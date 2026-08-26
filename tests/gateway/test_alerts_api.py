@@ -148,6 +148,38 @@ def test_ingest_dedups_same_instance(db_conn: psycopg.Connection) -> None:
     assert summary == "updated summary"
 
 
+def test_ingest_severity_escalation_updates_instance_and_renotifies(
+    db_conn: psycopg.Connection,
+) -> None:
+    """Escalation is a new firing transition on the existing instance."""
+    with TestClient(app) as client:
+        warning = _ingest(client, _webhook(severity="warning"))
+        error = _ingest(client, _webhook(severity="error"))
+
+    assert warning.json()["notified"] == 1
+    assert error.json()["notified"] == 1
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*), max(severity) FROM alerts")
+        row = cur.fetchone()
+    assert row == (1, "error")
+
+
+def test_ingest_severity_downgrade_does_not_renotify(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A lower class carries no new urgent information for the owner."""
+    with TestClient(app) as client:
+        error = _ingest(client, _webhook(severity="error"))
+        warning = _ingest(client, _webhook(severity="warning"))
+
+    assert error.json()["notified"] == 1
+    assert warning.json()["notified"] == 0
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*), max(severity) FROM alerts")
+        row = cur.fetchone()
+    assert row == (1, "warning")
+
+
 def test_ingest_resolved_flips_row_and_notifies_recovery(db_conn: psycopg.Connection) -> None:
     """A resolved webhook for a notified firing flips status + sets ends_at
     and notifies the recovery line."""

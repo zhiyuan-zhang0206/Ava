@@ -15,11 +15,11 @@ Notice — own table, own UI section, own IM channel; nothing here touches
 (`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` as code) and delivers the Alertmanager
 standard webhook payload to the gateway; this router is the other half of
 the loop. The cluster health probe (`cli/commands/_health_alerts.py`) posts
-its edge-triggered health alerts through the same endpoint with
+its time-graded health alerts through the same endpoint with
 `source="health-probe"`, and the heartbeat liveness pass
 (`services/heartbeat/liveness.py`) writes its machine offline/online edges
 straight to the table (`source="machine-probe"`) — every producer rides one
-store/IM pipeline: one row + one IM notification per delivered transition. The
+store/IM pipeline: one row per episode, with another IM when severity increases. The
 store/IM core lives in `shared/alerts.py` (this router is one caller; the
 probes run the same functions locally). Three HTTP surfaces plus one background
 reconciler:
@@ -44,7 +44,7 @@ One row = one alert instance, deduped by **(fingerprint, starts_at)**
 (unique constraint, migration `20260813T042527_alerts`). Alertmanager may
 re-send the same instance while firing and sends it once more on resolution;
 the upsert updates the row instead of duplicating it.
-Columns: `status` (unresolved|resolved — no ack, no escalation) /
+Columns: `status` (unresolved|resolved — no ack state) /
 `severity` (critical|warning|error, read from the rule's `severity` label,
 normalized — anything else defaults to warning) / `alertname` / `labels` /
 `annotations` (jsonb, the Alertmanager shape) / `starts_at` / `ends_at` /
@@ -106,7 +106,9 @@ of user-visible IM copy (governance ruling 2026-08-08) — with zh/en variants
 `shared.alerts.display_language` at ingest time. Alert labels/annotations
 data is never translated. All three severities push. Recovery sends only when
 the firing had been IM-notified (`notified_at` set); firing retries while
-`notified_at` stays NULL. IM failures are logged, never fail the ingest.
+`notified_at` stays NULL. An unresolved already-notified instance re-notifies
+only when severity increases (WARNING → ERROR/CRITICAL or ERROR → CRITICAL);
+equal severity and downgrades stay silent. IM failures are logged, never fail the ingest.
 Reconciliation repairs the durable store and SSE view but does not synthesize
 an IM recovery without Grafana's resolved notification payload.
 

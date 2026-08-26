@@ -7,7 +7,9 @@ was the single actor never consulting it.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -24,7 +26,7 @@ _IDLE = DeployWindow(active=False, detail="no deploy in flight")
 
 
 @pytest.fixture(autouse=True)
-def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Capture owner alerts; autouse so no test here publishes to a live
     notification channel. Probe failure paths call `_ingest_alert` (W16: the
     alerts ingest seam — gateway POST, local fallback, im_bridge /send).
@@ -36,8 +38,8 @@ def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     sent the operator real "[test_...] [health-probe] cluster unhealthy"
     messages, four per local pytest run. The alert semantics stay testable
     through the captured list."""
-    sent: list[str] = []
-    monkeypatch.setattr(health, "_ingest_alert", lambda **kw: sent.append(kw["message"]))  # pyright: ignore[reportUnknownArgumentType]
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(alerts, "_ingest_alert", lambda **kw: sent.append(kw))  # pyright: ignore[reportUnknownArgumentType]
     return sent
 
 
@@ -208,21 +210,29 @@ def test_a_deploy_resets_the_consecutive_counter_rather_than_freezing_it(
     assert (tmp_path / health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "1"
 
 
-def test_deploy_in_flight_suppresses_the_alert_too(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _sent_alerts: list[str]
+def test_deploy_window_tracks_episode_and_grades_after_it_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _sent_alerts: list[dict[str, Any]]
 ) -> None:
-    """A deploy suppresses the ROLLBACK *and* the alert (2026-08-05 user
-    ruling): gateway/services going down mid-deploy is the expected
-    transition, the rollout itself reports failure (log + IM), and the
-    cluster-health alert was misfiring on every deploy — resolved by the
-    time the owner looked. The probe still exits 1 and the state file is
-    untouched, so a failure after the deploy window closes alerts normally."""
+    """A live deploy explains but does not erase an outage episode."""
     monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IN_FLIGHT)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
 
-    assert health.run_health_probe(auto_rollback=True, threshold=1) == 1
-    assert _sent_alerts == []  # no alert during a deploy
+    assert health.run_health_probe(auto_rollback=False) == 1
+    marker = tmp_path / health.ALERT_STATE_FILE
+    state = marker.read_text().split("\n")
+    assert state[-1] == ""
+    state[-2] = (datetime.now(UTC) - timedelta(seconds=601)).isoformat()
+    marker.write_text("\n".join(state))
+
+    assert health.run_health_probe(auto_rollback=False) == 1
+    assert _sent_alerts == []
+
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IDLE)  # pyright: ignore[reportUnknownArgumentType]
+    assert health.run_health_probe(auto_rollback=False) == 1
+    assert [(edge["severity"], edge["starts_at"]) for edge in _sent_alerts] == [
+        ("error", datetime.fromisoformat(state[-2]))
+    ]
 
 
 def test_counter_and_rollback_still_work_with_no_deploy_running(

@@ -21,6 +21,12 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 - **Cluster-wide**: not dependent on a local session, cross-machine wake-up (wherever the target agent runs, it is woken in its claim loop on that machine)
 - **Mounted-console liveness**: the one-minute machine/lease pass keeps lifecycle
   intent and reachability separate in `agents_meta.status` / `liveness_state`.
+  `machine_probe.transition_since` records the first failed probe until
+  recovery. The same episode stays silent during the normal-recovery budget,
+  fires WARNING after `AVA_ALERTS_TRANSITION_WARNING_SECONDS`, and escalates
+  in place to ERROR after `AVA_ALERTS_TRANSITION_ERROR_SECONDS`. A live cluster
+  deploy or that host's updater lease explains the transition without resetting
+  its start; unreadable lease state explains nothing.
   Edges entering or leaving `offline` publish the canonical `agent_updated`
   snapshot after commit, so the existing frontend fold updates immediately;
   `unknown → online` is not broadcast because both render online and a

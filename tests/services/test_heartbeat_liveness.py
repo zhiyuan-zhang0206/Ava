@@ -11,9 +11,12 @@ fake so the full DB merge runs without dialing real ops servers.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from services.heartbeat.liveness import (
@@ -60,6 +63,24 @@ def _set_machine_probe(db: psycopg.Connection, name: str, *, online: bool, failu
             (name, online, failures),
         )
     db.commit()
+
+
+def _age_transition(db: psycopg.Connection, name: str, *, seconds: float) -> None:
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE machine_probe SET transition_since = "
+            "now() - make_interval(secs => %s) WHERE machine_name = %s",
+            (seconds, name),
+        )
+    db.commit()
+
+
+def _transition_since(db: psycopg.Connection, name: str) -> datetime | None:
+    with db.cursor() as cur:
+        cur.execute("SELECT transition_since FROM machine_probe WHERE machine_name = %s", (name,))
+        row = cur.fetchone()
+    assert row is not None
+    return row[0]
 
 
 def _make_agent(
@@ -209,6 +230,23 @@ class TestLivenessPass:
         asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
         assert _state(db_conn, aid)[0] == "online"  # success resets
 
+    def test_probe_failure_sets_episode_start_once_and_success_clears_it(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        _register_machine(db_conn)
+        import asyncio
+
+        fail = FakeProbe({_MACHINE: False})
+        asyncio.run(run_liveness_pass(pool, probe=fail))
+        started_at = _transition_since(db_conn, _MACHINE)
+        assert started_at is not None
+
+        asyncio.run(run_liveness_pass(pool, probe=fail))
+        assert _transition_since(db_conn, _MACHINE) == started_at
+
+        asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
+        assert _transition_since(db_conn, _MACHINE) is None
+
     def test_pass_announces_only_liveness_edges(
         self,
         pool: ConnectionPool,
@@ -341,129 +379,177 @@ class TestMachineAlertEdges:
     def _mock_notify(self, monkeypatch: pytest.MonkeyPatch, func: Callable[[str], bool]) -> None:
         monkeypatch.setattr("shared.alerts.notify_im", func)
 
-    def test_offline_edge_writes_unresolved_alert_and_notifies(
+    def test_recent_failure_tracks_episode_without_alerting(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=True, failures=0)
         notified: list[str] = []
-        self._mock_notify(monkeypatch, lambda t: notified.append(t) or True)
+        self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
 
         import asyncio
 
-        # failure #1: no alert yet (anti-jitter threshold)
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         assert self._alerts(db_conn) == []
-        # failure #2: the edge
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        rows = self._alerts(db_conn)
-        assert len(rows) == 1
-        status, severity, alertname, source, fp, notified_at = rows[0]
-        assert (status, severity, alertname, source) == (
-            "unresolved",
-            "error",
-            "machine offline",
-            "machine-probe",
-        )
-        assert fp  # Alertmanager fingerprint computed
-        assert notified_at is not None
-        assert len(notified) == 1
-        firing_head = "⚠️ 告警 [ERROR] machine offline"  # emoji-ok: asserting the user-designated IM format (zh default)
-        assert str(notified[0]).startswith(firing_head)
+        assert _transition_since(db_conn, _MACHINE) is not None
+        assert notified == []
 
-    def test_machine_offline_before_start_fires_edge_on_first_pass(
+    def test_warning_escalates_to_error_on_one_instance(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A machine whose probe row already carries a failure count past the
-        threshold when this process starts (cf persisted across restarts and
-        rollouts — prod 2026-08-13: machine-2 at cf=234) must still produce
-        the firing edge on its first pass: the gate is `>=`, not `==`."""
+        monkeypatch.setattr(settings.alerts, "transition_warning_seconds", 60.0)
+        monkeypatch.setattr(settings.alerts, "transition_error_seconds", 120.0)
         _register_machine(db_conn)
-        _set_machine_probe(db_conn, _MACHINE, online=False, failures=234)
+        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
+        _age_transition(db_conn, _MACHINE, seconds=61)
         notified: list[str] = []
-        self._mock_notify(monkeypatch, lambda t: notified.append(t) or True)
+        self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
 
         import asyncio
 
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         rows = self._alerts(db_conn)
         assert len(rows) == 1
-        assert rows[0][0] == "unresolved"
+        assert rows[0][1] == "warning"
+        warning_fp = rows[0][4]
         assert rows[0][5] is not None
         assert len(notified) == 1
 
-        # steady state after the edge: still one row, still one IM
+        _age_transition(db_conn, _MACHINE, seconds=121)
+        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
+        rows = self._alerts(db_conn)
+        assert len(rows) == 1
+        assert rows[0][1] == "error"
+        assert rows[0][4] == warning_fp
+        assert len(notified) == 2
+
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         assert len(self._alerts(db_conn)) == 1
-        assert len(notified) == 1
-
-    def test_steady_state_failure_stays_silent(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        _register_machine(db_conn)
-        _set_machine_probe(db_conn, _MACHINE, online=True, failures=0)
-        notified: list[str] = []
-        self._mock_notify(monkeypatch, lambda t: notified.append(t) or True)
-
-        import asyncio
-
-        for _ in range(4):  # push the machine deep into offline steady state
-            asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        rows = self._alerts(db_conn)
-        assert len(rows) == 1  # one instance, no duplicates
-        assert len(notified) == 1  # one IM, no storm
+        assert len(notified) == 2
 
     def test_im_failure_retries_while_offline(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A firing IM that never landed (im_bridge down at the edge) retries
-        on the next pass while the row's notified_at stays NULL."""
         _register_machine(db_conn)
-        _set_machine_probe(db_conn, _MACHINE, online=True, failures=0)
-        notified: list[str] = []  # successful sends only
-        self._mock_notify(monkeypatch, lambda _t: False)
+        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
+        _age_transition(db_conn, _MACHINE, seconds=181)
+        notified: list[str] = []
+        self._mock_notify(monkeypatch, lambda _text: False)
 
         import asyncio
 
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        # the threshold fired on failure #2; the IM failed (edge pass)
         rows = self._alerts(db_conn)
         assert len(rows) == 1
-        assert rows[0][5] is None  # notified_at still NULL
+        assert rows[0][5] is None
 
-        self._mock_notify(monkeypatch, lambda t: notified.append(t) or True)
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))  # still offline -> retry
-        rows = self._alerts(db_conn)
-        assert rows[0][5] is not None  # landed now
+        self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
+        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
+        assert self._alerts(db_conn)[0][5] is not None
         assert len(notified) == 1
 
     def test_recovery_edge_resolves_and_notifies(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _register_machine(db_conn)
-        _set_machine_probe(db_conn, _MACHINE, online=True, failures=0)
+        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
+        _age_transition(db_conn, _MACHINE, seconds=181)
         notified: list[str] = []
-        self._mock_notify(monkeypatch, lambda t: notified.append(t) or True)
+        self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
 
         import asyncio
 
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         assert len(notified) == 1
 
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: True})))  # recovery
+        asyncio.run(self._run(pool, FakeProbe({_MACHINE: True})))
         rows = self._alerts(db_conn)
         assert len(rows) == 1
         assert rows[0][0] == "resolved"
-        assert rows[0][5] is not None
         assert len(notified) == 2
-        recovery_head = "✅ 已恢复 [ERROR] machine offline"  # emoji-ok: asserting the user-designated IM format (zh default)
-        assert str(notified[1]).startswith(recovery_head)
 
-        # next healthy pass is silent (no open instance to re-resolve)
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: True})))
         assert len(notified) == 2
+
+    def test_cluster_deploy_explains_then_grades_from_true_start(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _register_machine(db_conn)
+        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
+        _age_transition(db_conn, _MACHINE, seconds=601)
+        monkeypatch.setattr("shared.cluster_lock.read_update_lease", object)
+        notified: list[str] = []
+        self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
+
+        import asyncio
+
+        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
+        assert self._alerts(db_conn) == []
+
+        monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
+        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
+        assert self._alerts(db_conn)[0][1] == "error"
+        assert len(notified) == 1
+
+    def test_host_updater_lease_explains_transition(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _register_machine(db_conn)
+        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
+        _age_transition(db_conn, _MACHINE, seconds=601)
+        monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
+        monkeypatch.setattr(
+            "shared.host_deploy_state.read_all",
+            lambda: {_MACHINE: SimpleNamespace(updater_live=True)},
+        )
+
+        import asyncio
+
+        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
+        assert self._alerts(db_conn) == []
+
+    def test_unreadable_deploy_context_fails_open(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _register_machine(db_conn)
+        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
+        _age_transition(db_conn, _MACHINE, seconds=601)
+        monkeypatch.setattr(
+            "shared.cluster_lock.read_update_lease",
+            lambda: (_ for _ in ()).throw(RuntimeError("unreadable")),
+        )
+
+        import asyncio
+
+        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
+        assert self._alerts(db_conn)[0][1] == "error"
+
+    def test_recovery_finds_preconvention_fingerprint_by_labels(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from shared.alerts import fingerprint
+
+        _register_machine(db_conn)
+        _set_machine_probe(db_conn, _MACHINE, online=False, failures=3)
+        _age_transition(db_conn, _MACHINE, seconds=181)
+        labels = {"alertname": "machine offline", "machine": _MACHINE, "severity": "warning"}
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO alerts (status, severity, alertname, labels, annotations, "
+                "starts_at, fingerprint, source, notified_at) VALUES "
+                "('unresolved', 'warning', 'machine offline', %s, '{}', %s, %s, "
+                "'machine-probe', now())",
+                (Jsonb(labels), datetime(2026, 8, 26, tzinfo=UTC), fingerprint(labels)),
+            )
+        db_conn.commit()
+        notified: list[str] = []
+        self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
+
+        import asyncio
+
+        asyncio.run(self._run(pool, FakeProbe({_MACHINE: True})))
+        assert self._alerts(db_conn)[0][0] == "resolved"
+        assert len(notified) == 1
 
     def test_paused_machine_is_not_probed_and_fires_no_alert(
         self, db_conn: psycopg.Connection, pool: ConnectionPool

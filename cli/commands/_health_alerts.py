@@ -4,9 +4,11 @@ Split out of ``cli.commands._cluster_health`` (2026-08-07, Task #1025) to keep
 that module under the per-file 800-line ceiling once the non-prod-checkout
 guard (PR #1821) and R2-D's deploy-window changes (PR #1824) both landed.
 
-Owns the consecutive-failure counter file, the edge-triggered owner alert
-(W16, via the IM bridge /send RPC with the alerts ingest), the local
-fallback ingest path, and the auto-rollback trigger at the failure threshold.
+Owns the consecutive-failure counter file, the time-graded owner alert (W16,
+via the IM bridge /send RPC with the alerts ingest), the local fallback ingest
+path, and the auto-rollback trigger at the failure threshold. One state file
+tracks the true start and last-fired severity of each outage episode so normal
+recovery stays quiet and WARNING can escalate in place to ERROR.
 The probe runner itself (`run_health_probe`) stays in ``_cluster_health`` and
 imports the pieces it needs from here.
 """
@@ -15,11 +17,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
+
+from shared.transition import transition_severity
 
 # Consecutive-failure tracking file. Lives under $AVA_HOME so it is
 # cluster-scoped and survives restarts. Its four lines are count, failure
@@ -27,12 +32,10 @@ import httpx
 # the probe might be running when the DB is down.
 FAILURE_COUNT_FILE = "health_probe_failures"
 
-# Edge-trigger state for owner alerts: holds the failure message of the alert
-# last sent plus the instance's starts_at timestamp (one ISO-8601 line each);
-# absent = last run was healthy. Same $AVA_HOME placement rationale as
-# FAILURE_COUNT_FILE. The starts_at line is the alerts instance key — the
-# recovery edge must reference the exact (fingerprint, starts_at) row the
-# firing edge created, so the two flips resolve as one alert instance.
+# Transition state for owner alerts: message, episode starts_at, last-fired
+# severity (empty until the episode reaches WARNING), one logical field per
+# line. Absent = last run was healthy. The starts_at line is the alert instance
+# key, and severity lets a later run distinguish steady state from escalation.
 ALERT_STATE_FILE = "health_probe_alert"
 
 
@@ -108,10 +111,10 @@ def _notify_owner(text: str) -> None:
         print(f"  (owner alert delivery failed: {type(e).__name__})", file=sys.stderr)
 
 
-# The alerts identity of every health-probe alert. One row per outage
-# instance: alertname is what the UI shows, severity is the alert class
-# ('error' — the old P1 tier, the incident class the health probe alerts at).
-# The (fingerprint, starts_at) dedup key is computed by the ingest.
+# The stable identity of every health-probe alert. Severity is graded per
+# episode and deliberately excluded from the fingerprint. OPS_SEVERITY remains
+# the compatibility default for callers and legacy two-line state written when
+# the health probe fired directly at the old error class.
 OPS_RULE_UID = "health-probe"
 OPS_RULE_NAME = "cluster health"
 OPS_SEVERITY = "error"
@@ -134,7 +137,12 @@ def _alert_summary(*, recovered: bool, message: str) -> str:
 
 
 def _ingest_alert(
-    *, status: Literal["firing", "resolved"], message: str, starts_at: datetime
+    *,
+    status: Literal["firing", "resolved"],
+    message: str,
+    starts_at: datetime,
+    severity: str = OPS_SEVERITY,
+    fingerprint: str | None = None,
 ) -> None:
     """Push one health-probe edge alert through the alerts ingest pipeline.
 
@@ -155,9 +163,12 @@ def _ingest_alert(
     alerting is a side channel and must never break the probe or the
     auto-rollback path it gates.
     """
+    from shared.alerts import fingerprint as compute_fingerprint
     from shared.config import settings
 
     summary = _alert_summary(recovered=status == "resolved", message=message)
+    stable_labels = {"alertname": OPS_RULE_NAME}
+    alert_fingerprint = fingerprint or compute_fingerprint(stable_labels)
     payload = {
         "source": "health-probe",
         "alerts": [
@@ -165,11 +176,12 @@ def _ingest_alert(
                 "status": status,
                 "labels": {
                     "alertname": OPS_RULE_NAME,
-                    "severity": OPS_SEVERITY,
+                    "severity": severity,
                 },
                 "annotations": {"summary": summary},
                 "startsAt": starts_at.isoformat(),
                 "endsAt": "" if status == "firing" else datetime.now(UTC).isoformat(),
+                "fingerprint": alert_fingerprint,
             }
         ],
     }
@@ -190,7 +202,13 @@ def _ingest_alert(
             f"{e.response.text[:200]} — falling back to local ingest)",
             file=sys.stderr,
         )
-        _ingest_alert_fallback(status=status, message=message, starts_at=starts_at)
+        _ingest_alert_fallback(
+            status=status,
+            message=message,
+            starts_at=starts_at,
+            severity=severity,
+            fingerprint=alert_fingerprint,
+        )
     except Exception as e:
         # Transport errors (timeout / connection refused) and a missing
         # gateway URL — log the class only, never the exception (which can
@@ -199,7 +217,13 @@ def _ingest_alert(
             f"  (health alert ingest failed: {type(e).__name__} — falling back to local ingest)",
             file=sys.stderr,
         )
-        _ingest_alert_fallback(status=status, message=message, starts_at=starts_at)
+        _ingest_alert_fallback(
+            status=status,
+            message=message,
+            starts_at=starts_at,
+            severity=severity,
+            fingerprint=alert_fingerprint,
+        )
 
 
 def _ingest_recovery_self_heal(resp: httpx.Response, *, status: str) -> None:
@@ -226,7 +250,12 @@ def _ingest_recovery_self_heal(resp: httpx.Response, *, status: str) -> None:
 
 
 def _ingest_alert_fallback(
-    *, status: Literal["firing", "resolved"], message: str, starts_at: datetime
+    *,
+    status: Literal["firing", "resolved"],
+    message: str,
+    starts_at: datetime,
+    severity: str = OPS_SEVERITY,
+    fingerprint: str | None = None,
 ) -> None:
     """Gateway unreachable — run the ingest logic locally (same code the
     gateway's endpoint uses) so the alert still lands: one alerts row +
@@ -239,7 +268,16 @@ def _ingest_alert_fallback(
     still hears, which matters more than the row when the UI is dark too.
     """
     import shared.db
-    from shared.alerts import display_language, notify_im, notify_text, stamp_notified, upsert_alert
+    from shared.alerts import (
+        display_language,
+        notify_im,
+        notify_text,
+        stamp_notified,
+        upsert_alert,
+    )
+    from shared.alerts import (
+        fingerprint as compute_fingerprint,
+    )
 
     # The Alertmanager-webhook alert shape as a plain dict — the same payload
     # the gateway ingest would have parsed (model_dump keys), so the shared
@@ -248,11 +286,12 @@ def _ingest_alert_fallback(
         "status": status,
         "labels": {
             "alertname": OPS_RULE_NAME,
-            "severity": OPS_SEVERITY,
+            "severity": severity,
         },
         "annotations": {"summary": _alert_summary(recovered=status == "resolved", message=message)},
         "starts_at": starts_at.isoformat(),
         "ends_at": "" if status == "firing" else datetime.now(UTC).isoformat(),
+        "fingerprint": fingerprint or compute_fingerprint({"alertname": OPS_RULE_NAME}),
     }
     try:
         with shared.db.connect() as conn:
@@ -279,27 +318,54 @@ def _ingest_alert_fallback(
         )
 
 
-def _alert_failure(home: Path, message: str) -> None:
-    """Owner alert on the healthy->unhealthy edge (or when the failure reason
-    changes, e.g. a dead frontend escalating to a dead gateway). Repeat runs
-    failing with the same message stay silent — the probe fires every few
-    minutes and must not turn a persistent outage into a notification storm.
+def _read_alert_state(marker: Path) -> tuple[str, datetime | None, str | None, bool]:
+    """Read current three-line state or a legacy one/two-line marker."""
+    raw = marker.read_text()
+    lines = raw.split("\n")
+    if len(lines) >= 3 and lines[-1] in ("", "warning", "error", "critical"):
+        with suppress(ValueError):
+            return "\n".join(lines[:-2]), datetime.fromisoformat(lines[-2]), lines[-1], True
+    if len(lines) >= 2:
+        with suppress(ValueError):
+            return "\n".join(lines[:-1]), datetime.fromisoformat(lines[-1]), OPS_SEVERITY, False
+    return raw, None, None, False
 
-    The edge also fixes the alert instance's starts_at into the state file:
-    the recovery edge replays it so both flips resolve to one alerts row
-    (fingerprint x starts_at dedup key)."""
+
+def _write_alert_state(marker: Path, message: str, starts_at: datetime, severity: str = "") -> None:
+    marker.write_text(f"{message}\n{starts_at.isoformat()}\n{severity}")
+
+
+def _alert_failure(home: Path, message: str, *, deploy_explains: bool = False) -> None:
+    """Track and grade one unhealthy episode, firing only on class changes."""
+    from shared.config import settings
+
     marker = home / ALERT_STATE_FILE
     if marker.exists():
-        lines = marker.read_text().splitlines()
-        # The failure message may itself contain newlines; the starts_at key
-        # is always the LAST line, so the dedup comparison is the text before
-        # it (audit P3: lines[0] broke dedup + starts_at parsing on
-        # multi-line messages).
-        if lines and "\n".join(lines[:-1]) == message:
+        recorded_message, recorded_start, recorded_severity, _current = _read_alert_state(marker)
+    else:
+        recorded_message, recorded_start, recorded_severity = "", None, None
+    now = datetime.now(UTC)
+    if recorded_message == message and recorded_start is not None:
+        starts_at = recorded_start
+    else:
+        starts_at = now
+        recorded_severity = None
+    severity = transition_severity(
+        starts_at,
+        now,
+        deploy_explains=deploy_explains,
+        warning_after_s=settings.alerts.transition_warning_seconds,
+        error_after_s=settings.alerts.transition_error_seconds,
+    )
+    if severity is None:
+        if recorded_severity:
             return
-    starts_at = datetime.now(UTC)
-    marker.write_text(f"{message}\n{starts_at.isoformat()}")
-    _ingest_alert(status="firing", message=message, starts_at=starts_at)
+        _write_alert_state(marker, message, starts_at)
+        return
+    if severity == recorded_severity:
+        return
+    _write_alert_state(marker, message, starts_at, severity)
+    _ingest_alert(status="firing", message=message, starts_at=starts_at, severity=severity)
 
 
 def _alert_recovery(home: Path) -> None:
@@ -308,16 +374,40 @@ def _alert_recovery(home: Path) -> None:
     marker = home / ALERT_STATE_FILE
     if not marker.exists():
         return
-    lines = marker.read_text().splitlines()
+    _message, starts_at, severity, current = _read_alert_state(marker)
     marker.unlink()
-    if len(lines) > 1:
-        try:
-            # starts_at is the LAST line — the message may contain newlines.
-            starts_at = datetime.fromisoformat(lines[-1])
-        except ValueError:
-            starts_at = None
-    else:
-        starts_at = None
+    if current:
+        if starts_at is not None and severity:
+            open_rows: list[tuple[str, datetime]] | None = None
+            try:
+                import shared.db
+
+                with shared.db.connect() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT fingerprint, starts_at FROM alerts "
+                        "WHERE labels->>'alertname' = 'cluster health' "
+                        "AND status = 'unresolved'"
+                    )
+                    open_rows = cur.fetchall()
+            except Exception:
+                open_rows = None
+            if open_rows:
+                for row_fingerprint, row_start in open_rows:
+                    _ingest_alert(
+                        status="resolved",
+                        message="all checks passing",
+                        starts_at=row_start,
+                        severity=severity,
+                        fingerprint=row_fingerprint,
+                    )
+            else:
+                _ingest_alert(
+                    status="resolved",
+                    message="all checks passing",
+                    starts_at=starts_at,
+                    severity=severity,
+                )
+        return
     if starts_at is not None:
         _ingest_alert(status="resolved", message="all checks passing", starts_at=starts_at)
     else:
@@ -348,7 +438,7 @@ def _increment_failure_count(home: Path, *, failure_class: str = "code", reason:
 
 
 def _deploy_suppression() -> str | None:
-    """The reason this failure must NOT advance the auto-rollback counter, or None.
+    """The live-deploy explanation for alert grading and rollback counting.
 
     **A cluster mid-deploy is not an unhealthy cluster.** Every rollback-gating check
     here (gateway liveness, agent population, schema) fails *by design* while a deploy
@@ -365,12 +455,12 @@ def _deploy_suppression() -> str | None:
     it fires.
 
     **Bounded by the lease's own TTL, with no second clock.** A deploy that dies
-    holding the lease cannot silence the probe past that: the lease stops being live
-    and failures count again. A settle hold is bounded harder still — `deploy_in_flight`
-    releases it the moment every host reaches the pin, rather than waiting out the
-    window. An unreadable lease does NOT suppress: the probe must not be talked out
-    of its job by a Postgres hiccup, and "cannot prove a deploy is running" has to
-    mean "assume none is" (`deploy_in_flight` returns not-active on any failure).
+    holding the lease cannot pause grading or counting past that: the lease stops
+    being live, alert severity resumes from the episode's true start, and failures
+    count again. A settle hold is bounded harder still — `deploy_in_flight` releases
+    it the moment every host reaches the pin, rather than waiting out the window. An
+    unreadable lease explains nothing: the probe must not be talked out of its job by
+    a Postgres hiccup (`deploy_in_flight` returns not-active on any failure).
 
     **This is also why `--threshold` does not have to grow when the fleet gets
     slower.** The lease is what protects a deploy from this probe, and the lease is
