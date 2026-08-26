@@ -37,6 +37,7 @@ from ._capabilities import (
     capabilities_section,
     capability_index_is_empty,
 )
+from ._codeact import _codeact_section
 
 
 def _resolved(setting: str) -> Any:
@@ -258,6 +259,12 @@ def _prefer_sdk_section() -> str:
         "When an `ava.*` tool covers an operation, use it over a plain-Python "
         "or raw-shell equivalent."
     )
+
+
+# CodeAct batching lives in `_codeact.py` (this module is at its line ceiling);
+# registered here so the section order stays the reading order this module lays
+# out — right after prefer-SDK, before keep-it-simple.
+register_system_prompt_section(_codeact_section)
 
 
 @register_system_prompt_section

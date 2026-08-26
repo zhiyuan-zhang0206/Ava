@@ -86,6 +86,12 @@ Capabilities rather than standing as its own section.
   `AVA_SYSTEM_PROMPT_PREFER_SDK`): one line steering the agent to `ava.*` tools over
   plain-Python / raw-shell equivalents. Deliberately example-free — specific
   misuse patterns get addressed if logs show them.
+- **Core CodeAct batching** — `agent/graph/_codeact.py:_codeact_section` (registered by `_system_prompt.py`),
+  **off by default** via `settings.agent.prompt_codeact_enabled` (env
+  `AVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
+  call — batch file reads, fold branches into if-else logic — because each
+  call is one LLM API round-trip. Opt-in (user ruling 2026-08-26): unlike the
+  on-by-default behavioral sections, an unconfigured cluster never pays for it.
 - **Core capabilities index** — `agent/graph/_capabilities.py:capabilities_section`:
   always-on name + one-line description of the capabilities the agent already
   has, under one `# Capabilities` heading — the prompt's ONE skill index.
@@ -322,6 +328,9 @@ Landed so far:
   machines, spawn an agent on the target machine so it can use that machine's
   resources directly. Semantic steer only — no API detail, so it cannot go
   stale. User-finalized wording, shipped verbatim.
+- A CodeAct batching section (`AVA_SYSTEM_PROMPT_CODEACT`, **off by default**):
+  pack several operations into one `execute_code` call to save LLM API calls
+  (user ruling 2026-08-26). Opt-in, unlike the ablation-toggled sections above.
 
 Closed without building:
 

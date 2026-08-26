@@ -102,6 +102,78 @@ def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.Monke
     assert "this meta-principle decides" in rendered
 
 
+# --- CodeAct batching (AVA_SYSTEM_PROMPT_CODEACT, off by default) ---
+
+
+def test_codeact_section_defaults_to_off():
+    """The CodeAct section is opt-in: the flag defaults to False, so an
+    unconfigured cluster never pays for the section — unlike the
+    on-by-default behavioral sections."""
+    assert settings.agent.prompt_codeact_enabled is False
+
+
+@pytest.mark.parametrize(
+    ("enabled", "expect_section"),
+    [
+        (True, True),
+        (False, False),
+    ],
+)
+def test_codeact_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
+    monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+
+    from agent.graph._codeact import _codeact_section
+
+    rendered = _codeact_section()
+
+    if expect_section:
+        assert "CodeAct" in rendered
+    else:
+        assert rendered == ""
+
+
+def test_codeact_section_urges_batching(monkeypatch: pytest.MonkeyPatch):
+    """When it renders, the section pushes the batching behavior by name:
+    several operations per call, batch file reads, branches folded into one
+    script, and the cost model (one call = one API round-trip) that justifies
+    it."""
+    monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", True)
+
+    from agent.graph._codeact import _codeact_section
+
+    rendered = _codeact_section()
+
+    assert "execute_code" in rendered
+    assert "one LLM API round-trip" in rendered
+    assert "several files in one call" in rendered
+    assert "if-else" in rendered
+    assert "round-trips" in rendered
+
+
+def test_codeact_section_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch):
+    """End-to-end: with the toggle on, the section is part of the assembled
+    system prompt."""
+    monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", True)
+
+    from agent.graph._system_prompt import build_system_prompt
+
+    prompt = build_system_prompt()
+
+    assert "CodeAct" in prompt
+
+
+def test_codeact_section_absent_from_full_prompt_when_off(monkeypatch: pytest.MonkeyPatch):
+    """End-to-end: with the toggle off (the default), the section is gone from
+    the assembled prompt entirely."""
+    monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", False)
+
+    from agent.graph._system_prompt import build_system_prompt
+
+    prompt = build_system_prompt()
+
+    assert "CodeAct" not in prompt
+
+
 def test_temporal_awareness_invokes_ai_capability_timescale(
     monkeypatch: pytest.MonkeyPatch,
 ):
