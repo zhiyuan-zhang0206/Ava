@@ -1040,7 +1040,7 @@ def test_timeline_compact_history_config_contract() -> None:
     field = GatewaySettings.model_fields["timeline_compact_history"]
     extra = field.json_schema_extra
 
-    assert GatewaySettings().timeline_compact_history == 0
+    assert GatewaySettings().timeline_compact_history == 1
     assert field_alias_map()["timeline_compact_history"] == "AVA_TIMELINE_COMPACT_HISTORY"
     assert isinstance(extra, dict)
     assert extra["restart_required"] == "gateway"
