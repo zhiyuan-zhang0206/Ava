@@ -204,6 +204,15 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     still dies on time — the one thing it cannot preempt is native code that
     never releases the GIL; a killed watcher skips the finally and leaves its
     pair behind, which the next launch prunes (_prune_stale_watcher_files).
+
+    Every bootstrap also arms the ORPHAN GUARD (task #1726): a daemon thread
+    that compares ``os.getppid()`` against the parent the process booted
+    under every few seconds and hard-exits with code 125 on a mismatch. The
+    pty host IS the session; when it dies (crash, SIGKILL, a reaper sweep),
+    the login shell dies with it and the watcher child is reparented to init
+    — still alive, still firing cron/at. The guard makes host death → child
+    death within a few seconds, on every host-death path (a kill-path
+    cascade cannot cover a crash or an external SIGKILL).
     """
     watchdog = ""
     if watchdog_secs is not None:
@@ -227,6 +236,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "import runpy\n"
         "import sys\n"
         "import threading\n"
+        "import time\n"
         "\n"
         # Identity is NOT inherited: the session env allowlist
         # (shared/env_registry.py child_env, Task #856) drops
@@ -248,6 +258,33 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         # (agent/db.py reads settings.agent at module level, and the runner
         # profile does not construct the agent domain — Task #856 fail-fast).
         f'os.environ["AVA_PROCESS_PROFILE"] = "agent"\n'
+        "\n"
+        # Orphan guard (task #1726): a watcher child must never outlive
+        # its session. The pty host IS the session; when it dies (crash,
+        # SIGKILL, a reaper sweep), the login shell dies with it and this
+        # process is reparented to init — still alive, still firing
+        # cron/at (2026-08-26: 49 of 85 watcher processes on the fleet
+        # host were multi-generation orphans of exactly this shape).
+        # Every few seconds, compare getppid() against the parent we
+        # booted under: a mismatch means the session chain is gone, and
+        # the watcher hard-exits instead of firing forever. This covers
+        # every host-death path — a kill-path cascade cannot (crash,
+        # external SIGKILL, ad-hoc sweeps).
+        "_parent_pid = os.getppid()\n"
+        "\n"
+        "def _orphan_guard() -> None:\n"
+        "    while True:\n"
+        "        time.sleep(5)\n"
+        "        if os.getppid() != _parent_pid:\n"
+        "            print(\n"
+        "                '[watcher] session gone (pty host died) — exiting (orphan guard)',\n"
+        "                file=sys.stderr,\n"
+        "                flush=True,\n"
+        "            )\n"
+        "            os._exit(125)\n"
+        "\n"
+        "_orphan_thread = threading.Thread(target=_orphan_guard, daemon=True)\n"
+        "_orphan_thread.start()\n"
         "\n"
         "import ava\n"
         "\n"
@@ -510,6 +547,33 @@ def at(
 logger = logging.getLogger(__name__)
 
 
+def _kill_watcher_orphan_processes(session_id: int) -> None:
+    """SIGKILL any live process still running this watcher's generated script.
+
+    A watcher whose session is gone but whose process is alive is an orphan:
+    its pty host died (crash / SIGKILL / a reaper sweep) and the child was
+    reparented to init — still alive, still firing cron/at (task #1726:
+    49 of 85 watcher processes on the fleet host were multi-generation
+    orphans of exactly this shape). The boot reconcile rebuilds the schedule
+    from the registry; without this kill, each rebuild stacks a NEW
+    generation on the orphan and both fire. The generated boot script path is
+    unique per (agent, session), so matching it in the process's argv is
+    precise; SIGKILL matches the pty reaper's convention for detached orphans
+    (shared/pty_sessions/orphan_reaper.py) and skips the child's finally, so
+    its registry row survives for the transition below. Fail-soft: a scan
+    error must not block the boot reconcile it serves.
+    """
+    import psutil
+
+    boot_path = str(_watchers_dir() / f"watcher_{session_id}_boot.py")
+    for proc in psutil.process_iter(["cmdline"]):
+        try:
+            if boot_path in (proc.info.get("cmdline") or []):
+                proc.kill()
+        except (psutil.Error, OSError):
+            continue
+
+
 def _reconcile_missing(row: dict[str, Any], now: datetime.datetime) -> str | None:
     """Handle one registry row whose session is gone: rebuild a standing
     schedule / future one-shot, mark a passed one-shot or launch watcher missed,
@@ -524,6 +588,12 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime) -> str | Non
     session_id = row["session_id"]
     name = row["name"]
     try:
+        # The session is gone by definition here — any live process still
+        # running this watcher's script is an orphan of a dead host, still
+        # firing. Kill it before the rebuild/mark below: a rebuild that does
+        # not kill the orphan stacks a new generation on it and both fire
+        # (task #1726). No-op when no such process exists.
+        _kill_watcher_orphan_processes(session_id)
         if row["kind"] == "cron":
             end_at = row["cron_end_at"]
             if end_at is not None and end_at < now:

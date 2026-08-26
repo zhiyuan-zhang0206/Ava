@@ -153,6 +153,72 @@ def test_launch_creates_watcher_session(_agent_row: int) -> None:
         ava.shell.kill(wid)
 
 
+def test_watcher_child_dies_when_pty_host_dies(_agent_row: int, tmp_path: pathlib.Path) -> None:
+    """Task #1726 acceptance: a watcher child must NEVER outlive its pty host.
+
+    When the host dies (crash / SIGKILL / a reaper sweep), the login shell
+    dies with it and the child is reparented to init — still alive, still
+    firing cron/at; 49 of 85 watcher processes on the fleet host were such
+    multi-generation orphans (8/19 onwards). The bootstrap's orphan guard
+    compares getppid() against the boot-time parent and hard-exits within a
+    few seconds. The child IGNORES SIGHUP, so its death can only come from
+    the guard — the test fails if the guard regresses and the child survives.
+    """
+    import signal
+    from contextlib import suppress
+
+    import psutil
+
+    from ava.shell import sessions as _sessions
+
+    pidfile = tmp_path / "child.pid"
+    code = (
+        "import os, signal, time\n"
+        "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+        f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        "while True:\n"
+        "    time.sleep(60)\n"
+    )
+    wid = watcher.launch(code, timeout="1h", name="test-orphan-guard")
+
+    deadline = time.time() + 20
+    while time.time() < deadline and not pidfile.exists():
+        time.sleep(0.2)
+    assert pidfile.exists(), "watcher child never started"
+    child_pid = int(pidfile.read_text())
+
+    try:
+        # The child's parent is the session shell; the grandparent is the pty
+        # host — the process whose death orphans the child.
+        child = psutil.Process(child_pid)
+        shell = psutil.Process(child.ppid())
+        host = psutil.Process(shell.ppid())
+        assert "shared.pty_sessions.host" in " ".join(host.cmdline())
+
+        os.kill(host.pid, signal.SIGKILL)
+
+        # The guard exits within its 5s interval; 20s is generous CI slack.
+        deadline = time.time() + 20
+        while time.time() < deadline and psutil.pid_exists(child_pid):
+            try:
+                if psutil.Process(child_pid).status() == psutil.STATUS_ZOMBIE:
+                    break  # dead, waiting for init to reap
+            except psutil.NoSuchProcess:
+                break
+            time.sleep(0.2)
+        assert (
+            not psutil.pid_exists(child_pid)
+            or psutil.Process(child_pid).status() == psutil.STATUS_ZOMBIE
+        ), "watcher child survived its host"
+    finally:
+        # A failed assertion must not leak the sleeper (the session record is
+        # gone with the host, so fixture teardown cannot reach it).
+        with suppress(psutil.Error):
+            psutil.Process(child_pid).kill()
+        with suppress(ValueError, subprocess.CalledProcessError):
+            _sessions.kill(wid)
+
+
 def test_launch_requires_timeout_and_name() -> None:
     # Both timeout and name are required
     with pytest.raises(TypeError):
@@ -191,9 +257,38 @@ def test_watchdog_message_formats_fractional_seconds(
 
 def test_boot_without_watchdog_has_no_timer(tmp_path: pathlib.Path) -> None:
     # at/cron scripts self-terminate, so their bootstrap arms no watchdog.
+    # The orphan guard (task #1726) is armed regardless — it is not a
+    # watchdog: it only hard-exits a watcher whose session chain died, and
+    # never bounds a healthy watcher's lifetime.
     boot = watcher._build_boot(tmp_path / "x.py", None, 42)
     assert "Timer" not in boot
-    assert "os._exit" not in boot
+    assert "os._exit(124)" not in boot
+    assert "os._exit(125)" in boot  # the orphan guard's exit code
+
+
+def test_boot_arms_orphan_guard(tmp_path: pathlib.Path) -> None:
+    """Task #1726: every generated bootstrap must arm the orphan guard — a
+    daemon thread that compares getppid() against the boot-time parent and
+    hard-exits (code 125) on a mismatch, so a watcher child dies within
+    seconds of its pty host dying instead of firing cron/at forever as a
+    ppid=1 orphan. Armed BEFORE `import ava`: a hung import must not keep an
+    orphan alive."""
+    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    assert "_parent_pid = os.getppid()" in boot
+    assert "def _orphan_guard" in boot
+    assert "os.getppid() != _parent_pid" in boot
+    assert "os._exit(125)" in boot
+    guard_line = boot.index("_orphan_guard")
+    assert guard_line < boot.index("import ava")
+    compile(boot, "<boot>", "exec")  # must be valid Python
+
+
+def test_boot_orphan_guard_message_names_session_gone(tmp_path: pathlib.Path) -> None:
+    # The guard's stderr line lands in the watcher's log — a debugger must be
+    # able to tell an orphan-guard exit (125) from a watchdog timeout (124).
+    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    assert "[watcher] session gone (pty host died)" in boot
+    assert "os._exit(125)" in boot
 
 
 def test_boot_loads_plugins_before_running_script(tmp_path: pathlib.Path) -> None:
@@ -876,6 +971,95 @@ def test_reconcile_skips_rebuilt_rows(_agent_row: int, monkeypatch: pytest.Monke
     assert calls and len(calls) == 1  # only the running row rebuilt
     assert any("real-dead" in a for a in actions)
     assert not any("dup-guard" in a or "gone-once" in a for a in actions)
+
+
+def test_reconcile_kills_orphan_process_before_rebuild(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task #1726: a watcher whose SESSION is gone but whose process is still
+    alive is an orphan — its pty host died and the child was reparented to
+    init, still firing cron/at. The reconcile must SIGKILL it when it rebuilds
+    the row: a rebuild that leaves the orphan alive stacks a NEW generation on
+    top of it and both fire (the multi-generation duplicate class). The
+    generated boot script path is unique per (agent, session), so the argv
+    match is precise."""
+    import subprocess
+
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    from shared.watcher_registry import register_watcher
+
+    register_watcher(
+        _agent_row,
+        424260,
+        kind="cron",
+        name="orphan-cron",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+    # A fake orphan: a live process whose argv names this watcher's generated
+    # boot script — the exact fingerprint of a reparented watcher child.
+    boot = watcher._watchers_dir() / "watcher_424260_boot.py"
+    boot.write_text("import time\ntime.sleep(600)\n")
+    orphan = subprocess.Popen([sys.executable, str(boot)])  # noqa: S603 — repo-internal fake watcher
+    from contextlib import suppress
+
+    try:
+        assert orphan.poll() is None  # still running
+        actions = watcher.reconcile()
+        # poll() reaps the SIGKILLed child (a killed-but-unreaped child would
+        # otherwise linger as a zombie and still answer pid_exists).
+        deadline = time.time() + 10
+        while time.time() < deadline and orphan.poll() is None:
+            time.sleep(0.05)
+        assert orphan.poll() is not None, "reconcile left the orphan alive"
+        assert calls, "the orphan's row was not rebuilt"
+        assert any("rebuilt as session 999" in a for a in actions)
+    finally:
+        with suppress(ProcessLookupError):
+            orphan.kill()  # a failed assertion must not leak the fake orphan
+        boot.unlink(missing_ok=True)
+
+
+def test_reconcile_kill_skips_alive_watcher_process(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The orphan-kill must never touch a process that does not match this
+    watcher's exact boot script path — a sibling session id or another agent's
+    same-numbered watcher is a live, healthy process."""
+    import subprocess
+
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", set)  # pyright: ignore[reportUnknownArgumentType]
+    from shared.watcher_registry import register_watcher
+
+    register_watcher(
+        _agent_row,
+        424261,
+        kind="launch",
+        name="orphan-kill-sibling",
+        timeout_secs=3600,
+    )
+    # A live process that looks like a DIFFERENT watcher (session 424262) and
+    # one that merely shares the agent's watchers dir — neither matches.
+    other_boot = watcher._watchers_dir() / "watcher_424262_boot.py"
+    other_boot.write_text("import time\ntime.sleep(600)\n")
+    sibling = subprocess.Popen([sys.executable, str(other_boot)])  # noqa: S603 — repo-internal fake watcher
+    from contextlib import suppress
+
+    try:
+        watcher.reconcile()
+        assert sibling.poll() is None, "sibling watcher process was killed"
+    finally:
+        with suppress(ProcessLookupError):
+            sibling.kill()
+        other_boot.unlink(missing_ok=True)
 
 
 # -- boot reconcile: stale-template rebuild (issue #1330) ----------------------

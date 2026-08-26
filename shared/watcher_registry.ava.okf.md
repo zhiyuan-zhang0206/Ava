@@ -13,7 +13,7 @@ tags:
 
 `shared/watcher_registry.py` is the pure-DB API for the **`agent_watchers` table** — the registry half of the registry × lease frame ([[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 design]]) applied to watchers. `ava.watcher.at/cron/launch` writes one row per spawned watcher session; the row outlives the session exactly when the session was **killed** rather than ended, so a surviving row with a missing session means "this watcher should exist and does not". The agent's boot reconcile (`ava.watcher.reconcile`) reads that and rebuilds cron watchers / marks missed one-shots — the fix for issue #1014 (4th recurrence: rollouts of that era and `ava stop` reaped every watcher session, and nothing knew a recurring watcher should exist, so cron schedules silently died; sessions now survive rollouts, and the registry remains the net for `ava stop`, host crashes, and reboots).
 
-**Liveness is the session itself** — a watcher process IS its session — so the registry deliberately holds no lease column: a session gone means the watcher is gone, and the reconcile is the only reader that needs to know.
+**Liveness is the session itself** — a watcher process IS its session — so the registry deliberately holds no lease column; a session gone means the watcher should be gone. One caveat the registry cannot see: a killed pty host leaves the watcher child alive as a ppid=1 orphan that keeps firing — the generated bootstrap's orphan guard (template v4) makes the child exit itself, and the reconcile SIGKILLs any process still running a missing watcher's script before rebuilding (task #1726; see [[ava/watcher.ava.okf.md|ava.watcher SDK]]).
 
 ## Core Responsibilities
 

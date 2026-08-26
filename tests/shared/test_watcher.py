@@ -342,14 +342,14 @@ def test_cron_script_stamps_template_version() -> None:
     from — the registry records it at spawn so the boot reconcile can rebuild
     live watchers whose script predates a template fix (issue #1330)."""
     script = build_cron_script(expr="0 * * * *", message="tick", timezone="UTC", end_time_iso=None)
-    assert "_TEMPLATE_VERSION = 3" in script
+    assert "_TEMPLATE_VERSION = 4" in script
     assert "TEMPLATE_VERSION" in __import__("shared.watcher", fromlist=["TEMPLATE_VERSION"]).__all__
 
 
 def test_at_script_stamps_template_version() -> None:
     when = dt.datetime(2030, 1, 1, 0, 0, tzinfo=dt.UTC)
     script = build_at_script(when_iso=when.isoformat(), message="wake")
-    assert "_TEMPLATE_VERSION = 3" in script
+    assert "_TEMPLATE_VERSION = 4" in script
 
 
 # -- schedule-state announcement (v3, task #1620) -----------------------------
