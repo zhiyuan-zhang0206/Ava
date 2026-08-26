@@ -316,8 +316,9 @@ def _run_agent_runner_self_update_inner(
     #    endpoint) used to skip this entirely: no signal, no wait, no kill — every
     #    agent rode the whole update on old code until the next rollout. Now:
     #    signal each live agent to restart (system:update + Redis wake), wait per
-    #    mode (smooth: out-waits the longest single execute_code; force: idle
-    #    drain only), and force-reap stragglers on timeout — marked 'restarting'
+    #    mode (smooth: the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window,
+    #    default 10s; force: idle drain only), and force-reap stragglers on
+    #    timeout — marked 'restarting'
     #    so the restarter respawns them on the new code once `ava start` unpauses.
     #    `mode='none'` (the rollout's Phase B) skips this: the gateway-side
     #    quiesce already drained the fleet; only `force_reap` (the quiesce-timeout

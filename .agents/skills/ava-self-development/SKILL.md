@@ -51,9 +51,11 @@ The CLI does:
 
 1. Serialize concurrent rollouts — one update runs at a time (cluster update lock)
 2. Drain every live agent: a `restart` signal per agent makes it exit at its
-   turn boundary, waited out per mode — smooth waits `exec_timeout × 1.2`
-   (default 360s) so long `execute_code` calls finish; force waits ~10s. Anything
-   still alive after the window is force-reaped and respawned on new code.
+   turn boundary, waited out per mode — smooth waits the configured
+   `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` window (default 10s); force waits ~10s.
+   Anything still alive after the window is force-reaped and respawned on new
+   code (an agent mid-`execute_code` is cut short — the short window is
+   deliberate, 2026-08-26 ruling: fast cluster unblock over graceful long execs).
    Your process goes down once and stays down while the update runs; do NOT
    expect to observe the rollout from the inside (unless you are the operator
    agent — 1818's deployment workflow runs the CLI and watches the rollout log).

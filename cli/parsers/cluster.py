@@ -278,13 +278,13 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         choices=("smooth", "force"),
         default="smooth",
         help="agent-drain policy before the rollout restarts processes. "
-        "'smooth' (default) waits out the longest possible single execute_code "
-        "(exec_timeout_seconds x 1.2, so healthy agents finish their current exec and "
-        "exit at the turn boundary), then force-kills any straggler. "
+        "'smooth' (default) waits the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS "
+        "window (default 10s) for agents to end their current turn and exit at the "
+        "turn boundary, then force-kills any straggler. "
         "'force' waits ~10s (idle agents drain) then force-kills whoever is still "
         "running — long execs are cut short and their work is lost. Either way every "
-        "agent is restarted onto the new code; 'smooth' just gives them time to land "
-        "cleanly first.",
+        "agent is restarted onto the new code; 'smooth' just gives them a short "
+        "window to land cleanly first.",
     )
     cluster_update_p.set_defaults(func=_h_cluster_update)
 
