@@ -17,7 +17,7 @@ import urllib.request
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar, TypedDict
+from typing import Any, ClassVar, TypedDict
 
 import pytest
 
@@ -32,6 +32,11 @@ class _FakeGateway(BaseHTTPRequestHandler):
     down = False
     requests = 0
     auth_hook: ClassVar[object | None] = None
+    # Failure-mode knobs for the auth-probe classification tests: `auth_status`
+    # answers the probe with that HTTP status (no body); `raw_body` answers 200
+    # with a literal body (garbage JSON). Both take precedence over `down`.
+    auth_status: ClassVar[int | None] = None
+    raw_body: ClassVar[str | None] = None
 
     def log_message(self, format: str, *args: object) -> None:
         pass
@@ -42,6 +47,17 @@ class _FakeGateway(BaseHTTPRequestHandler):
             hook = _FakeGateway.auth_hook
             if callable(hook):
                 hook()
+            if _FakeGateway.auth_status is not None:
+                self.send_response(_FakeGateway.auth_status)
+                self.end_headers()
+                return
+            if _FakeGateway.raw_body is not None:
+                body = _FakeGateway.raw_body.encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if _FakeGateway.down:
                 self.send_response(503)
                 self.end_headers()
@@ -94,6 +110,8 @@ class _Servers(TypedDict):
 def servers(tmp_path: Path) -> Iterator[_Servers]:
     _FakeGateway.requests = 0
     _FakeGateway.auth_hook = None
+    _FakeGateway.auth_status = None
+    _FakeGateway.raw_body = None
     _FakeApp.requests = 0
     gw = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGateway)
     app = ThreadingHTTPServer(("127.0.0.1", 0), _FakeApp)
@@ -119,6 +137,149 @@ def servers(tmp_path: Path) -> Iterator[_Servers]:
     }
     for s in (gw, app, gate_server):
         s.shutdown()
+
+
+@pytest.fixture
+def probe_events() -> Iterator[list[dict[str, object]]]:
+    """Capture `gate_auth_probe_failed` records the gate emits through the
+    loguru logger — the structured half of the fail-closed verdict (audit
+    #1736). The daemon's module-level `logger` is the shared.log singleton,
+    so a sink on `loguru.logger` sees the records."""
+    from loguru import logger
+
+    seen: list[dict[str, object]] = []
+
+    def sink(message: Any) -> None:
+        rec = message.record
+        if rec["extra"].get("event") == "gate_auth_probe_failed":
+            seen.append(dict(rec["extra"]))
+
+    sink_id = logger.add(sink, level="WARNING")
+    try:
+        yield seen
+    finally:
+        logger.remove(sink_id)
+
+
+def _probe_failure_asserts(seen: list[dict[str, object]], *, category: str) -> dict[str, object]:
+    """The probe failed fail-closed AND left exactly one classified event."""
+    assert len(seen) == 1, f"expected one gate_auth_probe_failed event, got {seen!r}"
+    event = seen[0]
+    assert event["category"] == category
+    assert isinstance(event["exception_type"], str) and event["exception_type"]
+    assert isinstance(event["latency_ms"], int) and event["latency_ms"] >= 0
+    return event
+
+
+def _http_error(status: int) -> urllib.error.HTTPError:
+    """One HTTPError with the shape urlopen raises for an error status."""
+    return urllib.error.HTTPError("http://gw", status, "error", {}, None)  # pyright: ignore[reportArgumentType]
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (_http_error(401), "auth"),
+        (_http_error(403), "auth"),
+        (_http_error(404), "application"),
+        (_http_error(503), "application"),
+        (TimeoutError("timed out"), "timeout"),
+        (urllib.error.URLError(TimeoutError("timed out")), "timeout"),
+        (urllib.error.URLError(ConnectionRefusedError(61, "refused")), "network"),
+        (ConnectionResetError(54, "reset"), "network"),
+        (json.JSONDecodeError("Expecting value", "x", 0), "application"),
+        (ValueError("boom"), "application"),
+    ],
+)
+def test_classify_probe_error(exc: BaseException, expected: str) -> None:
+    """Every auth-probe failure lands in exactly one of the four audit
+    categories — auth / timeout / network / application — so a postmortem can
+    tell the incident shapes apart from the event's category alone."""
+    assert gate_daemon.classify_probe_error(exc) == expected
+
+
+def test_probe_auth_failure_serves_down_and_emits_auth_event(
+    servers: _Servers, probe_events: list[dict[str, object]]
+) -> None:
+    """The gateway answering 401/403 to the auth check is an AUTH failure —
+    the route is auth-bypassed and always 200, so a 401/403 means the auth
+    layer in front of it rejected the probe. External behavior stays the
+    down page; internally the event says "auth"."""
+    _FakeGateway.auth_status = 401
+
+    status, body = _get(servers["gate"] + "/")
+
+    assert status == 503
+    assert "Service unavailable" in body
+    event = _probe_failure_asserts(probe_events, category="auth")
+    assert event["exception_type"] == "HTTPError"
+    assert event["status"] == 401
+
+
+def test_probe_timeout_serves_down_and_emits_timeout_event(
+    servers: _Servers,
+    probe_events: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A probe that outlives its budget is a TIMEOUT, not a network outage —
+    the distinction the audit needed (a slow gateway needs different surgery
+    than a dead one)."""
+    monkeypatch.setattr(gate_daemon, "_PROBE_TIMEOUT_S", 0.2)
+    _FakeGateway.auth_hook = lambda: __import__("time").sleep(1.0)
+
+    status, body = _get(servers["gate"] + "/")
+
+    assert status == 503
+    assert "Service unavailable" in body
+    _probe_failure_asserts(probe_events, category="timeout")
+
+
+def test_probe_network_failure_serves_down_and_emits_network_event(
+    servers: _Servers, probe_events: list[dict[str, object]]
+) -> None:
+    """The gateway process gone (connection refused) is a NETWORK failure.
+
+    `shutdown()` alone stops the accept loop but leaves the listening socket
+    open — a fresh connect would queue and hang until the probe timeout — so
+    `server_close()` is what makes the port actually refuse connections."""
+    servers["gw"].shutdown()
+    servers["gw"].server_close()
+
+    status, body = _get(servers["gate"] + "/")
+
+    assert status == 503
+    assert "Service unavailable" in body
+    _probe_failure_asserts(probe_events, category="network")
+
+
+def test_probe_gateway_error_serves_down_and_emits_application_event(
+    servers: _Servers, probe_events: list[dict[str, object]]
+) -> None:
+    """The gateway up but answering the check with an error status is an
+    APPLICATION failure — the machine is reachable, the service is failing."""
+    _FakeGateway.auth_status = 503
+
+    status, body = _get(servers["gate"] + "/")
+
+    assert status == 503
+    assert "Service unavailable" in body
+    event = _probe_failure_asserts(probe_events, category="application")
+    assert event["status"] == 503
+
+
+def test_probe_garbage_body_serves_down_and_emits_application_event(
+    servers: _Servers, probe_events: list[dict[str, object]]
+) -> None:
+    """The gateway answering 200 with a non-JSON body is an APPLICATION
+    failure — the check contract is broken even though the transport worked."""
+    _FakeGateway.raw_body = "{not-json"
+
+    status, body = _get(servers["gate"] + "/")
+
+    assert status == 503
+    assert "Service unavailable" in body
+    event = _probe_failure_asserts(probe_events, category="application")
+    assert event["exception_type"] == "JSONDecodeError"
 
 
 def _get(url: str) -> tuple[int, str]:

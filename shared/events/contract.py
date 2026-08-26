@@ -569,6 +569,29 @@ class PromQueryBudget(TypedDict):
     wait_timeout: int
 
 
+class GateAuthProbeFailed(TypedDict):
+    """`gate_auth_probe_failed` payload — services/gate/daemon.py.
+
+    One row per failed gateway auth probe, emitted by the gate's fail-closed
+    verdict (audit #1736: probe exceptions used to collapse into an
+    unobservable "down").
+
+    ``category`` is the classification a postmortem keys on — ``auth``
+    (the gateway answered 401/403), ``timeout`` (the probe's 3s budget
+    elapsed), ``network`` (transport failure), or ``application`` (the
+    gateway answered but not with a valid auth check, or an unexpected
+    failure). ``status`` is the HTTP status when the gateway answered with
+    an error, else None. ``latency_ms`` is the probe duration, including
+    the timeout budget when one elapsed.
+    """
+
+    category: str
+    exception_type: str
+    exception_value: str
+    status: int | None
+    latency_ms: int
+
+
 class LogPayload(TypedDict):
     """`log` payload — bare-log fallback; `msg` rides every loguru-sourced row."""
 
@@ -1051,6 +1074,13 @@ EVENTS: dict[str, EventSpec] = {
         "checkpoint_table_sizes",
         "checkpoint table physical sizes after each blob vacuum run",
         payload=CheckpointTableSizes,
+    ),
+    # gate entry-point diagnostics
+    "gate_auth_probe_failed": _telemetry(
+        "gate_auth_probe_failed",
+        "gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape",
+        payload=GateAuthProbeFailed,
+        tier="anomaly",
     ),
     # ── log (category=log) — registry.md §4, the bare-log fallback ──
     "log": EventSpec(
