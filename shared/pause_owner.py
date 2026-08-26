@@ -165,6 +165,43 @@ def mark_legacy_resumed() -> PauseOwnerSnapshot:
         return _read_unlocked(path)
 
 
+def finalize_natural_resume() -> bool:
+    """Generation-scoped successful-finalize when a host returns to serving on
+    its own, without a `cluster/resume` op.
+
+    A rollout's Phase-B `ava start` (and the gateway-local finally's own
+    unpause) restore posture directly, so the exact ``(holder, acquired_at)``
+    the Phase-A stop journaled would otherwise stay ``paused`` forever even
+    though the rollout finished — the 2026-08-26 residue (rollout rc=0 while
+    deploy-pause-owner.json still read ``paused``). This records the journaled
+    generation as ``resumed``, the same CAS record ``mark_resumed`` writes on
+    the explicit resume path, under the same lock.
+
+    Generation-scoped by construction, never a force-clear: only a ``paused``
+    journal is transitioned, and only to its own generation — this never
+    creates, mints or clears a record, and an absent / legacy /
+    already-``resumed`` / ``invalid`` journal is left untouched (an invalid one
+    may be cleared only by recovery's no-live-owner proof). A newer pause
+    replaces the journal before a delayed finalize can reach it.
+
+    Returns True when the journal was transitioned ``paused`` -> ``resumed``.
+    """
+    path = state_path()
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(path)
+        if current.status != "paused" or current.holder is None or current.acquired_at is None:
+            return False
+        _write_atomic(
+            path,
+            {
+                "state": "resumed",
+                "holder": current.holder,
+                "acquired_at": current.acquired_at.astimezone(dt.UTC).isoformat(),
+            },
+        )
+        return True
+
+
 def clear(holder: str, acquired_at: dt.datetime) -> bool:
     """CAS-clear one recovered/completed generation; never a replacement."""
     path = state_path()

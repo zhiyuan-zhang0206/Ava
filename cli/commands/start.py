@@ -653,6 +653,15 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     set_posture("converging" if rollout_child else "idle")
 
+    # 5.1) generation-scoped successful-finalize: a Phase-B `ava start`
+    # resumes without a cluster/resume op, so the journaled generation must be
+    # recorded `resumed` or it stays `paused` forever (2026-08-26 residue);
+    # a rollout child (converging) skips — its finally owns that boundary.
+    if not rollout_child:
+        from ops.cluster_pause import finalize_pause_owner_journal
+
+        finalize_pause_owner_journal()
+
     # 5.5) wait for the just-launched services to pass their probes before the
     # status snapshot. The spawn returns the instant the session starts, but a uvicorn
     # daemon needs a beat to bind its port -- probe it immediately and every row

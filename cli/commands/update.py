@@ -486,7 +486,10 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     On any failing/abnormal exit after Phase A, a compensating `cluster/resume`
     fan-out (the `hosts_to_resume` finally) resumes the hosts still paused —
     every host on a pre-Phase-B abort, or the ones the Phase-B poll left paused
-    — so a failed rollout self-heals instead of stranding hosts paused.
+    — so a failed rollout self-heals instead of stranding hosts paused. The
+    `finally` also unpauses and finalizes the LOCAL host's pause-owner journal
+    (generation-scoped), so a co-located gateway,agent-runner box does not keep
+    a `paused` journal after a rollout that finished (2026-08-26 residue).
     """
     # Dynamic lookup for fan-out helpers + local-update so tests can stub.
     import cli.commands as _ns
@@ -691,6 +694,14 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         # failed or an unexpected exception escaped, the finally ensures the
         # flag is removed and the restarter is respawned.
         unpause_local_cluster()
+        # Generation-scoped successful-finalize of the local pause-owner
+        # journal: on a co-located gateway,agent-runner box Phase A's own
+        # cluster/stop op journaled the exact generation, and the bare unpause
+        # above would leave it `paused` forever (2026-08-26 residue). Never
+        # raises — it runs in a `finally` that may already be unwinding.
+        from ops.cluster_pause import finalize_pause_owner_journal
+
+        finalize_pause_owner_journal()
         # Best-effort resume of every still-paused remote, then — on an abnormal
         # exit — a residual-state + manual-recovery summary. `finalize_rollout`
         # never raises: it runs in a `finally` that may already be unwinding an
