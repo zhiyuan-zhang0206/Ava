@@ -1231,9 +1231,10 @@ remote trace pipeline writes Tempo only and never the gateway mirror, avoiding
 a second copy and replay ambiguity. Needed only for gaps the queue could not
 hold (backend down longer than the queue, offline machines, past windows).
 Gated by `AVA_TELEMETRY_OTLP_ENABLED` (refuses while off — one kill switch
-for the whole OTLP surface). The old 5-minute ship schedule (gateway
-schedule id=5) is obsolete for liveness — the sidecar fans out live; keep it
-only if you want scheduled gap-replay.
+for the whole OTLP surface). The 5-minute ship schedule (gateway schedule
+id=5) runs `ava trace ship` on a timer — it ships the local mirror to the
+local Tempo viewer (LGTM stack) every 5 minutes, incremental by per-file
+watermark.
 
 - **incremental** (no args): a per-file byte-offset watermark
   (`traces/.ship-watermark.json`) advances per POSTed line, so re-running ships
