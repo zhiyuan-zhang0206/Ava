@@ -570,7 +570,8 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     The dump is a normal managed backup (`services.backup.run_backup`), so it
     lands in `<home>/backups/db/`, is named `<db>-<ts>.dump.gz.enc`, and is pruned by
     the standard 7-day rotation. The returned path is threaded through the
-    recovery context so a failed rollout names the exact restore point.
+    recovery context so a failed rollout names the exact restore point, and is
+    printed to the rollout output once verified so the snapshot is visible.
 
     Raises RuntimeError when the dump cannot be created OR verified: a rollout
     that will migrate with no recoverable data snapshot is exactly the P1 the
@@ -604,6 +605,10 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
             ) from None
 
         _verify_snapshot_artifact(dump_path)
+        # The verified path goes to the rollout output: without it, a snapshot
+        # is invisible in the log (run_backup writes to its own daemon stream)
+        # and an operator can mistake it for an unscheduled backup.
+        print(f"→ pre-update data snapshot: {dump_path} (verified)")
         return dump_path
 
 
