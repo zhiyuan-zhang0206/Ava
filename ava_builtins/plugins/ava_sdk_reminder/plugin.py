@@ -125,7 +125,7 @@ def _assumed_persistence_name(
 
 def _nameerror_persistence_hint(name: str) -> str:
     return (
-        f"NameError: '{name}' was defined in an earlier execute_code call, "
+        f"NameError: '{name}' appeared in an earlier execute_code call, "
         "but each call runs in a fresh interpreter — variables do not persist "
         "between calls. Re-define it here, or carry state via files or shell sessions."
     )
