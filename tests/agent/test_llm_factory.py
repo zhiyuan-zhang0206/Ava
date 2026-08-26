@@ -402,6 +402,19 @@ class TestBuildChatModel:
         assert isinstance(m, ReasoningContentChatModel)
         assert "bigmodel.cn" in str(m.openai_api_base)
 
+    def test_glm_5_3_flash_returns_reasoning_content_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """glm-5.3-flash dispatches through the same glm branch — Zhipu
+        OpenAI-compatible endpoint, ReasoningContentChatModel."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
+        from shared.lm._reasoning_compat import ReasoningContentChatModel
+
+        m = build_chat_model("glm-5.3-flash")
+        assert isinstance(m, ReasoningContentChatModel)
+        assert "bigmodel.cn" in str(m.openai_api_base)
+
     def test_glm_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setattr(settings.lm, "zhipu_api_key", None)
@@ -420,6 +433,20 @@ class TestBuildChatModel:
         m = build_chat_model("qwen3.8-max")
         assert isinstance(m, ReasoningContentChatModel)
         assert str(m.openai_api_base) == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    def test_qwen3_8_flash_returns_reasoning_content_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """qwen3.8-flash dispatches through the same qwen branch — DashScope
+        compatible-mode endpoint, ReasoningContentChatModel."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        from shared.lm._reasoning_compat import ReasoningContentChatModel
+
+        m = build_chat_model("qwen3.8-flash")
+        assert isinstance(m, ReasoningContentChatModel)
+        assert str(m.openai_api_base) == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        assert m.stream_usage is True
 
     def test_qwen_honors_the_configured_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A dedicated Model Studio workspace serves the same API on its own host,
@@ -899,6 +926,24 @@ class TestReasoningEffortDispatch:
         m = build_chat_model("glm-5.2", thinking={"type": "disabled"})
         assert isinstance(m, ReasoningContentChatModel)
         assert m.extra_body == {"thinking": {"type": "disabled"}}
+        assert m.reasoning_effort is None
+
+    @pytest.mark.parametrize("model", ["glm-5.3", "glm-5.3-flash"])
+    def test_glm_5_3_thinking_disabled_warns_instead_of_sending_body(
+        self, monkeypatch: pytest.MonkeyPatch, model: str
+    ) -> None:
+        """GLM-5.3 / GLM-5.3-Flash always think: the endpoint rejects
+        thinking.type=disabled with a 400 (error code 1210, live-checked
+        2026-08-27), so the builder drops the disabled body and warns (the kimi
+        branch's pattern) instead of sending a body that fails every call."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
+        monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
+        from shared.lm._reasoning_compat import ReasoningContentChatModel
+
+        m = build_chat_model(model, thinking={"type": "disabled"})
+        assert isinstance(m, ReasoningContentChatModel)
+        assert m.extra_body is None
         assert m.reasoning_effort is None
 
     # ── qwen ────────────────────────────────────────────────────────────

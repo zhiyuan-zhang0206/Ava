@@ -93,9 +93,12 @@ from shared.lm.content import content_blocks
 from shared.lm.factory import build_chat_model
 from shared.message_kwargs import message_addl_kwargs, message_content
 
-# Both registered Qwen models — the vendor could revise either independently, and
-# the two facts below were measured on both.
-_MODELS = ("qwen3.8-max", "qwen3.8-27b")
+# All three registered Qwen models — the vendor could revise any of them
+# independently, and the two facts below were measured on the first two. For
+# flash, thinking-ON-by-default and enable_thinking=false were re-verified
+# live 2026-08-27; the streamed cache frame fact is guarded here like the
+# rest (the file is opt-in live, so this run extends the measurement to flash).
+_MODELS = ("qwen3.8-max", "qwen3.8-27b", "qwen3.8-flash")
 _LIVE_KEY = os.environ.get("AVA_LIVE_DASHSCOPE_KEY")
 _LIVE_BASE_URL = os.environ.get("AVA_LIVE_DASHSCOPE_BASE_URL")
 

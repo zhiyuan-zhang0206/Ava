@@ -187,6 +187,10 @@ class ModelSpec:
     # clamp vocabulary elsewhere). Serves the spawn-dialog dropdown + the claude clamp.
     extended_thinking_only: bool = False  # claude models whose only thinking mode is manual
     # extended thinking (budget_tokens; default OFF) and that 400 on `effort`
+    thinking_always_on: bool = False  # models whose reasoning cannot be switched off: a
+    # caller disabling thinking gets a warning instead of a wire body the endpoint
+    # rejects (kimi-k3; glm-5.3 / glm-5.3-flash, whose thinking.type=disabled 400s —
+    # verified live 2026-08-27, error code 1210)
     streaming: bool = True  # construction-time streaming default; False only where a
     # model's streaming path is known-worse than its non-streaming one
     media_types: frozenset[str] = frozenset()
@@ -551,8 +555,43 @@ MODELS: dict[str, ModelSpec] = {
         knowledge_cutoff="2025-12",
         # docs.z.ai/guides/llm/glm-5.3: reasoning_effort low/high/max, default max.
         effort_levels=("low", "high", "max"),
+        # docs.z.ai/guides/overview/migrate-to-glm-new + live check 2026-08-27:
+        # GLM-5.3 always thinks — thinking.type=disabled is rejected with error
+        # code 1210: "this model always thinks, disabling is unsupported"), so the
+        # glm builder warns
+        # instead of sending the disabled body (kimi-k3 pattern).
+        thinking_always_on=True,
         tuning=ModelTuning(
             # Z.ai documents GLM-5.3's default effort as max.
+            reasoning_effort="max",
+            # Same GLM-family overload history rationale as glm-5.2's entry
+            # (llm_retry_max_attempts=10).
+            llm_retry_max_attempts=10,
+        ),
+    ),
+    "glm-5.3-flash": ModelSpec(
+        provider="glm",
+        spawnable=True,
+        # docs.z.ai/guides/vlm/glm-5.3-flash: 1M-token context window.
+        context_window=1_000_000,
+        # Zhipu publishes no knowledge cutoff for any GLM-5 model; carries the
+        # glm-5.3 entry's conservative 2025-12 estimate forward — erring early
+        # is the safe direction (see glm-5.3's entry).
+        knowledge_cutoff="2025-12",
+        # docs.z.ai/api-reference/llm/chat-completion: "For the GLM-5.3
+        # GLM-5.3-FLASH model, only the low / high / max levels are supported"
+        # (default max); verified live 2026-08-27 that low is accepted.
+        effort_levels=("low", "high", "max"),
+        # docs.z.ai/guides/vlm/glm-5.3-flash documents native multimodal input
+        # (images, videos, files) — but the OpenAI-compatible binding Ava dials
+        # renders image_url blocks only today, the same conservatism as
+        # qwen3.8-max (whose official modality list also includes video).
+        media_types=frozenset({"image"}),
+        # Same always-on thinking as glm-5.3 (docs + live 400 on
+        # thinking.type=disabled, error code 1210).
+        thinking_always_on=True,
+        tuning=ModelTuning(
+            # Z.ai documents the GLM-5.3 series' default effort as max.
             reasoning_effort="max",
             # Same GLM-family overload history rationale as glm-5.2's entry
             # (llm_retry_max_attempts=10).
@@ -607,6 +646,33 @@ MODELS: dict[str, ModelSpec] = {
             # `enable_thinking: false` is honored rather than rejected.
             reasoning_effort="high",
         ),
+        media_types=frozenset({"image"}),
+    ),
+    "qwen3.8-flash": ModelSpec(
+        provider="qwen",
+        spawnable=True,
+        # DashScope model-info API (GET /api/v1/models, checked 2026-08-27):
+        # context 1M, max input 991,808, reasoning-mode max input 983,616.
+        # This roster runs with thinking on, so the lower ceiling is the one an
+        # agent actually has (same convention as qwen3.8-max).
+        context_window=983_616,
+        max_output_tokens=131_072,
+        # Same unpublished-cutoff situation as every Qwen — see qwen3.8-max.
+        # Anchored on this model's own publication (2026-08-25), erring early.
+        knowledge_cutoff="2026-01",
+        model_identity="You are running on Qwen3.8-Flash (Alibaba Qwen).",
+        # Same binary enable_thinking knob as every registered qwen model
+        # (shared/lm/_effort.py:qwen_extra_body) — verified live 2026-08-27
+        # that thinking is ON by default and enable_thinking=false is honored.
+        effort_levels=("none", "high"),
+        tuning=ModelTuning(
+            # The "high" rung IS the provider default: thinking is on unless
+            # enable_thinking=false is sent (same as qwen3.8-max).
+            reasoning_effort="high",
+        ),
+        # Official request modality is Image/Text/Video (DashScope model-info
+        # API), but the compatible-mode binding renders image blocks only —
+        # same conservatism as qwen3.8-max's entry.
         media_types=frozenset({"image"}),
     ),
     # -- legacy / non-spawnable (facts kept for old agents) --
