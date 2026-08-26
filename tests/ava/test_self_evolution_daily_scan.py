@@ -104,3 +104,27 @@ def test_render_is_quiet_on_clean_day(daily_scan: Any) -> None:
     ds = daily_scan
     out = ds.render([_record("ok", agent_id=1), _record("ok", agent_id=2)], Path("d.jsonl"), 1)
     assert "ALERT" not in out
+
+
+def test_scan_passes_include_test_flag_through(
+    daily_scan: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--include-test` is measurement-only: the nightly scan must stay on the
+    default (exclude), and the flag must reach collect untouched."""
+    calls: list[tuple[object, ...]] = []
+
+    class _CollectStub:
+        @staticmethod
+        def collect(days: int, week: str | None, include_test: bool = False) -> list[dict]:
+            calls.append((days, week, include_test))
+            return []
+
+    monkeypatch.setattr(daily_scan, "collect", _CollectStub)
+    monkeypatch.setattr(daily_scan, "ava_home", lambda: tmp_path)
+
+    daily_scan.scan(1, week="w1")
+    daily_scan.scan(2, week="w2", include_test=True)
+
+    assert calls == [(1, "w1", False), (2, "w2", True)]
+    # the default run wrote the dataset file, the measurement run too
+    assert (tmp_path / "self_evolution" / "daily").is_dir()

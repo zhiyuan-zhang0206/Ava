@@ -68,13 +68,15 @@ def _why(rec: dict[str, Any]) -> list[str]:
     return why or ["no explicit signal"]
 
 
-def scan(days: int, week: str | None = None) -> tuple[list[dict[str, Any]], Path]:
+def scan(
+    days: int, week: str | None = None, *, include_test: bool = False
+) -> tuple[list[dict[str, Any]], Path]:
     """Collect the window's runs and write them under
     `$AVA_HOME/self_evolution/daily/<date>.jsonl`. The weekly `dataset/`
     files are never touched, so a daily run can never clobber a weekly
     file that shares the same date stamp."""
     week = week or datetime.now(UTC).date().isoformat()
-    records = collect.collect(days, week)
+    records = collect.collect(days, week, include_test=include_test)
     out_dir = ava_home() / "self_evolution" / "daily"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{week}.jsonl"
@@ -129,11 +131,16 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--days", type=int, default=1, help="window size in days (default 1)")
+    p.add_argument(
+        "--include-test",
+        action="store_true",
+        help="include TEST- prefixed benchmark/probe spawns (measurement only; default excludes)",
+    )
     args = p.parse_args()
     if args.days < 1:
         print("error: --days must be >= 1", file=sys.stderr)
         raise SystemExit(1)
-    records, path = scan(args.days)
+    records, path = scan(args.days, include_test=args.include_test)
     print(render(records, path, args.days))
     raise SystemExit(alert_exit(records))
 

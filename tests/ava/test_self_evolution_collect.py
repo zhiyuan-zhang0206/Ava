@@ -478,3 +478,19 @@ def test_build_record_adds_leak_audit_only_for_eval_collection(
     assert "invalidated" not in weekly
     assert audited["invalidated"] is True
     assert audited["leak_audit"][0]["surface"] == "results"
+
+
+def test_test_label_ids_matches_prefix_only(collect_mod: Any, db_conn: psycopg.Connection) -> None:
+    """Only TEST- prefixed role labels are test spawns: a plain agent label
+    and a NULL label must stay in the dataset."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents (id, label) VALUES (9001, 'TEST-bench-on-t1'), "
+            "(9002, 'test-agent-9002'), (9003, NULL)"
+        )
+    db_conn.commit()
+
+    with db_conn.cursor() as cur:
+        ids = collect_mod._test_label_ids(cur, [9001, 9002, 9003, 99999])
+
+    assert ids == {9001}

@@ -266,6 +266,15 @@ def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, tuple]:
     return {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
 
 
+def _test_label_ids(cur: psycopg.Cursor, ids: list[int]) -> set[int]:
+    """Agent ids whose role label carries the TEST- prefix — benchmark /
+    probe spawns, not production runs. The scan must not label them
+    fumbled or feed them into the health metrics (2026-08-25 convention:
+    test spawns carry a TEST- label prefix)."""
+    cur.execute("SELECT id, label FROM agents WHERE id = ANY(%s)", [ids])
+    return {row[0] for row in cur.fetchall() if (row[1] or "").startswith("TEST-")}
+
+
 # ─────────────── driver ───────────────
 
 
@@ -275,6 +284,7 @@ def collect(
     *,
     from_: datetime | None = None,
     to: datetime | None = None,
+    include_test: bool = False,
 ) -> list[dict[str, Any]]:
     """One record per agent active in the window [from_, to) (default:
     now - days -> now, UTC).
@@ -285,6 +295,11 @@ def collect(
     only exec stdout payloads, which build_record never reads, and every
     agent that logs stdout also emits telemetry events, so agent discovery
     loses nothing.
+
+    Agents whose role label carries the TEST- prefix (benchmark / probe
+    spawns) are excluded by default so they never reach the health dataset
+    or its labels; pass `include_test=True` to collect them (a measurement
+    run that reads the same fields).
     """
     window_to = to or datetime.now(UTC)
     window_from = from_ or (window_to - timedelta(days=days))
@@ -299,10 +314,13 @@ def collect(
     with connect() as conn, conn.cursor() as cur:
         inbounds = _inbounds_by_agent(cur, ids, window)
         meta = _meta_by_agent(cur, ids)
+        test_ids = set() if include_test else _test_label_ids(cur, ids)
     records = []
     for agent_id in ids:
         if agent_id not in meta:
             continue  # active in events but no lifecycle row — skip, not a real run
+        if agent_id in test_ids:
+            continue  # benchmark/probe spawn — never into the health dataset
         records.append(
             build_record(
                 agent_id,
@@ -401,6 +419,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="window end, ISO-8601 with timezone (default: now)",
     )
+    p.add_argument(
+        "--include-test",
+        action="store_true",
+        help="include TEST- prefixed benchmark/probe spawns (measurement only; default excludes)",
+    )
     return p.parse_args()
 
 
@@ -416,7 +439,7 @@ def main() -> None:
     week = args.week or _default_week()
     from_ = _parse_iso(args.from_) if args.from_ else None
     to = _parse_iso(args.to) if args.to else None
-    records = collect(args.days, week, from_=from_, to=to)
+    records = collect(args.days, week, from_=from_, to=to, include_test=args.include_test)
     path = write_dataset(records, week)
     counts = Counter(r["label"] for r in records)
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
