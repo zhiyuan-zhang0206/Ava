@@ -269,6 +269,9 @@ an alert costs one cheap review, a missed bad run costs the weekly cycle its
 earliest signal. A missing script or a hard failure also wakes this agent with
 the error, so a silently broken scan cannot hide.
 
+**Loki-failure fallback.** On dense windows `/api/events` can 500; run
+`reference/mirror_backfill.py <days> [week]` — collect from the local event mirror (rows deduped by event id).
+
 ## Cron integration
 
 This skill is driven by a weekly schedule on the gateway (schedule id 1, `self-evolution-weekly`; managed via the `ava schedules` CLI):
