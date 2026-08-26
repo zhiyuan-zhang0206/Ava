@@ -34,8 +34,9 @@ the spans.
 Everything hangs off these. Get one, and the rest follows.
 
 - **`agent_id`** — the agent. It is also the LangGraph `thread_id`, as a decimal
-  string (`checkpoints.thread_id = '3048'`), the Loki line field
-  (`| agent_id="3048"`), and the root span's `session.id`.
+  string (`checkpoints.thread_id = '3048'`), the Loki stream matcher
+  (`{service_name="unknown_service", agent_id="3048"}` — an index label
+  since the 2026-08-23 cutover), and the root span's `session.id`.
 - **`trace_id`** — one turn of graph work, lowercase 32-hex. It is the Loki line
   field (`| trace_id="<hex>"`), the Tempo trace id, and — stamped per turn onto
   the checkpoint the turn committed — `checkpoints.metadata->>'trace_id'`. The
