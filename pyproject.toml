@@ -314,7 +314,7 @@ ignore = [
 "cli/*" = ["T20"]
 "ava/*" = ["T20"]
 "ava_builtins/plugins/*" = ["T20"]
-# ops CLI runs docker / tmux / cron / curl — all hardcoded commands + static args;
+# ops CLI runs cron / curl — all hardcoded commands + static args;
 # S603 (subprocess untrusted input) is meaningless.
 "cli/commands/*.py" = ["S603"]
 "services/healthchecks/*.py" = ["S603"]
