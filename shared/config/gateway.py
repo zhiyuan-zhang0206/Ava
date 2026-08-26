@@ -182,6 +182,7 @@ class GatewaySettings(EnvSettings):
     update_quiesce_timeout_seconds: float = Field(
         default=10.0,
         ge=0,
+        allow_inf_nan=False,
         alias="AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS",
         description=(
             "How long `ava cluster update` / `ava cluster rollback` (and the "
@@ -191,8 +192,10 @@ class GatewaySettings(EnvSettings):
             "and between-turn agents exit at their turn boundary inside the "
             "window; an agent mid-execute_code is cut short by the force-reap "
             "and its work lost — accepted in exchange for a fast cluster "
-            "unblock. Any non-negative value is legal (0 = signal then "
-            "immediately force-reap); there is no minimum wait."
+            "unblock. Any finite non-negative value is legal (0 = signal "
+            "then immediately force-reap; NaN/Inf rejected — an infinite "
+            "window would make the force-reap backstop never fire); there "
+            "is no minimum wait."
         ),
         json_schema_extra={
             "restart_required": "",
