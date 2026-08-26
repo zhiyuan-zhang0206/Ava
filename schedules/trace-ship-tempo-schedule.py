@@ -1,8 +1,5 @@
-"""Replay the local trace mirror (collector JSONL) to Tempo every 5 minutes.
+"""Ship the local OTel trace mirror to the local Tempo viewer every 5 minutes.
 
-Since task #1266 the sidecar fans traces out LIVE, so this schedule is no
-longer needed for liveness — it remains as an operator-enablable GAP-REPLAY
-(backend down longer than the collector queue held, offline machines).
 Incremental (per-file watermark) so each run only sends new lines; idempotent
 by span id, so a missed window is caught up on the next run. Best-effort:
 failures are printed to the schedule log and retried on the next loop.
