@@ -347,12 +347,20 @@ def test_orchestration_aborts_when_update_lock_held(monkeypatch: pytest.MonkeyPa
 # ─── update modes: smooth / force ─────────────────────────────────────────────
 
 
-def test_quiesce_timeout_smooth_is_exec_timeout_plus_20pct() -> None:
-    """Smooth mode waits out the longest possible single execute_code, plus a 20%
-    grace margin — a healthy agent's exec is guaranteed to end and reach its
-    turn-boundary claim before the force-reap backstop fires."""
-    expected = settings.sandbox.exec_timeout_seconds * 1.2
-    assert _up._quiesce_timeout_s("smooth") == pytest.approx(expected)  # pyright: ignore[reportUnknownMemberType]
+def test_quiesce_timeout_smooth_is_the_configured_short_window() -> None:
+    """Smooth mode's wait is the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS
+    (default 10s, user ruling 2026-08-26) — no longer exec_timeout_seconds x 1.2:
+    the default wait is short, decoupled from the sandbox exec bound."""
+    assert _up._quiesce_timeout_s("smooth") == pytest.approx(10.0)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_quiesce_timeout_smooth_accepts_a_short_configured_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No lower-bound validation: a configured window below the old exec-derived
+    floor (5s, the low end of the user's 5/10/15 range) is legal."""
+    monkeypatch.setattr(settings.gateway, "update_quiesce_timeout_seconds", 5.0)
+    assert _up._quiesce_timeout_s("smooth") == pytest.approx(5.0)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_quiesce_timeout_force_is_short() -> None:
@@ -382,6 +390,28 @@ class _FakeTime:
 
     def sleep(self, _s: float) -> None:
         self.now += 1.0
+
+
+def test_quiesce_graceful_boundary_with_the_short_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The graceful boundary with the short default window: an agent that exits
+    before the deadline is counted as gracefully drained (True — the
+    orchestration then skips the force-reap); an agent still live at the
+    deadline makes quiesce return False (the orchestration force-reaps it). The
+    boundary is the same as before — only the window shrank to 10s."""
+    from shared import db as _db
+
+    monkeypatch.setattr(_db, "signal_live_agents_restart", lambda **_kw: [1])  # pyright: ignore[reportUnknownArgumentType]
+
+    # Drains on the first poll → graceful, no reap.
+    monkeypatch.setattr(_db, "list_live_agent_ids", lambda **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+    assert _up._quiesce_all_agents(timeout_s=0.05) is True
+
+    # Never drains → False once the (short) deadline passes.
+    monkeypatch.setattr(_db, "list_live_agent_ids", lambda **_kw: [1])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "time", _FakeTime())
+    assert _up._quiesce_all_agents(timeout_s=0.05) is False
 
 
 def test_force_mode_orchestration_force_reaps_every_host(

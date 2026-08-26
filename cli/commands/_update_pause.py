@@ -102,9 +102,10 @@ def _stop_the_world(
     # restart takes it down and keeps it down — no old-code agent writes the
     # central DB while the local update migrates the schema. Phase B brings
     # each host back on new code, whose restarter respawns the quiesced
-    # agents. The wait is bounded per mode: smooth waits out the longest
-    # possible single execute_code (so healthy agents exit at their turn
-    # boundary), force waits only for idle agents to drain — either way a
+    # agents. The wait is bounded per mode: smooth waits the configured
+    # AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window (default 10s — agents idle or
+    # between turns exit at their turn boundary; mid-exec agents are cut
+    # short), force waits only for idle agents to drain — either way a
     # timeout means stragglers and the rollout force-reaps them everywhere.
     print("\n→ quiesce all agents before migration (stop-the-world)")
     from cli.commands import update as _up_mod

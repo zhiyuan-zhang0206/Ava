@@ -487,6 +487,43 @@ def test_hibernate_min_active_rejects_negative() -> None:
         DaemonSettings.model_validate({"hibernate_min_active": -1})
 
 
+@pytest.mark.parametrize("bad", ["inf", "-inf", "nan", "Infinity"])
+def test_update_quiesce_timeout_rejects_non_finite(
+    bad,
+) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """The quiesce window must be finite at the parsing layer: an infinite
+    value would make the force-reap backstop's deadline never fire and a
+    rollout hang forever. `allow_inf_nan=False` rejects NaN/±Inf as they
+    arrive from the .env surface (string -> float), matching the #686
+    finite-value standard."""
+    from pydantic import ValidationError
+
+    from shared.config.gateway import GatewaySettings
+
+    with pytest.raises(ValidationError):
+        GatewaySettings.model_validate({"update_quiesce_timeout_seconds": bad})
+
+
+def test_update_quiesce_timeout_accepts_short_finite_values() -> None:
+    """The 2026-08-26 short-window ruling parses: a 5s window and 0 (signal
+    then immediately force-reap) are legal — only non-finite values are
+    rejected, no positive minimum exists."""
+    from shared.config.gateway import GatewaySettings
+
+    assert (
+        GatewaySettings.model_validate(
+            {"update_quiesce_timeout_seconds": "5"}
+        ).update_quiesce_timeout_seconds
+        == 5.0
+    )
+    assert (
+        GatewaySettings.model_validate(
+            {"update_quiesce_timeout_seconds": "0"}
+        ).update_quiesce_timeout_seconds
+        == 0.0
+    )
+
+
 def test_cluster_secret_validator_allows_url_safe_and_empty() -> None:
     """Empty (off / default) and URL-safe tokens pass — they are safe in URLs,
     redis.conf, and a bearer header."""

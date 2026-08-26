@@ -216,9 +216,10 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "--mode",
         choices=("smooth", "force"),
         default="smooth",
-        help="agent-drain policy with --quiesce: 'smooth' (default) waits out the "
-        "longest single execute_code (exec_timeout_seconds x 1.2) then force-reaps "
-        "stragglers; 'force' waits ~10s (idle agents drain) then force-reaps.",
+        help="agent-drain policy with --quiesce: 'smooth' (default) waits the "
+        "configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window (default 10s) for "
+        "agents to end their turn, then force-reaps stragglers; 'force' waits "
+        "~10s (idle agents drain) then force-reaps.",
     )
     restart_p.add_argument(
         "--force-reap",
