@@ -280,15 +280,31 @@ def _prepare_case(
     return record
 
 
+def _worker_done(agent_id: int, status: S | None) -> bool:
+    """A worker is done only when it can no longer act.
+
+    TERMINATED is unambiguous. IDLING counts only WITH output already
+    produced: a freshly spawned worker's row starts as IDLING before its
+    process has even booted (the runner publishes the running transition
+    later), so bare IDLING must not count as done — that read the whole batch
+    as finished seconds after spawning and audited empty transcripts
+    (adversarial-eval 2026-35, 2026-08-26). A worker that finished but failed
+    to self-terminate still ends a turn IDLING with its report message, and
+    the audit reads exactly that message."""
+    if status == S.TERMINATED:
+        return True
+    if status == S.IDLING:
+        return bool(ava.agents.get_last_message(agent_id))
+    return False
+
+
 def _wait_for_workers(worker_to_case: dict[int, str]) -> set[int]:
     deadline = datetime.now(UTC) + BATCH_DEADLINE
     pending = set(worker_to_case)
     while pending and datetime.now(UTC) < deadline:
         statuses = {agent.agent_id: agent.status for agent in _all_agents()}
         pending = {
-            agent_id
-            for agent_id in pending
-            if statuses.get(agent_id) not in (S.IDLING, S.TERMINATED)
+            agent_id for agent_id in pending if not _worker_done(agent_id, statuses.get(agent_id))
         }
         if pending:
             time.sleep(POLL_SECONDS)
