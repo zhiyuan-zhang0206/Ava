@@ -78,6 +78,7 @@ from gateway import (
     prom_metrics,
 )
 from gateway import mcp_endpoint as _mcp_endpoint
+from gateway._auth401_log import _log_auth401_rejection
 from gateway._cors import cors_allowed_origins
 from gateway._server import main as _run_gateway
 from gateway.error_envelope import error_response, request_trace_middleware
@@ -647,16 +648,7 @@ async def _cluster_auth_middleware(
     if x_secret and hmac.compare_digest(x_secret, secret):
         return await call_next(request)
 
-    # Task #1635: the frontend used to blind-retry 401'd SSE streams, producing a
-    # ~43k/24h storm; the fix stops that, so a 401 here now means a residual client
-    # (stale tab on an old bundle, script, SDK). uvicorn access logs are gated to
-    # WARNING, so without this line 401s are invisible — log client + UA to find them.
-    _log.warning(
-        "auth 401: path=%s client=%s ua=%s",
-        request.url.path,
-        request.client.host if request.client else "unknown",
-        request.headers.get("user-agent", "-"),
-    )
+    _log_auth401_rejection(request)
     return error_response(
         request,
         code="authentication_required",
