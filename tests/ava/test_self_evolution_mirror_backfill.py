@@ -63,6 +63,11 @@ def _consumer(backfill_mod: Any, rows: dict[str, list[dict[str, Any]]]) -> Any:
     return backfill_mod._mirror_fetch_factory(rows)
 
 
+def _no_records(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    """collect() stub for tests that only exercise the mirror reading."""
+    return []
+
+
 def test_consumer_dedups_by_id(backfill_mod: Any) -> None:
     ts = datetime.now(UTC).isoformat()
     rows = {"telemetry": [_row(1, ts), _row(2, ts), _row(1, ts), _row(3, ts)]}
@@ -128,12 +133,30 @@ def test_consumer_unknown_category_empty(backfill_mod: Any) -> None:
     assert _consumer(backfill_mod, rows)("log", None, None) == []
 
 
+def _write_mirror_day(logs: Path, day: str, events: list[dict[str, Any]]) -> None:
+    (logs / f"events-{day}.jsonl").write_text(
+        "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events)
+    )
+
+
+def _window_days(now: datetime, days: int) -> list[str]:
+    window_from = now - timedelta(days=days)
+    start = (window_from - timedelta(minutes=1)).date()
+    end = now.date()
+    out: list[str] = []
+    d = start
+    while d <= end:
+        out.append(d.strftime("%Y%m%d"))
+        d += timedelta(days=1)
+    return out
+
+
 def test_backfill_wires_dedup_into_collect(
     backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """backfill() must hand the deduped row set to collect(): the consumer it
-    installs (C._fetch_events_window) drops duplicate ids, keeps the window,
-    and feeds both categories before collect() ever sees a row."""
+    installs (collect._fetch_events_window) drops duplicate ids, keeps the
+    window, and feeds both categories before collect() ever sees a row."""
     now = datetime.now(UTC)
     window_from = now - timedelta(days=1)
     ts_in = (window_from + timedelta(minutes=5)).isoformat()
@@ -141,7 +164,7 @@ def test_backfill_wires_dedup_into_collect(
 
     logs = tmp_path / "logs"
     logs.mkdir()
-    day = (window_from - timedelta(minutes=1)).date().strftime("%Y%m%d")
+    days = _window_days(now, 1)
     events = [
         _row(1, ts_in),
         _row(1, ts_in),  # true duplicate
@@ -149,9 +172,9 @@ def test_backfill_wires_dedup_into_collect(
         _row(3, ts_out),
         {**_row(4, ts_in), "category": "audit"},
     ]
-    (logs / f"events-{day}.jsonl").write_text(
-        "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events)
-    )
+    _write_mirror_day(logs, days[0], events)
+    for day in days[1:]:  # every window day must exist — missing days are not silent
+        _write_mirror_day(logs, day, [])
 
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
@@ -165,9 +188,61 @@ def test_backfill_wires_dedup_into_collect(
 
     monkeypatch.setattr(backfill_mod.collect, "collect", fake_collect)
 
-    path = backfill_mod.backfill(1, "test-week")
+    path, missing = backfill_mod.backfill(1, "test-week")
 
     assert [r["id"] for r in captured["telemetry"]] == [1, 2]
     assert [r["id"] for r in captured["audit"]] == [4]
+    assert missing == []
     assert path == tmp_path / "self_evolution" / "daily" / "test-week.jsonl"
     assert path.exists()
+
+
+def test_backfill_reports_missing_days_and_exits_nonzero(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: Any
+) -> None:
+    """A missing mirror day must never be silent: backfill() returns it, the
+    per-day counts print, and the CLI exits non-zero — a partial window must
+    not silently become a partial dataset (collect's iron rule)."""
+    now = datetime.now(UTC)
+    window_from = now - timedelta(days=1)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    days = _window_days(now, 1)
+    # Only the first window day exists; the rest are missing.
+    _write_mirror_day(logs, days[0], [_row(1, (window_from + timedelta(minutes=5)).isoformat())])
+
+    monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+
+    path, missing = backfill_mod.backfill(1, "test-week")
+
+    assert missing == days[1:]
+    assert path.exists()
+    out = capsys.readouterr().out
+    assert f"{days[0]}: 1 rows in window" in out  # per-day count printed
+    assert "warning: mirror file missing for " + ", ".join(days[1:]) in out
+
+    monkeypatch.setattr(sys, "argv", ["mirror_backfill.py", "1", "test-week"])
+    with pytest.raises(SystemExit) as exc:
+        backfill_mod.main()
+    assert exc.value.code == 1
+
+
+def test_main_exits_zero_when_all_days_present(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CLI success path: no missing days -> exit 0."""
+    now = datetime.now(UTC)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for day in _window_days(now, 1):
+        _write_mirror_day(logs, day, [])
+    monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    monkeypatch.setattr(sys, "argv", ["mirror_backfill.py", "1", "test-week"])
+
+    with pytest.raises(SystemExit) as exc:
+        backfill_mod.main()
+    assert exc.value.code == 0
