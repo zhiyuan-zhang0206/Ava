@@ -264,6 +264,70 @@ def test_prune_keeps_newest(bdir: Path) -> None:
     assert sorted(p.name for p in bdir.glob("*.dump")) == names[len(names) - keep :]
 
 
+def test_prune_keeps_newest_daily_plus_newest_pre_update_snapshot(
+    bdir: Path,
+) -> None:
+    """Update-kind snapshots get their own slot: 7 dailies survive alongside the
+    newest `.pre-update` snapshot instead of consuming a daily-dump slot."""
+    dailies = [f"ava-202606{i:02d}-030000.dump" for i in range(1, 9)]  # 8 dailies
+    snaps = [
+        "ava-20260605T100000Z.pre-update.dump.gz.enc",
+        "ava-20260607T100000Z.pre-update.dump.gz.enc",
+    ]
+    for name in dailies + snaps:
+        _touch(bdir, name)
+    removed = backup._prune(bdir)
+    # the oldest daily (beyond the 7-window) and the older snapshot (only the
+    # newest one is kept) are pruned; 7 dailies + the newest snapshot survive
+    assert removed == [
+        Path(bdir / "ava-20260601-030000.dump"),
+        Path(bdir / "ava-20260605T100000Z.pre-update.dump.gz.enc"),
+    ]
+    assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
+    assert len(list(bdir.glob("*.dump"))) == backup.BACKUP_KEEP  # dailies only
+
+
+def test_prune_with_snapshot_alone_keeps_newest_snapshot(bdir: Path) -> None:
+    """No dailies yet (fresh cluster, first update) keeps the one snapshot."""
+    snaps = [
+        "ava-20260605T100000Z.pre-update.dump.gz.enc",
+        "ava-20260607T100000Z.pre-update.dump.gz.enc",
+    ]
+    for name in snaps:
+        _touch(bdir, name)
+    removed = backup._prune(bdir)
+    assert removed == [bdir / "ava-20260605T100000Z.pre-update.dump.gz.enc"]
+    assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
+
+
+def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pre-update snapshot carries the kind segment so prune can classify it."""
+    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
+        if cmd[0].endswith("pg_dump"):
+            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
+        elif cmd[0] == "gzip":
+            cast(Any, _kw["stdout"]).write(b"compressed dump")
+        else:
+            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
+        return _Ok()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+    path = backup.run_backup(
+        datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        db_url="dbname=ava",
+        pre_update=True,
+    )
+    assert path.name == "ava-20260609T190000Z.pre-update.dump.gz.enc"
+    assert backup._is_pre_update(path)
+    assert backup._is_pre_update(_touch(bdir, "ava-20260609T190000Z.dump.gz.enc")) is False
+
+
 def test_run_backup_failure_leaves_no_files(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class _Failed:
         returncode = 1

@@ -568,8 +568,10 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     (a code-only update cannot damage data; the daily backup already covers it).
 
     The dump is a normal managed backup (`services.backup.run_backup`), so it
-    lands in `<home>/backups/db/`, is named `<db>-<ts>.dump.gz.enc`, and is pruned by
-    the standard 7-day rotation. The returned path is threaded through the
+    lands in `<home>/backups/db/`; the `pre_update=True` marker names it
+    `<db>-<ts>.pre-update.dump.gz.enc`, and prune keeps the newest such snapshot
+    in its own retention slot rather than consuming a daily-dump slot. The
+    returned path is threaded through the
     recovery context so a failed rollout names the exact restore point, and is
     printed to the rollout output once verified so the snapshot is visible.
 
@@ -591,7 +593,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     # the same-second target between creation and verification.
     with backup_lock(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S):
         try:
-            dump_path = run_backup(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S)
+            dump_path = run_backup(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S, pre_update=True)
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 "could not create pre-update data snapshot: pg_dump timed out after "
