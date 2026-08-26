@@ -31,6 +31,7 @@ import argparse
 import datetime as dt
 import json
 import logging
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +39,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from shared.config import settings
+from shared.log import logger
 from shared.ui_update_state import UiUpdateSnapshot
 
 _log = logging.getLogger("services.gate")
@@ -48,6 +50,38 @@ _log = logging.getLogger("services.gate")
 _FORWARD_HEADERS = ("accept", "accept-language", "cookie", "content-type")
 
 _PROBE_TIMEOUT_S = 3.0
+
+# Auth-probe failure categories (audit #1736). The gate's verdict is
+# fail-closed ("down") for every one of them — the category exists so an
+# incident can be reconstructed from the events table instead of a wall of
+# indistinguishable "down" pages. Each category is one value of
+# `gate_auth_probe_failed`'s `category` attribute.
+PROBE_FAIL_AUTH = "auth"  # gateway answered 401/403 — the probe itself was rejected
+PROBE_FAIL_TIMEOUT = "timeout"  # probe exceeded _PROBE_TIMEOUT_S (connect or read)
+PROBE_FAIL_NETWORK = "network"  # transport failure: refused, unreachable, reset, DNS
+PROBE_FAIL_APPLICATION = "application"  # gateway answered, but not with a valid auth check
+
+
+def classify_probe_error(exc: BaseException) -> str:
+    """Classify one auth-probe exception for observability (audit #1736).
+
+    Purely diagnostic — the verdict stays fail-closed for every category.
+    The gateway's ``/api/auth/check`` route is in its auth-bypass set and
+    always answers 200, so a 401/403 means the auth layer in front of it
+    rejected the probe; any other HTTP error status means the gateway
+    answered but failed; a timeout is the probe budget elapsing; a transport
+    error means the gateway was unreachable; anything else (non-JSON body,
+    unexpected failure) is an application error.
+    """
+    if isinstance(exc, urllib.error.HTTPError):  # subclass of URLError — check first
+        return PROBE_FAIL_AUTH if exc.code in (401, 403) else PROBE_FAIL_APPLICATION
+    if isinstance(exc, TimeoutError):  # socket.timeout is TimeoutError on 3.10+
+        return PROBE_FAIL_TIMEOUT
+    if isinstance(exc, urllib.error.URLError):
+        return PROBE_FAIL_TIMEOUT if isinstance(exc.reason, TimeoutError) else PROBE_FAIL_NETWORK
+    if isinstance(exc, OSError):  # RemoteDisconnected / ConnectionReset / BrokenPipe / ...
+        return PROBE_FAIL_NETWORK
+    return PROBE_FAIL_APPLICATION
 
 
 class Gate:
@@ -109,14 +143,36 @@ class Gate:
             f"{self.gateway_base}/api/auth/check",
             headers={"Cookie": cookie} if cookie else {},
         )
+        started = time.monotonic()
         try:
             with urllib.request.urlopen(  # noqa: S310 — operator-declared internal URL
                 req, timeout=_PROBE_TIMEOUT_S
             ) as resp:
                 body = json.loads(resp.read())
                 return "up" if body.get("authenticated") else "login"
-        except Exception:  # any probe failure means "not serving"; never crash a request
+        except Exception as exc:  # any probe failure means "not serving"; never crash a request
+            self._report_probe_failure(exc, latency_ms=round((time.monotonic() - started) * 1000))
             return "down"
+
+    def _report_probe_failure(self, exc: BaseException, *, latency_ms: int) -> None:
+        """Structured record of one failed auth probe — the diagnostic half
+        of the fail-closed verdict (audit #1736).
+
+        One ``gate_auth_probe_failed`` event per failed probe, carrying the
+        classification and the exception shape, so an operator can tell an
+        auth rejection, a network outage, a probe timeout, and a gateway
+        application failure apart from the events table alone — previously
+        every one of them collapsed into an unobservable "down".
+        """
+        logger.warning(
+            "gate auth probe failed ({category}) after {latency_ms}ms: {exception_value!r}",
+            event="gate_auth_probe_failed",
+            category=classify_probe_error(exc),
+            exception_type=type(exc).__name__,
+            exception_value=str(exc),
+            status=exc.code if isinstance(exc, urllib.error.HTTPError) else None,
+            latency_ms=latency_ms,
+        )
 
     def proxy_app(self, handler: BaseHTTPRequestHandler, snapshot: UiUpdateSnapshot) -> None:
         """Fetch the path from the app and stream it back; on transport failure
