@@ -122,7 +122,7 @@ def test_codeact_section_defaults_to_off():
 def test_codeact_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
     monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
 
-    from agent.graph._system_prompt import _codeact_section
+    from agent.graph._codeact import _codeact_section
 
     rendered = _codeact_section()
 
@@ -139,7 +139,7 @@ def test_codeact_section_urges_batching(monkeypatch: pytest.MonkeyPatch):
     it."""
     monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", True)
 
-    from agent.graph._system_prompt import _codeact_section
+    from agent.graph._codeact import _codeact_section
 
     rendered = _codeact_section()
 
