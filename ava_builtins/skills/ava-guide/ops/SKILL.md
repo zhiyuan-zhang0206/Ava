@@ -159,16 +159,17 @@ feature/*  ──→ main  ──→ tag  ──→ ava cluster update   # the O
 operator action with a single entry point — the CLI:
 
 ```bash
-ava cluster update                  # smooth (default): wait out the longest
-                                    # single execute_code, then force-kill stragglers
+ava cluster update                  # smooth (default): waits the configured
+                                    # window (default 10s), then force-kills stragglers
 ava cluster update --mode force     # force: ~10s drain, then force-kill whoever
                                     # is still running (long execs are cut short)
 ```
 
-Both modes restart every agent onto the new code; `smooth` just gives them time
-to land cleanly first. The quiesce signal (a `restart` inbound per live agent)
-makes each agent exit at its turn boundary; the wait is
-`exec_timeout_seconds × 1.2` (default 300×1.2 = 360s) in smooth mode, ~10s in
+Both modes restart every agent onto the new code; `smooth` just gives them a
+short window to land cleanly first. The quiesce signal (a `restart` inbound per
+live agent) makes each agent exit at its turn boundary; the smooth wait is the
+configured `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` (default 10s, deliberately
+short since 2026-08-26 — an agent mid-`execute_code` is cut short), ~10s in
 force mode; anything still alive after the window is force-reaped (marked
 `restarting`, process killed) and respawned by the restarter on the new code.
 The same drain runs on standalone self-heals (`ava restart --quiesce`, the

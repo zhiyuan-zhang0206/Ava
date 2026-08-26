@@ -12,7 +12,11 @@ new code in Phase B. On timeout the stragglers are force-reaped
 rollout must stay bounded.
 
 `_UPDATE_MODES` ('smooth' / 'force' / 'none') + the timeout derivation
-(`_quiesce_timeout_s`) live here with the loop they parameterize.
+(`_quiesce_timeout_s`) live here with the loop they parameterize. The smooth
+window is the configured `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` (default 10s,
+user ruling 2026-08-26) — deliberately short, so a rollout unblocks the
+cluster fast at the cost of cutting short any agent mid-execute_code; force
+is the same shape with an always-reap backstop.
 
 Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
 so `cli.commands(.update)._quiesce_all_agents` / `._quiesce_local_agents` /
@@ -25,31 +29,36 @@ from __future__ import annotations
 import sys
 
 _QUIESCE_POLL_INTERVAL_S = 1.0
-# Smooth mode waits out the longest possible single execute_code, plus a 20%
-# grace margin past the sandbox's hard kill — a healthy agent's exec is then
-# guaranteed to end and reach its turn-boundary claim, so only genuinely stuck
-# agents (hung exec machinery, offline host, wedged process) remain to be
-# force-reaped. Force mode waits only long enough for idle agents to drain
-# (~10s) and force-reaps whoever is still live — long execs are cut short.
+# Smooth mode's window is the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS
+# (default 10s): agents idle or between turns exit at their turn boundary
+# inside it; anything still live at the deadline is force-reaped. The window
+# is deliberately short (user ruling 2026-08-26) — an agent mid-execute_code
+# is cut short and its work lost, accepted in exchange for a fast cluster
+# unblock; there is no minimum. Force mode waits only long enough for idle
+# agents to drain (~10s) and force-reaps whoever is still live regardless.
 _FORCE_QUIESCE_TIMEOUT_S = 10.0
-_SMOOTH_QUIESCE_MULTIPLIER = 1.2
 
-# Update modes: 'smooth' (default) waits out long execs then force-reaps
-# stragglers; 'force' waits ~10s then force-reaps; 'none' skips quiesce
-# entirely (the rollout's Phase B, whose agents the gateway-side quiesce
-# already drained).
+# Update modes: 'smooth' (default) waits the configured short window then
+# force-reaps stragglers; 'force' waits ~10s then force-reaps; 'none' skips
+# quiesce entirely (the rollout's Phase B, whose agents the gateway-side
+# quiesce already drained).
 _UPDATE_MODES = ("smooth", "force", "none")
 
 
 def _quiesce_timeout_s(mode: str) -> float:
-    """Quiesce wait for an update mode (see _UPDATE_MODES)."""
+    """Quiesce wait for an update mode (see _UPDATE_MODES).
+
+    'smooth' is the configured `update_quiesce_timeout_seconds` (default 10s,
+    no minimum — any non-negative value is legal); 'force' is the fixed ~10s
+    idle-drain window; 'none' waits 0 (no quiesce at all).
+    """
     if mode == "force":
         return _FORCE_QUIESCE_TIMEOUT_S
     if mode == "none":
         return 0.0
     from shared.config import settings
 
-    return settings.sandbox.exec_timeout_seconds * _SMOOTH_QUIESCE_MULTIPLIER
+    return settings.gateway.update_quiesce_timeout_seconds
 
 
 def _quiesce_pass(signalled: set[int]) -> bool:
