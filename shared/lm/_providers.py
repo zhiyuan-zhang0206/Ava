@@ -485,6 +485,7 @@ def _build_kimi_model(
 
 def _build_glm_model(
     model: str,
+    spec: ModelSpec | None,
     *,
     thinking: ThinkingConfig | None,
     resolved_effort: str,
@@ -493,7 +494,11 @@ def _build_glm_model(
 ) -> BaseChatModel:
     """glm-* branch: ReasoningContentChatModel (OpenAI-compatible).
     Thinking off rides top-level `thinking` via extra_body; otherwise
-    reasoning effort rides the `reasoning_effort` constructor field."""
+    reasoning effort rides the `reasoning_effort` constructor field.
+    Models whose reasoning is always on (glm-5.3 / glm-5.3-flash,
+    `ModelSpec.thinking_always_on`) get a warning instead — their endpoint
+    rejects thinking.type=disabled with a 400 (error code 1210), so sending
+    the body would fail the call rather than honor the intent."""
     from shared.lm._reasoning_compat import ReasoningContentChatModel
 
     # Zhipu GLM API is OpenAI-compatible (https://open.bigmodel.cn/api/paas/v4),
@@ -514,7 +519,16 @@ def _build_glm_model(
     # the cheaper tiers; checked 2026-08-23 for GLM-5.3).
     glm_kwargs: dict[str, Any] = {}
     if thinking is not None and thinking.get("type") == "disabled":
-        glm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        if spec is not None and spec.thinking_always_on:
+            # glm-5.3 / glm-5.3-flash always think — the endpoint rejects
+            # thinking.type=disabled (400, error code 1210, live-checked
+            # 2026-08-27). Warn like the kimi branch instead of sending a
+            # body that fails the call.
+            logger.warning(
+                f"{model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored"
+            )
+        else:
+            glm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     elif resolved_effort:
         glm_kwargs["reasoning_effort"] = _clamp_effort(
             resolved_effort,
