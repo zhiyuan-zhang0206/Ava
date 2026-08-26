@@ -505,27 +505,19 @@ def inspect_values(
                 from_=from_,
                 to=to,
             )
-            archive_active_seconds = _inspect_pg.archive_aggregate(
+            archive_active_seconds = _inspect_pg.archive_node_exit_seconds(
                 conn,
-                field="duration_seconds",
-                agg="sum",
-                event_names=["^node_exit$"],
-                categories=None,
                 agent_id=agent_id,
+                node="exclude_claim",
                 from_=from_,
                 to=to,
-                attribute_filters={"node": "!=claim"},
             )
-            archive_exec_seconds = _inspect_pg.archive_aggregate(
+            archive_exec_seconds = _inspect_pg.archive_node_exit_seconds(
                 conn,
-                field="duration_seconds",
-                agg="sum",
-                event_names=["^node_exit$"],
-                categories=None,
                 agent_id=agent_id,
+                node="exec",
                 from_=from_,
                 to=to,
-                attribute_filters={"node": "exec"},
             )
         archive_lifecycle = (
             rollup.lifecycle
