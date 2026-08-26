@@ -219,8 +219,11 @@ def show(
         port: the port your server listens on; omit to use the port
             reserved for you.
         title: defaults to `name`.
-        ttl: optional page lifetime in seconds; the gateway default applies
-            when omitted.
+        ttl: optional page lifetime in seconds; when omitted, the platform
+            default applies. Expiry only unregisters the page (the link
+            turns into the expired notice) — the server runs in your own
+            process, so you must stop it yourself to release the port; the
+            expiry notice reminds you.
     """
     return _register_page(name, port, title, serve_dir=None, ttl=_validate_ttl(ttl))
 
@@ -252,8 +255,7 @@ def serve(
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
         port: omit to use the port reserved for you.
         title: defaults to `name`.
-        ttl: optional page lifetime in seconds; the gateway default applies
-            when omitted.
+        ttl: optional page lifetime in seconds; when omitted, the platform default applies.
     """
     ttl = _validate_ttl(ttl)
     _validate_name(name)
@@ -290,8 +292,7 @@ def serve_markdown(
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
         port: omit to use the port reserved for you.
         title: defaults to `name`.
-        ttl: optional page lifetime in seconds; the gateway default applies
-            when omitted.
+        ttl: optional page lifetime in seconds; when omitted, the platform default applies.
     """
     ttl = _validate_ttl(ttl)
     _validate_name(name)

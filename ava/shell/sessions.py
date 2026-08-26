@@ -175,7 +175,14 @@ def _create_session(
 
 def new(name: str, *, ttl: float | None = None) -> int:
     """Create a session and return its id. `name` is only a display label —
-    a lowercase slug like `"dev-server"`; every operation takes the id."""
+    a lowercase slug like `"dev-server"`; every operation takes the id.
+
+    Args:
+        ttl: optional hard lifetime in seconds, counted from creation — the
+            session is force-killed once it elapses, with no idle/activity
+            renewal. Omit (or pass None) for a session that is never
+            auto-reclaimed; resident worktables should omit it. Use
+            `ava.watcher` for a deadline that must not kill running work."""
     session_id, _ = _create_session(name, ttl=_validate_ttl(ttl))
     return session_id
 

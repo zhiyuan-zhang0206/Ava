@@ -104,7 +104,7 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, agent_id, name FROM agent_pages "
+                "SELECT id, agent_id, name, serve_dir FROM agent_pages "
                 "WHERE expires_at IS NOT NULL AND expires_at <= now() "
                 "AND closed_at IS NULL AND expired_at IS NULL "
                 "ORDER BY id LIMIT %s",
@@ -112,7 +112,7 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
             )
             rows = cur.fetchall()
         reaped: list[tuple[int, str, int]] = []
-        for page_id, agent_id, name in rows:
+        for page_id, agent_id, name, serve_dir in rows:
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agent_pages SET expired_at = now() "
@@ -122,13 +122,24 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
                 if cur.rowcount == 0:
                     continue
             reaped.append((agent_id, name, page_id))
-        for agent_id, name, page_id in reaped:
-            _notify_owner(
-                conn,
-                agent_id,
-                f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
-                "expired. Serve it again with ava.ui.serve() to republish.",
-            )
+            if serve_dir is None:
+                # show() page: the gateway only expires the registration — the
+                # server lives in the agent's own process, so the notice tells
+                # the owner to stop it and release the port.
+                _notify_owner(
+                    conn,
+                    agent_id,
+                    f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
+                    "expired. Stop the page's HTTP server to release its port; "
+                    "re-show with ava.ui.show() to republish.",
+                )
+            else:
+                _notify_owner(
+                    conn,
+                    agent_id,
+                    f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
+                    "expired. Serve it again with ava.ui.serve() to republish.",
+                )
             telemetry.emit(
                 "log",
                 "page_ttl_expired",
@@ -148,13 +159,8 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
     return reaped
 
 
-async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
-    """Kill TTL-expired shell sessions on their home machines.
-
-    The row is deleted only on a definitive verdict (killed / absent); an
-    unreachable machine or a version-skewed runner leaves it for the next
-    pass — deleting the row would orphan the live session.
-    """
+def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int]]:
+    """TTL-expired shell tracking rows, oldest deadline first."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT agent_id, session_id FROM agent_shell_ttls "
@@ -162,10 +168,36 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
             "ORDER BY agent_id, session_id LIMIT %s",
             (_PASS_BATCH,),
         )
-        rows = cur.fetchall()
+        return [(row[0], row[1]) for row in cur.fetchall()]
+
+
+def _delete_shell_row_blocking(pool: ConnectionPool, agent_id: int, session_id: int) -> None:
+    """Drop a reclaimed shell's tracking row and notify its live owner."""
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
+                (agent_id, session_id),
+            )
+        _notify_owner(
+            conn,
+            agent_id,
+            f"Shell session {session_id} (agent {agent_id}) was reclaimed after its TTL expired.",
+        )
+
+
+async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
+    """Kill TTL-expired shell sessions on their home machines.
+
+    The row is deleted only on a definitive verdict (killed / absent); an
+    unreachable machine or a version-skewed runner leaves it for the next
+    pass — deleting the row would orphan the live session. All DB work runs
+    via to_thread: the gateway event loop never blocks on psycopg.
+    """
+    rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
     reaped: list[tuple[int, int]] = []
     for agent_id, session_id in rows:
-        machine = _agent_machine(pool, agent_id)
+        machine = await asyncio.to_thread(_agent_machine, pool, agent_id)
         if machine is None:
             _log.warning(
                 "[ttl-reaper] shell %s of agent %s has unknown machine — deferring",
@@ -197,18 +229,7 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
                 result,
             )
             continue
-        with pool.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
-                    (agent_id, session_id),
-                )
-            _notify_owner(
-                conn,
-                agent_id,
-                f"Shell session {session_id} (agent {agent_id}) was reclaimed "
-                "after its TTL expired.",
-            )
+        await asyncio.to_thread(_delete_shell_row_blocking, pool, agent_id, session_id)
         telemetry.emit(
             "log",
             "shell_ttl_expired",
