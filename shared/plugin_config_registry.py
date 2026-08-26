@@ -41,6 +41,7 @@ Usage (`ava_builtins/plugins/<name>/default_config.py`):
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 
@@ -408,12 +409,53 @@ def resolve_overlay_targets(overlay: dict[str, object]) -> dict[str, tuple[str |
     return out
 
 
+def _validate_llm_model_range(value: object) -> str | None:
+    from shared.lm.registry import MODELS
+
+    if isinstance(value, str) and value in MODELS:
+        return None
+    valid_models = ", ".join(sorted(MODELS))
+    return (
+        f"overlay key 'llm_model' value {value!r} is not a registered model; "
+        f"valid models: {valid_models}"
+    )
+
+
+def _validate_reasoning_effort_range(value: object) -> str | None:
+    from shared.lm._effort import _EFFORT_VOCAB
+
+    valid_values = ("", *_EFFORT_VOCAB)
+    if isinstance(value, str) and value in valid_values:
+        return None
+    rendered_values = ", ".join(repr(candidate) for candidate in valid_values)
+    return (
+        f"overlay key 'reasoning_effort' value {value!r} is not valid; "
+        f"valid values: {rendered_values}"
+    )
+
+
+_FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
+    "llm_model": _validate_llm_model_range,
+    "reasoning_effort": _validate_reasoning_effort_range,
+}
+
+
+def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
+    for field, value in updates.items():
+        if field not in _FRAMEWORK_RANGE_VALIDATORS:
+            continue
+        error = _FRAMEWORK_RANGE_VALIDATORS[field](value)
+        if error is not None:
+            raise InvalidConfigOverlay(error)
+
+
 def validate_config_overlay(overlay: dict[str, object]) -> None:
     """SDK-side validation — called before `ava.self.restart(config_overlay=overlay)` writes to DB.
 
     Type validation relies on Pydantic: splice overlay into a dummy instance and
     try to build (settings field via framework Settings, plugin field via the
-    corresponding cls). Failure raises InvalidConfigOverlay with Pydantic error.
+    corresponding cls). Framework fields with a named value universe then run
+    their semantic range validator. Failure raises InvalidConfigOverlay.
 
     Success = overlay is valid; does **not** modify settings / _PLUGIN_CONFIGS —
     that's `apply_config_overlay`'s job at new process boot.
@@ -449,6 +491,9 @@ def validate_config_overlay(overlay: dict[str, object]) -> None:
                 f"overlay field type validation failed ({owner}): {e}"
             ) from e
 
+    if None in grouped:
+        _validate_framework_overlay_ranges(grouped[None])
+
 
 def apply_config_overlay(
     overlay: dict[str, object],
@@ -474,9 +519,9 @@ def apply_config_overlay(
     Plugin Config overlay: `_PLUGIN_CONFIGS[plugin] = cls(**merged)`, new
     frozen instance.
 
-    Field-level type validation happens up-front via `validate_config_overlay`
-    before the inbound is committed, so by the time this runs the values are
-    already known good for their declared types.
+    Field-level type and named-range validation happens up-front via
+    `validate_config_overlay` before the inbound is committed, so by the time
+    this runs the values are already known good for their declared contracts.
 
     Raises:
         InvalidConfigOverlay: overlay invalid (key / type / per_agent).

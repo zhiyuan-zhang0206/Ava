@@ -266,6 +266,34 @@ def test_validate_config_overlay_type_error_raises(isolated_registry, unit_home)
         validate_config_overlay({"marker": 123})
 
 
+def test_validate_config_overlay_unknown_llm_model_raises(isolated_registry, unit_home):
+    with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
+        validate_config_overlay({"llm_model": "deepseek-v4-flash-vision"})
+
+    assert "deepseek-v4-flash-vision-exp" in str(exc_info.value)
+
+
+def test_validate_config_overlay_registered_llm_model_passes(isolated_registry, unit_home):
+    validate_config_overlay({"llm_model": "claude-opus-4-6"})
+
+
+def test_validate_config_overlay_unknown_reasoning_effort_raises(isolated_registry, unit_home):
+    with pytest.raises(InvalidConfigOverlay, match="valid values"):
+        validate_config_overlay({"reasoning_effort": "turbo"})
+
+
+@pytest.mark.parametrize("effort", ["", "high"])
+def test_validate_config_overlay_known_reasoning_effort_passes(
+    isolated_registry, unit_home, effort: str
+):
+    validate_config_overlay({"reasoning_effort": effort})
+
+
+def test_validate_config_overlay_does_not_range_check_plugin_fields(isolated_registry, unit_home):
+    _setup_overlayable_plugin()
+    validate_config_overlay({"marker": "any string"})
+
+
 def test_apply_config_overlay_mutates_plugin_config(isolated_registry, unit_home):
     """After apply, get_plugin_config returns a new instance with marker overlaid."""
     _setup_overlayable_plugin()

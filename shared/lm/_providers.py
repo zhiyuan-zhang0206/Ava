@@ -187,9 +187,17 @@ def _build_deepseek_model(
     # deepseek model fails fast here rather than borrowing a wrong cap —
     # the same fail-fast posture as the unknown-prefix raise at the end.
     if spec is None or spec.max_output_tokens is None:
+        known_models = ", ".join(
+            sorted(
+                model_id
+                for model_id, registered_spec in MODELS.items()
+                if registered_spec.provider == "deepseek"
+            )
+        )
         raise ValueError(
             f"Unknown deepseek model {model!r} — register it (with "
-            f"max_output_tokens) in `shared/lm/registry.py:MODELS`"
+            f"max_output_tokens) in `shared/lm/registry.py:MODELS`. "
+            f"Known deepseek models: {known_models}"
         )
     max_tokens = spec.max_output_tokens
 

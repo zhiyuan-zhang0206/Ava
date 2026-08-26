@@ -179,6 +179,39 @@ class TestRestart:
             assert count_row is not None
             assert count_row[0] == 0
 
+    def test_restart_with_unknown_model_raises_without_persisting(
+        self, db_conn: psycopg.Connection, monkeypatch
+    ) -> None:
+        """A model typo is rejected before either persistent restart side effect."""
+        ava._boot._agent_id = spawn_agent()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT config_overlay FROM agents_meta WHERE id = %s",
+                (ava.self.AGENT_ID,),
+            )
+            before_row = cur.fetchone()
+        assert before_row is not None
+        assert before_row[0] in (None, {})
+
+        with pytest.raises(ava.self.InvalidConfigOverlay, match="not a registered model"):  # type: ignore[attr-defined]
+            ava.self.restart(config_overlay={"llm_model": "deepseek-v4-flash-vision"})
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'restart'",
+                (ava.self.AGENT_ID,),
+            )
+            inbound_count_row = cur.fetchone()
+            cur.execute(
+                "SELECT config_overlay FROM agents_meta WHERE id = %s",
+                (ava.self.AGENT_ID,),
+            )
+            after_row = cur.fetchone()
+        assert inbound_count_row is not None
+        assert inbound_count_row[0] == 0
+        assert after_row is not None
+        assert after_row[0] == before_row[0]
+
 
 class TestPauseHeartbeat:
     def test_pause_heartbeat_sets_window_and_emits_event(

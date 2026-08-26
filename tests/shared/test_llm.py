@@ -55,8 +55,14 @@ class TestDeepseekMaxTokens:
         than silently borrowing some other model's cap (fail-fast: an unknown
         cap is a registration bug, surface it at build time)."""
         monkeypatch.setattr(settings.lm, "deepseek_api_key", SecretStr("sk-test-deepseek"))
-        with pytest.raises(ValueError, match="Unknown deepseek model"):
+        with pytest.raises(ValueError, match="Unknown deepseek model") as exc_info:
             build_chat_model("deepseek-v4-nonexistent")
+
+        message = str(exc_info.value)
+        assert "Known deepseek models:" in message
+        assert "deepseek-v4-flash" in message
+        assert "deepseek-v4-flash-vision-exp" in message
+        assert "deepseek-v4-pro" in message
 
 
 class TestModelContextWindow:

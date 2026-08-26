@@ -676,6 +676,36 @@ class TestMainExceptionPath:
         ):
             assert cleanup in names, f"exception path missed cleanup {cleanup!r}"
 
+    async def test_boot_failure_emits_marker_and_reraises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from shared import telemetry
+
+        async def _fail_boot(
+            _agent_id: int,
+            _config_overlay: dict[str, object] | None,
+            _birth_config: dict[str, object] | None,
+        ) -> tuple[object, object]:
+            raise ValueError("Unknown deepseek model 'deepseek-v4-flash-vision'")
+
+        emit_spy = MagicMock()
+        monkeypatch.setattr("agent.loop._boot_agent_process", _fail_boot)
+        monkeypatch.setattr(telemetry, "emit", emit_spy)
+
+        with pytest.raises(ValueError, match="Unknown deepseek model"):
+            await main(agent_id=2985)
+
+        emit_spy.assert_called_once()
+        call = emit_spy.call_args
+        assert call.kwargs["category"] == "telemetry"
+        assert call.kwargs["event_name"] == "agent_boot_failed"
+        assert call.kwargs["level"] == "error"
+        assert call.kwargs["agent_id"] == 2985
+        assert call.kwargs["attributes"]["error_type"] == "ValueError"
+        assert call.kwargs["attributes"]["error"] == (
+            "Unknown deepseek model 'deepseek-v4-flash-vision'"
+        )
+
     async def test_cancelled_error_runs_cleanups_and_reraises(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

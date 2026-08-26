@@ -92,6 +92,7 @@ from .startup import (
 __all__ = [
     "_MCP_SOCKET_DIR",
     "_MCPDaemon",
+    "_emit_boot_failure",
     "_exit_reason",
     "_install_lifecycle_signal_handlers",
     "_invoke_graph_with_lifecycle_logging",
@@ -109,6 +110,34 @@ __all__ = [
     "main",
     "run",
 ]
+
+
+def _emit_boot_failure(agent_id: int, exc: BaseException) -> None:
+    try:
+        model = turn_settings.lm.llm_model
+    except Exception:
+        model = "<unknown>"
+
+    try:
+        from shared import telemetry
+
+        telemetry.emit(
+            category="telemetry",
+            event_name="agent_boot_failed",
+            level="error",
+            agent_id=agent_id,
+            attributes={
+                "model": model,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+    except Exception:
+        logger.warning(
+            "agent {agent_id} boot-failure telemetry emit failed",
+            agent_id=agent_id,
+            exc_info=True,
+        )
 
 
 async def _renew_agent_lease_loop(pool: AsyncConnectionPool, agent_id: int) -> None:
@@ -145,7 +174,11 @@ async def main(
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
 ) -> None:
-    mcp_daemon, llm = await _boot_agent_process(agent_id, config_overlay, birth_config)
+    try:
+        mcp_daemon, llm = await _boot_agent_process(agent_id, config_overlay, birth_config)
+    except Exception as exc:
+        _emit_boot_failure(agent_id, exc)
+        raise
     inbound_listener, event_publisher = await _build_data_plane(agent_id)
 
     try:
