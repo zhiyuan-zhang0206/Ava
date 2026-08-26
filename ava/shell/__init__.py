@@ -115,6 +115,10 @@ def run_background(
             a script file.
         name: a lowercase slug like `"build"`.
         cwd: defaults to your workspace.
+        ttl: optional hard lifetime in seconds, counted from creation — the
+            session is force-killed once it elapses, with no idle/activity
+            renewal. Omit for a session that is never auto-reclaimed;
+            `keep=True` does not extend or disable it.
     """
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
