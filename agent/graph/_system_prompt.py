@@ -37,6 +37,7 @@ from ._capabilities import (
     capabilities_section,
     capability_index_is_empty,
 )
+from ._codeact import _codeact_section
 
 
 def _resolved(setting: str) -> Any:
@@ -259,8 +260,6 @@ def _prefer_sdk_section() -> str:
         "or raw-shell equivalent."
     )
 
-
-from ._codeact import _codeact_section
 
 # CodeAct batching lives in `_codeact.py` (this module is at its line ceiling);
 # registered here so the section order stays the reading order this module lays
