@@ -1,7 +1,8 @@
 """Register media for delivery across the child-to-parent attachment transport.
 
 The child-local buffer is drained into the exec envelope, checkpointed by the
-parent, and turned into one message when the current turn ends.
+parent, and turned into one media message appended right after the exec output
+of the registering turn (user ruling 2026-08-26).
 """
 
 from __future__ import annotations
