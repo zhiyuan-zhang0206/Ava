@@ -96,6 +96,7 @@ def run_background(
     name: str,
     cwd: str | None = None,
     keep: bool = False,
+    ttl: float | None = None,
 ) -> BackgroundRun:
     """Run a long shell command in the background; you get a message when it
     finishes — no polling. Returns immediately.
@@ -114,13 +115,17 @@ def run_background(
             a script file.
         name: a lowercase slug like `"build"`.
         cwd: defaults to your workspace.
+        ttl: optional hard lifetime in seconds, counted from creation — the
+            session is force-killed once it elapses, with no idle/activity
+            renewal. Omit for a session that is never auto-reclaimed;
+            `keep=True` does not extend or disable it.
     """
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
     aid = _boot.agent_id()
     if cwd is None:
         cwd = str(workspace_dir(aid))
-    session_id, _full = sessions._create_session(name, cwd=cwd)
+    session_id, _full = sessions._create_session(name, cwd=cwd, ttl=sessions._validate_ttl(ttl))
     output_path = _background.allocate_output_path(session_id, name)
     line = _background.notified_line(
         cmd,

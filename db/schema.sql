@@ -519,7 +519,9 @@ CREATE TABLE agent_pages (
     server_token TEXT, -- durable per-page /health identity, minted by the page-server daemon.
     session_name TEXT, -- daemon-owned persistent shell; NULL for show() and pre-session rows.
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    closed_at  TIMESTAMPTZ
+    closed_at  TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    expired_at TIMESTAMPTZ
 );
 
 COMMENT ON COLUMN agent_pages.serve_dir IS
@@ -532,6 +534,22 @@ CREATE UNIQUE INDEX agent_pages_unique_open
 CREATE INDEX agent_pages_per_agent_open
     ON agent_pages (agent_id, created_at)
     WHERE closed_at IS NULL;
+
+CREATE INDEX agent_pages_expiry_idx
+    ON agent_pages (expires_at)
+    WHERE closed_at IS NULL AND expired_at IS NULL;
+
+CREATE TABLE agent_shell_ttls (
+    agent_id   BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    session_id BIGINT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (agent_id, session_id)
+);
+
+CREATE INDEX agent_shell_ttls_expiry_idx ON agent_shell_ttls (expires_at);
+
+COMMENT ON TABLE agent_shell_ttls IS 'Persistent shell sessions whose agent declared a TTL at creation (ava.shell.sessions.new/run_background ttl=). Reaped by the gateway TTL reaper; rows are removed when reaped or when the session dies (the reaper self-cleans).';
 
 CREATE OR REPLACE FUNCTION cascade_close_agent_pages() RETURNS TRIGGER AS $$
 BEGIN

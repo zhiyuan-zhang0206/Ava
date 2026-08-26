@@ -17,6 +17,7 @@ compatibility), host:port stays in the registry for the proxy's dialing.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -37,6 +38,19 @@ def _page_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple]:  # pyrig
             (agent_id,),
         )
         return cur.fetchall()
+
+
+def _page_deadline(
+    conn: psycopg.Connection, agent_id: int, name: str
+) -> tuple[datetime | None, datetime | None]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT expires_at, expired_at FROM agent_pages WHERE agent_id = %s AND name = %s",
+            (agent_id, name),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    return row[0], row[1]
 
 
 def test_register_page_inserts_open_row(db_conn: psycopg.Connection) -> None:
@@ -140,6 +154,82 @@ def test_register_page_missing_host_422() -> None:
     assert resp.status_code == 422
 
 
+def test_register_page_rejects_zero_ttl() -> None:
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/agents/1/pages",
+            json={"name": "p", "port": 8001, "host": _HOST, "ttl_seconds": 0},
+        )
+    assert resp.status_code == 422
+
+
+def test_register_page_sets_explicit_expiry(db_conn: psycopg.Connection) -> None:
+    aid = create_agent(db_conn)
+    before = datetime.now(UTC)
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/agents/{aid}/pages",
+            json={"name": "timed", "port": 8001, "host": _HOST, "ttl_seconds": 120},
+        )
+    assert response.status_code == 201
+    db_conn.rollback()
+    expires_at, expired_at = _page_deadline(db_conn, aid, "timed")
+    assert expires_at is not None
+    assert (
+        before + timedelta(seconds=119) <= expires_at <= datetime.now(UTC) + timedelta(seconds=121)
+    )
+    assert expired_at is None
+
+
+def test_register_page_applies_gateway_default_expiry(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.daemon, "page_default_ttl_seconds", 300.0)
+    aid = create_agent(db_conn)
+    before = datetime.now(UTC)
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/agents/{aid}/pages",
+            json={"name": "defaulted", "port": 8001, "host": _HOST},
+        )
+    assert response.status_code == 201
+    db_conn.rollback()
+    expires_at, _ = _page_deadline(db_conn, aid, "defaulted")
+    assert expires_at is not None
+    assert (
+        before + timedelta(seconds=299) <= expires_at <= datetime.now(UTC) + timedelta(seconds=301)
+    )
+
+
+def test_register_page_revives_expired_row_and_resets_deadline(
+    db_conn: psycopg.Connection,
+) -> None:
+    from ops.pages import register_page
+
+    aid = create_agent(db_conn)
+    original = register_page(db_conn, aid, "revive", 8001, _HOST, None, ttl_seconds=30)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET expired_at = now() WHERE id = %s",
+            (original.id,),
+        )
+    db_conn.commit()
+
+    before = datetime.now(UTC)
+    revived = register_page(db_conn, aid, "revive", 8002, _HOST, "Again", ttl_seconds=240)
+
+    assert revived.id == original.id
+    assert revived.port == 8002
+    expires_at, expired_at = _page_deadline(db_conn, aid, "revive")
+    assert expires_at is not None
+    assert (
+        before + timedelta(seconds=239) <= expires_at <= datetime.now(UTC) + timedelta(seconds=241)
+    )
+    assert expired_at is None
+
+
 def test_register_page_invalid_name_422() -> None:
     with TestClient(app) as client:
         resp = client.post(
@@ -212,6 +302,28 @@ def test_list_pages_returns_only_open(db_conn: psycopg.Connection) -> None:
         r2 = client.get(f"/api/agents/{aid}/pages")
         assert r2.status_code == 200
         assert r2.json() == []
+
+
+def test_list_pages_excludes_expired_rows(db_conn: psycopg.Connection) -> None:
+    aid = create_agent(db_conn)
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/agents/{aid}/pages",
+            json={"name": "expired", "port": 8001, "host": _HOST},
+        )
+        assert response.status_code == 201
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = 'expired'",
+            (aid,),
+        )
+    db_conn.commit()
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/pages")
+        fleet_response = client.get("/api/pages")
+    assert response.status_code == 200
+    assert response.json() == []
+    assert (aid, "expired") not in {(row["agent_id"], row["name"]) for row in fleet_response.json()}
 
 
 def test_list_all_pages_spans_agents_open_only(db_conn: psycopg.Connection) -> None:

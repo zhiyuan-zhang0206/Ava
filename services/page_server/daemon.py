@@ -19,7 +19,9 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import sys
+import tempfile
 import time
 import urllib.request
 from contextlib import suppress
@@ -100,7 +102,9 @@ def _open_rows(pool: ConnectionPool, host: str) -> list[_PageRow]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, agent_id, name, port, host, serve_dir, server_token, session_name "
-            "FROM agent_pages WHERE closed_at IS NULL AND serve_dir IS NOT NULL AND host = %s "
+            "FROM agent_pages "
+            "WHERE closed_at IS NULL AND expired_at IS NULL "
+            "AND serve_dir IS NOT NULL AND host = %s "
             "ORDER BY agent_id, name",
             (host,),
         )
@@ -112,7 +116,8 @@ def _closed_page_sessions(pool: ConnectionPool, host: str) -> list[str]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT session_name FROM agent_pages "
-            "WHERE closed_at IS NOT NULL AND serve_dir IS NOT NULL AND host = %s "
+            "WHERE (closed_at IS NOT NULL OR expired_at IS NOT NULL) "
+            "AND serve_dir IS NOT NULL AND host = %s "
             "AND session_name IS NOT NULL",
             (host,),
         )
@@ -345,6 +350,31 @@ def _close_persisted_sessions(backend: SessionBackend, session_names: list[str])
             backend.kill_session(page_session)
 
 
+def _cleanup_markdown_tmpdir(serve_dir: str) -> None:
+    """Remove a serve_markdown temp dir once its page is terminal.
+
+    serve_markdown() builds each page in a `tempfile.mkdtemp(prefix="ava_md_")`
+    dir under the OS temp dir; the only cleanup today is the agent's in-process
+    close()/re-serve, which never runs for TTL-expired pages. The daemon is the
+    one party that stops the page session on every terminal path (close,
+    expiry, replacement), so it cleans the dir too. Only dirs that LOOK like
+    serve_markdown temp dirs (the `ava_md_` prefix, resolved under the OS temp
+    dir) are ever removed — a user's real serve(dir) directory is never
+    touched.
+    """
+    path = Path(serve_dir)
+    if not path.name.startswith("ava_md_"):
+        return
+    try:
+        under_tmp = path.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
+    except (OSError, ValueError):
+        return
+    if not under_tmp:
+        return
+    _log.info("[page-server] removing markdown tmpdir %s", path)
+    shutil.rmtree(path, ignore_errors=True)
+
+
 def _drop_stale_handles(
     backend: SessionBackend,
     wanted: dict[tuple[int, str], _PageRow],
@@ -359,10 +389,12 @@ def _drop_stale_handles(
         if row is None:
             _log.info("[page-server] closing %s (row gone)", key)
             _kill_page_session(backend, handle)
+            _cleanup_markdown_tmpdir(handle.serve_dir)
             del managed[key]
         elif row.port != handle.port or row.serve_dir != handle.serve_dir:
             _log.info("[page-server] replacing %s (port/dir changed)", key)
             _kill_page_session(backend, handle)
+            _cleanup_markdown_tmpdir(handle.serve_dir)
             del managed[key]
             backoff.pop(key, None)
             degraded.pop(key, None)

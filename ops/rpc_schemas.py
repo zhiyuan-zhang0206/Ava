@@ -408,6 +408,7 @@ OpKind = Literal[
     "inventory_write",
     "cluster_fetch",
     "shell_probe",
+    "shell_kill",
     "agent_skill_view",
     "shell_capture",
     "upload_receive",
@@ -523,6 +524,13 @@ class ShellProbePayload(BaseModel):
     """`shell_probe` op payload: whose live persistent shells to list."""
 
     agent_id: int
+
+
+class ShellKillPayload(BaseModel):
+    """`shell_kill` op payload: one persistent session to reclaim."""
+
+    agent_id: int
+    session_id: int
 
 
 class AgentSkillViewPayload(BaseModel):
@@ -647,6 +655,12 @@ class ShellProbeResult(BaseModel):
     returns; the gateway forwards it into the inspector panel)."""
 
     shells: list[ShellInfo]
+
+
+class ShellKillResult(BaseModel):
+    """`shell_kill` result; absent means the session already ended."""
+
+    mode: Literal["killed", "absent"]
 
 
 class OpsCommandItem(BaseModel):

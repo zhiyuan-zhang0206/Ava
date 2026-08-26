@@ -147,7 +147,11 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     from ava.shell import sessions as _sessions
 
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(_sessions, "_create_session", lambda _name, cwd=None: (7, "full"))  # noqa: ARG005 — cwd is part of the patched signature  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _sessions,
+        "_create_session",
+        lambda _name, cwd=None, ttl=None: (7, "full"),  # noqa: ARG005 — cwd/ttl are part of the patched signature  # pyright: ignore[reportUnknownArgumentType]
+    )
     monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
 
     handle = ava.shell.run_background("echo hi", name="test-bg", cwd=str(tmp_path))

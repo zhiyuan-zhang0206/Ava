@@ -4,6 +4,7 @@ __all_for_ava__ = ["capture", "kill", "list", "new", "send", "send_keys"]
 
 import builtins
 import contextlib
+import math
 import re
 from pathlib import Path
 
@@ -102,7 +103,18 @@ def _resolve(session_id: int) -> str:
 _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 
 
-def _create_session(name: str | None = None, *, cwd: str | None = None) -> tuple[int, str]:
+def _validate_ttl(ttl: float | None) -> float | None:
+    if ttl is not None and (not math.isfinite(ttl) or ttl <= 0):
+        raise ValueError("ttl must be finite and greater than zero")
+    return ttl
+
+
+def _create_session(
+    name: str | None = None,
+    *,
+    cwd: str | None = None,
+    ttl: float | None = None,
+) -> tuple[int, str]:
     # Allocate the next session id and create the shell session. `name` becomes
     # a `-<name>` suffix on the session identifier (None = unnamed). `cwd` sets
     # the session's starting directory (None = the agent's workspace, the same
@@ -137,13 +149,41 @@ def _create_session(name: str | None = None, *, cwd: str | None = None) -> tuple
     ok = backend.new_session(full, "", Path(cwd), env=forward_env_dict())
     if not ok:
         raise RuntimeError(f"failed to create session {full!r}")
+    if ttl is not None:
+        import psycopg
+
+        from ava._settings import DB_URL
+        from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+
+        try:
+            with (
+                psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
+                conn.cursor() as cur,
+            ):
+                cur.execute(
+                    "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+                    "VALUES (%s, %s, now() + make_interval(secs => %s))",
+                    (ava._boot.agent_id(), session_id, ttl),
+                )
+                conn.commit()
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                backend.kill_session(full, graceful=False)
+            raise RuntimeError(f"failed to track TTL for session {full!r}") from exc
     return session_id, full
 
 
-def new(name: str) -> int:
+def new(name: str, *, ttl: float | None = None) -> int:
     """Create a session and return its id. `name` is only a display label —
-    a lowercase slug like `"dev-server"`; every operation takes the id."""
-    session_id, _ = _create_session(name)
+    a lowercase slug like `"dev-server"`; every operation takes the id.
+
+    Args:
+        ttl: optional hard lifetime in seconds, counted from creation — the
+            session is force-killed once it elapses, with no idle/activity
+            renewal. Omit (or pass None) for a session that is never
+            auto-reclaimed; resident worktables should omit it. Use
+            `ava.watcher` for a deadline that must not kill running work."""
+    session_id, _ = _create_session(name, ttl=_validate_ttl(ttl))
     return session_id
 
 

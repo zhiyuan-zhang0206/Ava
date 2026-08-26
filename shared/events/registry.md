@@ -25,7 +25,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 |------|------|-------------|------|------|
 | audit (category=audit) | `events` | 20 | events table | 365d+ |
 | telemetry (category=telemetry) | `events` | 114 | events table | 90d |
-| log (category=log) | `events` | 4 | events table | 30d |
+| log (category=log) | `events` | 6 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection | ephemeral |
 
@@ -221,6 +221,8 @@ consumers: see the comments at each emit point.
 | `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, window_from, window_to, query | 30d | events |
 | `prom_query_failed` | a Prometheus HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, query | 30d | events |
 | `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | anomaly | agent_id, key, name, serve_dir, port | 30d | events |
+| `page_ttl_expired` | the gateway TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id | observation | — | 30d | events |
+| `shell_ttl_expired` | the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | 30d | events |
 
 ## 5. SSE roles (live channel, not persisted, 28)
 

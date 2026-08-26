@@ -207,6 +207,34 @@ def test_capture_shell_unknown_session_raises(monkeypatch: pytest.MonkeyPatch):
         cluster_status.capture_shell(7, 99)
 
 
+def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ops.rpc_schemas import ShellInfo
+    from shared.cluster import session_name
+
+    killed: list[str] = []
+
+    class _Backend:
+        @staticmethod
+        def kill_session(name: str) -> tuple[bool, str]:
+            killed.append(name)
+            return True, "forced"
+
+    monkeypatch.setattr(
+        cluster_status,
+        "agent_shell_sessions",
+        lambda _agent_id: [ShellInfo(id=3, name="build", uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
+
+    assert cluster_status.kill_shell(7, 3) == "killed"
+    assert killed == [session_name("agent-7-shell-3-build")]
+
+
+def test_kill_shell_missing_session_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cluster_status, "agent_shell_sessions", lambda _agent_id: [])  # pyright: ignore[reportUnknownArgumentType]
+    assert cluster_status.kill_shell(7, 99) == "absent"
+
+
 def test_capture_shell_capture_failure_raises(monkeypatch: pytest.MonkeyPatch):
     """A backend capture failure (session died after probe) → RuntimeError."""
     _stub_sessions(monkeypatch, "ava-main-agent-7-shell-1")

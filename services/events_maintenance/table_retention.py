@@ -60,8 +60,17 @@ TABLE_POLICIES: tuple[TablePolicy, ...] = (
     # Resolved notices (answered/dismissed/read/withdrawn/superseded): the
     # decision record is audit-like, so align with the audit retention.
     TablePolicy("agent_notices", "resolved_at IS NOT NULL", 365, age_column="resolved_at"),
-    # Closed page servers: the row is a registry entry, no value after close.
+    # Closed/expired page rows: the row is a registry entry, no value after
+    # terminalization. Two policies because the generic machinery ages ONE
+    # column and `NULL < x` is never true — a single policy with either column
+    # would silently never delete the other kind of terminal row.
     TablePolicy("agent_pages", "closed_at IS NOT NULL", 90, age_column="closed_at"),
+    TablePolicy(
+        "agent_pages",
+        "expired_at IS NOT NULL AND closed_at IS NULL",
+        90,
+        age_column="expired_at",
+    ),
     # Done/cancelled tasks: the audit trail lives in the events stream
     # (task_update events), so old terminal rows are safe to drop. Guards keep
     # rows referenced as a parent task or by a notice (FKs without cascade).

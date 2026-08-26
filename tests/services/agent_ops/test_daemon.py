@@ -281,6 +281,45 @@ async def test_dispatch_shell_probe_bad_payload_fails(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_shell_kill_calls_shell_kill_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """shell_kill resolves and kills one host-local persistent session."""
+    from ops.rpc_schemas import ShellKillResult
+
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+    seen: dict[str, int] = {}
+
+    def _fake_kill(agent_id: int, session_id: int) -> ShellKillResult:
+        seen.update(agent_id=agent_id, session_id=session_id)
+        return ShellKillResult(mode="killed")
+
+    monkeypatch.setattr(daemon.ops_cluster, "shell_kill_op", _fake_kill)
+    status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 5})
+    assert status == "completed"
+    assert seen == {"agent_id": 42, "session_id": 5}
+    assert result == {"mode": "killed"}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_shell_kill_reports_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A shell already gone is a successful, idempotent absent result."""
+    from ops.rpc_schemas import ShellKillResult
+
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+    monkeypatch.setattr(
+        daemon.ops_cluster,
+        "shell_kill_op",
+        lambda _agent_id, _session_id: ShellKillResult(mode="absent"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 999})
+    assert status == "completed"
+    assert result == {"mode": "absent"}
+
+
+@pytest.mark.asyncio
 async def test_dispatch_agent_skill_view_calls_machine_op(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
