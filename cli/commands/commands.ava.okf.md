@@ -26,7 +26,9 @@ Two kinds of module live here, distinguished by filename:
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
   directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge` /
   `_converge_spec` (the step contract) / `_converge_os_jobs` (the OS-scheduled
-  jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring),
+  jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
+  `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
+  permission-prompt watcher),
   `_update_git` /
   `_update_orchestration` / `_update_agent_runner` / `_update_uv_sync` /
   `_updater_lease` / `_update_recover` /
