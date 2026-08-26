@@ -44,7 +44,7 @@ class CompactState(BaseModel):
 
 
 class AttachEntry(BaseModel):
-    """One resolved local file awaiting delivery in the next turn."""
+    """One resolved local file awaiting delivery as a media message."""
 
     path: str
     label: str | None
@@ -55,7 +55,7 @@ def _new_pending_attachments() -> list[AttachEntry]:
 
 
 class AttachState(BaseModel):
-    """Files registered during a turn, held until the claim boundary drains them."""
+    """Files registered during a turn, drained into a media message by the exec node at the end of the registering turn (claim-boundary drain remains as the fallback for compact-halt edge paths)."""
 
     pending: list[AttachEntry] = Field(default_factory=_new_pending_attachments)
 

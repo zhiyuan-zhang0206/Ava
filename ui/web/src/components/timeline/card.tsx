@@ -23,6 +23,7 @@ import {
   Code2,
   FileText,
   Info,
+  Paperclip,
   Settings,
   Sparkles,
   Terminal,
@@ -161,6 +162,19 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         headerTs: true,
       };
     }
+    case "attach":
+      // Attached media (ava.self.attach) — always open so the image
+      // thumbnails are visible without a click (user ruling 2026-08-26).
+      return {
+        rich: null,
+        icon: Paperclip,
+        title: null,
+        titleKey: "timeline.attachedFiles",
+        border: "border-sky-400/50",
+        bg: "bg-sky-50/40 dark:bg-sky-950/10",
+        fixedDefault: true,
+        headerTs: true,
+      };
     case "inbound_chat": {
       // Inter-agent + system inbound default collapsed (secondary chatter — the
       // header label stays, the body folds); only a human message stays open.

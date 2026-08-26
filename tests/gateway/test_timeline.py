@@ -19,6 +19,9 @@ Coverage:
     the elif header and silently lost AIMessage is exactly this kind of bug)
 """
 
+from pathlib import Path
+from typing import Any
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +30,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from gateway.app import app
 from gateway.routers.timeline import _window_before
 from shared.db import create_agent, insert_inbound_message
-from shared.timeline import TimelineItem, _ai_message_items, tail_window
+from shared.timeline import TimelineItem, _ai_message_items, build_timeline_items, tail_window
 
 
 @pytest.fixture
@@ -528,6 +531,129 @@ class TestAvaMsgTypeDispatch:
         assert items[0].source is None
 
 
+class TestAttachItems:
+    """`build_timeline_items` dispatch for ava_msg_type="attach" messages.
+
+    An attach message (product of `agent/graph/_attach_drain.py`) carries a
+    leading text caption block plus provider-native media blocks (image data
+    URIs, pdf document blocks, ...). It must render as a dedicated `attach`
+    item: payload = caption text only (the base64 must never leak into the
+    payload), images = the image data URIs for thumbnails, item_id = msg_idx.0.
+    """
+
+    @staticmethod
+    def _attach_message(
+        tmp_path: Path,
+        *,
+        blocks_override: list[dict[str, Any]] | None = None,
+    ) -> HumanMessage:
+        from agent.messages import attach_message
+        from shared.lm.attach import AttachEntry, pack_attachments
+
+        image = tmp_path / "render.png"
+        from PIL import Image
+
+        Image.new("RGB", (1, 1)).save(image)
+        pack = pack_attachments(
+            "deepseek-v4-flash-vision-exp",
+            [AttachEntry(path=str(image.resolve()), label="after fix")],
+        )
+        assert pack is not None
+        blocks = blocks_override if blocks_override is not None else pack.blocks
+        from datetime import UTC, datetime
+
+        return attach_message(blocks=blocks, text=pack.text, created_at=datetime.now(UTC))
+
+    def test_attach_renders_caption_only_with_image_data_uris(self, tmp_path: Path):
+        msg = self._attach_message(tmp_path)
+        items, _ = build_timeline_items([msg], [])
+        assert len(items) == 1
+        item = items[0]
+        assert item.kind == "attach"
+        assert item.source is None
+        assert item.item_id == "0.0"
+        assert item.images is not None and len(item.images) == 1
+        assert item.images[0].startswith("data:image/png;base64,")
+        # Caption text only — the base64 must never reach the payload.
+        assert "base64" not in item.payload
+        assert "data:image" not in item.payload
+        assert "[1] render.png" in item.payload
+        assert "after fix" in item.payload
+
+    def test_attach_without_images_has_no_images_field(self, tmp_path: Path):
+        # A text-only attach (e.g. a model that cannot receive media: the pack
+        # still emits a caption message listing skipped files).
+        msg = self._attach_message(
+            tmp_path,
+            blocks_override=[
+                {
+                    "type": "text",
+                    "text": "[system] Files attached during this turn:\n- [1] x.png (image/png) — not delivered",
+                }
+            ],
+        )
+        items, _ = build_timeline_items([msg], [])
+        assert len(items) == 1
+        item = items[0]
+        assert item.kind == "attach"
+        assert item.images is None
+        assert "not delivered" in item.payload
+
+    def test_non_image_media_blocks_never_leak_into_payload_or_images(self, tmp_path: Path):
+        # pdf document blocks + media blocks are not thumbnailable; they must be
+        # ignored for images AND their bytes must not leak into the payload.
+        msg = self._attach_message(
+            tmp_path,
+            blocks_override=[
+                {"type": "text", "text": "caption"},
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": "cGVuZGluZw==",
+                    },
+                },
+                {"type": "media", "mime_type": "video/mp4", "data": b"video-bytes"},
+            ],
+        )
+        items, _ = build_timeline_items([msg], [])
+        assert len(items) == 1
+        item = items[0]
+        assert item.kind == "attach"
+        assert item.images is None
+        assert item.payload == "caption"
+        assert "cGVuZGluZw==" not in item.payload
+        assert "video-bytes" not in item.payload
+
+    def test_attach_position_in_mixed_conversation(self, tmp_path: Path):
+        # The attach message lands right after the exec-output ToolMessage in
+        # state.messages (exec-node drain, user ruling 2026-08-26); item ids
+        # must keep absolute msg_idx alignment.
+        from langchain_core.messages import AIMessage
+
+        from agent.messages import exec_output_message
+
+        tool_call = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "execute_code",
+                    "args": {"code": "x = 1"},
+                    "id": "tc-1",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        output = exec_output_message(content="ok", tool_call_id="tc-1", exit_code=0)
+        attach = self._attach_message(tmp_path)
+        items, count = build_timeline_items([tool_call, output, attach], [])
+        assert count == 3
+        kinds = [it.kind for it in items]
+        assert kinds == ["agent_code", "code_output", "attach"]
+        assert items[2].item_id == "2.0"
+
+
 class TestTimelineDispatch:
     """End-to-end dispatch chain tests: load real state.messages into PostgresSaver
     checkpoint, run the full GET /timeline endpoint, verify the returned items'
@@ -798,6 +924,46 @@ def test_item_sort_key_is_numeric_not_lexical() -> None:
 
     assert _item_sort_key("2.0") < _item_sort_key("10.0")
     assert _item_sort_key("3.2") < _item_sort_key("3.10")
+
+    def test_attach_message_renders_through_full_dispatch(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        tmp_path: Path,
+    ) -> None:
+        """End-to-end: an attach HumanMessage in the checkpoint must come back
+        as a single kind=attach item with caption-only payload + image data
+        URIs — not the old red system_marker with the base64 str()-d into the
+        payload (Task #1668)."""
+        from PIL import Image
+
+        from agent.messages import attach_message
+        from shared.lm.attach import AttachEntry, pack_attachments
+
+        image = tmp_path / "render.png"
+        Image.new("RGB", (2, 2)).save(image)
+        pack = pack_attachments(
+            "deepseek-v4-flash-vision-exp",
+            [AttachEntry(path=str(image.resolve()), label="brand")],
+        )
+        assert pack is not None
+        from datetime import UTC, datetime
+
+        attach = attach_message(blocks=pack.blocks, text=pack.text, created_at=datetime.now(UTC))
+        tid = create_agent(db_conn)
+        self._put_checkpoint(tid, [attach])  # pyright: ignore[reportUnknownMemberType]
+
+        resp = test_client.get(f"/api/agents/{tid}/timeline")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["msg_count"] == 1
+        assert len(body["items"]) == 1
+        item = body["items"][0]
+        assert item["kind"] == "attach"
+        assert item["source"] is None
+        assert "[1] render.png" in item["payload"]
+        assert "base64" not in item["payload"]
+        assert "data:image/png;base64," in item["images"][0]
 
 
 class TestTimelineFailLoud:

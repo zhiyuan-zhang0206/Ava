@@ -19,7 +19,7 @@ from __future__ import annotations
 import ast as _ast
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -80,6 +80,7 @@ class TimelineItem(BaseModel):
         "inbound_chat",
         "inbound_compact_summary",
         "inbound_compact_request",
+        "attach",
         "agent_chat",
         "agent_code",
         "agent_reasoning",
@@ -110,10 +111,9 @@ class TimelineItem(BaseModel):
     # events (memory recall + the one-time guidance notes) — see
     # `_NO_TIMESTAMP_NOTE_TAGS`. Default True keeps every other kind unchanged.
     show_timestamp: bool = True
-    # Image reference urls on a multimodal `inbound_chat` item (None elsewhere).
-    # Read from the inbound HumanMessage's ava_image_urls; the frontend renders
-    # each as an <img> thumbnail. The base64 the model decodes lives in the
-    # message content and is deliberately never surfaced here.
+    # Image urls on a multimodal `inbound_chat` / `attach` item (None
+    # elsewhere): inbound_chat = gateway-relative urls from ava_image_urls
+    # (via assetUrl); attach = data URIs from content blocks (rendered raw).
     images: list[str] | None = None
     # SDK calls extracted from agent_code payload via AST parsing (None on
     # other kinds). Drives the collapsed-code chip ("files.read x3" etc.)
@@ -302,6 +302,8 @@ def build_timeline_items(
                 next_ts,
             )
             items.append(item)
+        elif ava_type == AvaMsgType.ATTACH:
+            items.append(_attach_item(msg_idx, raw_content, next_ts(msg)))
         elif ava_type == AvaMsgType.EXEC_OUTPUT:
             items.append(
                 _exec_output_item(msg_idx, content, next_ts(msg), kwargs.get("ava_exec_ms"))
@@ -394,6 +396,39 @@ def _inbound_item(
         images=images if images else None,
     )
     return item, current_anchor, sub_offset, next_anchor_idx
+
+
+def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | None:
+    """Data-URI image urls from attach ``image_url`` blocks; other media ignored."""
+    if not isinstance(content, list):
+        return None
+    urls: list[str] = []
+    for block in content_blocks(content):
+        if not isinstance(block, dict) or block.get("type") != "image_url":
+            continue
+        # `image_url` is not a ContentBlock key — cast through the dict arm.
+        image_url = cast("dict[str, Any] | None", block.get("image_url"))
+        if image_url is None:
+            continue
+        url = image_url.get("url")
+        if isinstance(url, str) and url.startswith("data:"):
+            urls.append(url)
+    return urls or None
+
+
+def _attach_item(
+    msg_idx: int, raw_content: str | list[str | dict[str, Any]], created_at: str
+) -> TimelineItem:
+    """Attachment message item — caption only; thumbnails ride on ``images`` (data URIs)."""
+    return TimelineItem(
+        item_id=f"{msg_idx}.0",
+        kind="attach",
+        source=None,
+        payload=_inbound_text(raw_content),
+        created_at=created_at,
+        inbound_id=None,
+        images=_attach_images(raw_content),
+    )
 
 
 def _exec_output_item(msg_idx: int, content: str, created_at: str, exec_ms: Any) -> TimelineItem:

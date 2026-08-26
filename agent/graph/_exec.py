@@ -69,10 +69,11 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent._config_carrier import get_config_maps
+from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
 from agent.graph._exec_notes import merge_exec_notes
 from agent.messages import exec_output_message
-from agent.state import _validate_plugin_state_keys
+from agent.state import AttachState, _validate_plugin_state_keys
 from ava.security import SecurityFindingEntry, take_findings
 from shared.config import settings
 from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
@@ -386,6 +387,18 @@ def _dispatch_exec_result(
     return halted, result_text, exit_code_for_msg
 
 
+def _attach_model(ctx: AvaContext) -> str:
+    """The model name attachments are packed for (media capability gate).
+
+    Same resolution as the claim fallback drain (`_attach_drain.py`): the live
+    LLM's model name, else the configured turn model. ``ctx.llm`` can be None
+    (tests / container edge), hence the getattr fallback.
+    """
+    from shared.config.turn_view import turn_settings
+
+    return getattr(ctx.llm, "model_name", None) or turn_settings.lm.llm_model
+
+
 async def _exec_node_impl(
     state: _state.AgentState,
     runtime: Runtime[AvaContext],
@@ -477,5 +490,15 @@ async def _exec_node_impl(
         **plugin_state_update,
     }
     if not compact_halt:
-        update["attach"] = merge_attachments(state.attach, envelope_attachments)
+        # Attachments registered during this execute_code call are packed into
+        # a media HumanMessage appended right after the exec output — the model
+        # sees the attached files on its very next step of the SAME turn (user
+        # ruling 2026-08-26). The claim-node drain (_attach_drain.py) remains
+        # as the fallback for edge paths that skip this update (compact halt).
+        merged_attach = merge_attachments(state.attach, envelope_attachments)
+        update["attach"] = merged_attach
+        attach_msg = build_attach_message(merged_attach, _attach_model(ctx))
+        if attach_msg is not None:
+            state_messages_update.append(attach_msg)
+            update["attach"] = AttachState()
     return Command[ExecGoto](update=update, goto=AFTER_EXEC)

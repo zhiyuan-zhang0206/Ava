@@ -2695,6 +2695,24 @@ describe("ItemView: inbound_chat images", () => {
     expect(img.getAttribute("src")).toContain("/api/agents/7/uploads/shot.png");
   });
 
+  it("attach item renders data-URI images raw (no API_BASE prefix)", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload: "[system] Files attached during this turn:\n- [1] render.png (image/png, 1.2 KiB)",
+            images: ["data:image/png;base64,iVBORw0KGgo="],
+          }),
+        ]}
+      />,
+    );
+    const img = screen.getByAltText("attached image");
+    expect(img.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
+    // Caption body still renders beside the thumbnail.
+    expect(screen.getByText(/render.png/)).toBeTruthy();
+  });
+
   it("image-only inbound hides the [image] placeholder text but shows the thumbnail", () => {
     render(
       <TimelineView

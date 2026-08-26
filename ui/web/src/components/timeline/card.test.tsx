@@ -84,6 +84,15 @@ describe("messageCardConfig", () => {
     expect(cfg!.rich).toBe("code");
   });
 
+  it("attach → paperclip card, open by default", () => {
+    const cfg = messageCardConfig(item("attach"));
+    expect(cfg).not.toBeNull();
+    expect(cfg!.icon?.displayName).toBe("Paperclip");
+    expect(cfg!.titleKey).toBe("timeline.attachedFiles");
+    expect(cfg!.fixedDefault).toBe(true);
+    expect(cfg!.headerTs).toBe(true);
+  });
+
   it("code_output → rich=output", () => {
     const cfg = messageCardConfig(item("code_output"));
     expect(cfg!.rich).toBe("output");

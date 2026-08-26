@@ -317,6 +317,7 @@
     "streamingInterrupted": "流式传输中断，内容可能不完整（重连后继续接收）",
     "commandOutput": "命令输出",
     "attachedImage": "附加图片",
+    "attachedFiles": "附加文件",
     "unknownEventType": "[未知事件类型]",
     "loadingEarlier": "加载更早的消息…",
     "loadingConversation": "加载对话…",

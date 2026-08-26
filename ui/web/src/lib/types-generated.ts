@@ -6862,7 +6862,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "inbound_chat" | "inbound_compact_summary" | "inbound_compact_request" | "agent_chat" | "agent_code" | "agent_reasoning" | "code_output" | "system_prompt" | "system_marker";
+            kind: "inbound_chat" | "inbound_compact_summary" | "inbound_compact_request" | "attach" | "agent_chat" | "agent_code" | "agent_reasoning" | "code_output" | "system_prompt" | "system_marker";
             /** Source */
             source?: string | null;
             /** Payload */
