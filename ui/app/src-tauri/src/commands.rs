@@ -183,16 +183,9 @@ pub async fn app_save_settings(
                 let endpoints = state
                     .endpoints()
                     .ok_or_else(|| "saved server address cannot be resolved".to_string())?;
-                let window = app
-                    .get_webview_window(window::MAIN_WINDOW)
-                    .ok_or_else(|| "connection window is unavailable".to_string())?;
-                let login_secret = secret.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    crate::autologin::login(&window, &endpoints, &login_secret)
-                })
-                .await
-                .map_err(|err| format!("native login task failed: {err}"))?
-                .map_err(|err| err.message())?;
+                crate::autologin::login(&app, &endpoints, &secret)
+                    .await
+                    .map_err(|err| err.message())?;
                 // Keep a submitted credential only after its native login has
                 // succeeded; settings.json never receives this value.
                 crate::android::save_secret_async(&app, &secret).await?;
