@@ -7,7 +7,7 @@ own IM channel):
 - the gateway router (gateway/routers/alerts.py) ingests the Grafana
   embedded-Alertmanager webhook on ``POST /api/alerts``;
 - the cluster health probe (cli/commands/_health_alerts.py) posts its
-  edge-triggered health alerts through that endpoint too
+  time-graded health alerts through that endpoint too
   (``source="health-probe"``) — and when the gateway is unreachable, it runs
   these same functions locally against its own DB connection, so one health
   alert = one alerts row + one IM notification even mid-outage;
@@ -28,8 +28,9 @@ Alertmanager-standard fnv-1a hash over sorted labels; the ingest computes it
 when a direct writer omits it, using the exact Alertmanager algorithm so a
 computed hash and a Grafana-sent hash agree for the same label set. The IM
 fan-out goes through the local im_bridge daemon's health-port ``/send`` RPC,
-gated by the transition logic in ``upsert_alert`` — every severity pushes
-unless the rule explicitly labels the alert ``notify_im="false"``.
+gated by the transition logic in ``upsert_alert`` — every severity pushes,
+and an open instance pushes again when its severity increases, unless the rule
+explicitly labels the alert ``notify_im="false"``.
 """
 
 from __future__ import annotations
@@ -67,6 +68,7 @@ _ZERO_TS = frozenset({"0001-01-01T00:00:00Z", "0001-01-01T00:00:00+00:00", ""})
 # label carries normalizes to ``warning`` — the quietest class, so an
 # unlabelled rule never reads as an incident.
 _SEVERITIES = frozenset({"critical", "warning", "error"})
+_SEVERITY_RANK = {"warning": 0, "error": 1, "critical": 2}
 
 # Alertmanager's status vocabulary maps onto the store's: the store has only
 # unresolved / resolved (no ack, no escalation — user ruling).
@@ -175,6 +177,8 @@ def upsert_alert(
       im_bridge outage must not silence the alert forever, the next re-send
       retries while ``notified_at`` stays NULL
     - firing, re-fired after a resolution (a new event for the user): True
+    - firing, severity increased on an unresolved already-notified instance:
+      True — escalation is a new firing transition and therefore new information
     - instance resolved, and the firing had been IM-notified before: True
     - every other re-send (already firing + already notified, already
       resolved): False
@@ -212,11 +216,13 @@ def upsert_alert(
 
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT status, notified_at FROM alerts WHERE fingerprint = %s AND starts_at = %s",
+            "SELECT status, severity, notified_at FROM alerts "
+            "WHERE fingerprint = %s AND starts_at = %s",
             (fp, starts_at),
         )
         old = cur.fetchone()
         old_status = old["status"] if old else None
+        old_severity = str(old["severity"]) if old else None
         was_notified = old is not None and old["notified_at"] is not None
 
         cur.execute(
@@ -260,6 +266,16 @@ def upsert_alert(
         # Firing gate is ``notified_at IS NULL``: keep notifying on every
         # re-send until the message actually lands (was_notified), and on a
         # re-fire after a resolution regardless (new event for the user).
+        should_notify = True
+    elif (
+        status == "unresolved"
+        and old_status == "unresolved"
+        and was_notified
+        and old_severity is not None
+        and _SEVERITY_RANK[severity] > _SEVERITY_RANK[old_severity]
+    ):
+        # Every firing transition pushes. Escalation on an open instance is
+        # new information even though the instance itself was already sent.
         should_notify = True
     elif old_status == "unresolved" and status == "resolved" and was_notified:
         should_notify = True

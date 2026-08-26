@@ -786,7 +786,8 @@ CREATE TABLE machines (
 -- machine_probe — per-machine status_probe results, written by the gateway
 -- heartbeat daemon's liveness pass (Task #1174). Raw probe outcome plus the
 -- consecutive-failure count (the anti-jitter gate: a machine is judged offline
--- only after 2 consecutive failed probes). Deliberately NOT a machines-table
+-- only after 2 consecutive failed probes) and the true start of the current
+-- failed-probe transition (NULL while reachable). Deliberately NOT a machines-table
 -- column: the machines row is a recomputed composition of machine_units
 -- (shared/machines.py _recompute_machine_row) and any column there would be
 -- clobbered by register_self.
@@ -794,7 +795,8 @@ CREATE TABLE machine_probe (
     machine_name         TEXT PRIMARY KEY,
     online               BOOLEAN NOT NULL,
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
-    last_probe_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    last_probe_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    transition_since     TIMESTAMPTZ
 );
 
 -- machine_units: per-unit capability contributions that COMPOSE the machines row

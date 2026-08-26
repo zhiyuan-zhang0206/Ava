@@ -31,19 +31,16 @@ Checks (all must pass for exit 0):
    disk is the 2026-08-08 outage class, but rollback frees no disk space.
 
 **A failure a running deploy explains does not advance the auto-rollback counter, and
-resets it** (`_deploy_suppression`). The probe's rollback-gating checks fail by design
-while a deploy stops services, and this probe is OS-scheduled, so it keeps firing
-throughout one — 3 failures at `StartInterval 300` is 15 minutes to rolling production
-back mid-deploy, pointing the pin the opposite way from the rollout running correctly.
-The *alert* is deliberately NOT suppressed, only annotated with the deploy: an alert
-a human reads costs nothing and silencing it would hide a deploy that really is
-breaking things, whereas the rollback is an unattended, destructive action nobody is
-watching.
+resets it** (`_deploy_suppression`). The same live lease is an expected transition
+window for alerts: the episode start is still persisted, but grading pauses while the
+lease is live and resumes from the true start if the outage survives the rollout.
+Unreadable deploy context explains nothing. Disk pressure is never explained by a
+deploy.
 
-Every check failure (and the later recovery) also pushes an owner alert,
-edge-triggered via a state file under $AVA_HOME: one alert when the probe
-flips healthy->unhealthy (or the failure reason changes), one when it flips
-back. The alert is ingested into the alerts store (source='health-probe')
+Every check failure is tracked in a state file under $AVA_HOME and graded by elapsed
+episode time: silent during normal recovery, WARNING after three minutes, ERROR after
+ten. The later recovery resolves only episodes that actually fired. The alert is
+ingested into the alerts store (source='health-probe')
 through the gateway's /api/alerts endpoint — the same pipeline
 Grafana alert rules use — which both records the row for the UI and
 fans the notification out to the owner's IM channels (im_bridge daemon, the
@@ -250,9 +247,9 @@ def _unhealthy(
     """Alert a gating failure, counting only code/config evidence toward rollback."""
     print(message, file=sys.stderr)
     _reset_pending_lkg_streak(home)
-    deploying = _deploy_suppression() if auto_rollback else None
+    deploying = _deploy_suppression()
+    _alert_failure(home, message, deploy_explains=deploying is not None)
     if deploying is None:
-        _alert_failure(home, message)
         if failure_class == "environment":
             print("  environment-class failure — NOT counted toward auto-rollback", file=sys.stderr)
         elif auto_rollback:
@@ -261,7 +258,7 @@ def _unhealthy(
             )
         return 1
 
-    print(f"  deploy in flight — NOT alerting ({deploying})", file=sys.stderr)
+    print(f"  deploy in flight — alert grading paused ({deploying})", file=sys.stderr)
     _reset_failure_count(home)
     print(
         f"  deploy in flight — NOT counting this failure toward auto-rollback "
@@ -584,7 +581,7 @@ def run_health_probe(
     if failing:
         message = f"FAIL: service probe — not healthy: {', '.join(sorted(failing))}"
         print(message, file=sys.stderr)
-        _alert_failure(home, message)
+        _alert_failure(home, message, deploy_explains=_deploy_suppression() is not None)
         return 1
     print("  ✓ service probes")
 
@@ -597,7 +594,7 @@ def run_health_probe(
     if disk_failure is not None:
         message = f"FAIL: disk usage — {disk_failure}"
         print(message, file=sys.stderr)
-        _alert_failure(home, message)
+        _alert_failure(home, message, deploy_explains=False)
         return 1
     print("  ✓ disk usage")
 
