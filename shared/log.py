@@ -585,8 +585,7 @@ def _postgres_sink(message: loguru.Message) -> None:
     )
 
 
-# Level-graded sampling for bare INFO `log` records (task #1637): ~30% of the
-# stream, ~91% INFO; WARNING+ and named events pass. Stderr/file sinks untouched.
+# Level-graded sampling for bare INFO `log` records (task #1637).
 _LOG_INFO_SAMPLE_EVERY = 10
 _log_info_sample_counter = itertools.count()
 
@@ -605,8 +604,7 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
         `node_exit` only; death analysis reads the node_enter trail from the
         log files), yet ~15% of the stream's rows. Kept in the log files, out
         of the table.
-      - bare INFO `log` records: one in `_LOG_INFO_SAMPLE_EVERY` passes;
-        WARNING+ and named events pass unchanged.
+      - bare INFO `log` records: one in `_LOG_INFO_SAMPLE_EVERY` passes; WARNING+ pass.
     """
     extra = record["extra"]
     if extra.get("_no_emitter") or extra.get("event") == "node_enter":

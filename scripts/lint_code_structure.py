@@ -152,6 +152,8 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # The EVENTS registry — one flat name→spec dict emit() consults; grows
     # one entry per event. Schema-registry shard split tracked.
     "shared/events/contract.py": ("#405", 500, "2026-12-31"),
+    # Structured logger + unified-event pipeline adapter (stderr/file/JSONL/OTLP sink registration, deploy quieting, event-pipeline filter). Was 798 lines on main before the #1637 INFO-sampling filter.
+    "shared/log.py": ("#405", 800, "2026-12-31"),
     # The whole Loki read-side query surface — history slice, counts,
     # aggregates, grouped rows share the LogQL pipeline builders. The
     # audit-priority split (query builder / transport) is tracked.
