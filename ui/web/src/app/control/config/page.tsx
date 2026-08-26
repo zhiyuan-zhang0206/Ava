@@ -43,7 +43,7 @@
 // from the result drives the per-machine restart banner.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Lock, Pencil, RefreshCw, X } from "lucide-react";
+import { Check, ChevronDown, Lock, Pencil, RefreshCw, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -86,6 +86,7 @@ type MachineSelection = string | null;
 
 const configQueryKey = (machine: MachineSelection) => ["config", machine] as const;
 const MACHINES_QUERY_KEY = ["machines"] as const;
+const COLLAPSED_GROUPS_STORAGE_KEY = "control.config.collapsedGroups";
 
 // --- helpers ---
 
@@ -141,6 +142,41 @@ export default function ConfigPage() {
   const visible = useSectionVisible();
   const [selection, setSelection] = useState<MachineSelection>(null);
   const [filter, setFilter] = useState<string>("all");
+  const [collapsedState, setCollapsedState] = useState<{
+    groups: Set<string>;
+    hydrated: boolean;
+  }>({ groups: new Set(), hydrated: false });
+
+  useEffect(() => {
+    let groups = new Set<string>();
+    try {
+      const stored = localStorage.getItem(COLLAPSED_GROUPS_STORAGE_KEY);
+      if (stored != null) {
+        const parsed: unknown = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          groups = new Set(parsed.filter((id): id is string => typeof id === "string"));
+        }
+      }
+    } catch {
+      // A corrupt or unavailable per-device store must not hide config fields.
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe localStorage hydration: the first paint stays fully expanded to avoid a hydration mismatch
+    setCollapsedState({ groups, hydrated: true });
+  }, []);
+
+  useEffect(() => {
+    if (!collapsedState.hydrated) return;
+    try {
+      // Per-device navigation state: group disclosure is intentionally exempt
+      // from DB-backed user settings and follows the task's localStorage contract.
+      localStorage.setItem(
+        COLLAPSED_GROUPS_STORAGE_KEY,
+        JSON.stringify([...collapsedState.groups]),
+      );
+    } catch {
+      // Config remains usable when storage is blocked or full.
+    }
+  }, [collapsedState]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: configQueryKey(selection),
@@ -279,7 +315,17 @@ export default function ConfigPage() {
   const focusField = useCallback((name: string) => {
     setFilter("all");
     setFocusedField(name);
-  }, []);
+    const field = data?.fields.find((candidate) => candidate.name === name);
+    if (field) {
+      const groupId = displayGroupId(field);
+      setCollapsedState((prev) => {
+        if (!prev.groups.has(groupId)) return prev;
+        const groups = new Set(prev.groups);
+        groups.delete(groupId);
+        return { ...prev, groups };
+      });
+    }
+  }, [data]);
   useEffect(() => {
     if (!focusedField) return;
     // `center` rather than an anchor jump: the filter bar above is sticky, so a
@@ -449,56 +495,83 @@ export default function ConfigPage() {
         </p>
       )}
 
-      {groupSections.map(({ id, label, fields }) => (
-        <div key={id} id={id} className="scroll-mt-4" data-testid={`config-group-${id}`}>
-          <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
-            {label}{" "}
-            <span className="ml-1 font-normal text-muted-foreground/70">({fields.length})</span>
-          </h3>
-          <div className="border border-border rounded-md divide-y divide-border">
-            {fields.map((field) => (
-              <ConfigRow
-                key={field.name}
-                field={field}
-                editable={isFieldEditable(field, selection)}
-                highlighted={focusedField === field.name}
-                remoteReadOnly={isRemote && field.scope !== "host"}
-                fieldError={fieldErrors[field.name] ?? null}
-                editingField={editingField}
-                editValue={editValue}
-                busy={toggleBool.isPending || saveText.isPending}
-                onToggle={(v) => {
-                  // Drop any prior error on this field before retrying.
-                  setFieldErrors((prev) =>
-                    Object.fromEntries(
-                      Object.entries(prev).filter(([k]) => k !== field.name),
-                    ),
-                  );
-                  toggleBool.mutate({ name: field.name, value: v, machine: selection });
-                }}
-                onSelectEnum={(v) => {
-                  // Enum picks PUT immediately (like the bool toggle), no inline
-                  // edit step. Drop any prior error on this field before retrying.
-                  setFieldErrors((prev) =>
-                    Object.fromEntries(
-                      Object.entries(prev).filter(([k]) => k !== field.name),
-                    ),
-                  );
-                  saveText.mutate({ name: field.name, value: v, machine: selection });
-                }}
-                onStartEdit={() => startEdit(field)}
-                onCancelEdit={cancelEdit}
-                onEditValueChange={setEditValue}
-                onCommitEdit={() => commitEdit(field)}
-                onEditKeyDown={(e) => {
-                  if (e.key === "Enter") commitEdit(field);
-                  else if (e.key === "Escape") cancelEdit();
-                }}
-              />
-            ))}
+      {groupSections.map(({ id, label, fields }) => {
+        const collapsed = collapsedState.groups.has(id);
+        const fieldsId = `${id}-fields`;
+        return (
+          <div key={id} id={id} className="scroll-mt-4" data-testid={`config-group-${id}`}>
+            <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
+              <button
+                type="button"
+                aria-expanded={!collapsed}
+                aria-controls={fieldsId}
+                onClick={() =>
+                  setCollapsedState((prev) => {
+                    const groups = new Set(prev.groups);
+                    if (collapsed) groups.delete(id);
+                    else groups.add(id);
+                    return { ...prev, groups };
+                  })
+                }
+                className={cn("w-full items-center justify-between rounded px-1 py-0.5 text-left hover:bg-muted/50", FLEX)}
+              >
+                <span>
+                  {label}{" "}
+                  <span className="ml-1 font-normal text-muted-foreground/70">({fields.length})</span>
+                </span>
+                <ChevronDown
+                  className={cn("size-4 shrink-0 transition-transform", collapsed && "-rotate-90")}
+                  aria-hidden
+                />
+              </button>
+            </h3>
+            {!collapsed ? (
+              <div id={fieldsId} className="border border-border rounded-md divide-y divide-border">
+                {fields.map((field) => (
+                  <ConfigRow
+                    key={field.name}
+                    field={field}
+                    editable={isFieldEditable(field, selection)}
+                    highlighted={focusedField === field.name}
+                    remoteReadOnly={isRemote && field.scope !== "host"}
+                    fieldError={fieldErrors[field.name] ?? null}
+                    editingField={editingField}
+                    editValue={editValue}
+                    busy={toggleBool.isPending || saveText.isPending}
+                    onToggle={(v) => {
+                      // Drop any prior error on this field before retrying.
+                      setFieldErrors((prev) =>
+                        Object.fromEntries(
+                          Object.entries(prev).filter(([k]) => k !== field.name),
+                        ),
+                      );
+                      toggleBool.mutate({ name: field.name, value: v, machine: selection });
+                    }}
+                    onSelectEnum={(v) => {
+                      // Enum picks PUT immediately (like the bool toggle), no inline
+                      // edit step. Drop any prior error on this field before retrying.
+                      setFieldErrors((prev) =>
+                        Object.fromEntries(
+                          Object.entries(prev).filter(([k]) => k !== field.name),
+                        ),
+                      );
+                      saveText.mutate({ name: field.name, value: v, machine: selection });
+                    }}
+                    onStartEdit={() => startEdit(field)}
+                    onCancelEdit={cancelEdit}
+                    onEditValueChange={setEditValue}
+                    onCommitEdit={() => commitEdit(field)}
+                    onEditKeyDown={(e) => {
+                      if (e.key === "Enter") commitEdit(field);
+                      else if (e.key === "Escape") cancelEdit();
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {saveError && (
         <p className="text-sm text-destructive">{saveError}</p>
@@ -624,7 +697,7 @@ function ConfigRow({
           <span className="font-medium break-all" title={field.env_var}>
             {fieldLabel(field.env_var)}
           </span>
-          {editable ? (
+          {field.writable ? (
             <TagBadge>{t("runtime")}</TagBadge>
           ) : (
             <span className="rounded border border-border bg-muted px-1 text-[11px] font-medium">
@@ -638,6 +711,11 @@ function ConfigRow({
           {remoteReadOnly && (
             <span className="text-[11px] text-muted-foreground italic">
               {t("editOnCluster")}
+            </span>
+          )}
+          {!editable && field.writable && !remoteReadOnly && (
+            <span className="text-[11px] text-muted-foreground italic">
+              {t("readOnly")}
             </span>
           )}
         </div>
@@ -699,7 +777,11 @@ function ConfigRow({
           ) : (
             <>
               <span
-                className={cn("items-center gap-1 px-1 text-xs text-muted-foreground", FLEX)}
+                className={cn(
+                  "items-center gap-1 px-1 text-xs text-muted-foreground",
+                  editable && "cursor-text rounded hover:bg-muted/50",
+                  FLEX,
+                )}
                 data-testid={`sensitive-${field.name}`}
               >
                 <Lock className="size-3" aria-hidden />
@@ -743,6 +825,11 @@ function ConfigRow({
               onChange={(e) => onSelectEnum(e.target.value)}
               className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer disabled:opacity-50"
             >
+              {(field.current_value == null || field.current_value === "") && (
+                <option value="" disabled>
+                  {t("notSet")}
+                </option>
+              )}
               {(field.choices ?? []).map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -789,9 +876,12 @@ function ConfigRow({
           // Display value + edit button
           <>
             <span
-              className={`text-xs px-1 max-w-48 truncate block ${
-                editable ? "" : "text-muted-foreground"
-              }`}
+              className={cn(
+                "block max-w-48 truncate px-1 text-xs",
+                editable
+                  ? "cursor-text rounded hover:bg-muted/50"
+                  : "text-muted-foreground",
+              )}
               title={displayValue}
             >
               {displayValue}

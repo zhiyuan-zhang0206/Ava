@@ -113,7 +113,7 @@ export default function ControlPage() {
           ariaLabel="Control sections"
         />
         <div id={CONTROL_SCROLL_ID} className={cn("overflow-y-auto overflow-x-hidden", FLEX_1)}>
-          <div className={cn("mx-auto max-w-4xl space-y-12 px-6 py-6 font-mono text-sm", MIN_W_0)}>
+          <div className={cn("mx-auto max-w-6xl space-y-12 px-6 py-6 text-sm", MIN_W_0)}>
             <ControlSection
               id="guide"
               label={ts("guide")}

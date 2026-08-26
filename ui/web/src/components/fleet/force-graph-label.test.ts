@@ -17,6 +17,14 @@ describe("wrapLabel", () => {
     expect(lines.every((line) => !line.includes("…"))).toBe(true);
   });
 
+  it("breaks at spaces before slicing a word", () => {
+    expect(wrapLabel("alpha beta gamma", 22)).toEqual(["alpha beta", "gamma"]);
+  });
+
+  it("breaks after a hyphen before slicing a word", () => {
+    expect(wrapLabel("alpha-beta", 18)).toEqual(["alpha-", "beta"]);
+  });
+
   it("never exceeds the horizontal character budget", () => {
     const radius = 30;
     const maxChars = Math.floor((2 * radius - 8) / 3.6);

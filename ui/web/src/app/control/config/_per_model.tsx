@@ -109,8 +109,14 @@ export function PerModelPanel({
           aria-label={t("model")}
           value={model}
           onChange={(e) => setPicked(e.target.value)}
+          disabled={model === ""}
           className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
         >
+          {model === "" && (
+            <option value="" disabled>
+              {t("loadingModels")}
+            </option>
+          )}
           {groups.map(([provider, ids]) => (
             <optgroup key={provider} label={providerLabel(provider)}>
               {ids.map((m) => (
@@ -171,7 +177,7 @@ function PerModelRow({
             {fieldLabel(field.env_var)}
           </button>
           <span
-            className="rounded border border-border px-1 text-[11px] text-muted-foreground"
+            className="rounded border border-dashed border-border px-1 text-[11px] text-muted-foreground/80"
             data-testid={`per-model-source-${field.name}`}
           >
             {SOURCE_LABEL[field.source]}

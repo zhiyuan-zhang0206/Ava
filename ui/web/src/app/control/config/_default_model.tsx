@@ -91,10 +91,15 @@ export function DefaultModelPanel({ id }: { id: string }) {
             aria-label="Default model"
             data-testid="select-default-model"
             value={value}
-            disabled={current.isLoading || save.isPending}
+            disabled={current.isLoading || models.isLoading || save.isPending}
             onChange={(e) => setPicked(e.target.value)}
             className="cursor-pointer rounded border border-border bg-transparent px-1.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
+            {value === "" && (
+              <option value="" disabled>
+                {t("loadingModels")}
+              </option>
+            )}
             {/* Keep the stored value selectable even if it left the roster, so the
                 dropdown reports the truth instead of silently showing another model. */}
             {stored !== "" && !groups.some(([, ids]) => ids.includes(stored)) && (

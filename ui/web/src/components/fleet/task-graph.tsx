@@ -446,6 +446,19 @@ export function TaskGraph({
           setParams={setParams}
           resetParams={reset}
           groups={TASK_FORCE_GROUPS}
+          legend={
+            <div aria-label="Task graph legend" className="space-y-1">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                {Object.entries(STATUS_LABEL).map(([status, label]) => (
+                  <span key={status} className={cn("items-center gap-1.5", FLEX)}>
+                    <span className={cn("size-2 rounded-full bg-current", STATUS_FILL[status])} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+              <p>uniform node size</p>
+            </div>
+          }
         />
       </div>
     </div>
