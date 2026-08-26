@@ -1269,13 +1269,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Proxy Page Root
-         * @description Trailing-slash canonicalization: `/pages/{name}` redirects to
-         *     `/pages/{name}/` so the page's relative asset links resolve against the
-         *     page directory, not the gateway API root.
-         */
-        get: operations["proxy_page_root_api_agents__agent_id__pages__name__get"];
+        get?: never;
         put?: never;
         post?: never;
         /**
@@ -1314,28 +1308,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/pages/{name}/{rest}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Proxy Page Get
-         * @description Legacy page URL — kept for links already handed out; new pages get
-         *     `/api/pages/<id>-<name>/` from the registry.
-         */
-        get: operations["proxy_page_get_api_agents__agent_id__pages__name___rest__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pages/{page_key}": {
+    "/pages/{page_key}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1344,10 +1317,10 @@ export interface paths {
         };
         /**
          * Proxy Page Root New
-         * @description Trailing-slash canonicalization for the new URL: `/api/pages/1-foo`
-         *     redirects to `/api/pages/1-foo/` so relative asset links resolve.
+         * @description Trailing-slash canonicalization: `/pages/1-foo` redirects to
+         *     `/pages/1-foo/` so relative asset links resolve.
          */
-        get: operations["proxy_page_root_new_api_pages__page_key__get"];
+        get: operations["proxy_page_root_new_pages__page_key__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1356,7 +1329,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/pages/{page_key}/{rest}": {
+    "/pages/{page_key}/{rest}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1365,12 +1338,11 @@ export interface paths {
         };
         /**
          * Proxy Page Get New
-         * @description New page URL reverse-proxy: `/api/pages/<agent_id>-<name>/...`.
+         * @description Page URL reverse-proxy: `/pages/<agent_id>-<name>/...`.
          *
-         *     404 for a malformed key, unknown/closed page, or missing agent — same
-         *     semantics as the legacy `/api/agents/{id}/pages/{name}/...` route.
+         *     404 for a malformed key, unknown/closed page, or missing agent.
          */
-        get: operations["proxy_page_get_new_api_pages__page_key___rest__get"];
+        get: operations["proxy_page_get_new_pages__page_key___rest__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5897,7 +5869,7 @@ export interface components {
          *     return of register/close endpoints.
          *
          *     `url`: absolute gateway reverse-proxy URL
-         *     (`http://<gateway>/api/pages/<id>-<name>/`) — the gateway serves
+         *     (`http://<gateway>/pages/<id>-<name>/`) — the gateway serves
          *     the page content, so this is the only address the browser needs; the
          *     page server's host:port stays inside the gateway.
          */
@@ -8491,38 +8463,6 @@ export interface operations {
             };
         };
     };
-    proxy_page_root_api_agents__agent_id__pages__name__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     delete_page_api_agents__agent_id__pages__name__delete: {
         parameters: {
             query?: never;
@@ -8575,40 +8515,7 @@ export interface operations {
             };
         };
     };
-    proxy_page_get_api_agents__agent_id__pages__name___rest__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-                name: string;
-                rest: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    proxy_page_root_new_api_pages__page_key__get: {
+    proxy_page_root_new_pages__page_key__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -8639,7 +8546,7 @@ export interface operations {
             };
         };
     };
-    proxy_page_get_new_api_pages__page_key___rest__get: {
+    proxy_page_get_new_pages__page_key___rest__get: {
         parameters: {
             query?: never;
             header?: never;

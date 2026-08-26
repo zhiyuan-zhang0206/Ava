@@ -413,7 +413,7 @@ export const api = {
   //
   // page-load fetches open pages; SSE page_opened / page_closed cover
   // increments. PageRow.url is a gateway reverse-proxy URL
-  // (shape: /api/pages/<agent_id>-<name>/); the frontend opens it in a new
+  // (shape: /pages/<agent_id>-<name>/); the frontend opens it in a new
   // tab.
 
   listPages: (agentId: number): Promise<PageRow[]> => {

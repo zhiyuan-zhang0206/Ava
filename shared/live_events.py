@@ -338,7 +338,7 @@ class PageOpened(_Base):
     frontend replaces the row in place).
 
     `url`: absolute gateway reverse-proxy URL
-    (`http://<gateway>/api/agents/<id>/pages/<name>/`) — the popover
+    (`http://<gateway>/pages/<id>-<name>/`) — the popover
     `<a href={url}>` opens it in a new tab; the gateway serves the content.
     """
 

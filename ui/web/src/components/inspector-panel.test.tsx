@@ -342,7 +342,7 @@ describe("InspectorPanel", () => {
       port: 4173,
       title: "Task dashboard",
       serve_dir: null,
-      url: "http://gateway.test/api/pages/7-task-dashboard/",
+      url: "http://gateway.test/pages/7-task-dashboard/",
       created_at: "2026-08-24T12:00:00Z",
       closed_at: null,
     } satisfies PageRow;

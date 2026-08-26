@@ -113,10 +113,7 @@ class TestShow:
         assert page.name == "cleanup"
         assert page.port == port
         assert page.title == "Picker"
-        assert (
-            page.url
-            == f"http://test-gateway.invalid:8000/api/pages/{ava._boot.agent_id()}-cleanup/"
-        )
+        assert page.url == f"http://test-gateway.invalid:8000/pages/{ava._boot.agent_id()}-cleanup/"
         db_conn.rollback()
         assert _open_pages(db_conn, ava._boot.agent_id()) == [("cleanup", port, "Picker", None)]
 
@@ -135,9 +132,7 @@ class TestShow:
         ava._boot._agent_id = spawn_agent()
         page = ava.ui.show("custom", port=13579, title="Custom")
         assert page.port == 13579
-        assert (
-            page.url == f"http://test-gateway.invalid:8000/api/pages/{ava._boot.agent_id()}-custom/"
-        )
+        assert page.url == f"http://test-gateway.invalid:8000/pages/{ava._boot.agent_id()}-custom/"
         db_conn.rollback()
         assert _open_pages(db_conn, ava._boot.agent_id()) == [("custom", 13579, "Custom", None)]
 

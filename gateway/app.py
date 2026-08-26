@@ -12,7 +12,7 @@ The non-JSON response surface is deliberately small and enumerated:
   template + build mechanics, not a frontend component).
 - `GET /api/agents/{id}/uploads/...` (`gateway/routers/uploads.py`) —
   `FileResponse` file downloads.
-- `/api/agents/{id}/pages/{name}/...` (`gateway/routers/pages.py`) — a
+- `/pages/{agent_id}-{name}/...` (`gateway/routers/pages.py`) — a
   streaming reverse proxy to an agent's own page server (arbitrary content).
 - `/grafana/*` (`gateway/routers/grafana.py`) — streaming reverse proxy to a
   co-located Grafana instance (HTML dashboard, default off → 404).
