@@ -204,3 +204,35 @@ def test_create_session_cleans_up_expired_rows(
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT id FROM web_sessions ORDER BY id")
         assert [row[0] for row in cur.fetchall()] == ["live-row"]
+
+
+def test_session_ids_with_suffix_matches_active_rows_only(
+    pool: ConnectionPool[psycopg.Connection[Any]],
+) -> None:
+    now = datetime.now(UTC)
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO web_sessions (id, created_at, expires_at, revoked_at)
+            VALUES (%s, %s, %s, %s)
+            """,
+            [
+                ("first-abcdef12", now, now + timedelta(hours=1), None),
+                (
+                    "second-abcdef12",
+                    now + timedelta(seconds=1),
+                    now + timedelta(hours=1),
+                    None,
+                ),
+                ("revoked-abcdef12", now, now + timedelta(hours=1), now),
+                ("expired-abcdef12", now, now - timedelta(seconds=1), None),
+                ("other-zzzz9999", now, now + timedelta(hours=1), None),
+            ],
+        )
+
+    assert session_store.session_ids_with_suffix(pool, "abcdef12") == [
+        "second-abcdef12",
+        "first-abcdef12",
+    ]
+    assert session_store.session_ids_with_suffix(pool, "zzzz9999") == ["other-zzzz9999"]
+    assert session_store.session_ids_with_suffix(pool, "nope") == []

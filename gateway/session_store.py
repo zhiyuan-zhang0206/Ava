@@ -120,3 +120,24 @@ def touch_session(pool: ConnectionPool[Any], session_id: str) -> None:
             "UPDATE web_sessions SET last_seen_at = now() WHERE id = %s",
             (session_id,),
         )
+
+
+def session_ids_with_suffix(pool: ConnectionPool[Any], suffix: str) -> list[str]:
+    """Active (unrevoked, unexpired) session ids ending with ``suffix``, newest first.
+
+    The sessions list masks non-current ids to their final 8 characters; the
+    revoke endpoint accepts that suffix, so this lookup resolves it back to a
+    row. `right()` avoids LIKE wildcards entirely (ids are base64url, which
+    includes ``_``).
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id FROM web_sessions
+            WHERE revoked_at IS NULL AND expires_at > now()
+              AND right(id, %s) = %s
+            ORDER BY created_at DESC, id DESC
+            """,
+            (len(suffix), suffix),
+        )
+        return [row[0] for row in cur.fetchall()]
