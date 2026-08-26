@@ -53,3 +53,20 @@ def record() -> Any:
 def test_exec_outcome_classification(record: Any, event: str, is_ok: bool, is_fail: bool) -> None:
     assert record._is_exec_ok(event) is is_ok
     assert record._is_exec_fail(event) is is_fail
+
+
+def test_count_tool_calls_ignores_syntax_warnings(
+    record: Any, recwarn: pytest.WarningsRecorder
+) -> None:
+    """Agent-written code with an invalid escape sequence (a non-raw-string
+    regex) parses fine and must not leak a SyntaxWarning into the scan's
+    stderr — where it rode along in the schedule ALERT message as
+    `<unknown>:N` lines (2026-08-27 00:00 run)."""
+    codes = [
+        "import ava\nava.files.write('x', 'y')",
+        "re.compile('a\\|b')",
+        "ava.shell.run('ls')",
+    ]
+    counts = record.count_tool_calls(codes)
+    assert counts == {"ava.files.write": 1, "ava.shell.run": 1}
+    assert not [w for w in recwarn.list if issubclass(w.category, SyntaxWarning)]
