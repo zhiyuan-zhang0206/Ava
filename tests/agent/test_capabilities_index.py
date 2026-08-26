@@ -21,8 +21,9 @@ from pathlib import Path
 
 import pytest
 
+import ava
 import ava.skills as skills_mod
-from agent.graph._capabilities import capabilities_section
+from agent.graph._capabilities import _disabled_by_sdk_config, capabilities_section
 from agent.graph._system_prompt import _delegation_check_section, build_system_prompt
 from shared.config import FIELD_INFOS, settings
 
@@ -254,3 +255,38 @@ def test_clean_description_still_indexed(fake_skills_dir: Path) -> None:
     section = capabilities_section()
     assert "ok" in section
     assert "security-flagged" not in section
+
+
+def test_runtime_removed_surface_renders_nothing(
+    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The eval-isolation boundary removes SDK surfaces at runtime via
+    `ava._apply_sdk_disable` (mcps, ui, tasks, ...) without touching
+    `settings.agent.sdk_disable` — the boot of an isolated eval agent crashed
+    in `_mcp_index_lines` when `ava.mcps` was gone but the config check could
+    not see it. The live namespace is the source of truth: a removed surface
+    renders no MCP lines and must not raise."""
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
+    _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
+    monkeypatch.delattr(ava, "mcps", raising=False)
+
+    text = capabilities_section()
+    assert "- `ava.skills.alpha` — Alpha desc" in text
+    assert "MCP" not in text
+
+
+def test_live_namespace_check_resolves_segment_by_segment(
+    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runtime half of `_disabled_by_sdk_config` walks the dotted path
+    against the live namespace: a present path is not disabled, a removed leaf
+    (the eval isolation shape — `agents.get_last_message`) is."""
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
+    _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
+
+    assert _disabled_by_sdk_config("skills") is False
+    assert _disabled_by_sdk_config("mcps") is False
+
+    monkeypatch.delattr(ava.agents, "get_last_message", raising=False)
+    assert _disabled_by_sdk_config("agents.get_last_message") is True
+    assert _disabled_by_sdk_config("agents") is False  # the parent still resolves
