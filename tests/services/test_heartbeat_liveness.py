@@ -524,7 +524,7 @@ class TestMachineAlertEdges:
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         assert self._alerts(db_conn)[0][1] == "error"
 
-    def test_recovery_finds_preconvention_fingerprint_by_labels(
+    def test_recovery_resolves_preconvention_and_stable_fingerprint_rows(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from shared.alerts import fingerprint
@@ -532,14 +532,22 @@ class TestMachineAlertEdges:
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=3)
         _age_transition(db_conn, _MACHINE, seconds=181)
-        labels = {"alertname": "machine offline", "machine": _MACHINE, "severity": "warning"}
+        identity_labels = {"alertname": "machine offline", "machine": _MACHINE}
+        old_labels = {**identity_labels, "severity": "warning"}
+        stable_labels = {**identity_labels, "severity": "error"}
+        starts_at = datetime(2026, 8, 26, tzinfo=UTC)
+        old_fingerprint = fingerprint(old_labels)
+        stable_fingerprint = fingerprint(identity_labels)
         with db_conn.cursor() as cur:
-            cur.execute(
+            cur.executemany(
                 "INSERT INTO alerts (status, severity, alertname, labels, annotations, "
                 "starts_at, fingerprint, source, notified_at) VALUES "
-                "('unresolved', 'warning', 'machine offline', %s, '{}', %s, %s, "
+                "('unresolved', %s, 'machine offline', %s, '{}', %s, %s, "
                 "'machine-probe', now())",
-                (Jsonb(labels), datetime(2026, 8, 26, tzinfo=UTC), fingerprint(labels)),
+                [
+                    ("warning", Jsonb(old_labels), starts_at, old_fingerprint),
+                    ("error", Jsonb(stable_labels), starts_at, stable_fingerprint),
+                ],
             )
         db_conn.commit()
         notified: list[str] = []
@@ -548,8 +556,12 @@ class TestMachineAlertEdges:
         import asyncio
 
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: True})))
-        assert self._alerts(db_conn)[0][0] == "resolved"
-        assert len(notified) == 1
+        rows = self._alerts(db_conn)
+        assert {(row[0], row[1], row[4]) for row in rows} == {
+            ("resolved", "warning", old_fingerprint),
+            ("resolved", "error", stable_fingerprint),
+        }
+        assert len(notified) == 2
 
     def test_paused_machine_is_not_probed_and_fires_no_alert(
         self, db_conn: psycopg.Connection, pool: ConnectionPool

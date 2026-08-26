@@ -369,52 +369,49 @@ def _alert_failure(home: Path, message: str, *, deploy_explains: bool = False) -
 
 
 def _alert_recovery(home: Path) -> None:
-    """Owner alert on the unhealthy->healthy edge; no-op when the last run
-    was already healthy (no state file)."""
+    """Resolve a fired episode across current and legacy marker formats."""
     marker = home / ALERT_STATE_FILE
     if not marker.exists():
         return
-    _message, starts_at, severity, current = _read_alert_state(marker)
+    _message, starts_at, severity, _ = _read_alert_state(marker)
     marker.unlink()
-    if current:
-        if starts_at is not None and severity:
-            open_rows: list[tuple[str, datetime]] | None = None
-            try:
-                import shared.db
-
-                with shared.db.connect() as conn, conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT fingerprint, starts_at FROM alerts "
-                        "WHERE labels->>'alertname' = 'cluster health' "
-                        "AND status = 'unresolved'"
-                    )
-                    open_rows = cur.fetchall()
-            except Exception:
-                open_rows = None
-            if open_rows:
-                for row_fingerprint, row_start in open_rows:
-                    _ingest_alert(
-                        status="resolved",
-                        message="all checks passing",
-                        starts_at=row_start,
-                        severity=severity,
-                        fingerprint=row_fingerprint,
-                    )
-            else:
-                _ingest_alert(
-                    status="resolved",
-                    message="all checks passing",
-                    starts_at=starts_at,
-                    severity=severity,
-                )
-        return
-    if starts_at is not None:
-        _ingest_alert(status="resolved", message="all checks passing", starts_at=starts_at)
-    else:
+    if starts_at is None:
         # Pre-W16 state file (failure message only, no instance key): no
         # alerts row exists to resolve, and the firing was IM'd directly
         # back then — so the recovery goes directly too.
         _notify_owner("[health-probe] cluster recovered: all checks passing")
+        return
+    if not severity:
+        return
+    open_rows: list[tuple[str, datetime]] | None = None
+    try:
+        import shared.db
+
+        with shared.db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT fingerprint, starts_at FROM alerts "
+                "WHERE labels->>'alertname' = 'cluster health' "
+                "AND status = 'unresolved'"
+            )
+            open_rows = cur.fetchall()
+    except Exception:
+        open_rows = None
+    if open_rows:
+        for row_fingerprint, row_start in open_rows:
+            _ingest_alert(
+                status="resolved",
+                message="all checks passing",
+                starts_at=row_start,
+                severity=severity,
+                fingerprint=row_fingerprint,
+            )
+    else:
+        _ingest_alert(
+            status="resolved",
+            message="all checks passing",
+            starts_at=starts_at,
+            severity=severity,
+        )
 
 
 def _reset_failure_count(home: Path) -> None:
