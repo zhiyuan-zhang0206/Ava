@@ -886,8 +886,15 @@ def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
 
     captured: dict[str, object] = {}
 
-    def fake_inner(dir: str, name: str, port: int | None = None, title: str | None = None) -> str:
-        captured.update(dir=dir, name=name, port=port, title=title)
+    def fake_inner(
+        dir: str,
+        name: str,
+        port: int | None = None,
+        title: str | None = None,
+        *,
+        ttl: float | None = None,
+    ) -> str:
+        captured.update(dir=dir, name=name, port=port, title=title, ttl=ttl)
         return "served"
 
     ava.state = _make_state_with_cwd(str(tmp_path))
@@ -899,6 +906,7 @@ def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
             "name": "preview",
             "port": 8123,
             "title": "Preview",
+            "ttl": None,
         }
     finally:
         ava.state = None
@@ -910,8 +918,15 @@ def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
 
     captured: dict[str, object] = {}
 
-    def fake_inner(dir: str, name: str, port: int | None = None, title: str | None = None) -> str:
-        captured.update(dir=dir, name=name, port=port, title=title)
+    def fake_inner(
+        dir: str,
+        name: str,
+        port: int | None = None,
+        title: str | None = None,
+        *,
+        ttl: float | None = None,
+    ) -> str:
+        captured.update(dir=dir, name=name, port=port, title=title, ttl=ttl)
         return "served"
 
     logical_cwd = tmp_path / "cwd"
