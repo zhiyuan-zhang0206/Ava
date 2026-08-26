@@ -818,11 +818,15 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
 
 
 async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_path: Path):
-    """A normal child registration reaches the parent attachment channel.
+    """A normal child registration drains into a media message in the exec update.
 
-    Packing is deliberately deferred to the claim boundary, so the exec update
-    must contain only the resolved path and label rather than media bytes.
+    User ruling 2026-08-26: the attach message lands right after the exec
+    output in the SAME turn, so the update must contain the packed media
+    HumanMessage and a cleared attach channel — not parked pending entries
+    for the claim boundary.
     """
+    from shared.message_kwargs import AvaMsgType
+
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = f"import ava\nava.self.attach({str(image)!r}, label='render result')"
@@ -832,9 +836,18 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict[str, Any], cmd.update)
-    assert update["attach"] == AttachState(
-        pending=[AttachEntry(path=str(image.resolve()), label="render result")]
-    )
+    # Pending is drained (cleared) in the same update — nothing parked.
+    assert update["attach"] == AttachState()
+    messages = update["messages"]
+    assert len(messages) == 2
+    attach_msg = messages[-1]
+    assert isinstance(attach_msg, HumanMessage)
+    assert attach_msg.additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value  # pyright: ignore[reportUnknownMemberType]
+    # The caption names the file; the packed image block follows the text block.
+    content = attach_msg.content  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(content, list)
+    first_block = cast("dict[str, Any]", content[0])
+    assert "render.png" in first_block["text"]
 
 
 async def test_exec_node_compact_path_drops_notes_and_clears_findings(
