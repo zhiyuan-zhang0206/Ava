@@ -7,7 +7,7 @@ would freeze a generated Gradle project against one Tauri version and make every
 upgrade a merge. So the release workflow regenerates it and this script layers
 the four things the app needs on top:
 
-  1. the Kotlin foreground service and Keystore plugins (`java/`);
+  1. the Kotlin foreground service, Keystore, and cookie plugins (`java/`);
   2. ProGuard rules that preserve the JNI/reflection surface (`proguard-ava.pro`);
   3. the network security config (`network_security_config.xml`);
   4. the manifest edits that make (1) and (3) take effect — permissions, the

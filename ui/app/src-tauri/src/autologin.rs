@@ -16,6 +16,8 @@ use reqwest::blocking::Client;
 use reqwest::header::SET_COOKIE;
 use reqwest::redirect::Policy;
 use tauri::webview::{cookie, Cookie};
+#[cfg(target_os = "android")]
+use tauri::AppHandle;
 use tauri::{Url, WebviewWindow};
 
 use crate::urls::Endpoints;
@@ -52,6 +54,7 @@ impl LoginError {
 /// Startup callers intentionally do not retry failures: a rejected stored
 /// secret must fall back to the regular console login instead of risking the
 /// gateway's brute-force protections.
+#[cfg(desktop)]
 pub fn start(window: WebviewWindow, endpoints: Endpoints, secret: String) {
     std::thread::spawn(move || match login(&window, &endpoints, &secret) {
         Ok(()) => {
@@ -71,6 +74,7 @@ pub fn start(window: WebviewWindow, endpoints: Endpoints, secret: String) {
 /// This intentionally leaves navigation to the caller: onboarding needs to
 /// persist a Keystore secret only after the cookie exchange has succeeded,
 /// while startup reloads the already-created console window afterwards.
+#[cfg(desktop)]
 pub fn login(
     window: &WebviewWindow,
     endpoints: &Endpoints,
@@ -80,6 +84,44 @@ pub fn login(
     window
         .set_cookie(cookie)
         .map_err(|err| LoginError::Unavailable(format!("could not install session cookie: {err}")))
+}
+
+/// Start one Android native login attempt through the platform cookie store.
+#[cfg(target_os = "android")]
+pub fn start(app: AppHandle, window: WebviewWindow, endpoints: Endpoints, secret: String) {
+    tauri::async_runtime::spawn(async move {
+        match login(&app, &endpoints, &secret).await {
+            Ok(()) => {
+                if let Err(err) = window.navigate(endpoints.entry) {
+                    log::error!("could not reload the console after auto-login: {err}");
+                }
+            }
+            Err(LoginError::Rejected) => {
+                log::warn!("stored auto-login secret was rejected; showing the console login");
+            }
+            Err(LoginError::Unavailable(err)) => {
+                log::warn!("native auto-login unavailable: {err}");
+            }
+        }
+    });
+}
+
+/// Exchange `secret` for a session cookie and install it through Android's
+/// `CookieManager`, which is the WebView store the console actually reads.
+#[cfg(target_os = "android")]
+pub async fn login(app: &AppHandle, endpoints: &Endpoints, secret: &str) -> Result<(), LoginError> {
+    let gateway = endpoints.gateway.clone();
+    let secret = secret.to_string();
+    let cookie = tauri::async_runtime::spawn_blocking(move || login_cookie(&gateway, &secret))
+        .await
+        .map_err(|err| LoginError::Unavailable(format!("native login task failed: {err}")))??;
+    crate::android::install_session_cookie_async(
+        app,
+        endpoints.gateway.as_str(),
+        cookie.to_string(),
+    )
+    .await
+    .map_err(LoginError::Unavailable)
 }
 
 /// Exchange the secret for a cookie. The response body is intentionally

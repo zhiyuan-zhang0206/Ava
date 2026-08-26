@@ -62,7 +62,8 @@ uses the same page without a secret field but preserves its existing arbitrary
 entry and gateway URLs for worktree development. Android's optional cluster
 secret is logged in natively, saved to Android Keystore only after that login
 succeeds, and exposed to the webview only as the resulting HTTP-only session
-cookie.
+cookie. Android writes that cookie through a Kotlin `CookieManager` bridge,
+because Wry cannot write Android WebView cookies.
 
 Saving switches immediately to a 30-second connecting screen, then defers the
 post-save window change until its IPC response flushes. Android refreshes the

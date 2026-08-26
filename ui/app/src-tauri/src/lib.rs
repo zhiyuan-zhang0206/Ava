@@ -48,6 +48,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(android::background_plugin())
         .plugin(android::secret_plugin())
+        .plugin(android::cookie_plugin())
         .plugin(android::click_plugin());
 
     builder

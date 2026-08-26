@@ -21,6 +21,8 @@ const BACKGROUND_PLUGIN_CLASS: &str = "AvaBackgroundPlugin";
 const BACKGROUND_PLUGIN_NAME: &str = "avabackground";
 const SECRET_PLUGIN_CLASS: &str = "AvaSecretPlugin";
 const SECRET_PLUGIN_NAME: &str = "avasecret";
+const COOKIE_PLUGIN_CLASS: &str = "AvaCookiePlugin";
+const COOKIE_PLUGIN_NAME: &str = "avacookie";
 const CLICK_PLUGIN_CLASS: &str = "AvaClickPlugin";
 const CLICK_PLUGIN_NAME: &str = "avaclick";
 
@@ -39,6 +41,11 @@ struct BackgroundPlugin<R: Runtime>(PluginHandle<R>);
 /// an empty secret when saving: storing a credential must fail closed.
 #[derive(Clone)]
 struct SecretPlugin<R: Runtime>(PluginHandle<R>);
+
+/// Managed handle to the Android WebView cookie-store bridge. A missing handle
+/// must fail native login rather than silently losing its session cookie.
+#[derive(Clone)]
+struct CookiePlugin<R: Runtime>(PluginHandle<R>);
 
 /// Managed handle to the notification-click mailbox. A missing overlay means
 /// the app continues without notification deep-link capture.
@@ -77,6 +84,21 @@ pub fn secret_plugin<R: Runtime>() -> TauriPlugin<R> {
                     app.manage(SecretPlugin(handle));
                 }
                 Err(err) => log::error!("Keystore secret plugin unavailable: {err}"),
+            }
+            Ok(())
+        })
+        .build()
+}
+
+/// Register the Kotlin Android-WebView cookie plugin.
+pub fn cookie_plugin<R: Runtime>() -> TauriPlugin<R> {
+    PluginBuilder::new(COOKIE_PLUGIN_NAME)
+        .setup(|app, api| {
+            match api.register_android_plugin(PLUGIN_PACKAGE, COOKIE_PLUGIN_CLASS) {
+                Ok(handle) => {
+                    app.manage(CookiePlugin(handle));
+                }
+                Err(err) => log::error!("Android cookie plugin unavailable: {err}"),
             }
             Ok(())
         })
@@ -158,6 +180,29 @@ pub async fn save_secret_async<R: Runtime>(app: &AppHandle<R>, secret: &str) -> 
         .await
         .map(|_| ())
         .map_err(|_| "could not save the cluster secret securely".to_string())
+}
+
+/// Put a session cookie into Android WebView and wait until the cookie manager
+/// accepts it. Unlike Wry's Android `set_cookie`, the native cookie manager
+/// actually writes to the WebView cookie store.
+pub async fn install_session_cookie_async<R: Runtime>(
+    app: &AppHandle<R>,
+    url: &str,
+    cookie: String,
+) -> Result<(), String> {
+    let plugin = app
+        .try_state::<CookiePlugin<R>>()
+        .map(|plugin| plugin.0.clone())
+        .ok_or_else(|| "Android session-cookie storage is unavailable".to_string())?;
+    // See the Android main-thread rule above: never use run_mobile_plugin here.
+    plugin
+        .run_mobile_plugin_async::<serde_json::Value>(
+            "set",
+            serde_json::json!({ "url": url, "cookie": cookie }),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| "could not install the session cookie".to_string())
 }
 
 /// Load and cache the Keystore secret without blocking the Android main looper.
