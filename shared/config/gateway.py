@@ -116,7 +116,7 @@ class GatewaySettings(EnvSettings):
     )
 
     timeline_compact_history: int = Field(
-        default=0,
+        default=1,
         ge=-1,
         alias="AVA_TIMELINE_COMPACT_HISTORY",
         description=(
