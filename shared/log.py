@@ -69,7 +69,7 @@ import threading
 import time
 import traceback as _traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import loguru
 from loguru import logger
@@ -622,13 +622,25 @@ def _add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None)
     from shared import telemetry
 
     telemetry.init_telemetry(process=process, agent_id=agent_id)
-    return logger.add(
+    global _postgres_sink_id  # noqa: PLW0603 — process-level singleton
+    live_handlers: Any = cast(Any, logger)._core.handlers  # private `_core` registry
+    if _postgres_sink_id is not None and _postgres_sink_id in live_handlers:
+        return _postgres_sink_id
+    _postgres_sink_id = logger.add(
         _postgres_sink,
         level="INFO",
         enqueue=False,
         catch=True,
         filter=_event_pipeline_filter,
     )
+    return _postgres_sink_id
+
+
+# Process-level singleton: exec_child calls this from two paths (env
+# AVA_AGENT_ID + request), and a second registration double-emits every
+# loguru record (byte-identical mirror rows, task #1638). The stored id is
+# re-verified against live handlers so a removed sink re-registers.
+_postgres_sink_id: int | None = None
 
 
 # Process-level idempotency guard. The three init_* functions add

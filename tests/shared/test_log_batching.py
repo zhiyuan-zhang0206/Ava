@@ -15,6 +15,7 @@ rename would break and a deletion would not.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -246,6 +247,45 @@ def test_production_loguru_sink_routes_through_the_emitter() -> None:
 def _rec(extra: dict[str, Any]) -> Any:
     """A minimal loguru-Record-shaped object — the filter reads only `extra`."""
     return {"extra": extra}
+
+
+def test_add_postgres_sink_registers_at_most_once() -> None:
+    """Two `_add_postgres_sink` calls (exec_child's env + request init paths)
+    must not double-register the adapter: one loguru record lands exactly one
+    mirror row. The 2026-08-24 double registration wrote every post-init
+    record twice — byte-identical rows, same surrogate id — into the JSONL
+    mirror (task #1638)."""
+    from datetime import UTC as _UTC
+
+    from shared.log import logger as _g
+
+    first = slog._add_postgres_sink(process="test-dup-guard")
+    second = slog._add_postgres_sink(process="test-dup-guard")
+    assert second == first, "repeat registration must return the live sink id"
+
+    marker = f"dup-guard-{time.time_ns()}"
+    try:
+        _g.configure(extra={"agent_id": "8901"})
+        _g.info(f"one record {marker}", event="label_change")
+        telemetry.flush()
+
+        from shared.paths import logs_dir
+
+        day = datetime.now(_UTC).strftime("%Y%m%d")
+        path = logs_dir() / f"events-{day}.jsonl"
+        rows: list[dict[str, Any]] = []
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                msg = obj.get("attributes", {}).get("msg", "")
+                if obj.get("event_name") == "label_change" and marker in msg:
+                    rows.append(obj)
+        assert len(rows) == 1, f"expected 1 mirror row, got {len(rows)}"
+    finally:
+        _g.remove(first)
 
 
 def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
