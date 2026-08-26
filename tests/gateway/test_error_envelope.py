@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+import gateway._auth401_log as auth401_log
 from gateway import loki_events, loki_query_budget, prom_metrics
 from gateway._cors import cors_allowed_origins
 from gateway.app import (
@@ -193,6 +194,7 @@ def _request(
     method: str = "GET",
     path: str = "/api/agents",
     headers: list[tuple[bytes, bytes]] | None = None,
+    client: tuple[str, int] | None = ("127.0.0.1", 1),
 ) -> Request:
     """Build the smallest request shape accepted by the direct middleware calls."""
     return Request(
@@ -205,11 +207,41 @@ def _request(
             "raw_path": path.encode(),
             "query_string": b"",
             "headers": headers or [],
-            "client": ("127.0.0.1", 1),
+            "client": client,
             "server": ("testserver", 80),
             "state": {},
         }
     )
+
+
+@pytest.fixture(autouse=True)
+def _clear_auth401_throttle_state() -> Iterator[None]:
+    """Keep process-local auth-401 throttle state from coupling tests."""
+    auth401_log._auth401_last_warn.clear()
+    auth401_log._auth401_suppressed.clear()
+    yield
+    auth401_log._auth401_last_warn.clear()
+    auth401_log._auth401_suppressed.clear()
+
+
+def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
+
+
+def _unauthorized_auth_response(request: Request) -> Response:
+    async def call_next(_request: Request) -> Response:
+        raise AssertionError("authentication middleware must short-circuit")
+
+    return asyncio.run(_cluster_auth_middleware(request, call_next))
+
+
+def _auth401_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if record.name == "gateway._auth401_log" and record.getMessage().startswith("auth 401:")
+    ]
 
 
 def test_auth_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -279,37 +311,136 @@ def test_auth_middleware_accepts_bearer_for_alert_reads(
     assert response.status_code == 204
 
 
-def test_auth_middleware_logs_unauthorized_request(
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/alerts/stream",
+        "/api/system/all",
+        "/api/agents/1/events/stream",
+        "/api/system",
+        "/api/agents/1/system",
+    ],
+)
+def test_auth_middleware_logs_sse_poll_401_at_debug(
+    path: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Stale EventSource reconnects stay forensic-only without changing the response."""
+    _enable_cluster_auth(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+
+    response = _unauthorized_auth_response(
+        _request(path=path, headers=[(b"user-agent", b"stale-browser")])
+    )
+    _assert_envelope(response, status=401, code="authentication_required", retryable=False)
+    records = _auth401_records(caplog)
+    assert [record.levelno for record in records] == [logging.DEBUG]
+    assert f"path={path}" in records[0].getMessage()
+    assert "client=127.0.0.1" in records[0].getMessage()
+    assert "ua=stale-browser" in records[0].getMessage()
+
+
+def test_auth_middleware_warns_on_first_non_stream_401(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Unauthorized requests expose enough client context to diagnose residual retries."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
-    request = Request(
-        {
-            "type": "http",
-            "http_version": "1.1",
-            "method": "GET",
-            "scheme": "http",
-            "path": "/api/agents",
-            "raw_path": b"/api/agents",
-            "query_string": b"",
-            "headers": [(b"user-agent", b"curl/8.1")],
-            "client": ("127.0.0.1", 1),
-            "server": ("testserver", 80),
-            "state": {},
-        }
-    )
+    """A new client/path source remains visible once at WARNING."""
+    _enable_cluster_auth(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
 
-    async def call_next(_request: Request) -> Response:
-        raise AssertionError("authentication middleware must short-circuit")
+    response = _unauthorized_auth_response(_request(headers=[(b"user-agent", b"curl/8.1")]))
+    _assert_envelope(response, status=401, code="authentication_required", retryable=False)
+    records = _auth401_records(caplog)
+    assert [record.levelno for record in records] == [logging.WARNING]
+    assert "path=/api/agents" in records[0].getMessage()
+    assert "client=127.0.0.1" in records[0].getMessage()
+    assert "ua=curl/8.1" in records[0].getMessage()
 
-    with caplog.at_level(logging.WARNING, logger="gateway.app"):
-        asyncio.run(_cluster_auth_middleware(request, call_next))
 
-    assert "path=/api/agents" in caplog.text
-    assert "client=127.0.0.1" in caplog.text
-    assert "ua=curl/8.1" in caplog.text
+def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A repeated client/path key is downgraded and counted during cooldown."""
+    _enable_cluster_auth(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+    request = _request()
+
+    _unauthorized_auth_response(request)
+    caplog.clear()
+    response = _unauthorized_auth_response(request)
+
+    _assert_envelope(response, status=401, code="authentication_required", retryable=False)
+    records = _auth401_records(caplog)
+    assert [record.levelno for record in records] == [logging.DEBUG]
+    assert "suppressed" in records[0].getMessage()
+    assert auth401_log._auth401_suppressed[("127.0.0.1", "/api/agents")] == 1
+
+
+def test_auth_middleware_warns_after_cooldown_with_suppressed_count(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The next warning reports repeats hidden during the elapsed cooldown."""
+    _enable_cluster_auth(monkeypatch)
+    now = [100.0]
+    monkeypatch.setattr(auth401_log.time, "monotonic", lambda: now[0])
+    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+    request = _request()
+
+    _unauthorized_auth_response(request)
+    _unauthorized_auth_response(request)
+    now[0] = 401.0
+    caplog.clear()
+    response = _unauthorized_auth_response(request)
+
+    _assert_envelope(response, status=401, code="authentication_required", retryable=False)
+    records = _auth401_records(caplog)
+    assert [record.levelno for record in records] == [logging.WARNING]
+    assert "suppressed 1 repeats in the last 300s" in records[0].getMessage()
+
+
+def test_auth_middleware_prunes_idle_401_throttle_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client/path key idle for two windows stops consuming throttle state."""
+    _enable_cluster_auth(monkeypatch)
+    now = [100.0]
+    monkeypatch.setattr(auth401_log.time, "monotonic", lambda: now[0])
+    stale_key = ("127.0.0.1", "/api/agents")
+
+    _unauthorized_auth_response(_request())
+    _unauthorized_auth_response(_request())
+    now[0] = 701.0
+    response = _unauthorized_auth_response(_request(path="/api/alerts"))
+
+    _assert_envelope(response, status=401, code="authentication_required", retryable=False)
+    assert stale_key not in auth401_log._auth401_last_warn
+    assert stale_key not in auth401_log._auth401_suppressed
+
+
+def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A warning for one client/path key does not hide either neighboring key."""
+    _enable_cluster_auth(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+    _unauthorized_auth_response(_request())
+    caplog.clear()
+
+    responses = [
+        _unauthorized_auth_response(_request(client=("127.0.0.2", 1))),
+        _unauthorized_auth_response(_request(path="/api/alerts")),
+    ]
+
+    for response in responses:
+        _assert_envelope(
+            response,
+            status=401,
+            code="authentication_required",
+            retryable=False,
+        )
+    records = _auth401_records(caplog)
+    assert [record.levelno for record in records] == [logging.WARNING, logging.WARNING]
+    messages = [record.getMessage() for record in records]
+    assert any("path=/api/agents client=127.0.0.2" in message for message in messages)
+    assert any("path=/api/alerts client=127.0.0.1" in message for message in messages)
 
 
 def test_cluster_pause_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
