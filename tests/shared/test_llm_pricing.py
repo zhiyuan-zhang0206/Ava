@@ -69,6 +69,19 @@ def test_qwen_27b_uses_its_own_published_usd_not_a_derived_rate() -> None:
     assert cheap < flagship
 
 
+def test_qwen3_8_flash_uses_the_official_qwencloud_usd() -> None:
+    """Locks the official QwenCloud USD figures ($0.16 / $0.016 / $0.47), the
+    only official USD published at onboarding — the Model Studio EN page
+    (Beijing USD column) was not yet live on 2026-08-27, and the no-conversion
+    rule forbids deriving Beijing USD from the published CNY (1 / 0.1 / 3).
+    Re-check when the alibabacloud.com page lands (see the module docstring)."""
+    assert cost_usd("qwen3.8-flash", _M, _M, 0) == pytest.approx(0.16 + 0.47)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-flash", _M, 0, _M) == pytest.approx(0.016)  # pyright: ignore[reportUnknownMemberType]
+    # and it is genuinely cheaper than the flagship, the reason it is registered
+    cheap = cost_usd("qwen3.8-flash", _M, _M, 0)
+    assert cheap is not None and cheap < 1.65 + 4.951
+
+
 def test_cost_usd_unknown_model_is_none() -> None:
     """A model absent from MODEL_PRICING returns None (unpriced), never a
     fabricated $0 — the caller counts it as unpriced rather than free."""
@@ -96,6 +109,16 @@ def test_glm_5_pricing_effective_interval_boundary() -> None:
     assert rates_at("glm-5.2", before, _M) == Rates(1.10, 0.55, 3.86)
     assert rates_at("glm-5.2", cutover, _M) == Rates(1.40, 0.26, 4.40)
     assert rates_at("glm-5.3", cutover, _M) == Rates(1.40, 0.26, 4.40)
+
+
+def test_glm_5_3_flash_launch_discount_boundary() -> None:
+    """GLM-5.3-Flash ships at a 50% launch discount (docs.z.ai pricing page)
+    ending 24:00 2026-09-09 UTC+8 = 2026-09-09T16:00:00Z; list rates follow."""
+    before = datetime(2026, 9, 9, 15, 59, 59, 999999, tzinfo=UTC)
+    cutover = datetime(2026, 9, 9, 16, 0, tzinfo=UTC)
+
+    assert rates_at("glm-5.3-flash", before, _M) == Rates(0.075, 0.015, 0.25)
+    assert rates_at("glm-5.3-flash", cutover, _M) == Rates(0.15, 0.03, 0.50)
 
 
 @pytest.mark.parametrize(

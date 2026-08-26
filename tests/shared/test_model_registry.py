@@ -197,6 +197,31 @@ def test_glm_5_3_registry_facts() -> None:
     assert resolve_setting("llm_retry_max_attempts", model="glm-5.3") == 10
 
 
+def test_glm_5_3_flash_registry_facts() -> None:
+    """The flash sibling shares the GLM-5.3 series' window, cutoff estimate,
+    effort vocabulary (docs: only low/high/max), always-on thinking, and the
+    GLM-family retry posture — priced separately in the catalog."""
+    spec = MODELS["glm-5.3-flash"]
+    assert spec.provider == "glm"
+    assert spec.spawnable
+    assert spec.context_window == 1_000_000
+    assert spec.knowledge_cutoff == "2025-12"
+    assert spec.effort_levels == ("low", "high", "max")
+    assert spec.media_types == frozenset({"image"})
+    assert resolve_setting("reasoning_effort", model="glm-5.3-flash") == "max"
+    assert resolve_setting("llm_retry_max_attempts", model="glm-5.3-flash") == 10
+
+
+def test_glm_5_3_series_thinking_cannot_be_disabled() -> None:
+    """Both GLM-5.3 models always think — thinking.type=disabled is rejected by
+    the endpoint (400, error code 1210, live-checked 2026-08-27), so the builder
+    must warn instead of sending the disabled body (kimi-k3 pattern)."""
+    assert MODELS["glm-5.3"].thinking_always_on
+    assert MODELS["glm-5.3-flash"].thinking_always_on
+    # glm-5.2 keeps the off switch — the family boundary is 5.3, not glm-*.
+    assert not MODELS["glm-5.2"].thinking_always_on
+
+
 def test_image_media_types_match_the_verified_model_matrix() -> None:
     """Image-capable ids are fixed by their provider bindings, not a broad
     prefix: the DeepSeek vision experiment is the only multimodal deepseek."""
@@ -222,23 +247,29 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "gpt-5.5",
         "gpt-5.4-mini",
         "kimi-k3",
+        "glm-5.3-flash",
         "qwen3.8-max",
         "qwen3.8-27b",
+        "qwen3.8-flash",
     }
     assert {model for model, spec in MODELS.items() if "image" in spec.media_types} == expected
 
 
-def test_qwen_roster_is_exactly_the_two_flat_tier_models() -> None:
+def test_qwen_roster_is_exactly_the_three_flat_tier_models() -> None:
     """Pinned by id, because which Qwen models may be registered is a pricing
     constraint, not a preference. Alibaba publishes its length-tier boundaries
     only as `Input<=256k` with no token count, and a tier boundary here must be
     an exact integer — so a length-tiered Qwen cannot be priced without guessing
-    262,144 against 256,000 and mispricing ~3x in the band between. These two
+    262,144 against 256,000 and mispricing ~3x in the band between. These three
     are registered because an account's own `GET /api/v1/models` reports
-    `"range_name": "Default"` for both: a single flat tier, no boundary to
-    guess. Adding a third Qwen means re-clearing that bar
+    `"range_name": "Default"` for each: a single flat tier, no boundary to
+    guess. Adding a fourth Qwen means re-clearing that bar
     (shared/lm/pricing.ava.okf.md)."""
-    assert sorted(SUPPORTED_MODELS["qwen"]) == ["qwen3.8-27b", "qwen3.8-max"]
+    assert sorted(SUPPORTED_MODELS["qwen"]) == [
+        "qwen3.8-27b",
+        "qwen3.8-flash",
+        "qwen3.8-max",
+    ]
 
 
 def test_model_ids_match_their_provider_prefix() -> None:

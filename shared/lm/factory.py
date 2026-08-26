@@ -549,6 +549,7 @@ def build_chat_model(
     if model.startswith("glm-"):
         return _build_glm_model(
             model,
+            spec,
             thinking=thinking,
             resolved_effort=resolved_effort,
             disable_streaming=disable_streaming,

@@ -32,10 +32,11 @@ A tier boundary here is an exact token count and the catalog validates gapless
 coverage, but Alibaba's docs express Qwen boundaries only as `Input<=256k` /
 `256k<Input<=1m` — the token value of "256K" is published nowhere. Guessing
 262,144 against 256,000 misprices ~3x in the band between them, so a
-length-tiered Qwen must not be registered off the docs website alone. Both
-registered models sidestep this: an account's own `GET /api/v1/models` reports
-`"range_name": "Default"` for each, i.e. a single flat tier with no boundary to
-guess. That endpoint, not the docs prose, is the authority on tiering.
+length-tiered Qwen must not be registered off the docs website alone. All
+three registered models sidestep this: an account's own `GET /api/v1/models`
+reports `"range_name": "Default"` for each, i.e. a single flat tier with no
+boundary to guess. That endpoint, not the docs prose, is the authority on
+tiering.
 
 **Do not convert CNY prices.** Alibaba publishes USD per model rather than
 converting at one rate, and the implied rates diverge — qwen3.8-max's USD works
@@ -49,6 +50,19 @@ Rates are also region-specific, and the endpoint is configurable
 same models differently (qwen3.8-max $2.00/$0.25/$6.00 against Beijing's
 $1.65/$0.206/$4.951). Repointing the base URL at another region means
 re-checking this catalog, not just the URL.
+
+## qwen3.8-flash is priced from QwenCloud USD pending the Model Studio page
+
+The Model Studio EN model page for qwen3.8-flash was not yet published when it
+was onboarded (checked 2026-08-27, the day after launch) — the Beijing USD
+column it will eventually carry does not exist yet, and deriving Beijing USD
+from the published Beijing CNY would violate the no-conversion rule above. The
+catalog therefore uses the official QwenCloud USD figures ($0.16 / $0.016 /
+$0.47), Alibaba's own Qwen cloud, with the caveat that QwenCloud's USD for
+qwen3.8-max equals Model Studio's SINGAPORE column ($2.00/$0.25/$6.00), not
+Beijing's. If the Beijing USD column lands lower, update this entry — until
+then the Singapore-rate figures err toward overstating cost, the same
+conservative direction as the UTC+14 boundary convention.
 """
 
 from __future__ import annotations

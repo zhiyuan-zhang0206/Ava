@@ -88,6 +88,14 @@ class TestModelContextWindow:
     def test_glm_5_3_is_1m(self) -> None:
         assert MODEL_CONTEXT_WINDOW["glm-5.3"] == 1_000_000
 
+    def test_glm_5_3_flash_is_1m(self) -> None:
+        assert MODEL_CONTEXT_WINDOW["glm-5.3-flash"] == 1_000_000
+
+    def test_qwen3_8_flash_window_is_thinking_mode_input(self) -> None:
+        """Same convention as qwen3.8-max: the roster runs with thinking on,
+        so the 983,616 reasoning-mode input ceiling is the binding one."""
+        assert MODEL_CONTEXT_WINDOW["qwen3.8-flash"] == 983_616
+
 
 class TestModelIdentity:
     """Per-model identity note injected into the system prompt — a model
