@@ -106,7 +106,7 @@ fn attach_entry(app: &AppHandle, window: WebviewWindow, endpoints: Endpoints) {
         let login_endpoints = endpoints.clone();
         tauri::async_runtime::spawn(async move {
             if let Some(secret) = crate::android::load_stored_secret(&handle).await {
-                crate::autologin::start(login_window, login_endpoints, secret);
+                crate::autologin::start(handle, login_window, login_endpoints, secret);
             }
         });
     }

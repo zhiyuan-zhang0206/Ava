@@ -74,10 +74,11 @@ and reloads after its native cookie store receives the session.
 
 Android has opt-in background residency and local notifications. A generated
 Tauri Gradle project is patched at build time by `android/apply_overlay.py`; the
-checked-in Kotlin plugins control a non-exported `specialUse` foreground service
-and the Android-Keystore secret bridge. `AvaClickPlugin` captures a notification
-tap so the bridge can open the fleet Inbox at `/fleet#inbox`: after its SSE
-opens, the bridge consumes the per-tap flag once and navigates the same window.
+checked-in Kotlin plugins control a non-exported `specialUse` foreground service,
+the Android-Keystore secret bridge, and CookieManager session-cookie injection.
+`AvaClickPlugin` captures a notification tap so the bridge can open the fleet
+Inbox at `/fleet#inbox`: after its SSE opens, the bridge consumes the per-tap
+flag once and navigates the same window.
 The overlay also keeps the JNI-named
 Tauri plugin classes and reflectively discovered commands through release
 minification. The injected SSE bridge listens to
