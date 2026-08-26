@@ -30,6 +30,14 @@
 > (raised from the 1 quoted above), so the off-site leg is no longer the only
 > history.
 >
+> **Update 2026-08-26 (#3347): pre-update snapshots get their own retention slot.**
+> Each `ava cluster update` that applies migrations writes a `<db>-<ts>.pre-update.dump.gz.enc`
+> snapshot into the same pool before stopping anything. Prune keeps the newest
+> `BACKUP_KEEP = 7` **daily** dumps plus the newest one pre-update snapshot — an
+> update never silently consumes a daily-dump slot, and the newest snapshot (the
+> most recent full dump before a migration) is always retained. Local and Drive
+> share the same prune.
+>
 > **Update 2026-08-25:** the gateway-owned pg-backup scheduler daemon now owns
 > the local schedule. The watchdog probes and restarts that daemon but never
 > runs `pg_dump` in its supervision round.
