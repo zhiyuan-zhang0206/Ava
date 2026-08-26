@@ -53,9 +53,11 @@ def _run_agent_runner_self_update(
     --restart-only` directly on an agent-runner.)
 
     The child `ava start` returns the posture row to idle at the end, pulling
-    this host back from paused to serving. When invoked via the ava-updater session
-    session (spawned by spawn_update()), this function runs in a detached pane so
-    a mid-flow `ava stop` does not take itself out.
+    this host back from paused to serving, and finalizes the pause-owner journal
+    (generation-scoped `pause_owner.finalize_natural_resume`) — the natural
+    resume that Phase B's poll reads as converged. When invoked via the
+    ava-updater session (spawned by spawn_update()), this function runs in a
+    detached pane so a mid-flow `ava stop` does not take itself out.
     """
     from shared import ui_update_state, updater_handoff
     from shared.host_deploy_state import (

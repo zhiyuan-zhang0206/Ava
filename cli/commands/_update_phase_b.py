@@ -411,8 +411,10 @@ def _phase_b_and_poll(
     """Phase B + poll: fan out each agent-runner's self-update (or restart-only
     bounce), then poll each back to healthy; return name -> terminal poll state
     ('ok' | 'degraded'). Each host's own `ava start` unlinks its flag (the natural
-    resume); the caller resumes whichever the poll still reports non-'ok'. No abort
-    on a Phase-B 5xx (already migrated); a failed host is only marked degraded.
+    resume, which also finalizes the host's pause-owner journal — a converged
+    host must not keep a `paused` journal); the caller resumes whichever the poll
+    still reports non-'ok'. No abort on a Phase-B 5xx (already migrated); a failed
+    host is only marked degraded.
 
     `target_sha` (the pinned rollout commit) rides each host's `cluster_update`
     payload so every agent-runner force-checks-out the *same* commit the gateway

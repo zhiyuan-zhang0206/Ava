@@ -83,6 +83,109 @@ def test_local_update_failure_resumes_every_host(monkeypatch: pytest.MonkeyPatch
     ], calls
 
 
+def test_gateway_local_finally_finalizes_the_pause_journal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression (2026-08-26): the finally's local unpause is the co-located
+    host's resume, so it must finalize the pause-owner journal like a
+    cluster/resume op would — otherwise the journal stays `paused` forever while
+    the rollout reports rc=0 (deploy-pause-owner.json still paused)."""
+    from datetime import UTC, datetime
+
+    from shared import pause_owner
+
+    owner_path = tmp_path / "deploy-pause-owner.json"
+    lock_path = tmp_path / "deploy-pause-owner.lock"
+    monkeypatch.setattr(pause_owner, "state_path", lambda: owner_path)
+    monkeypatch.setattr(pause_owner, "lock_path", lambda: lock_path)
+    acquired = datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC)
+    pause_owner.mark_paused("macmini:pid65276", acquired)
+
+    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(_cli, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _cli,
+        "_poll_until_unpaused",
+        lambda _hosts: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    assert rc == 0
+    snapshot = pause_owner.read()
+    assert snapshot.status == "resumed"
+    assert snapshot.matches("macmini:pid65276", acquired)
+
+
+def test_gateway_local_finally_finalizes_the_journal_on_abort(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The abort path runs the same finally, so the local journal is finalized
+    there too — a co-located host Phase A paused must not keep a `paused`
+    journal after the rollout gave up."""
+    from datetime import UTC, datetime
+
+    from shared import pause_owner
+
+    owner_path = tmp_path / "deploy-pause-owner.json"
+    lock_path = tmp_path / "deploy-pause-owner.lock"
+    monkeypatch.setattr(pause_owner, "state_path", lambda: owner_path)
+    monkeypatch.setattr(pause_owner, "lock_path", lambda: lock_path)
+    acquired = datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC)
+    pause_owner.mark_paused("macmini:pid65276", acquired)
+
+    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
+
+    def _fatal_stop(hosts, path, _timeout, payload=None):  # type: ignore[no-untyped-def]
+        if path == "/api/cluster/stop":
+            return [(name, "fatal", "boom") for name, _url in hosts]
+        return [(name, "ok", "") for name, _url in hosts]
+
+    monkeypatch.setattr(_cli, "_fan_out", _fatal_stop)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _cli,
+        "_quiesce_all_agents",
+        lambda **_: pytest.fail("must abort before quiesce"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    assert rc == 1
+    assert pause_owner.read().status == "resumed"
+
+
+def test_gateway_local_finally_swallows_a_finalize_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The finalize runs in a `finally` that may already be unwinding; a journal
+    write failure must be swallowed, never allowed to mask the rollout outcome
+    (the 2026-07-20 never-raise-in-the-finally contract)."""
+    from shared import pause_owner
+
+    def _boom() -> bool:
+        raise OSError("journal write failed")
+
+    monkeypatch.setattr(pause_owner, "finalize_natural_resume", _boom)
+    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(_cli, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _cli,
+        "_poll_until_unpaused",
+        lambda _hosts: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    # must not raise out of the finally despite the journal write failing
+    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    assert rc == 0
+
+
 def test_success_path_does_not_resume(monkeypatch: pytest.MonkeyPatch) -> None:
     """All hosts poll back paused=false -> Phase B was the natural resume -> the
     finally sends nothing (must not re-resume a host that self-updated)."""

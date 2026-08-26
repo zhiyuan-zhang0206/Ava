@@ -1977,6 +1977,102 @@ def test_cmd_start_returns_this_host_to_idle_posture(
     assert calls and calls[-1] == "idle"
 
 
+def test_cmd_start_finalizes_a_paused_deploy_journal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression (2026-08-26): a Phase-B `ava start` restores posture without a
+    cluster/resume op, so the pause-owner journal must be finalized (paused ->
+    resumed, generation preserved) by the start itself — otherwise it stays
+    `paused` forever while the host serves (rollout rc=0, deploy-pause-owner.json
+    still paused). The exact journaled generation must be kept, so a delayed
+    resume for that generation stays an idempotent no-op and a foreign one is
+    refused."""
+    from datetime import UTC, datetime
+
+    from shared import pause_owner
+
+    owner_path = tmp_path / "deploy-pause-owner.json"
+    lock_path = tmp_path / "deploy-pause-owner.lock"
+    monkeypatch.setattr(pause_owner, "state_path", lambda: owner_path)
+    monkeypatch.setattr(pause_owner, "lock_path", lambda: lock_path)
+    monkeypatch.setattr(
+        "shared.host_deploy_state.set_posture",
+        lambda _p: None,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _cli.subprocess,
+        "run",
+        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    acquired = datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC)
+    pause_owner.mark_paused("macmini:pid65276", acquired)
+
+    assert _cli.cmd_start() == 0
+
+    snapshot = pause_owner.read()
+    assert snapshot.status == "resumed"
+    assert snapshot.matches("macmini:pid65276", acquired)
+    # The finalize kept the exact generation: the same-generation resume stays an
+    # idempotent no-op, a delayed foreign resume stays refused.
+    assert pause_owner.mark_resumed("macmini:pid65276", acquired)
+    assert not pause_owner.mark_resumed("other:pid1", acquired)
+
+
+def test_rollout_child_start_does_not_finalize_the_pause_journal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A rollout child (gateway local leg) leaves posture `converging` and the
+    restarter down — the orchestrator's own finally owns that resume boundary, so
+    the start must not record the pause as completed while the host is still
+    mid-transition."""
+    from datetime import UTC, datetime
+
+    from cli.commands import _data_plane_admin_secrets as secrets_mod
+    from cli.commands import start as start_mod
+    from shared import pause_owner
+    from shared.cluster_lock import DeployLease
+
+    owner_path = tmp_path / "deploy-pause-owner.json"
+    lock_path = tmp_path / "deploy-pause-owner.lock"
+    monkeypatch.setattr(pause_owner, "state_path", lambda: owner_path)
+    monkeypatch.setattr(pause_owner, "lock_path", lambda: lock_path)
+    monkeypatch.setattr(
+        "shared.host_deploy_state.set_posture",
+        lambda _p: None,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        "shared.cluster_lock.read_update_lease",
+        lambda: DeployLease(
+            holder="rollout:42",
+            held_for_s=10,
+            expires_in_s=900,
+            note=None,
+            kind="rollout",
+            acquired_at=datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC),
+        ),
+    )
+    monkeypatch.setattr(
+        secrets_mod,
+        "ensure_data_plane_admin_secrets",
+        lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
+    monkeypatch.setattr(
+        _cli.subprocess,
+        "run",
+        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    pause_owner.mark_paused("rollout:42", datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC))
+
+    assert _cli.cmd_start(persist_services=False) == 0
+
+    snapshot = pause_owner.read()
+    assert snapshot.status == "paused"
+    assert snapshot.matches("rollout:42", datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC))
+
+
 def test_rollout_child_keeps_converging_and_restarter_down(
     monkeypatch: pytest.MonkeyPatch,
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],

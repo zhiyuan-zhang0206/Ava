@@ -180,3 +180,32 @@ def unpause_local_cluster() -> None:
             return
         raise RuntimeError(f"could not respawn {restarter_sess} session")
     _log.info("[cluster] respawned %s session", restarter_sess)
+
+
+def finalize_pause_owner_journal() -> None:
+    """Generation-scoped successful-finalize of the pause-owner journal for a
+    host that returned to serving WITHOUT a `cluster/resume` op — the natural
+    resume (a Phase-B `ava start`), or the gateway-local finally's own unpause.
+
+    Records the journaled paused generation as `resumed` — the same CAS
+    `mark_resumed` writes on the explicit resume path — so a rollout that
+    finished cleanly never leaves deploy-pause-owner.json `paused` forever
+    (the 2026-08-26 residue: rollout rc=0, the journal still paused). It is
+    generation-scoped by construction and never force-clears: an absent /
+    legacy / invalid journal is left for recovery's no-live-owner proof.
+
+    Never raises: the journal is bookkeeping, and the callers run on paths (a
+    start tail, a rollout `finally`) where a raise would mask the real
+    outcome; a failure is logged and swallowed.
+    """
+    from shared import pause_owner
+
+    try:
+        if pause_owner.finalize_natural_resume():
+            _log.info("[cluster] pause-owner journal: recorded the deploy pause as resumed")
+    except Exception:
+        _log.warning(
+            "[cluster] pause-owner journal finalize failed (non-fatal); the paused "
+            "record stays for recovery's no-live-owner proof",
+            exc_info=True,
+        )
