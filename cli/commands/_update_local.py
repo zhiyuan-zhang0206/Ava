@@ -17,6 +17,9 @@ frontend-only fast path and the frontend session relaunch it shares:
 - `_boot_gateway_fresh` — `ava start` in a fresh subprocess so start loads the
   synced revision, not this stale interpreter (start applies pending migrations
   itself early in boot).
+- `_restart_schedule_sessions` — after a code-change boot, bounce the old
+  checkout's schedule runner sessions so the fresh gateway's ScheduleManager
+  relaunches them on the new code.
 - `_adopt_child_data_plane_credentials` — refresh the surviving orchestrator's
   credential view after that child returns, before any pin or recovery DB write.
 - `_run_gateway_local_update` — the composed local leg; every failure recovers
@@ -127,6 +130,51 @@ def _restart_frontend_session(repo: Path) -> bool:
     if _ns._new_session(sess, spec.cmd, repo):
         return True
     return _relaunch_once(sess, spec.cmd, repo, None)
+
+
+def _restart_schedule_sessions() -> None:
+    """Bounce gateway-hosted schedule runner sessions after a code-change rollout.
+
+    The fresh gateway's ScheduleManager re-adopts live ``ava-schedule-<id>``
+    sessions at boot (liveness is the session name), so without this step the
+    runners launched from the OLD checkout keep serving — old runner code AND
+    old materialized script text — until the session is killed. 2026-08-27
+    (Task #1746): schedules 1/2/3/5/6/7/8 still ran 08-25 code after two
+    rollouts. Killing the sessions here lets the new manager's reconcile loop
+    relaunch them on the new checkout within one poll interval; a killed
+    runner is a deliberate bounce, not a crash — no 'completed' marker, no
+    breaker count, and a schedule that was running stably has no backoff entry,
+    so the relaunch is immediate.
+
+    Never fatal: a kill failure leaves the old runner serving and must not
+    fail the rollout — the post-rollout checklist's leftover-schedule_runner
+    check is the backstop. Callers only invoke it on the pull path after a
+    successful boot, so sessions are never bounced for a restart-only bounce
+    (same code) or when the rollout is recovering to last-known-good.
+    """
+    from shared.session_backend import get_shell_backend
+
+    prefix = session_name("schedule-")
+    backend = get_shell_backend()
+    try:
+        names = backend.list_sessions(prefix=prefix)
+    except Exception as exc:
+        print(f"  ! schedule session scan failed (non-fatal): {exc}", file=sys.stderr)
+        return
+    if not names:
+        print("  · no schedule runner sessions to restart")
+        return
+    print(f"\n→ restart schedule runner session(s): {', '.join(names)} (new code)")
+    for name in names:
+        try:
+            ok, _detail = backend.kill_session(name)
+        except Exception as exc:
+            print(f"  ! schedule session {name} kill failed (non-fatal): {exc}", file=sys.stderr)
+            continue
+        if not ok:
+            print(f"  ! schedule session {name} kill failed (non-fatal)", file=sys.stderr)
+            continue
+        print(f"  ✓ {name} killed — the schedule manager relaunches it on the new code")
 
 
 def _run_frontend_only_update(repo: Path, origin: str) -> int:
@@ -462,4 +510,9 @@ def _run_gateway_local_update(
     if pull_recover is not None and start_rc != 0:
         print("  ✗ ava start failed", file=sys.stderr)
         return _recover_rc(repo, pull_recover, preserve_frontend)
+    if pull and start_rc == 0:
+        # Code changed: the fresh gateway re-adopted the old checkout's live
+        # schedule sessions, so bounce them — its reconcile loop relaunches
+        # them on the new code within a poll interval (Task #1746).
+        _restart_schedule_sessions()
     return start_rc
