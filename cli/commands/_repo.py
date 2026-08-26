@@ -71,7 +71,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
     package-lock.json changed since the last install — `npm run build` without
     the exact locked deps dies immediately and the session exits (hit by
     first-time install, fresh clone, AND by `ava cluster update` pulling a lockfile that
-    adds a dependency: build fails, `npm run build && npm run start` short-
+    adds a dependency: build fails, `npm run build && exec npm run start` short-
     circuits, port 3000 goes dark).
 
     `node_modules/.ava-lock-hash` stamps the sha256 of the package-lock.json we

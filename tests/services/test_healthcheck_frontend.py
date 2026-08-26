@@ -79,9 +79,15 @@ def test_restart_routes_through_respawn_service(
     # restart, so the frontend could never self-heal.
     assert checkout == tmp_path
     assert extra_env == {"AVA_PROCESS_PROFILE": "gateway"}
-    # build + start ride the respawn command
+    # build + start ride the respawn command, and the serve stage execs — the
+    # session validator (shared.session_env.exec_into) rejects a compound
+    # command whose final stage does not hand over its pid, so without this the
+    # respawn could never launch and a dead frontend could never self-heal.
     assert "npm run build" in cmd
-    assert "npm run start" in cmd
+    assert "exec npm run start -- -p" in cmd
+    from shared.session_env import exec_into
+
+    assert exec_into(cmd) == cmd
 
 
 def test_restart_injects_gateway_port_matching_servicespec(
@@ -114,6 +120,51 @@ def test_restart_injects_gateway_port_matching_servicespec(
 
     spec = next(s for s in repo.build_services() if s.session == "frontend")
     assert "NEXT_PUBLIC_GATEWAY_PORT=8800 npm run build" in spec.cmd
+
+
+def test_respawn_command_is_the_spec_command_single_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The watchdog respawn and the canonical ServiceSpec build the SAME command
+    (shared.cluster.frontend_service_cmd) — the single source that makes drift
+    impossible. The 2026-08-27 prod outage was exactly this drift: the respawn
+    lost its `exec`, the session validator rejected the command, and a dead
+    frontend could never self-heal. Locking both call sites to the builder (and
+    the builder to the validator) closes it for good."""
+    frontend_dir = tmp_path / "ui" / "web"
+    frontend_dir.mkdir(parents=True)
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "project_root", tmp_path)
+
+    cmds: list[str] = []
+    monkeypatch.setattr(
+        hc,
+        "respawn_service",
+        lambda _s, cmd, _repo, **_kw: cmds.append(cmd) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    assert hc._restart() is True
+    assert len(cmds) == 1
+    cmd = cmds[0]
+
+    from urllib.parse import urlsplit
+
+    from shared.cluster import frontend_service_cmd
+
+    # The respawn command is exactly the shared builder's output for this
+    # frontend dir...
+    port = urlsplit(hc._FRONTEND_URL).port or 3000
+    assert cmd == frontend_service_cmd(port, frontend_dir)
+    # ...and the spec's command is the same builder's output for the checkout
+    # root, so the two launch paths differ only in the session's working
+    # directory, never in the command shape.
+    import cli.commands._repo as repo
+
+    spec = next(s for s in repo.build_services() if s.session == "frontend")
+    assert spec.cmd == frontend_service_cmd(port)
+    # Same build env prefix in both (the port baked into the bundle).
+    assert f"NEXT_PUBLIC_GATEWAY_PORT={settings.gateway.gateway_port}" in cmd
+    assert f"NEXT_PUBLIC_GATEWAY_PORT={settings.gateway.gateway_port}" in spec.cmd
 
 
 def test_main_skips_restart_when_session_exists_but_curl_fails(
