@@ -277,6 +277,22 @@ def capture_shell(agent_id: int, session_id: int, lines: int = 200) -> tuple[str
     return full_name, captured_lines
 
 
+def kill_shell(agent_id: int, session_id: int) -> str:
+    """Kill one host-local persistent shell, or report that it is already absent."""
+    shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
+    if shell is None:
+        return "absent"
+    full_name = shared.cluster.session_name(f"agent-{agent_id}-shell-{session_id}") + (
+        f"-{shell.name}" if shell.name else ""
+    )
+    from shared.session_backend import get_shell_backend
+
+    ok, _mode = get_shell_backend().kill_session(full_name)
+    if not ok:
+        raise RuntimeError(f"failed to kill session {full_name!r}")
+    return "killed"
+
+
 def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
     """Enumerate this host's live sessions from the session backends, and return
     (sessions, shell_count, total).

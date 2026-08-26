@@ -5888,6 +5888,8 @@ export interface components {
             title?: string | null;
             /** Serve Dir */
             serve_dir?: string | null;
+            /** Ttl Seconds */
+            ttl_seconds?: number | null;
         };
         /**
          * PageRow

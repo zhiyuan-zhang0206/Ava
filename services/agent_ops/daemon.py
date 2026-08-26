@@ -42,6 +42,7 @@ Work kinds (kind -> operations.py function):
     `inventory_read`  -> inventory_read_op
     `inventory_write` -> inventory_write_op
     `shell_probe`     -> shell_probe_op
+    `shell_kill`      -> shell_kill_op
     `agent_skill_view` -> agent_skill_view_op (runner-discovered command catalog)
     `shell_capture`   -> shell_capture_op
     `upload_receive`  -> upload_receive_op (pull an upload onto this host)
@@ -97,6 +98,7 @@ from ops.rpc_schemas import (
     LifecyclePayload,
     OpEnvelope,
     ShellCapturePayload,
+    ShellKillPayload,
     ShellProbePayload,
     UploadReceivePayload,
 )
@@ -364,6 +366,11 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
         case "shell_probe":
             sp = ShellProbePayload.model_validate(payload)
             return "completed", ops_cluster.shell_probe_op(sp.agent_id).model_dump(mode="json")
+        case "shell_kill":
+            sk = ShellKillPayload.model_validate(payload)
+            return "completed", ops_cluster.shell_kill_op(sk.agent_id, sk.session_id).model_dump(
+                mode="json"
+            )
         case "agent_skill_view":
             asv = AgentSkillViewPayload.model_validate(payload)
             return "completed", ops_cluster.agent_skill_view_op(asv.agent_id, _db_pool).model_dump(

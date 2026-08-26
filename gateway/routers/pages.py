@@ -18,6 +18,7 @@ The proxy streams the upstream response chunk-by-chunk (StreamingResponse)
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import ipaddress
 import re as _re
 import threading
@@ -57,6 +58,20 @@ _PROXY_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0)
 _PAGE_HOST_CACHE_TTL_S = 60.0
 _page_host_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _page_host_cache_lock = threading.Lock()
+
+
+def _EXPIRED_PAGE_HTML(agent_id: int, name: str) -> str:  # noqa: N802 — fixed contract name
+    """Small self-contained response for links whose page TTL elapsed."""
+    escaped_name = _html.escape(name)
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>Page expired</title></head><body><main>"
+        "<h1>Page expired</h1>"
+        "<p>页面已过期，请让 agent 重新 serve</p>"  # noqa: RUF001 — PM-specified user-facing copy (fullwidth comma is part of the text)
+        f"<p>Page {escaped_name} · agent {agent_id}</p>"
+        "</main></body></html>"
+    )
+
 
 # Response headers forwarded from the page server; everything else
 # (hop-by-hop, server internals) is dropped. Content-Length is forwarded too
@@ -232,6 +247,15 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
         _page_target_blocking, request.app.state.db_pool, agent_id, name
     )
     if target_row is None:
+        expired = await asyncio.to_thread(
+            _page_expired_blocking, request.app.state.db_pool, agent_id, name
+        )
+        if expired:
+            return Response(
+                status_code=410,
+                media_type="text/html",
+                content=_EXPIRED_PAGE_HTML(agent_id, name),
+            )
         raise HTTPException(status_code=404, detail=f"page {name!r} not open (agent {agent_id})")
     host, port = target_row
     await asyncio.to_thread(_validate_proxy_page_target, request.app.state.db_pool, agent_id, host)
@@ -454,7 +478,14 @@ def _register_page_blocking(
         # Close any existing open pages for this agent before registering a new one.
         closed_names = close_all_agent_pages(conn, agent_id)
         record = register_page(
-            conn, agent_id, body.name, body.port, body.host, body.title, body.serve_dir
+            conn,
+            agent_id,
+            body.name,
+            body.port,
+            body.host,
+            body.title,
+            body.serve_dir,
+            body.ttl_seconds,
         )
     return record, closed_names
 
@@ -477,3 +508,15 @@ def _page_target_blocking(pool: ConnectionPool, agent_id: int, name: str) -> tup
     """Sync open-page target lookup — via to_thread (the proxy dial path)."""
     with pool.connection() as conn:
         return get_open_page_target(conn, agent_id, name)
+
+
+def _page_expired_blocking(pool: ConnectionPool, agent_id: int, name: str) -> bool:
+    """Whether the newest registry row for this page name expired."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT expired_at IS NOT NULL FROM agent_pages "
+            "WHERE agent_id = %s AND name = %s ORDER BY id DESC LIMIT 1",
+            (agent_id, name),
+        )
+        row = cur.fetchone()
+    return bool(row[0]) if row is not None else False

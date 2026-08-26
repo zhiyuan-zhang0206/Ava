@@ -21,14 +21,19 @@ already-closed.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
 
 from ops.rpc_schemas import PageRow
+from shared.config import settings
 from shared.db import fetch_one
 
-_SELECT_COLUMNS = "id, agent_id, name, port, host, title, serve_dir, created_at, closed_at"
+_SELECT_COLUMNS = (
+    "id, agent_id, name, port, host, title, serve_dir, created_at, closed_at, "
+    "expires_at, expired_at"
+)
 
 
 def _page_url(agent_id: int, name: str) -> str:
@@ -45,7 +50,19 @@ def _page_url(agent_id: int, name: str) -> str:
 
 
 def _row_to_record(row: tuple[Any, ...]) -> PageRow:
-    pid, agent_id, name, port, _host, title, serve_dir, created_at, closed_at = row
+    (
+        pid,
+        agent_id,
+        name,
+        port,
+        _host,
+        title,
+        serve_dir,
+        created_at,
+        closed_at,
+        _expires_at,
+        _expired_at,
+    ) = row
     return PageRow(
         id=pid,
         agent_id=agent_id,
@@ -67,6 +84,7 @@ def register_page(
     host: str,
     title: str | None,
     serve_dir: str | None = None,
+    ttl_seconds: int | None = None,
 ) -> PageRow:
     """Register or update an open page.
 
@@ -80,20 +98,24 @@ def register_page(
     server after resurrect/restart; NULL for ava.ui.show() pages (the agent
     manages those servers itself).
     """
+    ttl = ttl_seconds if ttl_seconds is not None else settings.daemon.page_default_ttl_seconds
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
     with db.cursor() as cur:
         cur.execute(
-            "UPDATE agent_pages SET port = %s, host = %s, title = %s, serve_dir = %s "  # noqa: S608
+            "UPDATE agent_pages SET port = %s, host = %s, title = %s, serve_dir = %s, "  # noqa: S608
+            "expires_at = %s, expired_at = NULL "
             "WHERE agent_id = %s AND name = %s AND closed_at IS NULL "
             "RETURNING " + _SELECT_COLUMNS,
-            (port, host, title, serve_dir, agent_id, name),
+            (port, host, title, serve_dir, expires_at, agent_id, name),
         )
         row = cur.fetchone()
         if row is None:
             cur.execute(
-                "INSERT INTO agent_pages (agent_id, name, port, host, title, serve_dir) "
-                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "INSERT INTO agent_pages "
+                "(agent_id, name, port, host, title, serve_dir, expires_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING " + _SELECT_COLUMNS,
-                (agent_id, name, port, host, title, serve_dir),
+                (agent_id, name, port, host, title, serve_dir, expires_at),
             )
             row = fetch_one(cur, f"insert page agent={agent_id} name={name!r}")
     db.commit()
@@ -132,7 +154,8 @@ def get_open_page_target(
     with db.cursor() as cur:
         cur.execute(
             "SELECT host, port FROM agent_pages "
-            "WHERE agent_id = %s AND name = %s AND closed_at IS NULL",
+            "WHERE agent_id = %s AND name = %s "
+            "AND closed_at IS NULL AND expired_at IS NULL",
             (agent_id, name),
         )
         row = cur.fetchone()
@@ -144,7 +167,7 @@ def list_open_pages(db: psycopg.Connection, agent_id: int) -> list[PageRow]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
-            "WHERE agent_id = %s AND closed_at IS NULL "
+            "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL "
             "ORDER BY created_at ASC",
             (agent_id,),
         )
@@ -159,7 +182,7 @@ def list_all_open_pages(db: psycopg.Connection) -> list[PageRow]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
-            "WHERE closed_at IS NULL ORDER BY created_at ASC",
+            "WHERE closed_at IS NULL AND expired_at IS NULL ORDER BY created_at ASC",
         )
         rows = cur.fetchall()
     return [_row_to_record(r) for r in rows]
@@ -185,14 +208,15 @@ def close_all_agent_pages(
     """
     with db.cursor() as cur:
         cur.execute(
-            "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
+            "SELECT name FROM agent_pages "
+            "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL",
             (agent_id,),
         )
         names = [r[0] for r in cur.fetchall()]
         if names:
             cur.execute(
                 "UPDATE agent_pages SET closed_at = now() "
-                "WHERE agent_id = %s AND closed_at IS NULL",
+                "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL",
                 (agent_id,),
             )
     db.commit()
@@ -214,7 +238,8 @@ def list_open_page_names(db: psycopg.Connection, agent_id: int) -> list[str]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT name FROM agent_pages "
-            "WHERE agent_id = %s AND closed_at IS NULL AND serve_dir IS NULL",
+            "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL "
+            "AND serve_dir IS NULL",
             (agent_id,),
         )
         return [r[0] for r in cur.fetchall()]

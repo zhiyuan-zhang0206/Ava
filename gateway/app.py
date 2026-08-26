@@ -76,6 +76,7 @@ from gateway import (
     loki_events,
     loki_query_budget,
     prom_metrics,
+    ttl_reaper,
 )
 from gateway import mcp_endpoint as _mcp_endpoint
 from gateway._cors import cors_allowed_origins
@@ -297,6 +298,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         alerts_router.publish_alert_rows,
     )
 
+    # TTL reaper — enforce serve() page and persistent-shell deadlines (user
+    # ruling 2026-08-25). Owns no request path; a pass that fails logs and
+    # retries on the next interval.
+    app.state.ttl_reaper = ttl_reaper.start_ttl_reaper(app.state.db_pool)
+
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
     # refreshes the plist, so an `ava cluster update` that changes the probe command
@@ -364,6 +370,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             yield
     finally:
         app.state.mcp_manager = None
+        await ttl_reaper.stop_ttl_reaper(app.state.ttl_reaper)
         await alert_reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
         await app.state.grafana_client.aclose()
         app.state.latency_flusher.cancel()

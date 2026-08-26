@@ -54,7 +54,8 @@ def _mark_preclaim_terminated(agent_id: int) -> None:
         # Capture only agent-owned pages before the terminal transition closes them.
         cur.execute(
             "SELECT name FROM agent_pages "
-            "WHERE agent_id = %s AND closed_at IS NULL AND serve_dir IS NULL",
+            "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL "
+            "AND serve_dir IS NULL",
             (agent_id,),
         )
         page_names = [r[0] for r in cur.fetchall()]

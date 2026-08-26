@@ -154,6 +154,32 @@ def test_proxy_404_closed_page(db_conn, page_server: int) -> None:  # pyright: i
     assert resp.status_code == 404
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/pages/{agent_id}-p/",
+        "/api/agents/{agent_id}/pages/p/",
+    ],
+)
+def test_proxy_410_expired_page(db_conn: psycopg.Connection, page_server: int, path: str) -> None:
+    aid = create_agent(db_conn)
+    with TestClient(app) as client:
+        _register(client, aid, "p", page_server)
+        db_conn.rollback()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = 'p'",
+                (aid,),
+            )
+        db_conn.commit()
+        response = client.get(path.format(agent_id=aid))
+
+    assert response.status_code == 410
+    assert response.headers["content-type"].startswith("text/html")
+    assert "页面已过期，请让 agent 重新 serve" in response.text
+    assert "Page expired" in response.text
+
+
 def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     with TestClient(app) as client:
         resp = client.get("/api/pages/99999-p/")

@@ -10920,6 +10920,18 @@
               }
             ],
             "title": "Serve Dir"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Seconds"
           }
         },
         "type": "object",

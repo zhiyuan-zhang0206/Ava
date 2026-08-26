@@ -710,6 +710,7 @@ def register_page(
     host: str,
     title: str | None,
     serve_dir: str | None = None,
+    ttl_seconds: int | None = None,
 ) -> dict:
     """POST /api/agents/{id}/pages → PageRow dict (id/name/port/title/...).
 
@@ -722,6 +723,8 @@ def register_page(
         body["title"] = title
     if serve_dir is not None:
         body["serve_dir"] = serve_dir
+    if ttl_seconds is not None:
+        body["ttl_seconds"] = ttl_seconds
     resp = _post(f"/api/agents/{agent_id}/pages", body)
     _raise_from_response(resp)
     return resp.json()

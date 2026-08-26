@@ -1056,6 +1056,18 @@ EVENTS: dict[str, EventSpec] = {
         payload=PageServeDirMissing,
         doc="a served page directory disappeared; emitted on degradation and auto-close",
     ),
+    "page_ttl_expired": EventSpec(
+        name="page_ttl_expired",
+        category="log",
+        tier="observation",
+        doc="the gateway TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id",
+    ),
+    "shell_ttl_expired": EventSpec(
+        name="shell_ttl_expired",
+        category="log",
+        tier="observation",
+        doc="the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode",
+    ),
 }
 
 

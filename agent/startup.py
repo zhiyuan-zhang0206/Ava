@@ -403,7 +403,7 @@ async def reconcile_open_pages(
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 "SELECT name, port, host, title, serve_dir FROM agent_pages "
-                "WHERE agent_id = %s AND closed_at IS NULL",
+                "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL",
                 (agent_id,),
             )
             rows = [(r[0], r[1], r[2], r[3], r[4]) for r in await cur.fetchall()]
@@ -475,6 +475,7 @@ async def _close_open_page(pool: AsyncConnectionPool, agent_id: int, name: str) 
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE agent_pages SET closed_at = now() "
-            "WHERE agent_id = %s AND name = %s AND closed_at IS NULL",
+            "WHERE agent_id = %s AND name = %s AND closed_at IS NULL "
+            "AND expired_at IS NULL",
             (agent_id, name),
         )

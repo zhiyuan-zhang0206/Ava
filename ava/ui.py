@@ -16,6 +16,7 @@ from __future__ import annotations
 __all_for_ava__ = ["Page", "close", "serve", "serve_markdown", "show"]
 
 import functools as _functools
+import math as _math
 import re as _re
 import shutil as _shutil
 import time as _time
@@ -133,6 +134,12 @@ def _validate_name(name: str) -> None:
         )
 
 
+def _validate_ttl(ttl: float | None) -> float | None:
+    if ttl is not None and (not _math.isfinite(ttl) or ttl <= 0):
+        raise ValueError("ttl must be finite and greater than zero")
+    return ttl
+
+
 def _page_is_serving(host: str, port: int) -> bool:
     """Whether an HTTP server answers on (host, port) — the daemon's server
     (any token; identity is the daemon's concern, not the caller's)."""
@@ -153,7 +160,14 @@ def _wait_until_serving(host: str, port: int, *, timeout: float) -> bool:
     return False
 
 
-def _register_page(name: str, port: int | None, title: str | None, serve_dir: str | None) -> Page:
+def _register_page(
+    name: str,
+    port: int | None,
+    title: str | None,
+    serve_dir: str | None,
+    *,
+    ttl: float | None = None,
+) -> Page:
     """Gateway registration shared by show() and serve().
 
     Closes any existing page first (one agent, one page), then writes the
@@ -164,18 +178,35 @@ def _register_page(name: str, port: int | None, title: str | None, serve_dir: st
     _close_existing()
     if port is None:
         port = _agent_page_port()
-    row = _gateway_client.register_page(
-        ava._boot.agent_id(),
-        name=name,
-        port=port,
-        host=reachable_host(),
-        title=title,
-        serve_dir=serve_dir,
-    )
+    if ttl is None:
+        row = _gateway_client.register_page(
+            ava._boot.agent_id(),
+            name=name,
+            port=port,
+            host=reachable_host(),
+            title=title,
+            serve_dir=serve_dir,
+        )
+    else:
+        row = _gateway_client.register_page(
+            ava._boot.agent_id(),
+            name=name,
+            port=port,
+            host=reachable_host(),
+            title=title,
+            serve_dir=serve_dir,
+            ttl_seconds=int(ttl),
+        )
     return _row_to_page(row)
 
 
-def show(name: str, port: int | None = None, title: str | None = None) -> Page:
+def show(
+    name: str,
+    port: int | None = None,
+    title: str | None = None,
+    *,
+    ttl: float | None = None,
+) -> Page:
     """Show the user the page your HTTP server serves.
 
     Declares the page with the platform so the platform routes your
@@ -188,11 +219,20 @@ def show(name: str, port: int | None = None, title: str | None = None) -> Page:
         port: the port your server listens on; omit to use the port
             reserved for you.
         title: defaults to `name`.
+        ttl: optional page lifetime in seconds; the gateway default applies
+            when omitted.
     """
-    return _register_page(name, port, title, serve_dir=None)
+    return _register_page(name, port, title, serve_dir=None, ttl=_validate_ttl(ttl))
 
 
-def serve(dir: str, name: str, port: int | None = None, title: str | None = None) -> Page:
+def serve(
+    dir: str,
+    name: str,
+    port: int | None = None,
+    title: str | None = None,
+    *,
+    ttl: float | None = None,
+) -> Page:
     """Start an HTTP server for `dir` and show it to the user, in one call.
 
     Declares the page (the content already lives in `dir`) and waits for the
@@ -212,7 +252,10 @@ def serve(dir: str, name: str, port: int | None = None, title: str | None = None
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
         port: omit to use the port reserved for you.
         title: defaults to `name`.
+        ttl: optional page lifetime in seconds; the gateway default applies
+            when omitted.
     """
+    ttl = _validate_ttl(ttl)
     _validate_name(name)
 
     if port is None:
@@ -220,7 +263,7 @@ def serve(dir: str, name: str, port: int | None = None, title: str | None = None
 
     _close_existing()
 
-    page = _register_page(name, port, title, serve_dir=str(Path(dir).resolve()))
+    page = _register_page(name, port, title, serve_dir=str(Path(dir).resolve()), ttl=ttl)
 
     # The daemon reconciles on a ~2s poll; wait for the server it spawns.
     if not _wait_until_serving(reachable_host(), port, timeout=_SERVE_READY_TIMEOUT_S):
@@ -233,7 +276,12 @@ def serve(dir: str, name: str, port: int | None = None, title: str | None = None
 
 
 def serve_markdown(
-    content: str, name: str, port: int | None = None, title: str | None = None
+    content: str,
+    name: str,
+    port: int | None = None,
+    title: str | None = None,
+    *,
+    ttl: float | None = None,
 ) -> Page:
     """Serve Markdown as a rendered HTML page (LaTeX math, code highlighting,
     GFM tables) — same behavior as `serve`, including the port rules.
@@ -242,7 +290,10 @@ def serve_markdown(
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
         port: omit to use the port reserved for you.
         title: defaults to `name`.
+        ttl: optional page lifetime in seconds; the gateway default applies
+            when omitted.
     """
+    ttl = _validate_ttl(ttl)
     _validate_name(name)
 
     # Locate the Markdown widget shipped alongside the SDK
@@ -271,7 +322,7 @@ def serve_markdown(
     # Defer tracking the new dir until after serve() succeeds, so that
     # _close_existing() -> close() does not delete the new tmpdir when
     # the page name is reused.
-    result = serve(str(tmpdir), name, port, title)
+    result = serve(str(tmpdir), name, port, title, ttl=ttl)
     _markdown_dirs[name] = str(tmpdir)
     return result
 

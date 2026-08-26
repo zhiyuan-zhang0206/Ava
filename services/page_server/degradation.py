@@ -46,7 +46,8 @@ def _close_row(pool: ConnectionPool, row_id: int) -> bool:
     """Close one still-open page row, returning whether this call changed it."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE agent_pages SET closed_at = now() WHERE id = %s AND closed_at IS NULL",
+            "UPDATE agent_pages SET closed_at = now() "
+            "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL",
             (row_id,),
         )
         return cur.rowcount == 1
