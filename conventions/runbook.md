@@ -374,6 +374,9 @@ authoritative and boot-time provisioning only inserts rows that are missing, so 
 template in `schedules/` reaches a running cluster only through an explicit
 `ava schedules update <name> --script-file <template>` (which relaunches an enabled
 schedule on the spot) — see [`schedules/README.md`](../schedules/README.md).
+The schedule runner PROCESS is the exception: a code-change rollout bounces every live
+`ava-schedule-<id>` session after the gateway boots, so runners (and the script text
+they materialized at launch) always run the new checkout (Task #1746).
 On agent-runners it also runs capability preflights that fail loud rather than letting
 a missing capability surface later: a headed Chrome (when the browser is enabled, see
 below), a **writable shared Google Drive folder**, and **the ability to open and merge
