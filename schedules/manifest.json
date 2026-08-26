@@ -46,7 +46,7 @@
       "name": "trace-ship-tempo",
       "class": "operator",
       "default_enabled": false,
-      "description": "Replay the local trace mirror (collector JSONL) to Tempo every 5 minutes — gap-replay only since task #1266 (the sidecar fans traces out live); incremental by per-file watermark.",
+      "description": "Ship the local OTel trace mirror to the local Tempo viewer (LGTM stack) every 5 minutes, incremental by per-file watermark.",
       "script": "trace-ship-tempo-schedule.py",
       "command": "python trace-ship-tempo-schedule.py"
     }
