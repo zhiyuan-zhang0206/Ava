@@ -140,8 +140,25 @@ def _is_exec_ok(event: str) -> bool:
     return event == "exec"
 
 
+_EXEC_FAIL_EVENTS = frozenset(
+    {
+        "exec_failed",
+        "exec_timeout",
+        "exec_node_timeout",
+        "exec_cancelled",
+        "exec_subprocess_aborted",
+        "exec_subprocess_killed",
+        "exec_result_envelope_invalid",
+    }
+)
+
+
 def _is_exec_fail(event: str) -> bool:
-    return event != "exec" and event.startswith(("exec_", "exec("))
+    # Exact failure/abnormal names only. `exec_envelope` is the per-execution
+    # wrapper (timing/counters), not an outcome — counting it as a failure
+    # inflated every Codex-driven run's exec_failed (observed 2026-08-25:
+    # dataset exec_failed=18 vs Loki exec_failed=0, 87 envelopes).
+    return event in _EXEC_FAIL_EVENTS
 
 
 def _msg_text(content: Any) -> str:
