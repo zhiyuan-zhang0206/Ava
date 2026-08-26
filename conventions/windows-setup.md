@@ -68,6 +68,7 @@ the same operator-approved version `scripts/provision/toolchain.sh` and CI
 run — instead of the astral installer's rolling latest. PowerShell (x86_64):
 
 ```powershell
+$ErrorActionPreference = "Stop"
 if (Get-Command uv -ErrorAction SilentlyContinue) {
   Write-Host "uv already present ($(uv --version))"
 } else {
@@ -80,9 +81,11 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
   $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
   if ($actual -ne $expected) { throw "uv $v sha256 mismatch: got $actual, expected $expected" }
   Expand-Archive -Path $zip -DestinationPath $tmp
+  # The 0.10.2 Windows zip carries uv.exe at the zip root (no uv-<tag>/ dir,
+  # unlike the POSIX tarballs toolchain.sh unpacks).
   $dest = Join-Path $env:USERPROFILE ".local\bin"
   New-Item -ItemType Directory -Force $dest | Out-Null
-  Copy-Item (Join-Path $tmp "uv-x86_64-pc-windows-msvc\uv.exe") $dest -Force
+  Copy-Item (Join-Path $tmp "uv.exe") $dest -Force
 }
 ```
 
