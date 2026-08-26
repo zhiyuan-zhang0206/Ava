@@ -2016,6 +2016,10 @@ class TestQueryProjectedLines:
             assert '| event_name=~"code"' not in q
         if era is LokiReadEra.INDEXED:
             assert 'event_name="code"' in range_queries[0]
+        else:
+            # The legacy selector must stay matcher-free — an SM event_name
+            # matcher there would reintroduce the batch-reuse label mismatch.
+            assert 'event_name="code"' not in range_queries[0]
 
 
 # ─── count_events_series / attribute_max_series (ops panel, task #1197) ─────
