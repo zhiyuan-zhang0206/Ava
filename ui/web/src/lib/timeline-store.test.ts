@@ -11,7 +11,7 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MAX_TIMELINE_ITEMS, useTimelineStore } from "./timeline-store";
+import { useTimelineStore } from "./timeline-store";
 import type { AgentRow, BackendTimelineItem, SystemEvent } from "./types";
 
 // -- helpers ───────────────────────────────────────────────────────────────
@@ -719,8 +719,11 @@ describe("scrollToBottomRequest force-scroll signal", () => {
 // -- reloadSnapshot ─────────────────────────────────────────────────────────
 
 describe("reloadSnapshot", () => {
-  it("retains only the newest 6000 items from an oversized snapshot", () => {
-    const snapshot = Array.from({ length: MAX_TIMELINE_ITEMS + 1 }, (_, index) =>
+  it("retains an oversized snapshot in full and honors backend has_more", () => {
+    // Task #1734: the old 6000-item cap is gone — a snapshot larger than the
+    // former ceiling is kept verbatim and hasMoreOlder stays whatever the
+    // backend reported (true here), so scroll-up paging can continue.
+    const snapshot = Array.from({ length: 6_001 }, (_, index) =>
       item({ item_id: `${index + 1}.0`, payload: `snapshot ${index + 1}` }),
     );
 
@@ -729,10 +732,10 @@ describe("reloadSnapshot", () => {
     });
 
     const state = useTimelineStore.getState();
-    expect(state.items).toHaveLength(MAX_TIMELINE_ITEMS);
-    expect(state.items[0].item_id).toBe("2.0");
-    expect(state.items.at(-1)?.item_id).toBe(`${MAX_TIMELINE_ITEMS + 1}.0`);
-    expect(state.hasMoreOlder).toBe(false);
+    expect(state.items).toHaveLength(6_001);
+    expect(state.items[0].item_id).toBe("1.0");
+    expect(state.items.at(-1)?.item_id).toBe("6001.0");
+    expect(state.hasMoreOlder).toBe(true);
   });
 
   it("hard reset: stable-id partial discarded when not in snapshot, replaced by snapshot", () => {
@@ -1198,7 +1201,9 @@ describe("prependOlder / load-older flags", () => {
     expect(s.hasMoreOlder).toBe(true);
   });
 
-  it("caps prepended history at 6000 newest items and stops older paging", () => {
+  it("prepends history beyond the old 6000 cap without dropping items", () => {
+    // Task #1734: crossing the former 6000-item ceiling no longer discards
+    // the oldest items — every prepended page is retained.
     const current = Array.from({ length: 5_999 }, (_, index) =>
       item({ item_id: `${index + 1_000}.0`, payload: `current ${index}` }),
     );
@@ -1206,7 +1211,7 @@ describe("prependOlder / load-older flags", () => {
       useTimelineStore.setState({ items: current, hasMoreOlder: true, loadingOlder: true });
       useTimelineStore.getState().prependOlder(
         [
-          item({ item_id: "s1.boundary.0.0", payload: "oldest dropped" }),
+          item({ item_id: "s1.boundary.0.0", payload: "oldest kept" }),
           item({ item_id: "s1.boundary.1.0", payload: "nearest older kept" }),
         ],
         true,
@@ -1214,28 +1219,31 @@ describe("prependOlder / load-older flags", () => {
     });
 
     const state = useTimelineStore.getState();
-    expect(state.items).toHaveLength(6_000);
-    expect(state.items[0].item_id).toBe("s1.boundary.1.0");
-    expect(state.items.some((entry) => entry.item_id === "s1.boundary.0.0")).toBe(false);
-    expect(state.hasMoreOlder).toBe(false);
+    expect(state.items).toHaveLength(6_001);
+    expect(state.items[0].item_id).toBe("s1.boundary.0.0");
+    expect(state.items.some((entry) => entry.item_id === "s1.boundary.1.0")).toBe(true);
+    expect(state.hasMoreOlder).toBe(true);
     expect(state.loadingOlder).toBe(false);
   });
 
-  it("stops older paging when the retained timeline reaches exactly 6000 items", () => {
+  it("keeps paging when the retained timeline reaches exactly 6000 items", () => {
     const current = Array.from({ length: 5_999 }, (_, index) =>
       item({ item_id: `${index + 1_000}.0` }),
     );
     act(() => {
       useTimelineStore.setState({ items: current, hasMoreOlder: true, loadingOlder: true });
       useTimelineStore.getState().prependOlder(
-        [item({ item_id: "s1.boundary.0.0", payload: "last allowed older item" })],
+        [item({ item_id: "s1.boundary.0.0", payload: "6000th retained item" })],
         true,
       );
     });
 
     const state = useTimelineStore.getState();
     expect(state.items).toHaveLength(6_000);
-    expect(state.hasMoreOlder).toBe(false);
+    expect(state.items[0].item_id).toBe("s1.boundary.0.0");
+    // Reaching the former cap no longer forces hasMoreOlder=false — the
+    // backend's has_more is the only authority on whether older items exist.
+    expect(state.hasMoreOlder).toBe(true);
   });
 
   it("switchThread clears hasMoreOlder + loadingOlder (cold)", () => {
@@ -1249,48 +1257,48 @@ describe("prependOlder / load-older flags", () => {
   });
 });
 
-describe("timeline item budget across live writers", () => {
+describe("no per-thread item cap across live writers (task #1734)", () => {
   const fullTimeline = () =>
-    Array.from({ length: MAX_TIMELINE_ITEMS }, (_, index) =>
+    Array.from({ length: 6_000 }, (_, index) =>
       item({ item_id: `${index + 1}.0`, payload: `item ${index + 1}` }),
     );
 
-  it("caps active SSE growth at 6000 newest items", () => {
+  it("keeps active SSE growth past 6000 items", () => {
     act(() => {
       useTimelineStore.setState({ items: fullTimeline(), hasMoreOlder: true });
       useTimelineStore.getState().processSseEvent({
         role: "chat_start",
         agent_id: 42,
-        item_id: `${MAX_TIMELINE_ITEMS + 1}.0`,
+        item_id: "6001.0",
       });
     });
 
     const state = useTimelineStore.getState();
-    expect(state.items).toHaveLength(MAX_TIMELINE_ITEMS);
-    expect(state.items[0].item_id).toBe("2.0");
-    expect(state.items.at(-1)?.item_id).toBe(`${MAX_TIMELINE_ITEMS + 1}.0`);
-    expect(state.hasMoreOlder).toBe(false);
+    expect(state.items).toHaveLength(6_001);
+    expect(state.items[0].item_id).toBe("1.0");
+    expect(state.items.at(-1)?.item_id).toBe("6001.0");
+    expect(state.hasMoreOlder).toBe(true);
   });
 
-  it("caps SSE growth in a parked thread bucket", () => {
+  it("keeps SSE growth in a parked thread bucket past 6000 items", () => {
     act(() => {
       useTimelineStore.getState().switchThread(1, fullTimeline(), true);
       useTimelineStore.getState().switchThread(2, null, false);
       useTimelineStore.getState().processSseEvent({
         role: "chat_start",
         agent_id: 1,
-        item_id: `${MAX_TIMELINE_ITEMS + 1}.0`,
+        item_id: "6001.0",
       });
     });
 
     const parked = useTimelineStore.getState().threads.get(1);
-    expect(parked?.items).toHaveLength(MAX_TIMELINE_ITEMS);
-    expect(parked?.items[0].item_id).toBe("2.0");
-    expect(parked?.items.at(-1)?.item_id).toBe(`${MAX_TIMELINE_ITEMS + 1}.0`);
-    expect(parked?.hasMoreOlder).toBe(false);
+    expect(parked?.items).toHaveLength(6_001);
+    expect(parked?.items[0].item_id).toBe("1.0");
+    expect(parked?.items.at(-1)?.item_id).toBe("6001.0");
+    expect(parked?.hasMoreOlder).toBe(true);
   });
 
-  it("caps an oversized switchThread seed", () => {
+  it("keeps an oversized switchThread seed in full", () => {
     const oversized = [
       item({ item_id: "0.0", payload: "oldest" }),
       ...fullTimeline(),
@@ -1301,10 +1309,55 @@ describe("timeline item budget across live writers", () => {
     });
 
     const state = useTimelineStore.getState();
-    expect(state.items).toHaveLength(MAX_TIMELINE_ITEMS);
-    expect(state.items[0].item_id).toBe("1.0");
-    expect(state.items.at(-1)?.item_id).toBe(`${MAX_TIMELINE_ITEMS}.0`);
+    expect(state.items).toHaveLength(6_001);
+    expect(state.items[0].item_id).toBe("0.0");
+    expect(state.items.at(-1)?.item_id).toBe("6000.0");
+    expect(state.hasMoreOlder).toBe(true);
+  });
+
+  it("infinite paging: repeated prependOlder pages accumulate without a local cap", () => {
+    // -1 (unlimited) semantics: the backend keeps returning has_more=true, so
+    // the frontend must keep accumulating pages far beyond the former
+    // 6000-item ceiling instead of self-stopping.
+    const pages = 10;
+    const pageSize = 1_000;
+    act(() => {
+      useTimelineStore.setState({ items: [], hasMoreOlder: true, loadingOlder: true });
+      for (let page = 0; page < pages; page++) {
+        const older = Array.from({ length: pageSize }, (_, index) =>
+          item({
+            item_id: `s1.boundary.${page * pageSize + index}.0`,
+            payload: `page ${page}`,
+          }),
+        );
+        useTimelineStore.getState().prependOlder(older, true);
+      }
+    });
+
+    const state = useTimelineStore.getState();
+    expect(state.items).toHaveLength(pages * pageSize);
+    expect(state.items[0].item_id).toBe("s1.boundary.0.0");
+    expect(state.items.at(-1)?.item_id).toBe(`s1.boundary.${pages * pageSize - 1}.0`);
+    // Backend has_more=true for every page — paging never self-stops.
+    expect(state.hasMoreOlder).toBe(true);
+    expect(state.loadingOlder).toBe(false);
+  });
+
+  it("infinite paging ends only when the backend reports has_more=false", () => {
+    // The backend's has_more is the sole authority: a page with
+    // has_more=false closes paging even with a small retained timeline.
+    act(() => {
+      useTimelineStore.setState({ items: [], hasMoreOlder: true, loadingOlder: true });
+      useTimelineStore.getState().prependOlder(
+        [item({ item_id: "s1.boundary.0.0", payload: "last segment tail" })],
+        false,
+      );
+    });
+
+    const state = useTimelineStore.getState();
+    expect(state.items).toHaveLength(1);
     expect(state.hasMoreOlder).toBe(false);
+    expect(state.loadingOlder).toBe(false);
   });
 });
 
