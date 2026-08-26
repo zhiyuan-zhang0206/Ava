@@ -43,9 +43,12 @@ def repo(tmp_path: Path) -> Path:
     return r
 
 
-def _patch_leg(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drive `_run_gateway_local_update` with every external step stubbed."""
-    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set()))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+def _patch_leg(monkeypatch: pytest.MonkeyPatch, *, from_sha: str = "old123") -> None:
+    """Drive `_run_gateway_local_update` with every external step stubbed.
+
+    `from_sha` is the pre-update HEAD the known-good snapshot records — the
+    rollout's no-op test passes the same value as the target."""
+    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: (from_sha, set()))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -54,16 +57,32 @@ def _patch_leg(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_pull_path_bounces_schedule_sessions(
     monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """A code-change rollout kills the old checkout's live schedule sessions so
-    the fresh gateway's reconcile loop relaunches them on the new code."""
+    """A code-change rollout (host on old123, target abc123) kills the old
+    checkout's live schedule sessions so the fresh gateway's reconcile loop
+    relaunches them on the new code."""
     backend = _FakeBackend([session_name("schedule-1"), session_name("schedule-2")])
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
-    _patch_leg(monkeypatch)
+    _patch_leg(monkeypatch, from_sha="old123")
 
     assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
 
     assert backend.killed == [session_name("schedule-1"), session_name("schedule-2")]
     assert "restart schedule runner session" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_noop_update_skips_schedule_bounce(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A no-op rollout (host already on the target commit) changes no code —
+    sessions must not be bounced (an in-flight fire is not interrupted for
+    nothing), even though the gateway still restarts."""
+    backend = _FakeBackend([session_name("schedule-1")])
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
+    _patch_leg(monkeypatch, from_sha="abc123")
+
+    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+
+    assert backend.killed == []
 
 
 def test_restart_only_skips_schedule_bounce(

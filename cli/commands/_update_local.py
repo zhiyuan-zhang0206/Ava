@@ -510,9 +510,12 @@ def _run_gateway_local_update(
     if pull_recover is not None and start_rc != 0:
         print("  ✗ ava start failed", file=sys.stderr)
         return _recover_rc(repo, pull_recover, preserve_frontend)
-    if pull and start_rc == 0:
-        # Code changed: the fresh gateway re-adopted the old checkout's live
-        # schedule sessions, so bounce them — its reconcile loop relaunches
-        # them on the new code within a poll interval (Task #1746).
+    if pull and start_rc == 0 and pull_recover is not None and pull_recover[0] != target_sha:
+        # Code changed (the rollout landed a different commit than the host was
+        # on): the fresh gateway re-adopted the old checkout's live schedule
+        # sessions, so bounce them — its reconcile loop relaunches them on the
+        # new code within a poll interval (Task #1746). A no-op update
+        # (from == target) changes no code and must not interrupt in-flight
+        # fires for nothing (review, PR #713).
         _restart_schedule_sessions()
     return start_rc
