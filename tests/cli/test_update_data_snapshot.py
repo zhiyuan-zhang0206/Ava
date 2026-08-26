@@ -73,9 +73,14 @@ def test_code_only_update_skips_pre_update_data_snapshot(
 
 
 def test_migration_update_creates_and_verifies_pre_update_dump(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A migration delta makes a bounded managed dump and proves it has a TOC."""
+    """A migration delta makes a bounded managed dump and proves it has a TOC.
+
+    The verified path is printed to the rollout output so the snapshot is
+    visible in the log — without the line, an operator mistakes it for an
+    unscheduled backup (2026-08-26 incident).
+    """
     _patch_migration_sets(monkeypatch, {"baseline", "20260825T010101_expand"}, {"baseline"})
     dump = tmp_path / "pre-update.dump"
     dump.write_bytes(b"custom-pg-dump")
@@ -92,6 +97,8 @@ def test_migration_update_creates_and_verifies_pre_update_dump(
     assert _git.snapshot_pre_update_data("TARGETSHA") == dump
     assert backup_calls == [_git._PRE_UPDATE_DUMP_TIMEOUT_S]
     assert verified == [dump]
+    out = capsys.readouterr().out
+    assert f"→ pre-update data snapshot: {dump} (verified)" in out
 
 
 def test_pre_update_data_snapshot_wraps_backup_failure(
