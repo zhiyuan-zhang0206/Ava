@@ -26,10 +26,12 @@ def _plist_path(tmp_path: Path) -> Path:
 
 def _patch_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the macOS branch so these tests exercise the step on every host
-    (CI is Linux; the real IS_MACOS would no-op the step there)."""
-    import shared.platform
+    (CI is Linux; the real IS_MACOS would no-op the step there).
 
-    monkeypatch.setattr(shared.platform, "IS_MACOS", True)
+    The step module binds IS_MACOS at import time, so its own module global
+    is patched — patching shared.platform would not reach the step.
+    """
+    monkeypatch.setattr(clpw, "IS_MACOS", True)
 
 
 def _fake_launchd(
@@ -66,9 +68,7 @@ def test_step_is_registered_host_global() -> None:
 
 
 def test_noop_on_non_macos(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import shared.platform
-
-    monkeypatch.setattr(shared.platform, "IS_MACOS", False)
+    monkeypatch.setattr(clpw, "IS_MACOS", False)
     _patch_home(monkeypatch, tmp_path)
     _step().apply(_ctx(tmp_path))
     assert not _plist_path(tmp_path).exists()
