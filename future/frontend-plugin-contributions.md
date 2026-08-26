@@ -123,7 +123,7 @@ any server data (TanStack Query). No per-plugin frontend code, no build step.
 
 Custom visuals come from a page the plugin serves itself, reached through the
 gateway exactly like `ava.ui` pages are today (`gateway/routers/pages.py`
-reverse-proxies `/api/pages/<agent_id>-<name>/…` to a supervised local page
+reverse-proxies `/pages/<agent_id>-<name>/…` to a supervised local page
 server, behind the gateway's normal auth). Plugin pages get the sibling mount:
 
 - `/api/plugin-ui/<plugin>/<path>` → the plugin's page backend: a

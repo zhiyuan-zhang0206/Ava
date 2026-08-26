@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`ava.ui` allows agents to display rich web pages and notifications to users. `serve()` and `serve_markdown()` are run by the page-server daemon inside persistent shell sessions owned by their agents; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/api/agents/<id>/pages/<name>/`), so the browser never dials the page server directly.
+`ava.ui` allows agents to display rich web pages and notifications to users. `serve()` and `serve_markdown()` are run by the page-server daemon inside persistent shell sessions owned by their agents; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/pages/<id>-<name>/`), so the browser never dials the page server directly.
 
 ## Core API (core SDK: page serving)
 

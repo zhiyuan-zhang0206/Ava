@@ -2,11 +2,9 @@
 
 URLs:
 - `/api/agents/{agent_id}/pages` — register / list / close (registry).
-- `/api/pages/{agent_id}-{name}/...` — reverse proxy (current URL shape,
-  one page per agent): the gateway forwards GETs to the agent's page
-  server (host:port from the registry) and returns the content.
-- `/api/agents/{agent_id}/pages/{name}/...` — legacy reverse-proxy URL,
-  kept so links already handed out keep working.
+- `/pages/{agent_id}-{name}/...` — reverse proxy (one page per agent):
+  the gateway forwards GETs to the agent's page server (host:port from
+  the registry) and returns the content.
 The browser never dials the page server directly — the registered URL is
 the gateway's own, auth-gated by the cluster middleware (session cookie /
 bearer) like every other API route.
@@ -205,14 +203,6 @@ def get_pages(agent_id: int, request: Request) -> list[PageRow]:
         return [_absolutize(request, r) for r in list_open_pages(conn, agent_id)]
 
 
-@router.get("/api/agents/{agent_id}/pages/{name}")
-async def proxy_page_root(agent_id: int, name: str) -> RedirectResponse:
-    """Trailing-slash canonicalization: `/pages/{name}` redirects to
-    `/pages/{name}/` so the page's relative asset links resolve against the
-    page directory, not the gateway API root."""
-    return RedirectResponse(f"/api/agents/{agent_id}/pages/{name}/", status_code=307)
-
-
 async def _iter_upstream(resp: httpx.Response) -> AsyncGenerator[bytes, None]:
     """Stream the upstream body chunk-by-chunk; an upstream drop mid-body
     ends the stream (the client sees EOF / a truncated body) instead of
@@ -286,14 +276,7 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     )
 
 
-@router.get("/api/agents/{agent_id}/pages/{name}/{rest:path}")
-async def proxy_page_get(agent_id: int, name: str, rest: str, request: Request) -> Response:
-    """Legacy page URL — kept for links already handed out; new pages get
-    `/api/pages/<id>-<name>/` from the registry."""
-    return await _proxy_page_get_impl(agent_id, name, rest, request)
-
-
-# --- New page URL: /api/pages/<agent_id>-<name>/ ---
+# --- Page URL: /pages/<agent_id>-<name>/ ---
 # One page per agent is the mental model: the URL carries the agent, the
 # name is secondary. The composite key is parseable because agent_id is
 # numeric — split on the FIRST dash even when the name contains dashes.
@@ -312,19 +295,18 @@ def _parse_page_key(page_key: str) -> tuple[int, str] | None:
     return int(m.group(1)), m.group(2)
 
 
-@router.get("/api/pages/{page_key}")
+@router.get("/pages/{page_key}")
 async def proxy_page_root_new(page_key: str) -> Response:
-    """Trailing-slash canonicalization for the new URL: `/api/pages/1-foo`
-    redirects to `/api/pages/1-foo/` so relative asset links resolve."""
-    return RedirectResponse(f"/api/pages/{page_key}/", status_code=307)
+    """Trailing-slash canonicalization: `/pages/1-foo` redirects to
+    `/pages/1-foo/` so relative asset links resolve."""
+    return RedirectResponse(f"/pages/{page_key}/", status_code=307)
 
 
-@router.get("/api/pages/{page_key}/{rest:path}")
+@router.get("/pages/{page_key}/{rest:path}")
 async def proxy_page_get_new(page_key: str, rest: str, request: Request) -> Response:
-    """New page URL reverse-proxy: `/api/pages/<agent_id>-<name>/...`.
+    """Page URL reverse-proxy: `/pages/<agent_id>-<name>/...`.
 
-    404 for a malformed key, unknown/closed page, or missing agent — same
-    semantics as the legacy `/api/agents/{id}/pages/{name}/...` route.
+    404 for a malformed key, unknown/closed page, or missing agent.
     """
     parsed = _parse_page_key(page_key)
     if parsed is None:

@@ -109,7 +109,7 @@ def _samples() -> dict[str, dict]:
             "name": "cleanup",
             "port": 8765,
             "title": "Cleanup picker",
-            "url": f"http://localhost:8000/api/pages/{agent_id}-cleanup/",
+            "url": f"http://localhost:8000/pages/{agent_id}-cleanup/",
         },
         "page_closed": {
             "role": "page_closed",

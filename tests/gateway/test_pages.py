@@ -10,9 +10,8 @@ Covers:
   leaving daemon-supervised serve() pages open
 
 Pages are served through the gateway reverse proxy (see test_pages_proxy.py):
-url is the gateway's own /api/pages/<id>-<name>/ (composite key; the old
-nested /api/agents/<id>/pages/<name>/ path still routes for backwards
-compatibility), host:port stays in the registry for the proxy's dialing.
+url is the gateway's own /pages/<id>-<name>/ (composite key), host:port
+stays in the registry for the proxy's dialing.
 """
 
 from __future__ import annotations
@@ -68,7 +67,7 @@ def test_register_page_inserts_open_row(db_conn: psycopg.Connection) -> None:
     assert body["closed_at"] is None
     # direct URL straight at the agent's page server, no reverse proxy
     # gateway reverse-proxy URL — host:port never appears
-    assert body["url"] == f"http://test-gateway.invalid:8000/api/pages/{aid}-cleanup/"
+    assert body["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-cleanup/"
 
     db_conn.rollback()  # reset the transaction held by the fixture to get the latest view
     rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
@@ -96,7 +95,7 @@ def test_register_page_url_uses_gateway_url_var_not_request_host(
         )
     assert resp.status_code == 201
     # ...yet the URL is the configured Gateway URL variable, not localhost.
-    assert resp.json()["url"] == f"http://test-gateway.invalid:8000/api/pages/{aid}-p/"
+    assert resp.json()["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
 
 
 def test_register_page_url_falls_back_to_request_base_without_gateway_url(
@@ -114,7 +113,7 @@ def test_register_page_url_falls_back_to_request_base_without_gateway_url(
             json={"name": "p", "port": 8001, "host": _HOST},
         )
     assert resp.status_code == 201
-    assert resp.json()["url"] == f"http://testserver/api/pages/{aid}-p/"
+    assert resp.json()["url"] == f"http://testserver/pages/{aid}-p/"
 
 
 def test_register_page_same_name_auto_closes_then_creates(db_conn: psycopg.Connection) -> None:
@@ -135,7 +134,7 @@ def test_register_page_same_name_auto_closes_then_creates(db_conn: psycopg.Conne
     assert r1.json()["closed_at"] is None  # r1 was open at the time
     assert r2.json()["port"] == 8002
     assert r2.json()["title"] == "v2"
-    assert r2.json()["url"] == f"http://test-gateway.invalid:8000/api/pages/{aid}-p/"
+    assert r2.json()["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
 
     db_conn.rollback()
     rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
@@ -296,7 +295,7 @@ def test_list_pages_returns_only_open(db_conn: psycopg.Connection) -> None:
         body = r.json()
         assert len(body) == 1
         assert body[0]["name"] == "a"
-        assert body[0]["url"] == f"http://test-gateway.invalid:8000/api/pages/{aid}-a/"
+        assert body[0]["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-a/"
         # Close it — list should be empty.
         client.delete(f"/api/agents/{aid}/pages/a")
         r2 = client.get(f"/api/agents/{aid}/pages")

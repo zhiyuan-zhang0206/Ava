@@ -4,7 +4,7 @@ The agent calls `ava.ui.show(name)` to start an HTTP server inside its own
 process (bound on the runner's reachable host — loopback on a single box),
 self-reporting its reachable host; this module writes the registration into
 the agent_pages table. The page URL is the gateway's own
-`/api/pages/<id>-<name>/` reverse-proxy address: the gateway forwards
+`/pages/<id>-<name>/` reverse-proxy address: the gateway forwards
 GETs to the page server, so the browser never dials it directly (host:port
 stays inside the gateway — it appears in no URL).
 
@@ -38,7 +38,7 @@ _SELECT_COLUMNS = (
 
 def _page_url(agent_id: int, name: str) -> str:
     # Gateway reverse-proxy path: the gateway serves page content at
-    # /api/pages/<agent_id>-<name>/ and the router absolutizes it against
+    # /pages/<agent_id>-<name>/ and the router absolutizes it against
     # the request base URL before returning. The browser never dials the
     # page server directly, so host/port appear in no URL — they stay in
     # the row for the proxy's own dialing.
@@ -46,7 +46,7 @@ def _page_url(agent_id: int, name: str) -> str:
     # The composite key is parseable because agent_id is numeric: split on
     # the FIRST dash yields (agent_id, name) even when name itself contains
     # dashes (name charset is [a-zA-Z0-9_-]).
-    return f"/api/pages/{agent_id}-{name}/"
+    return f"/pages/{agent_id}-{name}/"
 
 
 def _row_to_record(row: tuple[Any, ...]) -> PageRow:
