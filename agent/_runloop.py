@@ -39,6 +39,7 @@ from shared.log import logger
 from . import _trace_checkpoint
 from .graph._context import AvaContext
 from .graph._llm import FatalLLMStreamError, FatalProviderError
+from .graph._node_log import flush_node_exit_aggregate
 from .hooks.compact import CompactionFailedError
 from .startup import (
     _reconcile_claimed_inbounds_at_startup,
@@ -345,6 +346,13 @@ async def _invoke_graph_with_lifecycle_logging(
                     await flush()
             # exit_requested is guaranteed present: this invocation's input
             # wrote the channel. [] not .get() — a missing key is a bug.
+            # Flush the aggregated node_exit buffer on EVERY invocation return:
+            # a terminate/restart exit (goto END with exit_requested=True) never
+            # reaches another claim enter, so the runloop is the only flush
+            # point that covers all exit paths (review #654-1). The claim-enter
+            # flush in claim_node remains as the cover for direct graph
+            # invocations that bypass this loop (tests/evals).
+            flush_node_exit_aggregate(agent_id)
             if result["exit_requested"]:
                 return
             # Turn over — re-invoke on the same thread; the fresh invocation's
