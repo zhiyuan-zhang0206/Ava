@@ -284,9 +284,9 @@ def _codeact_section() -> str:
         "other.\n"
         "- Chain independent steps \u2014 fetch, transform, write \u2014 in one "
         "script rather than one call per step.\n\n"
-        "You see the full output of every call, so batching loses nothing but "
-        "round-trips. Split into a second call only when the next step "
-        "genuinely depends on the previous one's output."
+        "You still receive every call's output back, so batching loses "
+        "nothing but round-trips. Split into a second call only when the "
+        "next step genuinely depends on the previous one's output."
     )
 
 
