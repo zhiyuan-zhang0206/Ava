@@ -1977,6 +1977,50 @@ class TestQueryProjectedLines:
                 limit_per_slice=2,
             )
 
+    @pytest.mark.parametrize("era", [LokiReadEra.LEGACY, LokiReadEra.INDEXED])
+    def test_projected_lines_filter_on_body_truth_event_name(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        era: LokiReadEra,
+    ) -> None:
+        """The code_len/output_len projections (metrics A3, task #1409) must
+        filter on body-truth event_name. Structured-metadata labels are
+        batch-reused in the legacy era — streams labeled event_name="code"
+        carry mixed log/llm_usage lines whose bodies lack `attributes.body` —
+        so an SM-label filter lets non-code lines reach
+        `line_format "{{ len .body }}"` and renders 0 (the distributions
+        were zero-dominated from the 08-23 cutover until #1515 switched the
+        filter to `event_name_extracted`)."""
+        if era is LokiReadEra.INDEXED:
+
+            def _indexed_slices(
+                window: tuple[datetime, datetime],
+            ) -> tuple[LokiReadSlice, ...]:
+                return (LokiReadSlice(LokiReadEra.INDEXED, *window),)
+
+            monkeypatch.setattr(loki_events, "_read_slices", _indexed_slices)
+        client = _install(monkeypatch, {"data": {"result": []}})
+        loki_events.query_projected_lines(
+            fields=["body"],
+            template="{{ len .body }}",
+            event_names=["code"],
+            from_=datetime(2026, 8, 1, tzinfo=UTC),
+            to=datetime(2026, 8, 2, tzinfo=UTC),
+        )
+        range_queries = [
+            params["query"] for _url, params in client.calls if _url.endswith("/query_range")
+        ]
+        assert range_queries
+        for q in range_queries:
+            assert '| json event_name_extracted="event_name" | event_name_extracted=~"code"' in q
+            assert '| event_name=~"code"' not in q
+        if era is LokiReadEra.INDEXED:
+            assert 'event_name="code"' in range_queries[0]
+        else:
+            # The legacy selector must stay matcher-free — an SM event_name
+            # matcher there would reintroduce the batch-reuse label mismatch.
+            assert 'event_name="code"' not in range_queries[0]
+
 
 # ─── count_events_series / attribute_max_series (ops panel, task #1197) ─────
 
