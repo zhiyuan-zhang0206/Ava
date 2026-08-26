@@ -142,6 +142,79 @@ def test_archive_queries_match_loki_filter_and_freeze_contract(
     ) == [(4.25, 1)]
 
 
+def test_archive_node_exit_seconds_reads_legacy_and_aggregated_rows(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The archive reader must not NULL out on either retained node_exit shape:
+    legacy per-node rows (top-level node/duration_seconds) and aggregated
+    per-turn rows (attributes.nodes list, shape since PR #654) — review #654-2."""
+    agent_id = _insert_agent(db_conn)
+    now = datetime.now(tz=UTC)
+    # Legacy per-node rows (pre-aggregation shape).
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="node_exit",
+        ts=now - timedelta(minutes=4),
+        attributes={"node": "llm", "duration_seconds": 10.0, "outcome": "ok"},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="node_exit",
+        ts=now - timedelta(minutes=4),
+        attributes={"node": "exec", "duration_seconds": 20.0, "outcome": "ok"},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="node_exit",
+        ts=now - timedelta(minutes=4),
+        attributes={"node": "claim", "duration_seconds": 3000.0, "outcome": "ok"},
+    )
+    # Aggregated per-turn row (one event, per-node entries inside `nodes`).
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="node_exit",
+        ts=now - timedelta(minutes=2),
+        attributes={
+            "count": 3,
+            "nodes": [
+                {"node": "llm", "outcome": "ok", "duration_seconds": 5.0},
+                {"node": "exec", "outcome": "ok", "duration_seconds": 6.0},
+                {"node": "claim", "outcome": "ok", "duration_seconds": 1.0},
+            ],
+        },
+    )
+    # Exclusive freeze boundary: this row establishes the cutoff without
+    # participating in the sums.
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="freeze_marker",
+        ts=now - timedelta(minutes=1),
+        attributes={},
+    )
+    db_conn.commit()
+
+    assert _inspect_pg.archive_node_exit_seconds(
+        db_conn, agent_id=agent_id, node="exclude_claim", from_=None, to=None
+    ) == pytest.approx(10.0 + 20.0 + 5.0 + 6.0)  # pyright: ignore[reportUnknownMemberType]
+    # claim rows excluded on both shapes
+    assert _inspect_pg.archive_node_exit_seconds(
+        db_conn, agent_id=agent_id, node="exec", from_=None, to=None
+    ) == pytest.approx(20.0 + 6.0)  # pyright: ignore[reportUnknownMemberType]
+    # Windowed read behaves the same (from_/to bound both shapes).
+    assert _inspect_pg.archive_node_exit_seconds(
+        db_conn,
+        agent_id=agent_id,
+        node="exclude_claim",
+        from_=now - timedelta(minutes=3),
+        to=None,
+    ) == pytest.approx(5.0 + 6.0)  # pyright: ignore[reportUnknownMemberType]
+
+
 def test_ledger_reads_are_day_scoped_and_return_exclusive_watermarks(
     db_conn: psycopg.Connection,
 ) -> None:

@@ -199,6 +199,7 @@ class SdkCall(TypedDict):
 
     fn: str
     duration: float
+    sample_rate: int
 
 
 class PluginActivation(TypedDict):
@@ -301,13 +302,19 @@ class AgentSpawned(TypedDict):
     forked_from: int | None
 
 
-class NodeExit(TypedDict):
-    """`node_exit` payload — agent/graph/_node_log.py."""
+class NodeExitEntry(TypedDict):
+    """One node's exit inside an aggregated per-turn `node_exit` event."""
 
     node: str
-    outcome: str  # ok | cancelled | exception:<Type>
+    outcome: str  # ok | cancelled
     duration_seconds: float
-    exc_name: str | None  # exception outcomes only
+
+
+class NodeExit(TypedDict):
+    """`node_exit` payload — one aggregated event per graph turn (agent/graph/_node_log.py)."""
+
+    count: int
+    nodes: list[NodeExitEntry]
 
 
 class HeartbeatPaused(TypedDict):

@@ -2817,7 +2817,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "topk(20, sum by (attributes_fn) (count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"sdk_call\" [$__range])))",
+     "expr": "topk(20, sum by (attributes_fn) (count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"sdk_call\" [$__range])) * 10)",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{attributes_fn}}"

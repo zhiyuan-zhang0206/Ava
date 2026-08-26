@@ -12,7 +12,7 @@ import threading
 import time as time_mod
 from datetime import UTC, date, datetime, time, timedelta
 from math import floor
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from psycopg_pool import ConnectionPool
 
@@ -252,6 +252,32 @@ def _attribute_number(attributes: dict[str, Any], key: str) -> float | None:
         return None
 
 
+def _node_exit_durations(
+    attributes: dict[str, Any], legacy_duration: float | None
+) -> tuple[float, float]:
+    """Return active/exec seconds from aggregate or retained legacy rows."""
+    nodes = attributes.get("nodes")
+    entries: list[dict[str, Any]]
+    if isinstance(nodes, list):
+        entries = [cast(dict[str, Any], entry) for entry in nodes if isinstance(entry, dict)]
+    elif legacy_duration is not None:
+        entries = [attributes]
+    else:
+        return 0.0, 0.0
+
+    active_seconds = exec_seconds = 0.0
+    for entry in entries:
+        duration = _attribute_number(entry, "duration_seconds")
+        if duration is None:
+            continue
+        node = _attribute_text(entry, "node")
+        if node != "claim":
+            active_seconds += duration
+        if node == "exec":
+            exec_seconds += duration
+    return active_seconds, exec_seconds
+
+
 def _projected_live_values(
     agent_id: int,
     *,
@@ -337,15 +363,12 @@ def _projected_live_values(
 
         if (
             event_name == "node_exit"
-            and duration is not None
             and activity_window is not None
             and _in_spans(timestamp, [activity_window])
         ):
-            node = _attribute_text(attributes, "node")
-            if node != "claim":
-                active_seconds += duration
-            if node == "exec":
-                exec_seconds += duration
+            active_delta, exec_delta = _node_exit_durations(attributes, duration)
+            active_seconds += active_delta
+            exec_seconds += exec_delta
 
     return _LiveInspectValues(
         turn_total,
@@ -482,27 +505,19 @@ def inspect_values(
                 from_=from_,
                 to=to,
             )
-            archive_active_seconds = _inspect_pg.archive_aggregate(
+            archive_active_seconds = _inspect_pg.archive_node_exit_seconds(
                 conn,
-                field="duration_seconds",
-                agg="sum",
-                event_names=["^node_exit$"],
-                categories=None,
                 agent_id=agent_id,
+                node="exclude_claim",
                 from_=from_,
                 to=to,
-                attribute_filters={"node": "!=claim"},
             )
-            archive_exec_seconds = _inspect_pg.archive_aggregate(
+            archive_exec_seconds = _inspect_pg.archive_node_exit_seconds(
                 conn,
-                field="duration_seconds",
-                agg="sum",
-                event_names=["^node_exit$"],
-                categories=None,
                 agent_id=agent_id,
+                node="exec",
                 from_=from_,
                 to=to,
-                attribute_filters={"node": "exec"},
             )
         archive_lifecycle = (
             rollup.lifecycle

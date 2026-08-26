@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from psycopg import Connection, errors, sql
 
@@ -158,6 +158,50 @@ def archive_aggregate(
             ),
             [field, *params],
         )
+        row = cur.fetchone()
+    return float(row[0]) if row is not None and row[0] is not None else 0.0
+
+
+def archive_node_exit_seconds(
+    conn: Connection[Any],
+    *,
+    agent_id: int,
+    node: Literal["exclude_claim", "exec"],
+    from_: datetime | None,
+    to: datetime | None,
+) -> float:
+    """Sum `node_exit` durations for one node class, reading BOTH retained shapes.
+
+    Legacy per-node rows contribute their top-level `duration_seconds` when
+    their `node` matches; aggregated per-turn rows (the shape since PR #654 —
+    `attributes.nodes` is a list of `{node, outcome, duration_seconds}`) expand
+    via a lateral join and contribute each matching entry. The freeze boundary
+    bounds the scan exactly like `_archive_where` (pre-cutover rows only), so a
+    mixed archive never silently NULLs activity on either shape (review #654-2).
+    """
+    with conn.cursor() as cur:
+        freeze = freeze_point(cur)
+        if freeze is None:
+            return 0.0
+        if node == "exclude_claim":
+            node_pred = sql.SQL(
+                "COALESCE(COALESCE(n.value, e.attributes) ->> 'node', '') <> 'claim'"
+            )
+        else:
+            node_pred = sql.SQL("COALESCE(COALESCE(n.value, e.attributes) ->> 'node', '') = 'exec'")
+        query = sql.SQL(
+            "SELECT sum((COALESCE(n.value, e.attributes) ->> 'duration_seconds')::float8) "
+            "FROM events e "
+            "LEFT JOIN LATERAL jsonb_array_elements(e.attributes -> 'nodes') AS n(value) "
+            "  ON e.attributes ? 'nodes' "
+            "WHERE e.agent_id = %s "
+            "AND e.event_name ~ '^node_exit$' "
+            "AND e.ts < COALESCE(%s, now()) "
+            "AND e.ts < %s "
+            "AND e.ts >= COALESCE(%s, '-infinity'::timestamptz) "
+            "AND {}"
+        ).format(node_pred)
+        cur.execute(query, (agent_id, to, freeze, from_))
         row = cur.fetchone()
     return float(row[0]) if row is not None and row[0] is not None else 0.0
 

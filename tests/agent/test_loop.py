@@ -525,6 +525,38 @@ class TestInvokeGraphLifecycleLogging:
                 "turn_idle": False,
             }, "every invocation's input must reset the per-invoke turn/exit/idle flags"
 
+    async def test_exit_requested_flushes_node_exit_aggregate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A terminate/restart exit (goto END with exit_requested=True) never
+        reaches another claim enter, so the runloop must flush the aggregated
+        node_exit buffer before returning — otherwise a single-turn worker's
+        node_exit events are silently lost and inspect activity reads zero
+        (review #654-1)."""
+        flushed: list[int] = []
+        monkeypatch.setattr("agent._runloop.flush_node_exit_aggregate", flushed.append)
+        graph = MagicMock()
+        graph.ainvoke = AsyncMock(return_value={"exit_requested": True})
+
+        await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
+
+        assert flushed == [42]
+
+    async def test_turn_boundary_reinvoke_flushes_before_continue(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every invocation return flushes — the turn-boundary re-invoke path
+        too, not only the final exit (the last claim exit of each invocation is
+        in the buffer and must land before the next invocation starts)."""
+        flushed: list[int] = []
+        monkeypatch.setattr("agent._runloop.flush_node_exit_aggregate", flushed.append)
+        graph = MagicMock()
+        graph.ainvoke = AsyncMock(side_effect=[{"exit_requested": False}, {"exit_requested": True}])
+
+        await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
+
+        assert flushed == [42, 42]
+
 
 class TestDbRecoveryWait:
     """`_wait_for_db_recovery` / `_probe_db_reachable` — the pause half of the

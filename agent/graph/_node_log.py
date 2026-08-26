@@ -3,10 +3,10 @@ driving frontend timeline sync.
 
 Two responsibilities merged in the same wrapper:
 
-1. **Observability**: wrap each node entry and exit with a lifecycle event:
+1. **Observability**: wrap each node entry and exit with lifecycle records:
    - `node_enter`: payload contains node name + current msg_count
-   - `node_exit`: payload contains node name + outcome (ok / cancelled / exception:X) +
-     duration_seconds
+   - normal/cancelled `node_exit` records accumulate into one per-turn payload
+   - exception `node_exit` records emit immediately with their traceback
 
    All outcomes log at INFO (user ruling 2026-08-04: node transitions are
    normal lifecycle flow, never WARNING — fatal turns surface through
@@ -186,6 +186,46 @@ def _stall_dump_guard(node_name: str) -> Generator[None]:
 # (len(messages) < cursor — compaction REMOVE_ALL) also forces full-window.
 _SNAPSHOT_CURSOR: dict[int, int] = {}
 
+# Normal graph turns visit several nodes, so emitting each successful exit as a
+# separate event makes lifecycle bookkeeping dominate the noise tier. Buffer
+# normal flow per agent and flush once at the next claim boundary. Each process
+# currently runs one agent; the key keeps tests and a future multi-agent process
+# isolated. Exceptions bypass this buffer because their attached traceback is
+# load-bearing diagnostic data.
+_NODE_EXIT_AGGREGATE: dict[int, list[dict[str, Any]]] = {}
+_NODE_EXIT_AGGREGATE_CAP = 32
+
+
+def flush_node_exit_aggregate(agent_id: int) -> None:
+    """Emit and clear the buffered normal node exits for one graph turn."""
+    entries = _NODE_EXIT_AGGREGATE.pop(agent_id, [])
+    if not entries:
+        return
+    logger.info(
+        "[node exits] {count}",
+        event="node_exit",
+        count=len(entries),
+        nodes=entries,
+    )
+
+
+def _accumulate_node_exit(
+    agent_id: int,
+    node_name: str,
+    outcome: str,
+    duration_seconds: float,
+) -> None:
+    entries = _NODE_EXIT_AGGREGATE.setdefault(agent_id, [])
+    entries.append(
+        {
+            "node": node_name,
+            "outcome": outcome,
+            "duration_seconds": duration_seconds,
+        }
+    )
+    if len(entries) >= _NODE_EXIT_AGGREGATE_CAP:
+        flush_node_exit_aggregate(agent_id)
+
 
 @contextlib.asynccontextmanager
 async def node_lifecycle(
@@ -280,12 +320,11 @@ async def node_lifecycle(
             try:
                 yield
             except asyncio.CancelledError:
-                logger.info(
-                    "[node exit {node}] outcome=cancelled {duration_seconds:.2f}s",
-                    event="node_exit",
-                    node=node_name,
-                    outcome="cancelled",
-                    duration_seconds=time.monotonic() - t0,
+                _accumulate_node_exit(
+                    agent_id,
+                    node_name,
+                    "cancelled",
+                    time.monotonic() - t0,
                 )
                 raise
             except BaseException as e:
@@ -299,12 +338,11 @@ async def node_lifecycle(
                 )
                 raise
             else:
-                logger.info(
-                    "[node exit {node}] outcome=ok {duration_seconds:.2f}s",
-                    event="node_exit",
-                    node=node_name,
-                    outcome="ok",
-                    duration_seconds=time.monotonic() - t0,
+                _accumulate_node_exit(
+                    agent_id,
+                    node_name,
+                    "ok",
+                    time.monotonic() - t0,
                 )
             return
         # No system-prompt special-casing: the incremental protocol already
@@ -339,12 +377,11 @@ async def node_lifecycle(
         try:
             yield
         except asyncio.CancelledError:
-            logger.info(
-                "[node exit {node}] outcome=cancelled {duration_seconds:.2f}s",
-                event="node_exit",
-                node=node_name,
-                outcome="cancelled",
-                duration_seconds=time.monotonic() - t0,
+            _accumulate_node_exit(
+                agent_id,
+                node_name,
+                "cancelled",
+                time.monotonic() - t0,
             )
             raise
         except BaseException as e:
@@ -358,10 +395,9 @@ async def node_lifecycle(
             )
             raise
         else:
-            logger.info(
-                "[node exit {node}] outcome=ok {duration_seconds:.2f}s",
-                event="node_exit",
-                node=node_name,
-                outcome="ok",
-                duration_seconds=time.monotonic() - t0,
+            _accumulate_node_exit(
+                agent_id,
+                node_name,
+                "ok",
+                time.monotonic() - t0,
             )

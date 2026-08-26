@@ -67,6 +67,7 @@ from shared.events.contract import (
     family_events,
 )
 from shared.plugin_metrics import MetricSpec
+from shared.sdk_telemetry import SDK_CALL_SAMPLE_EVERY
 
 # ── LogQL fragments (Task #1280) ──────────────────────────────────────────────
 # The event stream + json pipeline every template starts with. Attribute
@@ -410,7 +411,8 @@ core_metrics.register_core_metric(
         query_type="logql",
         query=(
             f'topk(20, sum by ({_SDK_ATTR["fn"]}) (count_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} [$__range])))"
+            f"category={{category}} | event_name={{event_name}} [$__range])) * "
+            f"{SDK_CALL_SAMPLE_EVERY})"
         ),
         target_names=["calls"],
         output=["grafana"],
