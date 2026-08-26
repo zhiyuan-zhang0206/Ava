@@ -8,6 +8,7 @@ YAML-indentation contract between template and generator is covered.
 
 from __future__ import annotations
 
+import os
 import platform
 import re
 from pathlib import Path
@@ -396,6 +397,7 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
 ) -> None:
     home = tmp_path / ".ava-preview"
     home.mkdir()
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[2],
         ava_home=home,
@@ -416,6 +418,35 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
     assert "collector skipped" in err
 
 
+def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An explicit AVA_TELEMETRY_OTLP_ENDPOINT override opens the converge
+    step on a non-LGTM gateway: the operator opted into explicit export, so
+    the local sidecar is installed instead of skipped/reaped."""
+    home = tmp_path / ".ava-preview"
+    home.mkdir()
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
+    ctx = oc.ConvergeCtx(
+        repo=Path(__file__).resolve().parents[2],
+        ava_home=home,
+        roles=frozenset({"gateway"}),
+    )
+
+    installed: list[tuple[object, object, object]] = []
+    monkeypatch.setattr(
+        oc,
+        "ensure_otel_collector",
+        lambda *args: installed.append(args),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+
+    oc.ensure_otel_collector_step(ctx)
+
+    assert len(installed) == 1
+    assert installed[0][1] == home
+
+
 def test_non_lgtm_gateway_reaps_orphan_collector_session(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -423,6 +454,7 @@ def test_non_lgtm_gateway_reaps_orphan_collector_session(
 ) -> None:
     home = tmp_path / ".ava-preview"
     home.mkdir()
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[2],
         ava_home=home,
@@ -459,6 +491,7 @@ def test_non_lgtm_gateway_without_session_skips_reap(
 ) -> None:
     home = tmp_path / ".ava-preview"
     home.mkdir()
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[2],
         ava_home=home,
@@ -495,6 +528,7 @@ def test_non_lgtm_gateway_reports_and_preserves_residual_config(
     collector.mkdir(parents=True)
     config = collector / "config.yaml"
     config.write_text("stale: true\n", encoding="utf-8")
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[2],
         ava_home=home,

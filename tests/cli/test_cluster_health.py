@@ -14,6 +14,7 @@ exactly one IM notification and one alerts row per transition.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -689,6 +690,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
     tmp_home.mkdir()
     recorded_sessions: list[str] = []
 
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
 
@@ -700,6 +702,29 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 
     assert _cluster_health._service_probes() == []
     assert "otel-collector" not in recorded_sessions
+
+
+def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cli.commands as _ns
+
+    tmp_home = tmp_path / "gateway"
+    tmp_home.mkdir()
+    recorded_sessions: list[str] = []
+
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
+    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
+
+    def _record_probe(spec: _ns.ServiceSpec) -> _ns.ServiceProbe:
+        recorded_sessions.append(spec.session)
+        return _ns.ServiceProbe(True, "probe", "")
+
+    monkeypatch.setattr(_ns, "_probe_service", _record_probe)
+
+    assert _cluster_health._service_probes() == []
+    assert "otel-collector" in recorded_sessions
 
 
 def test_service_probes_checks_otel_collector_on_lgtm_gateway(
