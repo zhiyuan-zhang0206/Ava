@@ -76,6 +76,9 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
       return "primary";
     case "inbound_chat":
       return inboundKind(item.source) === "human" ? "primary" : "secondary";
+    case "attach":
+      // Attached media stays visible — never folded into a turn's details.
+      return "primary";
     case "agent_reasoning":
     case "agent_code":
     case "code_output":

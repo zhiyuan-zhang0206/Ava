@@ -317,6 +317,7 @@
     "streamingInterrupted": "Streaming interrupted, content may be incomplete (reconnects resume receiving)",
     "commandOutput": "command output",
     "attachedImage": "attached image",
+    "attachedFiles": "Attached files",
     "unknownEventType": "[unknown event type]",
     "loadingEarlier": "Loading earlier messages…",
     "loadingConversation": "Loading conversation…",

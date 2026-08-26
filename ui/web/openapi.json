@@ -12872,6 +12872,7 @@
               "inbound_chat",
               "inbound_compact_summary",
               "inbound_compact_request",
+              "attach",
               "agent_chat",
               "agent_code",
               "agent_reasoning",

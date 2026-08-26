@@ -56,6 +56,8 @@ describe("classifyItem", () => {
     expect(classifyItem(item("agent_chat"))).toBe("primary");
     expect(classifyItem(item("inbound_chat", "user"))).toBe("primary");
     expect(classifyItem(item("inbound_chat", "ui:page:board"))).toBe("primary");
+    // Attached media stays visible — never folded into a turn's details.
+    expect(classifyItem(item("attach"))).toBe("primary");
   });
 
   it("agent + system inbound are secondary", () => {

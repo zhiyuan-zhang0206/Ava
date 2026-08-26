@@ -72,6 +72,9 @@ function EnvelopeContent({
   // An image-only message stores "[image]" as its text placeholder; suppress that
   // literal in the body when real thumbnails render below.
   const showBody = body && !(images?.length && body === "[image]");
+  // Attach items carry data URIs (self.attach media) — those render raw;
+  // gateway-relative urls (user uploads) resolve through assetUrl.
+  const resolveImageSrc = (src: string) => (src.startsWith("data:") ? src : assetUrl(src));
   return (
     <>
       {header ? (
@@ -98,10 +101,10 @@ function EnvelopeContent({
       {images?.length ? (
         <div className={cn("mt-1.5 flex-wrap gap-2", FLEX)}>
           {images.map((src) => (
-            <a key={src} href={assetUrl(src)} target="_blank" rel="noreferrer">
-              {/* eslint-disable-next-line @next/next/no-img-element -- user upload, not a static asset */}
+            <a key={src} href={resolveImageSrc(src)} target="_blank" rel="noreferrer">
+              {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
               <img
-                src={assetUrl(src)}
+                src={resolveImageSrc(src)}
                 alt={t("attachedImage")}
                 crossOrigin="use-credentials"
                 className="max-h-48 max-w-[16rem] rounded border border-border object-contain"
@@ -153,6 +156,7 @@ export const ItemView = memo(function ItemView({
     case "inbound_chat":
     case "inbound_compact_summary":
     case "inbound_compact_request":
+    case "attach":
       return <EnvelopeContent payload={item.payload} images={item.images} />;
 
     case "agent_chat":
