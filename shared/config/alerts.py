@@ -19,6 +19,37 @@ from shared.config._base import EnvSettings
 
 
 class AlertsSettings(EnvSettings):
+    transition_warning_seconds: float = Field(
+        default=180.0,
+        alias="AVA_ALERTS_TRANSITION_WARNING_SECONDS",
+        description=(
+            "Seconds an outage transition may remain unexplained before WARNING. "
+            "The 2026-08-04 user ruling reserves this window for normal node, "
+            "rollout, watchdog self-heal, and network recovery."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    transition_error_seconds: float = Field(
+        default=600.0,
+        alias="AVA_ALERTS_TRANSITION_ERROR_SECONDS",
+        description=(
+            "Seconds an unrecovered outage transition may remain open before ERROR. "
+            "The 2026-08-04 user ruling grades the preceding interval as WARNING."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     grafana_admin_password: SecretStr | None = Field(
         default=None,
         alias="GRAFANA_ADMIN_PASSWORD",

@@ -29,7 +29,7 @@ A cluster's identity **is** its home path, so every verb that names one takes
 | `down --path <home>` | stop the cluster at the home, keeping registry entry + data (safe stop for worktrees) |
 | `destroy --path <home>` | stop + free the registry slot (port block); `--drop-db` deletes pg/redis data too; **refuses `~/.ava` (prod)** |
 | `rollback` | commit-pinned (`apply_down` to target sha) |
-| `health-probe` | health-probe cron payload (exit 0/1); **not** `cluster status` (roster GET). `--auto-rollback` **resets** the consecutive counter while a deploy is in flight (`ops/deploy_window.py`) — its checks fail by design mid-rollout, and the failures before a deploy were about the commit the deploy replaced |
+| `health-probe` | health-probe cron payload (exit 0/1); **not** `cluster status` (roster GET). Every outage episode persists its start in `$AVA_HOME/health_probe_alert`, stays silent through the normal-recovery window, then grades WARNING → ERROR. A live deploy lease pauses grading (except disk pressure) without resetting the start, and `--auto-rollback` still resets the consecutive counter because pre-deploy failures describe the replaced commit |
 | `recover` | clear a stranded update lock + pause; refuses while the holder pid lives |
 | `health-probe-register` / `health-probe-unregister` | cluster-level cron |
 | `watchdog-probe --role <cap>` | 60s OS job respawning that capability's dead watchdog — ends the who-watches-the-watchdog recursion (`-register` / `-unregister` variants) |

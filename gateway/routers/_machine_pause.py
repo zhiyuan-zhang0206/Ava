@@ -123,30 +123,30 @@ def _resolve_machine_alerts_blocking(pool: ConnectionPool, name: str) -> None:
     machine's absence is expected, not an incident, so an alert that was
     already firing when the pause ran must not stay open (and spam IM) for
     the whole pause window. Mirrors the liveness pass's recovery edge
-    (`services.heartbeat.liveness._machine_alert_edges`) so the fingerprint
-    and the resolve semantics match the firing edge exactly."""
-    from services.heartbeat.liveness import _machine_alert_labels
-    from shared.alerts import AlertKey, fingerprint, stamp_notified, upsert_alert
+    (`services.heartbeat.liveness._machine_alert_edges`) so each persisted
+    instance keeps its original fingerprint convention."""
+    from shared.alerts import AlertKey, stamp_notified, upsert_alert
 
-    labels = _machine_alert_labels(name)
-    fp = fingerprint(labels)
+    identity_labels = {"alertname": "machine offline", "machine": name}
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT starts_at FROM alerts WHERE fingerprint = %s AND status = 'unresolved' "
+                "SELECT starts_at, fingerprint, severity FROM alerts "
+                "WHERE labels->>'alertname' = 'machine offline' "
+                "AND labels->>'machine' = %s AND status = 'unresolved' "
                 "ORDER BY starts_at DESC",
-                (fp,),
+                (name,),
             )
-            open_rows = [r[0] for r in cur.fetchall()]
+            open_rows = cur.fetchall()
         keys: list[AlertKey] = []
-        for starts_at in open_rows:
+        for starts_at, row_fingerprint, severity in open_rows:
             alert = {
                 "status": "resolved",
-                "labels": labels,
+                "labels": {**identity_labels, "severity": severity},
                 "annotations": {"summary": f"machine {name} paused (expected absence)"},
                 "starts_at": starts_at.isoformat(),
                 "ends_at": datetime.now(UTC).isoformat(),
-                "fingerprint": fp,
+                "fingerprint": row_fingerprint,
             }
             key, _did_insert, should_notify, _row = upsert_alert(
                 conn, alert, source="machine-pause"
