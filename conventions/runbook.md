@@ -285,8 +285,9 @@ runner surface: SELECT on every table (plus sequence USAGE), SELECT/UPDATE on
 — `ava start` / `ava stop`), INSERT/UPDATE on `host_deploy_state`
 (set_posture), INSERT/UPDATE/DELETE on `api_idempotency` (the runner's ops
 server dedupes /ops calls), INSERT/UPDATE on `agent_tasks` (`ava.tasks`),
-INSERT/UPDATE/DELETE on `agent_watchers` (`ava.watcher`; DELETE is the watcher
-child's clean-exit row removal), UPDATE on `agent_pages` (page close at
+INSERT/UPDATE/DELETE on `agent_watchers` (`ava.watcher`; DELETE is the
+runner-side row removal — clean-exit / kill / reconcile drops), UPDATE on
+`agent_pages` (page close at
 exit), INSERT on `agent_shell_ttls` (TTL deadline rows; the gateway
 reaper reads and deletes them), and full CRUD on the LangGraph checkpoint
 tables. `agents` INSERT,
