@@ -253,12 +253,23 @@ exporters:
 $OTLP_EXPORTERS
   # Local JSONL mirror — the grep surface (user ruling: "agent debug 时 grep
   # 最方便"). One line per export batch, each line a standard OTLP/JSON
-  # ExportTraceServiceRequest. Rotation (lumberjack) gives append semantics
+  # ExportTraceServiceRequest. Rotation (timberjack) gives append semantics
   # across collector restarts: the ACTIVE file is never truncated, and
   # max_days / max_backups bound the directory. `spans.jsonl` -> rotated
-  # `spans-<ISO-timestamp>.jsonl` on rotation.
+  # `spans-<ISO-timestamp>-size.jsonl` on size rotation (timberjack 1.4.5 in
+  # otelcol-contrib 0.155.0 appends the trigger reason to the backup name;
+  # `shared/trace.py` parses both suffixed and unsuffixed shapes).
   #
-  # No `localtime` key below — lumberjack's default (false) stamps the
+  # Segment size is the structural bound on the ACTIVE file (the file
+  # exporter exposes no time-based rotation, so size is the only trigger):
+  # at 64 MiB the mirror rotates roughly every half hour at peak volume.
+  # max_backups caps the un-compressed window at ~1.5 GiB; old segments are
+  # gzipped and day-pruned by the agent-side pass (`shared/trace.py`'s
+  # `_gzip_old_mirror` / `_prune_old_mirror` on every agent start), which is
+  # the real retention — max_backups only bounds the window before that pass
+  # runs (it stops counting backups once they are renamed `.jsonl.gz`).
+  #
+  # No `localtime` key below — timberjack's default (false) stamps the
   # rotated filename's timestamp in UTC. `shared/trace.py`'s `_prune_old_mirror`
   # parses that embedded timestamp and treats it as UTC explicitly
   # (`tzinfo=UTC`); setting `localtime: true` here would silently break that
@@ -267,9 +278,9 @@ $OTLP_EXPORTERS
   file/traces:
     path: $AVA_HOME/traces/spans.jsonl
     rotation:
-      max_megabytes: 256
+      max_megabytes: 64
       max_days: $RETENTION_DAYS
-      max_backups: 16
+      max_backups: 24
 
 service:
   telemetry:

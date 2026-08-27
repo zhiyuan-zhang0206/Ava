@@ -209,6 +209,147 @@ def test_incremental_ship_posts_and_advances_watermark(
     assert posts == []
 
 
+def test_incremental_ship_reads_gzipped_segments_and_keeps_watermark(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A segment compressed by the agent-side pass (.jsonl.gz) is decompressed
+    on read, keyed in the watermark by the BASE name (so the gzip rename never
+    strands or re-ships lines), and a second run posts nothing new."""
+    import gzip as gz
+
+    _enable_tempo_config(monkeypatch)
+    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+
+    rotated = tmp_path / "spans-2026-08-27T03-29-10.942-size.jsonl.gz"
+    with gz.open(rotated, "wt", encoding="utf-8") as f:
+        f.write(_otlp_line("a") + "\n")
+        f.write(_otlp_line("b") + "\n")
+
+    posts: list[bytes] = []
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def post(self, endpoint, *, content, headers):
+            posts.append(content)  # pyright: ignore[reportUnknownArgumentType]
+            return _Resp()
+
+    monkeypatch.setattr("httpx.Client", _Client)
+
+    assert cmd_trace_ship(since=None, until=None, dry_run=False) == 0
+    assert len(posts) == 2  # both gz lines POSTed
+
+    # Watermark keyed by the base name — the same key a plain segment used.
+    wm = json.loads((tmp_path / ".ship-watermark.json").read_text())
+    assert wm["spans-2026-08-27T03-29-10.942-size.jsonl"] > 0
+    assert "spans-2026-08-27T03-29-10.942-size.jsonl.gz" not in wm
+
+    # Second run: watermark is at the end of the stream, nothing re-ships.
+    posts.clear()
+    assert cmd_trace_ship(since=None, until=None, dry_run=False) == 0
+    assert posts == []
+
+
+def test_incremental_ship_gz_resumes_from_partial_watermark(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A gz segment whose base-name watermark sits mid-stream ships only the
+    unshipped tail (the shipped prefix is discarded, not re-POSTed)."""
+    import gzip as gz
+
+    _enable_tempo_config(monkeypatch)
+    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+
+    rotated = tmp_path / "spans-2026-08-27T03-29-10.942-size.jsonl.gz"
+    with gz.open(rotated, "wt", encoding="utf-8") as f:
+        f.write(_otlp_line("a") + "\n")
+        f.write(_otlp_line("b") + "\n")
+
+    # Pre-seed the watermark as if "a" was already shipped (byte offset of the
+    # second line = length of the first line's bytes).
+    first = _otlp_line("a") + "\n"
+    (tmp_path / ".ship-watermark.json").write_text(
+        json.dumps({"spans-2026-08-27T03-29-10.942-size.jsonl": len(first.encode())}),
+        encoding="utf-8",
+    )
+
+    posts: list[bytes] = []
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def post(self, endpoint, *, content, headers):
+            posts.append(content)  # pyright: ignore[reportUnknownArgumentType]
+            return _Resp()
+
+    monkeypatch.setattr("httpx.Client", _Client)
+
+    assert cmd_trace_ship(since=None, until=None, dry_run=False) == 0
+    assert len(posts) == 1  # only the tail line
+
+
+def test_windowed_ship_includes_gzipped_segments(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Windowed ship scans gz segments too — a gzipped window is not stranded
+    by the compression pass."""
+    import gzip as gz
+
+    _enable_tempo_config(monkeypatch)
+    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+
+    gz_rotated = tmp_path / "spans-2026-06-16T00-00-00.000-size.jsonl.gz"
+    with gz.open(gz_rotated, "wt", encoding="utf-8") as f:
+        f.write(_otlp_line("c") + "\n")
+    out_of_window = tmp_path / "spans-2020-06-16T00-00-00.000-size.jsonl"
+    out_of_window.write_text(_otlp_line("x") + "\n", encoding="utf-8")
+
+    posts: list[bytes] = []
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def post(self, endpoint, *, content, headers):
+            posts.append(content)  # pyright: ignore[reportUnknownArgumentType]
+            return _Resp()
+
+    monkeypatch.setattr("httpx.Client", _Client)
+
+    assert cmd_trace_ship(since="2026-06-15", until="2026-06-17", dry_run=False) == 0
+    assert len(posts) == 1  # only the gz segment in the window
+
+
 def test_ship_client_bypasses_environment_proxy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """The ship client must never route through a host system proxy: the macOS
     system-config branch httpx reads with trust_env=True sends protobuf POSTs to

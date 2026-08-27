@@ -251,6 +251,20 @@ def _render_real_template(
     return parsed
 
 
+def test_gateway_config_trace_mirror_rotation_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The trace mirror's file exporter rotates by size with bounded backups:
+    small segments (64 MiB — the structural bound on the ACTIVE file, since
+    the file exporter exposes no time-based rotation) and a bounded number of
+    backups; day retention comes from $RETENTION_DAYS (the cluster setting)."""
+    cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+    rotation = cfg["exporters"]["file/traces"]["rotation"]
+    assert rotation["max_megabytes"] == 64
+    assert rotation["max_backups"] == 24
+    assert rotation["max_days"] == 3  # from trace_retention_days default
+
+
 def test_gateway_config_scrapes_this_clusters_own_data_plane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
