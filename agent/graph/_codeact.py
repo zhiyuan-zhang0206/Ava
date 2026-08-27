@@ -5,18 +5,18 @@ Owned as its own module (like `_capabilities.py`) because the section list in
 registers the section explicitly so the render order stays its reading order.
 """
 
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 
 
 def _codeact_section() -> str:
-    """Toggle via settings.agent.prompt_codeact_enabled (env
-    AVA_SYSTEM_PROMPT_CODEACT, default off — opt-in). CodeAct batching: every
-    `execute_code` call is one LLM API round-trip, so pack several operations
-    into one call (batch file reads, fold branches into if-else logic) instead
-    of many single-purpose calls. Off by default because it steers toward
-    larger, denser tool calls — a per-cluster/per-agent choice, not a
-    universal default."""
-    if not settings.agent.prompt_codeact_enabled:
+    """Toggle via turn_settings.agent.prompt_codeact_enabled (settings /
+    per-agent overlay; env AVA_SYSTEM_PROMPT_CODEACT, default off — opt-in).
+    CodeAct batching: every `execute_code` call is one LLM API round-trip, so
+    pack several operations into one call (batch file reads, fold branches
+    into if-else logic) instead of many single-purpose calls. Off by default
+    because it steers toward larger, denser tool calls — a per-cluster/
+    per-agent choice, not a universal default."""
+    if not turn_settings.agent.prompt_codeact_enabled:
         return ""
     return (
         "# CodeAct \u2014 batch work into fewer calls\n\n"
