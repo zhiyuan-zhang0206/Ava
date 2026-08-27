@@ -1000,7 +1000,7 @@ def test_busy_foreground_job(sessions: Path) -> None:
 
 def test_busy_background_job(sessions: Path) -> None:
     """A background job (children of the shell, no tty) also counts as
-    running work — the brief's '活跃进程/后台 job'."""
+    running work — the ruling's 'active process / background job'."""
     home = sessions
     name = "ava-test-busy-bg-1"
     _new(home, name)
