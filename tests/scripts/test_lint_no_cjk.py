@@ -20,7 +20,11 @@ from scripts import lint_no_cjk as gate
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the gate at a scratch repo root so the real checkout is untouched."""
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(gate, "_LOCALE_PY_FILES", frozenset({"shared/alerts_copy.py"}))
+    monkeypatch.setattr(
+        gate,
+        "_LOCALE_PY_FILES",
+        frozenset({"shared/alerts_copy.py", "shared/pages_copy.py"}),
+    )
     return tmp_path
 
 
