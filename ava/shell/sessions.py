@@ -249,6 +249,18 @@ def kill_all() -> int:
     for name in sessions:
         with contextlib.suppress(RuntimeError):
             get_shell_backend().kill_session(name, graceful=False)
+    # Same deliberate-kill semantics as kill(): every watcher this agent just
+    # killed must not be resurrected by the next boot reconcile (Task #1825 —
+    # a kill path that left the registry row behind made a killed cron come
+    # back as a second live instance). Fail-soft: a registry blip must not
+    # make the cleanup itself fail.
+    with contextlib.suppress(Exception):
+        from ava import _boot
+        from shared.watcher_registry import delete_watcher, watcher_session_ids
+
+        agent_id = int(_boot.agent_id())
+        for session_id in watcher_session_ids(agent_id=agent_id):
+            delete_watcher(agent_id, session_id)
     return len(sessions)
 
 

@@ -471,9 +471,16 @@ def cron(
     timezone: str | None = None,
     end_time: datetime.datetime | datetime.timedelta | str | None = None,
     name: str,
+    _exclude_session: int | None = None,
 ) -> int:
     """Wake yourself with `message` on a recurring schedule. Runs until
     `end_time`, or until you kill its session.
+
+    A schedule already live under the same (agent, expression, timezone,
+    end time) is REUSED instead of registered twice: two identical-schedule
+    crons fire the same wake-ups, and a kill/rebuild cycle that stacked them
+    made both fire concurrently (Task #1825). The returned session id is the
+    existing watcher's when reused; kill it to stop the schedule.
 
     Args:
         expr: 5-field cron expression (`minute hour day-of-month month
@@ -498,6 +505,36 @@ def cron(
     tz = timezone if timezone is not None else (cluster_tz_name() or host_tz_name())
     validate_timezone(tz)
     et = normalize_end_time(end_time)
+    # Dedupe (Task #1825): a second registration of a schedule that is already
+    # live under another session must not stack a new generation — the
+    # kill/rebuild + restart cycle created exactly that double instance twice
+    # (#2811 triple, CEO #228 sessions 52+53). Reuse the live session instead.
+    # `_exclude_session` lets the stale-template rebuild skip the very session
+    # it is replacing (it must spawn a fresh one with the new template).
+    # Fail-soft: a registry/list blip yields no duplicate and the spawn
+    # proceeds — the dedupe is advisory, the registration is not.
+    try:
+        alive = set(_sessions.list())
+    except Exception:
+        # Session list unavailable — cannot verify liveness, so no dedupe
+        # (spawning is the fail-safe: a duplicate is recoverable, a reused
+        # dead session would silently lose the schedule).
+        alive = None
+    existing = _live_cron_session(
+        _agent_id(),
+        cron_expr=expr,
+        cron_timezone=tz,
+        cron_end_at=et,
+        alive=alive,
+        exclude_session=_exclude_session,
+    )
+    if existing is not None:
+        logger.info(
+            "[watcher] cron %r already live as session %s — reusing (dedupe)",
+            expr,
+            existing,
+        )
+        return existing
     code = build_cron_script(
         expr=expr,
         message=message,
@@ -588,11 +625,75 @@ def _kill_watcher_orphan_processes(session_id: int) -> None:
             continue
 
 
-def _reconcile_missing(row: dict[str, Any], now: datetime.datetime) -> str | None:
+def _live_cron_session(
+    agent_id: int,
+    *,
+    cron_expr: str,
+    cron_timezone: str,
+    cron_end_at: datetime.datetime | None,
+    alive: set[int] | None,
+    exclude_session: int | None = None,
+) -> int | None:
+    """Return the session id of an existing LIVE cron watcher with the same
+    schedule (Task #1825), or None.
+
+    Two watchers with the same (agent, kind, schedule) — expression,
+    timezone, end time — are duplicates: they fire the same wake-ups, and a
+    kill/rebuild cycle that stacked them (a killed cron resurrected as a new
+    session while the old registration survived) made both fire concurrently
+    (observed twice: #2811's triple instance, CEO #228's escalation-check-6h
+    sessions 52+53). The reconcile and cron() dedupe through this: a live
+    duplicate is reused instead of stacking a new generation.
+
+    "Live" means the registry row is still `running` AND its session is in
+    the caller's session list. A row whose session is gone is exactly what
+    the reconcile is rebuilding — it is not a duplicate to reuse. `alive=None`
+    (session list unavailable) deliberately finds nothing: returning a session
+    that might be dead would silently lose the schedule, and a duplicate is
+    recoverable while a lost wake-up is not. `exclude_session` skips one live
+    row — the stale-template rebuild must not dedupe against the very session
+    it is replacing.
+
+    Fail-soft: a registry read failure logs and yields no duplicate — the
+    dedupe is advisory and must never block a registration.
+    """
+    from shared.watcher_registry import watcher_rows
+
+    if alive is None:
+        return None
+    try:
+        rows = watcher_rows(agent_id)
+    except Exception:
+        logger.warning(
+            "watcher dedupe: registry read failed for agent %s — proceeding without dedupe",
+            agent_id,
+            exc_info=True,
+        )
+        return None
+    for row in rows:
+        if row["kind"] != "cron" or row["status"] != "running":
+            continue
+        if row["session_id"] == exclude_session:
+            continue
+        if row["session_id"] not in alive:
+            continue
+        if (
+            row["cron_expr"] == cron_expr
+            and row["cron_timezone"] == cron_timezone
+            and row["cron_end_at"] == cron_end_at
+        ):
+            return row["session_id"]
+    return None
+
+
+def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[int]) -> str | None:
     """Handle one registry row whose session is gone: rebuild a standing
     schedule / future one-shot, mark a passed one-shot or launch watcher missed,
     drop an ended schedule. Returns the action sentence (None when nothing was
-    done — an ended cron schedule deletes its row without an action)."""
+    done — an ended cron schedule deletes its row without an action).
+
+    `alive` is the caller's live-session set, used to spot a live duplicate
+    before rebuilding a cron (Task #1825)."""
     import contextlib
 
     from ava import agents as _agents
@@ -613,6 +714,24 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime) -> str | Non
             if end_at is not None and end_at < now:
                 delete_watcher(agent_id, session_id)
                 return f"cron watcher '{name}': schedule ended; row dropped"
+            # Dedupe (Task #1825): the schedule may already be live under
+            # another session (a duplicate registration survived a
+            # kill/restart cycle — #2811, CEO #228). Rebuild would stack a
+            # second generation on it and both would fire; reuse it instead
+            # and drop this dead duplicate row.
+            existing = _live_cron_session(
+                agent_id,
+                cron_expr=row["cron_expr"],
+                cron_timezone=row["cron_timezone"],
+                cron_end_at=end_at,
+                alive=alive,
+                exclude_session=session_id,
+            )
+            if existing is not None:
+                delete_watcher(agent_id, session_id)
+                return (
+                    f"cron watcher '{name}': duplicate of live session {existing}; dead row dropped"
+                )
             new_id = cron(
                 row["cron_expr"],
                 row["message"] or "",
@@ -675,6 +794,10 @@ def _rebuild_stale_cron_watcher(row: dict[str, Any]) -> str | None:
             timezone=row["cron_timezone"],
             end_time=row["cron_end_at"],
             name=name,
+            # The session being replaced is LIVE (this is a template upgrade,
+            # not a death recovery) — the dedupe must not reuse it, or the
+            # rebuild would kill the only live copy and leave nothing.
+            _exclude_session=session_id,
         )
         _sessions_mod.kill(session_id)
         return (
@@ -762,7 +885,7 @@ def reconcile() -> list[str]:
                 if action:
                     actions.append(action)
             continue
-        action = _reconcile_missing(row, now)
+        action = _reconcile_missing(row, now, alive)
         if action:
             actions.append(action)
     return actions
