@@ -14,7 +14,7 @@ import psycopg
 
 
 def system_root_id(cur: psycopg.Cursor) -> int | None:
-    """Id of the system root task (task-tree anchor / default parent), or None
+    """Id of the system root task (task-tree anchor / parent of top-level tasks), or None
     when no is_root row exists yet (uninitialized table; prod always has one)."""
     cur.execute("SELECT id FROM agent_tasks WHERE is_root ORDER BY id LIMIT 1")
     row = cur.fetchone()
