@@ -157,12 +157,24 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     _mark_current(home)
     _redirect_plists(monkeypatch, tmp_path / "plists")
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    # Pin the listen-host settings to their defaults so the rendered bytes are
-    # deterministic regardless of the runner's environment.
+    # Pin the listen-host and read-URL settings to their defaults so the
+    # rendered bytes are deterministic regardless of the runner's environment.
     monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "127.0.0.1")
     monkeypatch.setattr(
         "shared.config.settings.observability.lgtm_grafana_listen_host",
         "0.0.0.0",  # noqa: S104 — pinned config default, not a bind
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
 
     _lgtm_native.ensure_lgtm_native(_repo(), home)
@@ -202,10 +214,50 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
         for job in prometheus_config["scrape_configs"]
     }
     assert targets == {
-        "prometheus": ["localhost:9090"],
+        "prometheus": ["127.0.0.1:9090"],
         "tempo": ["127.0.0.1:3200"],
         "loki": ["127.0.0.1:3100"],
         "grafana": ["127.0.0.1:3003"],
+    }
+
+
+def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The Prometheus scrape targets derive from the telemetry read URLs, so
+    the external-migration form (widened listen host + matching URLs) keeps
+    self-scrape working without template edits."""
+    home = tmp_path / "home"
+    _mark_current(home)
+    _redirect_plists(monkeypatch, tmp_path / "plists")
+    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "100.64.0.5")
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_loki_url", "http://100.64.0.5:3100"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_prometheus_url", "http://100.64.0.5:9090"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_grafana_url", "http://100.64.0.5:3003"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+    )
+
+    _lgtm_native.ensure_lgtm_native(_repo(), home)
+
+    prometheus = yaml.safe_load(
+        (_native_dir(home) / "config/prometheus.yml").read_text(encoding="utf-8")
+    )
+    targets = {
+        job["job_name"]: job["static_configs"][0]["targets"] for job in prometheus["scrape_configs"]
+    }
+    assert targets == {
+        "prometheus": ["100.64.0.5:9090"],
+        "tempo": ["127.0.0.1:3200"],
+        "loki": ["100.64.0.5:3100"],
+        "grafana": ["100.64.0.5:3003"],
     }
 
 
