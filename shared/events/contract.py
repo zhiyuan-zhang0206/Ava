@@ -444,11 +444,19 @@ class ResolutionStatus(TypedDict):
 
 
 class CheckpointTableSizes(TypedDict):
-    """`checkpoint_table_sizes` payload — post-vacuum physical sizes."""
+    """`checkpoint_table_sizes` payload — physical sizes + live row counts.
+
+    Emitted hourly by the events-maintenance pass and after each blob vacuum
+    run; the live counts separate live growth from dead-tuple bloat when
+    reading the physical-size curve.
+    """
 
     blobs_bytes: int
     checkpoints_bytes: int
     writes_bytes: int
+    blobs_live: int
+    checkpoints_live: int
+    writes_live: int
 
 
 class GatewayLatency(TypedDict):
@@ -1077,7 +1085,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "checkpoint_table_sizes": _telemetry(
         "checkpoint_table_sizes",
-        "checkpoint table physical sizes after each blob vacuum run",
+        "checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run)",
         payload=CheckpointTableSizes,
     ),
     # gate entry-point diagnostics

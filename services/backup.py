@@ -64,7 +64,7 @@ from zoneinfo import ZoneInfo
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from shared.config import settings
-from shared.db import direct_db_url
+from shared.db import connect, direct_db_url
 from shared.google_drive import find_writable_google_drive
 from shared.pg_tools import pg_tool
 from shared.platform import file_lock
@@ -340,6 +340,48 @@ def run_backup(
         return _run_backup(now, db_url=db_url, timeout_s=timeout_s, pre_update=pre_update)
 
 
+def _db_size_breakdown() -> str:
+    """One-line DB composition for the backup log: total, the frozen `events`
+    archive, the LangGraph checkpoint tables, and everything else.
+
+    The events archive (summed over its month partitions) and the checkpoint
+    tables dominate DB size and dump time; logging them on every backup makes
+    each artifact carry its own baseline for growth tracking. Best-effort by
+    contract: a failure (e.g. a fresh cluster missing the tables) degrades to
+    "unavailable" and never fails the backup.
+    """
+    try:
+        with connect(direct=True, autocommit=True) as conn:
+            row = conn.execute(
+                """
+                SELECT pg_database_size(current_database()),
+                       COALESCE((SELECT sum(pg_total_relation_size(c.oid))
+                                 FROM pg_inherits i
+                                 JOIN pg_class c ON c.oid = i.inhrelid
+                                 JOIN pg_class p ON p.oid = i.inhparent
+                                 JOIN pg_namespace n ON n.oid = p.relnamespace
+                                 WHERE p.relname = 'events' AND n.nspname = 'public'), 0),
+                       COALESCE(pg_total_relation_size(to_regclass('public.checkpoint_blobs')), 0),
+                       COALESCE(pg_total_relation_size(to_regclass('public.checkpoints')), 0),
+                       COALESCE(pg_total_relation_size(to_regclass('public.checkpoint_writes')), 0)
+                """
+            ).fetchone()
+    except Exception:
+        return "unavailable"
+    assert row is not None  # noqa: S101 — aggregate over fixed tables always returns one row
+    db, events, blobs, checkpoints, writes = (int(v) for v in row)
+    checkpoint = blobs + checkpoints + writes
+    rest = max(db - events - checkpoint, 0)
+    return (
+        f"db={_mb(db)}MiB events={_mb(events)}MiB "
+        f"checkpoint={_mb(checkpoint)}MiB rest={_mb(rest)}MiB"
+    )
+
+
+def _mb(b: int) -> int:
+    return round(b / 2**20)
+
+
 def _run_backup(
     now: datetime | None = None,
     *,
@@ -364,6 +406,7 @@ def _run_backup(
             stale.unlink()
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
+    _log.info("[backup] db composition: %s", _db_size_breakdown())
     target = _available_target(directory, dbname, now, pre_update=pre_update)
     stem = target.name.removesuffix(".dump.gz.enc")
     dump_partial = directory / f"{stem}.dump.partial"

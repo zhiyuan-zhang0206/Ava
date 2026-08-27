@@ -179,6 +179,40 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
     assert path.name == "ava-20260609T190000Z.dump.gz.enc"
 
 
+def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The backup log line reports the DB composition that dominates dump
+    time: total, the frozen events archive, the checkpoint tables, and the
+    rest. Best-effort: a failed sample degrades to "unavailable", never
+    fails the backup."""
+
+    class _FakeConn:
+        def __enter__(self) -> _FakeConn:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def execute(self, _sql: str) -> _FakeConn:
+            return self
+
+        def fetchone(self) -> tuple[int, ...]:
+            # db, events, blobs, checkpoints, writes
+            return (4_240_000_000, 2_800_000_000, 1_240_000_000, 130_000_000, 30_000_000)
+
+    def _fake_connect(**_: object) -> _FakeConn:
+        return _FakeConn()
+
+    monkeypatch.setattr(backup, "connect", _fake_connect)  # pyright: ignore[reportUnknownArgumentType]
+    line = backup._db_size_breakdown()
+    assert line == "db=4044MiB events=2670MiB checkpoint=1335MiB rest=38MiB"
+
+    def _boom(**_: object) -> object:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(backup, "connect", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    assert backup._db_size_breakdown() == "unavailable"
+
+
 def test_run_backup_repairs_storage_permissions(
     bdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
