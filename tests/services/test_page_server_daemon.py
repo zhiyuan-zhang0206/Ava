@@ -71,7 +71,11 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> _FakeShellBackend:
     fake = _FakeShellBackend()
     monkeypatch.setattr(psd, "get_shell_backend", lambda: fake)
     monkeypatch.setattr(psd, "_page_server_occupants", dict)
-    monkeypatch.setattr(psd, "_page_session_shell_pids", lambda _wanted: {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        psd,
+        "_page_session_shell_pids",
+        lambda _wanted, _live=None: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
     return fake
 
 
@@ -163,6 +167,100 @@ def test_open_row_creates_persistent_page_session_and_persists_token(
     _reconcile(sync_pool, managed, backoff, degraded)
     assert _token_and_session(db_conn, agent_id, "My_Page") == (token, page_session)
     assert len(backend.new_calls) == 1
+
+
+def test_new_row_session_created_before_slow_housekeeping(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A freshly registered row's session is created BEFORE the pass's slow
+    housekeeping (the process scan) — serve()'s wait is one poll, not one
+    full pass. The re-scan after creation must keep the new session alive
+    through the rest of the pass (a stale scan would reap it as dead)."""
+    from types import SimpleNamespace
+
+    agent_id = spawn_agent()
+    key = (agent_id, "fast-lane")
+    _insert_page_row(db_conn, agent_id, key[1], 12030, tmp_path)
+    events: list[str] = []
+
+    def _occupants() -> dict[int, tuple[int, str | None]]:
+        events.append("occupants")
+        return {}
+
+    monkeypatch.setattr(psd, "_page_server_occupants", _occupants)
+    # The pty record scan mirrors the fake backend's session set: the session
+    # created in the fast path must appear in the post-creation re-scan.
+    monkeypatch.setattr(
+        psd,
+        "_live_session_records",
+        lambda _b: {name: SimpleNamespace(pid=12345) for name in backend.sessions},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    orig_new = backend.new_session
+
+    def _new(name: str, command: str, cwd: Path, *, env: dict[str, str], **_kw: object) -> bool:
+        events.append("create")
+        return orig_new(name, command, cwd, env=env, **_kw)
+
+    backend.new_session = _new
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+
+    _reconcile(sync_pool, managed, {}, {})
+
+    assert events[0] == "create"
+    assert "occupants" in events
+    assert set(managed) == {key}
+    assert backend.killed == []
+
+
+def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Managed-row liveness comes from the pass's in-process pty record scan,
+    not the backend's per-name has_session — a subprocess round-trip (~0.25s)
+    per row that stretched a pass to tens of seconds."""
+    from types import SimpleNamespace
+
+    agent_id = spawn_agent()
+    key = (agent_id, "scan-live")
+    page_session = f"ava-agent-{agent_id}-shell-9-page-scan-live"
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        key[1],
+        12031,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
+    )
+    monkeypatch.setattr(
+        psd,
+        "_live_session_records",
+        lambda _b: {page_session: SimpleNamespace(pid=12345)},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    calls: list[str] = []
+    orig_has = backend.has_session
+
+    def _has(name: str) -> bool:
+        calls.append(name)
+        return orig_has(name)
+
+    backend.has_session = _has
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+
+    _reconcile(sync_pool, managed, {}, {})
+
+    assert set(managed) == {key}
+    assert backend.new_calls == []
+    assert calls == []
 
 
 def test_healthy_page_is_not_resent(

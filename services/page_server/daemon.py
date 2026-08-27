@@ -42,8 +42,8 @@ from shared.daemon_shutdown import install_graceful_shutdown
 from shared.log import init_gateway_process
 from shared.machine import machine_name, reachable_host
 from shared.paths import legacy_pid_path
-from shared.platform import IS_WINDOWS
-from shared.session_backend import SessionBackend, get_shell_backend
+from shared.session_backend import PtySessionBackend, SessionBackend, get_shell_backend
+from shared.session_record import SessionRecord
 
 from .degradation import (
     _DegradedServeDir,
@@ -293,18 +293,47 @@ def _page_server_occupants() -> dict[int, tuple[int, str | None]]:
     return found
 
 
-def _page_session_shell_pids(wanted: dict[tuple[int, str], _PageRow]) -> dict[int, tuple[int, str]]:
-    """Map live page-shell PIDs to their page-row keys on POSIX."""
-    if IS_WINDOWS:
+def _live_session_records(backend: SessionBackend) -> dict[str, SessionRecord] | None:
+    """One in-process scan of the live pty session records, or None when the
+    backend is not the PTY supervisor (the Windows native backend keeps no
+    pty record store).
+
+    The PTY backend's per-name ``has_session`` costs a subprocess round-trip
+    (~0.25 s each, measured 2026-08-28); a reconcile pass that asked once per
+    managed row serialized dozens of Python startups and stretched the 2 s
+    poll to ~30 s (2026-08-28 incident — serve()'s 15 s wait timed out about
+    half the time). The record scan is the same liveness rule read
+    in-process.
+    """
+    if not isinstance(backend, PtySessionBackend):
+        return None
+    return shared.pty_sessions.cli.live_sessions()
+
+
+def _session_is_live(
+    backend: SessionBackend, live_names: set[str] | None, session_name: str
+) -> bool:
+    """Whether a page shell is alive: membership in the pass's in-process
+    record scan when one exists, else the backend's per-name check (the
+    Windows native backend, whose has_session is in-process)."""
+    if live_names is not None:
+        return session_name in live_names
+    return backend.has_session(session_name)
+
+
+def _page_session_shell_pids(
+    wanted: dict[tuple[int, str], _PageRow], live: dict[str, SessionRecord] | None
+) -> dict[int, tuple[int, str]]:
+    """Map live page-shell PIDs to their page-row keys on POSIX.
+
+    ``live`` is the pass's pty record scan (None on Windows, where the native
+    backend keeps no pty records)."""
+    if live is None:
         return {}
     session_keys = {
         row.session_name: key for key, row in wanted.items() if row.session_name is not None
     }
-    return {
-        record.pid: session_keys[name]
-        for name, record in shared.pty_sessions.cli.live_sessions().items()
-        if name in session_keys
-    }
+    return {record.pid: session_keys[name] for name, record in live.items() if name in session_keys}
 
 
 def _page_session_owner(pid: int, shell_pids: dict[int, tuple[int, str]]) -> tuple[int, str] | None:
@@ -365,10 +394,12 @@ def _reclaim_occupants(
         _kill_pid(pid)
 
 
-def _close_persisted_sessions(backend: SessionBackend, session_names: list[str]) -> None:
+def _close_persisted_sessions(
+    backend: SessionBackend, session_names: list[str], live_names: set[str] | None
+) -> None:
     """Finish closed-page teardown after a daemon restart lost its cache."""
     for page_session in session_names:
-        if backend.has_session(page_session):
+        if _session_is_live(backend, live_names, page_session):
             _log.info("[page-server] closing persisted page session %s", page_session)
             backend.kill_session(page_session)
 
@@ -404,6 +435,7 @@ def _drop_stale_handles(
     managed: dict[tuple[int, str], _ServerHandle],
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], _DegradedServeDir],
+    live_names: set[str] | None,
 ) -> None:
     """Remove managed entries whose rows or sessions no longer match."""
     for key in list(managed):
@@ -421,7 +453,7 @@ def _drop_stale_handles(
             del managed[key]
             backoff.pop(key, None)
             degraded.pop(key, None)
-        elif not backend.has_session(handle.session_name):
+        elif not _session_is_live(backend, live_names, handle.session_name):
             _log.warning("[page-server] page session died for %s", key)
             del managed[key]
 
@@ -457,6 +489,7 @@ def _ensure_handle(
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], _DegradedServeDir],
     now: float,
+    live_names: set[str] | None,
 ) -> tuple[_ServerHandle | None, bool]:
     """Return a managed handle and whether this pass created its shell."""
     if handle := managed.get(key):
@@ -465,7 +498,7 @@ def _ensure_handle(
         return None, False
     if now < backoff.get(key, 0.0):
         return None, False
-    if row.session_name is not None and backend.has_session(row.session_name):
+    if row.session_name is not None and _session_is_live(backend, live_names, row.session_name):
         handle = _ServerHandle(
             row.agent_id,
             row.name,
@@ -550,20 +583,47 @@ def _reconcile_once(
     degraded: dict[tuple[int, str], _DegradedServeDir],
     host: str,
 ) -> None:
-    """Reconcile page rows with durable page-shell sessions and their health."""
+    """Reconcile page rows with durable page-shell sessions and their health.
+
+    Newly registered rows are adopted FIRST — before the pass's slow
+    housekeeping (process scans, per-row health probes) — so a serve() caller
+    waits one poll (~2s), not one full pass. Liveness checks read the pty
+    record store once in-process instead of asking the PTY backend per name
+    (each has_session is a subprocess round-trip, ~0.25s; serialized over
+    every open row it stretched a pass to tens of seconds)."""
     backend = get_shell_backend()
     rows = _open_rows(pool, host)
     wanted = {(row.agent_id, row.name): row for row in rows}
     _discard_gone_degraded(degraded, wanted)
+    live = _live_session_records(backend)
+    live_names = set(live) if live is not None else None
+    now = time.monotonic()
+    # Fast path: new/unadopted rows get their session now, before the slow
+    # full-pass work. _ensure_handle's per-row snapshot re-check still guards
+    # the stale-row race (a row closed or re-registered mid-pass is skipped).
+    for key, row in wanted.items():
+        if key not in managed:
+            _ensure_handle(pool, backend, row, key, managed, backoff, degraded, now, live_names)
+    # Re-scan: sessions created above must be visible to the liveness checks
+    # below, or a stale scan would reap them as dead in this same pass.
+    live = _live_session_records(backend)
+    live_names = set(live) if live is not None else None
     occupants = _page_server_occupants()
-    shell_pids = _page_session_shell_pids(wanted)
+    shell_pids = _page_session_shell_pids(wanted, live)
     _reclaim_occupants(rows, occupants, shell_pids)
-    _drop_stale_handles(backend, wanted, managed, backoff, degraded)
-    _close_persisted_sessions(backend, _closed_page_sessions(pool, host))
+    _drop_stale_handles(backend, wanted, managed, backoff, degraded, live_names)
+    _close_persisted_sessions(backend, _closed_page_sessions(pool, host), live_names)
     now = time.monotonic()
     for key, row in wanted.items():
-        handle, created = _ensure_handle(pool, backend, row, key, managed, backoff, degraded, now)
-        if handle is not None and not created:
+        handle = managed.get(key)
+        if handle is None:
+            # A handle dropped mid-pass (row changed / session died) is
+            # re-created here, after the teardown work — same-pass recovery
+            # the pre-fast-path loop always had.
+            handle, _ = _ensure_handle(
+                pool, backend, row, key, managed, backoff, degraded, now, live_names
+            )
+        if handle is not None:
             _supervise_handle(
                 backend, row, key, handle, managed, backoff, occupants, shell_pids, now
             )

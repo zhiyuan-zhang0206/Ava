@@ -264,18 +264,29 @@ def session_started_at(name: str) -> float | None:
     return rec.started_at
 
 
+# Last warning reason per retained record: a tick-scanning poller (the
+# page-server daemon scans every ~2s pass) would otherwise flood the log with
+# an identical warning every pass. Entries exist only while a record keeps
+# failing liveness; a swept record's entry is dropped so a re-created record
+# warns again.
+_retained_warning_reasons: dict[str, str] = {}
+
+
 def _sweep_dead(name: str) -> None:
     """Drop a provably dead session's record + socket (its host is gone too)."""
     rec = SessionRecord.read(record_path(name))
     if rec is not None:
         reapable, why = _record_reapable(rec)
         if not reapable:
-            logger.warning(
-                "pty retaining live session record {name}: {why}",
-                name=name,
-                why=why,
-            )
+            if _retained_warning_reasons.get(name) != why:
+                logger.warning(
+                    "pty retaining live session record {name}: {why}",
+                    name=name,
+                    why=why,
+                )
+                _retained_warning_reasons[name] = why
             return
+    _retained_warning_reasons.pop(name, None)
     with contextlib.suppress(OSError):
         record_path(name).unlink(missing_ok=True)
     with contextlib.suppress(OSError):

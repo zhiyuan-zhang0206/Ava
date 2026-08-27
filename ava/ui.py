@@ -37,9 +37,11 @@ _NAME_RE = _re.compile(r"^[a-zA-Z0-9_-]+$")
 _PAGE_BASE_PORT = 10000
 
 # How long serve() waits for the page_server daemon to bring the server up
-# before failing (the daemon reconciles on a ~2s poll; the window covers a
-# cold daemon restart too).
-_SERVE_READY_TIMEOUT_S = 15.0
+# before failing. The daemon's fast path adopts a new row within one poll
+# (~2s); this window is the fallback for a cold daemon restart or a slow pass
+# under load — long enough to cover the slowest observed pass (~30s,
+# 2026-08-28) while still failing loudly when the daemon is genuinely down.
+_SERVE_READY_TIMEOUT_S = 60.0
 
 # Temp dirs created by serve_markdown(), keyed by page name so close() can
 # clean them up. Lost on restart (in-process cache) — the daemon keeps serving

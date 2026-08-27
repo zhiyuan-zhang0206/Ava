@@ -284,6 +284,14 @@ class TestServe:
             ("nod", silent.port, None, str(tmp_path))
         ]
 
+    def test_serve_ready_timeout_covers_a_slow_daemon_pass(self) -> None:
+        """The serve() wait must exceed the slowest observed daemon pass
+        (~30s, 2026-08-28) — the fast path makes the normal path ~2s, but the
+        window is the fallback for a slow pass / cold restart."""
+        import ava.ui as ui_mod
+
+        assert ui_mod._SERVE_READY_TIMEOUT_S >= 60.0
+
     def test_serve_same_name_replaces(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         ava._boot._agent_id = spawn_agent()
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
