@@ -198,7 +198,7 @@ class TestRemind:
         # the daemon passed its delivery transaction connection rather than
         # opening a second connection after the insert.
         assert published == [(owner, 1)]
-        assert _inbound_messages(db_conn, owner) == [("reminder", "chat", "system")]
+        assert _inbound_messages(db_conn, owner) == [("reminder", "system_note", "system")]
 
     def test_single_overdue_task_delivers_single_task_digest(
         self,
@@ -294,8 +294,17 @@ class TestRemind:
         assert len(inbounds) == 1
         content, kind, source = inbounds[0]
         assert f"#{task_id}" in content
-        assert kind == "chat"
+        # A reminder is a task system notification: delivered as a system-note
+        # inbound (NoteTag 'task'), never as peer chat (user ruling 2026-08-27).
+        assert kind == "system_note"
         assert source == "system"
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'system_note'",
+                (dead,),
+            )
+            payload = cur.fetchone()
+            assert payload is not None and payload[0] == {"note_tag": "task"}
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (dead,))
             assert cur.fetchone() == ("terminated",)

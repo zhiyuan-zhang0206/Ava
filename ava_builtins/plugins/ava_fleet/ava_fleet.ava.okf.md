@@ -47,7 +47,7 @@ tags:
 
 - All sub-concepts share the same DB (`agent_activity`, `agent_notices`, `agent_tasks` tables, etc.)
 - Notify depends on Self's `agent_id` as the notice owner
-- Tasks depends on Neighbors' `send_message` to notify relevant agents on owner change
+- Tasks notifies relevant agents on owner change with a system note (`send_system_note`, NoteTag `task`)
 - Agents spawned by Spawn establish a tie with the spawner via Neighbors
 
 ## Configuration

@@ -39,7 +39,7 @@ The skip rules for the two legs are asymmetric — the new owner is always notif
 | `new_owner is None` | Defensive: only the root task has no owner, a normal transfer path won't hit this |
 | `new_owner == actor` (caller themselves) | No need to tell themselves they've taken over |
 
-A new owner that is already `terminated` is still sent — `send_message` goes through the gateway delivery path and will `resurrect_if_terminated` it automatically. This prevents tasks from becoming stranded when assigning to a terminated agent (the assignment notification and the task body are delivered together to the revived owner).
+A new owner that is already `terminated` is still sent — the system-note delivery (`send_system_note`, `resurrect=True`) revives a terminated target automatically. This prevents tasks from becoming stranded when assigning to a terminated agent (the assignment notification and the task body are delivered together to the revived owner).
 
 **Old owner leg** (whether to send "task left you"):
 
@@ -49,20 +49,32 @@ A new owner that is already `terminated` is still sent — `send_message` goes t
 | `old_owner == actor` (caller themselves) | No need to tell themselves "you shouldn't do this" (they transferred their own task) |
 | Old owner is already `terminated` / does not exist in `agents_meta` | **The only preserved terminated skip** — waking up a terminated previous owner just to say the task is gone is wasteful, and they didn't ask to be revived |
 
+## Delivery: system note, not peer chat (user ruling 2026-08-27)
+
+Task notifications are **system notes** (`ava.agents.send_system_note`, NoteTag
+`task`): they render in the receiving agent's timeline as a system_marker —
+no Agent prefix, no peer timestamp — consistent with other system notes. They
+are delivered through the inbound queue as kind=`system_note` rows and claimed
+into `ava_msg_type='system_note'` messages; the timeline dispatches on the
+NoteTag, so the rendering change needs no frontend special-casing.
+
 ## Implementation Details
 
 ```python
 def _notify_owner_change(task_id, title, old_owner, new_owner, actor, description=None):
-    # New owner leg: always notify (terminated agents are auto-revived by send_message's gateway delivery path)
+    # New owner leg: always notify (terminated agents are auto-revived —
+    # an assignment is a delegator direction, so the system-note delivery resurrects)
     if new_owner is not None and new_owner != actor:
         new_msg = f'Task #{task_id} "{title}" is now assigned to you (by agent #{actor}).'
         if description:                   # Only passed from the create assignment path
             new_msg += f"\n\n{description}"
-        ava.agents.send_message(new_owner, new_msg)
-    # Old owner leg: the only leg that may be skipped due to terminated status
+        ava.agents.send_system_note(new_owner, new_msg, resurrect=True)
+    # Old owner leg: the only leg that may be skipped due to terminated status;
+    # resurrect=False — a notification must never revive an owner
     if old_owner is not None and old_owner != actor and not _is_terminated(old_owner):
-        ava.agents.send_message(
-            old_owner, f'Task #{task_id} "{title}" you owned is no longer assigned to you.'
+        ava.agents.send_system_note(
+            old_owner, f'Task #{task_id} "{title}" you owned is no longer assigned to you.',
+            resurrect=False,
         )
 
 
@@ -92,7 +104,7 @@ This design has two reasons:
 
 ## Relationship with Other Notifications
 
-- Task owner change notifications are **agent-to-agent** notifications, sent via `agents.send_message`.
+- Task owner change notifications are **system notes** (sent via `agents.send_system_note`, NoteTag `task`), not peer chat messages.
 - Task completion results should be presented to the **user** via [[../notify.ava.okf.md|`ava.ui.notify`]].
 - These two types of notifications are not substitutes for each other — the former lets the receiving agent know about a new task, the latter lets the human supervisor see the result.
 - A third, different line: `create`/`update` also publishes `task_created`/`task_updated` events on each write (SSE, visible to `GLOBAL_ROLES`) — these are not directed messages but cause all open task boards to invalidate and re-fetch; overdue task escalation (if parent has an owner → send a chat to the parent owner; if parent has no owner → insert a require_response notice on the stuck owner) is covered in [[../task_maintenance/task-maintenance.ava.okf.md|Task-Maintenance]] and is not part of this node.

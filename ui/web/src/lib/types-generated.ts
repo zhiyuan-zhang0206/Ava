@@ -619,6 +619,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/system-note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Agent System Note
+         * @description Deliver a framework system note to the specified agent.
+         *
+         *     The note is queued as a kind='system_note' inbound; the agent's claim
+         *     renders it as a system note (system_marker, NoteTag `body.note_tag`) in
+         *     its timeline — no Agent prefix, no peer timestamp — instead of a chat
+         *     peer message. Task notifications (assign / update / reminder) are the
+         *     current family (`note_tag='task'`).
+         *
+         *     `body.resurrect` mirrors the chat path's auto-resurrect but is a choice,
+         *     not a given: task assignment (a delegator direction) wakes a terminated
+         *     owner, while plain update / reminder notices must not (user ruling
+         *     2026-08-27 — notification messages never resurrect a terminated owner).
+         *
+         *     404: agent_id does not exist. 413: content exceeds the 1 MiB transport
+         *     limit. 422: note_tag is not a NoteTag value, or source is not a legal
+         *     envelope source.
+         */
+        post: operations["post_agent_system_note_api_agents__agent_id__system_note_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/messages/reconcile": {
         parameters: {
             query?: never;
@@ -6714,6 +6749,40 @@ export interface components {
          */
         StatsWindowHours: 0 | 1 | 6 | 24 | 72 | 168;
         /**
+         * SystemNoteIn
+         * @description POST /api/agents/{id}/system-note request body — a framework system
+         *     notification delivered to the agent as a system note (system_marker in
+         *     the timeline), never a peer chat message.
+         *
+         *     `content` is the note text. `source` follows the same envelope whitelist
+         *     as chat messages (system / agent:N / user / ...), defaulting to 'system';
+         *     it is recorded for audit but the note itself renders without a sender
+         *     prefix. `note_tag` picks the timeline chip — must be a NoteTag value
+         *     (closed set); `task` is the task-notification family. `resurrect`
+         *     controls whether a terminated target is woken to receive the note: task
+         *     assignment (a delegator direction) resurrects, plain update notices do
+         *     not (user ruling 2026-08-27 — notifications never resurrect an owner).
+         */
+        SystemNoteIn: {
+            /** Content */
+            content: string;
+            /**
+             * Source
+             * @default system
+             */
+            source: string;
+            /**
+             * Note Tag
+             * @default task
+             */
+            note_tag: string;
+            /**
+             * Resurrect
+             * @default true
+             */
+            resurrect: boolean;
+        };
+        /**
          * SystemStatus
          * @description GET /api/status response — System Status panel data all in one go.
          */
@@ -7830,6 +7899,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AgentMessageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMessageEnqueued"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_agent_system_note_api_agents__agent_id__system_note_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemNoteIn"];
             };
         };
         responses: {

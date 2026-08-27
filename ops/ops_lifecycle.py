@@ -561,7 +561,7 @@ async def resurrect_agent_op(
     body: ResurrectAgentRequest,
     *,
     trigger_inbound_id: int | None = None,
-    trigger_inbound_kind: Literal["chat", "compact_request"] | None = None,
+    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
 ) -> ResurrectAgentResponse:
     """Local-target resurrect (UPDATE terminated -> idling + detached process launch).
 
@@ -594,7 +594,7 @@ async def resurrect_if_terminated(
     agent_id: int,
     *,
     trigger_inbound_id: int,
-    trigger_inbound_kind: Literal["chat", "compact_request"],
+    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"],
 ) -> AgentStatus:
     """Resurrect `agent_id` when it is terminated, so a just-delivered inbound is
     handled by a live process instead of sitting unclaimed forever.
@@ -722,7 +722,7 @@ async def lifecycle_op(
     db_pool: ConnectionPool,
     *,
     trigger_inbound_id: int | None = None,
-    trigger_inbound_kind: Literal["chat", "compact_request"] | None = None,
+    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
 ) -> TerminateAgentResponse | ResurrectAgentResponse | RestartAgentResponse:
     """Parse the lifecycle path from a 'lifecycle' op payload and dispatch to
     the appropriate per-action op. Returns the per-action response model (the
