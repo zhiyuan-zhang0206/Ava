@@ -174,6 +174,23 @@ def fleet(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> _Fleet:
     return _Fleet(procs=procs, waited=waited)
 
 
+def test_kill_session_with_verdict_live_session_is_interrupted(fleet: _Fleet) -> None:
+    """The TTL reaper's interrupt verdict on Windows: the session process IS
+    the work (new_session Popens the user's command directly — no shell
+    layer), so killing any live session interrupted something; only the
+    idempotent noop on an already-absent session reports not-interrupted."""
+    ok, mode, interrupted = winproc.kill_session_with_verdict("ava-updater")
+    assert (ok, mode, interrupted) == (True, "forced", True), (
+        "a live session with a running child must report interrupted"
+    )
+    ok, mode, interrupted = winproc.kill_session_with_verdict("ava-agent-42")
+    assert (ok, mode, interrupted) == (True, "forced", True), (
+        "a live session WITHOUT children is still the work itself — busy"
+    )
+    ok, mode, interrupted = winproc.kill_session_with_verdict("ava-nonexistent")
+    assert (ok, mode, interrupted) == (True, "noop", False), "an absent session was not interrupted"
+
+
 def test_killing_a_daemon_spares_the_updater_session_it_spawned(fleet: _Fleet) -> None:
     """The regression: stopping `ava-ops` must not take down the `ava-updater`
     session, which on Windows is one of its children — the updater is the only

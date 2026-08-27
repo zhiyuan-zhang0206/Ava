@@ -264,6 +264,25 @@ def test_kill_session_absent_session_is_ok(cli_calls):  # pyright: ignore[report
     assert (ok, mode) == (True, "forced")
 
 
+def test_kill_session_with_verdict_maps_cli_stdout(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """The TTL reaper's interrupt verdict rides the kill CLI's stdout: `idle`
+    → not interrupted; `interrupted` → interrupted; anything else (record-based
+    fallback kill of a wedged host) is not proven idle → interrupted (fail-open)."""
+    calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+    script[("s", "kill")] = _FakeCompletedProcess(returncode=0, stdout="interrupted\n")
+    assert _backend().kill_session_with_verdict("s") == (True, "forced", True)
+    assert _argv(calls) == ["s", "kill"]  # pyright: ignore[reportUnknownArgumentType]
+
+    script[("s", "kill")] = _FakeCompletedProcess(returncode=0, stdout="idle\n")
+    assert _backend().kill_session_with_verdict("s") == (True, "forced", False)
+
+    script[("s", "kill")] = _FakeCompletedProcess(returncode=0, stdout="")
+    assert _backend().kill_session_with_verdict("s") == (True, "forced", True)
+
+    script[("s", "kill")] = _FakeCompletedProcess(returncode=1, stderr="boom")
+    assert _backend().kill_session_with_verdict("s")[0] is False
+
+
 # ---------------------------------------------------------------------------
 # list_sessions / session_log_path
 # ---------------------------------------------------------------------------

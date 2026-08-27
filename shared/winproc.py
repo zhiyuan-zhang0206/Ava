@@ -244,6 +244,22 @@ def has_session(name: str) -> bool:
     return _process_for_record(rec) is not None
 
 
+def kill_session_with_verdict(
+    name: str, *, graceful: bool = False, timeout: float = 15.0
+) -> tuple[bool, str, bool]:
+    """Kill a session; return (ok, mode, interrupted) — the TTL reaper's verdict.
+
+    On Windows the session process IS the work: ``new_session`` Popens the
+    user's command directly (no shell intermediate layer) whenever the
+    command needs no cmd.exe syntax, so a live session can never be proven
+    to be an idle shell waiting for input — killing one always interrupted
+    something. ``interrupted`` is therefore True for every kill of a live
+    session and False only for the idempotent noop on an already-absent one.
+    """
+    ok, mode = kill_session(name, graceful=graceful, timeout=timeout)
+    return ok, mode, mode != "noop"
+
+
 def new_session(
     name: str,
     cmd: str | list[str],

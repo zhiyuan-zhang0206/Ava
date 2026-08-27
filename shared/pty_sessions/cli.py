@@ -30,7 +30,13 @@ Ops (session ops take the session name first):
                             (graceful: SIGTERM first); idempotent noop.
                             Falls back to record-pid kills when the host
                             itself is wedged, so a kill is authoritative
-                            even against a broken host.
+                            even against a broken host. On success prints
+                            `interrupted` when the session carried live
+                            processes (a running foreground/background job)
+                            at kill time, `idle` otherwise — the TTL
+                            reaper's interrupt verdict (a record-based kill
+                            of a wedged host answers `interrupted`,
+                            fail-open).
 - ``list [prefix]``         live session names, one per line (record scan —
                             no process to dial; sweeps dead records).
 - ``list-started-at [prefix]``     every live session's launch epoch.
@@ -568,6 +574,7 @@ def _kill_by_record(name: str) -> int:
     if has_session(name):
         sys.stderr.write(f"session {name} survived the record-based kill\n")
         return 1
+    sys.stdout.write("interrupted\n")  # fail-open: a wedged host's kill could not be probed
     _sweep_dead(name)
     try:
         _reap_orphaned_hosts(name, force_unresponsive=True)
@@ -593,11 +600,13 @@ def _op_kill(name: str, rest: list[str]) -> int:
                 sys.stderr.write(f"cannot reap orphan pty host for {name}: {exc}\n")
                 return 1
             _sweep_dead(name)
+            sys.stdout.write("idle\n")  # nothing was there to interrupt
             return 0  # idempotent: killing an absent session is a noop
         return _kill_by_record(name)
     result = _finish_op(resp)
     if result != 0:
         return result
+    sys.stdout.write("interrupted\n" if resp["data"].get("interrupted") else "idle\n")
     try:
         _reap_orphaned_hosts(name, force_unresponsive=True)
     except RuntimeError as exc:

@@ -955,3 +955,71 @@ def test_kill_then_immediate_same_name_new_is_a_real_session(sessions: Path) -> 
     assert second.pid != first.pid, "must be a fresh shell, not the dying one"
     _send(home, name, "echo reborn-ok")
     _output_until(home, name, "reborn-ok")
+
+
+# ---------------------------------------------------------------------------
+# kill verdict — the TTL reaper's interrupt probe
+# ---------------------------------------------------------------------------
+
+
+def _kill_verdict(home: Path, name: str) -> str:
+    result = _run_cli(home, name, "kill")
+    assert result.returncode == 0, f"kill failed: {result.stderr}"
+    return result.stdout.strip()
+
+
+def test_kill_idle_reports_not_interrupted(sessions: Path) -> None:
+    """Killing a shell sitting at its prompt reports `idle` — the empty-shell
+    case the 2026-08-27 ruling reaps silently."""
+    home = sessions
+    name = "ava-test-verdict-idle-1"
+    _new(home, name)
+    _send(home, name, "echo verdict-idle-ready")
+    _output_until(home, name, "verdict-idle-ready")
+    assert _kill_verdict(home, name) == "idle"
+    assert not _has(home, name)
+
+
+def _wait_shell_child(home: Path, name: str) -> psutil.Process:
+    """Wait until the named session's shell has a live child (the job is up)."""
+    rec = _record(home, name)
+    assert rec is not None
+    shell = psutil.Process(rec.pid)
+    assert _wait(shell.children), f"{name} shell never grew a child"
+    return shell
+
+
+def test_kill_foreground_job_reports_interrupted(sessions: Path) -> None:
+    """Killing a session with a foreground job reports `interrupted` — the
+    verdict is snapshotted by the kill op itself, so a job starting between
+    a separate probe and the kill cannot be missed."""
+    home = sessions
+    name = "ava-test-verdict-fg-1"
+    _new(home, name)
+    _send(home, name, "echo verdict-fg-ready")
+    _output_until(home, name, "verdict-fg-ready")
+    _send(home, name, "sleep 300")
+    _wait_shell_child(home, name)
+    assert _kill_verdict(home, name) == "interrupted"
+    assert not _has(home, name)
+
+
+def test_kill_background_job_reports_interrupted(sessions: Path) -> None:
+    """A background job (children of the shell, no tty) also counts as
+    running work — the ruling's 'active process / background job'."""
+    home = sessions
+    name = "ava-test-verdict-bg-1"
+    _new(home, name)
+    _send(home, name, "echo verdict-bg-ready")
+    _output_until(home, name, "verdict-bg-ready")
+    _send(home, name, "sleep 300 &")
+    _wait_shell_child(home, name)
+    assert _kill_verdict(home, name) == "interrupted"
+    assert not _has(home, name)
+
+
+def test_kill_absent_reports_idle(sessions: Path) -> None:
+    """Killing an absent session is an idempotent noop and reports `idle` —
+    nothing was there to interrupt."""
+    home = sessions
+    assert _kill_verdict(home, "ava-test-verdict-absent-1") == "idle"

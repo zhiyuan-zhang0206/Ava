@@ -185,6 +185,28 @@ class SessionBackend(abc.ABC):
         """Capture output from a session's terminal. PTY only."""
         raise NotImplementedError(f"{type(self).__name__} does not support capture_pane")
 
+    def kill_session_with_verdict(
+        self,
+        name: str,
+        *,
+        graceful: bool = False,
+        timeout: float = 15.0,
+        expected: bool = False,
+    ) -> tuple[bool, str, bool]:
+        """Kill a session and report whether the kill interrupted running work.
+
+        Returns ``(ok, mode, interrupted)`` — ``kill_session`` plus the TTL
+        reaper's verdict: ``interrupted`` is True when the session carried
+        live processes (a running foreground/background job) at kill time.
+        The verdict is computed by the SAME operation that kills, so a job
+        starting between a separate idle probe and the kill cannot be cut
+        short without a notice. Backends that cannot produce a verdict raise
+        NotImplementedError — the caller treats that as interrupted
+        (fail-open: a session that cannot be proven idle may well be running
+        something).
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support kill verdicts")
+
 
 # ── POSIX: native process supervisor ─────────────────────────────────────
 
@@ -386,6 +408,24 @@ class PtySessionBackend(SessionBackend):
         result = self._cli(name, "kill", "--graceful") if graceful else self._cli(name, "kill")
         return result.returncode == 0, "graceful" if graceful else "forced"
 
+    def kill_session_with_verdict(
+        self,
+        name: str,
+        *,
+        graceful: bool = False,
+        timeout: float = 15.0,
+        expected: bool = False,
+    ) -> tuple[bool, str, bool]:
+        del timeout, expected  # the supervisor owns the graceful timeout
+        result = self._cli(name, "kill", "--graceful") if graceful else self._cli(name, "kill")
+        ok = result.returncode == 0
+        mode = "graceful" if graceful else "forced"
+        # stdout carries the host's kill-time verdict ("interrupted"/"idle");
+        # anything else (record-based fallback kill, wedged host) is not
+        # proven idle — report interrupted (fail-open).
+        interrupted = result.stdout.strip() != "idle"
+        return ok, mode, interrupted
+
     def list_sessions(self, prefix: str = "") -> list[str]:
         """Live session names from the record scan — no subprocess, no socket.
 
@@ -499,6 +539,19 @@ class WinprocSessionBackend(SessionBackend):
         from shared import winproc
 
         return winproc.session_log_path(name)
+
+    def kill_session_with_verdict(
+        self,
+        name: str,
+        *,
+        graceful: bool = False,
+        timeout: float = 15.0,
+        expected: bool = False,
+    ) -> tuple[bool, str, bool]:
+        del expected
+        from shared import winproc
+
+        return winproc.kill_session_with_verdict(name, graceful=graceful, timeout=timeout)
 
 
 _backend: SessionBackend | None = None

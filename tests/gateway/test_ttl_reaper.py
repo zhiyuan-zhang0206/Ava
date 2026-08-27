@@ -5,7 +5,8 @@ terminalized (expired_at, never closed_at), unexpired/closed rows are left
 alone, PageClosed is published, owners are notified only when running/idling,
 and expired shell rows dispatch a shell_kill op and are deleted only on a
 definitive verdict (killed / absent) — unreachable machines and failed ops
-leave the row for the next pass.
+leave the row for the next pass. Shell owners are notified only when the reap
+interrupted a running job; an idle or already-absent shell's reaping is silent.
 """
 
 from __future__ import annotations
@@ -163,7 +164,7 @@ async def test_reap_expired_shells_deletes_on_killed(
         assert machine == "macmini"
         assert kind == "shell_kill"
         assert payload == {"agent_id": aid, "session_id": 3}
-        return ShellKillResult(mode="killed").model_dump()
+        return ShellKillResult(mode="killed", interrupted=True, name="build").model_dump()
 
     monkeypatch.setattr(
         ttl_reaper.cluster_rpc,
@@ -178,7 +179,9 @@ async def test_reap_expired_shells_deletes_on_killed(
         row = cur.fetchone()
         assert row is not None and row[0] == 0
     msgs = _system_inbounds(db_conn, aid)
-    assert len(msgs) == 1 and "Shell session 3" in msgs[0]
+    assert len(msgs) == 1
+    assert "Shell session 'build' (id 3, agent" in msgs[0]
+    assert "interrupting a running task" in msgs[0]
 
 
 async def test_reap_expired_shells_keeps_row_on_unreachable(
@@ -229,3 +232,102 @@ async def test_reap_expired_shells_keeps_row_on_unknown_machine(
         cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
         row = cur.fetchone()
         assert row is not None and row[0] == 1
+
+
+async def test_reap_expired_shells_idle_reaping_is_silent(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A killed shell that carried no running job is reclaimed without a
+    notice — the user ruling: only a reap that interrupts running work
+    messages the owner."""
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+            "VALUES (%s, 4, now() - interval '1 minute')",
+            (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    async def _dispatch(machine: str, kind: str, payload: dict, **kwargs: object) -> dict:
+        return ShellKillResult(mode="killed", interrupted=False).model_dump()
+
+    monkeypatch.setattr(
+        ttl_reaper.cluster_rpc,
+        "dispatch_to_machine",
+        _dispatch,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == [(aid, 4)]
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 0
+    assert _system_inbounds(db_conn, aid) == []
+
+
+async def test_reap_expired_shells_absent_reaping_is_silent(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session already gone was not interrupted — reclaiming its row sends
+    no notice (previously it notified; the 2026-08-27 ruling narrows shell
+    notices to interrupted work)."""
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+            "VALUES (%s, 5, now() - interval '1 minute')",
+            (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    async def _dispatch(machine: str, kind: str, payload: dict, **kwargs: object) -> dict:
+        return ShellKillResult(mode="absent").model_dump()
+
+    monkeypatch.setattr(
+        ttl_reaper.cluster_rpc,
+        "dispatch_to_machine",
+        _dispatch,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == [(aid, 5)]
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 0
+    assert _system_inbounds(db_conn, aid) == []
+
+
+async def test_reap_expired_shells_missing_interrupted_field_notifies(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-policy runner's shell_kill result has no `interrupted` field —
+    default to notifying (the old behavior) so a version-skewed fleet never
+    silently swallows an interruption notice."""
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+            "VALUES (%s, 6, now() - interval '1 minute')",
+            (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    async def _dispatch(machine: str, kind: str, payload: dict, **kwargs: object) -> dict:
+        return {"mode": "killed"}  # old runner: no interrupted field
+
+    monkeypatch.setattr(
+        ttl_reaper.cluster_rpc,
+        "dispatch_to_machine",
+        _dispatch,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == [(aid, 6)]
+    msgs = _system_inbounds(db_conn, aid)
+    assert len(msgs) == 1 and "interrupting a running task" in msgs[0]

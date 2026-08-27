@@ -433,10 +433,36 @@ def _kill_target_groups(session: PtySession) -> set[int]:
     return groups
 
 
+def _session_busy(session: PtySession) -> bool:
+    """Whether the session carries live work beyond its idle shell.
+
+    Idle = the shell sits at its prompt: no foreground job owns the tty (the
+    same signal `_kill_target_groups` uses) and no descendant survives.
+    A shell that cannot be inspected answers busy (fail-open: a session we
+    cannot prove idle may well be running work).
+    """
+    if session.dead or not session.pid_matches():
+        return False
+    try:
+        foreground = os.tcgetpgrp(session.master_fd)
+    except OSError:
+        foreground = -1
+    if foreground > 0 and foreground != session.pid:
+        return True
+    try:
+        return bool(psutil.Process(session.pid).children(recursive=True))
+    except psutil.Error:
+        return True  # cannot inspect — assume the worst
+
+
 def _op_kill(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     if session.dead:
-        return ok({"mode": "noop"})  # idempotent, like posixproc
+        return ok({"mode": "noop", "interrupted": False})  # idempotent, like posixproc
     graceful = bool(req.get("graceful", False))
+    # The interrupted verdict is snapshotted HERE, in the same request that
+    # kills — a job starting after a separate idle probe could otherwise be
+    # cut short with no notice (the TOCTOU a standalone probe cannot close).
+    interrupted = _session_busy(session)
 
     if not session.pid_matches():
         # The shell died but the reader has not finished yet; the reader's
@@ -471,7 +497,7 @@ def _op_kill(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
                         child.kill()
             session.wait_dead(_KILL_FORCE_WAIT_S)
     if session.dead:
-        return ok({"mode": mode})
+        return ok({"mode": mode, "interrupted": interrupted})
     # The kill did not take — keep the record so the caller can see the
     # survivor (posixproc's #1015 lesson), and report failure.
     return err(1, f"session {session.name} survived the kill")
