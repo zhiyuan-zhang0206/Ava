@@ -113,10 +113,10 @@ describe("TaskGraph (graph mode)", () => {
     render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     const legend = screen.getByLabelText("Task graph legend");
-    for (const label of ["Open", "In progress", "Done", "Cancelled", "Root"]) {
+    for (const label of ["Open", "In progress", "Done", "Canceled", "Root"]) {
       expect(legend.textContent).toContain(label);
     }
-    expect(legend.textContent).toContain("uniform node size");
+    expect(legend.textContent).toContain("Uniform node size");
   });
 
   it("renders only open/in-progress cards by default", async () => {
@@ -166,12 +166,12 @@ describe("TaskGraph (graph mode)", () => {
 
     fireEvent.click(screen.getByText("Kanban"));
 
-    // Kanban mode has columns: Open, In Progress, Done, Cancelled.
+    // Kanban mode has columns: Open, In Progress, Done, Canceled.
     // Done and Canceled columns are hidden when empty (by default Done/Canceled
     // tasks are toggled off so those lanes have zero cards).
     // Open column is also empty here (no open subtasks) so it is hidden too.
     await waitFor(() => expect(screen.getAllByText("In progress").length).toBeGreaterThanOrEqual(1));
-    // Open, Done, and Cancelled lane headers do not render when empty.
+    // Open, Done, and Canceled lane headers do not render when empty.
   });
 
   it("in Kanban mode, Done column appears when Done toggle is on", async () => {
@@ -217,8 +217,9 @@ describe("TaskGraph (graph mode)", () => {
     // #5 (cancelled) is hidden.
     expect(screen.queryByText(/#5/)).toBeNull();
 
-    // Click the Canceled toggle to reveal Canceled tasks.
-    fireEvent.click(screen.getByText("Canceled"));
+    // Click the Canceled toggle to reveal Canceled tasks. The legend now
+    // also spells it "Canceled", so target the toggle button by role.
+    fireEvent.click(screen.getByRole("button", { name: /^Canceled/ }));
     await waitFor(() => expect(screen.getAllByText(/#5/).length).toBeGreaterThan(0), { timeout: 4000 });
   });
 

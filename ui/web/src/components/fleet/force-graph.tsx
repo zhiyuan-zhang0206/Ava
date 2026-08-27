@@ -77,25 +77,61 @@ const ZOOM_MIN = 0.001;
 const ZOOM_MAX = Infinity;
 export const LABEL_MIN_ZOOM = 0.45;
 
-// Label wrapping: each 6px mono glyph is ~3.6px wide. Horizontal and vertical
-// padding keep every rendered line inside the node; the id occupies line one.
+// Label wrapping: the 6px mono font advances ~0.6em per Latin glyph but a full
+// em (~6px) per CJK / full-width glyph, so wrapping budgets by measured width,
+// not char count — a char-count budget lets CJK labels run past the node edge
+// (QA #651: Chinese task titles bled ~20px beyond the circle). Horizontal and
+// vertical padding keep every rendered line inside the node; the id occupies
+// line one.
 export const LABEL_LINE_HEIGHT = 7;
 
+// Per-glyph advance of the 6px mono font: ~0.6em for Latin/digit glyphs, 1em
+// for CJK and other full-width glyphs (incl. CJK punctuation and emoji).
+export const GLYPH_WIDTH_LATIN = 3.6;
+export const GLYPH_WIDTH_FULL = 6;
+// Full-width ranges: CJK radicals/kana/hangul/ideographs, CJK punctuation,
+// fullwidth forms, emoji/symbol blocks, and the ellipsis we append ourselves.
+const FULL_WIDTH_RE =
+  /[\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF\u2600-\u27BF\u{1F000}-\u{1FAFF}\u2026]/u;
+
+function glyphWidth(ch: string): number {
+  return FULL_WIDTH_RE.test(ch) ? GLYPH_WIDTH_FULL : GLYPH_WIDTH_LATIN;
+}
+
+/** Number of leading chars of `text` that fit within `maxWidth` px. */
+function charsThatFit(text: string, maxWidth: number): number {
+  let width = 0;
+  let i = 0;
+  for (const ch of text) {
+    const w = glyphWidth(ch);
+    // 1e-9 tolerance: summing 3.6px advances in doubles drifts (~1e-14/char),
+    // so an exact-budget line (e.g. 10 × 3.6 = 36) must not be cut one glyph
+    // short by accumulated float error.
+    if (width + w > maxWidth + 1e-9) break;
+    width += w;
+    i += ch.length;
+  }
+  return i;
+}
+
 export function wrapLabel(label: string, r: number): string[] {
-  const maxChars = Math.floor((2 * r - 8) / 3.6);
+  const maxLineWidth = 2 * r - 8;
   const maxLabelLines = Math.max(Math.floor((2 * r - 4) / LABEL_LINE_HEIGHT) - 1, 0);
-  if (maxChars <= 0 || maxLabelLines === 0 || label.length === 0) return [];
+  if (maxLineWidth < GLYPH_WIDTH_LATIN || maxLabelLines === 0 || label.length === 0) return [];
 
   const lines: string[] = [];
   let remaining = label.trim();
-  while (remaining.length > maxChars) {
-    if (remaining[maxChars] === " ") {
-      lines.push(remaining.slice(0, maxChars));
-      remaining = remaining.slice(maxChars + 1).trimStart();
+  while (charsThatFit(remaining, maxLineWidth) < remaining.length) {
+    const cut = charsThatFit(remaining, maxLineWidth);
+    if (cut <= 0) break; // one glyph is wider than the line — can't make progress
+
+    if (remaining[cut] === " ") {
+      lines.push(remaining.slice(0, cut));
+      remaining = remaining.slice(cut + 1).trimStart();
       continue;
     }
 
-    const candidate = remaining.slice(0, maxChars);
+    const candidate = remaining.slice(0, cut);
     const spaceIndex = candidate.lastIndexOf(" ");
     const hyphenIndex = candidate.lastIndexOf("-");
     const breakIndex = Math.max(spaceIndex, hyphenIndex);
@@ -106,15 +142,17 @@ export function wrapLabel(label: string, r: number): string[] {
       continue;
     }
 
-    lines.push(remaining.slice(0, maxChars));
-    remaining = remaining.slice(maxChars);
+    lines.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut);
   }
   if (remaining.length > 0) lines.push(remaining);
   if (lines.length <= maxLabelLines) return lines;
 
+  // Ellipsize: the last visible line makes room for the ellipsis glyph.
   const visibleLines = lines.slice(0, maxLabelLines);
   const last = visibleLines.length - 1;
-  visibleLines[last] = `${visibleLines[last].slice(0, Math.max(maxChars - 1, 0))}…`;
+  const keep = charsThatFit(visibleLines[last], maxLineWidth - glyphWidth("…"));
+  visibleLines[last] = `${visibleLines[last].slice(0, keep)}…`;
   return visibleLines;
 }
 
