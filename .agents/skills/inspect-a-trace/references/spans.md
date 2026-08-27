@@ -86,7 +86,10 @@ OTLP/JSON request per line, active `spans.jsonl` plus rotated
 the trigger reason). Old segments are gzipped to `.jsonl.gz` by the
 agent-side compression pass and retention-pruned by day; `fetch_trace.py`
 and `ava trace ship` read them transparently. `ava trace ship` replays a
-shed window into Tempo when the sidecar's live fan-out missed it.
+shed window into Tempo when the sidecar's live fan-out missed it. At peak
+volume (~2.9 GB/day) the collector's 24-backup cap truncates the mirror to
+roughly the last half day of segments — grep/replay windows older than that
+need Tempo, not the mirror.
 
 ## Read
 
