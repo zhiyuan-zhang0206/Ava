@@ -41,7 +41,7 @@ from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.config import settings
 from shared.envfile import upsert_env
 from shared.paths import ava_home
-from shared.url_secret import url_with_password, url_with_userinfo
+from shared.url_secret import url_host, url_with_password, url_with_userinfo
 
 _TOKEN_BYTES = 32
 _SCOPES = frozenset({"admin", "runner", "both"})
@@ -66,6 +66,11 @@ class RotationState:
     redis_port: int
     pgbouncer_enabled: bool
     pgbouncer_port: int
+    # The hosts the probes/dials go to, derived from this cluster's own URLs at
+    # build_state (Task #1752 external data plane). Defaulted loopback so a
+    # journal written before these fields existed resumes unchanged.
+    pg_host: str = "127.0.0.1"
+    redis_host: str = "127.0.0.1"
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     phase: str = "minted"
 
@@ -152,15 +157,17 @@ def build_state(scope: str = "both") -> RotationState:
         new_redis_password=(mint_secret() if scope in {"runner", "both"} else old_redis_runtime),
         pg_port=record_postgres_port(record),
         redis_port=record_redis_port(record),
+        pg_host=url_host(settings.data_plane.db_url),
+        redis_host=url_host(settings.data_plane.redis_url),
         pgbouncer_enabled=settings.data_plane.pgbouncer_enabled,
         pgbouncer_port=record_pgbouncer_port(record),
     )
 
 
-def _pg_probe(user: str, db_name: str, port: int, password: str) -> bool:
+def _pg_probe(host: str, user: str, db_name: str, port: int, password: str) -> bool:
     try:
         with psycopg.connect(
-            url_with_userinfo(f"postgresql://@127.0.0.1:{port}/{db_name}", user, password),
+            url_with_userinfo(f"postgresql://@{host}:{port}/{db_name}", user, password),
             connect_timeout=3,
         ) as connection:
             connection.execute("SELECT 1")
@@ -169,10 +176,10 @@ def _pg_probe(user: str, db_name: str, port: int, password: str) -> bool:
         return False
 
 
-def _redis_probe(port: int, password: str, *, username: str) -> bool:
+def _redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
     try:
         with redis.Redis(
-            host="127.0.0.1",
+            host=host,
             port=port,
             username=username,
             password=password,
@@ -193,11 +200,22 @@ def preflight(state: RotationState) -> bool:
     checks = [
         (
             "Postgres owner",
-            _pg_probe(state.identity, state.identity, state.pg_port, state.old_db_admin_password),
+            _pg_probe(
+                state.pg_host,
+                state.identity,
+                state.identity,
+                state.pg_port,
+                state.old_db_admin_password,
+            ),
         ),
         (
             "Redis default",
-            _redis_probe(state.redis_port, state.old_redis_admin_password, username="default"),
+            _redis_probe(
+                state.redis_host,
+                state.redis_port,
+                state.old_redis_admin_password,
+                username="default",
+            ),
         ),
     ]
     if state.rotates_runner:
@@ -206,13 +224,20 @@ def preflight(state: RotationState) -> bool:
                 (
                     "Postgres runner",
                     _pg_probe(
-                        RUNNER_ROLE, state.identity, state.pg_port, state.old_runner_db_password
+                        state.pg_host,
+                        RUNNER_ROLE,
+                        state.identity,
+                        state.pg_port,
+                        state.old_runner_db_password,
                     ),
                 ),
                 (
                     "Redis ACL user",
                     _redis_probe(
-                        state.redis_port, state.old_redis_password, username=state.identity
+                        state.redis_host,
+                        state.redis_port,
+                        state.old_redis_password,
+                        username=state.identity,
                     ),
                 ),
             ]
@@ -238,7 +263,7 @@ def preflight(state: RotationState) -> bool:
 
 def _working_redis_admin_password(state: RotationState) -> str:
     for password in (state.new_redis_admin_password, state.old_redis_admin_password):
-        if _redis_probe(state.redis_port, password, username="default"):
+        if _redis_probe(state.redis_host, state.redis_port, password, username="default"):
             return password
     raise RuntimeError("Redis default user rejects both recorded admin passwords")
 
@@ -270,7 +295,7 @@ def apply_admin(state: RotationState) -> None:
     )
     current = _working_redis_admin_password(state)
     with redis.Redis(
-        host="127.0.0.1",
+        host=state.redis_host,
         port=state.redis_port,
         username="default",
         password=current,
@@ -295,7 +320,7 @@ def apply_runner(state: RotationState) -> None:
     admin_password = _working_redis_admin_password(state)
     ensure_cluster_redis_acl(
         state.identity,
-        redis_admin_url=(f"redis://default:{admin_password}@127.0.0.1:{state.redis_port}"),
+        redis_admin_url=(f"redis://default:{admin_password}@{state.redis_host}:{state.redis_port}"),
         runtime_password=state.new_redis_password,
         channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
     )
@@ -306,11 +331,22 @@ def verify(state: RotationState) -> None:
     checks = [
         (
             "Postgres owner",
-            _pg_probe(state.identity, state.identity, state.pg_port, state.db_admin_password),
+            _pg_probe(
+                state.pg_host,
+                state.identity,
+                state.identity,
+                state.pg_port,
+                state.db_admin_password,
+            ),
         ),
         (
             "Redis default",
-            _redis_probe(state.redis_port, state.redis_admin_password, username="default"),
+            _redis_probe(
+                state.redis_host,
+                state.redis_port,
+                state.redis_admin_password,
+                username="default",
+            ),
         ),
     ]
     if state.rotates_runner:
@@ -318,11 +354,22 @@ def verify(state: RotationState) -> None:
             [
                 (
                     "Postgres runner",
-                    _pg_probe(RUNNER_ROLE, state.identity, state.pg_port, state.runner_db_password),
+                    _pg_probe(
+                        state.pg_host,
+                        RUNNER_ROLE,
+                        state.identity,
+                        state.pg_port,
+                        state.runner_db_password,
+                    ),
                 ),
                 (
                     "Redis ACL user",
-                    _redis_probe(state.redis_port, state.redis_password, username=state.identity),
+                    _redis_probe(
+                        state.redis_host,
+                        state.redis_port,
+                        state.redis_password,
+                        username=state.identity,
+                    ),
                 ),
             ]
         )

@@ -227,6 +227,129 @@ def test_dry_run_never_calls_a_mutating_phase(monkeypatch: pytest.MonkeyPatch) -
     assert mutations == []
 
 
+def test_probes_and_dials_use_the_state_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rotation probes and admin dials must go to the URL-derived hosts on
+    RotationState — asserted against a foreign host, so a re-hardcoded loopback
+    literal fails this test (the loopback default alone would be vacuous)."""
+    state = _state()
+    state.pg_host = "10.0.0.7"
+    state.redis_host = "10.0.0.7"
+
+    pg_urls: list[str] = []
+    redis_hosts: list[str] = []
+    acl_urls: list[str] = []
+
+    class _PgConn:
+        def __enter__(self) -> _PgConn:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, _sql: str) -> None:
+            return None
+
+    def _connect(url: str, **_kwargs: object) -> _PgConn:
+        pg_urls.append(url)
+        return _PgConn()
+
+    class _Redis:
+        def __init__(self, **kwargs: object) -> None:
+            redis_hosts.append(str(kwargs["host"]))
+
+        def __enter__(self) -> _Redis:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def ping(self) -> bool:
+            return True
+
+        def execute_command(self, *_args: str) -> None:
+            return None
+
+    def _ensure_cluster_role(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def _ensure_runner_role(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def _working_redis_admin_password(_state: rotate.RotationState) -> str:
+        return "old-redis-admin"
+
+    def _ensure_cluster_redis_acl(*_args: object, **kwargs: object) -> None:
+        acl_urls.append(str(kwargs["redis_admin_url"]))
+
+    monkeypatch.setattr(rotate.psycopg, "connect", _connect)
+    monkeypatch.setattr(rotate.redis, "Redis", _Redis)
+    monkeypatch.setattr(rotate, "ensure_cluster_role", _ensure_cluster_role)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(rotate, "ensure_runner_role", _ensure_runner_role)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
+    monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert (
+        rotate._pg_probe(state.pg_host, "ava_main", "ava_main", state.pg_port, "probe-pw") is True
+    )
+    assert (
+        rotate._redis_probe(state.redis_host, state.redis_port, "probe-pw", username="default")
+        is True
+    )
+    assert pg_urls == ["postgresql://ava_main:probe-pw@10.0.0.7:15433/ava_main"]
+    assert redis_hosts == ["10.0.0.7"]
+
+    rotate.apply_admin(state)
+    rotate.apply_runner(state)
+    # The CONFIG SET dial and the ACL-provisioning admin URL both hit the host.
+    assert redis_hosts == ["10.0.0.7", "10.0.0.7"]
+    assert acl_urls == ["redis://default:old-redis-admin@10.0.0.7:16380"]
+
+
+def test_build_state_derives_hosts_from_the_cluster_urls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """build_state snapshots the dial hosts from this cluster's own URLs — the
+    replaceable-source contract (external data plane, Task #1752)."""
+    _patch_gateway_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        settings.data_plane, "db_url", "postgresql://ava_main:old-db@10.0.0.7:16433/ava_main"
+    )
+    monkeypatch.setattr(
+        settings.data_plane, "redis_url", "redis://ava_main:old-redis-runtime@10.0.0.7:16380/0"
+    )
+    (tmp_path / ".env").write_text(
+        "AVA_DB_ADMIN_PASSWORD=old-db\n"
+        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
+        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
+        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
+    )
+
+    state = rotate.build_state()
+
+    assert state.pg_host == "10.0.0.7"
+    assert state.redis_host == "10.0.0.7"
+
+
+def test_old_journal_without_host_fields_resumes_loopback(tmp_path: Path) -> None:
+    """A rotation journal written before the host fields existed (no pg_host /
+    redis_host) resumes with the loopback default — an in-flight rotation must
+    survive the upgrade."""
+    import json
+    from dataclasses import asdict
+
+    state = _state()
+    data = asdict(state)
+    del data["pg_host"]
+    del data["redis_host"]
+    path = tmp_path / "data-plane-old.json"
+    path.write_text(json.dumps(data))
+
+    loaded = rotate.RotationState.load(path)
+
+    assert loaded.pg_host == "127.0.0.1"
+    assert loaded.redis_host == "127.0.0.1"
+
+
 def test_recovery_state_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(rotate, "ava_home", lambda: tmp_path)
     state = _state()

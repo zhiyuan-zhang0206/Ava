@@ -58,6 +58,33 @@ def test_pgbouncer_line_uses_registry_port(
     assert probed["port"] == 6433  # the reachability probe hit the real listen port
 
 
+def test_status_probes_receive_the_url_host(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The status probes must be WIRED to the host their own URLs name — asserted
+    against a foreign host, so a re-hardcoded loopback literal fails (matching
+    the test env's own loopback URL would be vacuous)."""
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:p@10.0.0.7:15433/ava")
+    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://ava:p@10.0.0.7:16380/0")
+    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
+    seen: dict[str, tuple[int, str]] = {}
+
+    def _pg_running(port: int, host: str) -> bool:
+        seen["pg"] = (port, host)
+        return False
+
+    def _redis_reachable(port: int, host: str) -> bool:
+        seen["redis"] = (port, host)
+        return False
+
+    monkeypatch.setattr(ci, "_pg_running", _pg_running)
+    monkeypatch.setattr(ci, "_redis_reachable", _redis_reachable)
+
+    ci.print_data_plane_status()
+
+    assert seen == {"pg": (15433, "10.0.0.7"), "redis": (16380, "10.0.0.7")}
+
+
 def test_pgbouncer_line_without_registry_record_says_so(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
