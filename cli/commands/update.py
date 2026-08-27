@@ -293,6 +293,9 @@ from shared.paths import ava_home as ava_home
 from shared.repo_change import (
     classify_change as _classify_change,  # noqa: F401 # pyright: ignore[reportUnusedImport]  # re-export (accessed as cli.commands._classify_change)
 )
+from shared.rollout_telemetry import activate as _activate_telemetry
+from shared.rollout_telemetry import record_host as _record_host_telemetry
+from shared.rollout_telemetry import stage as _stage_telemetry
 
 
 def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped lifecycle
@@ -495,11 +498,17 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     import cli.commands as _ns
 
     # 0) Classify + pin: fast paths return their rc now; otherwise the single
-    #    rollout target every node checks out.
-    early_rc, restart_frontend, target_sha = _rollout_preflight(
-        repo, restart_only=restart_only, origin=origin
-    )
+    #    rollout target every node checks out. The collector activated here makes
+    #    every `stage()` below record into the one summary line the rollout log
+    #    ends with (Task #1820 — phase durations must be numbers, not a log to
+    #    re-read by hand).
+    telemetry = _activate_telemetry()
+    with _stage_telemetry("preflight"):
+        early_rc, restart_frontend, target_sha = _rollout_preflight(
+            repo, restart_only=restart_only, origin=origin
+        )
     if early_rc is not None:
+        telemetry.print_summary()
         return early_rc
 
     # Open the last-update record now: the target is resolved, nothing has been
@@ -550,17 +559,25 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     # operator who still has to self-heal after a rollout that finished CLEAN
     # for everyone it reached.
     skipped: list[str] = []
-    if _run_preflight_fetch(agent_runners, restart_only=restart_only, skipped=skipped):
+    with _stage_telemetry("phase0_fetch"):
+        phase0_failed = _run_preflight_fetch(
+            agent_runners, restart_only=restart_only, skipped=skipped
+        )
+    if phase0_failed:
+        # Printed after the stage above has recorded itself — the summary must
+        # include the phase whose failure aborted the rollout.
+        telemetry.print_summary()
         return 1
 
     try:
         # 1-1c) pause restarters (local + remote) + quiesce all agents. None = a
         #       Phase-A 5xx; abort with nothing migrated (the finally resumes).
-        paused_names, all_quiesced = _stop_the_world(
-            agent_runners,
-            mode=mode,
-            deploy_capability=deploy_capability,
-        )
+        with _stage_telemetry("stop_the_world"):
+            paused_names, all_quiesced = _stop_the_world(
+                agent_runners,
+                mode=mode,
+                deploy_capability=deploy_capability,
+            )
         if paused_names is None:
             return 1
         # Stragglers (quiesce timeout) or an explicit force mode: every host's
@@ -579,13 +596,14 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
 
         # 2-5) gateway local stop -> pull -> sync -> start (start migrates).
         #      restart_only skips the pull/sync (bounce on current code).
-        rc = _ns._run_gateway_local_update(
-            repo,
-            target_sha=target_sha,
-            restart_frontend=restart_frontend,
-            pull=not restart_only,
-            force_reap_agents=force_reap,
-        )
+        with _stage_telemetry("local_leg"):
+            rc = _ns._run_gateway_local_update(
+                repo,
+                target_sha=target_sha,
+                restart_frontend=restart_frontend,
+                pull=not restart_only,
+                force_reap_agents=force_reap,
+            )
         if rc != 0:
             # rc carries the recovery outcome (1 recovered / 2 DOWN on the pull path;
             # the raw start code for a restart-only bounce). The compensating-unpause
@@ -653,7 +671,11 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         #      Still asked when this host is the only target: the local leg's `ava start`
         #      runs with `--no-readiness-gate`, so skipping here would leave a single-box
         #      rollout with the readiness question asked nowhere at all.
-        if not _gateway_ready_or_incomplete(fanout_targets, paused_names, unconverged):
+        with _stage_telemetry("readiness"):
+            gateway_serving = _gateway_ready_or_incomplete(
+                fanout_targets, paused_names, unconverged
+            )
+        if not gateway_serving:
             outcome = RolloutOutcome.INCOMPLETE
             failing_step = "the gateway was not serving, so Phase B never fanned out"
             return 1
@@ -661,14 +683,24 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         # 7-8) Phase B + poll + verdict; hosts still mid-transition keep the lease
         #      as a settle hold. outcome / hosts_to_resume are re-assigned here so
         #      the `finally` reports the true aftermath, not the ABORTED default.
-        rc, outcome, hosts_to_resume = _phase_b_outcome(
-            fanout_targets,
-            target_sha=target_sha,
-            restart_only=restart_only,
-            runner_urls=runner_urls,
-            unconverged=unconverged,
-            force_reap=force_reap,
-        )
+        # Per-host updater stage times, gathered by the Phase-B poll from the
+        # `last_updater_outcome` each status probe carried; a converged host is
+        # re-probed once (the fresh-idle read in `ops.updater_outcome` serves
+        # its completed breakdown, `start` included). Land in the telemetry
+        # summary so one rollout log shows every host's checkout/uv/stop/start.
+        host_outcomes: dict[str, dict[str, float]] = {}
+        with _stage_telemetry("phase_b"):
+            rc, outcome, hosts_to_resume = _phase_b_outcome(
+                fanout_targets,
+                target_sha=target_sha,
+                restart_only=restart_only,
+                runner_urls=runner_urls,
+                unconverged=unconverged,
+                force_reap=force_reap,
+                host_outcomes=host_outcomes,
+            )
+        for _host, _stages in host_outcomes.items():
+            _record_host_telemetry(_host, _stages)
         if outcome is not RolloutOutcome.CLEAN:
             failing_step = "the Phase-B poll: acked agent-runners never reported back"
         elif local_launch_failures:
@@ -732,3 +764,9 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
                 "online (`ava cluster status` shows them off-pin until then).",
                 file=sys.stderr,
             )
+        # One machine-readable line at the end of every rollout log: each phase's
+        # duration (Task #1820), the bytes moved (the pre-update snapshot), and
+        # per-host updater stages where the poll captured them. The per-stage
+        # lines above already make a killed rollout readable; this is the
+        # aggregate the 368s breakdown was reconstructed from by hand.
+        telemetry.print_summary()

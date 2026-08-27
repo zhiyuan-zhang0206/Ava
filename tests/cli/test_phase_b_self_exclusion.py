@@ -83,7 +83,7 @@ def _drive(
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda hosts: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
+        lambda hosts, **_unused: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
     )
     rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     return _Rollout(rc, calls)

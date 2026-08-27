@@ -272,7 +272,7 @@ def _drive_rollout(
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda hosts: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
+        lambda hosts, **_unused: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_up, "settle_update_lock", lambda _holder, hosts: settled.extend(hosts))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -369,7 +369,7 @@ def test_ready_gateway_proceeds_to_phase_b_in_order(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda hosts: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
+        lambda hosts, **_unused: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")

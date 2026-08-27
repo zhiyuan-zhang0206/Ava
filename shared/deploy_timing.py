@@ -90,6 +90,18 @@ from __future__ import annotations
 # `ops.cluster_deploy._UPDATER_STALL_TIMEOUT_S`.
 NO_PROGRESS_TIMEOUT_S = 900.0
 
+# How long the Phase-B poll harvest waits before re-probing a host whose posture
+# just went idle but whose updater stage capture is missing its final `start`
+# stage line (Task #1820). The updater's `start` line lands a few ms AFTER the
+# posture row flips idle, and a host that converged between probes carried no
+# stages at all — one short wait makes the harvest deterministic instead of
+# racy. Best-effort: a failed or empty harvest changes nothing about the poll
+# verdict. Must stay far inside NO_PROGRESS_TIMEOUT_S: the re-probe reads the
+# host's outcome through the same fresh-idle window, and a grace at or beyond
+# the window would always find the reading stale, silently dropping a converged
+# host's completed stage breakdown.
+HARVEST_GRACE_S = 1.0
+
 # The gateway waits this long for a newly detached rollout/restart child to
 # publish its persistent UI owner. The HTTP client must outlive that wait plus
 # rollout's worst-case read-only release preflight (three 15 s git commands),

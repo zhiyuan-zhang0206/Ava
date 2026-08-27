@@ -48,7 +48,7 @@ def _patch_leg(monkeypatch: pytest.MonkeyPatch, *, from_sha: str = "old123") -> 
 
     `from_sha` is the pre-update HEAD the known-good snapshot records — the
     rollout's no-op test passes the same value as the target."""
-    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: (from_sha, set()))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: (from_sha, set(), None))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -105,7 +105,7 @@ def test_failed_boot_skips_schedule_bounce(monkeypatch: pytest.MonkeyPatch, repo
     backend = _FakeBackend([session_name("schedule-1")])
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set()))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set(), None))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_recover_rc", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]

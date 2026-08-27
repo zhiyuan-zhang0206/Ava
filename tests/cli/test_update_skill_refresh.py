@@ -29,7 +29,7 @@ def repo(tmp_path: Path) -> Path:
 
 def test_gateway_leg_refreshes_on_pull_path(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     refresh_calls: list[Path] = []
-    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set()))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set(), None))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_refresh_builtin_skills", refresh_calls.append)  # pyright: ignore[reportUnknownArgumentType]
@@ -43,7 +43,7 @@ def test_gateway_leg_skips_refresh_on_restart_only(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
     refresh_calls: list[Path] = []
-    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set()))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set(), None))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_refresh_builtin_skills", refresh_calls.append)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]

@@ -438,6 +438,38 @@ def test_the_posix_updater_command_carries_no_marker(
 
 
 @pytest.mark.real_cluster_spawn
+@pytest.mark.parametrize(
+    "restart_only",
+    [False, True],
+    ids=["update", "restart-only"],
+)
+def test_the_native_updater_ladder_carries_per_stage_markers(
+    restart_only: bool, native_host: _FakeSessionBackend
+) -> None:
+    """The cmd.exe ladder emits `[updater] stage=` markers between its steps
+    (Task #1820 — per-host updater stage telemetry).
+
+    `ops.updater_outcome._parse_stages` pairs the `t=` timestamps into the
+    fetch/checkout/uv breakdown the rollout report shows; a ladder without the
+    markers is exactly the Windows 75.9s decision the brief could not subdivide.
+    A full update marks fetch/checkout/uv/restart; a restart-only bounce has no
+    fetch/checkout to measure, so it marks only the restart that follows.
+    """
+    cluster_mod.spawn_update(restart_only=restart_only)
+
+    cmd = native_host.spawned[0][1]
+    expected = (
+        ["fetch", "checkout", "uv", "restart", "done"] if not restart_only else ["restart", "done"]
+    )
+    for stage in expected:
+        assert f"cli.commands._updater_stage {stage}" in cmd, f"missing {stage} marker"
+    if not restart_only:
+        # Fail-soft like the source-switch markers: a marker that cannot print
+        # must not abort the update it is there to measure.
+        assert f"_updater_stage {expected[0]} || ver>nul" in cmd
+
+
+@pytest.mark.real_cluster_spawn
 def test_spawn_update_logs_nonzero_validate_fetch(
     native_host: _FakeSessionBackend,
     monkeypatch: pytest.MonkeyPatch,

@@ -610,3 +610,193 @@ def test_the_line_the_updater_echoes_is_the_line_the_reader_anchors_on(
     assert echoed.strip() == _marker(), "the emitted marker drifted from the spelling read here"
     assert outcome is not None
     assert outcome.kind == "unknown"
+
+
+# ─── Per-stage telemetry (Task #1820) ──────────────────────────────────────────
+
+
+def test_parse_stages_reads_self_contained_dur_lines() -> None:
+    """The in-process updater legs (POSIX self-update, `ava restart` behind the
+    cmd.exe ladder) print `dur=` at each stage's end — self-contained, no pairing."""
+    tail = (
+        "[updater] stage=checkout dur=3.2s\n"
+        "[updater] stage=uv_sync dur=41.0s\n"
+        "[updater] stage=stop dur=2.1s\n"
+        "[updater] stage=start dur=14.6s\n"
+    )
+    assert uo._parse_stages(tail) == {
+        "checkout": 3.2,
+        "uv_sync": 41.0,
+        "stop": 2.1,
+        "start": 14.6,
+    }
+
+
+def test_parse_stages_pairs_consecutive_ladder_markers() -> None:
+    """The cmd.exe ladder prints `t=` (monotonic) ahead of each step; consecutive
+    markers pair into durations. The LAST marker has no follower, so its own step
+    is measured by the `dur=` lines `cmd_restart` writes inside it instead."""
+    tail = (
+        "[updater] stage=fetch t=100.000\n"
+        "[updater] stage=checkout t=103.120\n"
+        "[updater] stage=uv t=104.355\n"
+        "[updater] stage=restart t=145.500\n"
+        "[updater] stage=stop dur=2.3s\n"
+    )
+    assert uo._parse_stages(tail) == {
+        "fetch": 3.1,
+        "checkout": 1.2,
+        "uv": 41.1,
+        "stop": 2.3,
+    }
+
+
+def test_parse_stages_keeps_the_last_dur_value_and_never_overwrites_with_markers() -> None:
+    tail = (
+        "[updater] stage=checkout dur=1.0s\n"
+        "[updater] stage=checkout dur=9.0s\n"
+        "[updater] stage=fetch t=100.0\n"
+        "[updater] stage=checkout t=110.0\n"
+    )
+    assert uo._parse_stages(tail) == {"checkout": 9.0, "fetch": 10.0}
+
+
+def test_parse_stages_ignores_unrelated_lines() -> None:
+    tail = (
+        "[updater] force-checkout to abc1234\n"
+        "[updater] stage=uv t=100.0\n"
+        "  \u2717 gateway unreachable\n"
+        "[session-exit] rc=3\n"
+    )
+    # A lone trailing marker has no follower to pair with — its own step's
+    # duration is unknowable from markers alone, so it contributes nothing.
+    assert uo._parse_stages(tail) == {}
+
+
+def test_a_log_with_stage_lines_carries_them_on_the_outcome(home: Path) -> None:
+    """`last_updater_outcome` hands the stages over with the verdict — the wire
+    field the Phase-B poll's per-host telemetry reads."""
+    _paused(home)
+    _write_log(
+        home / "logs" / "updater-1785470000.log",
+        "[updater] stage=checkout dur=3.2s\n"
+        "[updater] stage=uv_sync dur=41.0s\n"
+        "[updater] stage=stop dur=2.1s\n"
+        "[updater] stage=start dur=14.6s\n"
+        "[session-exit] rc=0\n",
+    )
+
+    outcome = uo.last_updater_outcome()
+
+    assert outcome is not None
+    assert outcome.stages == {"checkout": 3.2, "uv_sync": 41.0, "stop": 2.1, "start": 14.6}
+    assert "stages: checkout 3.2s, start 14.6s, stop 2.1s, uv_sync 41.0s" in (
+        uo.describe_updater_outcome(outcome)
+    )
+
+
+def test_the_stages_clause_is_absent_when_there_are_no_stages() -> None:
+    described = uo.describe_updater_outcome(uo.UpdaterOutcome(kind="exited", rc=1))
+    assert "stages:" not in described
+
+
+def test_model_validate_accepts_a_wire_dict_without_stages() -> None:
+    """The runner answering the probe is on a different commit than the
+    orchestrator for the whole rollout by construction — a host that predates
+    the field sends no `stages`, and the report must render, not raise."""
+    outcome = uo.UpdaterOutcome.model_validate({"kind": "exited", "rc": 1})
+    assert outcome.stages == {}
+
+
+def test_stage_lines_do_not_leak_into_the_detail(home: Path) -> None:
+    """Stage lines start with `[updater]`, which is also a detail prefix — without
+    the exclusion, the operator's `detail` (the preflight complaint) would be
+    replaced by a wall of stage numbers."""
+    _paused(home)
+    _write_log(
+        home / "logs" / "updater-1785470000.log",
+        "[updater] stage=fetch t=100.0\n"
+        "[updater] stage=checkout t=103.1\n"
+        "  \u2717 gateway unreachable at http://100.64.0.2:8000: [Errno 61] Connection refused.\n"
+        "[updater] restart DECLINED by its own preflight -- host still serving, not starting over it\n",
+    )
+
+    outcome = uo.last_updater_outcome()
+
+    assert outcome is not None
+    assert "gateway unreachable" in outcome.detail
+    assert "stage=" not in outcome.detail
+
+
+# ─── Fresh-idle reading (Task #1820 harvest) ───────────────────────────────────
+
+
+def _idle_row_without_anchor() -> None:
+    """An idle posture row with the pause anchor cleared — what a host that just
+    finished its update looks like (`ava start` resumes it, clearing paused_at)."""
+    from datetime import datetime
+
+    from shared.host_deploy_state import HostDeployState
+
+    now = datetime.now(UTC)
+    _PAUSE_STATE["state"] = HostDeployState(
+        machine="test",
+        posture="idle",
+        updated_at=now,
+        updater_lease_expires_at=None,
+        paused_at=None,
+    )
+
+
+def test_a_freshly_idle_host_still_reports_its_completed_stages(home: Path) -> None:
+    """The Phase-B poll's harvest probe runs after the host resumed, when the
+    pause anchor is already cleared. The freshness window (the family's
+    no-progress bound) stands in for it, so the completed `start` stage — which
+    lands in the log only after the posture row goes idle — is served instead
+    of None."""
+    _idle_row_without_anchor()
+    _write_log(
+        home / "logs" / "updater-1785470000.log",
+        "[updater] stage=checkout dur=3.2s\n[updater] stage=start dur=14.6s\n[session-exit] rc=0\n",
+    )
+
+    outcome = uo.last_updater_outcome()
+
+    assert outcome is not None
+    assert outcome.stages == {"checkout": 3.2, "start": 14.6}
+
+
+def test_a_stale_idle_log_reads_as_no_record(home: Path) -> None:
+    """Freshness is the idle host's anchor: a log older than the no-progress
+    bound belongs to an update that finished long ago, and reporting it as this
+    moment's outcome would be the same misattribution the pause anchor exists
+    to prevent."""
+    _idle_row_without_anchor()
+    _write_log(
+        home / "logs" / "updater-1785470000.log",
+        "[session-exit] rc=0\n",
+        age_s=uo.NO_PROGRESS_TIMEOUT_S + 60.0,
+    )
+
+    assert uo.last_updater_outcome() is None
+
+
+def test_a_paused_host_without_an_anchor_reads_as_no_record(home: Path) -> None:
+    """The relaxation is scoped to idle hosts: a paused/converging row with no
+    `paused_at` cannot prove which run the log speaks for, so it keeps the old
+    None contract rather than guessing."""
+    from datetime import datetime
+
+    from shared.host_deploy_state import HostDeployState
+
+    now = datetime.now(UTC)
+    _PAUSE_STATE["state"] = HostDeployState(
+        machine="test",
+        posture="paused",
+        updated_at=now,
+        updater_lease_expires_at=None,
+        paused_at=None,
+    )
+    _write_log(home / "logs" / "updater-1785470000.log", "[session-exit] rc=0\n")
+
+    assert uo.last_updater_outcome() is None
