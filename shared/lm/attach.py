@@ -43,8 +43,7 @@ ATTACH_MAX_TOTAL_BYTES = 48 * 1024 * 1024
 ATTACH_MAX_LABEL_CHARS = 120
 
 _ATTACH_NOTICE = (
-    "[system] Files attached during this turn "
-    "(available for this turn only; re-attach if you need them again later):"
+    "[system] Files attached during this turn (kept in the message history; no need to re-attach):"
 )
 
 
