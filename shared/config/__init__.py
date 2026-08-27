@@ -372,22 +372,58 @@ else:
 # runs, and the env is the same single source the Settings field is built from.
 
 
+def cluster_tz_name() -> str | None:
+    """The authoritative cluster timezone name, or ``None`` when this process
+    holds none.
+
+    Authoritative means ``settings.general.timezone`` was explicitly set at
+    Settings build (env / unit ``.env`` / bootstrap fetch), not the silent
+    ``America/Los_Angeles`` field default. ``None`` is the *host-zone
+    fallback signal*: display paths render machine-local
+    (``dt.astimezone(None)``), which is the documented degradation of a
+    maintenance verb running while the gateway is down. This is the single
+    authority check — callers must not re-implement the
+    ``model_fields_set`` probe.
+    """
+    if "timezone" not in settings.general.model_fields_set:
+        return None
+    return settings.general.timezone
+
+
+def host_tz_name() -> str:
+    """This host's IANA timezone name, for paths that need an explicit name
+    but have no authoritative cluster timezone (settings-lite cron).
+
+    Resolves the ``/etc/localtime`` symlink (POSIX); falls back to ``UTC``
+    where there is none (Windows) or the link is not a zoneinfo path. The
+    name is only ever used as a wall-clock display zone for a lite process —
+    the cluster clock is authoritative whenever it exists.
+    """
+    try:
+        target = os.path.realpath("/etc/localtime")
+    except OSError:
+        return "UTC"
+    marker = "/zoneinfo/"
+    if marker in target:
+        return target.split(marker, 1)[1]
+    return "UTC"
+
+
 def cluster_tz() -> ZoneInfo | None:
     """The cluster's timezone as a ``ZoneInfo``, or ``None`` when this process
     holds no authoritative ``AVA_TIMEZONE`` (settings-lite / bare checkout).
 
     ``None`` is the *host-zone fallback signal*: ``dt.astimezone(None)`` is
     machine-local, which is the documented degradation of a maintenance verb
-    running while the gateway is down. Authoritative means the field was
-    explicitly set at Settings build (env / unit ``.env`` / bootstrap fetch),
-    not the silent ``America/Los_Angeles`` field default. A value that fails
-    to parse as IANA (belt and braces — Settings already fails fast on it at
-    construction) also yields ``None`` rather than crashing a display path.
+    running while the gateway is down. A value that fails to parse as IANA
+    (belt and braces — Settings already fails fast on it at construction)
+    also yields ``None`` rather than crashing a display path.
     """
-    if "timezone" not in settings.general.model_fields_set:
+    name = cluster_tz_name()
+    if name is None:
         return None
     try:
-        return ZoneInfo(settings.general.timezone)
+        return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
         return None
 
@@ -426,9 +462,9 @@ def apply_cluster_timezone() -> None:
     exist there, and the explicit ``cluster_tz()`` reads cover the display
     paths instead.
     """
-    if "timezone" not in settings.general.model_fields_set:
+    name = cluster_tz_name()
+    if name is None:
         return
-    name = settings.general.timezone
     try:
         ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
