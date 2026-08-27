@@ -307,7 +307,24 @@ def _heartbeat(
 _SHELL_PROBE_TIMEOUT_S = 3.0
 
 
-async def _probe_agent_shells(agent_id: int, machine: str) -> list[ShellInfo]:
+def _shell_ttls_blocking(pool: ConnectionPool, agent_id: int) -> dict[int, datetime]:
+    """The agent's TTL deadlines from `agent_shell_ttls` — session_id -> expires_at.
+
+    The table lives in the gateway's own Postgres, so the TTL merge happens
+    HERE (the runner probe answers session identity + uptime only; the ops
+    server on a split runner has no DB access). A session without a row has
+    no TTL — watcher sessions deliberately record none, and legacy
+    pre-mandate shells predate the table.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT session_id, expires_at FROM agent_shell_ttls WHERE agent_id = %s",
+            (agent_id,),
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
+
+
+async def _probe_agent_shells(agent_id: int, machine: str, pool: ConnectionPool) -> list[ShellInfo]:
     """The agent's live persistent shells, probed on the machine it runs on.
 
     One uniform path for every machine — the gateway never probes sessions itself.
@@ -317,6 +334,10 @@ async def _probe_agent_shells(agent_id: int, machine: str) -> list[ShellInfo]:
     gateway's own box is just another row (its localhost URL), so a
     single-box deployment dials itself exactly like a split deployment dials a
     runner.
+
+    Each probed shell is enriched with its `agent_shell_ttls` deadline (the
+    gateway-owned half of the row; see `_shell_ttls_blocking`) — sessions
+    without a row keep `expires_at=None` (no TTL).
 
     Degrades to an empty list on any probe failure (unreachable machine,
     unregistered name, version-skewed runner that does not know the op): the
@@ -329,7 +350,14 @@ async def _probe_agent_shells(agent_id: int, machine: str) -> list[ShellInfo]:
         )
     except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed):
         return []
-    return [ShellInfo.model_validate(s) for s in result.get("shells", [])]
+    shells = [ShellInfo.model_validate(s) for s in result.get("shells", [])]
+    if shells:
+        ttls = await asyncio.to_thread(_shell_ttls_blocking, pool, agent_id)
+        shells = [
+            s.model_copy(update={"expires_at": ttls.get(s.id)}) if s.id in ttls else s
+            for s in shells
+        ]
+    return shells
 
 
 class _InspectAggregates(NamedTuple):
@@ -548,7 +576,7 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
-        _probe_agent_shells(agent_id, db.machine),
+        _probe_agent_shells(agent_id, db.machine, pool),
         asyncio.to_thread(_heartbeat_last_pause_or_none, agent_id),
     )
     return AgentInspectLive(
@@ -655,7 +683,7 @@ async def get_agent_inspect(
         started_at=db.started_at,
         window_hours=None if since_compact else hours,
         since_compact=since_compact,
-        shells=await _probe_agent_shells(agent_id, db.machine),
+        shells=await _probe_agent_shells(agent_id, db.machine, pool),
         config_overlay=db.config_overlay,
         notice=notice,
         cost=aggregates.cost,

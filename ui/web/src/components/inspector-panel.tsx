@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, type ReactNode, useEffect } from "react";
+import { useCallback, type ReactNode, useEffect, useState } from "react";
 
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { api } from "@/lib/api";
@@ -482,8 +482,23 @@ function NoticeReplySection({
   );
 }
 
+// A page-level tick shared by the shells section only: runtime and TTL
+// remaining are derived from absolute timestamps (created_at / expires_at),
+// so one lightweight interval keeps them live between the panel's 60s inspect
+// polls — no new polling system. The tick lives here (not in the panel) so a
+// closed panel — which unmounts this section — leaves no interval running.
+function useNow(intervalMs: number): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
 function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
+  const now = useNow(1_000);
   return (
     <Section
       icon={<Terminal className="size-3" />}
@@ -495,7 +510,7 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
       ) : (
         <ul className="space-y-1">
           {shells.map((s) => (
-            <ShellRow key={s.id} agentId={inspect.agent_id} shell={s} />
+            <ShellRow key={s.id} agentId={inspect.agent_id} shell={s} now={now} />
           ))}
         </ul>
       )}
@@ -504,20 +519,56 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 // A shell row links to its full-screen monitor page (live terminal tail).
-// Guards against NaN / missing ids from a partial API response — if either
-// agentId or shell.id is not a valid finite integer, renders as plain text
-// (no link) to avoid navigating to /shell/NaN/NaN.
-function ShellRow({ agentId, shell }: { agentId: number; shell: ShellInfo }) {
+// Each row shows the shell's three meta facts: Created (browser-local launch
+// time), TTL (remaining + expiry; "No TTL" when the session has none — the
+// watcher / legacy pre-mandate shape), and Runtime (launch → now, ticking
+// live; falls back to the probe-time uptime snapshot when created_at is
+// missing). Guards against NaN / missing ids from a partial API response —
+// if either agentId or shell.id is not a valid finite integer, renders as
+// plain text (no link) to avoid navigating to /shell/NaN/NaN.
+function ShellRow({
+  agentId,
+  shell,
+  now,
+}: {
+  agentId: number;
+  shell: ShellInfo;
+  now: Date;
+}) {
   const validAgent = Number.isFinite(agentId) && agentId >= 0;
   const validShell = Number.isFinite(shell.id) && shell.id >= 0;
+  const createdMs = shell.created_at != null ? new Date(shell.created_at).getTime() : NaN;
+  const runtimeSeconds =
+    Number.isFinite(createdMs)
+      ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))
+      : shell.uptime_seconds;
+  const expiresAt = shell.expires_at ?? null;
+  const expiresMs = expiresAt != null ? new Date(expiresAt).getTime() : NaN;
+  const ttlRemainingSeconds = Number.isFinite(expiresMs)
+    ? Math.max(0, Math.floor((expiresMs - now.getTime()) / 1000))
+    : null;
   const rowClass =
-    "flex items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]";
+    "block rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px]";
   const content = (
     <>
-      <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
-      <span className="truncate text-foreground">{shell.name ?? "(unnamed)"}</span>
-      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-        {formatUptime(shell.uptime_seconds)}
+      <span className={cn("items-center gap-2", FLEX)}>
+        <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
+        <span className="truncate text-foreground">{shell.name ?? "(unnamed)"}</span>
+        <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
+          Runtime {formatUptime(runtimeSeconds)}
+        </span>
+      </span>
+      <span className={cn("mt-0.5 items-center gap-x-2 text-[10px] text-muted-foreground/80", FLEX)}>
+        <span className="truncate">
+          Created {shell.created_at != null ? formatShort(shell.created_at) : "—"}
+        </span>
+        {ttlRemainingSeconds != null && expiresAt != null ? (
+          <span className="shrink-0">
+            TTL {formatUptime(ttlRemainingSeconds)} · expires {formatShort(expiresAt)}
+          </span>
+        ) : (
+          <span className="shrink-0">No TTL</span>
+        )}
       </span>
     </>
   );

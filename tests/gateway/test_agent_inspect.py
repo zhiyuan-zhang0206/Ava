@@ -610,7 +610,13 @@ def test_inspect_live_returns_only_window_independent_fields(
     assert body["machine"] == "wsl"
     assert body["config_overlay"] == {"llm_model": "claude-opus-4-8"}
     assert body["shells"] == [
-        {"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}
+        {
+            "id": 5,
+            "name": "live-shell",
+            "created_at": None,
+            "uptime_seconds": 42,
+            "expires_at": None,
+        }
     ]
     assert body["heartbeat"]["last_pause"]["duration_s"] == 1800
     assert {"cost", "stats", "tps", "activity"}.isdisjoint(body)
@@ -809,8 +815,51 @@ def test_inspect_shells_probed_on_agents_machine(
         "payload": {"agent_id": aid},
     }
     assert body["shells"] == [
-        {"id": 5, "name": "desktop-remove", "created_at": None, "uptime_seconds": 42}
+        {
+            "id": 5,
+            "name": "desktop-remove",
+            "created_at": None,
+            "uptime_seconds": 42,
+            "expires_at": None,
+        }
     ]
+
+
+def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TTL deadlines come from the gateway's own `agent_shell_ttls` rows,
+    merged onto the probed shells — the runner probe answers identity +
+    uptime only, and a split runner has no DB access. A session without a row
+    (watcher / legacy pre-TTL) keeps `expires_at=None`."""
+    from gateway.routers import agent_inspect as inspect_mod
+
+    aid = _insert_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES (%s, %s, %s)",
+            (aid, 5, datetime.now(tz=UTC) + timedelta(hours=2)),
+        )
+    db_conn.commit()
+
+    async def _fake_dispatch(
+        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return {
+            "shells": [
+                {"id": 5, "name": "dev-server", "created_at": None, "uptime_seconds": 42},
+                {"id": 6, "name": "watcher", "created_at": None, "uptime_seconds": 7},
+            ]
+        }
+
+    monkeypatch.setattr(inspect_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+
+    with TestClient(app) as client:
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
+    by_id = {s["id"]: s for s in body["shells"]}
+    assert by_id[5]["expires_at"] is not None  # row present -> deadline set
+    assert by_id[6]["expires_at"] is None  # no row -> no TTL
 
 
 def test_inspect_shells_degrade_to_empty_on_unreachable(
