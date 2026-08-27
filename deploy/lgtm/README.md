@@ -46,9 +46,10 @@ today.
 Native templates in `native/config/` are rendered on every converge into
 `$AVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
 and launch script. Loki's limits and query defenses are copied from the rollback
-configuration and must remain aligned. Native backend listeners bind loopback
-only, and native Grafana dials Loki, Prometheus, and Postgres on the host
-loopback.
+configuration and must remain aligned. Native backend listen hosts are config
+knobs (`AVA_LGTM_LISTEN_HOST`, `AVA_LGTM_GRAFANA_LISTEN_HOST`): Loki and
+Prometheus default to loopback, Grafana defaults to all interfaces, and native
+Grafana dials Loki, Prometheus, and Postgres on the host loopback.
 
 ## Why this stack
 
@@ -75,7 +76,9 @@ are written to `$AVA_HOME/lgtm/native/logs/`.
 
 All unauthenticated backend APIs remain loopback-only: Loki 3100, Prometheus
 9090, Tempo 3200 and 14318. Grafana 3003 is the intended wider,
-anonymous-but-read-only surface.
+anonymous-but-read-only surface; its listen host is the
+`AVA_LGTM_GRAFANA_LISTEN_HOST` knob, whose `0.0.0.0` default is the historical
+all-interfaces form.
 
 ## Start, stop, and rollback
 
@@ -145,6 +148,8 @@ Copy `.env.example` to `.env` only when an override is needed.
 | `GRAFANA_PROVISIONING_PATH` | checkout provisioning directory | Rendered by converge for native Grafana; do not set it in `.env` |
 | `AVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
 | `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
+| `AVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form |
+| `AVA_LGTM_GRAFANA_LISTEN_HOST` | `0.0.0.0` | Listen host for native Grafana's HTTP listener (the historical all-interfaces form); narrow it to `127.0.0.1` or a tailnet IP to restrict the anonymous read-only UI |
 
 `.env` holds live secrets and is gitignored; never commit it. Converge renders
 the native Grafana provisioning path and runtime configuration; `.env` supplies
