@@ -36,8 +36,6 @@ Message formats exchanged between agent, LLM, users, and other agents. `messages
 
 ### Chat Inbound Assembly (`_chat_inbound.py`)
 - Assembles `kind='chat'` inbound rows into `HumanMessage`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model
-- Command expansion produces one raw text value shared by semantic skill matching and message assembly; the user message itself keeps the same envelope, content, and metadata regardless of whether matching emits a hint
-- When the per-agent semantic matcher is enabled, `_claim_dispatch.py` may place one `SDK_HINT` HumanMessage immediately before the inbound HumanMessage. `_skill_matcher.py` compares the expanded raw text with the live `indexed_skills()` corpus under a bounded async embedding call; failures, cold/stale caches, and below-threshold results add no message
 - Split out from `_claim.py`, focused on multimodal image inline path
 
 ## Key Dependencies
@@ -52,4 +50,3 @@ Message formats exchanged between agent, LLM, users, and other agents. `messages
 - `agent/messages.py:exec_output_message(...)` — execution output
 - `agent/messages.py:attach_message(...)` — attached media for the next turn
 - `agent/graph/_chat_inbound.py` — chat inbound → HumanMessage assembly (multimodal inline)
-- `agent/graph/_skill_matcher.py` — optional semantic skill hint selection and fingerprinted vector cache

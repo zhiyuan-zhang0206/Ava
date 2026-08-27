@@ -6,9 +6,8 @@ renderers (_by_who / _ts_prefix / _render_restart_completed_marker), one
 handler per inbound kind, and the routing-guarded dispatch loop
 (dispatch_batch).
 
-Behavior (preserved from the original claim module unless noted):
-- chat: optionally prepend one semantic skill SDK_HINT, then append the
-  unchanged envelope-wrapped HumanMessage
+Behavior (preserved verbatim from the original claim module):
+- chat: append HumanMessage (envelope wrap)
 - compact_summary: written by agent ava.self.compact(summary) → wipe the whole
   history and replace with [system prompt, summary] (no raw tail)
 - compact_request: framework / user "/compact" triggered → run Compaction LLM
@@ -63,7 +62,6 @@ from agent.hooks.compact import (
 from agent.messages import NoteTag, system_note_message
 from shared.agents import AgentStatus
 from shared.config import now_timestamp, settings
-from shared.config.turn_view import turn_settings
 from shared.inbound import InboundKind
 from shared.live_events import Cancelled
 from shared.log import logger
@@ -166,18 +164,7 @@ async def _handle_chat(
     st: _BatchState,
 ) -> None:
     """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
-    if turn_settings.agent.skill_match_enabled:
-        from agent.graph._chat_inbound import expanded_chat_text
-        from agent.graph._skill_matcher import skill_match_hint
-
-        raw_text = expanded_chat_text(item)
-        user_message = build_chat_inbound(item, expanded_text=raw_text)
-        hint = await skill_match_hint(raw_text)
-        if hint is not None:
-            st.new_msgs.append(hint)
-        st.new_msgs.append(user_message)
-    else:
-        st.new_msgs.append(build_chat_inbound(item))
+    st.new_msgs.append(build_chat_inbound(item))
     st.committed_chat_ids.append(item.id)
 
 
