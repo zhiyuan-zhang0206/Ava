@@ -25,14 +25,14 @@ def test_budget_is_thirty_forty_percent_of_a_1m_window() -> None:
     assert budget.soft_compact_tokens == 300_000
 
 
-def test_deepseek_budget_is_374k_soft_512k_hard() -> None:
+def test_deepseek_budget_is_600k_soft_700k_hard() -> None:
     """User decision (task #581): the deepseek entries opt out of the flat rule
-    with per-model fractions — soft 374k / hard 512k on their 1M window."""
+    with per-model fractions — soft 600k / hard 700k on their 1M window."""
     for model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
         budget = resolve_context_budget(model)
         assert budget.max_context_tokens == 1_000_000
-        assert budget.soft_compact_tokens == 374_000, model
-        assert budget.hard_compact_tokens == 512_000, model
+        assert budget.soft_compact_tokens == 600_000, model
+        assert budget.hard_compact_tokens == 700_000, model
 
 
 def test_budget_scales_to_a_smaller_window() -> None:
@@ -48,8 +48,8 @@ def test_budget_scales_to_a_smaller_window() -> None:
 def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule() -> None:
     """The roster carries no per-model compact fraction or ceiling, so EVERY
     model's thresholds are exactly 30% / 40% of its own context window — except
-    the deepseek entries, which carry the user-pinned 0.374 / 0.512 (see
-    test_deepseek_budget_is_374k_soft_512k_hard)."""
+    the deepseek entries, which carry the user-pinned 0.6 / 0.7 (see
+    test_deepseek_budget_is_600k_soft_700k_hard)."""
     for models in SUPPORTED_MODELS.values():
         for model in models:
             if model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
