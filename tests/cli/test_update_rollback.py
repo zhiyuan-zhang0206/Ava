@@ -636,7 +636,7 @@ def test_orchestration_resolves_and_threads_target_sha(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
 
-    def _phase_b(_hosts, *, target_sha, restart_only, force_reap=False):  # type: ignore[no-untyped-def]
+    def _phase_b(_hosts, *, target_sha, restart_only, force_reap=False, host_outcomes=None):  # type: ignore[no-untyped-def]
         captured["phaseb_target"] = target_sha
         return {"a": _cli.PollVerdict("ok")}
 
@@ -677,7 +677,11 @@ def test_phase_b_payload_carries_target_sha(monkeypatch: pytest.MonkeyPatch) -> 
         return [(h[0], "ok", "") for h in hosts]
 
     monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_poll_until_unpaused", lambda _hosts: {"a": _cli.PollVerdict("ok")})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _cli,
+        "_poll_until_unpaused",
+        lambda _hosts, **_unused: {"a": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
+    )
     _up._phase_b_and_poll([("a", None)], target_sha="PINNEDSHA", restart_only=False)
     assert captured["payload"] == {"target_sha": "PINNEDSHA"}
     assert captured["timeout"] == 120.0

@@ -52,12 +52,15 @@ the slice there is the whole tail and nothing about that platform changes.
 
 from __future__ import annotations
 
+import re
 import time
+from itertools import pairwise
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import shared.paths
+from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.platform import IS_WINDOWS
 
@@ -90,6 +93,45 @@ _EXIT_MARKER = "[session-exit] rc="
 # begins; POSIX needs none (one file per spawn) and prints none, which is what keeps
 # that platform's log byte-identical.
 _RUN_MARKER = "[updater-run]"
+
+# The stage lines the updater writes (Task #1820 — per-host stage telemetry). Two
+# shapes, one regex: the in-process legs print `dur=` at the stage's end
+# (`shared.rollout_telemetry.updater_stage`), the cmd.exe ladder prints `t=` at the
+# stage's start (`cli.commands._updater_stage`), and `_parse_stages` pairs
+# consecutive `t=` markers into durations. A stage line in the log that fails to
+# match is a line nothing reads — which is why the emitter and this regex are
+# asserted against each other in tests.
+_STAGE_LINE_RE = re.compile(
+    r"\[updater\] stage=([a-z0-9_]+) (?:dur=([0-9]+(?:\.[0-9]+)?)s|t=([0-9]+(?:\.[0-9]+)?))"
+)
+
+
+def _parse_stages(tail: str) -> dict[str, float]:
+    """Per-stage durations from the updater log's `[updater] stage=` lines.
+
+    `dur=` lines are self-contained (in-process legs). `t=` markers (the cmd.exe
+    ladder) carry a monotonic timestamp instead, so consecutive markers are paired
+    into durations — the last marker's own duration is unknowable from markers
+    alone (its step is the run's tail), which is why the ladder's final step
+    (`ava restart`) also writes `dur=` lines from inside `cmd_restart`.
+
+    A stage that appears more than once keeps its LAST `dur=` value, and a `t=`
+    marker never overwrites a `dur=` value for the same name. Durations round to
+    0.1s — the brief's 368s rollout is decomposed to that precision, and no
+    consumer here needs more.
+    """
+    stages: dict[str, float] = {}
+    markers: list[tuple[str, float]] = []
+    for match in _STAGE_LINE_RE.finditer(tail):
+        name, dur, t = match.group(1), match.group(2), match.group(3)
+        if dur is not None:
+            stages[name] = round(float(dur), 1)
+        else:
+            markers.append((name, float(t)))
+    for (name, t0), (_next, t1) in pairwise(markers):
+        stages.setdefault(name, round(t1 - t0, 1))
+    return stages
+
 
 # Lines worth carrying off the box: the preflight's own `✗` complaints (which name
 # the gateway URL that was unreachable) and the updater's own narration.
@@ -126,6 +168,13 @@ class UpdaterOutcome(BaseModel):
     rc: int | None = None
     detail: str = ""
     log: str = ""
+    # Per-stage durations parsed from the log's `[updater] stage=` lines
+    # (Task #1820): the Windows ladder's fetch/checkout/uv markers and the
+    # in-process legs' checkout/uv/stop/start lines, as seconds. Empty on a log
+    # that predates the markers or a run that never wrote one. Best-effort
+    # observational data — it rides the status probe, so a missing or partial
+    # dict is a gap in the report, never a reason to refuse one.
+    stages: dict[str, float] = Field(default_factory=dict)
 
 
 def updater_log_candidates(session: str) -> list[Path]:
@@ -305,8 +354,16 @@ def _newest_log(session: str) -> Path | None:
 
 def _classify(tail: str, log: Path) -> UpdaterOutcome:
     lines = [line.strip() for line in tail.splitlines() if line.strip()]
+    # Stage lines are telemetry, not narration: they start with `[updater]` (one of
+    # the detail prefixes) but carry only `stage=... dur=...` — keeping them in
+    # `detail` would hand the operator a wall of stage numbers where the preflight
+    # complaint used to be.
     detail = " | ".join(
-        line for line in lines if line.startswith(_DETAIL_PREFIXES) and _EXIT_MARKER not in line
+        line
+        for line in lines
+        if line.startswith(_DETAIL_PREFIXES)
+        and _EXIT_MARKER not in line
+        and not line.startswith("[updater] stage=")
     )
     rc: int | None = None
     for line in reversed(lines):
@@ -323,16 +380,20 @@ def _classify(tail: str, log: Path) -> UpdaterOutcome:
         kind = "exited"
     else:
         kind = "unknown"
-    return UpdaterOutcome(kind=kind, rc=rc, detail=tail_detail, log=log.name)
+    return UpdaterOutcome(
+        kind=kind, rc=rc, detail=tail_detail, log=log.name, stages=_parse_stages(tail)
+    )
 
 
 def last_updater_outcome() -> UpdaterOutcome | None:
     """This host's last updater outcome, or None when no log speaks for *this* update.
 
     None covers three readings that an operator must not be handed as an outcome: no
-    updater log exists at all, this host is not paused (so there is no update to be
-    the outcome of), and the newest log predates the current pause (a previous
-    update's). See the module docstring for why the pause is the anchor.
+    updater log exists at all, the newest log is stale, and the host is neither
+    paused nor freshly-idle (no update in flight and none just finished). The pause
+    is the anchor for a paused/converging host; a freshly-idle host keeps the
+    reading for a while (NO_PROGRESS_TIMEOUT_S window) so the rollout poll can
+    harvest the completed stage breakdown after convergence — Task #1820.
 
     The same flag anchors the tail a second time, one level finer: on a log that
     holds every run (Windows), `_anchor_to_this_run` keeps only the lines after this
@@ -353,12 +414,25 @@ def last_updater_outcome() -> UpdaterOutcome | None:
         # at the pause transition and preserved through `converging` — standing
         # in for the retired `cluster_paused` file's mtime. A host with no row
         # has never been paused; `paused_at` NULL means the window's anchor is
-        # gone (idle, or an updater that ran without a pause), so there is no
-        # update to be the outcome of — exactly what the absent flag read.
+        # gone (idle, or an updater that ran without a pause).
         state = read()
-        if state is None or state.posture == POSTURE_IDLE or state.paused_at is None:
+        if state is None:
             return None
-        paused_at = state.paused_at.timestamp()
+        if state.paused_at is not None:
+            paused_at = state.paused_at.timestamp()
+        else:
+            # Fresh-idle reading (Task #1820): a finished update clears the
+            # pause anchor on resume, so an idle host has none — but the
+            # Phase-B poll needs the host's COMPLETED stage breakdown after
+            # convergence, and the updater's final `start` stage line lands
+            # only after the posture row has already gone idle. The freshness
+            # window stands in for the anchor: the family's no-progress bound
+            # (shared/deploy_timing) is the longest an updater run can span, so
+            # a log written within it belongs to THIS host's just-finished
+            # update, and `_anchor_to_this_run` still slices it by run marker.
+            if state.posture != POSTURE_IDLE:
+                return None
+            paused_at = time.time() - NO_PROGRESS_TIMEOUT_S
         log = _newest_log(session_name(_UPDATER_SERVICE))
         if log is None or log.stat().st_mtime < paused_at:
             return None
@@ -395,6 +469,21 @@ _DECLINE_NEXT_STEP = (
 )
 
 
+def _stages_clause(outcome: UpdaterOutcome) -> str:
+    """` (stages: fetch 3.1s, checkout 1.2s, ...)` for an outcome that has them.
+
+    The clause is appended to every rendered outcome, because the stage times are
+    the answer to a question the verdict itself leaves open: WHERE the time went.
+    The brief's Windows case — a 75.9s updater decision with no way to subdivide
+    checkout/uv/stop/start — is exactly this clause rendered. Sorted so a reader
+    comparing hosts reads the same order.
+    """
+    if not outcome.stages:
+        return ""
+    parts = ", ".join(f"{name} {dur:.1f}s" for name, dur in sorted(outcome.stages.items()))
+    return f" (stages: {parts})"
+
+
 def describe_updater_outcome(outcome: UpdaterOutcome | None) -> str:
     """The clause a stalled host gets in the rollout report.
 
@@ -413,6 +502,7 @@ def describe_updater_outcome(outcome: UpdaterOutcome | None) -> str:
         return (
             f"DECLINED by its own preflight — nothing was stopped and this host is still "
             f"serving its old code{reason}; {_DECLINE_NEXT_STEP}"
+            f"{_stages_clause(outcome)}"
         )
     if outcome.kind == "exited":
         declined = outcome.rc == RESTART_DECLINED_EXIT_CODE
@@ -422,11 +512,11 @@ def describe_updater_outcome(outcome: UpdaterOutcome | None) -> str:
             else ""
         )
         reason = f" — {outcome.detail}" if outcome.detail else ""
-        return f"updater exited rc={outcome.rc}{note}{reason}"
+        return f"updater exited rc={outcome.rc}{note}{reason}{_stages_clause(outcome)}"
     reason = f" — {outcome.detail}" if outcome.detail else ""
     return (
         f"updater left no exit verdict in {outcome.log} — it died mid-flight, before any "
-        f"branch of its own chain could report one{reason}"
+        f"branch of its own chain could report one{reason}{_stages_clause(outcome)}"
     )
 
 

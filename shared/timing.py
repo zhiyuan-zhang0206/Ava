@@ -149,6 +149,11 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.NO_PROGRESS_TIMEOUT_S,
         "the one definition of 'this host stopped making progress'",
     ),
+    "HARVEST_GRACE_S": Clock(
+        "deploy",
+        lambda: deploy.HARVEST_GRACE_S,
+        "one short wait before the Phase-B harvest re-probe of a converged host",
+    ),
     "LOCK_TTL_S": Clock(
         "deploy",
         lambda: cluster_lock.LOCK_TTL_S,
@@ -296,6 +301,16 @@ CONSTRAINTS: list[Constraint] = [
         "LOCK_TTL_S",
         "the crash-reclaim bound must outlast the no-progress judgment, or a "
         "slow-but-alive rollout loses its lease mid-operation (2026-07-29 incident)",
+    ),
+    Constraint(
+        "<",
+        "HARVEST_GRACE_S",
+        "NO_PROGRESS_TIMEOUT_S",
+        "the harvest re-probe reads the host's outcome through the same "
+        "fresh-idle window the no-progress judgment defines, so its grace must "
+        "land far inside that window — a grace at or beyond it would always "
+        "find the reading stale and silently drop a converged host's completed "
+        "stage breakdown",
     ),
     Constraint(
         "<",

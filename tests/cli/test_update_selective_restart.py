@@ -225,7 +225,7 @@ def test_restart_only_skips_classify_pulls_nothing_and_fans_out_restart(
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda _hosts: {"wsl": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"wsl": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     def _local(

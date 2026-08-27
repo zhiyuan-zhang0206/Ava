@@ -13250,6 +13250,13 @@
             "type": "string",
             "title": "Log",
             "default": ""
+          },
+          "stages": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Stages"
           }
         },
         "type": "object",

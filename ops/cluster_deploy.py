@@ -439,7 +439,9 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # so `ava` resolves without an activation prefix.
         native_cmd = (
             f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
+            f" && (python -m cli.commands._updater_stage restart || ver>nul)"
             f" && {_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}"
+            f" & (python -m cli.commands._updater_stage done || ver>nul)"
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}"
         )
     else:
@@ -497,11 +499,25 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             f" && (python -m cli.commands._source_switch_marker on || ver>nul)"
             f" && echo [updater] force-checkout to {native_ref} -- discards any unpushed "
             f"local commits or a dirty tree, recover via git reflog"
+            # Per-step stage markers (Task #1820): each prints a monotonic
+            # timestamp ahead of its step, so `ops.updater_outcome` pairs them
+            # into the fetch/checkout/uv durations the rollout report shows —
+            # the breakdown the brief's Windows 75.9s case was missing. Fail-soft
+            # like the source-switch markers: a marker that cannot print costs a
+            # stage boundary, never the update. A marker missing because the step
+            # BEFORE it failed is the diagnosis — the last marker names where the
+            # chain died. The trailing `done` (after the restart, before the
+            # lease clear) closes the decision window: it runs only on the
+            # success path — the abort arm exits cmd.exe before it.
+            f" && (python -m cli.commands._updater_stage fetch || ver>nul)"
             f" && git fetch origin"
+            f" && (python -m cli.commands._updater_stage checkout || ver>nul)"
             f" && git checkout --force -B {_native_arg(branch)} {native_ref}"
             f" && git diff --quiet && git diff --cached --quiet"
+            f" && (python -m cli.commands._updater_stage uv || ver>nul)"
             f" && python -m cli.commands._update_uv_sync"
             f" && (python -m cli.commands._installed_sha || ver>nul)"  # see that module
+            f" && (python -m cli.commands._updater_stage restart || ver>nul)"
             f" && ({_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}) || ("
             f"echo [updater] checkout/sync or tree verification FAILED -- refusing to "
             f"start services on a possibly-mixed tree; the host stays on its current code{SOURCE_SWITCH_OFF}"
@@ -518,6 +534,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             # waits on the same host again.
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}{SOURCE_SWITCH_OFF}"
             f" & exit /b 1)"
+            f" & (python -m cli.commands._updater_stage done || ver>nul)"
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}{SOURCE_SWITCH_OFF}"
         )
     # One log holds every native run, so its tail needs a seam to be read by (#1117).

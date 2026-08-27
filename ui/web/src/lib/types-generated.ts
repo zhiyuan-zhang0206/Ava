@@ -7163,6 +7163,10 @@ export interface components {
              * @default
              */
             log: string;
+            /** Stages */
+            stages?: {
+                [key: string]: number;
+            };
         };
         /**
          * UploadedBatch

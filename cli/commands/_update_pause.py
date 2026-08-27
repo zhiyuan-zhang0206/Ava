@@ -24,6 +24,7 @@ from cli.commands._update_fanout import (
     ClusterOpPayload,
     _print_fan_out_results,
 )
+from shared.rollout_telemetry import stage as _stage_telemetry
 
 
 def _run_phase_a(
@@ -89,11 +90,16 @@ def _stop_the_world(
     # still-running local restarter within its 1s poll. The compensating
     # finally unpauses on every exit path, so pausing early adds no strand
     # risk.
-    pause_local_cluster()
-
     # 1b) Phase A: fan-out cluster/stop. None = a 5xx; abort (the finally resumes
     #     every host we may have paused). Otherwise the set of hosts that acked.
-    paused_names = _run_phase_a(agent_runners, deploy_capability=deploy_capability)
+    #
+    # Both halves are one telemetry stage: the brief's 368s breakdown had Phase A
+    # and the quiesce drain fused into one number, and they answer different
+    # questions (fan-out latency vs agents' exit latency), so the pause is timed
+    # here and the drain gets its own stage below.
+    with _stage_telemetry("phase_a_pause"):
+        pause_local_cluster()
+        paused_names = _run_phase_a(agent_runners, deploy_capability=deploy_capability)
     if paused_names is None:
         return None, False
 
@@ -110,5 +116,6 @@ def _stop_the_world(
     print("\n→ quiesce all agents before migration (stop-the-world)")
     from cli.commands import update as _up_mod
 
-    all_quiesced = _ns._quiesce_all_agents(timeout_s=_up_mod._quiesce_timeout_s(mode))
+    with _stage_telemetry("quiesce_drain"):
+        all_quiesced = _ns._quiesce_all_agents(timeout_s=_up_mod._quiesce_timeout_s(mode))
     return paused_names, all_quiesced

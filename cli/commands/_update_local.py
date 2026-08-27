@@ -38,6 +38,7 @@ so `cli.commands(.update)._run_gateway_local_update` / `._run_frontend_only_upda
 
 from __future__ import annotations
 
+import contextlib
 import shlex
 import sys
 from pathlib import Path
@@ -51,6 +52,8 @@ from cli.commands._update_recover import _recover_rc
 from cli.commands._update_report import _print_local_launch_failure_block
 from shared.config import refresh_data_plane_settings
 from shared.rollout_handoff import child_process_env
+from shared.rollout_telemetry import record_bytes as _record_telemetry_bytes
+from shared.rollout_telemetry import stage as _stage_telemetry
 
 # `ava cluster update` restarts only the side that actually changed. A frontend-only
 # pull just rebuilds the ava-frontend session — no agent quiesce, no migration,
@@ -127,14 +130,15 @@ def _restart_frontend_session(repo: Path) -> bool:
     from cli.commands._repo import _ensure_frontend_deps, build_services
     from cli.commands._session_lifecycle import _relaunch_once
 
-    spec = next(s for s in build_services() if s.session == _FRONTEND_SESSION)
-    sess = session_name(spec.session)
-    print(f"\n→ restart {sess} (rebuild ~30-60s)")
-    _ns._graceful_kill_session(sess, expected=True)
-    _ensure_frontend_deps(repo)
-    if _ns._new_session(sess, spec.cmd, repo):
-        return True
-    return _relaunch_once(sess, spec.cmd, repo, None)
+    with _stage_telemetry("frontend_build"):
+        spec = next(s for s in build_services() if s.session == _FRONTEND_SESSION)
+        sess = session_name(spec.session)
+        print(f"\n→ restart {sess} (rebuild ~30-60s)")
+        _ns._graceful_kill_session(sess, expected=True)
+        _ensure_frontend_deps(repo)
+        if _ns._new_session(sess, spec.cmd, repo):
+            return True
+        return _relaunch_once(sess, spec.cmd, repo, None)
 
 
 def _restart_schedule_sessions() -> None:
@@ -276,16 +280,18 @@ def _checkout_and_sync(
     print(f"\n→ git checkout {target_sha[:7]} (pinned rollout target)")
     from cli.commands import update as _up_mod
 
-    try:
-        _up_mod.git_checkout_sha(target_sha)
-    except GitPullFailed as e:
-        print(f"  ✗ {e}", file=sys.stderr)
-        return _recover_rc(repo, pull_recover, preserve_frontend)
+    with _stage_telemetry("checkout"):
+        try:
+            _up_mod.git_checkout_sha(target_sha)
+        except GitPullFailed as e:
+            print(f"  ✗ {e}", file=sys.stderr)
+            return _recover_rc(repo, pull_recover, preserve_frontend)
     print(f"  ✓ {from_sha[:7]} → {target_sha[:7]}")
 
     # 3) uv sync (new code may introduce dependencies)
     print("\n→ uv sync")
-    sync_result = _update_uv_sync.run_uv_sync(repo, runner=_up_mod.subprocess.run)
+    with _stage_telemetry("uv_sync"):
+        sync_result = _update_uv_sync.run_uv_sync(repo, runner=_up_mod.subprocess.run)
     if sync_result.returncode != 0:
         print("  ✗ uv sync failed", file=sys.stderr)
         return _recover_rc(repo, pull_recover, preserve_frontend)
@@ -342,9 +348,14 @@ def _boot_gateway_fresh(repo: Path, preserve_frontend: frozenset[str]) -> int:
         start_args += f" --disable-service {session}"
     ava_bin = str(repo / ".venv" / "bin" / "ava")
     child_env = child_process_env()
-    return _up_mod.subprocess.run(
-        [ava_bin, *shlex.split(start_args)], cwd=repo, env=child_env, check=False
-    ).returncode
+    # The child applies pending migrations early in its boot, so this one stage
+    # covers migrate + service start + the child's own readiness wait. The
+    # child's output streams into this same log, so the finer split is visible
+    # in the text; the number is what the telemetry summary carries.
+    with _stage_telemetry("start"):
+        return _up_mod.subprocess.run(
+            [ava_bin, *shlex.split(start_args)], cwd=repo, env=child_env, check=False
+        ).returncode
 
 
 def _recover_interrupted_update(
@@ -362,7 +373,7 @@ def _recover_interrupted_update(
     return _recover_rc(repo, pull_recover, preserve_frontend)
 
 
-def _run_gateway_local_update(
+def _run_gateway_local_update(  # noqa: PLR0915 — the local leg's stop -> checkout -> sync -> start sequence; each step is one statement
     repo: Path,
     *,
     target_sha: str | None = None,
@@ -402,14 +413,22 @@ def _run_gateway_local_update(
     # Snapshot last-known-good BEFORE stopping anything (pull path only); a
     # failure here propagates while the gateway is still up — with no snapshot
     # there is nothing to recover to (see `_snapshot_known_good`).
-    pull_recover = _snapshot_known_good(pull=pull, target_sha=target_sha)
+    with _stage_telemetry("snapshot"):
+        pull_recover = _snapshot_known_good(pull=pull, target_sha=target_sha)
+    # The bytes the snapshot moved ride the same stage: the brief's 368s
+    # breakdown showed the dump's ~4.24GiB but its size was a hand-read `ls`.
+    if pull_recover is not None and pull_recover[2] is not None:
+        # The duration is the signal; a vanished dump is a recovery problem.
+        with contextlib.suppress(OSError):
+            _record_telemetry_bytes("snapshot", pull_recover[2].stat().st_size)
 
     # 0.5) force-reap straggler agents BEFORE the service stop (quiesce-timeout
     #    backstop): mark this host's still-live agents 'restarting' and kill their
     #    processes, so no agent rides the migration on old code. The restarter is
     #    already paused (Phase A) and respawns them on new code after `ava start`.
     if force_reap_agents:
-        _up_mod._force_reap_local_agents()
+        with _stage_telemetry("force_reap"):
+            _up_mod._force_reap_local_agents()
 
     # 1) graceful stop gateway daemons (old schema still in place; this ensures the
     # subsequent migrate is not hit by local daemons running old code).
@@ -419,13 +438,14 @@ def _run_gateway_local_update(
     print("\n→ stop gateway daemons (graceful, keep pg/redis up for migrations)")
     if not restart_frontend:
         print("  · keeping frontend up (backend-only change, no UI rebuild)")
-    _up_mod._do_stop(
-        repo,
-        graceful=True,
-        require_confirmation=False,
-        keep_infra=True,
-        preserve_sessions=preserve_frontend,
-    )
+    with _stage_telemetry("stop"):
+        _up_mod._do_stop(
+            repo,
+            graceful=True,
+            require_confirmation=False,
+            keep_infra=True,
+            preserve_sessions=preserve_frontend,
+        )
 
     # The stop above took the gateway down too, so ANY failure below leaves the
     # gateway offline — and the orchestration's compensating cluster/resume rows
