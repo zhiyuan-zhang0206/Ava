@@ -198,7 +198,6 @@ class TestConsumptionMatrixDeclarations:
             "memory_indexer",
             "ops",
             "delivery_watchdog",
-            "idle_shell_reminder",
             "im_bridge",
             "page_server",
             # The hosted agent-runner (future/infra/agent-runner-as-server.md).

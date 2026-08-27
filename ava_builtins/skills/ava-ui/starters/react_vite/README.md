@@ -22,7 +22,7 @@ ava.shell.run('cd /tmp/my-app && npm install react-markdown remark-math rehype-k
 
 # Start dev server (background shell session, runs until agent exits). --host 0.0.0.0 makes
 # it accessible from the user's browser.
-sess = ava.shell.sessions.new("my-app")
+sess = ava.shell.sessions.new("my-app", ttl=24 * 3600)
 ava.shell.sessions.send(sess, 'cd /tmp/my-app && npm run dev -- --port 5173 --host 0.0.0.0')
 
 # Vite dev server takes 1-3s to bind port. sessions.send does not wait, must poll —

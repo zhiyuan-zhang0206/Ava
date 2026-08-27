@@ -158,7 +158,6 @@ class PtySession:
         self._lock = threading.Lock()
         self._dead = False
         self._cond = threading.Condition(self._lock)
-        self.last_output_at = time.monotonic()
 
     def feed(self, data: bytes) -> None:
         """Reader-thread ingest: the live screen when one exists, the raw
@@ -166,7 +165,6 @@ class PtySession:
         bug would kill the shell with it) — feed errors are swallowed and
         the ring remains the degraded capture source."""
         with self._lock:
-            self.last_output_at = time.monotonic()
             screen = self._screen
             if screen is None:
                 self._ring += data
@@ -382,28 +380,6 @@ def _op_send(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     return ok()
 
 
-def _op_is_idle(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
-    """Whether the shell owns its tty foreground process group.
-
-    Foreground jobs create their own process group, while background jobs leave
-    the interactive shell in front. A dying or unreadable tty is conservatively
-    busy: it must never produce a reminder based on uncertain process state.
-    """
-    del req
-    if session.dead:
-        return err(3, f"no such pty session: {session.name}")
-    try:
-        foreground_pgrp, shell_pgrp = os.tcgetpgrp(session.master_fd), os.getpgid(session.pid)
-    except OSError:
-        return ok({"idle": False, "idle_since": None})
-    idle = foreground_pgrp > 0 and foreground_pgrp == shell_pgrp
-    if not idle:
-        return ok({"idle": False, "idle_since": None})
-    with session._lock:
-        idle_since = session.last_output_at
-    return ok({"idle": True, "idle_since": idle_since})
-
-
 def _op_capture(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     if session.dead:
         return err(3, f"no such pty session: {session.name}")
@@ -505,7 +481,6 @@ _OPS: dict[str, Callable[[PtySession, dict[str, Any]], dict[str, Any]]] = {
     "ping": _op_ping,
     "send": _op_send,
     "send_keys": _op_send,  # keys arrive pre-translated to bytes (cli side)
-    "is_idle": _op_is_idle,
     "capture": _op_capture,
     "resize": _op_resize,
     "kill": _op_kill,

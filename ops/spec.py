@@ -284,17 +284,6 @@ def build_services() -> tuple[ServiceSpec, ...]:
             identity_probe=daemon_identity("heartbeat", settings.services.heartbeat_pidfile),
             healthcheck_module="services.healthchecks.heartbeat",
         ),
-        ServiceSpec(
-            session="idle-shell-reminder",
-            cmd=".venv/bin/python -m services.idle_shell_reminder.daemon",
-            capabilities=_GATEWAY,
-            requires_db=True,
-            curl_url=_hz("idle_shell_reminder"),
-            identity_probe=daemon_identity(
-                "idle_shell_reminder", settings.services.idle_shell_reminder_pidfile
-            ),
-            healthcheck_module="services.healthchecks.idle_shell_reminder",
-        ),
         # delivery-watchdog: cluster-wide stale-pending-inbound tripwire. A
         # gateway daemon — it owns the data plane. Config-gated by
         # AVA_DELIVERY_WATCHDOG_ENABLED.
@@ -705,8 +694,6 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return _otel_collector_gate_reason()
     if session == "heartbeat" and not settings.daemon.heartbeat_enabled:
         return "disabled (AVA_HEARTBEAT_ENABLED off)"
-    if session == "idle-shell-reminder" and not settings.daemon.idle_shell_reminder_enabled:
-        return "disabled (AVA_IDLE_SHELL_REMINDER_ENABLED off)"
     if session == "delivery-watchdog" and not settings.daemon.delivery_watchdog_enabled:
         return "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)"
     if session == "im-bridge" and not settings.services.im_bridge_enabled:

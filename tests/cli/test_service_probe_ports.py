@@ -107,7 +107,6 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "labeler",
         "heartbeat",
         "delivery-watchdog",
-        "idle-shell-reminder",
         "events-maintenance",
         "task-maintenance",
         "milvus",

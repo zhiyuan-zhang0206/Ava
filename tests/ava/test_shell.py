@@ -120,7 +120,7 @@ def test_run_default_cwd_is_home_before_identity() -> None:
 
 
 def test_new_returns_int_session_id(_agent_row: int) -> None:
-    sid = shell.new("test-new")
+    sid = shell.new("test-new", ttl=120)
     try:
         assert isinstance(sid, int)
         assert sid == 0  # first session of a fresh agent
@@ -129,8 +129,8 @@ def test_new_returns_int_session_id(_agent_row: int) -> None:
 
 
 def test_new_increments_session_index(_agent_row: int) -> None:
-    a = shell.new("a")
-    b = shell.new("b")
+    a = shell.new("a", ttl=120)
+    b = shell.new("b", ttl=120)
     try:
         assert (a, b) == (0, 1)
     finally:
@@ -140,7 +140,7 @@ def test_new_increments_session_index(_agent_row: int) -> None:
 
 @pytest.mark.flaky  # real session + time.sleep polling (10s deadline)
 def test_send_capture_roundtrip_by_id(_agent_row: int) -> None:
-    sid = shell.new("test-roundtrip")
+    sid = shell.new("test-roundtrip", ttl=120)
     try:
         shell.send(sid, "echo unified-session-ok")
         # Poll instead of a fixed sleep: under a CPU-saturated parallel bucket
@@ -158,8 +158,8 @@ def test_send_capture_roundtrip_by_id(_agent_row: int) -> None:
 
 
 def test_list_returns_id_and_name(_agent_row: int) -> None:
-    sid = shell.new("alpha")
-    named = shell.new("dev-server")
+    sid = shell.new("alpha", ttl=120)
+    named = shell.new("dev-server", ttl=120)
     try:
         listed = shell.list()
         assert listed[sid] == "alpha"
@@ -173,7 +173,7 @@ def test_list_returns_id_and_name(_agent_row: int) -> None:
 def test_named_session_capture_and_kill_by_id(_agent_row: int) -> None:
     # The name is a label only — send/capture/kill address a named session by
     # the same int id as an unnamed one.
-    sid = shell.new(name="scratch")
+    sid = shell.new(name="scratch", ttl=120)
     try:
         shell.send(sid, "echo named-session-ok")
         # Poll — see test_send_capture_roundtrip_by_id (audit round-2 P2).
@@ -191,7 +191,7 @@ def test_named_session_capture_and_kill_by_id(_agent_row: int) -> None:
 def test_new_rejects_invalid_name(_agent_row: int) -> None:
     for bad in ("Dev Server", "1abc", "-x", "a_b"):
         with pytest.raises(ValueError, match="lowercase slug"):
-            shell.new(name=bad)
+            shell.new(name=bad, ttl=120)
 
 
 def test_resolve_does_not_conflate_id_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,7 +216,7 @@ def test_operations_reject_foreign_id(_agent_row: int) -> None:
 
 
 def test_kill_removes_session(_agent_row: int) -> None:
-    sid = shell.new("test-kill")
+    sid = shell.new("test-kill", ttl=120)
     shell.kill(sid)
     assert sid not in shell.list()
 
@@ -233,7 +233,7 @@ def test_stale_session_cleanup_spares_lone_shell(_agent_row: int) -> None:
     """
     from ops import agent_launch
 
-    sid = shell.new(name="claude")  # the lone surviving session
+    sid = shell.new(name="claude", ttl=120)  # the lone surviving session
     try:
         agent_launch._kill_stale_session(_agent_row)
         assert sid in shell.list()  # process kill never touches the shell backend
@@ -258,7 +258,7 @@ def test_stale_session_cleanup_kills_process_session_spares_shell(_agent_row: in
     agent_sess = session_name(f"agent-{_agent_row}")
     # a real detached "stale process" tracked by the native supervisor
     posixproc.new_session(agent_sess, ["/bin/sleep", "300"], Path.cwd(), env=dict(os.environ))
-    sid = shell.new(name="claude")
+    sid = shell.new(name="claude", ttl=120)
     try:
         assert posixproc.has_session(agent_sess)
         agent_launch._kill_stale_session(_agent_row)
@@ -323,7 +323,7 @@ def test_send_enter_false_then_send_keys_enter_submits(_agent_row: int) -> None:
     """sessions.send(enter=False) types text without submitting; a later
     send_keys('Enter') submits it — the text/Enter split the SDK contract
     promises (a combined write races TUI programs)."""
-    sid = shell.new("test-noenter")
+    sid = shell.new("test-noenter", ttl=120)
     try:
         _ready(sid)
         shell.send(sid, "echo submitted-by-enter", enter=False)
@@ -342,7 +342,7 @@ def test_send_enter_false_then_send_keys_enter_submits(_agent_row: int) -> None:
 def test_send_keys_ctrl_c_interrupts_foreground(_agent_row: int) -> None:
     """C-c interrupts a foreground job (here `cat` blocking on stdin) and the
     shell survives to run the next command."""
-    sid = shell.new("test-cc")
+    sid = shell.new("test-cc", ttl=120)
     try:
         _ready(sid)
         shell.send(sid, "cat")
@@ -358,7 +358,7 @@ def test_send_keys_ctrl_c_interrupts_foreground(_agent_row: int) -> None:
 def test_send_keys_up_arrow_recalls_history(_agent_row: int) -> None:
     """Up recalls the previous command from shell history; Enter re-runs it —
     the raw-key path that drives interactive programs."""
-    sid = shell.new("test-up")
+    sid = shell.new("test-up", ttl=120)
     try:
         _ready(sid)
         shell.send(sid, "echo hist-marker-1")
@@ -378,7 +378,7 @@ def test_new_default_cwd_is_agent_workspace(_agent_row: int) -> None:
     directory; the workspace is created on demand)."""
     from shared.paths import workspace_dir
 
-    sid = shell.new("test-cwd")
+    sid = shell.new("test-cwd", ttl=120)
     try:
         _ready(sid)
         shell.send(sid, "pwd")
@@ -399,7 +399,7 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     from ava.shell import sessions as _sessions
     from shared.paths import run_dir
 
-    sid = shell.new("test-tree")
+    sid = shell.new("test-tree", ttl=120)
     try:
         _ready(sid)
         full = _sessions._resolve(sid)

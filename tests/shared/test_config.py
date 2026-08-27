@@ -396,7 +396,6 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "heartbeat_enabled",
         "hibernate_enabled",
         "hibernate_min_active",
-        "idle_shell_reminder_enabled",
         "machine_description",
         "permissions_helper_enabled",
         "ops_concurrency",

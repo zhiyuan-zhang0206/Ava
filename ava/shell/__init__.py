@@ -96,7 +96,7 @@ def run_background(
     name: str,
     cwd: str | None = None,
     keep: bool = False,
-    ttl: float | None = None,
+    ttl: float,
 ) -> BackgroundRun:
     """Run a long shell command in the background; you get a message when it
     finishes — no polling. Returns immediately.
@@ -115,9 +115,9 @@ def run_background(
             a script file.
         name: a lowercase slug like `"build"`.
         cwd: defaults to your workspace.
-        ttl: optional hard lifetime in seconds, counted from creation — the
+        ttl: required hard lifetime in seconds, counted from creation — the
             session is force-killed once it elapses, with no idle/activity
-            renewal. Omit for a session that is never auto-reclaimed;
+            renewal. Pass a large value for a long-resident command;
             `keep=True` does not extend or disable it.
     """
     if not cmd.strip():

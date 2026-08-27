@@ -1,9 +1,11 @@
 """Gateway TTL reaper — enforce serve() page and persistent-shell deadlines.
 
 The user ruling (2026-08-25) gives pages a hard lifetime (default 24h,
-env-configurable via ``AVA_PAGE_DEFAULT_TTL_SECONDS``) and lets agents declare
-a TTL when creating persistent shell sessions (``ava.shell.sessions.new(ttl=)``
-/ ``run_background(ttl=)``). This loop is the enforcer, scanning
+env-configurable via ``AVA_PAGE_DEFAULT_TTL_SECONDS``); the 2026-08-27 ruling
+makes a TTL **mandatory** for every persistent shell session created via
+``ava.shell.sessions.new(ttl=)`` / ``run_background(ttl=)`` (the
+idle-shell-reminder daemon is gone; TTL is the only reclamation mechanism).
+This loop is the enforcer, scanning
 ``agent_pages.expires_at`` and ``agent_shell_ttls.expires_at`` for rows past
 their deadline:
 
