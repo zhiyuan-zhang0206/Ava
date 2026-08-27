@@ -5,16 +5,14 @@ description: Mines real Ava runs for skill and plugin regressions and produces c
 
 # Self-Evolution
 
-Ava improves by looking at its own real usage. Every week this skill turns the
-past week of real agent runs into a **trace dataset**, finds the runs that went
+Ava improves by looking at its own real usage. Every week this skill turns
+the past week of real runs into a **trace dataset**, finds the runs that went
 badly, ties them to the skills/plugins that changed recently, and proposes
 concrete fixes. The dataset is the durable asset — it grows every week and is
 the material you iterate skills and plugins against.
 
 This is NOT a pre-merge gate, a benchmark, or a synthetic test suite. It reads
 what actually happened.
-
-
 
 ## Backpropagation analogy
 
@@ -29,8 +27,8 @@ weights:
 | Weight update | Edit the skill text |
 
 The backward pass is **80% agent self-reflection** (`evaluate.debrief()`)
-and **20% trace-mining by a separate worker**. The agent that ran the task
-knows best what tripped it up — so ask it first.
+and **20% trace-mining by a separate worker** — the agent that ran the task
+knows best what tripped it up.
 
 ## The weekly flow
 
@@ -38,10 +36,9 @@ knows best what tripped it up — so ask it first.
 collect dataset -> detect what changed -> mine bad runs + analyze -> (replay) -> report
 ```
 
-Helper scripts live in `reference/`. The skill directory name has a hyphen, so
-they are not importable as a package — run them as scripts with
-`.venv/bin/python`. Output data lands under `$AVA_HOME/self_evolution/` (private per
-deployment), not in the repo.
+Helper scripts live in `reference/` (hyphenated dir, not importable — run as
+scripts with `.venv/bin/python`). Output lands under
+`$AVA_HOME/self_evolution/` (private per deployment), not in the repo.
 
 ### 1. Collect the dataset
 
@@ -51,7 +48,7 @@ $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/
 
 Reads the past week's runs from the existing tables and writes one JSON record
 per run to `$AVA_HOME/self_evolution/dataset/<this-monday>.jsonl`. Each record
-holds the task prompt, the full transcript, the tools called, objective signals
+holds the task prompt, the complete transcript (see Data source), the tools called, objective signals
 (turns, exec failures, compactions, delivery breach, user re-prompts, user
 corrections, peer agent feedback), the skills it touched, and a rule-based
 `label` of **ok / fumbled / failed** (see `reference/label.py`). The script
@@ -60,18 +57,16 @@ prints the run counts.
 **Correction signals** (two new data sources since 2026-07):
 
 - `corrections` — user messages classified as redirection/criticism via
-  keyword detection (不对, 错了, 重新, wrong, incorrect, etc.). These are
-  split out from regular `followup_prompts` because a correction is a
-  stronger failure signal than a neutral follow-up question.
+  keyword detection (不对, 错了, 重新, wrong, incorrect, etc.); split from
+  `followup_prompts` because a correction is a stronger failure signal than a
+  neutral follow-up.
 - `peer_feedback` — agent-to-agent messages (`source LIKE 'agent:%'`)
-  classified as corrective feedback via keyword detection. Another agent
-  stepping in to correct is an objective signal that something went wrong.
+  classified as corrective feedback; another agent stepping in to correct is
+  an objective signal that something went wrong.
 
-Both fields feed into `label.py` for scoring: any non-empty `corrections`
-or `peer_feedback` → fumbled at minimum.
+Both feed `label.py`: any non-empty `corrections` or `peer_feedback` → fumbled at minimum.
 
-Collecting is the point on its own — the dataset is worth growing every week
-even in a quiet week.
+Collecting is the point on its own — grow the dataset every week even in a quiet week.
 
 ### 2. Detect what changed
 
@@ -105,9 +100,9 @@ for d in (home / "plugins").iterdir():                    # hand-cloned plugin r
 (When issue #39's cluster registry lands, its version-change feed replaces
 this per-machine sweep.)
 
-List the skills/plugins whose files changed this week, with dates. These are
-your suspects. If nothing changed, you can still write a short report noting the
-dataset grew and stop early.
+List the skills/plugins whose files changed this week, with dates — these
+are your suspects. If nothing changed, write a short report noting the dataset
+grew and stop early.
 
 ### 3. Mine the bad runs and analyze
 
@@ -118,54 +113,53 @@ $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/
 Clusters this week's `failed`/`fumbled` runs and prints a markdown digest —
 which run ids, what went wrong — in two passes: by the skill they touched, and
 by the plugin contribution (`<plugin>/<surface>/<identifier>`) that fired in
-them. The plugin pass reads `plugins_activated`, which counts each time a
-plugin hook, wrap, or system-prompt section actually acted in the run, so a
-regression caused by a silently-firing hook is attributable to the exact
-contribution rather than invisible.
+them. The plugin pass reads `plugins_activated` — each time a plugin hook,
+wrap, or prompt section actually acted in the run — so a silently-firing
+hook's regression is attributable to the exact contribution rather than
+invisible.
 
 For each cluster that (a) has several bad runs AND (b) overlaps a skill/plugin
 that changed this week, ask the original agents directly with `evaluate.debrief()` (80% of signal), then spawn one deep-dive worker with `ava.agents.spawn` for the remaining 20%:
 
 - Give it the skill name, the run ids, the dataset path
-  (`$AVA_HOME/self_evolution/dataset/<week>.jsonl`), and that skill's `git
-  diff` for the week.
-- Task it: "Read these runs' `transcript` in the dataset file
-  and the skill's SKILL.md + diff. Did this skill's change cause the failures?
-  If so, name the root cause and the exact edit that would fix it. Reply in
-  3-5 lines."
-- The worker reads the dataset file directly — the full transcript is already
-  in it, so it needs no DB access.
+  (`$AVA_HOME/self_evolution/dataset/<week>.jsonl`), and that skill's `git diff`
+  for the week.
+- Task it: read the runs' `transcript` in the dataset file and the skill's
+  SKILL.md + diff. Did this skill's change cause the failures? Name the root
+  cause and the exact edit that would fix it; reply in 3-5 lines.
+- The worker reads the dataset file directly — the full transcript is in it, no DB access.
 
-Collect the workers' replies with `ava.agents.get_last_message`. Skill
-attribution combines a logged `skill_invoked` signal (emitted when an agent
-opens a skill) with a content scan of the trace; treat it as a strong
-suspicion and let the worker reading the real trace confirm or dismiss it.
+Collect the workers' replies with `ava.agents.get_last_message`. Attribution
+combines a logged `skill_invoked` signal with a content scan of the trace — a
+strong suspicion, confirmed by the worker reading the real trace.
 
-Write each confirmed finding to
-`$AVA_HOME/self_evolution/proposals/<week>-<skill>.md`:
-phenomenon, the real run ids, root cause, and the concrete fix.
+Write findings to `$AVA_HOME/self_evolution/proposals/<week>-<skill>.md`:
+phenomenon, real run ids, root cause, concrete fix.
 
 **Optional deep dive.** The dataset's transcript is usually enough. When a
 finding hinges on something a transcript cannot show — where the time went, why
-an exec died, which langgraph path the turn took, what the agent's history
-looked like before a compaction — read the run itself:
-`ava.help(ava.skills.inspect_a_trace)` is the correlation know-how across the
-checkpoints table, the Loki event river, and the Tempo spans. This complements
-`evaluate.debrief()` with evidence the agent's own account does not carry; it
-costs a few queries, so reach for it per finding, not per run.
+an exec died, what the agent's history looked like before a compaction — read
+the run itself: `ava.help(ava.skills.inspect_a_trace)` is the correlation
+know-how across the checkpoints table, the Loki event river, and the Tempo
+spans, complementing `evaluate.debrief()` with evidence the agent's own account
+does not carry; it costs a few queries, so reach for it per finding, not per
+run.
 
 ### 4. Re-run to verify (optional, off by default)
 
 Only when a specific proposal is worth confirming empirically. The dataset's
 recorded outcome is the "old" baseline; re-running the same task under the
 current tree is the "new" side — via the Evaluation Loop's spawn path
-(`reference/evaluate.py`: `launch` -> `poll` -> `gather`).
+(`reference/evaluate.py`: `launch` -> `poll` -> `gather`). A clean A/B, not
+a verbatim replay: a fresh agent gets only the task prompt — never the
+original transcript — verified against the original tool profile
+(`verify_replay`).
 
 Only the **replay-safe subset** is ever re-run — tasks whose tool calls are
 pure read/compute (the `is_replay_safe` gate in `evaluate.py`). The OS and
 network are not sandboxed, so tasks that ran a shell command, sent a message,
-edited files, or hit an external API are deliberately skipped. Skip this
-whole step unless a proposal earns the cost. Gather verifies every completed
+edited files, or hit an external API are skipped. Skip this step unless a
+proposal earns the cost. Gather verifies every completed
 replay against its original tool profile; degenerate or side-effecting runs are
 listed as `invalid` and excluded from the mean.
 
@@ -175,14 +169,12 @@ Write `$AVA_HOME/self_evolution/reports/<week>.md`:
 
 1. **Dataset** — runs collected this week (ok / fumbled / failed), weeks accrued.
 2. **Changes** — skills/plugins that changed this week.
-3. **Findings** — per confirmed regression: the skill, the real run ids, root
-   cause, the fix, and (if run) re-run scores. Mark the fixes you are opening
-   as PRs.
+3. **Findings** — per confirmed regression: skill, real run ids, root cause,
+   the fix, and (if run) re-run scores. Mark fixes you are opening as PRs.
 4. **No-signal changes** — changes with no related regression, so next week
    knows they were checked.
 
-Then notify the user:
-`ava.ui.notify(title="Self-evolution: <N> changes, <M> suspected regressions", content="<report path>")`.
+Then notify the user with `ava.ui.notify(title="Self-evolution: <N> changes, <M> suspected regressions", content="<report path>")`.
 
 For a high-confidence skill fix, open a PR to `main` following the
 `ava-self-development` skill's workflow (PR title `[Ava-<your-id>]`, commit
@@ -222,8 +214,8 @@ For each skill that changed this week, run this loop (2-3 rounds):
 
 ### Running evaluate.py (async — spawn then gather)
 
-A task run takes minutes, longer than one code block may run, so evaluation is
-two phases with a wait in between. Import it from your own code (add the
+A task run takes minutes, longer than one code block may run, so evaluation
+is two phases with a wait in between. Import it from your own code (add the
 reference dir to `sys.path`, then `import evaluate`; `launch` needs your live
 agent identity, so it is not a CLI):
 
@@ -248,7 +240,7 @@ Compare `report["mean"]["overall"]` before vs after your edit. `rubric.py`
 scores two dimensions in [0, 1]: **completion** (output produced, no breach,
 clean exec) and **efficiency** (few tokens/turns, no exec failures, no
 compaction, no re-prompts); `overall` weights completion higher. Use only the
-verified mean: invalid replays are reported separately and do not affect it.
+verified mean — invalid replays are reported separately.
 
 ## Data source
 
@@ -257,17 +249,25 @@ is a frozen archive since 2026-08-12 (Task #1197 LGTM cutover); `collect.py`
 is the Loki read path, and a 0-run dataset is an ALERT (exit 2), never
 "nothing to act on".
 
+**Transcript completeness.** Each record's `transcript` is the checkpoint's
+complete read path (`load_checkpoint_messages_full`, `shared/checkpoint.py`):
+retained `compact_boundary` snapshots stitched with the latest segment,
+dropping only the repeated leading system prompt; summaries and session notes
+stay. "Complete" = full history since the compact-boundary retention rule
+(Task #1125, effective 2026-08-10); earlier trimmed history is not
+reconstructed — detail: the `evaluation` sub-skill.
+
 ## Daily incremental scan
 
 Between weekly runs, a daily schedule (`self-evolution-daily`, 00:00 deployment
 timezone) runs `reference/daily_scan.py --days 1`: it collects the past day's
-runs into `$AVA_HOME/self_evolution/daily/<date>.jsonl` (the weekly `dataset/`
-files are never touched), prints a compact report, and exits 2 (ALERT) whenever
-any run is labeled `failed` or `fumbled` — which wakes this agent to review and
-act immediately instead of waiting a week. The threshold is deliberately low:
-an alert costs one cheap review, a missed bad run costs the weekly cycle its
-earliest signal. A missing script or a hard failure also wakes this agent with
-the error, so a silently broken scan cannot hide.
+runs into `$AVA_HOME/self_evolution/daily/<date>.jsonl` (weekly `dataset/` files
+are never touched), prints a compact report, and exits 2 (ALERT) whenever any
+run is labeled `failed` or `fumbled` — waking this agent to review immediately
+instead of waiting a week. The threshold is deliberately low: an alert costs
+one cheap review, a missed bad run costs the weekly cycle its earliest signal.
+A missing script or a hard failure also wakes this agent, so a silently broken
+scan cannot hide.
 
 **Loki-failure fallback.** On dense windows `/api/events` can 500; run
 `reference/mirror_backfill.py <days> [week]` — collect from the local event mirror (rows deduped by event id).
