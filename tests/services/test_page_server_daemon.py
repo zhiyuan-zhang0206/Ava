@@ -369,11 +369,14 @@ def test_stale_snapshot_never_creates_session_for_closed_row(
     assert managed == {}
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT session_name FROM agent_pages WHERE agent_id = %s AND name = %s",
+            "SELECT session_name, server_token FROM agent_pages WHERE agent_id = %s AND name = %s",
             (agent_id, key[1]),
         )
         row = cur.fetchone()
         assert row is not None and row[0] is None
+        # No token is minted for a closed row (the mint is deferred until
+        # after the liveness re-check, never evaluated eagerly).
+        assert row[1] is None
 
 
 def test_stale_snapshot_skips_row_re_registered_mid_pass(
@@ -403,6 +406,54 @@ def test_stale_snapshot_skips_row_re_registered_mid_pass(
 
     assert backend.new_calls == []
     assert managed == {}
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT session_name FROM agent_pages WHERE agent_id = %s AND name = %s",
+            (agent_id, key[1]),
+        )
+        row = cur.fetchone()
+        assert row is not None and row[0] is None
+
+
+def test_session_rolled_back_when_row_expires_during_create(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A row that expires in the window between the liveness re-check and the
+    session_name write is rolled back too — the UPDATE's liveness condition
+    matches the re-check, so an expired row never keeps a ghost session."""
+    fake_tmp = tmp_path / "os-tmp"
+    fake_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_tmp))
+    md_dir = fake_tmp / "ava_md_expired"
+    md_dir.mkdir()
+    (md_dir / "index.html").write_text("x")
+    agent_id = spawn_agent()
+    key = (agent_id, "mid-create-expire")
+    _insert_page_row(db_conn, agent_id, key[1], 12024, md_dir)
+    stale = psd._open_rows(sync_pool, _HOST)[0]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = %s",
+            (agent_id, key[1]),
+        )
+    db_conn.commit()
+    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    # The liveness re-check passed a moment ago; expiry lands after it.
+    monkeypatch.setattr(psd, "_row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    backoff: dict[tuple[int, str], float] = {}
+
+    _reconcile(sync_pool, managed, backoff, {})
+
+    assert len(backend.new_calls) == 1
+    assert backend.killed == [backend.new_calls[0][0]]
+    assert not md_dir.exists()
+    assert managed == {}
+    assert backoff[key] > time.monotonic()
 
 
 def test_session_created_for_row_closed_during_create_is_rolled_back(
