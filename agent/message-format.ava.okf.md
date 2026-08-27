@@ -32,7 +32,7 @@ Message formats exchanged between agent, LLM, users, and other agents. `messages
 
 ### Attachments (`attach_message`)
 - Appends one HumanMessage at the completed-turn boundary for files registered with `ava.self.attach`
-- Starts with the packer's text caption and follows with model-native media blocks; `ava_msg_type="attach"` distinguishes it without image URL metadata
+- Content blocks are interleaved per file: a leading notice text block, then each file's caption line directly before its model-native media block (`[text(notice), text(line1), media1, ...]`); `ava_msg_type="attach"` distinguishes it without image URL metadata, and the timeline pairs every image with its own caption line structurally
 
 ### Chat Inbound Assembly (`_chat_inbound.py`)
 - Assembles `kind='chat'` inbound rows into `HumanMessage`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model

@@ -55,10 +55,13 @@ def test_drain_builds_one_native_image_message(tmp_path: Path) -> None:
     message = drain["messages"][0]
     assert isinstance(message, HumanMessage)
     assert message.additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value  # pyright: ignore[reportUnknownMemberType]
-    text, image_block = _blocks(message)
-    assert text["type"] == "text"
-    assert "after fix" in text["text"]
-    assert image_block["type"] == "image_url"
+    blocks = _blocks(message)
+    # Interleaved pack: [text(notice), text(caption line), image_url, ...] —
+    # the file's own caption line sits directly before its media block.
+    assert [b["type"] for b in blocks] == ["text", "text", "image_url"]
+    assert "Files attached during this turn" in blocks[0]["text"]
+    assert "after fix" in blocks[1]["text"]
+    assert blocks[2]["type"] == "image_url"
 
 
 def test_drain_keeps_text_only_models_informed(tmp_path: Path) -> None:
@@ -72,8 +75,9 @@ def test_drain_keeps_text_only_models_informed(tmp_path: Path) -> None:
     message = drain["messages"][0]
     assert isinstance(message, HumanMessage)
     blocks = _blocks(message)
-    assert len(blocks) == 1
-    assert "your model cannot receive image" in blocks[0]["text"]
+    # Skipped entry: notice + its caption line, both text blocks, no media block.
+    assert [b["type"] for b in blocks] == ["text", "text"]
+    assert "your model cannot receive image" in blocks[1]["text"]
 
 
 def test_drain_is_noop_without_pending_attachments() -> None:
