@@ -57,6 +57,20 @@ describe("standingHeadNoteIds", () => {
     expect(standingHeadNoteIds(items)).toEqual(new Set(["1.0"]));
   });
 
+  it("stops the run at an untagged marker (source=null catch-all rows are not head notes)", () => {
+    // Pre-tag checkpoint rows / retired markers render as system_marker with
+    // source=null via the catch-all. They are stale rows, not standing head
+    // notes, and must end the run — otherwise old data would be re-attached
+    // to every window and skipped in paging.
+    const items = [
+      item({ item_id: "0.0", kind: "system_prompt" }),
+      item({ item_id: "1.0", kind: "system_marker", source: "exec_timeout" }),
+      item({ item_id: "2.0", kind: "system_marker", source: null, payload: "legacy" }),
+      item({ item_id: "3.0", kind: "system_marker", source: "memory" }),
+    ];
+    expect(standingHeadNoteIds(items)).toEqual(new Set(["1.0"]));
+  });
+
   it("returns an empty set when there is no 0.0 prompt", () => {
     expect(
       standingHeadNoteIds([item({ item_id: "1.0", kind: "system_marker", source: "memory" })]),
