@@ -66,7 +66,7 @@ def _print_pre_update_data_snapshot_restore(data_snapshot: Path | None) -> None:
     """Name the verified restore point without exposing the cluster DB URL."""
     if data_snapshot is not None:
         print(
-            f"  · pre-update data snapshot: {data_snapshot} — restore: decrypt + gunzip, then "
+            f"  · pre-update data snapshot: {data_snapshot} — restore: decrypt, then "
             "pg_restore --clean --if-exists -d <db_url> <decrypted-dump> "
             "(drill: conventions/down-failure-drill.md)",
             file=sys.stderr,

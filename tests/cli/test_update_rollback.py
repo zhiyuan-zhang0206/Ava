@@ -276,7 +276,7 @@ def test_recover_message_names_data_snapshot(
     assert rc == 1
     message = capsys.readouterr().err
     assert str(dump) in message
-    assert "decrypt + gunzip" in message
+    assert "restore: decrypt, then" in message
     assert "pg_restore --clean --if-exists -d <db_url> <decrypted-dump>" in message
 
 

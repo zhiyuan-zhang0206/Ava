@@ -2,9 +2,11 @@
 
 The default target is the newest managed artifact in the local backup directory;
 pass an explicit artifact path to exercise a different retained copy. The drill
-never touches the live database. It decrypts, unzips, restores into a native
-throwaway Postgres cluster, verifies the recovery-source tables and a checkpoint
-reader sample, then removes every scratch file and the throwaway cluster.
+never touches the live database. It decrypts (removing the legacy gzip layer
+when the artifact predates the 2026-08-27 double-gzip removal), restores into a
+native throwaway Postgres cluster, verifies the recovery-source tables and a
+checkpoint reader sample, then removes every scratch file and the throwaway
+cluster.
 """
 
 from __future__ import annotations
@@ -41,20 +43,6 @@ def _newest_artifact() -> Path:
     if not artifacts:
         raise RuntimeError("no managed backup artifact exists")
     return artifacts[-1][1]
-
-
-def _gunzip(compressed_dump: Path, raw_dump: Path) -> None:
-    """Expand the decrypted custom dump without ever invoking a shell."""
-    with raw_dump.open("wb") as output:
-        proc = subprocess.run(  # noqa: S603
-            ["gzip", "--decompress", "--stdout", str(compressed_dump)],
-            stdout=output,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=backup._DUMP_TIMEOUT_S,
-        )
-    if proc.returncode != 0:
-        raise RuntimeError(f"backup gunzip exited {proc.returncode}")
 
 
 _RESTORE_ROLES = ("ava_main", "ava_runner", "grafana_ro")
@@ -155,10 +143,10 @@ def run_drill(artifact: Path | None = None) -> tuple[RestoreReport, float]:
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="ava-restore-drill-") as tmp:
         scratch = Path(tmp)
-        compressed_dump = scratch / "backup.dump.gz"
         raw_dump = scratch / "backup.dump"
-        backup.decrypt_artifact(artifact, compressed_dump)
-        _gunzip(compressed_dump, raw_dump)
+        backup.decrypt_artifact(artifact, raw_dump)
+        # Legacy artifacts carry a gzip layer; current ones are raw archives.
+        backup.gunzip_if_needed(raw_dump)
         with throwaway_postgres() as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
             _restore(raw_dump, scratch_db_url)
@@ -168,7 +156,7 @@ def run_drill(artifact: Path | None = None) -> tuple[RestoreReport, float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Restore and verify an encrypted Ava DB backup.")
-    parser.add_argument("artifact", nargs="?", type=Path, help="managed .dump.gz.enc artifact")
+    parser.add_argument("artifact", nargs="?", type=Path, help="managed .dump.enc artifact")
     args = parser.parse_args()
     report, elapsed = run_drill(args.artifact)
     print(
