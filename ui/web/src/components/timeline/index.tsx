@@ -83,7 +83,7 @@ import { useTranslations } from "next-intl";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useContentToggle, useContentToggleReset } from "@/lib/content-toggle-store";
-import { isReattachedTimelineContext, parseItemIdParts } from "@/lib/timeline";
+import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline";
 import {
   POINTER_STICKY_THRESHOLDS,
   TOUCH_STICKY_THRESHOLDS,
@@ -405,8 +405,15 @@ export function TimelineView({
         // after it, so it is never displaced and compensation is zero.
         let anchorNode: HTMLElement | null = null;
         let contextNode: HTMLElement | null = null;
+        // Re-attached context = the prompt + standing head notes (the gateway
+        // re-attaches both at the head of every window) + compact summaries.
+        // A prepend of a same-segment window inserts after them, so anchoring
+        // to one yields delta 0 — the "jump to the top" bug #817.
+        const headNoteIds = standingHeadNoteIds(itemsRef.current);
         const contextIds = new Set(
-          itemsRef.current.filter(isReattachedTimelineContext).map((it) => it.item_id),
+          itemsRef.current
+            .filter((it) => isReattachedTimelineContext(it) || headNoteIds.has(it.item_id))
+            .map((it) => it.item_id),
         );
         const vpRect = viewport.getBoundingClientRect();
         for (const n of viewport.querySelectorAll<HTMLElement>("[data-item-id]")) {
@@ -435,7 +442,9 @@ export function TimelineView({
                 frontId:
                   itemsRef.current.find(
                     (it) =>
-                      !isReattachedTimelineContext(it) && !it.item_id.startsWith("_"),
+                      !isReattachedTimelineContext(it) &&
+                      !headNoteIds.has(it.item_id) &&
+                      !it.item_id.startsWith("_"),
                   )?.item_id ?? null,
                 // Document-space top (rect.top + scrollTop — invariant under
                 // user scrolls). Refreshed on every commit while pending, so
@@ -618,8 +627,12 @@ export function TimelineView({
     // prepend, so compare the first real item id captured at trigger instead.
     // Streaming commits / snapshot folds only touch the tail, so the front
     // real id is unchanged until an older window actually lands.
+    const headNoteIds = standingHeadNoteIds(items);
     const frontRealId = items.find(
-      (it) => !isReattachedTimelineContext(it) && !it.item_id.startsWith("_"),
+      (it) =>
+        !isReattachedTimelineContext(it) &&
+        !headNoteIds.has(it.item_id) &&
+        !it.item_id.startsWith("_"),
     )?.item_id ?? null;
     if (frontRealId === anchor.frontId) {
       // Prepend not landed yet — keep waiting. Refresh the anchor's document

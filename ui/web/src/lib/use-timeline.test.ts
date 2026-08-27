@@ -334,6 +334,95 @@ describe("useTimeline mount + initial fetch", () => {
     expect(showError).not.toHaveBeenCalled();
   });
 
+  it("loadOlder skips the re-attached standing head notes as cursors", async () => {
+    // The gateway re-attaches the standing head notes (exec timeout / timezone
+    // / cluster memory / agent id / agent memory) right after the prompt. A
+    // cursor on one of them would make the gateway cross straight to the
+    // older compact segment and skip the current segment's real items between
+    // the head and the tail window — paging must start at the oldest REAL item.
+    const showError = vi.fn();
+    vi.mocked(api.getTimeline).mockResolvedValueOnce(
+      tlResp(
+        [
+          snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          snapshotItem({
+            item_id: "1.0",
+            kind: "system_marker",
+            source: "exec_timeout",
+            payload: "timeout",
+          }),
+          snapshotItem({
+            item_id: "2.0",
+            kind: "system_marker",
+            source: "timezone",
+            payload: "tz",
+          }),
+          snapshotItem({
+            item_id: "3.0",
+            kind: "system_marker",
+            source: "memory",
+            payload: "cluster memory",
+          }),
+          snapshotItem({
+            item_id: "4.0",
+            kind: "system_marker",
+            source: "agent_id",
+            payload: "id",
+          }),
+          snapshotItem({
+            item_id: "5.0",
+            kind: "system_marker",
+            source: "agent_memory",
+            payload: "agent memory",
+          }),
+          snapshotItem({
+            item_id: "6.0",
+            kind: "inbound_compact_summary",
+            payload: "SUMMARY",
+          }),
+          snapshotItem({ item_id: "960.1", kind: "inbound_chat", payload: "recent" }),
+        ],
+        true,
+      ),
+    );
+    vi.mocked(api.getTimeline).mockResolvedValueOnce(
+      tlResp(
+        [
+          snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          snapshotItem({ item_id: "915.1", kind: "agent_chat", payload: "older" }),
+        ],
+        false,
+      ),
+    );
+
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(8));
+    expect(result.current.hasMoreOlder).toBe(true);
+    vi.mocked(api.getTimeline).mockClear();
+
+    act(() => result.current.loadOlder());
+
+    // The cursor is the oldest real item — never 1.0..5.0 (head notes) or 6.0.
+    await waitFor(() => expect(result.current.items).toHaveLength(9));
+    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+    expect(api.getTimeline).toHaveBeenLastCalledWith(42, {
+      before: "960.1",
+      limit: 50,
+    });
+    expect(result.current.items.map((i) => i.item_id)).toEqual([
+      "0.0",
+      "1.0",
+      "2.0",
+      "3.0",
+      "4.0",
+      "5.0",
+      "6.0",
+      "915.1",
+      "960.1",
+    ]);
+    expect(showError).not.toHaveBeenCalled();
+  });
+
   it("loadOlder is a no-op when hasMoreOlder is false", async () => {
     const showError = vi.fn();
     vi.mocked(api.getTimeline).mockResolvedValueOnce(
