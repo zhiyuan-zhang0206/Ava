@@ -704,10 +704,16 @@ class AgentSkillViewResult(BaseModel):
 class ShellCaptureResult(BaseModel):
     """`shell_capture` op result — one session's terminal tail captured on
     the host that runs it: the reconstructed full session name plus the
-    captured lines (newline-split, trailing newline stripped)."""
+    captured lines (newline-split, trailing newline stripped).
+
+    `created_at` / `uptime_seconds` ride along from the resolved session
+    record (the launch epoch + probe-time uptime) so the shell monitor page
+    can render runtime/TTL meta in its title bar without a second probe."""
 
     session_name: str
     lines: list[str]
+    created_at: datetime | None = None
+    uptime_seconds: int = 0
 
 
 class UploadReceiveResult(BaseModel):

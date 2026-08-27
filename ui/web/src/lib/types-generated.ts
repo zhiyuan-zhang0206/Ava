@@ -6551,6 +6551,12 @@ export interface components {
          *     trailing newline. `session_name` is the resolved session name the
          *     capture came from. Backs the shell monitor page, which polls it while open;
          *     the session must be live (404 otherwise).
+         *
+         *     `created_at` / `uptime_seconds` come from the runner's session record
+         *     (the launch epoch + probe-time uptime); `expires_at` is the gateway-owned
+         *     TTL deadline from `agent_shell_ttls` — None when the session has no TTL.
+         *     Together they let the monitor page's title bar render runtime + TTL
+         *     without a second probe.
          */
         ShellCaptureResponse: {
             /** Agent Id */
@@ -6561,6 +6567,15 @@ export interface components {
             session_name: string;
             /** Lines */
             lines: string[];
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Uptime Seconds
+             * @default 0
+             */
+            uptime_seconds: number;
+            /** Expires At */
+            expires_at?: string | null;
         };
         /**
          * ShellInfo

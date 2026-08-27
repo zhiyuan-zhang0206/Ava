@@ -17,7 +17,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
+import { useNow } from "@/lib/use-now";
 import { useUserSettings } from "@/lib/use-user-settings";
+import { formatShort, formatUptime } from "@/lib/time";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
@@ -138,6 +140,22 @@ export default function ShellMonitorPage({
     }
   }, [data]);
 
+  // Title-bar meta: runtime + TTL from the capture response's timestamps.
+  // Runtime is launch → now (ticking via the shared 1s tick, falling back to
+  // the probe-time uptime snapshot when created_at is missing); TTL remaining
+  // is expires_at − now, "No TTL" when the session records none (watcher /
+  // legacy pre-mandate shells).
+  const now = useNow(1_000);
+  const createdMs = data?.created_at != null ? new Date(data.created_at).getTime() : NaN;
+  const runtimeSeconds = Number.isFinite(createdMs)
+    ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))
+    : (data?.uptime_seconds ?? 0);
+  const expiresAt = data?.expires_at ?? null;
+  const expiresMs = expiresAt != null ? new Date(expiresAt).getTime() : NaN;
+  const ttlRemainingSeconds = Number.isFinite(expiresMs)
+    ? Math.max(0, Math.floor((expiresMs - now.getTime()) / 1000))
+    : null;
+
   // Terminal colour classes keyed on the resolved theme.
   const terminalBg = isDark ? "bg-black" : "bg-gray-100";
   const terminalFg = isDark ? "text-green-400" : "text-gray-900";
@@ -161,6 +179,23 @@ export default function ShellMonitorPage({
         {data?.session_name && (
           <span className="hidden shrink-0 truncate font-mono text-[11px] text-muted-foreground sm:inline">
             {data.session_name}
+          </span>
+        )}
+
+        {/* Runtime + TTL — the session's meta facts, live on the title bar
+            (user correction 2026-08-28: moved here from the inspector). */}
+        {data && (
+          <span className={cn("shrink-0 items-center gap-2 font-mono text-[11px] text-muted-foreground", FLEX)}>
+            <span className="tabular-nums">
+              Runtime {formatUptime(runtimeSeconds)}
+            </span>
+            {ttlRemainingSeconds != null && expiresAt != null ? (
+              <span className="hidden tabular-nums sm:inline">
+                TTL {formatUptime(ttlRemainingSeconds)} · expires {formatShort(expiresAt)}
+              </span>
+            ) : (
+              <span className="hidden sm:inline">No TTL</span>
+            )}
           </span>
         )}
 

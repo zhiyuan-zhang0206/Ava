@@ -16,10 +16,12 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, type ReactNode, useEffect, useState } from "react";
+import { useCallback, type ReactNode, useEffect } from "react";
 
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
+import { formatItemTime } from "@/components/timeline/timestamp";
 import { api } from "@/lib/api";
+import { useNow } from "@/lib/use-now";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { useAgentPages } from "@/lib/use-agent-pages";
 import { useInspectorHours, useInspectorOpen } from "@/lib/inspector-panel-store";
@@ -38,7 +40,7 @@ import type {
   ShellInfo,
   SystemEvent,
 } from "@/lib/types";
-import { formatAbsolute, formatRelative, formatShort } from "@/lib/time";
+import { formatAbsolute, formatRelative, formatShort, formatUptime } from "@/lib/time";
 import { useEventStream } from "@/lib/useEventStream";
 import { cn } from "@/lib/utils";
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
@@ -482,20 +484,6 @@ function NoticeReplySection({
   );
 }
 
-// A page-level tick shared by the shells section only: runtime and TTL
-// remaining are derived from absolute timestamps (created_at / expires_at),
-// so one lightweight interval keeps them live between the panel's 60s inspect
-// polls — no new polling system. The tick lives here (not in the panel) so a
-// closed panel — which unmounts this section — leaves no interval running.
-function useNow(intervalMs: number): Date {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
-
 function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
   const now = useNow(1_000);
@@ -519,13 +507,14 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 // A shell row links to its full-screen monitor page (live terminal tail).
-// Each row shows the shell's three meta facts: Created (browser-local launch
-// time), TTL (remaining + expiry; "No TTL" when the session has none — the
-// watcher / legacy pre-mandate shape), and Runtime (launch → now, ticking
-// live; falls back to the probe-time uptime snapshot when created_at is
-// missing). Guards against NaN / missing ids from a partial API response —
-// if either agentId or shell.id is not a valid finite integer, renders as
-// plain text (no link) to avoid navigating to /shell/NaN/NaN.
+// Each row shows the runtime value (launch → now, ticking live; falls back to
+// the probe-time uptime snapshot when created_at is missing) and the launch
+// time in the timeline's bracket format (`[YYYY-MM-DD HH:MM:SS TZ]`). TTL and
+// the full runtime live on the shell monitor page's title bar instead (user
+// correction 2026-08-28) — the panel row stays minimal. Guards against NaN /
+// missing ids from a partial API response — if either agentId or shell.id is
+// not a valid finite integer, renders as plain text (no link) to avoid
+// navigating to /shell/NaN/NaN.
 function ShellRow({
   agentId,
   shell,
@@ -542,11 +531,6 @@ function ShellRow({
     Number.isFinite(createdMs)
       ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))
       : shell.uptime_seconds;
-  const expiresAt = shell.expires_at ?? null;
-  const expiresMs = expiresAt != null ? new Date(expiresAt).getTime() : NaN;
-  const ttlRemainingSeconds = Number.isFinite(expiresMs)
-    ? Math.max(0, Math.floor((expiresMs - now.getTime()) / 1000))
-    : null;
   const rowClass =
     "block rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px]";
   const content = (
@@ -555,20 +539,11 @@ function ShellRow({
         <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
         <span className="truncate text-foreground">{shell.name ?? "(unnamed)"}</span>
         <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-          Runtime {formatUptime(runtimeSeconds)}
+          {formatUptime(runtimeSeconds)}
         </span>
       </span>
-      <span className={cn("mt-0.5 items-center gap-x-2 text-[10px] text-muted-foreground/80", FLEX)}>
-        <span className="truncate">
-          Created {shell.created_at != null ? formatShort(shell.created_at) : "—"}
-        </span>
-        {ttlRemainingSeconds != null && expiresAt != null ? (
-          <span className="shrink-0">
-            TTL {formatUptime(ttlRemainingSeconds)} · expires {formatShort(expiresAt)}
-          </span>
-        ) : (
-          <span className="shrink-0">No TTL</span>
-        )}
+      <span className={cn("mt-0.5 truncate text-[10px] text-muted-foreground/80", FLEX)}>
+        {shell.created_at != null ? formatItemTime(shell.created_at) || "—" : "—"}
       </span>
     </>
   );
@@ -785,17 +760,6 @@ function formatTps(n: number): string {
   if (n < 10) return n.toFixed(1);
   if (n < 100) return n.toFixed(1);
   return `${Math.round(n)}`;
-}
-
-function formatUptime(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${m % 60}m`;
-  const d = Math.floor(h / 24);
-  const remH = h % 24;
-  return remH ? `${d}d ${remH}h` : `${d}d`;
 }
 
 // A heartbeat interval / pause duration as a compact span: `45s` / `15m` /

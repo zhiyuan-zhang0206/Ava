@@ -105,6 +105,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   getAgentInspect.mockReset();
   getAgentInspectLive.mockReset();
@@ -141,23 +142,20 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
     shells: [
       // created_at is offset from fixture-build time so the tick-computed
       // runtime lands on the same formatted span as uptime_seconds (8040s /
-      // 660s) no matter when the test runs; dev-server also carries a TTL
-      // deadline 7900s ahead, which stays "TTL 2h 11m" under render skew
-      // under 40s.
+      // 660s) no matter when the test runs. The duration-asserting test
+      // freezes Date via vi.setSystemTime for exact determinism.
       {
         id: 0,
         name: "dev-server",
         created_at: new Date(Date.now() - 8040_000).toISOString(),
         uptime_seconds: 8040,
-        expires_at: new Date(Date.now() + 7900_000).toISOString(),
       },
-      { id: 1, name: null, created_at: null, uptime_seconds: 45, expires_at: null },
+      { id: 1, name: null, created_at: null, uptime_seconds: 45 },
       {
         id: 2,
         name: "watcher",
         created_at: new Date(Date.now() - 660_000).toISOString(),
         uptime_seconds: 660,
-        expires_at: null,
       },
     ],
     config_overlay: { llm_model: "claude-opus-4-8", auto_compact_fraction: 0.7 },
@@ -301,7 +299,14 @@ describe("InspectorPanel", () => {
   });
 
   it("renders all sections from the /inspect response", async () => {
+    // Freeze Date so the tick-computed runtime values are exact (created_at
+    // offsets are relative to Date.now() at fixture build).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+    // Rebuild BOTH fixtures on the frozen clock — beforeEach built them on
+    // the real one, whose created_at offsets would render negative runtimes.
     getAgentInspect.mockResolvedValue(fixture());
+    getAgentInspectLive.mockResolvedValue(liveFixture());
     render(<InspectorPanel agentId={1} />);
 
     // shells: count badge + named / unnamed / watcher rows with formatted uptime
@@ -310,17 +315,19 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("dev-server")).toBeTruthy();
     expect(screen.getByText("(unnamed)")).toBeTruthy();
     expect(screen.getByText("watcher")).toBeTruthy();
-    // runtime: tick-computed from created_at (8040s / 660s), probe snapshot
-    // when created_at is missing (45s)
-    expect(screen.getByText("Runtime 2h 14m")).toBeTruthy(); // 8040s
-    expect(screen.getByText("Runtime 45s")).toBeTruthy();
-    expect(screen.getByText("Runtime 11m")).toBeTruthy(); // 660s
-    // created: browser-local launch time per row; "—" when unknown
-    expect(screen.getAllByText(/^Created /)).toHaveLength(3);
-    expect(screen.getByText("Created —")).toBeTruthy();
-    // TTL: remaining + expiry when the gateway row exists; "No TTL" otherwise
-    expect(screen.getByText(/TTL 2h 11m · expires/)).toBeTruthy(); // ~7900s remaining
-    expect(screen.getAllByText("No TTL")).toHaveLength(2); // unnamed + watcher
+    // runtime: bare value (no label), tick-computed from created_at (8040s /
+    // 660s), probe snapshot when created_at is missing (45s)
+    expect(screen.getByText("2h 14m")).toBeTruthy(); // 8040s
+    expect(screen.getByText("45s")).toBeTruthy();
+    expect(screen.getByText("11m")).toBeTruthy(); // 660s
+    // created: the timeline bracket format `[YYYY-MM-DD HH:MM:SS TZ]` per
+    // row (timezone varies with the test host, so match the shape, not the
+    // zone); "—" when unknown
+    expect(screen.getAllByText(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /)).toHaveLength(2);
+    // unknown created time renders "—" in the unnamed shell's row
+    const shellsSection = screen.getByText("Persistent shells").closest("section");
+    expect(shellsSection).not.toBeNull();
+    expect(within(shellsSection!).getByText("—")).toBeTruthy();
     // each shell row links to its monitor page /shell/{agentId}/{shellId}
     expect(screen.getByText("dev-server").closest("a")?.getAttribute("href")).toBe("/shell/1/0");
     expect(screen.getByText("watcher").closest("a")?.getAttribute("href")).toBe("/shell/1/2");
@@ -537,27 +544,7 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("long-shell")).toBeTruthy());
-    expect(screen.getByText("Runtime 24d 3h")).toBeTruthy();
-  });
-
-  it("clamps an already-expired TTL deadline to 0s remaining", async () => {
-    getAgentInspectLive.mockResolvedValue(
-      liveFixture({
-        shells: [
-          {
-            id: 9,
-            name: "expiring-shell",
-            created_at: new Date(Date.now() - 3600_000).toISOString(),
-            uptime_seconds: 3600,
-            expires_at: new Date(Date.now() - 10_000).toISOString(),
-          },
-        ],
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("expiring-shell")).toBeTruthy());
-    expect(screen.getByText(/TTL 0s · expires/)).toBeTruthy();
+    expect(screen.getByText("24d 3h")).toBeTruthy();
   });
 
   it("activity durations show em dashes when alive is 0 while TPS remains visible", async () => {
@@ -904,7 +891,9 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
-    expect(screen.getByText("—")).toBeTruthy();
+    const livenessSection = screen.getByText("Liveness").closest("section");
+    expect(livenessSection).not.toBeNull();
+    expect(within(livenessSection!).getByText("—")).toBeTruthy();
     expect(screen.getByText("5m ago · 30m")).toBeTruthy();
   });
 });

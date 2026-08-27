@@ -57,7 +57,10 @@ def test_capture_trims_leading_and_trailing_blank_padding(
     shell_sessions(ShellInfo(id=7))
     backend = fake_backend("\n\n\nreal line one\nreal line two\n\nreal line three\n\n\n")
 
-    name, lines = capture_shell(42, 7, lines=200)
+    name, lines, created_at, uptime = capture_shell(42, 7, lines=200)
+
+    assert created_at is None
+    assert uptime == 0
 
     assert lines == ["real line one", "real line two", "", "real line three"]
     assert backend.calls == [(name, 200)]
@@ -73,7 +76,7 @@ def test_capture_of_all_blank_output_is_empty(
     shell_sessions(ShellInfo(id=3))
     fake_backend("\n\n\n")
 
-    _, lines = capture_shell(42, 3, lines=200)
+    _, lines, _, _ = capture_shell(42, 3, lines=200)
 
     assert lines == []
 
@@ -86,6 +89,6 @@ def test_capture_without_blank_padding_is_unchanged(
     shell_sessions(ShellInfo(id=9))
     fake_backend("line one\nline two\nline three\n")
 
-    _, lines = capture_shell(42, 9, lines=200)
+    _, lines, _, _ = capture_shell(42, 9, lines=200)
 
     assert lines == ["line one", "line two", "line three"]

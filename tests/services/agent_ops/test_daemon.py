@@ -393,7 +393,12 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 3, "lines": 500}
-    assert result == {"session_name": "ava-agent-42-shell-3-build", "lines": ["a", "b"]}
+    assert result == {
+        "session_name": "ava-agent-42-shell-3-build",
+        "lines": ["a", "b"],
+        "created_at": None,
+        "uptime_seconds": 0,
+    }
 
 
 @pytest.mark.asyncio
