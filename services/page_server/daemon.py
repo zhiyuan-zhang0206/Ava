@@ -166,20 +166,26 @@ def _allocate_session_index(pool: ConnectionPool, agent_id: int) -> int:
 
 
 def _ensure_token(pool: ConnectionPool, row: _PageRow) -> str:
-    """Return the row's durable health token, minting it on first adoption."""
+    """Return the row's durable health token, minting it on first adoption.
+
+    The mint only persists for a still-open row; a row that closed or expired
+    while this pass reconciled is terminal and never written (the caller
+    drops it this pass anyway), so the minted value is returned unpersisted
+    rather than raising and aborting the whole reconcile pass."""
     if row.server_token is not None:
         return row.server_token
     minted = secrets.token_hex(16)
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_pages SET server_token = COALESCE(server_token, %s) "
-            "WHERE id = %s RETURNING server_token",
+            "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL "
+            "RETURNING server_token",
             (minted, row.id),
         )
         persisted = cur.fetchone()
         conn.commit()
     if persisted is None or persisted[0] is None:
-        raise RuntimeError(f"page row {row.id} disappeared while assigning its server token")
+        return minted
     return str(persisted[0])
 
 
@@ -202,21 +208,26 @@ def _create_page_session(
         raise RuntimeError(f"failed to create page session {page_session!r}")
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE agent_pages SET session_name = %s WHERE id = %s AND closed_at IS NULL",
-            (page_session, row.id),
+            "UPDATE agent_pages SET session_name = %s "
+            "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL "
+            "AND serve_dir IS NOT NULL AND host = %s",
+            (page_session, row.id, row.host),
         )
         if cur.rowcount == 0:
-            # The row closed between this function's start and the write (the
-            # caller's snapshot can be seconds stale). A session without a row
-            # is a recordless ghost the next pass would reap as an orphan —
-            # roll the just-created session back instead.
+            # The row left the open set between the liveness re-check and this
+            # write (closed, expired, or re-registered without serve_dir) —
+            # the caller's snapshot can be seconds stale. A session without a
+            # live row is a recordless ghost the next pass would reap as an
+            # orphan; roll the just-created session back instead.
             _log.warning(
-                "[page-server] page row %s closed while creating its session; rolling back %s",
+                "[page-server] page row %s left the open set while creating its session; "
+                "rolling back %s",
                 row.id,
                 page_session,
             )
             backend.kill_session(page_session)
-            raise RuntimeError(f"page row {row.id} closed while creating its session")
+            _cleanup_markdown_tmpdir(row.serve_dir)
+            raise RuntimeError(f"page row {row.id} left the open set while creating its session")
         conn.commit()
     return page_session
 
@@ -442,7 +453,6 @@ def _ensure_handle(
     backend: SessionBackend,
     row: _PageRow,
     key: tuple[int, str],
-    token: str,
     managed: dict[tuple[int, str], _ServerHandle],
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], _DegradedServeDir],
@@ -461,7 +471,7 @@ def _ensure_handle(
             row.name,
             row.port,
             row.serve_dir,
-            token,
+            _ensure_token(pool, row),
             row.session_name,
             now - _SPAWN_VERIFY_TIMEOUT_S,
         )
@@ -473,6 +483,7 @@ def _ensure_handle(
         # (poll interval away) adopts the current row truth.
         return None, False
     try:
+        token = _ensure_token(pool, row)
         page_session = _create_page_session(pool, backend, row, token)
     except RuntimeError as exc:
         _log.error("[page-server] session create failed for %s: %s", key, exc)
@@ -551,9 +562,7 @@ def _reconcile_once(
     _close_persisted_sessions(backend, _closed_page_sessions(pool, host))
     now = time.monotonic()
     for key, row in wanted.items():
-        handle, created = _ensure_handle(
-            pool, backend, row, key, _ensure_token(pool, row), managed, backoff, degraded, now
-        )
+        handle, created = _ensure_handle(pool, backend, row, key, managed, backoff, degraded, now)
         if handle is not None and not created:
             _supervise_handle(
                 backend, row, key, handle, managed, backoff, occupants, shell_pids, now
