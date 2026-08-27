@@ -108,8 +108,8 @@ DEFAULT_TUNING = ModelTuning(
     # context window, remind at 30%. Both are fractions of `context_window`, so
     # "the same rule" means different absolute token counts per model, and a model
     # added to the registry inherits it with no entry of its own. The deepseek
-    # entries are the roster's exception: user decision (task #581) pins them at
-    # soft 374k / hard 512k (0.374 / 0.512 of their 1M window).
+    # entries are the roster's exception: user decision (2026-08-27) pins them at
+    # soft 600k / hard 700k (0.6 / 0.7 of their 1M window).
     auto_compact_fraction=0.4,
     auto_compact_ceiling_tokens=0,  # 0 = no absolute cap; the fraction alone decides
     compact_reminder_fraction=0.3,
@@ -229,14 +229,14 @@ MODELS: dict[str, ModelSpec] = {
             # able from a dead one until data starts. 600 matches the server's
             # own connection-close cutoff.
             llm_stream_ttft_timeout_seconds=600.0,
-            # Compact thresholds pinned 2026-08-01 (user decision, task #581):
-            # soft 374k / hard 512k. The flat 30/40 rule's 400k hard threshold
-            # sat below DeepSeek's own published trigger (512K), compacting
-            # 1M-window agents a quarter-million tokens before the vendor does.
-            # 0.512 / 0.374 of the 1M window is exactly 512_000 / 374_000
-            # (decisions/2026-08-01-deepseek-compact-thresholds.md).
-            auto_compact_fraction=0.512,
-            compact_reminder_fraction=0.374,
+            # Compact thresholds pinned 2026-08-27 (user decision, superseding
+            # task #581's 374k/512k): soft 600k / hard 700k. Fleet evidence:
+            # observed max per-call input 513,831 (nothing above 600k), and
+            # DeepSeek cached-read pricing (~$0.022/M) makes the larger prefix
+            # cheap to re-read; see
+            # decisions/2026-08-27-deepseek-compact-thresholds-600k-700k.md.
+            auto_compact_fraction=0.7,
+            compact_reminder_fraction=0.6,
         ),
     ),
     "deepseek-v4-flash": ModelSpec(
@@ -250,10 +250,10 @@ MODELS: dict[str, ModelSpec] = {
         tuning=ModelTuning(
             reasoning_effort="max",  # same as pro: Ava is not an auto-promoted harness
             llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
-            # Same user decision as deepseek-v4-pro (task #581): soft 374k /
-            # hard 512k on the 1M window — 0.512 / 0.374 exactly.
-            auto_compact_fraction=0.512,
-            compact_reminder_fraction=0.374,
+            # Same decision as deepseek-v4-pro (2026-08-27): soft 600k /
+            # hard 700k on the 1M window — 0.7 / 0.6 exactly.
+            auto_compact_fraction=0.7,
+            compact_reminder_fraction=0.6,
         ),
     ),
     # DeepSeek's experimental multimodal variant of v4-flash (api-docs.deepseek.com/
@@ -274,10 +274,10 @@ MODELS: dict[str, ModelSpec] = {
         tuning=ModelTuning(
             reasoning_effort="max",  # same as pro/flash: Ava is not an auto-promoted harness
             llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
-            # Same user decision as deepseek-v4-pro (task #581): soft 374k /
-            # hard 512k on the 1M window — 0.512 / 0.374 exactly.
-            auto_compact_fraction=0.512,
-            compact_reminder_fraction=0.374,
+            # Same decision as deepseek-v4-pro (2026-08-27): soft 600k /
+            # hard 700k on the 1M window — 0.7 / 0.6 exactly.
+            auto_compact_fraction=0.7,
+            compact_reminder_fraction=0.6,
         ),
     ),
     # -- claude --

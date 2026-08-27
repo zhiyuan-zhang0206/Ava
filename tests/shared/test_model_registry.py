@@ -177,12 +177,10 @@ def test_deepseek_vision_exp_registry_facts() -> None:
     assert spec.knowledge_cutoff == "2026-04"
     assert spec.effort_levels == ("high", "max")
     assert spec.media_types == frozenset({"image"})
-    # Same compact decision as every deepseek entry (task #581): soft 374k /
-    # hard 512k on the 1M window.
-    assert resolve_setting("auto_compact_fraction", model="deepseek-v4-flash-vision-exp") == 0.512
-    assert (
-        resolve_setting("compact_reminder_fraction", model="deepseek-v4-flash-vision-exp") == 0.374
-    )
+    # Same compact decision as every deepseek entry (2026-08-27): soft 600k /
+    # hard 700k on the 1M window.
+    assert resolve_setting("auto_compact_fraction", model="deepseek-v4-flash-vision-exp") == 0.7
+    assert resolve_setting("compact_reminder_fraction", model="deepseek-v4-flash-vision-exp") == 0.6
 
 
 def test_glm_5_3_registry_facts() -> None:
@@ -294,11 +292,11 @@ def test_shared_floor_applies_when_nothing_set() -> None:
 
 
 def test_deepseek_carries_per_model_compact_thresholds() -> None:
-    """User decision (task #581): deepseek-v4-pro / deepseek-v4-flash compact
-    at soft 374k / hard 512k on their 1M window — 0.374 / 0.512 of the window."""
+    """User decision (2026-08-27): the deepseek entries compact at soft
+    600k / hard 700k on their 1M window — 0.6 / 0.7 of the window."""
     for model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
-        assert resolve_setting("auto_compact_fraction", model=model) == 0.512, model
-        assert resolve_setting("compact_reminder_fraction", model=model) == 0.374, model
+        assert resolve_setting("auto_compact_fraction", model=model) == 0.7, model
+        assert resolve_setting("compact_reminder_fraction", model=model) == 0.6, model
 
 
 def test_unregistered_model_falls_back_to_shared_floor() -> None:
