@@ -356,13 +356,20 @@ def test_native_provisioning_renders_remote_observatory_urls(
         "http://100.78.137.46",
     )
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.10")
+    monkeypatch.setattr(
+        "shared.config.settings.data_plane.db_url",
+        "postgresql://grafana_ro@100.103.96.72:5433/ava_main",
+    )
 
     _lgtm_native._render_configs(repo, native_dir, home)
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
     assert "AVA_TELEMETRY_LOKI_URL=http://100.78.137.46:3100" in rendered_runtime_env
     assert "AVA_TELEMETRY_PROMETHEUS_URL=http://100.78.137.46:9090" in rendered_runtime_env
-    assert "AVA_PG_URL=100.78.137.46:5433" in rendered_runtime_env
+    # PG is the cluster's own database (#3606): it follows the data-plane
+    # db_url, NOT the observatory — stage C moves the observatory while PG
+    # stays on the gateway.
+    assert "AVA_PG_URL=100.103.96.72:5433" in rendered_runtime_env
     assert "AVA_ALERTS_WEBHOOK_URL=http://100.64.0.10:8000/api/alerts" in rendered_runtime_env
     _assert_rendered_provisioning(
         native_dir,
@@ -546,6 +553,28 @@ def test_ensure_no_kickstart_when_config_unchanged(
 
     kickstarts = [c for c in calls[first:] if c[0] == "kickstart"]
     assert kickstarts == []
+
+
+def test_native_provisioning_pg_stays_on_data_plane_when_db_url_is_loopback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Remote observatory + a db_url that still names loopback -> the PG
+    datasource renders loopback (Grafana would dial its own host) and the
+    render warns instead of silently pointing at the observatory (CTO
+    review of 3b523ab14; #3606's PG never follows the observatory)."""
+    monkeypatch.setattr(
+        "shared.config.settings.observability.observability_url",
+        "http://100.78.137.46",
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.data_plane.db_url",
+        "postgresql:///ava_main?host=/tmp/ava-pg-ava-test&port=5433",
+    )
+    loki, prometheus, pg = _observatory_urls._observability_datasource_urls()
+    assert loki == "http://100.78.137.46:3100"
+    assert prometheus == "http://100.78.137.46:9090"
+    assert pg == "127.0.0.1:5433"
+    assert "data-plane db_url" in capsys.readouterr().err
 
 
 def test_observability_url_validation_warns_and_falls_back(

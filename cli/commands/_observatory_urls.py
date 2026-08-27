@@ -2,9 +2,11 @@
 
 Two-state on AVA_OBSERVABILITY_URL (task #1791, A3+A4): empty (default) keeps
 every consumer on its current local loopback endpoint; non-empty switches the
-Grafana datasources, the alert webhook target, and the otel-collector gateway
-fan-out to the remote observatory station. Split out of _lgtm_native.py so
-the URL contract has one home shared by the native renderer and the collector.
+Grafana Loki/Prometheus datasources, the alert webhook target, and the
+otel-collector gateway fan-out to the remote observatory station (the PG
+datasource stays on the cluster's data plane — it never follows the
+observatory, #3606). Split out of _lgtm_native.py so the URL contract has
+one home shared by the native renderer and the collector.
 """
 
 from __future__ import annotations
@@ -23,25 +25,49 @@ def _observability_datasource_urls() -> tuple[str, str, str]:
 
     Two-state on AVA_OBSERVABILITY_URL: empty (default) keeps the current
     loopback endpoints (from the per-service settings, which default to this
-    host's native backends); non-empty uses the observatory station's base URL
-    with each service's port appended. PG keeps its scheme-less host:port
-    form — the observatory host must serve this cluster's ava_main on :5433
-    with the grafana_ro role or the SQL panels break (#3606).
+    host's native backends); non-empty points Loki/Prometheus at the remote
+    observatory station (base URL + the service's own port). PG keeps its
+    scheme-less host:port form but NEVER follows the observatory — it is the
+    CLUSTER's own database (#3606) and stays on the data plane (its host
+    derives from the runner's db_url; task #1752 moves PG on its own track).
     """
 
     obs = settings.observability
     base = _validated_observability_base(obs.observability_url)
     if base:
-        pg_host = (
-            urlparse(base).hostname
-            or base.removeprefix("http://").removeprefix("https://").split(":")[0]
-        )
-        return f"{base}:3100", f"{base}:9090", f"{pg_host}:5433"
+        return f"{base}:3100", f"{base}:9090", _pg_datasource_host_port()
     return (
         obs.telemetry_loki_url.rstrip("/"),
         obs.telemetry_prometheus_url.rstrip("/"),
         "127.0.0.1:5433",
     )
+
+
+def _pg_datasource_host_port() -> str:
+    """The cluster's own PG host:port for the rendered Grafana SQL datasource.
+
+    PG externalization (#1752) is an independent track from the observatory
+    (stage C moves the observatory while PG stays on the gateway), so the
+    datasource host must derive from the data plane, not from
+    AVA_OBSERVABILITY_URL. The runner's db_url is the single source of truth:
+    under a remote observatory it names the cluster's data-plane host, and
+    ``url_host`` is the same A5 single point the admin/status dials use. A
+    db_url that still names loopback under a remote observatory renders a
+    loopback datasource (only correct when Grafana runs on the PG host
+    itself) — warn loudly, same pattern as the Tempo topology warning.
+    """
+    from shared.url_secret import url_host
+
+    host = url_host(settings.data_plane.db_url)
+    if host in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "lgtm native: AVA_OBSERVABILITY_URL is set but the data-plane db_url "
+            f"still names {host} — the rendered PG datasource will dial the "
+            "Grafana host's own loopback; point db_url at the cluster's "
+            "data-plane host (task #1752) for a remote observatory.",
+            file=sys.stderr,
+        )
+    return f"{host}:5433"
 
 
 def _validated_observability_base(observability_url: str) -> str:
