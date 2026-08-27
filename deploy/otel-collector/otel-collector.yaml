@@ -6,7 +6,9 @@
 #
 # Architecture: every agent process sends OTLP/HTTP to its local
 # 127.0.0.1:4318 receiver. On a gateway/single-box collector the pipelines fan
-# out to loopback Tempo/Loki/Prometheus. A pure runner keeps the same exporter
+# out to Tempo/Loki/Prometheus — loopback by default, or the remote observatory
+# station's endpoints when AVA_OBSERVABILITY_URL is set (two-state render,
+# task #1791). A pure runner keeps the same exporter
 # component IDs and queues but points them at the gateway collector's separate,
 # authenticated remote receiver; the gateway then fans those batches into its
 # loopback backends. Backend ports never need an off-box bind.

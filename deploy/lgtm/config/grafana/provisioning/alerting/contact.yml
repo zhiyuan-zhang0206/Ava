@@ -1,7 +1,22 @@
 # Ava alerts — webhook contact point (as code, Task #1224).
 #
-# The webhook URL uses 127.0.0.1 — native Grafana (2026-08-23 cutover)
-# reaches the gateway on the host loopback.
+# The webhook URL uses Grafana's native $__env{} expansion (same mechanism as
+# the datasources) — the value comes from the process env, which compose
+# supplies as a static loopback default and native converge renders two-state
+# on AVA_OBSERVABILITY_URL:
+#   - empty (default) -> http://127.0.0.1:8000/api/alerts — native Grafana on
+#     the same host reaches the gateway on loopback (byte-identical default).
+#   - non-empty -> http://<gateway reachable host>:8000/api/alerts — a remote
+#     observatory Grafana must dial the GATEWAY's own reachable address
+#     (shared.machine.reachable_host), NOT the observatory base URL: the
+#     ingest endpoint lives on this cluster's gateway. Self-dialing a
+#     tailnet IP from the gateway host itself can hit VPN hairpin filtering
+#     (pgbouncer probe incident), which is why the loopback form is kept when
+#     no remote observatory is configured. Topology assumption: the non-empty
+#     form presumes a remote observatory Grafana consumes the rendered
+#     contact.yml (delivery mechanism lands with the observatory deployment,
+#     stage B); with a local Grafana consumer, keep AVA_OBSERVABILITY_URL
+#     empty until that mechanism exists.
 #
 # Routes every fired alert to the gateway's alert ingest endpoint
 # (POST /api/alerts), which stores the instance in `alerts` (Alertmanager
@@ -40,7 +55,7 @@ contactPoints:
         type: webhook
         disableResolveMessage: false
         settings:
-          url: http://127.0.0.1:8000/api/alerts
+          url: $__env{AVA_ALERTS_WEBHOOK_URL}
           httpMethod: POST
           authorization_scheme: Bearer
           authorization_credentials: $__env{OPS_ALERTS_WEBHOOK_TOKEN}

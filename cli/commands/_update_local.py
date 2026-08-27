@@ -10,10 +10,15 @@ frontend-only fast path and the frontend session relaunch it shares:
 - `_snapshot_known_good` — HEAD + applied-migration set + verified data snapshot,
   taken BEFORE anything is stopped (the recovery anchor for `_update_recover`).
 - `_checkout_and_sync` — force-checkout the pinned rollout commit + `uv sync`.
-  Grafana provisioning needs no copy step: the LGTM Grafana container mounts
-  `deploy/lgtm/config/grafana/provisioning/` read-only straight from the
-  checkout, so the checkout IS the dashboard/alert refresh (Grafana's file
-  provider hot-reloads within ~30s).
+  Grafana provisioning needs no copy step here: the converge phase of the
+  subsequent `ava start` copies `deploy/lgtm/config/grafana/provisioning/`
+  VERBATIM into `$AVA_HOME/lgtm/native/config/provisioning/` — datasource
+  and webhook URLs are Grafana-native `$__env{}` references resolved from
+  the rendered runtime.env (two-state on AVA_OBSERVABILITY_URL, task #1791),
+  so the checkout files are always valid. A converge that changes the
+  rendered grafana config kickstarts the running Grafana; unchanged renders
+  are a no-op. The compose rollback asset mounts the same always-valid
+  checkout tree with its static env defaults.
 - `_boot_gateway_fresh` — `ava start` in a fresh subprocess so start loads the
   synced revision, not this stale interpreter (start applies pending migrations
   itself early in boot).

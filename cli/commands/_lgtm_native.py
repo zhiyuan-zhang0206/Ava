@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import os
 import platform
 import plistlib
@@ -29,6 +30,12 @@ from urllib.parse import urlparse
 import yaml
 
 from cli.commands._converge_spec import ConvergeCtx
+from cli.commands._observatory_urls import (
+    _alerts_webhook_url,
+    _atomic_write,
+    _observability_datasource_urls,
+)
+from cli.commands._rendered_file import write_rendered_guarded
 from shared.log import logger
 from shared.loki_index_labels import validate_loki_deploy_config
 
@@ -396,7 +403,10 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     from shared.config import settings
 
     source_dir = repo / "deploy/lgtm/native/config"
-    provisioning_dir = repo / "deploy/lgtm/config/grafana/provisioning"
+    # Grafana provisioning is converge-rendered (datasources.yml / contact.yml
+    # carry settings-baked URLs); grafana reads the rendered tree, never the
+    # source checkout directly.
+    rendered_provisioning = native_dir / "config" / "provisioning"
     tempo_query_url = settings.observability.telemetry_tempo_query_url.rstrip("/")
     tempo_intake_endpoint = settings.observability.telemetry_tempo_endpoint.rstrip("/")
     lgtm_listen_host = settings.observability.lgtm_listen_host
@@ -408,11 +418,19 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
             file=sys.stderr,
         )
     _warn_listen_read_mismatches()
+    loki_url, prometheus_url, pg_url = _observability_datasource_urls()
     substitutions = {
         "AVA_HOME": str(ava_home),
-        "AVA_PROVISIONING_PATH": str(provisioning_dir),
-        "GRAFANA_PROVISIONING_PATH": str(provisioning_dir / "dashboards"),
+        "AVA_PROVISIONING_PATH": str(rendered_provisioning),
+        "GRAFANA_PROVISIONING_PATH": str(rendered_provisioning / "dashboards"),
         "AVA_TEMPO_QUERY_URL": tempo_query_url,
+        # Two-state datasource + webhook URLs: empty AVA_OBSERVABILITY_URL keeps
+        # the loopback defaults (byte-identical to pre-parameterization); the
+        # provisioning files consume them via Grafana's $__env{} expansion.
+        "LOKI_URL": loki_url,
+        "PROMETHEUS_URL": prometheus_url,
+        "PG_URL": pg_url,
+        "ALERTS_WEBHOOK_URL": _alerts_webhook_url(),
         "REPO": str(repo),
         "lgtm_grafana_listen_host": settings.observability.lgtm_grafana_listen_host,
     }
@@ -451,6 +469,62 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     rendered_run_script = native_dir / "grafana" / "run.sh"
     _write_if_changed(rendered_run_script, run_script)
     rendered_run_script.chmod(0o755)
+    _render_provisioning(repo, native_dir)
+
+
+def _render_provisioning(repo: Path, native_dir: Path) -> None:
+    """Copy the Grafana provisioning tree into the native config dir.
+
+    Every provisioning file (datasources, alert rules, dashboards, READMEs) is
+    copied VERBATIM — the datasource and webhook URLs are Grafana-native
+    $__env{} references resolved from the process env (runtime.env), so the
+    checkout file is always a valid configuration and the rendered copy never
+    rewrites URLs. Each file is written atomically through the content-hash
+    user-modification guard (web-sources precedent): a file the user
+    hand-edited since the last converge write is warned about and preserved,
+    never overwritten. Grafana reads this rendered tree via
+    {{AVA_PROVISIONING_PATH}} — the deployment state is decoupled from the
+    source checkout, so a rollout that swaps the checkout cannot feed the
+    running instance a half-rendered tree.
+    """
+    source_dir = repo / "deploy/lgtm/config/grafana/provisioning"
+    if not source_dir.is_dir():
+        return
+    dest_dir = native_dir / "config" / "provisioning"
+    hashes_path = native_dir / "config" / "provisioning-hashes.json"
+    rendered_relative: set[str] = set()
+    for source in sorted(source_dir.rglob("*")):
+        if not source.is_file():
+            continue
+        rel = source.relative_to(source_dir)
+        rendered_relative.add(rel.as_posix())
+        content = source.read_text(encoding="utf-8")
+        warning = write_rendered_guarded(
+            dest_dir / rel, content, hashes_path, rel.as_posix(), writer=_atomic_write
+        )
+        if warning is not None:
+            print(f"  ! lgtm native: {warning}", file=sys.stderr)
+    # Remove rendered files whose source template vanished (web-sources
+    # _cleanup_gone_sources): untouched copies are pure derived state; a copy
+    # the user edited is kept, loudly.
+    for dest in sorted(dest_dir.rglob("*")):
+        if not dest.is_file():
+            continue
+        rel = dest.relative_to(dest_dir).as_posix()
+        if rel in rendered_relative:
+            continue
+        hashes: dict[str, str] = {}
+        if hashes_path.exists():
+            hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
+        recorded = hashes.get(rel)
+        if recorded is not None and hashlib.sha256(dest.read_bytes()).hexdigest() == recorded:
+            dest.unlink()
+            continue
+        print(
+            f"  ! lgtm native: rendered provisioning file {dest} has no source "
+            "template anymore but was modified locally; kept",
+            file=sys.stderr,
+        )
 
 
 def _render_grafana_admin_password(native_dir: Path) -> None:
@@ -563,6 +637,7 @@ def ensure_lgtm_native(repo: Path, ava_home: Path) -> None:
             continue
         _download_and_verify(name, asset["version"], asset, native_dir)
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
+    grafana_config_before = _grafana_config_fingerprint(native_dir)
     _render_configs(repo, native_dir, ava_home)
     _render_grafana_admin_password(native_dir)
     for name in _NATIVE_CONSTANTS:
@@ -570,6 +645,54 @@ def ensure_lgtm_native(repo: Path, ava_home: Path) -> None:
         _write_if_changed(_plist_path(label), _render_plist(name, native_dir, ava_home))
     if (ava_home / "lgtm-host").exists():
         _retire_other_native_jobs(ava_home)
+    _restart_grafana_if_config_changed(native_dir, ava_home, grafana_config_before)
+
+
+def _grafana_config_fingerprint(native_dir: Path) -> tuple[str, str, str]:
+    """The converge-rendered inputs the RUNNING Grafana serves: the INI (its
+    provisioning path lives there), the runtime env (the datasource/webhook
+    $__env{} values), and the rendered provisioning tree's hash sidecar (the
+    tree content). Comparing the pre/post tuple detects every config change
+    that needs a Grafana restart to take effect."""
+    config_dir = native_dir / "config"
+    ini = config_dir / "grafana.ini"
+    runtime_env = config_dir / "runtime.env"
+    hashes = config_dir / "provisioning-hashes.json"
+    return (
+        ini.read_text(encoding="utf-8") if ini.exists() else "",
+        runtime_env.read_text(encoding="utf-8") if runtime_env.exists() else "",
+        hashes.read_text(encoding="utf-8") if hashes.exists() else "",
+    )
+
+
+def _restart_grafana_if_config_changed(
+    native_dir: Path, ava_home: Path, before: tuple[str, str, str]
+) -> None:
+    """Kickstart Grafana when its converge-rendered config changed.
+
+    A running Grafana never re-reads its INI: after a render that changed the
+    provisioning path or the env-baked datasource/webhook URLs, the instance
+    keeps serving the OLD config until restarted (the watchdog only acts on
+    readiness failure, which broken datasources do not cause). A controlled
+    `launchctl kickstart -k` closes that window — same convention the README
+    documents for manual config restarts. Only on Darwin with the job loaded;
+    the watchdog's 60s readiness window is well above Grafana's ~10s cold
+    start. Converge does not wait for the restart.
+    """
+    if platform.system() != "Darwin":
+        return
+    after = _grafana_config_fingerprint(native_dir)
+    if before == after:
+        return
+    label = native_label("grafana", ava_home)
+    if not _job_loaded(label):
+        return
+    _launchctl("kickstart", "-k", f"gui/{os.getuid()}/{label}")
+    print(
+        f"  · lgtm native: grafana config changed; kickstarted {label} "
+        "(watchdog readiness window covers the cold start)",
+        file=sys.stderr,
+    )
 
 
 def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:

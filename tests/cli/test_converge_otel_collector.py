@@ -70,6 +70,72 @@ def test_generate_config_bakes_settings(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert "$" not in out
 
 
+def test_generate_config_two_state_observability_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AVA_OBSERVABILITY_URL set -> the gateway collector's LGTM fan-out points
+    at the observatory station; unset -> the per-service settings URLs (loopback
+    defaults, locked by test_generate_config_bakes_settings)."""
+    repo = tmp_path / "repo"
+    (repo / "deploy/otel-collector").mkdir(parents=True)
+    (repo / "deploy/otel-collector/otel-collector.yaml").write_text(
+        "ava_home: $AVA_HOME\ntempo: $TEMPO_ENDPOINT\nloki: $LOKI_BASE\nprom: $PROM_BASE\n",
+        encoding="utf-8",
+    )
+    obs = pytest.MonkeyPatch()
+    obs.setattr(
+        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+    )
+    obs.setattr("shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100")
+    obs.setattr(
+        "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+    )
+    obs.setattr("shared.config.settings.observability.observability_url", "http://100.78.137.46")
+
+    out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
+    assert "loki: http://100.78.137.46:3100/otlp" in out
+    assert "prom: http://100.78.137.46:9090/api/v1/otlp" in out
+    assert "tempo: http://127.0.0.1:14318" in out
+
+    obs.setattr("shared.config.settings.observability.observability_url", "")
+    out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
+    assert "loki: http://127.0.0.1:3100/otlp" in out
+    assert "prom: http://127.0.0.1:9090/api/v1/otlp" in out
+
+
+def test_write_config_preserves_user_edited_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A hand-edited config.yaml survives the next converge with a warning —
+    the content-hash guard protects user edits (web-sources precedent)."""
+    dest_dir = tmp_path / "otel-collector"
+    dest_dir.mkdir(parents=True)
+    config = dest_dir / "config.yaml"
+    rendered = "otelcol: default\n"
+    oc._write_config(config, rendered)
+    assert config.read_text(encoding="utf-8") == rendered
+
+    config.write_text("otelcol: user-edit\n", encoding="utf-8")
+    oc._write_config(config, "otelcol: regenerated\n")
+
+    assert config.read_text(encoding="utf-8") == "otelcol: user-edit\n"
+    assert "modified locally" in capsys.readouterr().err
+
+
+def test_write_config_records_and_accepts_converge_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """After converge wrote a config, a re-render of the same content is a
+    no-op; a re-render with NEW content replaces it (only user edits are
+    protected)."""
+    dest_dir = tmp_path / "otel-collector"
+    dest_dir.mkdir(parents=True)
+    config = dest_dir / "config.yaml"
+    oc._write_config(config, "v1\n")
+    oc._write_config(config, "v2\n")
+    assert config.read_text(encoding="utf-8") == "v2\n"
+
+
 def test_ensure_skips_download_when_version_matches(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

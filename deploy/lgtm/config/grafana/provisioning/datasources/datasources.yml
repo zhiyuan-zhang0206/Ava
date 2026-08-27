@@ -1,4 +1,11 @@
 apiVersion: 1
+# Grafana datasources. URLs use Grafana's native $__env{} expansion (the Tempo
+# precedent): the process env supplies the values, so this checkout file is
+# ALWAYS a valid configuration — compose (static env defaults) and native
+# (converge-rendered runtime.env) load the same file with the same mechanism.
+# AVA_OBSERVABILITY_URL empty (default) → loopback backends (current behavior);
+# non-empty → the remote observatory station's URLs (converge bakes the derived
+# values into the native runtime.env).
 datasources:
   - name: Tempo
     uid: tempo
@@ -15,13 +22,13 @@ datasources:
     uid: loki
     type: loki
     access: proxy
-    url: http://127.0.0.1:3100
+    url: $__env{AVA_TELEMETRY_LOKI_URL}
 
   - name: Prometheus
     uid: prometheus
     type: prometheus
     access: proxy
-    url: http://127.0.0.1:9090
+    url: $__env{AVA_TELEMETRY_PROMETHEUS_URL}
 
   # Read-only Postgres — the remaining SQL panels (core_live_agents reads the
   # live agents_meta table; the plugin panels query the retired events table,
@@ -31,11 +38,17 @@ datasources:
   # role (SELECT on agents_meta/events only, no writes), password injected via
   # the container env ($GRAFANA_PG_PASSWORD from deploy/lgtm/.env,
   # gitignored — never in this repo).
+  #
+  # ⚠️ PG is the most typical bomb in observatory cutovers (#3606): it is the
+  # CLUSTER's OWN database (grafana_ro/ava_main), not an observatory service.
+  # When AVA_OBSERVABILITY_URL is set, this URL follows the switch and the
+  # operator MUST ensure the target host's :5433 serves this cluster's
+  # ava_main with the grafana_ro role — otherwise the SQL panels break.
   - name: Postgres (ava read-only)
     uid: ops
     type: postgres
     access: proxy
-    url: 127.0.0.1:5433
+    url: $__env{AVA_PG_URL}
     user: grafana_ro
     secureJsonData:
       password: $GRAFANA_PG_PASSWORD

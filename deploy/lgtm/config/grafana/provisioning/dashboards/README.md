@@ -1,9 +1,14 @@
 # Grafana dashboards — Ava Ops (as code)
 
-This directory IS the live provisioning source. Native Grafana receives its
-absolute file-provider path through `GRAFANA_PROVISIONING_PATH` in
-`config/grafana/runtime.env` and hot-reloads changed dashboards within ~30s —
-a git checkout is the whole deployment step, with no copy pipeline.
+This directory is the provisioning source. At converge,
+`cli/commands/_lgtm_native.py` copies the whole provisioning tree VERBATIM
+into `$AVA_HOME/lgtm/native/config/provisioning/` (content-hash user-edit
+protected; datasource/webhook URLs are Grafana-native `$__env{}` references,
+so the checkout files are always valid); native Grafana receives that
+rendered directory's absolute file-provider path through
+`GRAFANA_PROVISIONING_PATH` in the rendered `runtime.env` and hot-reloads
+changed dashboards within ~30s — a git checkout plus the converge copy is the
+whole deployment step, with no separate render pipeline.
 
 ## One dashboard (2026-08-23 merge, task #1399)
 
