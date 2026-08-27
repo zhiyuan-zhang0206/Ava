@@ -73,9 +73,8 @@ ui/web/reports/
 .stryker-tmp/
 ui/web/.stryker-tmp/
 
-# metrics.py raw reports (keep the dir, ignore the reports)
+# metrics.py raw reports (dir auto-recreated on demand, reports stay ignored)
 outputs/*
-!outputs/.gitkeep
 
 # Claude Code collaboration files
 tasks.md
