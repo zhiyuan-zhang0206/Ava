@@ -1,5 +1,3 @@
-"""Your own process — identity and lifecycle."""
-
 from __future__ import annotations
 
 import json as _json
@@ -166,9 +164,7 @@ def _publish_self_inbound_wake() -> None:
 
 
 def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
-    """Replace the current process with a fresh one.
-
-    `config_overlay`: a flat `{field_name: value}` dict merged into your
+    """`config_overlay`: a flat `{field_name: value}` dict merged into your
     persistent per-agent settings.
     """
     from ava import _boot
@@ -204,11 +200,8 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
 
 
 def terminate() -> NoReturn:
-    """End your process — the normal last step when your task is done.
-
-    Your conversation state is preserved; a message from a peer or the user
-    resurrects you with full context. Never idle waiting for someone else to
-    terminate you.
+    """Your conversation state is preserved; a message from a peer or the
+    user resurrects you with full context.
     """
     from ava import _boot
 
@@ -226,15 +219,9 @@ def terminate() -> NoReturn:
 def pause_heartbeat(duration: float) -> None:
     """Suppress idle heartbeat check-ins for the next `duration` seconds.
 
-    While you are idle, a periodic heartbeat wakes you with a check-in
-    asking whether you are still working, waiting, or done. Pause it only
-    while you are deliberately waiting on a known external event (a watcher,
-    a peer's reply, a user decision, a scheduled time) — not as a substitute
-    for ending your process: if your work is done and nothing known is
-    pending, terminate instead (your state is preserved and a message
-    resurrects you). Each check-in wakes you and spends tokens, so back off
-    exponentially instead of re-pausing the same short window -- 30 minutes
-    first, 2 hours next, longer after that.
+    Each check-in wakes you and spends tokens, so back off exponentially
+    instead of re-pausing the same short window -- 30 minutes first, 2 hours
+    next, longer after that.
 
     Only the heartbeat is suppressed; real wake-ups still reach you. A later
     call replaces the window.
@@ -329,13 +316,6 @@ def compact(summary: str) -> NoReturn:
 
 def update() -> NoReturn:
     """Removed — updates go through the CLI only.
-
-    `ava.self.update()` was removed (2026-08): an agent triggering a rollout
-    from inside its own process created a second, subtly different update path
-    (the initiator waited in-turn for the quiesce signal and exited immediately,
-    while a CLI-triggered rollout left the triggering agent to drain at its turn
-    boundary — and, on a long execute_code, to ride the whole rollout on old
-    code). Updates are now a single, operator-facing path:
 
         ava cluster update                 # smooth (default)  # lint-docstring: ok CLI command name
         ava cluster update --mode force    # force: ~10s drain  # lint-docstring: ok CLI command name

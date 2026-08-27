@@ -133,20 +133,15 @@ _MEMORY_DOC = """Long-term notes as markdown files, with semantic search to find
 
 Two stores:
 
-- Shared pool (`ava.memory.PATH`): notes visible to every agent. Write
-  durable facts another agent would need to take over your role.
+- Shared pool (`ava.memory.PATH`): notes visible to every agent.
 - Per-agent memory (`<workspace>/memory/`): your own durable state.
   `MEMORY.md` there is the index — one line per memory, injected into your
   context at cold start and after each compact; each memory is one file
   beside it, read on demand. `write(slug, content, ..., store="personal")`
-  writes the entry and maintains its index. Maintain it — role, preferences,
-  ongoing responsibilities, known pitfalls; keep shared-worthy facts in the
-  pool instead.
+  writes the entry and maintains its index.
 
-Use `write(slug, content, *, title=None, description=None, tags=None,
-store="personal")` to write either store. It resolves an absolute store-owned
-path, so it is immune to `ava.cwd` changes, and maintains the corresponding
-`MEMORY.md` pointer.
+Use `write(slug, content, ..., store="personal")` to write either store; it
+resolves an absolute store-owned path, so it is immune to `ava.cwd` changes.
 """
 
 _PATH_DOC = """Memory pool root: a shared folder of markdown notes.
@@ -162,9 +157,8 @@ Start each note with YAML frontmatter, then the attribution header:
     ---
     <!-- agent-<your id> @ <your machine>, YYYY-MM-DD HH:MM -->
 
-Use `write(slug, content, *, title=None, description=None, tags=None,
-store="shared")` as the canonical writer: it uses an absolute pool path and
-updates MEMORY.md, so a changed `ava.cwd` cannot put a note in the wrong place."""
+Use `write(slug, content, ..., store="shared")` as the canonical writer:
+an absolute pool path, immune to `ava.cwd` changes."""
 
 _memory_ns = _SimpleNamespace()
 _memory_ns.__doc__ = _MEMORY_DOC
@@ -174,8 +168,8 @@ _memory_ns.IndexerUnavailable = IndexerUnavailable
 
 def _search(query: str, k: int = 5) -> list[tuple[Path, str, list[str]]]:
     """Semantic search; return the most relevant notes as (absolute path,
-    description, tags) tuples. The description is "" when absent; tags carry the
-    note's `type/<x>` tag, for a caller weighing a hit by the kind of note."""
+    description, tags) tuples. The description is "" when absent; tags carry
+    the note's `type/<x>` tag."""
     results = _client.memory_search(query, k)
     return [(_memory_ns.PATH / r.path, r.description, list(r.tags)) for r in results]
 
@@ -310,16 +304,14 @@ def write(
     tags: list[str] | None = None,
     store: str = "personal",
 ) -> Path:
-    """Write a memory note to its owned store and upsert its MEMORY.md pointer.
+    """Upsert the store's MEMORY.md pointer.
 
     Personal entries use a flat kebab-case name in the calling agent's
     workspace; shared entries may use topic directories in the memory pool.
-    Both targets are absolute, so this API is unaffected by the agent's cwd.
+    Both targets are absolute store paths.
 
-    Each index update holds an advisory lock on that store's individual
-    `MEMORY.md` file. This serializes writers in this and other processes that
-    use `flock` on the same filesystem; distinct index files and writers that
-    do not take the same advisory lock remain independent.
+    Each index update holds an advisory lock on the store's `MEMORY.md`, so
+    concurrent writers in this and other processes are serialized.
     """
     from ava._boot import _agent_id
 

@@ -125,7 +125,7 @@ def _flag_frontmatter(text: str) -> str:
 
 
 def write(path: str | Path, content: str) -> None:
-    """Overwrite a file, creating parent directories if needed."""
+    """Write, creating parent directories if needed."""
     p = _resolve(path)
     if _is_memory_note(p) and is_flagged(content):
         content = _flag_frontmatter(content)
@@ -200,10 +200,9 @@ def _closest_match_hint(content: str, old: str) -> str:
 
 
 def edit(path: str | Path, old: str, new: str, *, replace_all: bool = False) -> None:
-    """Replace `old` with `new` in a text file.
-
-    `old` must appear exactly once unless `replace_all=True`. When it is not
-    found, the error includes a diff against the closest match in the file.
+    """`old` must appear exactly once unless `replace_all=True`. When it is
+    not found, the error includes a diff against the closest match in the
+    file.
     """
     p = _resolve(path)
     content = p.read_text(encoding="utf-8")

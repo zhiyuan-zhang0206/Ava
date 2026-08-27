@@ -1,7 +1,6 @@
 """Task tracking — shared, persistent work items. All agents are peers: any
-agent can update any task. The system periodically reminds the owner of an
-in-progress task to post progress. A task may have a parent, so a large piece
-of work splits into a tree of subtasks."""
+agent can update any task; owners are reminded periodically; a task may have
+a parent."""
 
 from __future__ import annotations
 
@@ -92,8 +91,8 @@ _UNSET = _Unset()
 
 @dataclass
 class Task:
-    """One work item. remind_interval_seconds is seconds without updates before the
-    owner is reminded (reminders cannot be disabled)."""
+    """remind_interval_seconds is seconds without updates before the owner is
+    reminded; reminders cannot be disabled."""
 
     id: int
     parent_id: int | None
@@ -233,21 +232,17 @@ def create(
     priority: str = _DEFAULT_PRIORITY,
     brief: str | None = None,
 ) -> Task:
-    """Create a task and return it.
-
+    """
     Args:
         title: unique among open/in_progress tasks.
-        description: what to do and why.
-        parent: required -- the id of an existing task this task descends
-            from. The system root task (id 1) parents only the top-level
-            tasks of the whole system; every other task must pass the id of
-            an existing task as its parent (create a parent first, then
-            create its subtasks with that id). Raises ValueError when the
+        parent: id of an existing task this task descends from. The system
+            root task (id 1) parents only top-level tasks; every other task
+            must reference an existing task. Raises ValueError when the
             parent does not exist (or, for parent=1, when task 1 is not the
             system root on this deployment).
-        remind_interval_seconds: seconds without updates before the owner is reminded.
-            Cannot be disabled: None means the priority default (P0 30m / P1 1h /
-            P2 2h / P3 4h), capped at 24h. An explicit value wins over the default.
+        remind_interval_seconds: cannot be disabled; None means the priority
+            default (P0 30m / P1 1h / P2 2h / P3 4h), capped at 24h; an
+            explicit value wins over the default.
         owner: agent to assign to; None means you. An owner other than you is
             notified.
         priority: "P0" (highest) through "P3" (lowest).
@@ -300,15 +295,13 @@ def create_and_assign(
     remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
 ) -> tuple[Task, int]:
-    """Spawn an agent and create a task assigned to it, in one call.
+    """Spawn an agent and assign it a task in one call.
 
     The new agent receives the task id, title, and description as its first
     message; arguments carry the same meaning as in create() and
     ava.agents.spawn(). ``machine`` defaults to your own machine.
-    ``parent`` is required, same rule as create(): the id of an existing task
-    this task descends from (the system root task id 1 for a top-level task).
-    The parent is validated before the agent spawns, so a bad parent never
-    leaves an orphaned agent behind.
+    ``parent``: same rule as create(). The parent is validated before the
+    agent spawns.
 
     Returns:
         (task, agent_id).
@@ -619,9 +612,7 @@ def update(
     content: str | None = None,
     note: str | None = None,
 ) -> None:
-    """Change a task; pass only the fields to change.
-
-    Any write resets the reminder clock. When the owner changes, both the old
+    """Any write resets the reminder clock. When the owner changes, both the old
     and new owner are notified (the new owner's message also carries a summary
     of the other fields changed in the same call). When the updater is not the
     owner, the owner is notified of the change and its author — except a
@@ -632,14 +623,12 @@ def update(
     Args:
         status: one of "open", "in_progress", "done", "cancelled". Closing a
             task is rejected while any direct child is open or in progress.
-        title: unique among open/in_progress tasks.
         results: replaces the whole field; use note to append instead.
         owner: agent id to reassign to. None means no change — a task always
             has an owner.
         remind_interval_seconds: None means no change; reminders cannot be disabled.
             Positive seconds, capped at 24h.
         parent_id: reparent (explicit None = system root; int = set parent).
-        note: appended to results as a timestamped line.
         content: deprecated alias for results.
     """
     status, results = _resolve_update_args(status, content, results)
@@ -893,8 +882,7 @@ def list(
     status: str | None = None,
     recursive: bool = False,
 ) -> builtins.list[Task]:
-    """List tasks matching the filters, in creation order; no filters lists
-    every task.
+    """In creation order; no filters lists every task.
 
     Args:
         parent: keep only direct subtasks of this task; with recursive=True,

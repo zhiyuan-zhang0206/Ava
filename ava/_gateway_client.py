@@ -799,4 +799,4 @@ def get_preset(name: str) -> dict:
 
 
 class PresetNotFoundError(Exception):
-    """No preset with that name exists."""
+    """Preset lookup failed."""

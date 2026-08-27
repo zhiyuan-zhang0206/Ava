@@ -1,5 +1,5 @@
 """Named per-agent config-overlay templates (model, plugin fields, other
-settings). Pick one at spawn to seed a new agent from it."""
+settings)."""
 
 from __future__ import annotations
 

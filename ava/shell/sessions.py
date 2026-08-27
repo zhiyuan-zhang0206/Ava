@@ -181,14 +181,13 @@ def _create_session(
 
 
 def new(name: str, *, ttl: float) -> int:
-    """Create a session and return its id. `name` is only a display label —
-    a lowercase slug like `"dev-server"`; every operation takes the id.
+    """`name` is only a display label — a lowercase slug like `"dev-server"`;
+    every operation takes the id.
 
     Args:
-        ttl: required hard lifetime in seconds, counted from creation — the
-            session is force-killed once it elapses, with no idle/activity
-            renewal. Pass a large value for a long-resident session; a
-            deadline-bound task belongs in `ava.watcher` instead."""
+        ttl: same semantics as `run_background` — required hard lifetime in
+            seconds from creation; a deadline-bound task belongs in
+            `ava.watcher` instead."""
     session_id, _ = _create_session(name, ttl=_validate_ttl(ttl))
     return session_id
 
@@ -196,8 +195,7 @@ def new(name: str, *, ttl: float) -> int:
 # `id` / `list` shadow builtins intentionally: these are the agent-facing names.
 # (flake8-builtins `A` is not in this repo's ruff select, so no noqa is needed.)
 def send(id: int, cmd: str, *, enter: bool = True) -> None:
-    """Type `cmd` into the session and submit it. Asynchronous — returns
-    immediately without waiting for the command.
+    """Asynchronous — returns immediately without waiting for the command.
 
     Set `enter=False` to type the string without pressing Enter."""
     # Text and Enter go in separate writes: a combined write races TUI
@@ -211,15 +209,15 @@ def send(id: int, cmd: str, *, enter: bool = True) -> None:
 
 
 def send_keys(id: int, *keys: str) -> None:
-    """Send raw keys to a session without submitting a line — for driving
-    interactive programs. Each argument is one key: a single character, or a
-    name like `C-c`, `Escape`, `Up`, `Enter`, `Space`, `PageUp`."""
+    """Send raw keys to a session without submitting a line. Each argument is
+    one key: a single character, or a name like `C-c`, `Escape`, `Up`,
+    `Enter`, `Space`, `PageUp`."""
     get_shell_backend().send_keys(_resolve(id), *keys)
 
 
 def capture(id: int, lines: int = 200, *, scrollback: bool = True) -> str:
-    """Return the session's most recent `lines` of output, including history
-    that has scrolled past. Pass `scrollback=False` to get only the current
+    """The session's most recent `lines` of output, including history that
+    has scrolled past. Pass `scrollback=False` to get only the current
     visible screen instead — needed for full-screen programs that redraw in
     place (`lines` is ignored then)."""
     # A session holds whatever ran in it — an interactive fetch, a coding agent

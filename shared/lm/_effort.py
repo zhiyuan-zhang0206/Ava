@@ -71,10 +71,8 @@ class ReasoningEffort(StrEnum):
     """Public reasoning-effort levels for `ava.understand` / `ava.web.fetch`.
 
     Ordered weakest → strongest. `minimal` is deliberately absent — it is a
-    gemini-only `thinking_level`, not a cross-provider effort level; gemini
-    clamps `none` onto `minimal` via `_clamp_effort` when asked for a level
-    below `low`. Members are plain `str`, so a member and its literal value
-    are interchangeable at every call site and on the wire.
+    gemini-only `thinking_level`, not a cross-provider effort level. Members
+    are plain `str`, so a member and its literal value are interchangeable.
     """
 
     NONE = "none"
