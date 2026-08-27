@@ -14,8 +14,9 @@ This module locks the three halves of the fix:
   updater machinery resolves — in-process or in a forwarded child env — can be
   the production home;
 - the deploy triggers (`spawn_update` / `spawn_rollout` / `spawn_restart`)
-  refuse the production home from any checkout that is not its anchored
-  `~/.ava/source`, BEFORE any handoff write, pause, or session spawn;
+  and the pause/unpause pair refuse the production home from any checkout that
+  is not its anchored `~/.ava/source`, BEFORE any handoff write, posture write,
+  pause, restarter respawn, or session spawn;
 - a failed spawn — even at the real-code level in a child process — leaves no
   pending handoff and no pause anywhere, and never touches the production
   handoff file.
@@ -39,7 +40,7 @@ from pathlib import Path
 
 import pytest
 
-from ops import cluster_deploy
+from ops import cluster_deploy, cluster_pause
 from ops.deploy_spawn import ProdHomeFromForeignCheckout
 from ops.update_check import UpdateCheck
 from shared.dotenv_boot import AVA_ENV_PATH
@@ -100,7 +101,14 @@ def _stub_all_deploy_write_seams(
     guard must fire before ANY of these runs. The stubs make the test safe even
     if the guard regresses — no real production side effect is possible.
     """
-    records: dict[str, list[object]] = {"begin": [], "pause": [], "spawn": [], "log": []}
+    records: dict[str, list[object]] = {
+        "begin": [],
+        "pause": [],
+        "posture": [],
+        "respawn": [],
+        "spawn": [],
+        "log": [],
+    }
     monkeypatch.setattr("shared.paths.ava_home", lambda: _PROD_HOME)
     monkeypatch.setattr(
         "shared.updater_handoff.begin",
@@ -110,6 +118,32 @@ def _stub_all_deploy_write_seams(
         "ops.cluster_pause.pause_local_cluster",
         lambda: records["pause"].append(True),  # pyright: ignore[reportUnknownArgumentType]
     )
+
+    def _record_posture(posture: str) -> None:
+        records["posture"].append(posture)
+
+    monkeypatch.setattr("shared.host_deploy_state.set_posture", _record_posture)
+
+    class _Backend:
+        def has_session(self, _name: str) -> bool:
+            return True  # restarter "alive": the unpause respawn leg is skipped
+
+        def new_session(
+            self, name: str, _cmd: str, _cwd: object, *, env: object, **_k: object
+        ) -> bool:
+            records["respawn"].append(name)
+            return True
+
+        def kill_session(
+            self, _name: str, graceful: bool = False, expected: bool = False
+        ) -> tuple[bool, str]:
+            return True, "forced"
+
+    def _stub_backend() -> _Backend:
+        return _Backend()
+
+    monkeypatch.setattr("shared.session_backend.get_backend", _stub_backend)
+    monkeypatch.setattr("shared.disabled_services.read_skipped", dict)
     monkeypatch.setattr(
         "ops.cluster_session._spawn_detached_session",
         lambda *_a, **_k: records["spawn"].append(_k),  # pyright: ignore[reportUnknownArgumentType]
@@ -152,10 +186,15 @@ def _drive_restart(_monkeypatch: pytest.MonkeyPatch) -> None:
     cluster_deploy.spawn_restart("test-origin")
 
 
+def _drive_unpause(_monkeypatch: pytest.MonkeyPatch) -> None:
+    cluster_pause.unpause_local_cluster()
+
+
 _DEPLOY_TRIGGERS: tuple[tuple[str, Callable[[pytest.MonkeyPatch], None]], ...] = (
     ("update", _drive_update),
     ("rollout", _drive_rollout),
     ("restart", _drive_restart),
+    ("unpause", _drive_unpause),
 )
 
 
@@ -169,11 +208,12 @@ def test_deploy_triggers_refuse_the_production_home_from_this_checkout(
     drive: Callable[[pytest.MonkeyPatch], None],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The three deploy triggers refuse when the resolved home is the production
-    home but the executing checkout is not its anchored `~/.ava/source` — the
-    exact 2026-08-27 incident shape (a dev/test checkout inheriting production
-    AVA_HOME). The refusal fires BEFORE any write seam: no handoff begin, no
-    pause, no session spawn, not even the update-log dir creation.
+    """The deploy triggers and the unpause restarter respawn refuse when the
+    resolved home is the production home but the executing checkout is not its
+    anchored `~/.ava/source` — the exact 2026-08-27 incident shape (a dev/test
+    checkout inheriting production AVA_HOME). The refusal fires BEFORE any write
+    seam: no handoff begin, no pause, no posture write, no restarter respawn,
+    no session spawn, not even the update-log dir creation.
 
     A non-prod home (a worktree cluster, the suite's tmpfs home) never trips
     this guard — the rest of the suite's spawn tests and the child-process test
@@ -184,10 +224,19 @@ def test_deploy_triggers_refuse_the_production_home_from_this_checkout(
         drive(monkeypatch)
 
     message = str(exc_info.value)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert "~/.ava/source" in message
-    assert records == {"begin": [], "pause": [], "spawn": [], "log": []}, (
-        f"{label}: the guard must fire before any handoff write, pause, session "
-        "spawn, or log creation"
+    # `prod_service_checkout_error` renders the anchored checkout as an ABSOLUTE
+    # path (Path.home()/".ava"/"source") — never the `~` spelling.
+    assert str(_PROD_HOME / "source") in message
+    assert records == {
+        "begin": [],
+        "pause": [],
+        "posture": [],
+        "respawn": [],
+        "spawn": [],
+        "log": [],
+    }, (
+        f"{label}: the guard must fire before any handoff write, pause, posture "
+        "write, restarter respawn, session spawn, or log creation"
     )
 
 

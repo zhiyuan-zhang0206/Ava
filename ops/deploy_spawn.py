@@ -9,6 +9,7 @@ import time
 import shared.ui_update_state
 from ops import cluster_session
 from shared.deploy_timing import ORCHESTRATION_OWNER_WAIT_S
+from shared.paths import repo_root
 
 _log = logging.getLogger(__name__)
 _UI_OWNER_POLL_S = 0.05
@@ -24,10 +25,10 @@ class ProdHomeFromForeignCheckout(RuntimeError):  # noqa: N818 — state descrip
     The same refusal `ava start` / `respawn_service` / `os_cron` already make
     (``shared.paths.prod_service_checkout_error`` — the 01:13 worktree accident,
     Task #966): the prod home's services may only be driven from its anchored
-    checkout ``~/.ava/source``. The deploy triggers are the last destructive
-    surface that lacked it; a process from any other checkout — a test
-    subprocess, a stray dev clone — must fail before it writes a handoff,
-    pauses the host, or spawns a session.
+    checkout ``~/.ava/source``. The deploy triggers and the pause/unpause pair
+    were the last destructive surfaces that lacked it; a process from any other
+    checkout — a test subprocess, a stray dev clone — must fail before it
+    writes a handoff, pauses the host, or spawns a session.
     """
 
 
@@ -38,19 +39,24 @@ def assert_prod_home_has_its_own_checkout() -> None:
     The deploy family's entry points used to be reachable from any checkout:
     ``cli.preflight.require_anchored_home`` stops an UNANCHORED checkout, but
     an env-supplied ``AVA_HOME`` reads as anchored (dotenv_boot rule 1), and a
-    direct call to ``spawn_update`` / ``spawn_rollout`` / ``spawn_restart``
-    (a test subprocess, an agent) bypasses the CLI gate entirely. A test
-    subprocess inheriting the operator's production ``AVA_HOME`` sailed through
-    both and ``spawn_update`` wrote the pending updater handoff and paused the
-    production host (2026-08-27 incident, Gateway 503). This closes that shape:
-    prod home + non-prod checkout = refuse, before any side effect — no log
-    dir creation, no handoff write, no pause, no session spawn.
+    direct call to ``spawn_update`` / ``spawn_rollout`` / ``spawn_restart`` /
+    ``unpause_local_cluster`` (a test subprocess, an agent) bypasses the CLI
+    gate entirely. A test subprocess inheriting the operator's production
+    ``AVA_HOME`` sailed through both and ``spawn_update`` wrote the pending
+    updater handoff and paused the production host (2026-08-27 incident,
+    Gateway 503). This closes that shape: prod home + non-prod checkout =
+    refuse, before any deploy side effect — no updater-log dir creation, no
+    handoff write, no pause, no session spawn.
+
+    The executing checkout is ``shared.paths.repo_root()`` — derived from this
+    module's own physical location, so no caller (cwd / env / sys.path) can
+    point it at a different checkout.
 
     A non-prod home (a dev worktree cluster, a CI tmpfs home) always passes.
     """
     from shared.paths import prod_service_checkout_error
 
-    refusal = prod_service_checkout_error(cluster_session._REPO_ROOT)
+    refusal = prod_service_checkout_error(repo_root())
     if refusal is not None:
         raise ProdHomeFromForeignCheckout(refusal)
 
