@@ -34,13 +34,18 @@ export function isReattachedTimelineContext(item: BackendTimelineItem): boolean 
  *  skipping every real item between the head and the tail window.
  *
  *  Only the CURRENT segment's run is returned: historical segments carry
- *  segment-prefixed ids and are paged by their own standing-context rules. */
+ *  segment-prefixed ids and are paged by their own standing-context rules.
+ *
+ *  The run requires a non-null `source` (a real NoteTag): untagged
+ *  system_markers (pre-tag checkpoint rows / retired markers that fall to the
+ *  catch-all with `source: null`) must not be treated as head notes — they
+ *  are stale rows, not standing context. */
 export function standingHeadNoteIds(items: readonly BackendTimelineItem[]): Set<string> {
   const ids = new Set<string>();
   const promptIdx = items.findIndex((it) => it.item_id === "0.0");
   if (promptIdx < 0) return ids;
   let i = promptIdx + 1;
-  while (i < items.length && items[i].kind === "system_marker") {
+  while (i < items.length && items[i].kind === "system_marker" && items[i].source != null) {
     ids.add(items[i].item_id);
     i += 1;
   }

@@ -48,18 +48,28 @@ def _standing_head_note_ids(items: list[TimelineItem]) -> set[str]:
     These are the notes ``agent/graph/_context_notes.py`` lays down at window
     establishment (exec timeout / timezone / cluster memory / agent id / agent
     memory / preloaded skills), rendered as ``system_marker`` items right
-    behind ``0.0``. They are standing context of the same class as the prompt
-    itself: ``_initial_window`` re-attaches them at the window head, and the
-    paging paths treat them as re-attached context (a cursor that would
-    select one must cross to the next older segment instead of looping on the
-    re-attached head).
+    behind the prompt. They are standing context of the same class as the
+    prompt itself: ``_initial_window`` re-attaches them at the window head,
+    and the paging paths treat them as re-attached context (a cursor that
+    would select one must cross to the next older segment instead of looping
+    on the re-attached head).
+
+    The run requires ``source is not None`` (a real NoteTag): the catch-all
+    fallback renders untagged HumanMessages — pre-tag checkpoint rows and
+    retired markers that old data may still carry right after the prompt —
+    as ``system_marker`` with ``source=None``, and treating those as head
+    notes would re-attach stale rows to every window and skip them in paging.
     """
     head: set[str] = set()
     idx = 0
+    # The current segment's prompt is always the plain "0.0" item (historical
+    # segments carry segment-prefixed ids), and the standing notes directly
+    # follow it — that ordering invariant is what makes this prefix scan
+    # unambiguous.
     while idx < len(items) and items[idx].kind != "system_prompt":
         idx += 1
     idx += 1  # past the prompt itself
-    while idx < len(items) and items[idx].kind == "system_marker":
+    while idx < len(items) and items[idx].kind == "system_marker" and items[idx].source is not None:
         head.add(items[idx].item_id)
         idx += 1
     return head
