@@ -23,7 +23,8 @@ running or idling — a terminated agent's page expiring is exactly the cleanup
 the TTL exists for, and must not resurrect it. Shell reclamations notify only
 when the reap interrupted a running job (the runner reports whether the
 session carried live processes at kill time); an empty shell's reaping is
-silent, and an already-absent session never notifies.
+silent, and an already-absent session never notifies. An interruption notice
+states when the TTL expired and how long it was.
 
 The pass is fail-open by design (never raises out of the loop): a DB or
 dispatch failure logs and retries next interval, and every reclaim is a CAS
@@ -36,13 +37,14 @@ import asyncio
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
 from ops import cluster_rpc
 from shared import telemetry
-from shared.config import settings
+from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.live_events import PageClosed
 from shared.redis_client import publish_best_effort_sync
@@ -164,16 +166,40 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
     return reaped
 
 
-def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int]]:
-    """TTL-expired shell tracking rows, oldest deadline first."""
+def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int, datetime, datetime]]:
+    """TTL-expired shell tracking rows, oldest deadline first.
+
+    Each row carries ``expires_at`` and ``created_at`` so the interruption
+    notice can state when the TTL expired and how long it was (the duration
+    is ``expires_at - created_at``; no extra column needed)."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT agent_id, session_id FROM agent_shell_ttls "
+            "SELECT agent_id, session_id, expires_at, created_at FROM agent_shell_ttls "
             "WHERE expires_at <= now() "
             "ORDER BY agent_id, session_id LIMIT %s",
             (_PASS_BATCH,),
         )
-        return [(row[0], row[1]) for row in cur.fetchall()]
+        return [(row[0], row[1], row[2], row[3]) for row in cur.fetchall()]
+
+
+def _human_ttl(seconds: float) -> str:
+    """A TTL duration as a compact human string: 1h, 30m, 90s."""
+    seconds = max(0, int(seconds))
+    if seconds >= 3600 and seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds >= 60 and seconds % 60 == 0:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+def _wall_clock(dt: datetime) -> str:
+    """Local wall-clock HH:MM for the notice (cluster timezone when set)."""
+    tz = cluster_tz()
+    return (
+        dt.astimezone(tz).strftime("%H:%M")
+        if tz is not None
+        else dt.astimezone(UTC).strftime("%H:%M")
+    )
 
 
 def _delete_shell_row_blocking(
@@ -183,10 +209,13 @@ def _delete_shell_row_blocking(
     *,
     interrupted: bool,
     name: str | None = None,
+    expires_at: datetime | None = None,
+    created_at: datetime | None = None,
 ) -> None:
     """Drop a reclaimed shell's tracking row; notify its live owner only when
     the reclamation interrupted a running job (an empty shell's reaping is
-    silent — user ruling 2026-08-27)."""
+    silent — user ruling 2026-08-27). The notice states when the TTL expired
+    and how long it was (``expires_at`` / ``created_at`` from the row)."""
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -199,10 +228,18 @@ def _delete_shell_row_blocking(
                 if name
                 else f"Shell session {session_id} (agent {agent_id})"
             )
+            detail = ""
+            if expires_at is not None:
+                ttl = (
+                    f", TTL {_human_ttl((expires_at - created_at).total_seconds())}"
+                    if created_at is not None
+                    else ""
+                )
+                detail = f" at {_wall_clock(expires_at)}{ttl}"
             _notify_owner(
                 conn,
                 agent_id,
-                f"{label} was reclaimed after its TTL expired, interrupting a running task.",
+                f"{label} was reclaimed after its TTL expired{detail}, interrupting a running task.",
             )
 
 
@@ -216,7 +253,7 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
     """
     rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
     reaped: list[tuple[int, int]] = []
-    for agent_id, session_id in rows:
+    for agent_id, session_id, expires_at, created_at in rows:
         machine = await asyncio.to_thread(_agent_machine, pool, agent_id)
         if machine is None:
             _log.warning(
@@ -262,6 +299,8 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
             session_id,
             interrupted=interrupted,
             name=result.get("name"),
+            expires_at=expires_at,
+            created_at=created_at,
         )
         telemetry.emit(
             "log",
