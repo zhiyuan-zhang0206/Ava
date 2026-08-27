@@ -512,3 +512,13 @@ def test_ava_settings_plugins_attribute_access(isolated_registry, unit_home):
 
     with pytest.raises(AttributeError, match="Known plugins"):
         _ = _ava_settings.plugins.nonexistent_plugin
+
+
+def test_syntax_fix_ruff_format_overlay_is_accepted() -> None:
+    """Per-agent A/B of the ruff format gate (task #1858 follow-up, user chose
+    a paired experiment): the field must accept a spawn config_overlay, like
+    prompt_codeact_enabled after #719."""
+    from shared.plugin_config_registry import validate_config_overlay
+
+    validate_config_overlay({"syntax_fix_ruff_format": True})  # must not raise
+    validate_config_overlay({"syntax_fix_ruff_format": False})

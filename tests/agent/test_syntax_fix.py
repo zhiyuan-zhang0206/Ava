@@ -52,6 +52,7 @@ from ava_builtins.plugins.ava_syntax_fix.plugin import (
     _strip_code_fence,
     syntax_fix_before_exec,
 )
+from shared.config import settings
 
 # --- _fix_chinese_punctuation ---
 
@@ -615,11 +616,10 @@ class TestSyntaxFixBeforeExec:
 
     async def test_chinese_punctuation_fixed(self, monkeypatch: pytest.MonkeyPatch):
         """Chinese comma should be fixed."""
-        from ava_builtins.plugins.ava_syntax_fix import plugin as _plugin
 
         # Pin the flag: the assertion expects ruff_format spacing, which a host
         # .env (AVA_SYNTAX_FIX_RUFF_FORMAT=false) would otherwise turn off.
-        monkeypatch.setattr(_plugin.settings.sandbox, "syntax_fix_ruff_format", True)
+        monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", True)
         state = AgentState(
             messages=[
                 AIMessage(
@@ -644,9 +644,8 @@ class TestSyntaxFixBeforeExec:
 
     async def test_ruff_format_applied_when_enabled(self, monkeypatch: pytest.MonkeyPatch):
         """settings.sandbox.syntax_fix_ruff_format=True -> non-canonical style normalized."""
-        from ava_builtins.plugins.ava_syntax_fix import plugin as _plugin
 
-        monkeypatch.setattr(_plugin.settings.sandbox, "syntax_fix_ruff_format", True)
+        monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", True)
         state = AgentState(
             messages=[
                 AIMessage(
@@ -667,9 +666,8 @@ class TestSyntaxFixBeforeExec:
         (missing-newline-at-end-of-file).  This keeps the hook returning a
         non-None result so we can assert that format was not applied — the test
         no longer depends on a specific ruff lint rule being active."""
-        from ava_builtins.plugins.ava_syntax_fix import plugin as _plugin
 
-        monkeypatch.setattr(_plugin.settings.sandbox, "syntax_fix_ruff_format", False)
+        monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", False)
         state = AgentState(
             messages=[
                 AIMessage(
