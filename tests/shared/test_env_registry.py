@@ -18,7 +18,9 @@ import sys
 from pathlib import Path
 
 # Ensure settings-lite so we can import config without a real .env
-os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
+os.environ["AVA_CONFIG_FETCH"] = (
+    "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
+)
 
 
 def _fields() -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]

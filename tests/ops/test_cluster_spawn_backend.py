@@ -30,6 +30,7 @@ import pytest
 from ops import cluster as cluster_mod
 from ops import cluster_deploy
 from ops import updater_outcome as uo
+from shared.config import settings
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.platform_backend import MacPlatformBackend, WindowsPlatformBackend
 
@@ -57,6 +58,20 @@ class _FakeSessionBackend:
         exec_cmd: bool = True,
     ) -> bool:
         assert env, "the native spawn must hand the child a populated env"
+        # The child env is the session-forward view (shared.session_env /
+        # shared.env_registry), which carries AVA_HOME from the SUITE's pinned
+        # test home — never the operator's production home. A child that
+        # inherited production AVA_HOME is exactly the 2026-08-27 incident: the
+        # updater test subprocess wrote the pending handoff and paused the
+        # production host (Gateway 503). Lock the child-env property here, where
+        # every spawn-site test passes through this one backend.
+        assert env.get("AVA_HOME") == str(settings.general.ava_home), (
+            f"child env must carry the suite's isolated home "
+            f"({settings.general.ava_home}), got AVA_HOME={env.get('AVA_HOME')!r}"
+        )
+        assert env.get("AVA_HOME") != str(Path.home() / ".ava"), (
+            "child env must never carry the production home"
+        )
         self.spawned.append((name, cmd, cwd))
         self.alive.add(name)
         return True

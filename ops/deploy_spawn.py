@@ -18,6 +18,43 @@ class ClusterUpdateInProgress(RuntimeError):  # noqa: N818 — state description
     """A whole-cluster or host updater orchestration is already in flight."""
 
 
+class ProdHomeFromForeignCheckout(RuntimeError):  # noqa: N818 — state description
+    """The resolved home is the production home but this checkout is not its own.
+
+    The same refusal `ava start` / `respawn_service` / `os_cron` already make
+    (``shared.paths.prod_service_checkout_error`` — the 01:13 worktree accident,
+    Task #966): the prod home's services may only be driven from its anchored
+    checkout ``~/.ava/source``. The deploy triggers are the last destructive
+    surface that lacked it; a process from any other checkout — a test
+    subprocess, a stray dev clone — must fail before it writes a handoff,
+    pauses the host, or spawns a session.
+    """
+
+
+def assert_prod_home_has_its_own_checkout() -> None:
+    """Refuse a detached deploy when the resolved home is the production home but
+    the executing checkout is not the production-anchored checkout.
+
+    The deploy family's entry points used to be reachable from any checkout:
+    ``cli.preflight.require_anchored_home`` stops an UNANCHORED checkout, but
+    an env-supplied ``AVA_HOME`` reads as anchored (dotenv_boot rule 1), and a
+    direct call to ``spawn_update`` / ``spawn_rollout`` / ``spawn_restart``
+    (a test subprocess, an agent) bypasses the CLI gate entirely. A test
+    subprocess inheriting the operator's production ``AVA_HOME`` sailed through
+    both and ``spawn_update`` wrote the pending updater handoff and paused the
+    production host (2026-08-27 incident, Gateway 503). This closes that shape:
+    prod home + non-prod checkout = refuse, before any side effect — no log
+    dir creation, no handoff write, no pause, no session spawn.
+
+    A non-prod home (a dev worktree cluster, a CI tmpfs home) always passes.
+    """
+    from shared.paths import prod_service_checkout_error
+
+    refusal = prod_service_checkout_error(cluster_session._REPO_ROOT)
+    if refusal is not None:
+        raise ProdHomeFromForeignCheckout(refusal)
+
+
 def wait_for_ui_owner(
     *, session: str, kind: shared.ui_update_state.UiUpdateKind, origin: str
 ) -> None:

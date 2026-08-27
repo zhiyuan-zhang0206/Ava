@@ -79,7 +79,13 @@ from ops.deploy_spawn import (
     ClusterUpdateInProgress as ClusterUpdateInProgress,
 )
 from ops.deploy_spawn import (
+    ProdHomeFromForeignCheckout as ProdHomeFromForeignCheckout,
+)
+from ops.deploy_spawn import (
     assert_no_orchestration_in_flight as _assert_no_orchestration_in_flight,
+)
+from ops.deploy_spawn import (
+    assert_prod_home_has_its_own_checkout as _assert_prod_home_has_its_own_checkout,
 )
 from ops.deploy_spawn import update_entry_args as _update_entry_args
 from ops.deploy_spawn import wait_for_ui_owner as _wait_for_ui_owner
@@ -350,7 +356,11 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             anything is paused.
         OrchestrationSpawnFailed: the session backend declined to start the
             updater session.
+        ProdHomeFromForeignCheckout: the resolved home is the production home but
+            this checkout is not its anchored `~/.ava/source`; refused before any
+            handoff write, pause, or session spawn.
     """
+    _assert_prod_home_has_its_own_checkout()
     # Standalone self-heals (watchdog pin/code controllers, the management
     # endpoint, an operator's direct `ava cluster update` on a runner) quiesce
     # this host's agents before the bounce — the per-host analogue of the
@@ -648,7 +658,11 @@ def spawn_rollout(
             intent is to bounce on the current code.
         OrchestrationSpawnFailed: the session backend declined to start the
             rollout session.
+        ProdHomeFromForeignCheckout: the resolved home is the production home but
+            this checkout is not its anchored `~/.ava/source`; refused before any
+            handoff write, pause, or session spawn.
     """
+    _assert_prod_home_has_its_own_checkout()
     _assert_no_orchestration_in_flight(force=force)
 
     # Fail fast on a no-op rollout: behind==0 means origin/main has nothing the
@@ -752,7 +766,11 @@ def spawn_restart(origin: str, *, force: bool = False, mode: str = "smooth") -> 
         ClusterUpdateInProgress: a restart / rollout / update is already in flight.
         OrchestrationSpawnFailed: the session backend declined to start the
             restart session.
+        ProdHomeFromForeignCheckout: the resolved home is the production home but
+            this checkout is not its anchored `~/.ava/source`; refused before any
+            handoff write, pause, or session spawn.
     """
+    _assert_prod_home_has_its_own_checkout()
     _assert_no_orchestration_in_flight(force=force)
 
     restart_sess = shared.cluster.session_name(_CLUSTER_RESTART_SERVICE)

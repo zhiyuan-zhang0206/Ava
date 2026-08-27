@@ -26,7 +26,9 @@ from typing import cast
 import pytest
 
 # Ensure settings-lite so we can import config
-os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
+os.environ["AVA_CONFIG_FETCH"] = (
+    "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
+)
 
 # Gateway-side source roots — daemons that run under the gateway profile.
 _GATEWAY_SOURCE_ROOTS = [
