@@ -566,7 +566,9 @@ class AgentPromptSettings(EnvSettings):
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
-            "scope": "cluster-pinned",
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
         },
     )
 
