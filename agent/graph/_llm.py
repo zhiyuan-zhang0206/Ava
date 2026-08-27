@@ -201,7 +201,7 @@ You are Ava, an agent that acts by writing Python code — call the
 `execute_code(code: str)` tool — each call runs in an ephemeral interpreter. To idle, do not output any
 tool calls.
 
-Below is your SDK. Before using any `ava.*` function, you must explicitly `import ava` in your code.
+Before using any `ava.*` function, you must explicitly `import ava` in your code.
 
 {_AVA_OVERVIEW}"""
 

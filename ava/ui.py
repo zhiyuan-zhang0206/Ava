@@ -211,8 +211,7 @@ def show(
 
     Declares the page with the platform so the platform routes your
     server's URL — you started that server yourself; the platform's page
-    supervisor does not manage it. Calling again auto-closes any existing
-    page first — each agent has at most one open page.
+    supervisor does not manage it.
 
     Args:
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
@@ -238,14 +237,7 @@ def serve(
 ) -> Page:
     """Start an HTTP server for `dir` and show it to the user, in one call.
 
-    Declares the page (the content already lives in `dir`) and waits for the
-    platform's page-server daemon to run the server inside a persistent shell
-    session owned by this agent. The server binds the machine's own address
-    (loopback on a single machine) — the page is only ever reached through the
-    platform's authenticated link.
-
-    Calling again auto-closes any existing page; `close(name)` closes the
-    page and the platform stops the server.
+    Calling again auto-closes any existing page.
 
     Args:
         dir: the directory to serve. A relative path is resolved against
@@ -287,12 +279,6 @@ def serve_markdown(
 ) -> Page:
     """Serve Markdown as a rendered HTML page (LaTeX math, code highlighting,
     GFM tables) — same behavior as `serve`, including the port rules.
-
-    Args:
-        name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
-        port: omit to use the port reserved for you.
-        title: defaults to `name`.
-        ttl: optional page lifetime in seconds; when omitted, the platform default applies.
     """
     ttl = _validate_ttl(ttl)
     _validate_name(name)

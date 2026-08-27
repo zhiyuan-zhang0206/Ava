@@ -31,7 +31,7 @@ from .discovery import (
 
 
 def help(*targets: Any) -> None:
-    """Print docs for one or more SDK targets, e.g. `ava.help(ava.shell)`."""
+    """Print docs for SDK targets, e.g. `ava.help(ava.shell)`."""
     import ava as _ava
 
     if not targets:

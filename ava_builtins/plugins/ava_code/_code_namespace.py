@@ -11,7 +11,6 @@ __all_for_ava__ = ["get", "set"]
 
 
 def get() -> Path:
-    """Return the current logical working directory."""
     # state_handle binding happens after register_namespace in plugin.py; lazy
     # import here keeps `from . import _code_namespace` cycle-free.
     from .plugin import state_handle
@@ -20,7 +19,7 @@ def get() -> Path:
 
 
 def set(path: str | Path) -> None:
-    """Change the logical working directory. Persistent across turns and restarts.
+    """Persistent across turns and restarts.
 
     AvaCode SDK wrappers resolve relative paths against this value. The
     Python process working directory is unchanged.

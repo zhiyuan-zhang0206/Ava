@@ -1,5 +1,4 @@
-"""Background watchers that wake you when something happens, so you do not
-stay in-turn polling."""
+"""Background watchers that wake you when something happens."""
 
 from __future__ import annotations
 
@@ -529,8 +528,7 @@ def cron(
     name: str,
     _exclude_session: int | None = None,
 ) -> int:
-    """Wake yourself with `message` on a recurring schedule. Runs until
-    `end_time`, or until you kill its session.
+    """Runs until `end_time`, or until you kill its session.
 
     A schedule already live under the same (agent, expression, timezone,
     end time) is REUSED instead of registered twice: two identical-schedule
@@ -544,8 +542,7 @@ def cron(
         timezone: IANA name (e.g. `"America/Los_Angeles"`); defaults to your
             configured timezone — the same wall clock your message timestamps
             are shown in.
-        end_time: a TZ-aware datetime, a timedelta from now (UTC), or an
-            ISO-8601 string with timezone.
+        end_time: same accepted types as `at()`'s `when`.
         name: a lowercase slug like `"daily-check-in"`.
 
     Returns:
@@ -593,8 +590,7 @@ def at(
     *,
     name: str,
 ) -> int:
-    """Wake yourself once with `message` at `when`.
-
+    """
     Args:
         when: a TZ-aware datetime, a timedelta from now (UTC), or an ISO-8601
             string with timezone. Must be in the future.

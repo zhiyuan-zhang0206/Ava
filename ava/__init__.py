@@ -1,5 +1,3 @@
-"""Drill into any submodule with `ava.help(ava.X)`."""
-
 import sys as _sys
 from types import SimpleNamespace
 from typing import Any

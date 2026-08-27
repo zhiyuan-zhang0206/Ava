@@ -161,13 +161,7 @@ def notify(
     priority: str = "P2",
     task: int | None = None,
 ) -> "Notice":
-    """Post one notice to the user, replacing any previous open notice.
-
-    Notices land in the user's aggregated queue, read asynchronously — use
-    them when the user is not in a live conversation. When the user is talking
-    to you directly in the dialog, reply in turn and do not post a notice.
-
-    Pick the rung by what you need back:
+    """Post one notice, replacing any previous open notice.
 
     - `require_response=False` (default) -- an FYI; the user may read, reply,
       or ignore it. Post sparingly: a flood of low-value notices buries the
@@ -176,8 +170,7 @@ def notify(
       that is irreversible, outward-facing, spends real money, or reaches a
       real person). A decision the agent that spawned you could make goes to
       that agent via ava.agents.send_message instead.
-    - `blocking=True` -- you cannot make progress until it is answered. If you
-      can keep doing other useful work, leave it False.
+    - `blocking=True` -- you cannot make progress until it is answered.
 
     Does not block: post, end your turn, and idle -- the reply arrives later
     as an ordinary message. You can have one open notice at a time; a new
@@ -187,7 +180,6 @@ def notify(
     Args:
         content: optional detail. Offer discrete choices as A / B / C so the
             user can reply with one letter (the reply is always free text).
-        priority: "P0" (highest) through "P3" (lowest).
         task: groups your notices by task in the user's queue.
 
     Returns:
@@ -243,11 +235,7 @@ def edit_notice(
     priority: str = _UNSET,  # type: ignore[assignment]
     blocking: bool = _UNSET,  # type: ignore[assignment]
 ) -> None:
-    """Revise your open notice before the user acts on it; pass only the
-    fields to change. At most one notice is open per agent (notify auto-resolves
-    the previous one), so no id is needed.
-
-    require_response cannot be changed -- to turn an FYI into a question,
+    """require_response cannot be changed -- to turn an FYI into a question,
     dismiss this notice and post a fresh one.
 
     Args:
@@ -285,9 +273,8 @@ def edit_notice(
 
 
 def dismiss_notice() -> None:
-    """Withdraw the open notice that is no longer relevant, so the user does
-    not spend time on a stale entry. At most one notice is open per agent
-    (notify auto-resolves the previous one), so no id is needed."""
+    """Withdraw the open notice. At most one notice is open per agent (notify
+    auto-resolves the previous one), so no id is needed."""
     aid = ava._boot.agent_id()
     # One unified write path (R3 door ④): the gateway withdraws the agent's
     # current open notice and publishes the resolve + agent-updated events.
@@ -328,7 +315,7 @@ def _spawn_with_label(
     label: str | None = None,
     preset: str | None = None,
 ) -> int:
-    """Start a new agent and return its id. Does not block.
+    """Start a new agent; does not block.
 
     Args:
         prompt: the first message — make it self-contained, the new agent has
