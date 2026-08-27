@@ -249,10 +249,9 @@ def test_emit_skips_missing_tables_fresh_cluster(
 
     monkeypatch.setattr(blob_vacuum, "telemetry", SimpleNamespace(emit=_capture), raising=False)
 
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
-            sizes = blob_vacuum.emit_checkpoint_table_sizes(cur)
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
+        sizes = blob_vacuum.emit_checkpoint_table_sizes(cur)
 
     assert sizes is None  # skipped, nothing emitted
     assert emitted == []
