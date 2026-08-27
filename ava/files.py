@@ -1,4 +1,4 @@
-"""Filesystem operations. Relative paths resolve to your workspace folder; `~/...` resolves to your home directory."""
+"""Relative paths resolve to your workspace folder; `~/...` resolves to your home directory."""
 
 __all_for_ava__ = [
     "append",

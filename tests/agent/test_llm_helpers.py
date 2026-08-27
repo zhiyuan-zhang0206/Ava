@@ -56,19 +56,20 @@ def test_capture_ava_overview_returns_non_empty_string() -> None:
 
 
 def test_capture_ava_overview_surfaces_public_sdk_index() -> None:
-    # The overview = `# ava` H1 + ava's own docstring (the root is the one module
-    # that keeps its own doc — it has no parent listing to carry it), then one
-    # entry per public top-level namespace as `from . import X` + that module's
-    # docstring. This is the SDK index, so the agent discovers the gateway
-    # primitives (agents / watcher / self) without spelunking; full
-    # per-namespace detail stays on demand via ava.help(ava.X).
+    # The overview = `# ava` H1 + one entry per public top-level namespace as
+    # `from . import X` + that module's docstring. This is the SDK index, so the
+    # agent discovers the gateway primitives (agents / watcher / self) without
+    # spelunking; full per-namespace detail stays on demand via ava.help(ava.X).
+    # The root docstring was deliberately removed (sysprompt verbosity audit,
+    # PR #840) — the `# ava` heading stands alone.
     overview = _capture_ava_overview()
 
-    # `# ava` heading first, then ava's root docstring (contains 'Drill into')
     assert overview.startswith("# ava\n\n"), (
         f"overview does not start with `# ava` heading: {overview[:200]!r}"
     )
-    assert "Drill into" in overview, f"ava root docstring not rendered: {overview[:200]!r}"
+    assert "Drill into" not in overview, (
+        f"removed root docstring still rendered: {overview[:200]!r}"
+    )
     # gateway primitives surfaced as index entries
     for name in ("agents", "watcher", "self", "shell"):
         assert f"from . import {name}" in overview, (

@@ -144,9 +144,7 @@ Use `write(slug, content, ..., store="personal")` to write either store; it
 resolves an absolute store-owned path, so it is immune to `ava.cwd` changes.
 """
 
-_PATH_DOC = """Memory pool root: a shared folder of markdown notes.
-
-When the pool spans machines, notes sync within about a day — a path `search`
+_PATH_DOC = """When the pool spans machines, notes sync within about a day — a path `search`
 returns may not have arrived here yet; retry later.
 
 Start each note with YAML frontmatter, then the attribution header:

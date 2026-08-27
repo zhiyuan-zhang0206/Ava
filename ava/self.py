@@ -37,10 +37,8 @@ __all_for_ava__ = [
 # remove the whole `self` namespace without stripping the identity.
 #
 # Annotation-only (no value binding) keeps the name out of the module dict so
-# every `ava.self.AGENT_ID` access routes to `__getattr__`, while the AnnAssign
-# + PEP 224 docstring still let `ava.help(ava.self)` document it.
+# every `ava.self.AGENT_ID` access routes to `__getattr__`.
 AGENT_ID: int
-"""Your agent id."""
 
 MACHINE_SPEC: tuple[str, str]
 """(name, description) of the machine this agent runs on."""
