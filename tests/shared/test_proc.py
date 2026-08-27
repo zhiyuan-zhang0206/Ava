@@ -19,7 +19,15 @@ import pytest
 
 from shared.paths import run_dir
 from shared.platform import IS_LINUX
-from shared.proc import hosting_supervised_session, kill_process_tree, process_alive, run_bounded
+from shared.proc import (
+    hosting_supervised_session,
+    kill_process_tree,
+    process_alive,
+    run_bounded,
+)
+from shared.proc import (
+    timeout_stderr_tail as proc_timeout_stderr_tail,
+)
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 
@@ -201,6 +209,42 @@ def test_run_bounded_rejects_capture_output_with_explicit_pipes() -> None:
             capture_output=True,
             stdout=subprocess.DEVNULL,
         )
+
+
+# --- timeout_stderr_tail: the timeout-point evidence ----------------------
+
+
+def test_timeout_stderr_tail_returns_the_last_lines_as_text() -> None:
+    """The partial stderr a `run_bounded` timeout carries (drained after the
+    tree kill) is normalized to the last non-empty lines, joined — the timeout
+    point a caller logs or returns."""
+    exc = subprocess.TimeoutExpired(
+        cmd=["git", "fetch"],
+        timeout=30.0,
+        stderr="ssh: connect to host github.com port 22: Connection timed out\n",
+    )
+    assert proc_timeout_stderr_tail(exc) == (
+        "ssh: connect to host github.com port 22: Connection timed out"
+    )
+
+
+def test_timeout_stderr_tail_normalizes_bytes_and_none() -> None:
+    """`TimeoutExpired.stderr` is typed `str | bytes | None`; bytes decode and
+    None (a child killed before it wrote anything) yields an empty string —
+    itself the evidence that the hang was pre-output, not mid-transfer."""
+    exc = subprocess.TimeoutExpired(
+        cmd=["git", "fetch"], timeout=30.0, stderr=b"Receiving objects: 45% (123/271)\r"
+    )
+    assert proc_timeout_stderr_tail(exc) == "Receiving objects: 45% (123/271)"
+
+    exc = subprocess.TimeoutExpired(cmd=["git", "fetch"], timeout=30.0, stderr=None)
+    assert proc_timeout_stderr_tail(exc) == ""
+
+
+def test_timeout_stderr_tail_bounds_the_number_of_lines() -> None:
+    exc = subprocess.TimeoutExpired(cmd=["git", "fetch"], timeout=30.0, stderr="a\nb\nc\nd\n")
+    assert proc_timeout_stderr_tail(exc) == "b | c | d"
+    assert proc_timeout_stderr_tail(exc, lines=2) == "c | d"
 
 
 # --- the git-driving modules stay converted ------------------------------
