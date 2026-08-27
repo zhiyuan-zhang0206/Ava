@@ -51,12 +51,22 @@ export function useFoldOwner(): FoldOwner {
     [],
   );
 
+  // The notices families are EXEMPT from the debounce (Task #1814): the open
+  // queue and its resolved history are the actively-viewed list — a resolve
+  // must reflect promptly, and the refetch is a cheap keyset query. The
+  // debounce exists for the heavy server-computed families (fleet-graph,
+  // tasks), whose bursts would otherwise fan out; TanStack itself coalesces
+  // a burst of immediate invalidations that land within one tick anyway.
   const ctx: FoldContext = useMemo(
     () => ({
       getQueryData: (key) => queryClient.getQueryData(key),
       setQueryData: (key, value) => queryClient.setQueryData(key, value),
       invalidateQueries: (key) => {
         const family = String(key[0]);
+        if (family === "notices" || family === "notices-resolved") {
+          void queryClient.invalidateQueries({ queryKey: key });
+          return;
+        }
         const existing = timersRef.current.get(family);
         if (existing !== undefined) clearTimeout(existing);
         timersRef.current.set(

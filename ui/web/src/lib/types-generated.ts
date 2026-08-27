@@ -1527,6 +1527,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notices/resolve-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Notices Resolve Batch
+         * @description Mark many open FYI notices 'read' in one transaction (the Inbox's
+         *     "Mark all read" — Task #1814).
+         *
+         *     The single-notice resolve path (POST /api/agents/{id}/notices/{notice_id}/resolve)
+         *     costs one HTTP round trip + one publish per notice, and each published
+         *     notice_resolved refetches the whole open queue — clearing a pile of FYI
+         *     notices one by one is N requests and N queue refetches. This endpoint does
+         *     the whole pile in ONE transaction and returns before the UI reconciles.
+         *
+         *     Batch semantics are deliberately permissive (idempotent): a row that is
+         *     already resolved, or that needs a response, is skipped — counted in
+         *     `skipped`, never an error — so a race with another resolver cannot fail
+         *     the whole request. The batch action is always 'read' (an FYI close); a
+         *     require_response notice can only be answered or dismissed one at a time.
+         *     No replies are possible here (bare reads wake no agent).
+         *
+         *     Returns {"resolved": n, "skipped": m}. 422 on an empty or oversized list.
+         */
+        post: operations["post_notices_resolve_batch_api_notices_resolve_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/notices": {
         parameters: {
             query?: never;
@@ -6028,6 +6064,20 @@ export interface components {
          */
         Priority: "P0" | "P1" | "P2" | "P3";
         /**
+         * ResolveBatchIn
+         * @description POST /api/notices/resolve-batch request body.
+         *
+         *     `notice_ids` — the global agent_notices ids of the FYI notices to mark
+         *     read in ONE transaction (the Inbox's "Mark all read" path). Idempotent
+         *     batch semantics: a row already resolved, or one that needs a response, is
+         *     skipped (counted in `skipped`), never an error — the batch clears what is
+         *     still open, so a concurrent resolve cannot fail the whole request.
+         */
+        ResolveBatchIn: {
+            /** Notice Ids */
+            notice_ids: number[];
+        };
+        /**
          * ResolveNoticeIn
          * @description POST /api/agents/{id}/notices/{notice_id}/resolve request body.
          *
@@ -8757,6 +8807,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentMessageEnqueued"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_notices_resolve_batch_api_notices_resolve_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

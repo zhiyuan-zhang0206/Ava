@@ -224,6 +224,13 @@ CREATE INDEX agent_notices_unread_idx
     ON agent_notices (agent_id, created_at)
     WHERE NOT require_response AND resolved_at IS NULL;
 
+-- Resolved-history page (Inbox's greyed history): ORDER BY resolved_at DESC,
+-- id DESC on the resolved half — the table accumulates forever, so the
+-- history query needs an index, not a seq scan + sort.
+CREATE INDEX agent_notices_resolved_idx
+    ON agent_notices (resolved_at DESC, id DESC)
+    WHERE resolved_at IS NOT NULL;
+
 -- ─────────────── inbound_messages ───────────────
 -- The agent's unified gateway — any "trigger" entering an agent goes through this table.
 -- See decisions/2026-05-02-self-cycling-langgraph.md.

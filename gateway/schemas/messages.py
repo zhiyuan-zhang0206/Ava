@@ -78,6 +78,19 @@ class AgentMessageEnqueued(BaseModel):
     inbound_id: int | None = None
 
 
+class ResolveBatchIn(BaseModel):
+    """POST /api/notices/resolve-batch request body.
+
+    `notice_ids` — the global agent_notices ids of the FYI notices to mark
+    read in ONE transaction (the Inbox's "Mark all read" path). Idempotent
+    batch semantics: a row already resolved, or one that needs a response, is
+    skipped (counted in `skipped`), never an error — the batch clears what is
+    still open, so a concurrent resolve cannot fail the whole request.
+    """
+
+    notice_ids: list[int]
+
+
 class ResolveNoticeIn(BaseModel):
     """POST /api/agents/{id}/notices/{notice_id}/resolve request body.
 

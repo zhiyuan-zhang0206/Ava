@@ -14,16 +14,27 @@ vi.mock("@/lib/sidebar", () => ({ formatRelativeTime: (ts: string) => `rel:${ts}
 const resolveNotice = vi.fn<
   (agentId: number, noticeId: number, body: { action: string; reply?: string }) => Promise<{ status: string }>
 >();
+// "Mark all read" — the batch endpoint (Task #1814). Mocked.
+const resolveNoticesBatch = vi.fn<
+  (noticeIds: number[]) => Promise<{ resolved: number; skipped: number }>
+>();
 vi.mock("@/lib/api", () => ({
   api: {
     resolveNotice: (a: number, n: number, b: { action: string; reply?: string }) => resolveNotice(a, n, b),
+    resolveNoticesBatch: (ids: number[]) => resolveNoticesBatch(ids),
   },
 }));
 
 // The whole queue is injected through the single data contract
 // (open/awaiting + resolved history). Default: empty.
 const inboxFeedMock = vi.fn<() => NoticesFeed>();
-vi.mock("@/lib/use-notices", () => ({ useNotices: () => inboxFeedMock() }));
+// The instant local drop after a resolve (Task #1814) — mocked so a click
+// under test never needs a real query cache.
+const dropOpenNotices = vi.fn<(queryClient: unknown, noticeIds: number[]) => void>();
+vi.mock("@/lib/use-notices", () => ({
+  useNotices: () => inboxFeedMock(),
+  dropOpenNotices: (qc: unknown, ids: number[]) => dropOpenNotices(qc, ids),
+}));
 
 // The queue joins entries to the task registry client-side (grouping); feed it a
 // controlled task list. Default: none — every entry stays a flat row.
@@ -45,6 +56,7 @@ afterEach(() => {
   inboxFeedMock.mockReturnValue(emptyFeed());
   useTasksMock.mockReturnValue({ tasks: [], loading: false, error: false });
   useAllPagesMock.mockReturnValue([]);
+  resolveNoticesBatch.mockResolvedValue({ resolved: 0, skipped: 0 });
 });
 
 function emptyFeed(over: Partial<NoticesFeed> = {}): NoticesFeed {
@@ -295,6 +307,61 @@ describe("InboxQueue — FYI action surface", () => {
     renderQueue([]);
     fireEvent.click(screen.getByText("Mark read"));
     await waitFor(() => expect(screen.getByText(/already read/i)).toBeTruthy());
+  });
+
+
+  it("drops the resolved notice from the open queue immediately", async () => {
+    resolveNotice.mockResolvedValue({ status: "running" });
+    setFeed({
+      open: [
+        ni({ id: 1, agent_id: 7, title: "first" }),
+        ni({ id: 2, agent_id: 7, title: "second" }),
+      ],
+    });
+    renderQueue([]);
+    fireEvent.click(screen.getByText("Mark read"));
+    await waitFor(() => expect(dropOpenNotices).toHaveBeenCalledWith(expect.anything(), [1]));
+  });
+});
+
+describe("InboxQueue — Mark all read (Task #1814)", () => {
+  it("shows the button only when an FYI notice is open", () => {
+    setFeed({ awaiting: [n({ id: 1, title: "needs you" })] });
+    renderQueue([]);
+    expect(screen.queryByText("Mark all read")).toBeNull();
+    setFeed({ open: [ni({ id: 2, title: "fyi" })] });
+    renderQueue([]);
+    expect(screen.getByText("Mark all read")).toBeTruthy();
+  });
+
+  it("clears every open FYI notice with ONE batch request", async () => {
+    resolveNoticesBatch.mockResolvedValue({ resolved: 3, skipped: 0 });
+    setFeed({
+      open: [
+        ni({ id: 1, agent_id: 7, title: "fyi one" }),
+        ni({ id: 2, agent_id: 8, title: "fyi two" }),
+        ni({ id: 3, agent_id: 9, title: "fyi three" }),
+      ],
+      awaiting: [n({ id: 4, title: "needs you" })],
+    });
+    renderQueue([]);
+    fireEvent.click(screen.getByText("Mark all read"));
+    await waitFor(() =>
+      expect(resolveNoticesBatch).toHaveBeenCalledWith([1, 2, 3]),
+    );
+    // the batch clears the FYI ids from the cache — the decision notice is untouched
+    await waitFor(() => expect(dropOpenNotices).toHaveBeenCalledWith(expect.anything(), [1, 2, 3]));
+  });
+
+  it("keeps the rows and surfaces the failure when the batch request fails", async () => {
+    resolveNoticesBatch.mockRejectedValue(new Error("500 boom"));
+    setFeed({ open: [ni({ id: 1, agent_id: 7, title: "fyi" })] });
+    renderQueue([]);
+    fireEvent.click(screen.getByText("Mark all read"));
+    await waitFor(() => expect(screen.getByText("Failed")).toBeTruthy());
+    expect(dropOpenNotices).not.toHaveBeenCalled();
+    // the open row is still there
+    expect(screen.getByRole("heading", { name: "fyi" })).toBeTruthy();
   });
 });
 
