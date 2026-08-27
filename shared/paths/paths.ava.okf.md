@@ -46,7 +46,6 @@ $AVA_HOME/
 ├── installed.json.lock         # serializes registry rewrites across processes (never the registry)
 ├── mcp.json  mcp_enabled.json  # machine MCP server defs + per-host enable overlay
 ├── skills/<name>/SKILL.md      # the single skill load dir (gated by the registry)
-├── skill_match_cache/          # derived skill vectors, keyed by live-catalog fingerprint
 ├── mcps/<name>/                # installed MCP packages, each with its own .venv
 ├── plugins/<name>/plugin.py    # externally installed plugins
 ├── machine_name, machine_host, machine_serve_*   # setup fields written by `ava start` flags

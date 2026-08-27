@@ -1,0 +1,6 @@
+-- drop-skill-match-config-keys (down): no-op by design.
+--
+-- The up migration destroys the four skill-match keys wherever they were
+-- stored; the values cannot be reconstructed, and restoring them would be
+-- wrong -- the feature they configure is deleted. There is nothing to reverse;
+-- the file exists to satisfy the mandatory up/down pairing.
