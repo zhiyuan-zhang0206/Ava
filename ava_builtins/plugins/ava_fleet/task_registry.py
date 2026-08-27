@@ -125,22 +125,6 @@ def _row_to_task(row: tuple) -> Task:
     return Task(*render_task_timestamps(row, _COLS))
 
 
-def _default_parent(cur) -> int | None:  # noqa: ANN001
-    """The default parent for a task created without an explicit one: the system
-    root task.
-
-    Returns the root's id, or None when no root exists yet -- an uninitialized
-    agent_tasks table, only reachable before db/schema.sql's seed (and its
-    backfill migration) has run. A prod DB always has exactly one is_root row
-    (the seed is idempotent), so this always anchors there; the None path keeps a
-    parentless task top-level in that degenerate case, matching pre-anchoring
-    behavior. ORDER BY id keeps the pick deterministic if a stray second root
-    ever exists. Caller runs inside an open cursor/transaction."""
-    cur.execute("SELECT id FROM agent_tasks WHERE is_root ORDER BY id LIMIT 1")
-    row = cur.fetchone()
-    return row[0] if row is not None else None
-
-
 def _insert_task(
     cur: psycopg.Cursor,
     title: str,
@@ -213,7 +197,7 @@ def create(
     title: str,
     description: str | None = None,
     *,
-    parent: int | None = None,
+    parent: int,
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
@@ -224,7 +208,12 @@ def create(
     Args:
         title: unique among open/in_progress tasks.
         description: what to do and why.
-        parent: parent task id, for a subtask.
+        parent: required -- the id of an existing task this task descends
+            from. The system root task (id 1) parents only the top-level
+            tasks of the whole system; every other task must pass the id of
+            an existing task as its parent (create a parent first, then
+            create its subtasks with that id). Raises ValueError when the
+            parent does not exist.
         remind_interval_seconds: seconds without updates before the owner is reminded.
             Cannot be disabled: None means the priority default (P0 30m / P1 1h /
             P2 2h / P3 4h), capped at 24h. An explicit value wins over the default.
@@ -239,16 +228,21 @@ def create(
     actor = ava._boot.agent_id()
     effective_owner = owner if owner is not None else actor
     with ava.DB.transaction(), ava.DB.cursor() as cur:
-        # A task with no explicit parent descends from the system root task: the
-        # root is the default parent, so every task lives in one tree rooted at
-        # it (no detached top-level nodes). The schema seeds exactly one is_root
-        # row idempotently, so this always resolves in a healthy (prod) DB.
-        effective_parent = parent if parent is not None else _default_parent(cur)
+        # parent is required: only the system root task (id 1) may parent the
+        # cluster's top-level tasks; every other task must name an existing
+        # task as its parent. Validate existence here for a friendly error
+        # instead of a raw foreign-key violation from the INSERT.
+        cur.execute("SELECT id FROM agent_tasks WHERE id = %s", (parent,))
+        if cur.fetchone() is None:
+            raise ValueError(
+                f"parent task {parent} does not exist -- create the parent first, "
+                "or pass the system root task id (1) for a cluster top-level task"
+            )
         task = _insert_task(
             cur,
             title,
             description,
-            effective_parent,
+            parent,
             effective_owner,
             remind_interval_seconds,
             priority,
@@ -275,7 +269,7 @@ def create_and_assign(
     label: str | None = None,
     config_overlay: dict | None = None,
     machine: str | None = None,
-    parent: int | None = None,
+    parent: int,
     remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
 ) -> tuple[Task, int]:
@@ -284,6 +278,8 @@ def create_and_assign(
     The new agent receives the task id, title, and description as its first
     message; arguments carry the same meaning as in create() and
     ava.agents.spawn(). ``machine`` defaults to your own machine.
+    ``parent`` is required, same rule as create(): the id of an existing task
+    this task descends from (the system root task id 1 for a top-level task).
 
     Returns:
         (task, agent_id).
@@ -478,8 +474,9 @@ def _write_task_update(
         raise ValueError(f"task {task_id} does not exist")
     old_owner, current_title, is_root = row
     # The system root task is immutable: it is the anchor of the task tree
-    # and the default parent, so it can never be reassigned, completed,
-    # cancelled, or otherwise edited. Fail fast rather than silently write.
+    # and the parent of the cluster's top-level tasks, so it can never be
+    # reassigned, completed, cancelled, or otherwise edited. Fail fast rather
+    # than silently write.
     if is_root:
         raise ValueError(
             f"task {task_id} is the system root task and is immutable — "
