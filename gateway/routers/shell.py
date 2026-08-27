@@ -10,6 +10,7 @@ URL, so a remote runner's shells are captured exactly like a local one's.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -82,12 +83,32 @@ async def get_agent_shell(
             detail=f"agent {agent_id} shell {session_id} capture failed: {exc.result!r}",
         ) from exc
 
+    expires_at = await asyncio.to_thread(
+        _shell_expiry_blocking, request.app.state.db_pool, agent_id, session_id
+    )
     return ShellCaptureResponse(
         agent_id=agent_id,
         session_id=session_id,
         session_name=result["session_name"],
         lines=result["lines"],
+        created_at=result.get("created_at"),
+        uptime_seconds=int(result.get("uptime_seconds") or 0),
+        expires_at=expires_at,
     )
+
+
+def _shell_expiry_blocking(pool: ConnectionPool, agent_id: int, session_id: int) -> datetime | None:
+    """The session's TTL deadline from `agent_shell_ttls`, or None when it has
+    no TTL (watcher / legacy pre-mandate sessions). The table lives in the
+    gateway's own Postgres — a split runner cannot answer this, so the merge
+    happens here, mirroring the inspector's shell list enrichment."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
+            (agent_id, session_id),
+        )
+        row = cur.fetchone()
+    return row[0] if row is not None else None
 
 
 def _agent_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:

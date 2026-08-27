@@ -31,6 +31,7 @@ vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mo
 import { resetMockSettings } from "@/test-support/user-settings-mock";
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   getAgentShell.mockReset();
   resetMockSettings();
@@ -56,6 +57,12 @@ function shellData(overrides: Partial<ShellCapture> = {}): ShellCapture {
     session_id: 12,
     session_name: "ava-main-agent-5-shell-12-dev-server",
     lines: ["$ npm run dev", "> ready on :3000"],
+    // Offsets from fixture-build time so the tick-computed title-bar meta
+    // lands on stable formatted spans; the meta tests freeze Date for
+    // exact determinism.
+    created_at: new Date(Date.now() - 8040_000).toISOString(),
+    uptime_seconds: 8040,
+    expires_at: new Date(Date.now() + 7900_000).toISOString(),
     ...overrides,
   };
 }
@@ -80,6 +87,29 @@ describe("ShellMonitorPage", () => {
     await waitFor(() =>
       expect(screen.getByText("ava-main-agent-5-shell-12-dev-server")).toBeTruthy(),
     );
+  });
+
+  it("shows runtime + TTL in the title bar", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+    getAgentShell.mockResolvedValue(shellData());
+    render();
+
+    // Runtime 8040s → "2h 14m"; TTL 7900s → "2h 11m" (exact under the
+    // frozen clock; expiry time varies with the test host's timezone, so
+    // match the shape only).
+    await waitFor(() => expect(screen.getByText("Runtime 2h 14m")).toBeTruthy());
+    expect(screen.getByText(/TTL 2h 11m · expires \d{1,2}\/\d{1,2} \d{2}:\d{2}/)).toBeTruthy();
+  });
+
+  it("falls back to the probe uptime and shows No TTL when the session has neither", async () => {
+    getAgentShell.mockResolvedValue(
+      shellData({ created_at: null, uptime_seconds: 45, expires_at: null }),
+    );
+    render();
+
+    await waitFor(() => expect(screen.getByText("Runtime 45s")).toBeTruthy());
+    expect(screen.getByText("No TTL")).toBeTruthy();
   });
 
   it("renders terminal output lines", async () => {

@@ -68,6 +68,19 @@ export function formatShort(iso: string, opts: FormatShortOptions = {}): string 
   return `${mo}/${day} ${h}:${mi}`;
 }
 
+/** Compact elapsed span, floors: `45s` / `2h 14m` / `24d 3h` (the day tier
+ *  kicks in past 24h). Used for runtimes and TTL-remaining countdowns. */
+export function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  const remH = h % 24;
+  return remH ? `${d}d ${remH}h` : `${d}d`;
+}
+
 /** Signed relative time, both directions: `in 4m` (future) / `5m ago`
  *  (past) / `now` within a minute. Seconds through years. The one wording
  *  scheme every relative-time surface in the app uses. Returns "—" for an

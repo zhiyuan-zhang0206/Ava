@@ -12174,6 +12174,35 @@
             },
             "type": "array",
             "title": "Lines"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "uptime_seconds": {
+            "type": "integer",
+            "title": "Uptime Seconds",
+            "default": 0
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
           }
         },
         "type": "object",
@@ -12184,7 +12213,7 @@
           "lines"
         ],
         "title": "ShellCaptureResponse",
-        "description": "GET /api/agents/{id}/shell/{sid} response — a recent tail of one\npersistent-shell session's terminal output.\n\n`lines` is the session's most recent output (up to the last 200 lines,\nhistory that has scrolled past included), one string per line with no\ntrailing newline. `session_name` is the resolved session name the\ncapture came from. Backs the shell monitor page, which polls it while open;\nthe session must be live (404 otherwise)."
+        "description": "GET /api/agents/{id}/shell/{sid} response — a recent tail of one\npersistent-shell session's terminal output.\n\n`lines` is the session's most recent output (up to the last 200 lines,\nhistory that has scrolled past included), one string per line with no\ntrailing newline. `session_name` is the resolved session name the\ncapture came from. Backs the shell monitor page, which polls it while open;\nthe session must be live (404 otherwise).\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch + probe-time uptime); `expires_at` is the gateway-owned\nTTL deadline from `agent_shell_ttls` — None when the session has no TTL.\nTogether they let the monitor page's title bar render runtime + TTL\nwithout a second probe."
       },
       "ShellInfo": {
         "properties": {

@@ -551,8 +551,13 @@ def shell_capture_op(agent_id: int, session_id: int, lines: int = 200) -> ShellC
         ShellNotFoundError: no live shell with `session_id` on this host.
         RuntimeError: the session capture failed.
     """
-    full_name, captured = capture_shell(agent_id, session_id, lines)
-    return ShellCaptureResult(session_name=full_name, lines=captured)
+    full_name, captured, created_at, uptime_seconds = capture_shell(agent_id, session_id, lines)
+    return ShellCaptureResult(
+        session_name=full_name,
+        lines=captured,
+        created_at=created_at,
+        uptime_seconds=uptime_seconds,
+    )
 
 
 def cluster_fetch_op() -> dict[str, object]:
