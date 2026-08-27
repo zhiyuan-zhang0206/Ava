@@ -271,3 +271,50 @@ def repair_editable_install(
     return repair_editable_ava_pth(
         source_root, allowed_roots=allowed_roots
     ) + repair_editable_direct_url(source_root, allowed_roots=allowed_roots)
+
+
+def editable_install_violations(
+    source_root: Path,
+    *,
+    allowed_roots: Iterable[Path] = (),
+) -> tuple[str, ...]:
+    """Human-readable allowlist violations of a checkout's editable install.
+
+    The read-only twin of the repair primitives: discovers the same records
+    (the ``.pth`` pointer and every ``direct_url.json``) and validates them
+    against the same exact-root allowlist, but never writes. The health probe
+    reports through this function so its detection can never drift from the
+    converge guard's repair semantics. A record that cannot be read is
+    reported as a violation rather than crashing the caller.
+
+    Returns an empty tuple when every record is legal — a missing record is a
+    no-op, matching the repair side.
+    """
+
+    resolved_source = source_root.expanduser().resolve(strict=False)
+    normalized_allowed = frozenset(
+        {_normalized_exact_path(resolved_source)}
+        | {_normalized_exact_path(root) for root in allowed_roots}
+    )
+    allowed_urls = frozenset(
+        {resolved_source.as_uri()}
+        | {root.expanduser().resolve(strict=False).as_uri() for root in allowed_roots}
+    )
+    violations: list[str] = []
+    for pth_path in editable_ava_pth_paths(resolved_source):
+        try:
+            raw_target = pth_path.read_text().strip()
+        except OSError:
+            violations.append(f"{pth_path} unreadable")
+            continue
+        if not _target_is_allowed(raw_target, normalized_allowed):
+            violations.append(f"{pth_path} names {raw_target or '(empty)'!r}")
+    for record in editable_direct_url_paths(resolved_source):
+        try:
+            raw_text = record.read_text()
+        except OSError:
+            violations.append(f"{record} unreadable")
+            continue
+        if not _direct_url_is_allowed(raw_text, allowed_urls):
+            violations.append(f"{record} records {raw_text.strip() or '(empty)'!r}")
+    return tuple(sorted(violations))

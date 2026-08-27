@@ -229,3 +229,67 @@ def test_repair_leaves_no_temp_file_behind(tmp_path: Path) -> None:
     editable_install.repair_editable_install(source_root)
 
     assert list(source_root.rglob("*.tmp")) == []
+
+
+# ─── read-only violations report (public twin of the repair primitives) ─────
+
+
+def test_editable_install_violations_healthy_is_empty(tmp_path: Path) -> None:
+    """Legal records (prod root + editable URL) report no violations."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+
+    assert editable_install.editable_install_violations(source_root) == ()
+
+
+def test_editable_install_violations_missing_records_are_empty(tmp_path: Path) -> None:
+    """A venv with no editable records has nothing to assert (repair: no-op)."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+
+    assert editable_install.editable_install_violations(source_root) == ()
+
+
+def test_editable_install_violations_allowlisted_clone_is_empty(tmp_path: Path) -> None:
+    """Exact-root allowlisting applies to the read-only report too."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    dev_clone = tmp_path / "Ava"
+    _write_pth(source_root, dev_clone)
+    _write_direct_url(source_root, dev_clone.as_uri())
+
+    assert (
+        editable_install.editable_install_violations(source_root, allowed_roots=(dev_clone,)) == ()
+    )
+
+
+def test_editable_install_violations_reports_poisoned_records(tmp_path: Path) -> None:
+    """Both records are reported, each naming the disposable source."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    worktree = tmp_path / "deleted-worktree"
+    pth = _write_pth(source_root, worktree)
+    record = _write_direct_url(source_root, worktree.as_uri())
+
+    violations = editable_install.editable_install_violations(source_root)
+
+    assert len(violations) == 2
+    assert str(pth) in violations[0] and str(worktree) in violations[0]
+    assert str(record) in violations[1] and str(worktree) in violations[1]
+
+
+def test_editable_install_violations_unparsable_record_is_reported(
+    tmp_path: Path,
+) -> None:
+    """A record that cannot be parsed cannot be verified — reported."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    _write_pth(source_root, source_root)
+    record = _write_direct_url(source_root, source_root.as_uri())
+    record.write_text("{not json")
+
+    violations = editable_install.editable_install_violations(source_root)
+
+    assert len(violations) == 1 and str(record) in violations[0]
