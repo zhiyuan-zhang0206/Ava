@@ -60,7 +60,7 @@ def _ruff_format(code: str) -> str:
     """Run `ruff format` via stdin; return the formatted code.
 
     Style-only normalization (quotes, spacing, line wrapping, trailing
-    commas) on top of `_ruff_fix`. Gated by settings.sandbox.syntax_fix_ruff_format.
+    commas) on top of `_ruff_fix`. Gated by the syntax_fix_ruff_format flag.
     """
     try:
         proc = subprocess.run(  # noqa: S603

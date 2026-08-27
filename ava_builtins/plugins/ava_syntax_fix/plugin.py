@@ -51,7 +51,7 @@ from agent.graph._tool_calls import (
 from agent.hooks import Hook, register_before_exec
 from agent.messages import exec_output_message
 from agent.state import AgentState
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
 from ._escapes import _fix_invalid_escapes
@@ -186,7 +186,7 @@ def _apply_fix_pipeline(code: str) -> tuple[str, list[str]]:
 def _maybe_ruff_format(code: str) -> tuple[str, bool]:
     """Step 5 of the pipeline: run `ruff format` (style-only normalization)
     when gated on; returns (code, applied)."""
-    if not settings.sandbox.syntax_fix_ruff_format:
+    if not turn_settings.sandbox.syntax_fix_ruff_format:
         return code, False
     formatted = _ruff_format(code)
     return formatted, formatted != code
