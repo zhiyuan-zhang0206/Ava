@@ -124,10 +124,13 @@ the agent's tool calls and touched files looking for the three leak surfaces;
 a run that touched one is invalidated (or its score read with the caveat),
 and the leak is fixed at its layer — never by blaming the agent.
 
-Audit pitfall from practice: the weekly dataset's `transcript` field
-truncates after compaction, so a fine-grained audit cross-checks the daily
-datasets and the run's own workspace instead of trusting the transcript alone
-(see the gmail deep-dive note, 2026-08-10).
+Transcript caveat: since 2026-08-10 the weekly dataset's `transcript` is
+read through the checkpoint's complete read path (stitched
+`compact_boundary` snapshots, Task #1125), so it no longer truncates after
+compaction — "complete" means the full history since that retention rule
+took effect. For runs older than that boundary the transcript may still be
+truncated; a fine-grained audit cross-checks the daily datasets and the
+run's own workspace for those (see the gmail deep-dive note, 2026-08-10).
 
 ## Status of this document
 
