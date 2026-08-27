@@ -21,6 +21,10 @@ from pydantic import SecretStr
 from cli.commands import _lgtm, _lgtm_native
 from cli.commands._converge_spec import ConvergeCtx
 
+# S104-flagged literal reused by the mismatch-warning parametrize — a config
+# value under test, not a bind.
+_WILDCARD_LISTEN = "0.0.0.0"  # noqa: S104
+
 
 def _fail_on_docker_query(_name: str) -> None:
     pytest.fail("native lifecycle must not query the Docker CLI")
@@ -359,6 +363,100 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
         assert "Tempo intake endpoint is http://tempo.example:14318" in captured.err
     else:
         assert captured.err == ""
+
+
+@pytest.mark.parametrize(
+    ("listen_host", "grafana_listen_host", "expected_warns"),
+    [
+        # A specific non-loopback listen host with default loopback read URLs.
+        ("10.0.0.5", _WILDCARD_LISTEN, ["AVA_TELEMETRY_LOKI_URL", "AVA_TELEMETRY_PROMETHEUS_URL"]),
+        # Both knobs widened, loopback read URLs still in place.
+        (
+            "10.0.0.5",
+            "10.0.0.6",
+            ["AVA_TELEMETRY_LOKI_URL", "AVA_TELEMETRY_PROMETHEUS_URL", "AVA_TELEMETRY_GRAFANA_URL"],
+        ),
+        # Wildcard binds still answer on loopback — no warning.
+        (_WILDCARD_LISTEN, _WILDCARD_LISTEN, []),
+        # Loopback binds — no warning.
+        ("127.0.0.1", "127.0.0.1", []),
+        # Listen hostname is not judged — no warning.
+        ("tailscale-box", "tailscale-box", []),
+    ],
+)
+def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    listen_host: str,
+    grafana_listen_host: str,
+    expected_warns: list[str],
+) -> None:
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", listen_host)
+    monkeypatch.setattr(
+        "shared.config.settings.observability.lgtm_grafana_listen_host", grafana_listen_host
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
+    )
+    # Pin the tempo topology to loopback so its pre-existing warning cannot
+    # pollute this test's stderr assertions.
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+    )
+
+    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+
+    captured = capsys.readouterr()
+    for env_var in expected_warns:
+        assert env_var in captured.err
+        assert "listens on" in captured.err
+    if not expected_warns:
+        assert captured.err == ""
+    else:
+        assert len(captured.err.strip().splitlines()) == len(expected_warns)
+
+
+def test_native_config_warns_only_when_read_urls_stay_loopback_after_widening(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When the read URLs follow the widened listen host, the mismatch warning
+    stays silent (the external-migration form)."""
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "10.0.0.5")
+    monkeypatch.setattr(
+        "shared.config.settings.observability.lgtm_grafana_listen_host", _WILDCARD_LISTEN
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_loki_url", "http://10.0.0.5:3100"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.5:9090"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
+    )
+    # Pin the tempo topology to loopback so its pre-existing warning cannot
+    # pollute this test's stderr assertion.
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+    )
+
+    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
 
 
 def _without_loki_transport_paths(config: dict[str, object]) -> dict[str, object]:
