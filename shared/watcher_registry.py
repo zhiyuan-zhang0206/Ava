@@ -20,6 +20,7 @@ Pure DB: no SDK imports, so the watcher child's bootstrap finally can call
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from psycopg.rows import dict_row
@@ -87,7 +88,7 @@ def register_cron_atomic(
     cron_expr: str,
     cron_timezone: str,
     cron_end_at: Any,
-    alive: set[int] | None,
+    alive_provider: Callable[[], set[int] | None],
     exclude_session: int | None = None,
     template_version: int | None = None,
 ) -> int | None:
@@ -111,20 +112,33 @@ def register_cron_atomic(
     serialization needs it; on a direct connection the semantics are
     identical.
 
-    `alive` is the caller's fresh session-id set: a same-schedule `running`
-    row counts as a duplicate only when its session is in it (a dead row is
-    exactly what the boot reconcile is about to rebuild — it must not block
-    a fresh registration). `alive=None` (session list unavailable) finds no
-    duplicate — a duplicate is recoverable, a reused dead session would
-    silently lose the schedule. `exclude_session` skips one row — the
-    stale-template rebuild must not dedupe against the live session it is
-    replacing.
+    `alive_provider` is CALLED INSIDE the lock (after pg_advisory_xact_lock),
+    never before: the caller's session list is only meaningful once a
+    concurrent winner's registration is committed and its session visible —
+    a snapshot taken before the lock has a window where the winner's session
+    does not yet exist and the re-check would miss it (QA nit, #794 delta2).
+    It returns the fresh session-id set, or None when the session list is
+    unavailable (no dedupe then — a duplicate is recoverable, a reused dead
+    session would silently lose the schedule); it must not raise. A
+    same-schedule `running` row counts as a duplicate only when its session
+    is in the set (a dead row is exactly what the boot reconcile is about to
+    rebuild — it must not block a fresh registration). `exclude_session`
+    skips one row — the stale-template rebuild must not dedupe against the
+    live session it is replacing.
     """
+    # `exclude_session` may be 0 — an agent's very first session
+    # (session_index starts at 0) — so the sentinel must be an explicit None
+    # check, never `or -1` (QA nit, #794 delta2).
+    exclude = -1 if exclude_session is None else exclude_session
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT pg_advisory_xact_lock(%s)",
             (cron_advisory_key(agent_id, cron_expr, cron_timezone, cron_end_at),),
         )
+        # Fresh liveness INSIDE the lock: the caller's session list is only
+        # meaningful once any concurrent winner's registration is committed
+        # and its session visible (QA nit, #794 delta2).
+        alive = alive_provider()
         cur.execute(
             """
             SELECT session_id FROM agent_watchers
@@ -135,7 +149,7 @@ def register_cron_atomic(
             ORDER BY created_at DESC, session_id DESC
             LIMIT 1
             """,
-            (agent_id, cron_expr, cron_timezone, cron_end_at, exclude_session or -1),
+            (agent_id, cron_expr, cron_timezone, cron_end_at, exclude),
         )
         row = cur.fetchone()
         if row is not None and alive is not None and row[0] in alive:
