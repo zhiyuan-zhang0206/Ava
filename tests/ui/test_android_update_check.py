@@ -74,7 +74,7 @@ def _release(
             }
         )
     return {
-        "tag_name": f"app-v{version}",
+        "tag_name": f"android-v{version}",
         "draft": draft,
         "prerelease": prerelease,
         "assets": assets,
