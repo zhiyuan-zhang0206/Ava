@@ -443,12 +443,8 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # forward_env_dict has already put this venv's bin dir on the child PATH,
         # so `ava` resolves without an activation prefix.
         native_cmd = (
-            # Per-stage markers (`cli.commands._updater_stage`; cmd.exe expands
-            # %TIME% once per command line). Fail-soft (`|| ver>nul`).
             f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
-            f" && (python -m cli.commands._updater_stage restart || ver>nul)"
             f" && {_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}"
-            f" & (python -m cli.commands._updater_stage done || ver>nul)"
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}"
         )
     else:
@@ -506,18 +502,11 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             f" && (python -m cli.commands._source_switch_marker on || ver>nul)"
             f" && echo [updater] force-checkout to {native_ref} -- discards any unpushed "
             f"local commits or a dirty tree, recover via git reflog"
-            # Per-stage markers (`cli.commands._updater_stage`; cmd.exe expands
-            # %TIME% once per command line): the checkout/uv/stop/start
-            # subdivision the updater log was missing. Fail-soft (`|| ver>nul`)
-            # so a tree that predates the module never breaks the ladder.
-            f" && (python -m cli.commands._updater_stage fetch || ver>nul)"
             f" && git fetch origin"
             f" && git checkout --force -B {_native_arg(branch)} {native_ref}"
             f" && git diff --quiet && git diff --cached --quiet"
-            f" && (python -m cli.commands._updater_stage uv-sync || ver>nul)"
             f" && python -m cli.commands._update_uv_sync"
             f" && (python -m cli.commands._installed_sha || ver>nul)"  # see that module
-            f" && (python -m cli.commands._updater_stage restart || ver>nul)"
             f" && ({_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}) || ("
             f"echo [updater] checkout/sync or tree verification FAILED -- refusing to "
             f"start services on a possibly-mixed tree; the host stays on its current code{SOURCE_SWITCH_OFF}"
@@ -534,7 +523,6 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             # waits on the same host again.
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}{SOURCE_SWITCH_OFF}"
             f" & exit /b 1)"
-            f" & (python -m cli.commands._updater_stage done || ver>nul)"
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}{SOURCE_SWITCH_OFF}"
         )
     # One log holds every native run, so its tail needs a seam to be read by (#1117).

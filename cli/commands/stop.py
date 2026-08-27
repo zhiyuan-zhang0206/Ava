@@ -611,17 +611,11 @@ def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool
     repo = _repo_root()
     print(f"[ava restart] cwd = {repo}")
 
-    # Stage boundaries carry wall-clock markers (`cli.commands._updater_stage`)
-    # so the updater log subdivides the restart into preflight / stop / start —
-    # the breakdown the 2026-08-27 forensics could not read out of a 75.9s
-    # Windows updater run.
-    from cli.commands._updater_stage import now_marker
-
     # Preflight: probe gateway + register machine BEFORE stopping services.
     # A transient gateway outage or network blip would otherwise leave the
     # host in "services dead, can't start" after the stop below.
     # On failure the host keeps serving — abort without stopping.
-    print(f"\n→ [{now_marker()}] preflight probes (validate-before-kill)")
+    print("\n→ preflight probes (validate-before-kill)")
     rc = _ns._preflight_probes()
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
@@ -645,7 +639,6 @@ def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool
     rc = _ns._do_stop(repo, graceful=False, require_confirmation=False, keep_infra=True)
     if rc != 0:
         return rc
-    print(f"\n→ [{now_marker()}] ava start (restart leg)")
     # Internal restart: preserve the operator's durable --disable-service marker
     # (a no-flag operator start would rewrite it to empty and re-enable everything).
     return _ns._cmd_start_body(persist_services=False)
