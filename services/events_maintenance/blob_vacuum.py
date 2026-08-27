@@ -113,7 +113,14 @@ def _checkpoint_state(cur: Any) -> tuple[CheckpointTableSizes, int]:
     )
     row = cur.fetchone()
     assert row is not None  # noqa: S101 — aggregate over a fixed table always returns one row
-    sizes = CheckpointTableSizes(*(int(v) for v in row[:6]))
+    sizes = CheckpointTableSizes(
+        blobs_bytes=int(row[0]),
+        checkpoints_bytes=int(row[1]),
+        writes_bytes=int(row[2]),
+        blobs_live=int(row[3]),
+        checkpoints_live=int(row[4]),
+        writes_live=int(row[5]),
+    )
     return sizes, int(row[6])
 
 
