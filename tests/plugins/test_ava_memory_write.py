@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from pathlib import Path
@@ -190,3 +191,85 @@ def test_personal_write_is_immune_to_ava_cwd_drift(memory_plugin: Any, tmp_path:
 
     assert entry == (workspace / "memory" / "cwd-proof.md").resolve()
     assert not (drifted_cwd / "memory" / "cwd-proof.md").exists()
+
+
+def test_plugin_loads_and_writes_without_fcntl(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Windows smoke: plugin import + index update with no fcntl module.
+
+    CI has no Windows runner — the root cause of b4b9689, where an unguarded
+    top-level ``import fcntl`` crashed every Windows agent at plugin load.
+    Simulate Windows's missing fcntl in-process by making ``import fcntl``
+    raise ImportError while the plugin loads and writes. Trade-off vs a real
+    Windows runner: only the fcntl absence is simulated, not msvcrt or other
+    platform quirks — but the ImportError mechanism is exactly what broke
+    Windows boot, and the write path is asserted to still work unguarded.
+    """
+    import builtins
+
+    sys.modules.pop("fcntl", None)  # collection may have imported it; the fake must intercept
+    real_import = builtins.__import__
+
+    def no_fcntl(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] | None = None,
+        level: int = 0,
+    ) -> Any:
+        if name == "fcntl":
+            raise ImportError("No module named 'fcntl'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", no_fcntl)
+
+    import ava._boot as boot
+    import shared.machine
+    import shared.paths
+
+    workspace = tmp_path / "workspace"
+    pool = tmp_path / "pool"
+
+    def isolated_home() -> Path:
+        return tmp_path
+
+    def isolated_workspace(_agent_id: int) -> Path:
+        return workspace
+
+    def isolated_pool() -> Path:
+        return pool
+
+    monkeypatch.setattr(shared.paths, "ava_home", isolated_home)
+    monkeypatch.setattr(shared.paths, "workspace_dir", isolated_workspace)
+    monkeypatch.setattr(shared.paths, "memory_dir", isolated_pool)
+    monkeypatch.setattr(shared.machine, "machine_name", lambda: "memory-host")
+    monkeypatch.setattr(boot, "_agent_id", 17)
+
+    clear_plugin_registrations()
+    for name in list(sys.modules):
+        if name.startswith("ava_builtins.plugins.ava_memory"):
+            del sys.modules[name]
+
+    try:
+        with PluginContext("ava_memory"):
+            from ava_builtins.plugins.ava_memory import plugin as plugin
+
+        assert plugin.fcntl is None  # the guard fired: fcntl unavailable
+
+        entry = ava.memory.write(
+            "no-fcntl",
+            "Body written without fcntl.\n",
+            title="No fcntl",
+            description="Windows smoke write",
+            tags=["type/reference"],
+        )
+        index = entry.parent / "MEMORY.md"
+        assert index.read_text(encoding="utf-8") == (
+            "- [No fcntl](no-fcntl.md) — Windows smoke write\n"
+        )
+    finally:
+        clear_plugin_registrations()
+        for name in list(sys.modules):
+            if name.startswith("ava_builtins.plugins.ava_memory"):
+                del sys.modules[name]
