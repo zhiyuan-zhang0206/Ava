@@ -68,6 +68,52 @@ def test_run_returncode_zero_on_success() -> None:
     assert ava.shell.run("echo ok").returncode == 0
 
 
+def test_run_result_fields_are_read_only() -> None:
+    """returncode/stderr are read-only — the hash/equality invariant (which
+    follows the string content only) cannot be broken by later mutation."""
+    res = ava.shell.run("echo hi; exit 3")
+    with pytest.raises(AttributeError, match="has no setter"):
+        res.returncode = 0  # type: ignore[misc]
+    with pytest.raises(AttributeError, match="has no setter"):
+        res.stderr = ""  # type: ignore[misc]
+
+
+def test_run_result_repr_contains_fields() -> None:
+    res = ava.shell.run("echo hi; echo err >&2; exit 3")
+    r = repr(res)
+    assert r.startswith("ShellResult(")
+    assert "'hi\\n'" in r and "returncode=3" in r and "'err\\n'" in r
+
+
+def test_run_result_equality_and_hash_follow_content_only() -> None:
+    """Two results with the same text are equal and hash equal regardless of
+    their fields, so content-keyed dicts keep working."""
+    from ava.shell import ShellResult
+
+    a = ShellResult("x", returncode=0, stderr="")
+    b = ShellResult("x", returncode=3, stderr="boom")
+    assert a == b
+    assert hash(a) == hash(b)
+    d = {a: "v"}
+    assert d[b] == "v"
+
+
+def test_run_result_pickle_roundtrip_preserves_fields() -> None:
+    """pickle/copy reconstruct the result with its fields — a str subclass
+    whose constructor takes the fields must declare __getnewargs_ex__."""
+    import copy
+    import pickle
+
+    from ava.shell import ShellResult
+
+    res = ShellResult("hi", returncode=3, stderr="err")
+    for clone in (pickle.loads(pickle.dumps(res)), copy.copy(res)):  # noqa: S301 — own object roundtrip
+        assert type(clone) is ShellResult
+        assert clone == "hi"
+        assert clone.returncode == 3
+        assert clone.stderr == "err"
+
+
 def test_run_result_preserves_str_behavior() -> None:
     """The result stays a plain string for every existing usage — str
     methods, equality, membership, formatting."""
