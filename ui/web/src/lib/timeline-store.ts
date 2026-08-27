@@ -597,6 +597,14 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     set((s) => {
       const existing = new Set(s.items.map((it) => it.item_id));
       const fresh = older.filter((it) => !existing.has(it.item_id));
+      if (fresh.length === 0 && hasMoreOlder) {
+        // The page added nothing yet claims older history still exists: the
+        // gateway returned only standing context it could not cross (a
+        // version mix — an older gateway does not recognize the re-attached
+        // head notes as crossing material). Stop paging instead of looping
+        // on the same cursor forever.
+        return { hasMoreOlder: false, loadingOlder: false };
+      }
       const merged = fresh.length ? sortByItemId([...fresh, ...s.items]) : s.items;
       return {
         items: merged,

@@ -1285,6 +1285,57 @@ describe("load-older prepend anchor (#659)", () => {
     expect(viewport.scrollTop).toBe(350);
   });
 
+  it("skips re-attached standing head notes — anchor and front signal land on the first real item", () => {
+    // The gateway re-attaches the standing head notes (exec timeout / timezone
+    // / cluster memory / agent id / agent memory) right after the prompt. They
+    // are standing context like 0.0: a prepend of a same-segment window inserts
+    // after them, so they must never be the scroll anchor, and the "prepend
+    // landed" front signal must look past them — otherwise the first scroll-up
+    // with head notes present would neither anchor nor detect the landing and
+    // the viewport would be left at the top of the prepended window (#659).
+    const loadOlder = vi.fn();
+    const items = [
+      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
+      makeItem({ item_id: "1.0", kind: "system_marker", source: "exec_timeout", payload: "t" }),
+      makeItem({ item_id: "2.0", kind: "system_marker", source: "memory", payload: "m" }),
+      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
+      makeItem({ item_id: "11.0", kind: "agent_chat", payload: "eleven" }),
+    ];
+    let moved = false;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.dataset.itemId === "10.0") return rect(moved ? 250 : 0);
+        return rect(0);
+      },
+    );
+    const { rerender } = render(
+      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
+    );
+    const viewport = screen.getByTestId("scroll-viewport");
+    viewport.scrollTop = 100;
+    viewport.dispatchEvent(new Event("scroll"));
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    // The older window lands below the standing head notes; the real item
+    // 10.0 is displaced by 250px. If 1.0 were the anchor or the front signal,
+    // the compensation would no-op (its rect never moves) and the viewport
+    // would stay at 100.
+    moved = true;
+    rerender(
+      <TimelineView
+        items={[
+          items[0],
+          ...items.slice(1, 3),
+          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
+          ...items.slice(3),
+        ]}
+        hasMoreOlder
+        onLoadOlder={loadOlder}
+      />,
+    );
+    expect(viewport.scrollTop).toBe(350);
+  });
+
   it("uses four-part historical ids for the prepend landing signal and exact anchor lookup", () => {
     const loadOlder = vi.fn();
     const recentHistoricalId = "s1.newer-boundary.1.0";

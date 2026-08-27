@@ -45,7 +45,7 @@ import { api } from "./api";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
-import { isReattachedTimelineContext, parseItemIdParts } from "./timeline";
+import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "./timeline";
 
 /** Base number of items fetched per scroll-up. Subsequent scroll-ups
  * fetch BASE * 2^olderFetchCount items (capped at 1000), so the window
@@ -384,13 +384,20 @@ export function useTimeline(
     if (agentId == null) return;
     const st = useTimelineStore.getState();
     if (!st.hasMoreOlder || st.loadingOlder) return;
-    // Current standing context is never a cursor. A segment-prefixed historical
-    // summary is the bounded continuation for a summary-only checkpoint,
-    // however: its exact checkpoint id lets the server advance one segment
-    // without scanning an unbounded chain in one request.
+    // Current standing context is never a cursor: the re-attached prompt, the
+    // standing head notes (exec timeout / timezone / cluster memory / agent id
+    // / agent memory — re-attached by the gateway beside the prompt), and
+    // compact summaries. A cursor on a head note would make the gateway cross
+    // straight to the older compact segment, skipping every real item between
+    // the head and the tail window. A segment-prefixed historical summary is
+    // the bounded continuation for a summary-only checkpoint, however: its
+    // exact checkpoint id lets the server advance one segment without scanning
+    // an unbounded chain in one request.
+    const headNoteIds = standingHeadNoteIds(st.items);
     const oldest = st.items.find((it) => {
       const parts = parseItemIdParts(it.item_id);
       if (parts === null) return false;
+      if (headNoteIds.has(it.item_id)) return false;
       return (
         !isReattachedTimelineContext(it) ||
         (parts.rank > 0 && it.kind === "inbound_compact_summary")
