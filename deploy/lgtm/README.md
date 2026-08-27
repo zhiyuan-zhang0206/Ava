@@ -68,7 +68,7 @@ before they reach Loki, Prometheus, or Tempo.
 Loki and Prometheus use explicit Go memory limits rather than container memory
 caps. Loki retains normal streams for seven days, preserves the configured
 archive-stream exception, and keeps bounded query splitting, fan-out, and
-embedded result caches. Prometheus retains data for 90 days or 8GB, whichever
+embedded result caches. Prometheus retains data for 15 days or 8GB, whichever
 limit is reached first. Tempo declares its 168-hour block retention. The two
 container services retain explicit CPU and memory capsules, and native logs
 are written to `$AVA_HOME/lgtm/native/logs/`.
