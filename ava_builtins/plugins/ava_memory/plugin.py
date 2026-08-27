@@ -374,10 +374,16 @@ _DISCIPLINE = """\
 
 Your memory — two stores, one discipline.
 
-- Shared pool (ava.memory.PATH): notes every agent can read. Write what another
-  agent would need to take over your role.
+- Shared pool (ava.memory.PATH): notes every agent can read. Restrained by
+  design: only reusable rules (each with a Why and a How to apply), facts many
+  agents repeatedly reach for, and user rulings. Events stay out by default —
+  git history already carries them. Judge each note by one question: "would a
+  new agent reading this in a year behave differently?" If not, it does not
+  belong in the pool.
 - Personal (memory/ in your workspace): your own durable state, maintained by
-  you alone.
+  you alone. Verbose is fine here: process details, half-formed understanding,
+  notes of uncertain future value — keep them personal until they earn a place
+  in the pool.
 
 Each store puts its index in front of you when a session starts and after a
 compact; the entries themselves you read on demand.

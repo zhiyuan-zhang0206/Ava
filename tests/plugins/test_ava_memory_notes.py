@@ -143,6 +143,24 @@ def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plug
     assert "possibly stale" in section  # unsure still means act, not leave alone
 
 
+def test_discipline_keeps_the_shared_pool_restrained_and_personal_verbose(
+    memory_plugin: Any,
+) -> None:
+    """User ruling 2026-08-28: the shared pool takes only reusable rules (with
+    Why + How to apply), facts many agents reach for, and user rulings; events
+    stay out by default (git history carries them); the personal store is
+    allowed to be verbose — process details and half-formed understanding live
+    there until they earn the pool."""
+    section = memory_plugin.memory_discipline_section()
+    assert "Restrained by" in section
+    assert "How to apply" in section
+    assert "user rulings" in section
+    assert "git history already carries them" in section
+    assert "behave differently" in section
+    assert "Verbose is fine here" in section
+    assert "until they earn a place" in section
+
+
 @pytest.mark.parametrize(
     ("index", "per_agent", "expected"),
     [(True, True, True), (True, False, True), (False, True, True), (False, False, False)],
