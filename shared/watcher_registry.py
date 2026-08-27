@@ -252,9 +252,9 @@ def mark_status(agent_id: int, session_id: int, status: str) -> None:
         )
 
 
-def wake_delivered(agent_id: int, session_id: int, since: Any) -> bool:
-    """Whether a `watcher:<session_id>`-tagged wake already reached the agent
-    after `since` (the row's `created_at`).
+def wake_delivered(agent_id: int, session_id: int, message: str, since: Any) -> bool:
+    """Whether a `watcher:<session_id>`-tagged wake with exactly `message`
+    already reached the agent after `since` (the row's `created_at`).
 
     The missed judgment's delivery check (task #1858): a one-shot whose child
     fired and delivered its wake but whose clean-exit row delete failed (or
@@ -262,13 +262,22 @@ def wake_delivered(agent_id: int, session_id: int, since: Any) -> bool:
     alerted — the wake was NOT lost, so the "your watcher never fired" alert
     is a false alarm (observed 2026-08-27: fired wake at 18:30:00, "marked
     missed" alert at 18:30:02, same session).
+
+    The content match is the discriminator, not an optimization: the shell
+    completion notice ("Watcher '<name>' exited with code N...") arrives with
+    the same `kind='chat'` + `source='watcher:<sid>'` tag, so a probe on
+    kind+source alone would count a child that died BEFORE waking (host
+    alive, notice delivered, wake never sent) as delivered and silently drop
+    a genuinely missed row (QA review of PR #826, 2026-08-27). Only the wake
+    itself carries the row's message verbatim.
     """
     with connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages "
-            "WHERE agent_id = %s AND kind = 'chat' AND source = %s AND created_at > %s "
+            "WHERE agent_id = %s AND kind = 'chat' AND source = %s "
+            "AND content = %s AND created_at > %s "
             "LIMIT 1",
-            (agent_id, f"watcher:{session_id}", since),
+            (agent_id, f"watcher:{session_id}", message, since),
         )
         return cur.fetchone() is not None
 
