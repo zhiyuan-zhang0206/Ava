@@ -896,6 +896,98 @@ def test_resolve_batch_publishes_each_resolved_notice(
     assert published == [fyi1, fyi2]
 
 
+def test_resolve_batch_concurrent_same_ids_serialize(db_conn: psycopg.Connection) -> None:
+    """Two concurrent batches over the same ids: the row locks serialize the
+    UPDATEs (READ COMMITTED re-evaluates the WHERE after the lock wait), so
+    exactly one request resolves the pile and the other sees all-skipped —
+    the FOR UPDATE / single-statement semantics locked by a real race, not
+    static reasoning."""
+    import threading
+
+    agents = [_seed_agent(db_conn) for _ in range(3)]
+    ids = [_insert_notice(db_conn, a, f"fyi {i}") for i, a in enumerate(agents)]
+
+    results: list[dict[str, int]] = []
+    barrier = threading.Barrier(2)
+
+    def fire() -> None:
+        barrier.wait()
+        resp = client.post("/api/notices/resolve-batch", json={"notice_ids": ids})
+        results.append(resp.json())
+
+    # ONE TestClient shared by both threads: httpx clients are thread-safe
+    # for concurrent requests, and a single lifespan (the latency flusher)
+    # stays on one event loop — per-thread clients would tear down across
+    # loops and warn.
+    with TestClient(app) as client:
+        threads = [threading.Thread(target=fire) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    # One request wins the whole pile; the other's UPDATE re-checks the WHERE
+    # after the lock wait and matches nothing -> all skipped. Either order.
+    assert sorted(r["resolved"] for r in results) == [0, len(ids)]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM agent_notices WHERE id = ANY(%s) AND resolved_at IS NULL",
+            (ids,),
+        )
+        row = cur.fetchone()
+        assert row is not None and row[0] == 0
+
+
+def test_resolve_batch_interleaved_with_single_resolve(db_conn: psycopg.Connection) -> None:
+    """Batch and single resolve racing on the SAME notice: exactly one wins.
+    If the batch commits first the single 409s (not open); if the single wins
+    the batch skips it (already resolved). Never double-resolved, never 500."""
+    import threading
+
+    a = _seed_agent(db_conn)
+    nid = _insert_notice(db_conn, a, "contested")
+
+    batch_out: list[tuple[int, dict[str, int]]] = []
+    single_out: list[int] = []
+    barrier = threading.Barrier(2)
+
+    def fire_batch() -> None:
+        barrier.wait()
+        resp = client.post("/api/notices/resolve-batch", json={"notice_ids": [nid]})
+        batch_out.append((resp.status_code, resp.json()))
+
+    def fire_single() -> None:
+        barrier.wait()
+        resp = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
+        single_out.append(resp.status_code)
+
+    with TestClient(app) as client:
+        threads = [
+            threading.Thread(target=fire_batch),
+            threading.Thread(target=fire_single),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    batch_status, batch_body = batch_out[0]
+    single_status = single_out[0]
+    assert batch_status == 200
+    legal = (
+        # batch won the race -> single sees it closed and 409s
+        (batch_body == {"resolved": 1, "skipped": 0} and single_status == 409)
+        # single won -> batch skips it
+        or (batch_body == {"resolved": 0, "skipped": 1} and single_status == 201)
+    )
+    assert legal, f"unexpected interleave: batch={batch_body} single={single_status}"
+    # either way the notice is resolved exactly once
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT resolved_at, resolution FROM agent_notices WHERE id = %s", (nid,))
+        row = cur.fetchone()
+    assert row is not None and row[0] is not None and row[1] == "read"
+
+
 def test_resolve_batch_reads_wake_no_agent(db_conn: psycopg.Connection) -> None:
     """Bare batch reads deliver no chat inbound — same contract as the
     single-notice read-without-reply path."""
