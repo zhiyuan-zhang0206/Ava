@@ -1,3 +1,6 @@
+> **Superseded 2026-08-27** — the deepseek pin moved to soft 600k / hard 700k; see
+> [`2026-08-27-deepseek-compact-thresholds-600k-700k.md`](2026-08-27-deepseek-compact-thresholds-600k-700k.md).
+
 # DeepSeek compact thresholds: 374k soft / 512k hard (per-model exception)
 
 User decision (2026-08-01, task #581): the two DeepSeek models —
