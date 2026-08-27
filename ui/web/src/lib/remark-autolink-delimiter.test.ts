@@ -14,16 +14,23 @@ interface ExpectedLink {
   children: [{ type: "text"; value: string }];
 }
 
+interface ExpectedText {
+  type: "text";
+  value: string;
+}
+
+interface ExpectedWrapper {
+  type: "strong" | "emphasis";
+  children: (ExpectedText | ExpectedLink)[];
+}
+
 type ExpectedChild =
-  | { type: "text"; value: string }
+  | ExpectedText
   | { type: "inlineCode"; value: string }
   | ExpectedLink
-  | {
-      type: "strong" | "emphasis";
-      children: [ExpectedLink];
-    };
+  | ExpectedWrapper;
 
-const text = (value: string): ExpectedChild => ({ type: "text", value });
+const text = (value: string): ExpectedText => ({ type: "text", value });
 
 const link = (url: string, value = url): ExpectedLink => ({
   type: "link",
@@ -36,7 +43,7 @@ const wrappedLink = (
   type: "strong" | "emphasis",
   url: string,
   value = url,
-): ExpectedChild => ({ type, children: [link(url, value)] });
+): ExpectedWrapper => ({ type, children: [link(url, value)] });
 
 function paragraphChildren(markdown: string): PhrasingContent[] {
   const processor = unified()
@@ -56,6 +63,62 @@ function paragraphChildren(markdown: string): PhrasingContent[] {
 }
 
 describe("remarkAutolinkDelimiter", () => {
+  it("restores both strong spans in the reported message", () => {
+    const markdown =
+      "方案报告在 **http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/**，附三项需你决策的清单：**events drop / N-step canary / Loki archive 365d**——你有空看时拍板，不急。";
+
+    const children = paragraphChildren(markdown);
+
+    expect(children).toMatchObject([
+      text("方案报告在 "),
+      wrappedLink(
+        "strong",
+        "http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/",
+      ),
+      text("，附三项需你决策的清单："),
+      {
+        type: "strong",
+        children: [
+          text("events drop / N-step canary / Loki archive 365d"),
+        ],
+      },
+      text("——你有空看时拍板，不急。"),
+    ] satisfies ExpectedChild[]);
+  });
+
+  it("restores a non-adjacent strong opener before a labeled URL", () => {
+    const children = paragraphChildren(
+      "**Grafana：http://100.103.96.72:3003**（匿名 viewer，无需登录）",
+    );
+
+    expect(children).toMatchObject([
+      {
+        type: "strong",
+        children: [
+          text("Grafana："),
+          link("http://100.103.96.72:3003"),
+        ],
+      },
+      text("（匿名 viewer，无需登录）"),
+    ] satisfies ExpectedChild[]);
+  });
+
+  it("restores a swallowed closer for a non-first link inside strong", () => {
+    const children = paragraphChildren("**a http://x.com/p2/**，b**c**");
+
+    expect(children).toMatchObject([
+      text("，b"),
+      {
+        type: "strong",
+        children: [
+          text("a "),
+          link("http://x.com/p2/"),
+          text("c"),
+        ],
+      },
+    ] satisfies ExpectedChild[]);
+  });
+
   it.each<{
     name: string;
     markdown: string;
