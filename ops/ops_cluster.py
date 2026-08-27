@@ -53,7 +53,7 @@ from shared.host_deploy_state import updater_lease_live
 from shared.log import logger
 from shared.machine import machine_name
 from shared.machines import mark_stopping
-from shared.proc import process_alive, run_bounded
+from shared.proc import process_alive, run_bounded, timeout_stderr_tail
 
 # `cluster_fetch_op`'s two git calls. The fetch ceiling is generous (the whole
 # point of the pre-flight is to find out whether this host can reach the remote);
@@ -562,6 +562,16 @@ def cluster_fetch_op() -> dict[str, object]:
     fans this out to every agent-runner *before* Phase A so a fetch failure
     aborts the rollout with nothing paused.
 
+    **Per-attempt observability (2026-08-27 performance forensics):** the
+    gateway retries a transport timeout at its own level, so one Phase 0 can
+    drive several sequential invocations of this op on the host (observed on
+    win/wsl: two 30s timeouts, then success on the third). Each invocation
+    logs its own start/end with pid + elapsed, so the attempts are countable
+    in the ops log; `--progress` forces git's stage markers onto stderr even
+    under a pipe, and a timeout carries the partial stderr tail — where git
+    was when `run_bounded` killed it (ssh connect / negotiation / pack
+    transfer) — instead of a bare "timed out".
+
     Returns:
         ``{"ok": True, "fetched": "<sha or empty>", "elapsed_s": <float>}``
         on success; ``{"ok": False, "error": "<message>"}`` on failure.
@@ -573,9 +583,14 @@ def cluster_fetch_op() -> dict[str, object]:
     from shared.paths import repo_root
 
     t0 = time.monotonic()
+    logger.info(
+        "[cluster_fetch] start pid={pid} timeout={timeout:.0f}s",
+        pid=os.getpid(),
+        timeout=_FETCH_TIMEOUT_S,
+    )
     try:
         result = run_bounded(
-            ["git", "fetch", "origin"],
+            ["git", "fetch", "--progress", "origin"],
             cwd=repo_root(),
             capture_output=True,
             text=True,
@@ -615,10 +630,28 @@ def cluster_fetch_op() -> dict[str, object]:
             "error": f"git fetch origin failed (rc={result.returncode}): {result.stderr[:300]}",
             "elapsed_s": round(elapsed, 2),
         }
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - t0
-        logger.warning("[cluster_fetch] git fetch timed out after {elapsed:.1f}s", elapsed=elapsed)
-        return {"ok": False, "error": f"git fetch origin timed out after {elapsed:.0f}s"}
+        # `run_bounded` drains the tree's pipes after the kill, so `exc.stderr`
+        # holds everything git wrote before the bound tripped — the timeout
+        # point. Empty stderr is itself evidence: a fetch killed before ssh or
+        # git printed anything died in the local/connect phase, not mid-transfer.
+        tail = timeout_stderr_tail(exc)
+        logger.warning(
+            "[cluster_fetch] git fetch timed out after {elapsed:.1f}s "
+            "(bound {bound:.0f}s); last stderr: {tail!r}",
+            elapsed=elapsed,
+            bound=_FETCH_TIMEOUT_S,
+            tail=tail,
+        )
+        return {
+            "ok": False,
+            "error": (
+                f"git fetch origin timed out after {elapsed:.0f}s"
+                + (f"; last stderr: {tail[:200]}" if tail else "")
+            ),
+            "elapsed_s": round(elapsed, 2),
+        }
     except Exception as exc:
         elapsed = time.monotonic() - t0
         logger.warning("[cluster_fetch] unexpected error: {exc!r}", exc=exc)

@@ -338,3 +338,20 @@ def run_bounded(
         proc.poll()  # collect the status if psutil did not, so Popen leaves no zombie
         raise
     return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
+
+def timeout_stderr_tail(exc: subprocess.TimeoutExpired, *, lines: int = 3) -> str:
+    """The last `lines` non-empty stderr lines a timed-out child wrote, as text.
+
+    A `run_bounded` timeout's `TimeoutExpired` carries whatever the child wrote
+    before the bound tripped (the pipes are drained after the tree kill) — the
+    "where was it when it died" evidence a bare timeout message drops. Bytes or
+    None are normalized so callers can log/return the tail without type games:
+    a fetch killed before ssh/git printed anything yields an empty string, which
+    is itself the evidence that it died in the local/connect phase rather than
+    mid-transfer (2026-08-27 win/wsl fetch forensics).
+    """
+    raw: str | bytes | None = exc.stderr
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    return " | ".join((raw or "").strip().splitlines()[-lines:])

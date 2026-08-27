@@ -33,7 +33,7 @@ def test_fetch_is_bounded_and_non_interactive(monkeypatch: pytest.MonkeyPatch) -
     assert result["ok"] is True
     assert result["fetched"] == "deadbeef"
     assert [c["argv"] for c in calls] == [
-        ["git", "fetch", "origin"],
+        ["git", "fetch", "--progress", "origin"],
         ["git", "rev-parse", "origin/main"],
     ]
     assert calls[0]["timeout"] == ops_cluster._FETCH_TIMEOUT_S
@@ -80,6 +80,56 @@ def test_fetch_timeout_reports_not_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     result = ops_cluster.cluster_fetch_op()
     assert result["ok"] is False
     assert "timed out" in str(result["error"])
+
+
+def test_fetch_timeout_carries_the_partial_stderr_tail(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A timeout must report WHERE git was when the bound tripped — `run_bounded`
+    drains the tree's pipes after the kill, so `TimeoutExpired.stderr` holds the
+    partial stderr (ssh connect errors, transfer progress, or nothing at all =
+    died before git spoke). This is the per-attempt evidence that turns "two 30s
+    timeouts then success" from a gap into a located hang (2026-08-27 forensics:
+    the timeout point was previously dropped)."""
+
+    def _timeout(argv: list[str], **kwargs: Any) -> None:
+        raise subprocess.TimeoutExpired(
+            cmd=argv,
+            timeout=kwargs["timeout"],
+            stderr="ssh: connect to host github.com port 22: Connection timed out",
+        )
+
+    monkeypatch.setattr(ops_cluster, "run_bounded", _timeout)
+
+    result = ops_cluster.cluster_fetch_op()
+
+    assert result["ok"] is False
+    # The timeout point travels both in the returned error (what the gateway's
+    # Phase-0 abort prints) and in the ops log line.
+    assert "Connection timed out" in str(result["error"])
+    messages = "\n".join(r["message"] for r in loguru_records)
+    assert "[cluster_fetch] git fetch timed out" in messages
+    assert "last stderr" in messages
+    assert "Connection timed out" in messages
+
+
+def test_fetch_logs_its_attempt_start(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """Each invocation logs a start marker, so consecutive attempts (the gateway
+    retries a transport timeout at its own level; each retry re-executes this op
+    on the host) are countable in the ops log with their own pids."""
+
+    def _ok(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout="deadbeef\n", stderr="")
+
+    monkeypatch.setattr(ops_cluster, "run_bounded", _ok)
+
+    ops_cluster.cluster_fetch_op()
+
+    messages = "\n".join(r["message"] for r in loguru_records)
+    assert "[cluster_fetch] start" in messages
+    assert "[cluster_fetch] ok" in messages
 
 
 def test_fetch_nonzero_exit_reports_not_ok(monkeypatch: pytest.MonkeyPatch) -> None:
