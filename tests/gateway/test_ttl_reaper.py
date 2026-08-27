@@ -153,8 +153,8 @@ async def test_reap_expired_shells_deletes_on_killed(
     aid = _running_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-            "VALUES (%s, 3, now() - interval '1 minute')",
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, 3, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
             (aid,),
         )
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
@@ -181,6 +181,7 @@ async def test_reap_expired_shells_deletes_on_killed(
     msgs = _system_inbounds(db_conn, aid)
     assert len(msgs) == 1
     assert "Shell session 'build' (id 3, agent" in msgs[0]
+    assert "expired at " in msgs[0] and "TTL 1h" in msgs[0], msgs[0]
     assert "interrupting a running task" in msgs[0]
 
 
@@ -243,8 +244,8 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
     aid = _running_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-            "VALUES (%s, 4, now() - interval '1 minute')",
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, 4, now() - interval '1 minute', now() - interval '31 minutes')",
             (aid,),
         )
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
@@ -331,3 +332,16 @@ async def test_reap_expired_shells_missing_interrupted_field_notifies(
     assert reaped == [(aid, 6)]
     msgs = _system_inbounds(db_conn, aid)
     assert len(msgs) == 1 and "interrupting a running task" in msgs[0]
+
+
+def test_human_ttl_formats_compact_durations() -> None:
+    """The notice's TTL duration reads compactly: whole hours/months as h/m,
+    anything else in seconds; negative (clock-skewed) durations clamp to 0s."""
+    from gateway.ttl_reaper import _human_ttl
+
+    assert _human_ttl(3600) == "1h"
+    assert _human_ttl(2 * 3600) == "2h"
+    assert _human_ttl(1800) == "30m"
+    assert _human_ttl(90) == "90s"
+    assert _human_ttl(0) == "0s"
+    assert _human_ttl(-61) == "0s"
