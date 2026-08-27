@@ -32,7 +32,7 @@ ava.tasks.log(task_id, "note")                                # Append a timesta
 agent_tasks (table)
 ├── id, parent_id          — Primary key and tree structure
 ├── title, description, results — Task description and result log
-├── status                 — CHECK IN ('open','in_progress','done','cancelled')
+├── status                 — CHECK IN ('open','in_progress','done','cancelled','ongoing') ('ongoing' is root-only, pinned by agent_tasks_root_status_ongoing)
 ├── owner                  — REFERENCES agents(id) (always has an owner except root task)
 ├── priority                — TEXT NOT NULL DEFAULT 'P2', CHECK IN ('P0','P1','P2','P3') (added in #663)
 ├── is_root                — BOOLEAN, system root task marker (the only row with owner=NULL)

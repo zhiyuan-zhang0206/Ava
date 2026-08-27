@@ -178,7 +178,7 @@ def test_tasks_done_cancelled_only_past_retention_with_guards(
             "(4, NULL, 'done', FALSE, %s), "
             "(5, NULL, 'in_progress', FALSE, %s), "
             "(6, NULL, 'cancelled', FALSE, %s), "
-            "(7, NULL, 'in_progress', TRUE, %s)",
+            "(7, NULL, 'ongoing', TRUE, %s)",
             (old, old, old, old, old, old, old),
         )
         cur.execute(

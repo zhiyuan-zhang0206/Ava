@@ -3350,9 +3350,10 @@ export interface paths {
          * @description Partially update a task; omitted fields stay unchanged.
          *
          *     status, priority, title, description, and results are taken when non-null
-         *     (priority must be one of P0..P3; a title colliding with another
-         *     open/in_progress task's is rejected). owner reassigns to another agent (an
-         *     explicit null is rejected — a task cannot be released).
+         *     (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
+         *     the system root's permanent state, never assignable; a title colliding with
+         *     another open/in_progress task's is rejected). owner reassigns to another
+         *     agent (an explicit null is rejected — a task cannot be released).
          *     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
          *     null is rejected — reminders cannot be disabled). Any write resets the
          *     reminder counters, same as the SDK update path. Unlike the SDK, an owner change here

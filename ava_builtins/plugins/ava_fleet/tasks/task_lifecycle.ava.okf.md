@@ -21,6 +21,7 @@ open ──→ in_progress ──→ done
 ```
 
 - **`open`**: created (creator is default owner); **`in_progress`**: actively worked; **`done`**: completed (outcome in `results`); **`cancelled`**: from any state.
+- **`ongoing`**: the system root task's permanent state only — never assignable via `create()`/`update()`/PATCH, and never present on a regular task (user ruling 2026-08-27).
 
 `status` is enforced by a database `CHECK` constraint; passing an illegal value raises `ValueError`.
 

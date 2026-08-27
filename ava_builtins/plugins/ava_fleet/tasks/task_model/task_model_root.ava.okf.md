@@ -15,7 +15,7 @@ The baseline in `db/schema.sql` seeds a system-level **root task** (`agent_tasks
 
 ## Special Properties
 
-- **`owner IS NULL`** — the **only** task without an owner; `created_by='system'`, `status` is always `in_progress`. This is why `Task.owner` and `Task.remind_interval_seconds` are `int | None`: reading the root task returns `None` for both.
+- **`owner IS NULL`** — the **only** task without an owner; `created_by='system'`, `status` is always `ongoing` (its permanent state — a dedicated status value that only the root may hold, pinned by the `agent_tasks_root_status_ongoing` DB CHECK; user ruling 2026-08-27). This is why `Task.owner` and `Task.remind_interval_seconds` are `int | None`: reading the root task returns `None` for both.
 - **Never reminded** — task-maintenance's remind/escalate SQL all include `NOT is_root`.
 - **Not filtered by `get()`/`list()`** — they return the root task. Callers reading `owner` must tolerate `None` (the frontend displays root as " · unowned").
 
