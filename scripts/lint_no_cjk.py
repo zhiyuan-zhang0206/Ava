@@ -32,10 +32,11 @@ text always carries.
   e.g. `ui/web/messages/{en,zh}.json`).
 - `**/locales/**` and `**/*.po` — gettext-style locale trees, should they
   ever appear.
-- `shared/alerts_copy.py` — the IM alert-push copy locale module: zh/en
+- `shared/alerts_copy.py`, `shared/pages_copy.py` — the Python locale
+  modules: IM alert-push copy and the page-expired page copy, both zh/en
   variants selected by `user_settings.display.language`, the same
-  language-switching mechanism as the frontend catalogs (the one locale
-  module that ships as Python; it is documented as such in its own docstring).
+  language-switching mechanism as the frontend catalogs (documented as
+  locale modules in their own docstrings).
 
 Nothing else is exempt — skill bodies, code comments, docs, tests, fixtures,
 generated files (the codegen sources are what must be clean), demo apps all
@@ -85,8 +86,10 @@ def _is_locale_path(rel_path: str) -> bool:
     )
 
 
-# The one Python locale module (IM alert copy, zh/en by display.language).
-_LOCALE_PY_FILES = frozenset({"shared/alerts_copy.py"})
+# The Python locale modules (zh/en by user_settings display.language, the
+# same language-switching mechanism as the frontend catalogs): the IM
+# alert-push copy and the page-expired page copy.
+_LOCALE_PY_FILES = frozenset({"shared/alerts_copy.py", "shared/pages_copy.py"})
 
 
 def _tracked_files() -> list[str]:
@@ -173,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
             "\nRaw CJK found in the repo. Translate prose/copy to English, or "
             "escape functional CJK data as \\uXXXX (runtime-identical). The only "
             "exemption is i18n / locale copy: <dir>/messages/*.json, */locales/*, "
-            "*.po, and shared/alerts_copy.py. See the docstring at the top of "
+            "*.po, and the shared/*_copy.py locale modules. See the docstring at the top of "
             "scripts/lint_no_cjk.py.",
             file=sys.stderr,
         )

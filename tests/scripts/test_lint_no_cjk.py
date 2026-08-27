@@ -88,6 +88,17 @@ def test_alerts_copy_locale_module_exempt(repo: Path) -> None:
     assert gate._scan_file("shared/alerts_copy.py") == []
 
 
+def test_pages_copy_locale_module_exempt(repo: Path) -> None:
+    """shared/pages_copy.py is the page-expired copy locale module (zh/en by
+    display.language) - same exemption class as alerts_copy."""
+    _write(
+        repo,
+        "shared/pages_copy.py",
+        'PAGE_EXPIRED_BODY = {"zh": "\u9875\u9762\u5df2\u8fc7\u671f"}\n',
+    )
+    assert gate._scan_file("shared/pages_copy.py") == []
+
+
 def test_skill_body_with_cjk_fails(repo: Path) -> None:
     """Skill bodies are in scope - the ruling names skill content explicitly."""
     _write(repo, "ava_builtins/skills/pkg/SKILL.md", "# Skill\n\u4e2d\u6587\n")

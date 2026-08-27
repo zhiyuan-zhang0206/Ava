@@ -24,6 +24,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg.types.json import Jsonb
 
 from gateway.app import app
 from gateway.routers import pages as pages_router
@@ -160,7 +161,11 @@ def test_proxy_404_closed_page(db_conn, page_server: int) -> None:  # pyright: i
         "/pages/{agent_id}-p/",
     ],
 )
-def test_proxy_410_expired_page(db_conn: psycopg.Connection, page_server: int, path: str) -> None:
+def test_proxy_410_expired_page_zh_default(
+    db_conn: psycopg.Connection, page_server: int, path: str
+) -> None:
+    """No user_settings row -> the page copy falls back to the zh default
+    (page copy follows display.language, user ruling 2026-08-13)."""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
         _register(client, aid, "p", page_server)
@@ -175,10 +180,38 @@ def test_proxy_410_expired_page(db_conn: psycopg.Connection, page_server: int, p
 
     assert response.status_code == 410
     assert response.headers["content-type"].startswith("text/html")
+    assert "\u9875\u9762\u5df2\u8fc7\u671f" in response.text  # zh title
     assert (
         "\u9875\u9762\u5df2\u8fc7\u671f\uff0c\u8bf7\u8ba9 agent \u91cd\u65b0 serve" in response.text
     )
+    assert "Page expired" not in response.text
+
+
+def test_proxy_410_expired_page_en_when_display_language_en(
+    db_conn: psycopg.Connection, page_server: int
+) -> None:
+    """display.language=en selects the English page-expired copy through the
+    full proxy path (the zh default is covered above)."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO user_settings (key, value) VALUES ('display.language', %s)",
+            (Jsonb("en"),),
+        )
+    aid = create_agent(db_conn)
+    with TestClient(app) as client:
+        _register(client, aid, "p", page_server)
+        db_conn.rollback()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = 'p'",
+                (aid,),
+            )
+        db_conn.commit()
+        response = client.get(f"/pages/{aid}-p/")
+
+    assert response.status_code == 410
     assert "Page expired" in response.text
+    assert "Page expired - ask the agent to serve it again" in response.text
 
 
 def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
