@@ -97,6 +97,29 @@ def test_personal_write_creates_entry_and_upserts_index(memory_plugin: Any, tmp_
     )
 
 
+def test_write_truncates_long_description_in_index_pointer(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """The index is injected into agent context, so an unbounded description
+    would leak into the context budget: the MEMORY.md pointer truncates the
+    description while the note keeps the full text (QA nit, #844)."""
+    from ava_builtins.plugins.ava_memory.plugin import _INDEX_DESCRIPTION_MAX
+
+    long_description = "d" * (_INDEX_DESCRIPTION_MAX + 50)
+    ava.memory.write(
+        "long-desc",
+        "Body.\n",
+        title="Long description",
+        description=long_description,
+        tags=["type/reference"],
+    )
+
+    entry = tmp_path / "workspace" / "memory" / "long-desc.md"
+    assert f"description: {long_description}" in entry.read_text(encoding="utf-8")
+    index = (tmp_path / "workspace" / "memory" / "MEMORY.md").read_text(encoding="utf-8")
+    assert index == (f"- [Long description](long-desc.md) — {'d' * _INDEX_DESCRIPTION_MAX}...\n")
+
+
 def test_concurrent_personal_writes_preserve_all_index_pointers(
     memory_plugin: Any, tmp_path: Path
 ) -> None:
