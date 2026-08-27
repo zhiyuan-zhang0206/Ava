@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Generator, Sequence
+from pathlib import Path
 
 import pytest
 
 from shared import memory_repo
+from shared.config import settings
+from shared.config.general import GeneralSettings
 from shared.machine import reset_identity, set_identity
 from shared.paths import gateway_memory_dir
 
@@ -443,3 +446,43 @@ def test_run_git_propagates_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(memory_repo, "run_bounded", _expire)
     with pytest.raises(subprocess.TimeoutExpired):
         memory_repo._run_git("fetch", "origin", "main")
+
+
+def test_status_last_fetch_renders_cluster_zone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RepoStatus.last_fetch is a display timestamp: it renders in the cluster
+    timezone (user ruling 2026-08-27), never the host OS zone."""
+
+    import datetime as dt
+
+    monkeypatch.setattr(
+        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
+    )
+    monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
+    monkeypatch.setattr(memory_repo, "memory_dir", lambda: tmp_path)
+
+    def _fake_run_git(*args: str, **kwargs: object) -> str:
+        argv = list(args)
+        if argv[:2] == ["rev-parse", "--abbrev-ref"]:
+            return "machine-main"
+        if argv[:2] == ["status", "--porcelain"]:
+            return ""
+        if argv == ["rev-list", "--count", "HEAD"]:
+            return "3"
+        if argv[:3] == ["rev-list", "--left-right", "--count"]:
+            return "1\t0"
+        raise AssertionError(f"unexpected git call: {argv}")
+
+    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    fetch_head = tmp_path / ".git" / "FETCH_HEAD"
+    fetch_head.parent.mkdir(parents=True)
+    fetch_head.write_text("dummy\n")
+    # A fixed mtime far from the assertion moment: 2026-01-03 09:05 UTC.
+    fixed = dt.datetime(2026, 1, 3, 9, 5, tzinfo=dt.UTC).timestamp()
+    import os
+
+    os.utime(fetch_head, (fixed, fixed))
+
+    status = memory_repo.status()
+    assert status.last_fetch == "2026-01-03T17:05:00+08:00"

@@ -33,3 +33,28 @@ def test_collect_sessions_batches_timestamp_reads(monkeypatch: pytest.MonkeyPatc
     assert [session.name for session in sessions] == sorted([service.name, shell.name])
     assert service.batch_calls == [[service.name]]
     assert shell.batch_calls == [[shell.name]]
+
+
+def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session created_at renders in the cluster timezone (user ruling
+    2026-08-27), never the host OS zone — a runner whose OS zone differs must
+    show the same wall clock as the gateway."""
+
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    service = _BatchOnlyBackend("ava-main-restarter")
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: _BatchOnlyBackend("x"))
+    from shared.config import settings
+    from shared.config.general import GeneralSettings
+
+    monkeypatch.setattr(
+        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
+    )
+
+    sessions, _, _ = cluster_status._collect_sessions()
+    created = sessions[0].created_at
+    assert created is not None
+    # epoch 1000 = 1970-01-01 00:16:40 UTC = 1970-01-01 08:16:40 +08:00
+    assert created == dt.datetime(1970, 1, 1, 8, 16, 40, tzinfo=ZoneInfo("Asia/Shanghai"))

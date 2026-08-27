@@ -23,6 +23,7 @@ from ops import cluster_pause, cluster_session
 from ops.cluster_session import OrchestrationKind
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 from ops.updater_outcome import UpdaterOutcome, last_updater_outcome
+from shared.config import cluster_tz
 from shared.machine import is_agent_runner, is_gateway, machine_name
 from shared.proc import process_alive
 from shared.resource_sample import ResourceSample
@@ -310,7 +311,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
     from shared.session_backend import get_backend, get_shell_backend
 
     rows: dict[str, SessionInfo] = {}
-    now = datetime.now().astimezone()
+    now = datetime.now().astimezone(cluster_tz())
     for backend in (get_backend(), get_shell_backend()):
         try:
             names = backend.list_sessions(_CLUSTER_SESSION_PREFIX)
@@ -331,7 +332,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
             epoch = epochs.get(name)
             if epoch is not None:
                 try:
-                    created = datetime.fromtimestamp(epoch).astimezone()
+                    created = datetime.fromtimestamp(epoch).astimezone(cluster_tz())
                 except (OSError, OverflowError, ValueError):
                     created = None
             uptime = int((now - created).total_seconds()) if created else 0

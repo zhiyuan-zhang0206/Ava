@@ -52,7 +52,7 @@ from shared.alerts_copy import (
     ALERT_LANGUAGES,
     ALERT_TRIGGERED_AT,
 )
-from shared.config import settings
+from shared.config import cluster_tz, settings
 from shared.daemon_health import health_port
 
 _log = logging.getLogger(__name__)
@@ -331,20 +331,22 @@ def notify_im(text: str) -> bool:
 
 
 def format_local(ts: datetime | None) -> str:
-    """Machine-local wall-clock string for the IM message ('' when None).
+    """Cluster-wall-clock string for the IM message ('' when None).
 
     Carries year + zone abbreviation (tz audit, 2026-08, PR-6): the prior
     `%m-%d %H:%M` gave no way to tell which year an alert near New Year's
     fired in, and no way to tell which machine's local zone the reader was
-    looking at on a multi-machine cluster. Minimal fix — stays on the
-    gateway machine's local zone (`.astimezone()` with no explicit tz) rather
-    than switching to the cluster's `AVA_TIMEZONE`, since that would need a
-    settings read this module doesn't otherwise take a dependency on.
+    looking at on a multi-machine cluster. Renders in the cluster's
+    `AVA_TIMEZONE` (user ruling 2026-08-27: one cluster clock — a runner
+    whose OS zone differs from the cluster's must not show a different wall
+    clock from every other surface); when this process holds no authoritative
+    cluster timezone (settings-lite, gateway down) it falls back to the host
+    zone, the documented lite degradation.
     """
 
     if ts is None:
         return ""
-    return ts.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    return ts.astimezone(cluster_tz()).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def frontend_base_url() -> str:
