@@ -195,8 +195,11 @@ async def revoke_other_session(session_id: str, request: Request) -> JSONRespons
     """Revoke a non-current browser session.
 
     Accepts either the full session id or the 8-character masked suffix shown
-    in the sessions list. An ambiguous suffix (more than one active session
-    ends with it) is refused rather than revoked wholesale.
+    in the sessions list. The suffix fallback only triggers for the exact
+    masked form (8 characters) — any other shape is a full id and 404s when
+    unknown — and never matches the request's own session (whose only
+    revocation path is logout). An ambiguous suffix (more than one other
+    active session ends with it) is refused rather than revoked wholesale.
     """
     current_session_id = request.cookies.get(cookie_name())
     if session_id == current_session_id:
@@ -206,9 +209,15 @@ async def revoke_other_session(session_id: str, request: Request) -> JSONRespons
         )
     pool = request.app.state.db_pool
     revoked = await asyncio.to_thread(revoke_session, pool, session_id)
-    if not revoked and len(session_id) >= 8:
-        # Not a full id (or already gone): the masked suffix from the list.
-        matches = await asyncio.to_thread(session_ids_with_suffix, pool, session_id)
+    if not revoked and len(session_id) == 8:
+        # The masked suffix from the list — nothing else falls back here. The
+        # current session is excluded: its only revocation path is logout, and
+        # its own suffix must not bypass that guard.
+        matches = [
+            match
+            for match in await asyncio.to_thread(session_ids_with_suffix, pool, session_id)
+            if match != current_session_id
+        ]
         if len(matches) > 1:
             raise HTTPException(
                 status_code=409,

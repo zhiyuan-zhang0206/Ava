@@ -7,6 +7,13 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 
 ## [Unreleased]
 
+### Fixed
+- Session-revoke suffix fallback could revoke the request's own session when
+  called with its masked suffix (the logout-only guard was bypassed) and
+  accepted any id shape of 8+ characters as a suffix. The fallback now only
+  triggers for the exact 8-character masked form and excludes the current
+  session from matches.
+
 ### Added
 - Browser-mcp daemon now keeps a valid gateway session cookie in the shared
   managed Chrome: logs in through the gateway, injects the returned opaque

@@ -125,8 +125,11 @@ export interface paths {
          * @description Revoke a non-current browser session.
          *
          *     Accepts either the full session id or the 8-character masked suffix shown
-         *     in the sessions list. An ambiguous suffix (more than one active session
-         *     ends with it) is refused rather than revoked wholesale.
+         *     in the sessions list. The suffix fallback only triggers for the exact
+         *     masked form (8 characters) — any other shape is a full id and 404s when
+         *     unknown — and never matches the request's own session (whose only
+         *     revocation path is logout). An ambiguous suffix (more than one other
+         *     active session ends with it) is refused rather than revoked wholesale.
          */
         post: operations["revoke_other_session_api_auth_sessions__session_id__revoke_post"];
         delete?: never;

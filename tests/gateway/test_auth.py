@@ -285,6 +285,63 @@ def test_revoke_endpoint_short_suffix_returns_404() -> None:
     assert response.status_code == 404
 
 
+def test_revoke_endpoint_refuses_current_session_by_suffix() -> None:
+    """The current session's own masked suffix must not bypass the logout-only
+    guard: it 404s and the session stays valid (QA nit1 regression)."""
+    with TestClient(app) as client:
+        current = _login(client)
+        response = client.post(f"/api/auth/sessions/{current[-8:]}/revoke")
+        check = client.get("/api/auth/check")
+
+    assert response.status_code == 404
+    assert check.json()["authenticated"] is True
+
+
+def test_revoke_endpoint_ambiguous_suffix_excludes_current_session(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The current session is filtered out of suffix matches BEFORE ambiguity
+    is judged: current + two others sharing a suffix still 409s on the two."""
+    with TestClient(app) as client:
+        current = _login(client)
+        suffix = current[-8:]
+        with db_conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
+                [(f"other-one-{suffix}",), (f"other-two-{suffix}",)],
+            )
+        db_conn.commit()
+        response = client.post(f"/api/auth/sessions/{suffix}/revoke")
+        check = client.get("/api/auth/check")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "session suffix is ambiguous"
+    assert check.json()["authenticated"] is True  # current session untouched
+
+
+def test_revoke_endpoint_rejects_longer_than_masked_suffix(
+    db_conn: psycopg.Connection,
+) -> None:
+    """Only the exact 8-character masked form falls back to suffix matching; a
+    longer non-full-id string must not revoke by suffix (QA nit2 regression)."""
+    with TestClient(app) as client:
+        _login(client)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
+                ("abcdefghij",),
+            )
+        db_conn.commit()
+        # "bcdefghij" is a 9-char suffix of an active session but not a full id.
+        response = client.post("/api/auth/sessions/bcdefghij/revoke")
+
+    assert response.status_code == 404
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT revoked_at FROM web_sessions WHERE id = %s", ("abcdefghij",))
+        row = cur.fetchone()
+    assert row is not None and row[0] is None  # untouched by the 404 revoke
+
+
 def test_login_sets_cookie_flags_and_configured_ttl(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
