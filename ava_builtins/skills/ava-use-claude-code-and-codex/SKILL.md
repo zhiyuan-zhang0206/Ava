@@ -67,8 +67,8 @@ nudge.
 
 Use the spawn script — it pre-trusts the directory, creates the two files if
 absent, launches the tool in a persistent shell session via
-`ava.shell.sessions.new("claude-<dirname>")` or `codex-<dirname>`, and sends the
-collaboration-contract message. Run it from the skill's reference directory:
+`ava.shell.sessions.new("claude-<dirname>", ttl=...)` or `codex-<dirname>`
+(TTL is mandatory; the script passes a generous one) and sends the contract message. Run it from the skill's reference directory:
 
 ```bash
 # Claude Code

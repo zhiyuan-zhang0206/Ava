@@ -42,15 +42,10 @@ def test_sessions_new_tracks_explicit_ttl(db_conn: psycopg.Connection, _agent_ro
             ava.shell.sessions.kill(session_id)
 
 
-def test_sessions_new_without_ttl_does_not_track(
-    db_conn: psycopg.Connection, _agent_row: int
-) -> None:
-    session_id = ava.shell.sessions.new("test-no-ttl")
-    try:
-        assert _deadline(db_conn, _agent_row, session_id) is None
-    finally:
-        with contextlib.suppress(ValueError, RuntimeError):
-            ava.shell.sessions.kill(session_id)
+def test_sessions_new_requires_ttl() -> None:
+    """TTL is mandatory (user ruling 2026-08-27): omitting it is a TypeError."""
+    with pytest.raises(TypeError):
+        ava.shell.sessions.new("test-no-ttl")  # type: ignore[call-arg]
 
 
 def test_run_background_tracks_explicit_ttl(db_conn: psycopg.Connection, _agent_row: int) -> None:

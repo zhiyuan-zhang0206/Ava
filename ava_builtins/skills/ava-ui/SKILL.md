@@ -127,8 +127,8 @@ ava.files.write('/tmp/hello-ui/index.html', '''
 </body></html>
 ''')
 
-# 2. Start the server in a background session
-session = ava.shell.sessions.new("my-server")
+# 2. Start the server in a background session (TTL is mandatory; 24h covers the page's default lifetime)
+session = ava.shell.sessions.new("my-server", ttl=24 * 3600)
 ava.shell.sessions.send(session, 'cd /tmp/hello-ui && python -m http.server 8765')
 
 # 3. Poll until the server is really listening
@@ -191,7 +191,7 @@ don't need any of this.)
 2. `ava.shell.run('cd /tmp/<your-name> && npm install', timeout=600)`
 3. paste a React widget (`Markdown.tsx` / `Transcript.tsx` / etc.) into `src/components/`
 4. import and use it in `src/App.tsx`
-5. `sess = ava.shell.sessions.new("dev-server"); ava.shell.sessions.send(sess, 'cd /tmp/<your-name> && npm run dev -- --port <port> --host 0.0.0.0')`
+5. `sess = ava.shell.sessions.new("dev-server", ttl=24 * 3600); ava.shell.sessions.send(sess, 'cd /tmp/<your-name> && npm run dev -- --port <port> --host 0.0.0.0')`
 6. **poll the port for readiness** (npm run dev takes 1-3s to come up), then `page = ava.ui.show('<name>', <port>)`
 
 ## Troubleshooting

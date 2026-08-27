@@ -9,7 +9,7 @@ Usage::
 Steps:
 1. Creates the task file / work file if absent (parent dirs included).
 2. Pre-trusts the directory in ``~/.codex/config.toml`` so no trust prompt blocks the session.
-3. Creates a persistent shell session via ``ava.shell.sessions.new(name=...)`` named
+3. Creates a persistent shell session via ``ava.shell.sessions.new(name=..., ttl=...)`` named
    ``codex-<dirname>`` and launches ``codex --dangerously-bypass-approvals-and-sandbox``.
 4. Polls ``ava.shell.sessions.capture`` until Codex has rendered its UI, then
    sends the collaboration-contract message — which names both file paths, so the
@@ -143,8 +143,10 @@ def main() -> int:
         )
         return 1
 
-    # Create a persistent shell session visible in the Inspect panel.
-    sid = ava.shell.sessions.new(name=session_name)
+    # Create a persistent shell session visible in the Inspect panel. TTL is
+    # mandatory (2026-08-27 ruling); 24h is a generous cap for a coding session
+    # — the supervisor re-spawns the script if a session is ever reclaimed.
+    sid = ava.shell.sessions.new(name=session_name, ttl=24 * 3600)
 
     inner = f"cd {shlex.quote(workspace.as_posix())} && codex --dangerously-bypass-approvals-and-sandbox"
     ava.shell.sessions.send(sid, inner)

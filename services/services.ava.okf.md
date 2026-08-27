@@ -17,7 +17,7 @@ launchd-owned exception with its own keepalive.
 ## Grouped by Capability
 Each service declares which machine capabilities it runs on (`ServiceSpec.capabilities` in `ops/spec.py`); a machine runs every service whose capability set matches. The groupings reflect the **merged roster** of core entries + entries contributed by `_plugin_services()`; node ownership follows the code—a service registered by a plugin has its node under that plugin's subtree. Sub-trees are split accordingly into two groups; services that run on both sides stay at this layer:
 
-- [[gateway_side.ava.okf.md|Gateway-side services]] — `capabilities` includes `gateway`: heartbeat, idle-shell-reminder, im-bridge (the product frontend), delivery-watchdog, events-maintenance, milvus, memory-indexer, labeler, pg-backup; plus the gateway itself / frontend documented elsewhere, and the plugin-registered task-maintenance (node under the [[ava_builtins/plugins/ava_fleet/ava_fleet.ava.okf.md|ava_fleet plugin]] subtree)
+- [[gateway_side.ava.okf.md|Gateway-side services]] — `capabilities` includes `gateway`: heartbeat, im-bridge (the product frontend), delivery-watchdog, events-maintenance, milvus, memory-indexer, labeler, pg-backup; plus the gateway itself / frontend documented elsewhere, and the plugin-registered task-maintenance (node under the [[ava_builtins/plugins/ava_fleet/ava_fleet.ava.okf.md|ava_fleet plugin]] subtree)
 - [[agent_runner_side.ava.okf.md|Agent-runner-side services]] — `capabilities` includes `agent-runner`: restarter, agent-ops, browser, permissions-helper (plus browser-mcp, computer-mcp)
 - **Both sides** (one instance each, stay at this layer):
   - [[watchdog.ava.okf.md|Watchdog]] — service health checks + schema/pin/pause self-healing; one instance per capability (`gateway-watchdog` + `agent-runner-watchdog`)
@@ -32,7 +32,7 @@ Each service declares which machine capabilities it runs on (`ServiceSpec.capabi
 ## Key Dependencies
 - [[watchdog.ava.okf.md]] — keep-alive + self-healing scheduler for all services
 - [[loop.ava.okf.md]] — restarter/heartbeat/task-maintenance directly operate on agent/task lifecycles
-- [[gateway-cli.ava.okf.md]] — gateway hosts heartbeat, idle-shell-reminder, im-bridge, delivery-watchdog, events-maintenance, task-maintenance, memory-indexer, milvus, labeler, pg-backup
+- [[gateway-cli.ava.okf.md]] — gateway hosts heartbeat, im-bridge, delivery-watchdog, events-maintenance, task-maintenance, memory-indexer, milvus, labeler, pg-backup
 
 ## Entry Points
 - `ops/spec.py:build_services()` (re-exported by cli `_repo.py`) — single source of truth for the service roster (session + probe metadata); core groupings + entries contributed by `_plugin_services()` from plugin declarations

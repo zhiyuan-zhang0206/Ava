@@ -13,7 +13,7 @@ shutil.copytree(f"{{os.environ['AVA_HOME']}}/skills/ava-ui/starters/single_html"
 # (use ava.files.write or bash > overwrite the entire file)
 
 # Start a persistent shell session to run the server (background session, keep running until agent exits)
-sess = ava.shell.sessions.new("my-page")
+sess = ava.shell.sessions.new("my-page", ttl=24 * 3600)
 ava.shell.sessions.send(sess, 'cd /tmp/my-page && python -m http.server 8765')
 
 # poll until port is listening (sessions.send is fire-and-forget, doesn't wait for bind)

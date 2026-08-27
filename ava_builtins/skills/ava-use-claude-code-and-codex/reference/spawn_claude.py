@@ -9,7 +9,7 @@ Usage::
 Steps:
 1. Creates the task file / work file if absent (parent dirs included).
 2. Pre-trusts the directory in ``~/.claude.json`` so no trust prompt blocks the session.
-3. Creates a persistent shell session via ``ava.shell.sessions.new(name=...)`` named
+3. Creates a persistent shell session via ``ava.shell.sessions.new(name=..., ttl=...)`` named
    ``claude-<dirname>`` and launches ``claude --dangerously-skip-permissions``
    (after ``unset ANTHROPIC_API_KEY`` to avoid API-key billing trap).
 4. Polls ``ava.shell.sessions.capture`` until Claude Code has rendered its UI, then
@@ -145,8 +145,10 @@ def main() -> int:
         )
         return 1
 
-    # Create a persistent shell session visible in the Inspect panel.
-    sid = ava.shell.sessions.new(name=session_name)
+    # Create a persistent shell session visible in the Inspect panel. TTL is
+    # mandatory (2026-08-27 ruling); 24h is a generous cap for a coding session
+    # — the supervisor re-spawns the script if a session is ever reclaimed.
+    sid = ava.shell.sessions.new(name=session_name, ttl=24 * 3600)
 
     inner = f"cd {shlex.quote(workspace.as_posix())} && unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions"
     ava.shell.sessions.send(sid, inner)

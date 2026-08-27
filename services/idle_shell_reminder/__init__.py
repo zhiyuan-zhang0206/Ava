@@ -1,1 +1,0 @@
-"""Idle persistent-shell reminders."""

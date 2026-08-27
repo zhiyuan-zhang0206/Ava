@@ -28,7 +28,7 @@ also removes pseudo-checks.
 ## Gateway order
 
 `redis-acl` → `pgbouncer` → `brew-pin` → `gateway` → `im-bridge` → `labeler` →
-`heartbeat` → `idle-shell-reminder` → `delivery-watchdog` →
+`heartbeat` → `delivery-watchdog` →
 `events-maintenance` → `milvus` → `frontend` → `pg-backup` →
 `otel-collector` → `task-maintenance` → `memory-indexer` → `lgtm`.
 

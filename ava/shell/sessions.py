@@ -103,8 +103,8 @@ def _resolve(session_id: int) -> str:
 _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 
 
-def _validate_ttl(ttl: float | None) -> float | None:
-    if ttl is not None and (not math.isfinite(ttl) or ttl <= 0):
+def _validate_ttl(ttl: float) -> float:
+    if not math.isfinite(ttl) or ttl <= 0:
         raise ValueError("ttl must be finite and greater than zero")
     return ttl
 
@@ -121,6 +121,13 @@ def _create_session(
     # base ava.shell.run uses). Returns (id, full_name). Internal — `new()`
     # (shell), `run_background`, and `ava.watcher._spawn` (named "watcher")
     # all use it.
+    #
+    # `ttl` stays optional HERE only for the watcher path: a watcher session
+    # carries its own lifecycle (registry row + boot reconcile + its own
+    # at/cron/timeout deadlines), so it deliberately records no TTL. The
+    # public SDK surface (`sessions.new` / `run_background`) requires one —
+    # user ruling 2026-08-27: shell TTL is mandatory, the idle-shell-reminder
+    # daemon is gone, and TTL is the only reclamation mechanism.
     if name is not None and not _NAME_RE.fullmatch(name):
         raise ValueError(
             f"session name {name!r} invalid — use a lowercase slug like 'dev-server' "
@@ -173,16 +180,15 @@ def _create_session(
     return session_id, full
 
 
-def new(name: str, *, ttl: float | None = None) -> int:
+def new(name: str, *, ttl: float) -> int:
     """Create a session and return its id. `name` is only a display label —
     a lowercase slug like `"dev-server"`; every operation takes the id.
 
     Args:
-        ttl: optional hard lifetime in seconds, counted from creation — the
+        ttl: required hard lifetime in seconds, counted from creation — the
             session is force-killed once it elapses, with no idle/activity
-            renewal. Omit (or pass None) for a session that is never
-            auto-reclaimed; resident worktables should omit it. Use
-            `ava.watcher` for a deadline that must not kill running work."""
+            renewal. Pass a large value for a long-resident session; a
+            deadline-bound task belongs in `ava.watcher` instead."""
     session_id, _ = _create_session(name, ttl=_validate_ttl(ttl))
     return session_id
 

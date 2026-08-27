@@ -33,7 +33,7 @@ from shared.pty_sessions import cli as pty_cli
 from shared.pty_sessions import host as pty_host
 from shared.pty_sessions._paths import host_identity, record_path, socket_path
 from shared.pty_sessions.cli import write_env_file
-from shared.pty_sessions.host import PtySession, _op_is_idle, _parse_request
+from shared.pty_sessions.host import PtySession, _parse_request
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
@@ -121,14 +121,6 @@ def _capture_until(home: Path, name: str, needle: str, *, scrollback: bool = Tru
 
     assert _wait(_seen, timeout=10.0), f"capture never contained {needle!r}"
     return _capture(home, name, scrollback=scrollback)
-
-
-def _idle_fact(name: str) -> dict[str, object]:
-    response = pty_cli.session_request(name, {"op": "is_idle"})
-    assert response["ok"] is True, response
-    fact = response["data"]
-    assert isinstance(fact, dict)
-    return fact
 
 
 def _output_until(home: Path, name: str, word: str, *, timeout: float = 10.0) -> str:
@@ -255,65 +247,6 @@ def test_parse_request_rejects_non_object() -> None:
         _parse_request(b'{"noop": 1}')
     req = _parse_request(b'{"op": "ping"}')
     assert req["op"] == "ping"
-
-
-@pytest.mark.parametrize(
-    ("foreground_pgrp", "shell_pgrp", "expected_idle"),
-    [(41, 41, True), (42, 41, False)],
-)
-def test_is_idle_compares_foreground_and_shell_process_groups(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    foreground_pgrp: int,
-    shell_pgrp: int,
-    expected_idle: bool,
-) -> None:
-    session = _make_session(tmp_path, "ava-test-idle-unit-1")
-    session.last_output_at = 123.5
-
-    def _foreground(_fd: int) -> int:
-        return foreground_pgrp
-
-    def _shell_group(_pid: int) -> int:
-        return shell_pgrp
-
-    monkeypatch.setattr(os, "tcgetpgrp", _foreground)
-    monkeypatch.setattr(os, "getpgid", _shell_group)
-
-    response = _op_is_idle(session, {})
-
-    assert response["ok"] is True
-    assert response["data"] == {
-        "idle": expected_idle,
-        "idle_since": 123.5 if expected_idle else None,
-    }
-
-
-def test_is_idle_treats_unreadable_or_dying_tty_as_busy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session = _make_session(tmp_path, "ava-test-idle-unit-2")
-
-    def _unreadable(_fd: int) -> int:
-        raise OSError("tty gone")
-
-    monkeypatch.setattr(os, "tcgetpgrp", _unreadable)
-    response = _op_is_idle(session, {})
-    assert response["data"] == {"idle": False, "idle_since": None}
-
-    session.begin_finish()
-    response = _op_is_idle(session, {})
-    assert response["ok"] is False
-    assert response["code"] == 3
-
-
-def test_feed_updates_last_output_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    session = _make_session(tmp_path, "ava-test-idle-output-1")
-    monkeypatch.setattr("shared.pty_sessions.host.time.monotonic", lambda: 456.25)
-
-    session.feed(b"fresh prompt")
-
-    assert session.last_output_at == 456.25
 
 
 # ---------------------------------------------------------------------------
@@ -598,24 +531,6 @@ def test_new_send_capture_loop(sessions: Path) -> None:
     _send(home, name, "echo hello-pty")
     out = _output_until(home, name, "hello-pty")
     assert "hello-pty" in out
-
-
-def test_real_session_is_idle_at_prompt_and_busy_during_foreground_job(sessions: Path) -> None:
-    home = sessions
-    name = "ava-test-idle-real-1"
-    _new(home, name)
-    assert _wait(lambda: _idle_fact(name)["idle"] is True, timeout=10.0)
-    first_idle_since = _idle_fact(name)["idle_since"]
-    assert isinstance(first_idle_since, float)
-
-    _send(home, name, "sleep 5")
-    assert _wait(lambda: _idle_fact(name)["idle"] is False, timeout=3.0)
-
-    _keys(home, name, "C-c")
-    assert _wait(lambda: _idle_fact(name)["idle"] is True, timeout=10.0)
-    second_idle_since = _idle_fact(name)["idle_since"]
-    assert isinstance(second_idle_since, float)
-    assert second_idle_since > first_idle_since
 
 
 def test_new_is_idempotent_for_live_session(sessions: Path) -> None:

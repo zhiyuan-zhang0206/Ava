@@ -135,7 +135,7 @@ def test_allocate_output_path_prunes_ring() -> None:
 
 def test_run_background_rejects_empty_cmd() -> None:
     with pytest.raises(ValueError, match="cmd cannot be empty"):
-        ava.shell.run_background("   ", name="test-empty")
+        ava.shell.run_background("   ", name="test-empty", ttl=120)
 
 
 def test_run_background_requires_name() -> None:
@@ -154,7 +154,7 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     )
     monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
 
-    handle = ava.shell.run_background("echo hi", name="test-bg", cwd=str(tmp_path))
+    handle = ava.shell.run_background("echo hi", name="test-bg", cwd=str(tmp_path), ttl=120)
     assert handle.session_id == 7
     assert Path(handle.output_path).exists()  # tailable immediately
     cmd = captured["cmd"]
@@ -176,7 +176,9 @@ def test_run_background_e2e_notice_log_and_close(
     fake_cli.chmod(0o755)
     monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
 
-    handle = ava.shell.run_background("echo hello-bg; exit 3", name="test-bg", cwd=str(tmp_path))
+    handle = ava.shell.run_background(
+        "echo hello-bg; exit 3", name="test-bg", cwd=str(tmp_path), ttl=120
+    )
 
     deadline = time.time() + 15
     while time.time() < deadline and not argv_file.exists():
@@ -217,7 +219,7 @@ def test_failed_cmd_closes_session_even_when_notice_fails(
     fake_cli.chmod(0o755)
     monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
 
-    handle = ava.shell.run_background("false", name="test-bg-fail", cwd=str(tmp_path))
+    handle = ava.shell.run_background("false", name="test-bg-fail", cwd=str(tmp_path), ttl=120)
 
     # Command failed AND the notice failed — the session must still close.
     deadline = time.time() + 15
@@ -236,7 +238,9 @@ def test_run_background_keep_leaves_session(
     fake_cli.chmod(0o755)
     monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
 
-    handle = ava.shell.run_background("echo done", name="test-keep", cwd=str(tmp_path), keep=True)
+    handle = ava.shell.run_background(
+        "echo done", name="test-keep", cwd=str(tmp_path), keep=True, ttl=120
+    )
     try:
         deadline = time.time() + 15
         while time.time() < deadline and not argv_file.exists():

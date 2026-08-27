@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Gateway-Side Services — background services running with gateway capability
-description: "Groups background daemons running on machines (single-machine or gateway-only) whose capabilities include gateway — data-plane-adjacent services: cluster-level wake-up daemons like heartbeat/task-reminder/idle-shell-reminder, vector memory stack, auto-labeling, daily backup. The source of truth is `ServiceSpec.capabilities` in `ops/spec.py`."
+description: "Groups background daemons running on machines (single-machine or gateway-only) whose capabilities include gateway — data-plane-adjacent services: cluster-level wake-up daemons like heartbeat/task-reminder, vector memory stack, auto-labeling, daily backup. The source of truth is `ServiceSpec.capabilities` in `ops/spec.py`."
 tags: []
 ---
 
 # Gateway-Side Services
 
 ## What is it
-Groupings of background services running on machines whose capabilities set includes `gateway` (single machine with `gateway,agent-runner` or pure gateway). The gateway capability owns data-plane-adjacent daemons: the HTTP gateway itself, frontend, cluster-level wake-up daemons (heartbeat / task-maintenance / idle-shell-reminder only INSERT inbound + Redis best-effort publish to wake the owner; the agent's SELECT recheck guarantees delivery, so they belong to a single gateway, not every runner), memory/vector stack, and the gateway's own watchdog instance.
+Groupings of background services running on machines whose capabilities set includes `gateway` (single machine with `gateway,agent-runner` or pure gateway). The gateway capability owns data-plane-adjacent daemons: the HTTP gateway itself, frontend, cluster-level wake-up daemons (heartbeat / task-maintenance only INSERT inbound + Redis best-effort publish to wake the owner; the agent's SELECT recheck guarantees delivery, so they belong to a single gateway, not every runner), memory/vector stack, and the gateway's own watchdog instance.
 
 `services/gateway_side/` is a **capability grouping, not a directory of code** — there is no `services/gateway_side/*.py`. Each daemon's code lives in its own `services/<name>/`; which side it runs on is a `ServiceSpec.capabilities` attribute, which cuts across the filesystem and cannot be expressed by co-location. This node and its children are the index layer for that attribute, the same way the domain roots under `okf/` are the index layer for the whole graph. Do not "fix" it by flattening the children into `services/` — that deletes the only place the capability split is represented in the hierarchy.
 
@@ -18,7 +18,6 @@ Source of truth = services in `build_services()` of `ops/spec.py` whose `Service
 | Service | Responsibility | File |
 |---------|----------------|------|
 | heartbeat | Idle agent heartbeat wake-up | [[heartbeat.ava.okf.md]] |
-| idle-shell-reminder | Persistent-shell idle backoff + owner reminder | [[idle_shell_reminder.ava.okf.md]] |
 | im-bridge | **Product frontend** — every IM channel adapter (Telegram / WeChat / Feishu), dialog push + commands | [[im_bridge.ava.okf.md]] |
 | delivery-watchdog | Wake dispatcher + stale-pending alerter + terminated-owner resurrect retry | [[delivery_watchdog.ava.okf.md]] |
 | events-maintenance | unified `events` stream maintenance (immutable-Loki class resolution + day-grain rollup + archive slices) | [[events_maintenance.ava.okf.md]] |

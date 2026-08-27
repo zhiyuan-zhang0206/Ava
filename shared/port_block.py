@@ -65,9 +65,11 @@ PORT_OFFSETS: dict[str, int] = {
     # an existing cluster's registry record pins its block base, so renumbering a
     # live offset would move a running daemon's port out from under it.
     "agent_host": 19,
-    # Idle-shell-reminder was added after every existing slot. Append so live
-    # clusters keep every previously assigned offset unchanged.
-    "idle_shell_reminder": 20,
+    # Offset 20 is deliberately VACATED: the idle-shell-reminder daemon held it
+    # until its removal (2026-08-27) and renumbering pg_backup down into the
+    # hole would move a live daemon's port on every existing cluster (records
+    # pin their block base; a missing-key derive must agree with the .env it
+    # predates). BLOCK_SIZE stays 22 so the block still covers pg_backup.
     # The backup scheduler is a first-class health daemon. Append its slot so
     # existing cluster records retain their assigned ports.
     "pg_backup": 21,
@@ -124,8 +126,8 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     # gateway dials for every runner RPC. `test_legacy_ports_are_unique` is the
     # guard.
     "agent_host": 8114,
-    # 8115 is the next unused fixed port after agent_host; uniqueness is
-    # guarded by tests/shared/test_cluster_alloc.py.
-    "idle_shell_reminder": 8115,
+    # 8115 was the idle-shell-reminder's fixed port (daemon removed 2026-08-27);
+    # left unused rather than renumbered, for the same record-pinning reason as
+    # the vacated block offset above.
     "pg_backup": 8116,
 }
