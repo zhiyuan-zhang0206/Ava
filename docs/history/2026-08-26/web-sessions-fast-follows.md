@@ -19,7 +19,10 @@ The sessions list masks every non-current row's id to its final 8 characters
 endpoint accepts the suffix, so masking costs no revocability: an exact-id
 revoke is tried first, then a suffix match against active rows — a suffix
 shared by more than one active session is refused with 409 rather than
-revoked wholesale.
+revoked wholesale. The suffix fallback only triggers for the exact 8-character
+masked form (a longer string is a full id and 404s when unknown) and never
+matches the request's own session, whose only revocation path is logout
+(QA guard-bypass follow-up, 2026-08-27).
 
 Managed-browser sessions are labeled: the browser daemon's gateway login sends
 a dedicated user agent (`ava-managed-browser`), and the list derives
