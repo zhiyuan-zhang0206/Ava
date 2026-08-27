@@ -374,6 +374,79 @@ def test_at_builds_and_spawns_without_watchdog(
     assert "ping later" in captured["code"]
 
 
+def test_at_announcement_uses_cluster_zone_when_authoritative(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """at() passes the cluster timezone to the generated script when the
+    process holds an authoritative one (user ruling 2026-08-27)."""
+    from shared.config import settings
+    from shared.config.general import GeneralSettings
+
+    monkeypatch.setattr(
+        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
+        captured["code"] = code
+        return 7
+
+    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
+    when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    watcher.at(when, "ping later", name="test-at-cluster-tz")
+    assert "_TZ = ZoneInfo('Asia/Shanghai')" in captured["code"]
+    assert "_WHEN.astimezone(_TZ).isoformat()" in captured["code"]
+
+
+def test_at_announcement_uses_host_clock_without_authoritative_zone(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A settings-lite process (no authoritative cluster timezone) passes
+    None: the announcement renders in the watcher's own wall clock — the
+    documented lite degradation."""
+    from shared.config import settings
+    from shared.config.general import GeneralSettings
+
+    monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
+    captured: dict[str, Any] = {}
+
+    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
+        captured["code"] = code
+        return 7
+
+    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
+    when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    watcher.at(when, "ping later", name="test-at-lite")
+    assert "ZoneInfo" not in captured["code"]
+    assert "_WHEN.astimezone().isoformat()" in captured["code"]
+
+
+def test_cron_defaults_to_host_zone_without_authoritative_zone(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """settings-lite cron (no authoritative cluster timezone) defaults to the
+    host's own zone — not the silent America/Los_Angeles field default."""
+    from shared.config import host_tz_name, settings
+    from shared.config.general import GeneralSettings
+
+    monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
+    captured: dict[str, Any] = {}
+
+    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
+        captured["code"] = code
+        return 7
+
+    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
+    watcher.cron("0 * * * *", "tick", name="test-cron-lite")
+    expected = host_tz_name()
+    assert f"_TZ = ZoneInfo('{expected}')" in captured["code"]
+    assert "America/Los_Angeles" not in captured["code"]
+
+
 def test_cron_invalid_expr_raises(_agent_row: int) -> None:
     from shared.watcher import CronExprError
 

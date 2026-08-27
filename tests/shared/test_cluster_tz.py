@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from shared.config import apply_cluster_timezone, cluster_tz, settings
+from shared.config import (
+    apply_cluster_timezone,
+    cluster_tz,
+    host_tz_name,
+    settings,
+)
 from shared.config.general import GeneralSettings
 
 
@@ -22,12 +27,21 @@ from shared.config.general import GeneralSettings
 def _restore_process_tz() -> Generator[None, None, None]:
     """Restore the process's original TZ env + tzset state after each test.
 
-    apply_cluster_timezone mutates the process wall clock (os.environ["TZ"] +
-    time.tzset()); the suite must not leak that into other tests. pytest's
-    monkeypatch restores the env var itself; this fixture re-tzset()s from the
-    restored env so the C library agrees with the env again.
+    apply_cluster_timezone mutates the process wall clock (os.environ["TZ"]
+    assignment + time.tzset()). A plain ``os.environ["TZ"] = ...`` assignment
+    is NOT tracked by pytest's monkeypatch (it only restores what setenv /
+    delenv registered — a delenv on an absent key registers nothing), so the
+    assignment must be undone here: restore the pre-test TZ value, then
+    re-tzset() so the C library agrees with the env again. Without this, a
+    leaked TZ is applied to the process wall clock on a UTC host (gmtoff
+    0 -> 28800); a CST host masked it (QA #737).
     """
+    original_tz = os.environ.get("TZ")
     yield
+    if original_tz is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = original_tz
     if hasattr(time, "tzset"):
         time.tzset()
 
@@ -108,5 +122,42 @@ def test_apply_sets_env_even_without_tzset(monkeypatch: pytest.MonkeyPatch) -> N
     untouched and no TZ state leaks into later tests."""
     monkeypatch.setattr("shared.config._tzset", lambda: None)
     _set_cluster_tz(monkeypatch, "Asia/Shanghai")
+    # apply_cluster_timezone assigns os.environ["TZ"] directly — monkeypatch
+    # does not track a plain dict assignment, so the assignment must be
+    # undone explicitly (delenv registers the restore); otherwise the
+    # autouse fixture's tzset() would apply the leaked TZ to the process wall
+    # clock (gmtoff 0 -> 28800 on a UTC host; a CST host masked it).
+    monkeypatch.delenv("TZ", raising=False)
     apply_cluster_timezone()
     assert os.environ["TZ"] == "Asia/Shanghai"
+
+
+def _realpath_to(target: str) -> Callable[[str], str]:
+    """A fake os.path.realpath that maps /etc/localtime to ``target``."""
+
+    def realpath(path: str) -> str:
+        return target if path == "/etc/localtime" else path
+
+    return realpath
+
+
+def test_host_tz_name_resolves_zoneinfo_symlink(monkeypatch: pytest.MonkeyPatch) -> None:
+    """/etc/localtime -> /usr/share/zoneinfo/Asia/Shanghai resolves to the
+    IANA name."""
+
+    monkeypatch.setattr("os.path.realpath", _realpath_to("/usr/share/zoneinfo/Asia/Shanghai"))
+    assert host_tz_name() == "Asia/Shanghai"
+
+
+def test_host_tz_name_falls_back_to_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No zoneinfo symlink (Windows) or an unreadable link yields UTC."""
+
+    def _raise(path: str) -> str:
+        raise OSError("no such file")
+
+    monkeypatch.setattr("os.path.realpath", _raise)
+    assert host_tz_name() == "UTC"
+    monkeypatch.setattr("os.path.realpath", _realpath_to("/var/db/timezone/zoneinfo/Asia/Shanghai"))
+    assert host_tz_name() == "Asia/Shanghai"
+    monkeypatch.setattr("os.path.realpath", _realpath_to("/etc/localtime"))
+    assert host_tz_name() == "UTC"

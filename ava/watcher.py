@@ -488,11 +488,14 @@ def cron(
     Returns:
         The watcher's session id; kill that session to stop the schedule.
     """
-    from shared.config import settings
+    from shared.config import cluster_tz_name, host_tz_name
 
     _validate_message(message)
     validate_cron(expr)
-    tz = timezone if timezone is not None else settings.general.timezone
+    # Default to the cluster clock when authoritative; a settings-lite
+    # process (no authoritative cluster timezone) falls back to this host's
+    # own zone — the same wall clock its other displays use.
+    tz = timezone if timezone is not None else (cluster_tz_name() or host_tz_name())
     validate_timezone(tz)
     et = normalize_end_time(end_time)
     code = build_cron_script(
@@ -531,7 +534,7 @@ def at(
     Returns:
         The watcher's session id; kill that session to cancel.
     """
-    from shared.config import settings
+    from shared.config import cluster_tz_name
 
     _validate_message(message)
     due_at = normalize_when(when)
@@ -545,11 +548,10 @@ def at(
     # settings-lite process (no authoritative cluster timezone) passes None so
     # the announcement renders in the watcher's own wall clock — the same
     # degradation every other display path uses.
-    tz = settings.general.timezone if "timezone" in settings.general.model_fields_set else None
     code = build_at_script(
         when_iso=due_at.isoformat(),
         message=message,
-        timezone=tz,
+        timezone=cluster_tz_name(),
     )
     # The one-shot script sleeps until `when`, wakes you once, and exits — it
     # ends itself, so no watchdog.
