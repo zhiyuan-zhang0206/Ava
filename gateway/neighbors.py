@@ -20,7 +20,9 @@ path walk in Python (the SQL recursive CTE had no Loki equivalent):
 Ancestors: the read also returns the queried agent's spawn chain — the
 agents that spawned it, walked upward over DIRECTED spawn/fork edges. The
 event stream writes those rows as agent_id = the new agent, target_agent_id
-= its spawner, so the upward walk follows agent_id -> target_agent_id.
+= its lineage parent (the spawner for a spawn, the fork source for a fork —
+fork-lineage ruling 2026-08-28), so the upward walk follows
+agent_id -> target_agent_id.
 Only creation events carry parentage: send_message is a peer tie and
 resurrect wakes an existing agent, so neither forms an ancestor. Spawn
 chains form a forest, so the upward walk is a simple linked-list traversal
@@ -94,7 +96,9 @@ def _fetch_archive_lineage(cur: Cursor, *, boundary: datetime | None) -> list[tu
 
     Direction is what the neighbor merge deliberately discards (undirected
     ties) but the ancestor walk needs: the events stream writes spawn/fork
-    rows as agent_id = the new agent, target_agent_id = its spawner."""
+    rows as agent_id = the new agent, target_agent_id = its lineage parent
+    (the spawner for a spawn, the fork source for a fork — fork-lineage
+    ruling 2026-08-28)."""
     if boundary is None:
         return []
     cur.execute(
