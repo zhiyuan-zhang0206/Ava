@@ -345,3 +345,38 @@ def test_human_ttl_formats_compact_durations() -> None:
     assert _human_ttl(90) == "90s"
     assert _human_ttl(0) == "0s"
     assert _human_ttl(-61) == "0s"
+
+
+def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The notice's expiry time renders in the cluster timezone: bare HH:MM on
+    the cluster's today, MM-DD HH:MM when the TTL crosses midnight."""
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from gateway import ttl_reaper
+
+    sh = ZoneInfo("Asia/Shanghai")
+    monkeypatch.setattr(ttl_reaper, "cluster_tz", lambda: sh)
+    now = datetime.now(sh)
+
+    # A specific wall-clock moment on the cluster's today: the same instant
+    # fed in as UTC must render the Shanghai wall clock, no date prefix.
+    at = now.replace(hour=23, minute=59, second=0, microsecond=0)
+    assert ttl_reaper._wall_clock(at.astimezone(UTC)) == "23:59"
+
+    # A moment on the cluster's tomorrow (TTL crossing midnight) carries the
+    # MM-DD prefix.
+    cross = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+    assert ttl_reaper._wall_clock(cross) == cross.strftime("%m-%d %H:%M")
+
+
+def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cluster_tz() None is the host-zone fallback signal: the stamp matches
+    dt.astimezone(None) (machine-local), not UTC."""
+    from datetime import UTC, datetime
+
+    from gateway import ttl_reaper
+
+    monkeypatch.setattr(ttl_reaper, "cluster_tz", lambda: None)
+    dt = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    assert ttl_reaper._wall_clock(dt) == dt.astimezone(None).strftime("%H:%M")
