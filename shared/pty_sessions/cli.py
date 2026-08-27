@@ -30,11 +30,13 @@ Ops (session ops take the session name first):
                             (graceful: SIGTERM first); idempotent noop.
                             Falls back to record-pid kills when the host
                             itself is wedged, so a kill is authoritative
-                            even against a broken host.
-- ``busy <name>``            print `busy` when the session carries live
-                            processes beyond its idle shell (a foreground
-                            or background job), `idle` otherwise — the TTL
-                            reaper's interrupt-detection probe.
+                            even against a broken host. On success prints
+                            `interrupted` when the session carried live
+                            processes (a running foreground/background job)
+                            at kill time, `idle` otherwise — the TTL
+                            reaper's interrupt verdict (a record-based kill
+                            of a wedged host answers `interrupted`,
+                            fail-open).
 - ``list [prefix]``         live session names, one per line (record scan —
                             no process to dial; sweeps dead records).
 - ``list-started-at [prefix]``     every live session's launch epoch.
@@ -572,26 +574,13 @@ def _kill_by_record(name: str) -> int:
     if has_session(name):
         sys.stderr.write(f"session {name} survived the record-based kill\n")
         return 1
+    sys.stdout.write("interrupted\n")  # fail-open: a wedged host's kill could not be probed
     _sweep_dead(name)
     try:
         _reap_orphaned_hosts(name, force_unresponsive=True)
     except RuntimeError as exc:
         sys.stderr.write(f"session {name} left an orphaned host after record-based kill: {exc}\n")
         return 1
-    return 0
-
-
-def _op_busy(name: str, rest: list[str]) -> int:
-    if rest:
-        sys.stderr.write(f"usage: pty_sessions.cli {name} busy\n")
-        return 2
-    try:
-        resp = session_request(name, {"op": "busy"})
-    except OSError as exc:
-        return _no_host(name, "busy", exc)
-    if not resp.get("ok"):
-        return _finish_op(resp)
-    sys.stdout.write("busy\n" if resp["data"]["busy"] else "idle\n")
     return 0
 
 
@@ -611,11 +600,13 @@ def _op_kill(name: str, rest: list[str]) -> int:
                 sys.stderr.write(f"cannot reap orphan pty host for {name}: {exc}\n")
                 return 1
             _sweep_dead(name)
+            sys.stdout.write("idle\n")  # nothing was there to interrupt
             return 0  # idempotent: killing an absent session is a noop
         return _kill_by_record(name)
     result = _finish_op(resp)
     if result != 0:
         return result
+    sys.stdout.write("interrupted\n" if resp["data"].get("interrupted") else "idle\n")
     try:
         _reap_orphaned_hosts(name, force_unresponsive=True)
     except RuntimeError as exc:
@@ -696,8 +687,6 @@ def main(argv: list[str] | None = None) -> int:
         return _op_resize(name, rest)
     if op == "kill":
         return _op_kill(name, rest)
-    if op == "busy":
-        return _op_busy(name, rest)
     sys.stderr.write(f"unknown op {op!r} for session {name!r}\n")
     return 2
 

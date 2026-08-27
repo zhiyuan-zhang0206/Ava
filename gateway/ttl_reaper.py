@@ -177,7 +177,12 @@ def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int]]:
 
 
 def _delete_shell_row_blocking(
-    pool: ConnectionPool, agent_id: int, session_id: int, *, interrupted: bool
+    pool: ConnectionPool,
+    agent_id: int,
+    session_id: int,
+    *,
+    interrupted: bool,
+    name: str | None = None,
 ) -> None:
     """Drop a reclaimed shell's tracking row; notify its live owner only when
     the reclamation interrupted a running job (an empty shell's reaping is
@@ -189,11 +194,15 @@ def _delete_shell_row_blocking(
                 (agent_id, session_id),
             )
         if interrupted:
+            label = (
+                f"Shell session {name!r} (id {session_id}, agent {agent_id})"
+                if name
+                else f"Shell session {session_id} (agent {agent_id})"
+            )
             _notify_owner(
                 conn,
                 agent_id,
-                f"Shell session {session_id} (agent {agent_id}) was reclaimed after its TTL "
-                "expired, interrupting a running task.",
+                f"{label} was reclaimed after its TTL expired, interrupting a running task.",
             )
 
 
@@ -247,7 +256,12 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
         # never notify (nothing was interrupted).
         interrupted = mode == "killed" and bool(result.get("interrupted", True))
         await asyncio.to_thread(
-            _delete_shell_row_blocking, pool, agent_id, session_id, interrupted=interrupted
+            _delete_shell_row_blocking,
+            pool,
+            agent_id,
+            session_id,
+            interrupted=interrupted,
+            name=result.get("name"),
         )
         telemetry.emit(
             "log",

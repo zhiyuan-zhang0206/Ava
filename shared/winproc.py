@@ -244,24 +244,20 @@ def has_session(name: str) -> bool:
     return _process_for_record(rec) is not None
 
 
-def session_has_active_processes(name: str) -> bool:
-    """True when the session carries live descendants beyond its own process.
+def kill_session_with_verdict(
+    name: str, *, graceful: bool = False, timeout: float = 15.0
+) -> tuple[bool, str, bool]:
+    """Kill a session; return (ok, mode, interrupted) — the TTL reaper's verdict.
 
-    The TTL reaper's interrupt probe: a session whose recorded process has
-    children is running work inside it (the session process itself is the
-    idle shell / cmd, not "work"). A session that cannot be inspected answers
-    True — fail-open, a session that cannot be proven idle may be running
-    something."""
-    rec = _read_record(name)
-    if rec is None:
-        return False  # session absent — nothing to interrupt
-    proc = _process_for_record(rec)
-    if proc is None:
-        return False  # session process gone — nothing to interrupt
-    try:
-        return bool(proc.children(recursive=True))
-    except psutil.Error:
-        return True  # cannot inspect — assume the worst
+    On Windows the session process IS the work: ``new_session`` Popens the
+    user's command directly (no shell intermediate layer) whenever the
+    command needs no cmd.exe syntax, so a live session can never be proven
+    to be an idle shell waiting for input — killing one always interrupted
+    something. ``interrupted`` is therefore True for every kill of a live
+    session and False only for the idempotent noop on an already-absent one.
+    """
+    ok, mode = kill_session(name, graceful=graceful, timeout=timeout)
+    return ok, mode, mode != "noop"
 
 
 def new_session(

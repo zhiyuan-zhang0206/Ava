@@ -669,10 +669,12 @@ class ShellKillResult(BaseModel):
     `interrupted` is True when the killed session carried live processes (a
     running foreground/background job) at kill time — the gateway notifies
     the owner only then, so an empty shell's reaping stays silent. Absent
-    sessions always report False."""
+    sessions always report False. `name` is the shell's optional display
+    name, for a notice that names what was interrupted."""
 
     mode: Literal["killed", "absent"]
     interrupted: bool = False
+    name: str | None = None
 
 
 class OpsCommandItem(BaseModel):

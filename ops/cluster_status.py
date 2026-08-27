@@ -280,19 +280,22 @@ def capture_shell(agent_id: int, session_id: int, lines: int = 200) -> tuple[str
     return full_name, captured_lines
 
 
-def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool]:
+def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
     """Kill one host-local persistent shell, or report that it is already absent.
 
-    Returns ``(mode, interrupted)``: ``mode`` is ``"killed"`` or ``"absent"``;
-    ``interrupted`` is True when the killed session carried live processes (a
-    running foreground or background job) at kill time — the TTL reaper uses
-    it to decide whether the reclamation deserves a notice to the owner (an
-    empty shell's reaping is silent). A backend that cannot inspect the
-    session's processes reports interrupted=True (fail-open: a session that
+    Returns ``(mode, interrupted, name)``: ``mode`` is ``"killed"`` or
+    ``"absent"``; ``interrupted`` is True when the killed session carried live
+    processes (a running foreground or background job) at kill time — the TTL
+    reaper uses it to decide whether the reclamation deserves a notice to the
+    owner (an empty shell's reaping is silent); ``name`` is the shell's
+    optional display name. The verdict comes from the same backend call that
+    kills (``kill_session_with_verdict``), so a job starting between a
+    separate idle probe and the kill cannot be missed; a backend without
+    verdict support reports interrupted=True (fail-open: a session that
     cannot be proven idle may well be running work)."""
     shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
     if shell is None:
-        return "absent", False
+        return "absent", False, None
     full_name = shared.cluster.session_name(f"agent-{agent_id}-shell-{session_id}") + (
         f"-{shell.name}" if shell.name else ""
     )
@@ -300,13 +303,13 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool]:
 
     backend = get_shell_backend()
     try:
-        interrupted = backend.session_has_active_processes(full_name)
+        ok, _mode, interrupted = backend.kill_session_with_verdict(full_name)
     except NotImplementedError:
         interrupted = True  # cannot inspect — assume the worst
-    ok, _mode = backend.kill_session(full_name)
+        ok, _mode = backend.kill_session(full_name)
     if not ok:
         raise RuntimeError(f"failed to kill session {full_name!r}")
-    return "killed", interrupted
+    return "killed", interrupted, shell.name
 
 
 def _collect_sessions() -> tuple[list[SessionInfo], int, int]:

@@ -174,19 +174,21 @@ def fleet(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> _Fleet:
     return _Fleet(procs=procs, waited=waited)
 
 
-def test_session_has_active_processes_reports_descendants(fleet: _Fleet) -> None:
-    """The TTL reaper's interrupt probe: a session is busy when its recorded
-    process carries live descendants, idle when it does not, and an absent
-    session is never busy (nothing to interrupt)."""
-    assert winproc.session_has_active_processes("ava-updater") is True, (
-        "the updater's running `ava restart` child makes it busy"
+def test_kill_session_with_verdict_live_session_is_interrupted(fleet: _Fleet) -> None:
+    """The TTL reaper's interrupt verdict on Windows: the session process IS
+    the work (new_session Popens the user's command directly — no shell
+    layer), so killing any live session interrupted something; only the
+    idempotent noop on an already-absent session reports not-interrupted."""
+    ok, mode, interrupted = winproc.kill_session_with_verdict("ava-updater")
+    assert (ok, mode, interrupted) == (True, "forced", True), (
+        "a live session with a running child must report interrupted"
     )
-    assert winproc.session_has_active_processes("ava-agent-42") is False, (
-        "a process with no children is idle"
+    ok, mode, interrupted = winproc.kill_session_with_verdict("ava-agent-42")
+    assert (ok, mode, interrupted) == (True, "forced", True), (
+        "a live session WITHOUT children is still the work itself — busy"
     )
-    assert winproc.session_has_active_processes("ava-nonexistent") is False, (
-        "an absent session was not interrupted"
-    )
+    ok, mode, interrupted = winproc.kill_session_with_verdict("ava-nonexistent")
+    assert (ok, mode, interrupted) == (True, "noop", False), "an absent session was not interrupted"
 
 
 def test_killing_a_daemon_spares_the_updater_session_it_spawned(fleet: _Fleet) -> None:

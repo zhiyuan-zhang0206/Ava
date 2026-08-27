@@ -958,69 +958,68 @@ def test_kill_then_immediate_same_name_new_is_a_real_session(sessions: Path) -> 
 
 
 # ---------------------------------------------------------------------------
-# busy — the TTL reaper's interrupt probe
+# kill verdict — the TTL reaper's interrupt probe
 # ---------------------------------------------------------------------------
 
 
-def _busy(home: Path, name: str) -> str:
-    result = _run_cli(home, name, "busy")
-    assert result.returncode == 0, f"busy failed: {result.stderr}"
+def _kill_verdict(home: Path, name: str) -> str:
+    result = _run_cli(home, name, "kill")
+    assert result.returncode == 0, f"kill failed: {result.stderr}"
     return result.stdout.strip()
 
 
-def test_busy_idle_at_prompt(sessions: Path) -> None:
-    """A shell sitting at its prompt with no job is idle — the empty-shell
+def test_kill_idle_reports_not_interrupted(sessions: Path) -> None:
+    """Killing a shell sitting at its prompt reports `idle` — the empty-shell
     case the 2026-08-27 ruling reaps silently."""
     home = sessions
-    name = "ava-test-busy-idle-1"
+    name = "ava-test-verdict-idle-1"
     _new(home, name)
-    _send(home, name, "echo busy-idle-ready")
-    _output_until(home, name, "busy-idle-ready")
-    assert _busy(home, name) == "idle"
+    _send(home, name, "echo verdict-idle-ready")
+    _output_until(home, name, "verdict-idle-ready")
+    assert _kill_verdict(home, name) == "idle"
+    assert not _has(home, name)
 
 
-def test_busy_foreground_job(sessions: Path) -> None:
-    """A foreground job owns the tty — the session carries running work."""
+def _wait_shell_child(home: Path, name: str) -> psutil.Process:
+    """Wait until the named session's shell has a live child (the job is up)."""
+    rec = _record(home, name)
+    assert rec is not None
+    shell = psutil.Process(rec.pid)
+    assert _wait(shell.children), f"{name} shell never grew a child"
+    return shell
+
+
+def test_kill_foreground_job_reports_interrupted(sessions: Path) -> None:
+    """Killing a session with a foreground job reports `interrupted` — the
+    verdict is snapshotted by the kill op itself, so a job starting between
+    a separate probe and the kill cannot be missed."""
     home = sessions
-    name = "ava-test-busy-fg-1"
+    name = "ava-test-verdict-fg-1"
     _new(home, name)
-    _send(home, name, "echo busy-fg-ready")
-    _output_until(home, name, "busy-fg-ready")
+    _send(home, name, "echo verdict-fg-ready")
+    _output_until(home, name, "verdict-fg-ready")
     _send(home, name, "sleep 300")
-
-    def _running() -> bool:
-        return _busy(home, name) == "busy"
-
-    assert _wait(_running, timeout=10.0), "foreground job never read busy"
-    _keys(home, name, "C-c")
-    assert _wait(lambda: _busy(home, name) == "idle", timeout=10.0), (
-        "session must read idle after the job is interrupted"
-    )
+    _wait_shell_child(home, name)
+    assert _kill_verdict(home, name) == "interrupted"
+    assert not _has(home, name)
 
 
-def test_busy_background_job(sessions: Path) -> None:
+def test_kill_background_job_reports_interrupted(sessions: Path) -> None:
     """A background job (children of the shell, no tty) also counts as
     running work — the ruling's 'active process / background job'."""
     home = sessions
-    name = "ava-test-busy-bg-1"
+    name = "ava-test-verdict-bg-1"
     _new(home, name)
-    _send(home, name, "echo busy-bg-ready")
-    _output_until(home, name, "busy-bg-ready")
+    _send(home, name, "echo verdict-bg-ready")
+    _output_until(home, name, "verdict-bg-ready")
     _send(home, name, "sleep 300 &")
-    assert _wait(lambda: _busy(home, name) == "busy", timeout=10.0), (
-        "background job never read busy"
-    )
-    # SIGKILL, not `kill %1`: the pty host ignores SIGTERM (the survive-storm
-    # invariant) and bash hands that inherited SIG_IGN to background children,
-    # so a TERM-based job kill is a silent no-op on them.
-    _send(home, name, "kill -9 %1")
-    assert _wait(lambda: _busy(home, name) == "idle", timeout=10.0), (
-        "session must read idle after the background job is killed"
-    )
+    _wait_shell_child(home, name)
+    assert _kill_verdict(home, name) == "interrupted"
+    assert not _has(home, name)
 
 
-def test_busy_absent_session_exits_3(sessions: Path) -> None:
-    """The busy op follows the ops contract: no such session -> exit 3."""
+def test_kill_absent_reports_idle(sessions: Path) -> None:
+    """Killing an absent session is an idempotent noop and reports `idle` —
+    nothing was there to interrupt."""
     home = sessions
-    result = _run_cli(home, "ava-test-busy-absent-1", "busy")
-    assert result.returncode == 3
+    assert _kill_verdict(home, "ava-test-verdict-absent-1") == "idle"
