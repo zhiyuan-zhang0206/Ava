@@ -151,33 +151,25 @@ def understand[TargetValue: str | list[str]](
 
     Each target is a dict with `prompt` plus exactly one of `text` / `paths`.
     `paths` is a non-empty list of file paths (text, image, video, audio, or
-    PDF) — a single file is a one-element list, and a relative path resolves
-    like your other file operations. The files are sent together in ONE model
-    call as separate parts, so the model can compare them (e.g. a design frame
-    plus a page screenshot); any media file makes the whole call run on the
+    PDF). The files are sent together in ONE model call as separate parts;
+    any media file makes the whole call run on the
     media model, and text files in the list ride along as text parts. `text`
     is the material itself as a literal string. A failed model call raises
     `ava.understand.UnderstandError`.
 
-    One question is a one-element list — there is no single-call form.
-
     `effort` sets the answering model's reasoning depth, one of `none` / `low`
     / `medium` / `high` / `xhigh` / `max` (also available as
     `ava.understand.ReasoningEffort`). Default `max` — the deepest reasoning
-    the model supports, sent explicitly so a global env override cannot
-    silently downgrade this path. Media (Gemini) has no `max` level: `max`
-    keeps the configured `AVA_UNDERSTAND_MEDIA_THINKING_LEVEL` knob, and any
-    other level is clamped onto Gemini's `minimal`/`low`/`medium`/`high`
-    thinking vocabulary (`none` → `minimal`, `xhigh` → `high`). Pass `effort`
-    by keyword — positional arguments after `targets` belong to
-    `max_concurrent`.
+    the model supports. Media (Gemini) has no `max` level: `max`
+    keeps the configured `AVA_UNDERSTAND_MEDIA_THINKING_LEVEL` knob; other
+    levels map to `minimal`/`low`/`medium`/`high` (`none` → `minimal`,
+    `xhigh` → `high`).
 
-    `max_concurrent` caps how many targets run at once — pass a number to
-    limit in-flight model calls (handy under a provider rate limit); the
-    default runs every target concurrently with no ceiling.
+    `max_concurrent` caps parallel targets; the default runs every target
+    concurrently with no ceiling.
 
-    Every result is auto-saved to `.exec_output/` in your workspace so you never
-    lose an answer to a compaction or restart. The path is logged at debug level.
+    Every result is auto-saved to `.exec_output/` in your workspace; the path
+    is logged at debug level.
 
     Returns:
         One answer per target, in input order.

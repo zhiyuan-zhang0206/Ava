@@ -178,7 +178,7 @@ def test_function_target_renders_heading_then_def_with_signature() -> None:
     out = _render(ava.shell.run)
     assert out.startswith("### ava.shell.run\n\n"), out.splitlines()[0]
     assert "def run(cmd: str" in out
-    assert "Run a shell command and return its stdout." in out
+    assert "Non-zero exit does not" in out  # name restatement trimmed (sysprompt verbosity audit)
 
 
 # ── submodule child = `from . import` + orphan docstring ────────────────────

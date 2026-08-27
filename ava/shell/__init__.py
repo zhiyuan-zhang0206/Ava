@@ -92,7 +92,7 @@ def run(
     cwd: str | None = None,
     timeout: float = 30.0,
 ) -> ShellResult:
-    """Run a shell command and return its stdout. Non-zero exit does not
+    """Non-zero exit does not
     raise; exceeding `timeout` seconds kills the command and raises
     `subprocess.TimeoutExpired`. `cwd` defaults to your workspace.
 
@@ -156,8 +156,7 @@ def run_background(
     keep: bool = False,
     ttl: float,
 ) -> BackgroundRun:
-    """Run a long shell command in the background; you get a message when it
-    finishes — no polling. Returns immediately.
+    """You get a message when it finishes — no polling.
 
     The command runs in a fresh persistent session, stdout+stderr streaming to
     `output_path` (`.shell_logs/<session_id>_<name>.log` in your workspace) —
@@ -165,8 +164,8 @@ def run_background(
     exit code, the log path, and the output tail; the session then closes
     itself unless `keep=True`. While running it is an ordinary session.
 
-    Use this for one-shot long tasks (builds, test suites, downloads);
-    interactive programs belong in `sessions.new` + `send`.
+    Use this for one-shot long tasks; interactive programs belong in
+    `sessions.new` + `send`.
 
     Args:
         cmd: must be a single line — join steps with `;` or `&&`, or point at

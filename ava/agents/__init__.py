@@ -1,5 +1,3 @@
-"""Interact with your peer agents."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -143,11 +141,10 @@ def _relative_time(dt: datetime) -> str:
 
 
 def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighbor]:
-    """Rank the agents most strongly tied to `agent_id`, strongest first.
+    """Rank the agents most strongly tied to `agent_id`.
 
     Ties form on spawn, fork, resurrect, or send_message and fade with time;
-    `depth` is how many hops out to look. The chain ABOVE an agent (who
-    spawned whom) is a separate read: `get_ancestors`.
+    `depth` is how many hops out to look.
     """
     return [
         Neighbor(
@@ -162,13 +159,10 @@ def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighb
 
 
 def get_ancestors(agent_id: int) -> list[Neighbor]:
-    """Return the spawn/fork chain above `agent_id`, nearest ancestor first.
+    """The spawn/fork chain above `agent_id`, nearest ancestor first.
 
-    Each row is a `Neighbor` with `depth` = hops UP (1 = the agent that
-    directly spawned the queried agent) and `score` = the lineage tie
-    strength. The walk goes to the top of the chain. Message ties never form
-    ancestors, and an agent spawned by the user (or with no recorded spawn)
-    returns [].
+    Message ties never form ancestors, and an agent spawned by the user (or
+    with no recorded spawn) returns [].
     """
     return [
         Neighbor(
@@ -241,7 +235,7 @@ def spawn(
     config_overlay: dict[str, object] | None = None,
     preset: str | None = None,
 ) -> int:
-    """Start a new agent and return its id. Does not block.
+    """Start a new agent; does not block.
 
     `prompt` is the first message (make it self-contained — the new agent has
     no context about why you spawned it); omit to leave it idling. `fork_from`
@@ -333,7 +327,7 @@ def commands() -> list[CommandInfo]:
 
 
 def send_message(agent_id: int, content: str) -> None:
-    """Send a message to another agent. Does not wait or confirm delivery.
+    """Does not wait or confirm delivery.
 
     A terminated target is auto-resurrected to handle the message.
     """  # lint-docstring: ok "auto-resurrected" is public behaviour, not impl detail
@@ -371,13 +365,10 @@ def send_system_note(
 
 
 def get_last_message(agent_id: int) -> str | None:
-    """Return the text of an agent's last message, or None when it has
-    produced none yet.
+    """Return the last message, or None when none yet.
 
     The returned text is peer-authored, so it passes through the same
-    prompt-injection scan as inbound chat messages (audit round-2
-    up-security-trust P1-4: the pull path bypassed the scan the push
-    path has)."""
+    prompt-injection scan as inbound chat messages."""
     from ava.security import scan_content
 
     caller = ava._boot.require_actor()
@@ -388,7 +379,6 @@ def get_last_message(agent_id: int) -> str | None:
 
 
 def get_status(agent_id: int) -> AgentStatus:
-    """Return the current status of an agent."""
     agents = _client.list_agents()
     for a in agents:
         if a["agent_id"] == agent_id:

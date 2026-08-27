@@ -1,5 +1,3 @@
-"""Search the web and fetch pages."""
-
 __all_for_ava__ = [
     "ReasoningEffort",
     "SearchResult",
@@ -122,13 +120,12 @@ class SearchResult:
 def search(
     queries: list[str], count: int = 10, max_concurrent: int | None = None
 ) -> list[list[SearchResult]]:
-    """Search the web for each query in parallel.
+    """Search each query in parallel.
 
     `count` caps results per query (at most 20).
 
-    `max_concurrent` caps how many queries run at once — pass a number to
-    limit in-flight search calls (handy under a rate limit); the default runs
-    every query concurrently with no ceiling.
+    `max_concurrent` caps parallel queries; the default runs every query
+    concurrently with no ceiling.
 
     Returns:
         One result list per query, in input order.
@@ -224,16 +221,13 @@ def fetch(
     model answers `prompt` against its content. `max_chars` caps how much of
     each page the model reads.
 
-    `effort` sets the summarizing model's reasoning depth, one of `none` /
-    `low` / `medium` / `high` / `xhigh` / `max` (also available as
-    `ava.web.ReasoningEffort`). `None` (default) keeps the configured
-    `settings.web.web_fetch_reasoning` (default `none`) — pass `effort="high"`
-    per call for deeper summaries. Pass `effort` by keyword — positional
-    arguments after `targets` belong to `max_chars` / `max_concurrent`.
+    `effort` sets the summarizing model's reasoning depth (same levels as
+    `ava.understand`; also available as `ava.web.ReasoningEffort`). `None`
+    (default) keeps the configured `settings.web.web_fetch_reasoning`
+    (default `none`) — pass `effort="high"` per call for deeper summaries.
 
-    `max_concurrent` caps how many targets run at once — pass a number to
-    limit in-flight fetches (handy under a rate limit); the default runs
-    every target concurrently with no ceiling.
+    `max_concurrent` caps parallel fetches; the default runs every target
+    concurrently with no ceiling.
 
     Returns:
         One answer per pair, in input order.
