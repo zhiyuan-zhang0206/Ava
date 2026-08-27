@@ -20,7 +20,9 @@ import type { NoticesFeed } from "./types";
 import {
   NOTICES_QUERY_KEY,
   NOTICES_RESOLVED_QUERY_KEY,
+  dropOpenNotices,
   useNotices,
+  type NoticesFeedWire,
 } from "./use-notices";
 import { EventStreamProvider } from "./useEventStream";
 
@@ -251,5 +253,41 @@ describe("useNotices", () => {
     };
     expect(secondCall.beforeAt).toBe("2026-06-14T02:00:00Z");
     expect(secondCall.beforeId).toBe(5);
+  });
+});
+
+describe("dropOpenNotices (Task #1814)", () => {
+  it("filters the resolved ids out of open AND awaiting, keeping everything else", () => {
+    // Wire shape under NOTICES_QUERY_KEY (camelCase, the api.getNotices data).
+    queryClient.setQueryData(NOTICES_QUERY_KEY, {
+      open: [
+        { id: 1, title: "keep fyi" },
+        { id: 2, title: "drop fyi" },
+      ],
+      awaiting: [
+        { id: 3, title: "drop decision" },
+        { id: 4, title: "keep decision" },
+      ],
+      resolved_page: [{ id: 5, title: "history untouched" }],
+      next_cursor: { before_at: "2026-06-14T00:00:00Z", before_id: 5 },
+    });
+
+    // A mix of ids spanning both lists plus an unknown id — only the matched
+    // rows vanish; the resolved history and the cursor are never touched.
+    dropOpenNotices(queryClient, [2, 3, 99]);
+
+    const data = queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY);
+    expect(data?.open.map((n) => n.id)).toEqual([1]);
+    expect(data?.awaiting.map((n) => n.id)).toEqual([4]);
+    expect(data?.resolved_page.map((n) => n.id)).toEqual([5]);
+    expect(data?.next_cursor?.before_id).toBe(5);
+  });
+
+  it("is a no-op on an empty id list and on an unseeded cache", () => {
+    dropOpenNotices(queryClient, []);
+    expect(queryClient.getQueryData(NOTICES_QUERY_KEY)).toBeUndefined();
+
+    dropOpenNotices(queryClient, [1]);
+    expect(queryClient.getQueryData(NOTICES_QUERY_KEY)).toBeUndefined();
   });
 });
