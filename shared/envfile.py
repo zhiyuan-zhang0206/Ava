@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+from shared.config import cluster_tz
 from shared.platform import file_lock
 from shared.private_storage import ensure_private_dir, ensure_private_file, write_private_bytes
 
@@ -62,7 +63,10 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
             return None
         # Local-time stamp with microseconds: filename sorts chronologically and
         # stays unique across rapid successive writes.
-        dest = backup_dir / f".env.{datetime.now().astimezone().strftime('%Y%m%d-%H%M%S-%f')}"
+        dest = (
+            backup_dir
+            / f".env.{datetime.now().astimezone(cluster_tz()).strftime('%Y%m%d-%H%M%S-%f')}"
+        )
         dest.write_text(content)
         ensure_private_file(dest)
         if keep > 0:

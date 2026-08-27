@@ -531,6 +531,8 @@ def at(
     Returns:
         The watcher's session id; kill that session to cancel.
     """
+    from shared.config import settings
+
     _validate_message(message)
     due_at = normalize_when(when)
     if due_at < datetime.datetime.now(datetime.UTC):
@@ -538,7 +540,13 @@ def at(
             f"when is in the past: {due_at.isoformat()}. "
             "Provide a future time, or use a positive timedelta."
         )
-    code = build_at_script(when_iso=due_at.isoformat(), message=message)
+    # The announcement's wall clock follows the cluster timezone (user ruling
+    # 2026-08-27: one cluster clock); the sleep is UTC-based regardless.
+    code = build_at_script(
+        when_iso=due_at.isoformat(),
+        message=message,
+        timezone=settings.general.timezone,
+    )
     # The one-shot script sleeps until `when`, wakes you once, and exits — it
     # ends itself, so no watchdog.
     return _spawn(code, None, name, kind="at", message=message, fires_at=due_at)

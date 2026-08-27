@@ -88,13 +88,29 @@ def test_normalize_end_time_none() -> None:
 
 def test_build_at_script_has_wake_and_sleep() -> None:
     when = dt.datetime(2030, 1, 1, 0, 0, tzinfo=dt.UTC)
-    script = build_at_script(when_iso=when.isoformat(), message="hi there")
+    script = build_at_script(when_iso=when.isoformat(), message="hi there", timezone="UTC")
     # The wake helper delivers a watcher:N-tagged inbound to the launching agent.
     assert "def _wake" in script
     assert '"watcher:" + _os.environ["AVA_WATCHER_SESSION_ID"]' in script
     assert "_wake(_MESSAGE)" in script
     assert "time.sleep" in script
     assert "hi there" in script
+    compile(script, "<at-script>", "exec")  # must be valid Python
+
+
+def test_build_at_script_announcement_uses_cluster_zone() -> None:
+    """The one-shot startup announcement renders in the passed cluster
+    timezone (user ruling 2026-08-27: one cluster clock), never the host OS
+    zone — the sleep stays UTC-based regardless."""
+
+    when = dt.datetime(2030, 1, 1, 0, 0, tzinfo=dt.UTC)
+    script = build_at_script(
+        when_iso=when.isoformat(), message="hi there", timezone="Asia/Shanghai"
+    )
+    assert "from zoneinfo import ZoneInfo" in script
+    assert "_TZ = ZoneInfo('Asia/Shanghai')" in script
+    assert "_WHEN.astimezone(_TZ).isoformat()" in script
+    assert "astimezone().isoformat()" not in script  # no bare host-zone read
     compile(script, "<at-script>", "exec")  # must be valid Python
 
 
@@ -310,7 +326,7 @@ def test_at_clock_step_backwards_does_not_fire_early(
         dt.datetime(2026, 8, 20, 16, 0, 9, 420000, tzinfo=dt.UTC),  # 2.91s before when
         corrections=[-4.0],
     )
-    script = build_at_script(when_iso=when.isoformat(), message="wake")
+    script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
     sent = _exec_watcher(script, wall, monkeypatch)
 
     assert len(sent) == 1
@@ -348,7 +364,7 @@ def test_cron_script_stamps_template_version() -> None:
 
 def test_at_script_stamps_template_version() -> None:
     when = dt.datetime(2030, 1, 1, 0, 0, tzinfo=dt.UTC)
-    script = build_at_script(when_iso=when.isoformat(), message="wake")
+    script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
     assert "_TEMPLATE_VERSION = 4" in script
 
 
@@ -397,11 +413,12 @@ def test_at_script_announces_when(
     capture shows at a glance when it will fire."""
     when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
     wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
-    script = build_at_script(when_iso=when.isoformat(), message="wake")
+    script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
     sent = _exec_watcher(script, wall, monkeypatch)
     out = capsys.readouterr().out
 
     assert len(sent) == 1  # fire semantics unchanged
-    # Printed in the machine's local wall clock (matches the cron script's
-    # tz-aware display); the isoformat with offset is the same instant.
-    assert f"[watcher] one-shot -> fires at {when.astimezone().isoformat()}" in out
+    # Printed in the passed cluster timezone (user ruling 2026-08-27: one
+    # cluster clock), matching the cron script's tz-aware display; the
+    # isoformat with offset is the same instant.
+    assert f"[watcher] one-shot -> fires at {when.astimezone(dt.UTC).isoformat()}" in out

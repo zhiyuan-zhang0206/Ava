@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 
 import shared.private_storage
+from shared.config import settings
+from shared.config.general import GeneralSettings
 from shared.envfile import ENV_BACKUP_KEEP, remove_env, snapshot_env, upsert_env
 
 
@@ -89,6 +91,30 @@ def test_snapshot_backs_up_content_0600(tmp_path: Path):
     assert dest is not None
     assert dest.read_text() == "SECRET=abc\n"
     assert oct(dest.stat().st_mode)[-3:] == "600"
+
+
+def test_snapshot_filename_stamps_cluster_clock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The backup filename's wall clock follows the cluster timezone (user
+    ruling 2026-08-27), so an operator reading backup names sees the same
+    clock as every other surface."""
+
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(
+        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
+    )
+    env = tmp_path / ".env"
+    env.write_text("SECRET=abc\n")
+    # Snapshot before/after the call so the midnight boundary cannot race the
+    # assertion: the stamp must be the cluster-zone wall date at call time.
+    before = _dt.datetime.now(ZoneInfo("Asia/Shanghai"))
+    dest = snapshot_env(env)
+    after = _dt.datetime.now(ZoneInfo("Asia/Shanghai"))
+    assert dest is not None
+    stamp = dest.name[len(".env.") :].split("-")[0]  # YYYYMMDD
+    assert len(stamp) == 8
+    assert stamp in {before.strftime("%Y%m%d"), after.strftime("%Y%m%d")}
 
 
 def test_snapshot_dedupes_identical(tmp_path: Path):
