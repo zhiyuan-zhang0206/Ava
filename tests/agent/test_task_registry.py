@@ -809,12 +809,12 @@ def test_update_by_owner_no_notification(db_conn: psycopg.Connection, root_task_
         ava._boot._agent_id = original
 
 
-def test_update_non_owner_notifies_terminated_owner(
+def test_update_non_owner_skips_terminated_owner(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    """A terminated owner is still told — send_message auto-resurrects it, so an
-    owner learns its task changed even while it is down (same rule as the
-    new-owner leg of a reassignment)."""
+    """A terminated owner is NOT notified of a non-owner write — a notification
+    is not worth resurrecting the agent (user ruling 2026-08-27: notification
+    messages never auto-resurrect a terminated owner)."""
     actor_id = _seed_agent(db_conn)
     dead_owner = _seed_agent(db_conn, status="terminated")
     original = ava._boot._agent_id
@@ -824,9 +824,75 @@ def test_update_non_owner_notifies_terminated_owner(
             task = task_registry.create("title", "detail", owner=dead_owner, parent=root_task_id)
         with patch("ava.agents.send_message") as mock_send:
             task_registry.update(task.id, status="done")
+            mock_send.assert_not_called()
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_parent_only_by_non_owner_no_notification(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """A parent-only reparent by a non-owner is structural tree maintenance, not
+    a business change: no owner notification, even when the owner is live
+    (regression for the 2026-08-27 batch-reparent wake storm)."""
+    actor_id = _seed_agent(db_conn)
+    owner_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = actor_id
+    try:
+        with patch("ava.agents.send_message"):
+            parent = task_registry.create("notify-parent", "d", parent=root_task_id)
+            task = task_registry.create("notify-child", "d", owner=owner_id, parent=root_task_id)
+        with patch("ava.agents.send_message") as mock_send:
+            task_registry.update(task.id, parent_id=parent.id)
+            mock_send.assert_not_called()
+        assert _persisted_parent(db_conn, task.id) == parent.id
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_parent_only_terminated_owner_not_resurrected(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """The exact incident shape: a batch reparent moves a task owned by a
+    terminated agent — the owner must stay asleep (no send_message, so no
+    auto-resurrect)."""
+    actor_id = _seed_agent(db_conn)
+    dead_owner = _seed_agent(db_conn, status="terminated")
+    original = ava._boot._agent_id
+    ava._boot._agent_id = actor_id
+    try:
+        with patch("ava.agents.send_message"):
+            parent = task_registry.create("storm-parent", "d", parent=root_task_id)
+            task = task_registry.create("storm-child", "d", owner=dead_owner, parent=root_task_id)
+        with patch("ava.agents.send_message") as mock_send:
+            task_registry.update(task.id, parent_id=parent.id)
+            mock_send.assert_not_called()
+        assert _persisted_parent(db_conn, task.id) == parent.id
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_parent_plus_business_field_still_notifies(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """A reparent combined with a real business change is not parent-only: the
+    owner is still notified, so a mixed update never slips through silently."""
+    actor_id = _seed_agent(db_conn)
+    owner_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = actor_id
+    try:
+        with patch("ava.agents.send_message"):
+            parent = task_registry.create("mixed-parent", "d", parent=root_task_id)
+            task = task_registry.create("mixed-child", "d", owner=owner_id, parent=root_task_id)
+        with patch("ava.agents.send_message") as mock_send:
+            task_registry.update(task.id, parent_id=parent.id, status="cancelled")
             mock_send.assert_called_once()
-            assert mock_send.call_args[0][0] == dead_owner
-            assert "was updated by" in mock_send.call_args[0][1]
+            recipient, msg = mock_send.call_args[0]
+            assert recipient == owner_id
+            assert "parent →" in msg
+            assert "status → cancelled" in msg
     finally:
         ava._boot._agent_id = original
 
