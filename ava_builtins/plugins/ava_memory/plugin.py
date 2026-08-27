@@ -246,7 +246,7 @@ def _locked_update(index_path: Path, update: Callable[[str], str]) -> None:
     lock is advisory and each upsert rewrites a single pointer line in place,
     so an unlocked Windows update can at worst drop one line under a
     concurrent writer; on a single-user box that beats crashing every agent at
-    plugin load (b4b9689)."""
+    plugin load (unguarded import introduced by 6e96b1554)."""
     index_path.parent.mkdir(parents=True, exist_ok=True)
     with index_path.open("a+", encoding="utf-8") as index_file:
         if fcntl is not None:
