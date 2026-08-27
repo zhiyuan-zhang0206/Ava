@@ -585,7 +585,10 @@ def update(
     Any write resets the reminder clock. When the owner changes, both the old
     and new owner are notified (the new owner's message also carries a summary
     of the other fields changed in the same call). When the updater is not the
-    owner, the owner is notified of the change and its author.
+    owner, the owner is notified of the change and its author — except a
+    parent-only reparent (no other field, no note), which is structural tree
+    maintenance and stays silent. A terminated owner is never resurrected for
+    a notification.
 
     Args:
         status: one of "open", "in_progress", "done", "cancelled". Closing a
@@ -610,6 +613,12 @@ def update(
             "update needs at least one of status, title, description, results, "
             "owner, remind_interval_seconds, priority, parent_id, note to change"
         )
+    # A parent-only reparent (no business field changed, no note) is structural
+    # tree maintenance — moving a task between parents, not changing its work —
+    # so it must not notify — and therefore must not resurrect — the owner.
+    # Batch reparenting used to fire one owner notification per move, each
+    # auto-resurrecting a terminated owner (62-agent wake storm, 2026-08-27).
+    parent_only = parent_id is not _UNSET and _nothing_to_update(sets, note)
     # Reset the reminder counters on any update — a fresh overdue window starts
     # from this update, so any previous reminder is stale.
     sets.append("last_reminded_at = NULL")
@@ -643,7 +652,15 @@ def update(
     # (unchanged) owner of what changed and by whom — so a task cancelled
     # behind its owner's back never goes unnoticed.
     _notify_after_update(
-        task_id, title, current_title, old_owner, new_owner, owner_changing, actor, changes
+        task_id,
+        title,
+        current_title,
+        old_owner,
+        new_owner,
+        owner_changing,
+        actor,
+        changes,
+        parent_only,
     )
 
     # Live-refresh every open task board (fleet-wide invalidate + refetch).
@@ -667,10 +684,18 @@ def _notify_after_update(
     owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
     actor: int,
     changes: builtins.list[str],
+    parent_only: bool,  # noqa: FBT001 — internal helper flag, always passed by name
 ) -> None:
     """Post-commit owner notifications for update(): tell the new owner about
     the reassignment (with the change summary), or tell the unchanged owner
-    that another agent wrote to its task."""
+    that another agent wrote to its task.
+
+    A parent-only reparent is skipped entirely — it is structural tree
+    maintenance (cleanup / hierarchy moves), not a change to the task's own
+    work, so no owner is woken for it (the 2026-08-27 incident: one batch
+    reparent auto-resurrected 62 terminated owners through this path)."""
+    if parent_only:
+        return
     resolved_title = title if title is not None else current_title
     if _owner_actually_changed(owner_changing, old_owner, new_owner):
         _notify_owner_change(task_id, resolved_title, old_owner, new_owner, actor, changes=changes)
@@ -724,15 +749,19 @@ def _notify_owner_updated(
 ) -> None:
     """Tell the task's owner that another agent changed their task.
 
-    Fires on any non-owner write (status, title, description, results, note,
-    priority, ...) so an owner is never left unaware that its task was touched --
-    the case that motivated it: task #494 was cancelled by another agent and its
-    owner only found out later. The owner is always told, even when terminated:
-    `send_message` auto-resurrects it (same rule as the new-owner leg of
-    `_notify_owner_change`), because the change is material to the owner's own
-    work on the task. `actor` is never notified about its own action -- update()
-    only calls this when `actor != owner`.
+    Fires on any non-owner business write (status, title, description,
+    results, note, priority, ...) so an owner is never left unaware that its
+    task was touched -- the case that motivated it: task #494 was cancelled by
+    another agent and its owner only found out later. A terminated owner is
+    deliberately left asleep: this is a notification, not a delegator
+    direction, so it must not auto-resurrect the owner just to be told (user
+    ruling 2026-08-27 -- notification messages never resurrect a terminated
+    owner; only real delegator/user business messages may). `actor` is never
+    notified about its own action -- update() only calls this when
+    `actor != owner`.
     """
+    if _is_terminated(owner):
+        return
     detail = "\n".join(f"- {c}" for c in changes)
     ava.agents.send_message(
         owner, f'Task #{task_id} "{title}" was updated by agent #{actor}:\n{detail}'
