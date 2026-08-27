@@ -143,8 +143,11 @@ def attach_message(
 ) -> HumanMessage:
     """Add files prepared during the preceding turn to the conversation.
 
-    The message is available to your next response. Its first content block
-    explains every file; following blocks carry any media your model can use.
+    The message is available to your next response. Content blocks are
+    interleaved per file — ``[text(notice), text(line1), media1, text(line2),
+    media2, ...]`` — so every media block sits directly after its own caption
+    line (the timeline reads that pairing structurally via
+    ``shared/timeline._attach_image_captions``).
     """
     content_blocks = blocks or [{"type": "text", "text": text}]
     return HumanMessage(

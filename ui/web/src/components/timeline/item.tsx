@@ -16,7 +16,7 @@
 // have no card and render bare through EphemeralSystemMarker.
 
 import { useTranslations } from "next-intl";
-import { memo } from "react";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
 
 import { CopyButton } from "@/components/copy-button";
 import { ChatMarkdown } from "@/components/markdown";
@@ -55,10 +55,154 @@ function splitEnvelope(payload: string): { header: string; body: string } {
 // Envelope content — dim single-line header + monospace body + optional image
 // thumbnails. The card frame provides the colored border / background; this
 // renders only the inner text, unpadded.
+//
+// Attach items (attachMode) render through AttachContent: the backend caption
+// lines interleave with their thumbnails (label → image → label → image), the
+// "[system] …" notice renders dimmed, and every thumbnail opens a lightbox on
+// click instead of navigating away. Multimodal inbound_chat keeps the
+// envelope layout but shares the same lightbox thumbnails.
+function Thumbnail({ src, alt }: { src: string; alt: string }) {
+  // Click-to-zoom overlay: no navigation (user ruling 2026-08-27 — the old
+  // <a target="_blank"> opened the raw data-URI in a new tab). Click anywhere
+  // on the backdrop (or the image) or press Escape to close. While open the
+  // dialog holds focus (Tab is trapped — the dialog is the only focusable
+  // node), background scroll is locked, and closing returns focus to the
+  // trigger button (QA review #831 nit).
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    const trigger = buttonRef.current;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+      } else if (e.key === "Tab") {
+        // Focus trap: keep Tab inside the modal instead of escaping to the
+        // background content behind the overlay.
+        e.preventDefault();
+        dialogRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      trigger?.focus();
+    };
+  }, [open]);
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={alt}
+        data-testid="attach-thumbnail"
+        className="cursor-zoom-in rounded border-0 bg-transparent p-0"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
+        <img
+          src={src}
+          alt={alt}
+          crossOrigin="use-credentials"
+          className="max-h-48 max-w-[16rem] rounded border border-border object-contain"
+        />
+      </button>
+      {open ? (
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={alt}
+          data-testid="attach-lightbox"
+          tabIndex={-1}
+          onClick={() => setOpen(false)}
+          className={cn("fixed inset-0 z-50 cursor-zoom-out items-center justify-center bg-black/80 p-4 outline-none", FLEX)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
+          <img
+            src={src}
+            alt={alt}
+            crossOrigin="use-credentials"
+            className="max-h-[88vh] max-w-[92vw] rounded object-contain shadow-2xl"
+          />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+// Attach item body: the caption lines rendered one per row, each delivered
+// image's thumbnail directly under its own line (label1 → image1 → label2 →
+// image2 — user ruling 2026-08-27). Pairing is structural: `imageCaptions`
+// holds the exact backend-generated caption line of each image (1:1 with
+// `images`), so a line matches at most one image and skipped entries (no
+// image, "not delivered" reason) fall through as plain rows. The leading
+// "[system] …" notice renders dimmed and small.
+function AttachContent({
+  payload,
+  images,
+  imageCaptions,
+}: {
+  payload: string;
+  images: string[] | null;
+  imageCaptions: string[] | null;
+}) {
+  const t = useTranslations("timeline");
+  const lines = payload.split("\n");
+  let imgIdx = 0;
+  const rows = lines.map((line, i) => {
+    const hasImage = imageCaptions?.[imgIdx] === line;
+    const src = hasImage && images != null ? images[imgIdx++] : null;
+    const isNotice = line.startsWith("[system]");
+    return (
+      <Fragment key={i}>
+        <div
+          className={cn(
+            "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono leading-relaxed m-0",
+            isNotice
+              ? "text-[11px] text-muted-foreground/70"
+              : "text-[13px] text-foreground/90",
+          )}
+        >
+          {line}
+        </div>
+        {src ? (
+          <div className="mt-1">
+            <Thumbnail src={src} alt={t("attachedImage")} />
+          </div>
+        ) : null}
+      </Fragment>
+    );
+  });
+  // Safety net: an image whose caption never matched a line (defensive — the
+  // backend contract guarantees alignment) still renders, so no thumbnail is
+  // ever dropped.
+  const trailing = images?.slice(imgIdx) ?? [];
+  return (
+    <div className="space-y-1.5">
+      {rows}
+      {trailing.length ? (
+        <div className={cn("flex-wrap gap-2", FLEX)}>
+          {trailing.map((src) => (
+            <Thumbnail key={src} src={src} alt={t("attachedImage")} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EnvelopeContent({
   payload,
   images,
   showCopy = false,
+  attachMode = false,
+  imageCaptions = null,
 }: {
   payload: string;
   // Image reference urls on a multimodal inbound — rendered as thumbnails below
@@ -66,6 +210,10 @@ function EnvelopeContent({
   images?: string[] | null;
   /** Show a copy button on the body pre block (for code_output). */
   showCopy?: boolean;
+  /** Attach items render their caption lines interleaved with thumbnails. */
+  attachMode?: boolean;
+  /** Backend caption line per image (1:1 with `images`) — attach items only. */
+  imageCaptions?: string[] | null;
 }) {
   const t = useTranslations("timeline");
   const { header, body } = splitEnvelope(payload);
@@ -75,6 +223,19 @@ function EnvelopeContent({
   // Attach items carry data URIs (self.attach media) — those render raw;
   // gateway-relative urls (user uploads) resolve through assetUrl.
   const resolveImageSrc = (src: string) => (src.startsWith("data:") ? src : assetUrl(src));
+  // Attach items render through AttachContent: per-image captions interleave
+  // label → thumbnail; without captions (legacy checkpoints, caption-only
+  // attaches) every image falls to the trailing row and the lines stay plain
+  // rows — the old layout, minus the navigating <a> wrappers.
+  if (attachMode) {
+    return (
+      <AttachContent
+        payload={payload}
+        images={images ?? null}
+        imageCaptions={imageCaptions?.length ? imageCaptions : null}
+      />
+    );
+  }
   return (
     <>
       {header ? (
@@ -101,15 +262,7 @@ function EnvelopeContent({
       {images?.length ? (
         <div className={cn("mt-1.5 flex-wrap gap-2", FLEX)}>
           {images.map((src) => (
-            <a key={src} href={resolveImageSrc(src)} target="_blank" rel="noreferrer">
-              {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
-              <img
-                src={resolveImageSrc(src)}
-                alt={t("attachedImage")}
-                crossOrigin="use-credentials"
-                className="max-h-48 max-w-[16rem] rounded border border-border object-contain"
-              />
-            </a>
+            <Thumbnail key={src} src={resolveImageSrc(src)} alt={t("attachedImage")} />
           ))}
         </div>
       ) : null}
@@ -156,8 +309,17 @@ export const ItemView = memo(function ItemView({
     case "inbound_chat":
     case "inbound_compact_summary":
     case "inbound_compact_request":
-    case "attach":
       return <EnvelopeContent payload={item.payload} images={item.images} />;
+
+    case "attach":
+      return (
+        <EnvelopeContent
+          payload={item.payload}
+          images={item.images}
+          attachMode
+          imageCaptions={item.image_captions}
+        />
+      );
 
     case "agent_chat":
       return (
