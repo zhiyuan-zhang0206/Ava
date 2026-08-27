@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import {
   applySystemEvent,
   isEventForThread,
-  isReattachedTimelineContext,
   mergeSnapshotWithStreaming,
   parseItemId,
   parseItemIdParts,
