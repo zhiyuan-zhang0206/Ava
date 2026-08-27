@@ -315,7 +315,7 @@ def _spawn_with_label(
     label: str | None = None,
     preset: str | None = None,
 ) -> int:
-    """Start a new agent and return its id. Does not block.
+    """Start a new agent; does not block.
 
     Args:
         prompt: the first message — make it self-contained, the new agent has
