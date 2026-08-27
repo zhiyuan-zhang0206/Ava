@@ -785,7 +785,7 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[i
             # 18:30:00 and the same session was alerted "marked missed" two
             # seconds later). A delivered wake means the row is stale, not a
             # lost moment: drop it silently.
-            if wake_delivered(agent_id, session_id, row["created_at"]):
+            if wake_delivered(agent_id, session_id, row["message"] or "", row["created_at"]):
                 delete_watcher(agent_id, session_id)
                 return f"one-shot watcher '{name}' already fired; row dropped"
             mark_status(agent_id, session_id, "missed")
