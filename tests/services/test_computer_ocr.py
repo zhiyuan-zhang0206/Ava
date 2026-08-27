@@ -60,11 +60,11 @@ def _force_rebuild(monkeypatch: pytest.MonkeyPatch, bin_path: Path, src_path: Pa
 
 
 def test_parses_tsv_lines_zh_en(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    out = "你好世界\t10.0\t20.0\t100.0\t30.0\nHello\t200.5\t400.25\t80.0\t20.0\n"
+    out = "\u4f60\u597d\u4e16\u754c\t10.0\t20.0\t100.0\t30.0\nHello\t200.5\t400.25\t80.0\t20.0\n"
     _stub_run(monkeypatch, [_FakeCompleted(stdout=out)])
     items = ocr_image("/tmp/x.png")  # noqa: S108
     assert items == [
-        {"text": "你好世界", "x": 10.0, "y": 20.0, "w": 100.0, "h": 30.0},
+        {"text": "\u4f60\u597d\u4e16\u754c", "x": 10.0, "y": 20.0, "w": 100.0, "h": 30.0},
         {"text": "Hello", "x": 200.5, "y": 400.25, "w": 80.0, "h": 20.0},
     ]
 

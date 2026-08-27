@@ -223,7 +223,7 @@ export default tseslint.config(
     },
   },
 
-  // ── English-only UI copy (AGENTS.md "English primary") ──
+  // ── English-only UI copy (AGENTS.md "English only — no raw CJK") ──
   // No lint previously covered this: the only CJK-forbidding lint in the repo
   // (scripts/lint_agent_docstrings.py) is Python-only (`types: [python]`),
   // scoped to ava/*.py + plugins/*/*.py agent-visible SDK docstrings — it
@@ -240,13 +240,13 @@ export default tseslint.config(
         {
           selector: "JSXText[value=/[\\u4e00-\\u9fff\\u3000-\\u303f\\uff00-\\uffef]/]",
           message:
-            "UI copy must be English (AGENTS.md \"English primary\") — no CJK in JSX text.",
+            "UI copy must be English (AGENTS.md \"English only\") — no raw CJK in JSX text.",
         },
         {
           selector:
             "JSXAttribute[name.name=/^(label|title|description|placeholder|aria-label)$/] > Literal[value=/[\\u4e00-\\u9fff\\u3000-\\u303f\\uff00-\\uffef]/]",
           message:
-            "UI copy must be English (AGENTS.md \"English primary\") — no CJK in label/title/description/placeholder/aria-label.",
+            "UI copy must be English (AGENTS.md \"English only\") — no raw CJK in label/title/description/placeholder/aria-label.",
         },
       ],
     },

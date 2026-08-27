@@ -62,7 +62,7 @@ def test_pruned_when_no_checkpoint_carries_trace(
     db_conn: psycopg.Connection, test_client: TestClient
 ) -> None:
     """A trace id no checkpoint carries -> pruned=true, checkpoint_id=None,
-    empty messages — the "已裁剪" shape (content gone, span metadata remains)."""
+    empty messages — the "\u5df2\u88c1\u526a" shape (content gone, span metadata remains)."""
     tid = create_agent(db_conn)
     resp = test_client.get(f"/api/agents/{tid}/traces/{'f' * 32}/messages")
     assert resp.status_code == 200

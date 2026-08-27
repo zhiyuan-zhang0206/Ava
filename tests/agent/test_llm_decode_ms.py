@@ -1,6 +1,6 @@
 """W14 decode_ms instrumentation — decode-stage timing on the LLM stream path.
 
-The ops panel "生成 stage 输出 TPS" (Σout_total/Σdecode_ms) needs an honest
+The ops panel "\u751f\u6210 stage \u8f93\u51fa TPS" (Σout_total/Σdecode_ms) needs an honest
 decode window: first chunk arrival → last chunk arrival (monotonic ms),
 measured in `_consume_stream_with_stall_timeout` and stamped by
 `_stream_with_cache_retry` onto the handler as `llm_decode_ms`. Non-streaming

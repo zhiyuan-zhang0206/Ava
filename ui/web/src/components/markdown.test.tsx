@@ -31,32 +31,32 @@ describe("ChatMarkdown", () => {
   });
 
   it("ends a literal autolink before fullwidth punctuation and CJK text", () => {
-    render(<ChatMarkdown content="浏览器开 https://ip.sb：显示" />);
+    render(<ChatMarkdown content="\u6d4f\u89c8\u5668\u5f00 https://ip.sb\uff1a\u663e\u793a" />);
 
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
     const link = screen.getByRole("link", { name: "https://ip.sb" });
     expect(link.getAttribute("href")).toBe("https://ip.sb");
-    expect(link.nextSibling?.textContent).toBe("：显示");
+    expect(link.nextSibling?.textContent).toBe("\uff1a\u663e\u793a");
   });
 
   it("keeps a CJK period outside a literal autolink", () => {
-    render(<ChatMarkdown content="https://ip.sb。" />);
+    render(<ChatMarkdown content="https://ip.sb\u3002" />);
 
     const link = screen.getByRole("link", { name: "https://ip.sb" });
     expect(link.getAttribute("href")).toBe("https://ip.sb");
-    expect(link.nextSibling?.textContent).toBe("。");
+    expect(link.nextSibling?.textContent).toBe("\u3002");
   });
 
   it("renders a CJK-bounded literal URL inside strong", () => {
     const { container } = render(
-      <ChatMarkdown content="**http://127.0.0.1:18025**。" />,
+      <ChatMarkdown content="**http://127.0.0.1:18025**\u3002" />,
     );
 
     const link = container.querySelector("strong > a");
     expect(link?.getAttribute("href")).toBe("http://127.0.0.1:18025");
     expect(link?.textContent).toBe("http://127.0.0.1:18025");
-    expect(link?.parentElement?.nextSibling?.textContent).toBe("。");
+    expect(link?.parentElement?.nextSibling?.textContent).toBe("\u3002");
   });
 
   it("renders a letter-bounded literal URL inside strong", () => {
@@ -72,7 +72,7 @@ describe("ChatMarkdown", () => {
 
   it("renders the reported bold URL without swallowed delimiters", () => {
     const content =
-      "方案报告在 **http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/**，附三项需你决策的清单：**events drop / N-step canary / Loki archive 365d**——你有空看时拍板，不急。";
+      "\u65b9\u6848\u62a5\u544a\u5728 **http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/**\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a**events drop / N-step canary / Loki archive 365d**——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002";
     const { container } = render(<ChatMarkdown content={content} />);
 
     const link = container.querySelector("strong > a");
@@ -96,7 +96,7 @@ describe("ChatMarkdown", () => {
 
   it("renders a literal URL with query parameters inside strong", () => {
     const { container } = render(
-      <ChatMarkdown content="**https://example.com/a?b=c&d=1**。" />,
+      <ChatMarkdown content="**https://example.com/a?b=c&d=1**\u3002" />,
     );
 
     const link = container.querySelector("strong > a");
@@ -104,7 +104,7 @@ describe("ChatMarkdown", () => {
       "https://example.com/a?b=c&d=1",
     );
     expect(link?.textContent).toBe("https://example.com/a?b=c&d=1");
-    expect(link?.parentElement?.nextSibling?.textContent).toBe("。");
+    expect(link?.parentElement?.nextSibling?.textContent).toBe("\u3002");
   });
 
   it("keeps a Unicode ellipsis outside a literal autolink", () => {
@@ -167,7 +167,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("multi-line ASCII diagram in a bare fence stays a <pre> block", () => {
-    const diagram = "```\n┌──┐\n│你│\n└──┘\n```";
+    const diagram = "```\n┌──┐\n│\u4f60│\n└──┘\n```";
     render(<ChatMarkdown content={diagram} />);
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();

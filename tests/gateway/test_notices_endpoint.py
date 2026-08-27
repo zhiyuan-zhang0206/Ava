@@ -1296,7 +1296,7 @@ def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
         assert r.json() == []
 
 
-# ── audit cc-backend-runtime P2: supersede 事件必须用 global id ───────
+# -- audit cc-backend-runtime P2: supersede events must use the global id ---
 
 
 def test_supersede_publishes_global_notice_id(

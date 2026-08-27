@@ -103,6 +103,22 @@ jobs:
           print(f"backend={str(backend).lower()}")
           EOF
           cat "$GITHUB_OUTPUT"
+  repo-language:
+    # The no-CJK gate must fire on EVERY PR, including docs-only and
+    # skills-only diffs: classify skips everything for docs-only changes and
+    # push-to-main ignores **/*.md + ava_builtins/skills/**, so a CJK-only
+    # change would otherwise reach main with zero CI. The gate is stdlib-only
+    # (python3 + git ls-files) and scans the whole tree in seconds, so it runs
+    # as its own cheap job rather than being gated behind backend/frontend.
+    name: repo language (no raw CJK)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Scan for raw CJK (i18n locale files exempt)
+        run: python3 scripts/lint_no_cjk.py
 
   backend-static:
     name: backend static (ruff + pyright + migration smoke)

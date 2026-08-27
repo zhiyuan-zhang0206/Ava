@@ -28,8 +28,8 @@ Fifteen nodes sat within 100 characters of the cap and 28 within 500 — then th
 distribution falls off a cliff, with only 33 nodes above 5000 and 50 above 4500.
 Content does not naturally stack in the last nine characters below a hard
 boundary. That shape is the fingerprint of repeated trim-to-fit, and the history
-names the mechanism: `af111684` records "14 处 E007 裁剪：超 6000 字符文件压缩至
-阈值内" — fourteen files compressed to fit — and PR #932's description says of
+names the mechanism: `af111684` records "14 E007 trims: files over 6000 chars compressed to
+fit the threshold" — fourteen files compressed to fit — and PR #932's description says of
 `shared.ava.okf.md` that a fact was "trimmed elsewhere to stay under the
 6000-char node ceiling".
 

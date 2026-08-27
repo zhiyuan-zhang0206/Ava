@@ -6,8 +6,8 @@ relationships, health) are removed, and agent ids are illustrative placeholders
 (#101...). Use it as a worked example of how the template's roles and rules
 map onto an actual fleet.
 
-> 参考实例已脱敏：不含任何用户私事。真实集群的角色分配与任务清单见集群自身
-> memory pool（不进 repo）。
+> The example is sanitized: it contains no private user data. The real cluster's
+> role assignments and task lists live in the cluster's own memory pool (not in the repo).
 
 ## Organization
 

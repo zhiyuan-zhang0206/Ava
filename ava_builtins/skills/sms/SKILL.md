@@ -40,6 +40,6 @@ Full Disk Access to the calling process.
 
 ## Patterns detected
 
-2FA codes matching: Chinese (verification code/check code), Korean (인증번호), Japanese (認証コード),
+2FA codes matching: Chinese (verification code/check code), Korean (\uc778\uc99d\ubc88\ud638), Japanese (\u8a8d\u8a3c\u30b3\u30fc\u30c9),
 English (verification code / security code / OTP), Google-style (G-XXXXXX), and
 standalone 4-8 digit sequences.

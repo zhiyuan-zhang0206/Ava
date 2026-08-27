@@ -56,7 +56,7 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int, restarter_
     # ── pre-restart turn: let agent write non-default cwd into plugin state then back to idle ──
     resp = httpx.post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/messages",
-        json={"content": "请设置工作目录", "source": "user"},
+        json={"content": "\u8bf7\u8bbe\u7f6e\u5de5\u4f5c\u76ee\u5f55", "source": "user"},
         timeout=10.0,
     )
     resp.raise_for_status()

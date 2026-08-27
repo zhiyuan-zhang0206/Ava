@@ -46,7 +46,7 @@ describe("wrapLabel", () => {
   it("wraps CJK labels at the full glyph width so they stay inside the node", () => {
     const radius = 20;
     const maxLineWidth = 2 * radius - 8;
-    const label = "中文标签溢出".repeat(2); // 12 full-width chars
+    const label = "\u4e2d\u6587\u6807\u7b7e\u6ea2\u51fa".repeat(2); // 12 full-width chars
     const lines = wrapLabel(label, radius);
 
     // No chars lost (the 12-char label fits the vertical budget at 5/line).
@@ -59,24 +59,24 @@ describe("wrapLabel", () => {
   });
 
   it("mixes narrow and full-width glyphs on one line by measured width", () => {
-    // "abc" = 3 × 3.6 = 10.8px + "中文" = 2 × 6 = 12px = 22.8px fits the
+    // "abc" = 3 × 3.6 = 10.8px + "\u4e2d\u6587" = 2 × 6 = 12px = 22.8px fits the
     // 24px budget (r=16); one more Latin char would overflow it.
-    expect(wrapLabel("abc中文def", 16)).toEqual(["abc中文", "def"]);
+    expect(wrapLabel("abc\u4e2d\u6587def", 16)).toEqual(["abc\u4e2d\u6587", "def"]);
   });
 
   it("breaks before an embedded Latin word instead of splitting it (QA #651 follow-up)", () => {
-    // "资源监控（" = 5 × 6 = 30px leaves only 6px on the 36px line (r=22) —
+    // "\u8d44\u6e90\u76d1\u63a7\uff08" = 5 × 6 = 30px leaves only 6px on the 36px line (r=22) —
     // just "C" of "Cluster" would fit, so the word must move to its own line
-    // whole instead of rendering "资源监控（C" / "luster Ops".
-    expect(wrapLabel("资源监控（Cluster Ops 域）", 22)).toEqual([
-      "资源监控（",
+    // whole instead of rendering "\u8d44\u6e90\u76d1\u63a7\uff08C" / "luster Ops".
+    expect(wrapLabel("\u8d44\u6e90\u76d1\u63a7\uff08Cluster Ops \u57df\uff09", 22)).toEqual([
+      "\u8d44\u6e90\u76d1\u63a7\uff08",
       "Cluster",
-      "Ops 域）",
+      "Ops \u57df\uff09",
     ]);
-    expect(wrapLabel("影分身（Think like a master）", 22)).toEqual([
-      "影分身（",
+    expect(wrapLabel("\u5f71\u5206\u8eab\uff08Think like a master\uff09", 22)).toEqual([
+      "\u5f71\u5206\u8eab\uff08",
       "Think like",
-      "a master）",
+      "a master\uff09",
     ]);
   });
 
@@ -84,11 +84,11 @@ describe("wrapLabel", () => {
     // QA rule: char-break only when the word itself exceeds the line width.
     // An over-wide word after a CJK prefix moves to its own line whole, then
     // is hard-cut by the budget; a pure-Latin label keeps the same behavior.
-    expect(wrapLabel("资源监控（Supercalifragilistic 域）", 22)).toEqual([
-      "资源监控（",
+    expect(wrapLabel("\u8d44\u6e90\u76d1\u63a7\uff08Supercalifragilistic \u57df\uff09", 22)).toEqual([
+      "\u8d44\u6e90\u76d1\u63a7\uff08",
       "Supercalif",
       "ragilistic",
-      "域）",
+      "\u57df\uff09",
     ]);
     expect(wrapLabel("supercalifragilistic", 22)).toEqual(["supercalif", "ragilistic"]);
   });

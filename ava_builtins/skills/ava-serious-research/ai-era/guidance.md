@@ -73,5 +73,5 @@ Legend: **↑** strengthened · **↓** weakened · **→** unchanged · **+** n
 
 ## Sources
 
-- Same evidence base as the three ai-era files: Lancet fabricated-citations audit (2026); CMU evaluation of AI Scientist (arXiv 2509.08713); Beel, Kan & Baumgart (arXiv 2502.14297); Koppel (2024); ICML desk-reject + 21% AI reviews + paper laundering (2026); Delip Rao on double-blind (2026-08); Tworek "era of evals" (2026-08); Zhen Wang Nature-week analysis (2026-05); burny_tech RSI verification hierarchy (2026-08); Grounded Autonomous Research (arXiv 2607.02329); The AI Research Assistant (arXiv 2602.22842); Flag Game (2026-08) [待核实: paper details]
+- Same evidence base as the three ai-era files: Lancet fabricated-citations audit (2026); CMU evaluation of AI Scientist (arXiv 2509.08713); Beel, Kan & Baumgart (arXiv 2502.14297); Koppel (2024); ICML desk-reject + 21% AI reviews + paper laundering (2026); Delip Rao on double-blind (2026-08); Tworek "era of evals" (2026-08); Zhen Wang Nature-week analysis (2026-05); burny_tech RSI verification hierarchy (2026-08); Grounded Autonomous Research (arXiv 2607.02329); The AI Research Assistant (arXiv 2602.22842); Flag Game (2026-08) [unverified: paper details]
 - Principles layer sources (books/papers) remain authoritative: see each `principles/*/SKILL.md` Sources section

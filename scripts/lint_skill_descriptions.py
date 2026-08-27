@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Lint: SKILL.md frontmatter — must load; `description` length, language, and identity.
+"""Lint: SKILL.md frontmatter — must load; `description` length and identity.
 
-Four gates over every repo-shipped SKILL.md:
+Three gates over every repo-shipped SKILL.md:
 
 1. **Frontmatter validity (hard fail).** The file must parse with the SAME
    parser the runtime loader uses (`shared.frontmatter.parse_frontmatter`) and
@@ -39,16 +39,11 @@ Four gates over every repo-shipped SKILL.md:
    loader now refuses it — so it must be caught here at merge time for
    repo-shipped skills.
 
-4. **`description` language — English primary (hard fail).** The repo rule is
-   that skill content is English (user ruling 2026-08-06; the trigger-formula
-   standard, PR #586, rewrote every description to an English what + when
-   line). A description in any other language defeats the standard and
-   misleads every agent that reads the index. CJK-script characters are
-   allowed inline as proper nouns inside an otherwise-English sentence (e.g.
-   `人民网` in an English line); a description fails when its CJK-script
-   characters are not strictly fewer than its English words — i.e. the line
-   is CJK-primary. Before this gate, a Chinese description short enough to
-   pass the length ceiling shipped unseen (the 2026-08 ava-corp incident).
+Note: the repo-wide no-CJK gate (`scripts/lint_no_cjk.py`, user ruling
+2026-08-27) supersedes the former English-primary description check — any raw
+CJK anywhere in the repo fails that gate, so a CJK description is already
+caught there. This script keeps the structural gates (parse / length /
+identity) only.
 
 Scans repo-shipped skills only (`ava_builtins/skills/`, `ava_builtins/plugins/*/skills/`, and the repo's own git-tracked `.agents/skills/` — `.ava/skills` and `.claude/skills` are links back to it), at both the root and the sub-skill level; user
 skills under `~/.ava/skills/` are out of the repo's control (and degrade
@@ -71,32 +66,14 @@ _SOFT_TARGET = 50
 
 # CJK ideographs count one unit each; CJK punctuation is blanked (like Latin
 # punctuation it is not its own unit); everything left splits into words.
-_CJK_IDEOGRAPH = re.compile(r"[㐀-鿿豈-﫿]")
-_CJK_PUNCTUATION = re.compile(r"[　-〿＀-￯]")
-
-# Non-English scripts for the language gate (gate 4): CJK ideographs + kana +
-# hangul. Wider than `_CJK_IDEOGRAPH` (which only counts length units) so a
-# Japanese or Korean description is caught too — the gate is "English primary",
-# not "no simplified Chinese".
-_CJK_SCRIPTS = re.compile(r"[㐀-鿿豈-﫿぀-ゟァ-ヿ가-힣]")
+_CJK_IDEOGRAPH = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_CJK_PUNCTUATION = re.compile(r"[\u3000-\u303f\uff00-\uffef]")
 
 
 def length_units(text: str) -> int:
     cjk = len(_CJK_IDEOGRAPH.findall(text))
     latin = _CJK_PUNCTUATION.sub(" ", _CJK_IDEOGRAPH.sub(" ", text))
     return cjk + len(latin.split())
-
-
-def language_counts(text: str) -> tuple[int, int]:
-    """(CJK-script chars, English words) — gate 4's two counters.
-
-    CJK-script characters are blanked (like punctuation) and the rest splits
-    into whitespace-delimited words, mirroring `length_units` so the two gates
-    read a description the same way.
-    """
-    script_chars = len(_CJK_SCRIPTS.findall(text))
-    english = _CJK_PUNCTUATION.sub(" ", _CJK_SCRIPTS.sub(" ", text))
-    return script_chars, len(english.split())
 
 
 def _skill_entries() -> list[SkillFile]:
@@ -158,21 +135,6 @@ def main() -> int:
                 f"{rel}: description is {n} units (CJK chars + non-CJK words), over the "
                 f"{_HARD_CEILING}-unit hard ceiling — trim it (aim under {_SOFT_TARGET}); "
                 f"the depth belongs in the skill body, not the index line."
-            )
-            errors += 1
-
-        # Gate 4: description language — English primary. CJK-script chars are
-        # allowed as proper nouns inside an English sentence; a description
-        # whose CJK-script chars are not strictly fewer than its English words
-        # is a non-English index line and fails (user ruling 2026-08-06; the
-        # trigger-formula standard PR #586).
-        script_chars, english_words = language_counts(description)
-        if script_chars > 0 and script_chars >= english_words:
-            print(
-                f"{rel}: description is not English-primary ({script_chars} CJK-script "
-                f"chars vs {english_words} English words) — write the index line in "
-                f"English per the trigger-formula standard; CJK is allowed only as "
-                f"proper nouns inside an English sentence."
             )
             errors += 1
 

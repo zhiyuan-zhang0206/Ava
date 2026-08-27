@@ -299,7 +299,7 @@ def test_load_registry_empty_when_no_file(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert cluster.load_registry() == {}
 
 
-# ─── port preflight helpers (issue: ava start 端口 preflight) ───────────────
+# --- port preflight helpers (issue: ava start port preflight) ---
 
 
 def test_expected_cluster_ports_derives_full_block_from_record(

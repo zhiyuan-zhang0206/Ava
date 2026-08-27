@@ -52,7 +52,7 @@ async def test_tool_call_chunk_args_serialized_to_json() -> None:
     tool_call = {
         "id": "call_1",
         "name": "execute_code",
-        "args": {"code": "print('中文 + quotes')"},
+        "args": {"code": "print('\u4e2d\u6587 + quotes')"},
     }
     fake = ScriptedFakeChatModel(script=(_msg(tool_call=tool_call),))
 
@@ -62,12 +62,12 @@ async def test_tool_call_chunk_args_serialized_to_json() -> None:
     assert len(chunk_msg.tool_call_chunks) == 1
     args_str = chunk_msg.tool_call_chunks[0]["args"]
     assert args_str is not None
-    assert json.loads(args_str) == {"code": "print('中文 + quotes')"}
+    assert json.loads(args_str) == {"code": "print('\u4e2d\u6587 + quotes')"}
 
     # simulate upper-layer accumulation + finalize: chunk → AIMessage parses args back
     final_msg = message_chunk_to_message(chunk_msg)
     assert isinstance(final_msg, AIMessage)
-    assert final_msg.tool_calls[0]["args"] == {"code": "print('中文 + quotes')"}
+    assert final_msg.tool_calls[0]["args"] == {"code": "print('\u4e2d\u6587 + quotes')"}
 
 
 def test_bind_tools_returns_self_unchanged() -> None:

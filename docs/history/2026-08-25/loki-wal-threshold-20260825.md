@@ -5,7 +5,7 @@ title: Loki WAL disk-full throttle raised to 0.95 (Task #1626)
 # Loki WAL disk-full throttle raised to 0.95
 
 **Date:** 2026-08-25
-**Task:** #1626 (FleetView 卡顿 + 缺边复查)
+**Task:** #1626 (FleetView jank + missing-edge recheck)
 
 ## Incident
 

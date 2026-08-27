@@ -5285,7 +5285,7 @@ export interface components {
          * MachinePauseRequest
          * @description POST /api/cluster/machines/{name}/pause body.
          *
-         *     `reason` is free-text why the machine is being pulled out (e.g. "休假一周")
+         *     `reason` is free-text why the machine is being pulled out (e.g. "a week off")
          *     — recorded on the machines row as `pause_reason` for the resume checklist.
          */
         MachinePauseRequest: {

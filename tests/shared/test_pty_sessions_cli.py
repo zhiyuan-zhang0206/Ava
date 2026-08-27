@@ -631,10 +631,10 @@ def test_send_transports_tricky_text_via_base64(sessions: Path) -> None:
     home = sessions
     name = "ava-test-b64-1"
     _new(home, name)
-    tricky = "echo 'quote \" and spaces 你好'"
+    tricky = "echo 'quote \" and spaces \u4f60\u597d'"
     _send(home, name, tricky)
-    out = _output_until(home, name, 'quote " and spaces 你好')
-    assert 'quote " and spaces 你好' in out
+    out = _output_until(home, name, 'quote " and spaces \u4f60\u597d')
+    assert 'quote " and spaces \u4f60\u597d' in out
 
 
 def test_send_without_enter_does_not_submit(sessions: Path) -> None:

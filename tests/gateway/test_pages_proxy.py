@@ -175,7 +175,9 @@ def test_proxy_410_expired_page(db_conn: psycopg.Connection, page_server: int, p
 
     assert response.status_code == 410
     assert response.headers["content-type"].startswith("text/html")
-    assert "页面已过期，请让 agent 重新 serve" in response.text
+    assert (
+        "\u9875\u9762\u5df2\u8fc7\u671f\uff0c\u8bf7\u8ba9 agent \u91cd\u65b0 serve" in response.text
+    )
     assert "Page expired" in response.text
 
 

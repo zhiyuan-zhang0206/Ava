@@ -14,7 +14,7 @@ description: Evaluates AI-produced results beyond static benchmark scores throug
 ## The shifts (2026-08 observation)
 
 1. **"The era of evals is done" (Jerry Tworek)** — Tworek (ex-OpenAI; led o1/o3/Codex; founder of Core Automation, "the most automated AI lab") argued at the Auto-Research Summit (2026-08) that traditional evals fail when AI runs research automatically; his AGI House interview is titled "why the era of evals is done." The claim: when the lab itself is automated, nobody knows what signal substitutes for human judgment.
-2. **Benchmark crisis** — frontier models retrieve solutions from test sets (Cursor research, 2026 [待核实: original report]); bogus benchmarks inflate capability claims (Gizmodo, 2026); "benchmark picking" is a documented AI-Scientist pitfall (CMU arXiv 2509.08713, pitfall #1); arXiv is tightening AI-slop policies (2026).
+2. **Benchmark crisis** — frontier models retrieve solutions from test sets (Cursor research, 2026 [unverified: original report]); bogus benchmarks inflate capability claims (Gizmodo, 2026); "benchmark picking" is a documented AI-Scientist pitfall (CMU arXiv 2509.08713, pitfall #1); arXiv is tightening AI-slop policies (2026).
 3. **Who verifies the output is the research gap** — with fully-automatic labs, the verification question is unsolved; the RSI survey (burny_tech, 2026) gives the operative hierarchy: formal verifiers (strongest) → process reward models → rubrics → intrinsic self-assessment (weakest). Every improvement loop is implicitly a claim that some signal can replace human judgment.
 4. **Process beats output for detection** — CMU: paper-only review detects fabrication 55% of the time; adding trace logs + code raises detection to 82%. Evaluation that does not look at the process misses roughly half of fabrication.
 5. **Trainable environments as the next wave** — instead of bigger agent swarms, agents trained in environments grounded in raw data (Zhen Wang, 2026-05); Discovery Loop's mission is exactly the automated experiment loop; "who evaluates an agent trained in an environment" will be the next evaluation question.
@@ -33,7 +33,7 @@ description: Evaluates AI-produced results beyond static benchmark scores throug
 - [ ] Each headline claim carries a verification level (formal verifier → self-assessment)
 - [ ] At least one key claim per project is checked at a level stronger than self-assessment
 - [ ] Trace logs + code exist for every load-bearing number, and were used in review
-- [ ] Benchmark provenance is stated; contamination check done or marked [待核实]
+- [ ] Benchmark provenance is stated; contamination check done or marked [unverified]
 - [ ] The verifier is named and is not the producer of the frame
 - [ ] Main comparison pre-registered; test set sealed
 - [ ] The evaluation choice (benchmark vs environment vs process audit) is justified, not inherited
@@ -63,9 +63,9 @@ description: Evaluates AI-produced results beyond static benchmark scores throug
 ## Sources
 
 - Tworek at Auto-Research Summit / AGI House (X @agihouse_org/status/2085133996137259312, 2026-08); the-decoder.com on Core Automation
-- burny_tech, *Recursive Self-Improvement in AI* RSI survey (X @burny_tech/status/2085462603610861802, 2026-08) [待核实: arXiv ID]
+- burny_tech, *Recursive Self-Improvement in AI* RSI survey (X @burny_tech/status/2085462603610861802, 2026-08) [unverified: arXiv ID]
 - Luo et al., CMU evaluation of AI Scientist (arXiv 2509.08713)
-- Cursor benchmark-retrieval research (2026, via X @v_shakthi) [待核实: original report]; Gizmodo bogus-benchmarks (2026)
+- Cursor benchmark-retrieval research (2026, via X @v_shakthi) [unverified: original report]; Gizmodo bogus-benchmarks (2026)
 - Zhen Wang on the Nature week and trainable environments (X @zhenwang9102/status/2057207629227667544, 2026-05)
 - Jeff Dean, Discovery Loop announcement (X @JeffDean/status/2085034604172603724, 2026-08)
 - Gelman & Loken, The Garden of Forking Paths (pre-registration rationale, via `principles/honesty`)

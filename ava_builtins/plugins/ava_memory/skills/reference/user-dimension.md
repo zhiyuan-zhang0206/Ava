@@ -16,7 +16,7 @@ say the same thing twice.**
 When writing memory, deliberately capture the user dimension:
 
 - **Repeatedly expressed preferences** — anything the user has said more than
-  once ("用中文", "不要用您", review style, communication channel). A repeat
+  once ("speak Chinese", "no nin-politeness", review style, communication channel). A repeat
   is a signal the preference is not yet durably captured; capture it so the
   repetition can stop.
 - **Recurring habits** — patterns the user reliably shows in how they work

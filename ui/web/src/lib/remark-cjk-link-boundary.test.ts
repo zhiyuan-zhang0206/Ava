@@ -48,18 +48,18 @@ describe("remarkCjkLinkBoundary", () => {
   }>([
     {
       name: "splits at a fullwidth colon",
-      markdown: "https://ip.sb：显示",
-      expected: [link("https://ip.sb"), text("：显示")],
+      markdown: "https://ip.sb\uff1a\u663e\u793a",
+      expected: [link("https://ip.sb"), text("\uff1a\u663e\u793a")],
     },
     {
       name: "splits at a CJK period",
-      markdown: "https://ip.sb。",
-      expected: [link("https://ip.sb"), text("。")],
+      markdown: "https://ip.sb\u3002",
+      expected: [link("https://ip.sb"), text("\u3002")],
     },
     {
       name: "splits at a fullwidth comma",
-      markdown: "https://ip.sb，再见",
-      expected: [link("https://ip.sb"), text("，再见")],
+      markdown: "https://ip.sb\uff0c\u518d\u89c1",
+      expected: [link("https://ip.sb"), text("\uff0c\u518d\u89c1")],
     },
     {
       name: "splits at a Unicode ellipsis",
@@ -68,33 +68,33 @@ describe("remarkCjkLinkBoundary", () => {
     },
     {
       name: "splits at an em dash",
-      markdown: "https://ip.sb——说明",
-      expected: [link("https://ip.sb"), text("——说明")],
+      markdown: "https://ip.sb——\u8bf4\u660e",
+      expected: [link("https://ip.sb"), text("——\u8bf4\u660e")],
     },
     {
       name: "merges the remainder with following text",
-      markdown: "https://ip.sb： 显示",
-      expected: [link("https://ip.sb"), text("： 显示")],
+      markdown: "https://ip.sb\uff1a \u663e\u793a",
+      expected: [link("https://ip.sb"), text("\uff1a \u663e\u793a")],
     },
     {
       name: "preserves query parameters before a CJK boundary",
-      markdown: "https://ip.sb?a=1&b=2。",
-      expected: [link("https://ip.sb?a=1&b=2"), text("。")],
+      markdown: "https://ip.sb?a=1&b=2\u3002",
+      expected: [link("https://ip.sb?a=1&b=2"), text("\u3002")],
     },
     {
       name: "splits at Han text without intervening punctuation",
-      markdown: "https://ip.sb中文",
-      expected: [link("https://ip.sb"), text("中文")],
+      markdown: "https://ip.sb\u4e2d\u6587",
+      expected: [link("https://ip.sb"), text("\u4e2d\u6587")],
     },
     {
       name: "splits at fullwidth parentheses",
-      markdown: "https://ip.sb（备注）",
-      expected: [link("https://ip.sb"), text("（备注）")],
+      markdown: "https://ip.sb\uff08\u5907\u6ce8\uff09",
+      expected: [link("https://ip.sb"), text("\uff08\u5907\u6ce8\uff09")],
     },
     {
       name: "maps a www boundary past the inferred scheme",
-      markdown: "www.ip.sb：显示",
-      expected: [link("http://www.ip.sb", "www.ip.sb"), text("：显示")],
+      markdown: "www.ip.sb\uff1a\u663e\u793a",
+      expected: [link("http://www.ip.sb", "www.ip.sb"), text("\uff1a\u663e\u793a")],
     },
     {
       name: "keeps GFM ASCII trailing-punctuation behavior",
@@ -108,18 +108,18 @@ describe("remarkCjkLinkBoundary", () => {
     },
     {
       name: "leaves a CommonMark full autolink unchanged",
-      markdown: "<https://ip.sb：显示>",
-      expected: [link("https://ip.sb：显示")],
+      markdown: "<https://ip.sb\uff1a\u663e\u793a>",
+      expected: [link("https://ip.sb\uff1a\u663e\u793a")],
     },
     {
       name: "leaves an explicit link unchanged",
-      markdown: "[点击](https://ip.sb：显示)",
-      expected: [link("https://ip.sb：显示", "点击")],
+      markdown: "[\u70b9\u51fb](https://ip.sb\uff1a\u663e\u793a)",
+      expected: [link("https://ip.sb\uff1a\u663e\u793a", "\u70b9\u51fb")],
     },
     {
       name: "keeps surrounding text in one clean remainder node",
-      markdown: "前 https://ip.sb：显示 后",
-      expected: [text("前 "), link("https://ip.sb"), text("：显示 后")],
+      markdown: "\u524d https://ip.sb\uff1a\u663e\u793a \u540e",
+      expected: [text("\u524d "), link("https://ip.sb"), text("\uff1a\u663e\u793a \u540e")],
     },
     {
       name: "leaves an ASCII URL unchanged",
@@ -128,11 +128,11 @@ describe("remarkCjkLinkBoundary", () => {
     },
     {
       name: "continues walking after splitting an earlier link",
-      markdown: "看 https://a.com。 和 https://b.com",
+      markdown: "\u770b https://a.com\u3002 \u548c https://b.com",
       expected: [
-        text("看 "),
+        text("\u770b "),
         link("https://a.com"),
-        text("。 和 "),
+        text("\u3002 \u548c "),
         link("https://b.com"),
       ],
     },

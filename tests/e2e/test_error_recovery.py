@@ -27,7 +27,9 @@ from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.error_recovery import ERROR_MSG, RECOVERY_REPLY
 
-_UNRECOGNIZED_RE = re.compile(r"Unrecognized system_marker|无法识别的 system_marker")
+_UNRECOGNIZED_RE = re.compile(
+    "Unrecognized system_marker|\u65e0\u6cd5\u8bc6\u522b\u7684 system_marker"
+)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.error_recovery:build")
@@ -39,7 +41,7 @@ def test_llm_error_renders_error_marker_and_agent_recovers(e2e_env: E2EEnv) -> N
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
     # ── turn 1: LLM rejects permanently → SSE error event → [error] marker ──
-    page.fill('[data-testid="composer-input"]', "第一轮会失败")
+    page.fill('[data-testid="composer-input"]', "\u7b2c\u4e00\u8f6e\u4f1a\u5931\u8d25")
     page.click('[data-testid="composer-send"]')
     wait_for_status(agent_id, AgentStatus.IDLING.value)
     # The error marker body carries the abort copy + the exception message.
@@ -69,7 +71,7 @@ def test_llm_error_renders_error_marker_and_agent_recovers(e2e_env: E2EEnv) -> N
     assert kinds == ["inbound_chat"], f"aborted turn must not commit an agent_chat: {kinds}"
 
     # ── turn 2: next message → normal reply (recovery without restart) ──
-    page.fill('[data-testid="composer-input"]', "再来一次")
+    page.fill('[data-testid="composer-input"]', "\u518d\u6765\u4e00\u6b21")
     page.click('[data-testid="composer-send"]')
     page.wait_for_selector(f"text={RECOVERY_REPLY}", timeout=30_000)
 

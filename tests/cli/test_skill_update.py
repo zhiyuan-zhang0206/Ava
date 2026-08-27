@@ -306,7 +306,7 @@ def test_update_refuses_worktree_repo_for_default_home(
 def test_update_adopt_sets_builtin_trust(unit_home: Path, repo: Path) -> None:
     """Adopting a hand-installed residue of a repo skill stamps it builtin —
     it ships under the checkout's review, not third-party."""
-    # 模拟收编前状态：user 行（磁盘无副本 — 更新会落地源内容）
+    # Simulate the pre-incorporation state: user row (no disk copy - update materializes source content)
     from datetime import UTC, datetime
 
     reg.register(
@@ -329,8 +329,8 @@ def test_update_unchanged_reanchors_stale_origin_path(unit_home: Path, repo: Pat
     cmd_skill_update(None, repo=repo)
     e = _entry("builtin-a")
     e.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/builtin-a"
-    reg.save(reg.load())  # 持久化
-    # 重新加载后更新 entry
+    reg.save(reg.load())  # persist
+    # after reload, update the entry
     pkg = reg.get("builtin-a")
     assert pkg is not None
     pkg.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/builtin-a"

@@ -101,7 +101,7 @@ Format: a severity-headed template + summary + generatorURL +
 `→ <fleet UI>/insights/alerts` (recovery swaps the head for the resolved
 variant). Templates live in `services/im_bridge/copy.py` — the single source
 of user-visible IM copy (governance ruling 2026-08-08) — with zh/en variants
-(`⚠️ 告警 [...]` / `⚠️ ALERT [...]`); the language follows `user_settings`
+(the zh head carries the Chinese firing/resolved words, the en head `⚠️ ALERT [...]`); the language follows `user_settings`
 `display.language` (default zh, user ruling 2026-08-13), resolved by
 `shared.alerts.display_language` at ingest time. Alert labels/annotations
 data is never translated. All three severities push. Recovery sends only when

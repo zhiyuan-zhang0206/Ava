@@ -446,7 +446,7 @@ public static class Program
                     string n = b.Current.Name;
                     if (n == null) continue;
                     if (n.IndexOf("OK") >= 0 || n.IndexOf("Close") >= 0 ||
-                        n.IndexOf("Restart") >= 0 || n.IndexOf("关闭") >= 0 || n.IndexOf("确定") >= 0)
+                        n.IndexOf("Restart") >= 0 || n.IndexOf("\u5173\u95ed") >= 0 || n.IndexOf("\u786e\u5b9a") >= 0)
                     {
                         try
                         {

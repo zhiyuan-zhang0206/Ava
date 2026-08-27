@@ -26,10 +26,13 @@ class TestExtractSdkCalls:
 
     def test_string_literal_not_matched(self):
         """The core fix: ava.*() inside a string literal is NOT an SDK call."""
-        assert extract_sdk_calls('x = "请调用 ava.agents.spawn() 来完成"') == []
+        assert (
+            extract_sdk_calls('x = "\u8bf7\u8c03\u7528 ava.agents.spawn() \u6765\u5b8c\u6210"')
+            == []
+        )
 
     def test_comment_not_matched(self):
-        code = '# 这里使用 ava.agents.spawn()\nava.shell.run("ls")'
+        code = '# \u8fd9\u91cc\u4f7f\u7528 ava.agents.spawn()\nava.shell.run("ls")'
         assert _methods(extract_sdk_calls(code)) == [("shell.run", 1)]
 
     def test_triple_quoted_docstring_not_matched(self):

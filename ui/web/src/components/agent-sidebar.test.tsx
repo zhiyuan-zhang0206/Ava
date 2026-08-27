@@ -847,7 +847,7 @@ describe("Flat view mode", () => {
     state.sidebarViewMode = "flat";
     state.agents = [makeAgent({ agent_id: 1 }), makeAgent({ agent_id: 2 })];
     wrap(<AgentSidebar {...handlers} />);
-    // 工具栏不再有 "Sort:" 文字与 3 个内联 key 按钮——只有一个 icon 按钮
+    // Toolbar no longer has a "Sort:" label or 3 inline key buttons - only one icon button
     expect(screen.queryByText("Sort:")).toBeNull();
     expect(screen.queryByText("active")).toBeNull();
     expect(screen.getByLabelText("Sort by id descending")).toBeTruthy();
@@ -863,7 +863,7 @@ describe("Flat view mode", () => {
     expect(screen.getByText("active")).toBeTruthy();
     expect(screen.getByText("status")).toBeTruthy();
     fireEvent.click(screen.getByText("id"));
-    // 同 key 再点 → 方向反转 → aria-label 更新为 ascending
+    // Clicking the same key again flips the direction -> aria-label updates to ascending
     expect(screen.getByLabelText("Sort by id ascending")).toBeTruthy();
   });
 
@@ -915,7 +915,7 @@ describe("Header layout + search overlay (task #723)", () => {
     wrap(<AgentSidebar {...handlers} />);
     const header = screen.getByText("Ava").closest("header")!;
     const labels = Array.from(header.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    // 展开态顶部按钮顺序：搜索 → 收起（收起最右）；Ava 标题在最左
+    // Expanded-state top button order: search -> collapse (collapse rightmost); Ava title leftmost
     expect(labels.filter(Boolean)).toEqual(["Search agents", "Collapse sidebar"]);
     expect(screen.getByText("Ava")).toBeTruthy();
   });
@@ -939,7 +939,7 @@ describe("Header layout + search overlay (task #723)", () => {
       "Insights",
       "Control",
     ]);
-    // 折叠 rail 顶部按钮不带 border-b 分隔线
+    // Collapsed rail top buttons carry no border-b divider
     const searchBtn = screen.getByLabelText("Search agents");
     const expandBtn = screen.getByLabelText("Expand sidebar");
     expect(searchBtn.className).not.toContain("border-b");
@@ -959,7 +959,7 @@ describe("Header layout + search overlay (task #723)", () => {
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.queryByLabelText("Search agent")).toBeNull();
     fireEvent.click(screen.getByLabelText("Search agents"));
-    // 浮层输入框出现（autofocus）
+    // The overlay input appears (autofocus)
     expect(screen.getByLabelText("Search agent")).toBeTruthy();
   });
 
@@ -971,8 +971,8 @@ describe("Header layout + search overlay (task #723)", () => {
     state.setActiveId = vi.fn();
     wrap(<AgentSidebar {...handlers} />);
     fireEvent.click(screen.getByLabelText("Search agents"));
-    // 空 query：浮层列出全部 agents（结果过滤本身由 AgentSidebar 的
-    // filteredAgents 驱动，见 "Search filtering" describe）
+    // Empty query: the overlay lists all agents (result filtering is driven by AgentSidebar's
+    // filteredAgents - see the "Search filtering" describe)
     expect(screen.getByTestId("overlay-result-1")).toBeTruthy();
     expect(screen.getByTestId("overlay-result-2")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Search agent"), { target: { value: "beta" } });

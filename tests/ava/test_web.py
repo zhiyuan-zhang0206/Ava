@@ -723,8 +723,8 @@ def test_fetch_login_gated_site_names_skill(
     the error names the logged-in-browser skill to use instead."""
     monkeypatch.setattr(settings.web, "jina_api_key", SecretStr("k"))
     payload = _make_jina_response(
-        title="安全验证 - 知乎",
-        content="请您登录后查看更多专业优质内容。",
+        title="\u5b89\u5168\u9a8c\u8bc1 - \u77e5\u4e4e",
+        content="\u8bf7\u60a8\u767b\u5f55\u540e\u67e5\u770b\u66f4\u591a\u4e13\u4e1a\u4f18\u8d28\u5185\u5bb9\u3002",
     )
     with (
         patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload)),

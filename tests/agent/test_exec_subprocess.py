@@ -209,14 +209,14 @@ async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
             "import sys\n"
             "print('utf8-mode', sys.flags.utf8_mode)\n"
             "print('stdout-encoding', sys.stdout.encoding)\n"
-            "print('cjk', '子进程')\n"
+            "print('cjk', '\u5b50\u8fdb\u7a0b')\n"
         ),
     )
 
     assert isinstance(result, _ExecDone)
     assert "utf8-mode 1" in result.output
     assert "stdout-encoding utf-8" in result.output.lower()
-    assert "cjk 子进程" in result.output
+    assert "cjk \u5b50\u8fdb\u7a0b" in result.output
 
 
 async def test_subprocess_merged_stream_preserves_order(tmp_path: Path) -> None:

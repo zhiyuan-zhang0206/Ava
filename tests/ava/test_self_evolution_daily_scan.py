@@ -85,7 +85,7 @@ def test_render_lists_bad_runs_with_their_signals(daily_scan: Any) -> None:
             "failed",
             agent_id=2,
             task_prompt="Fix the suite",
-            corrections=["不对，重做"],
+            corrections=["\u4e0d\u5bf9\uff0c\u91cd\u505a"],
             exec_failed=4,
             last_exec_failed=True,
         ),

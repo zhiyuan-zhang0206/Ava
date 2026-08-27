@@ -65,7 +65,7 @@ def _EXPIRED_PAGE_HTML(agent_id: int, name: str) -> str:  # noqa: N802 — fixed
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<title>Page expired</title></head><body><main>"
         "<h1>Page expired</h1>"
-        "<p>页面已过期，请让 agent 重新 serve</p>"  # noqa: RUF001 — PM-specified user-facing copy (fullwidth comma is part of the text)
+        "<p>Page expired - ask the agent to serve it again</p>"
         f"<p>Page {escaped_name} · agent {agent_id}</p>"
         "</main></body></html>"
     )

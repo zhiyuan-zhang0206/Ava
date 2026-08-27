@@ -16,7 +16,7 @@ Finally, summarize the report.
 ## 1. Agent Lifecycle Tests
 
 ### 1.1 spawn
-Use `ava.agents.spawn(prompt="回复 'pong' 然后 idle 等待。不要 terminate。")` to create an agent.
+Use `ava.agents.spawn(prompt="reply 'pong' then idle and wait. Do not terminate.")` to create an agent.
 After waiting 5 seconds, check if `ava.agents.get_status(id)` is running/idling.
 Record: `[PASS] spawn: agent {id}` or `[FAIL] spawn: {reason}`.
 
@@ -31,7 +31,7 @@ After waiting 3 seconds, confirm status == 'terminated'.
 Record: `[PASS] terminate` or `[FAIL]: {reason}`.
 
 ### 1.4 resurrect
-Resurrect using `ava.agents.resurrect(child_id, prompt="回复 'resurrected' 然后 idle。不要 terminate。")`.
+Resurrect using `ava.agents.resurrect(child_id, prompt="reply 'resurrected' then idle. Do not terminate.")`.
 After waiting 5 seconds, confirm status in (running, idling).
 Record: `[PASS] resurrect` or `[FAIL]: {reason}`.
 
@@ -41,7 +41,7 @@ After waiting 5 seconds, confirm status in (running, idling).
 Record: `[PASS] restart` or `[FAIL]: {reason}`.
 
 ### 1.6 fork
-Fork an agent using `ava.agents.spawn(prompt="回复 'forked' 然后 idle。不要 terminate。", fork_from=child_id)`.
+Fork an agent using `ava.agents.spawn(prompt="reply 'forked' then idle. Do not terminate.", fork_from=child_id)`.
 After waiting 5 seconds, confirm the new agent is normal.
 Record: `[PASS] fork: agent {fork_id}` or `[FAIL]: {reason}`.
 
@@ -50,8 +50,8 @@ Record: `[PASS] fork: agent {fork_id}` or `[FAIL]: {reason}`.
 ## 2. Agent Communication Tests
 
 ### 2.1 agent chat
-Spawn agent Alice (prompt="你是 Alice。等 Bob 发消息，收到后回复然后 idle。不要 terminate。")
-Spawn agent Bob (prompt=f"用 ava.agents.send_message({alice_id}, 'Hello from Bob') 发消息给 Alice，等回复后 idle。")
+Spawn agent Alice (prompt="You are Alice. Wait for Bob to message you, reply when you receive it, then idle. Do not terminate.")
+Spawn agent Bob (prompt=f"Send Alice a message with ava.agents.send_message({alice_id}, 'Hello from Bob'), then idle after her reply.")
 After waiting 10 seconds, confirm both agents are alive.
 Record: `[PASS] agent-chat` or `[FAIL]: {reason}`.
 

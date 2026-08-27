@@ -151,10 +151,10 @@ class TestSpawn:
         """spawn(prompt=...) together INSERT chat inbound (source='agent:{ava.self.AGENT_ID}')."""
         ava._boot._agent_id = _spawn_agent()  # self identity
 
-        child_id = ava.agents.spawn(prompt="去查 X")
+        child_id = ava.agents.spawn(prompt="\u53bb\u67e5 X")
 
         assert _inbound_rows(db_conn, child_id) == [
-            ("去查 X", "chat", f"agent:{ava.self.AGENT_ID}"),
+            ("\u53bb\u67e5 X", "chat", f"agent:{ava.self.AGENT_ID}"),
         ]
 
     def test_spawn_defaults_machine_to_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -284,13 +284,13 @@ class TestSpawnFork:
             )
         db_conn.commit()
 
-        new_id = ava.agents.spawn(prompt="继续吧", fork_from=source)
+        new_id = ava.agents.spawn(prompt="\u7ee7\u7eed\u5427", fork_from=source)
 
         # fork first posts an identity inbound (kind='fork', source=fork source agent) in spawn transaction, then prompt's chat inbound —
         # claim side dispatches identity marker first to fix "who am I", then processes prompt.
         assert _inbound_rows(db_conn, new_id) == [
             ("", "fork", f"agent:{source}"),
-            ("继续吧", "chat", f"agent:{ava.self.AGENT_ID}"),
+            ("\u7ee7\u7eed\u5427", "chat", f"agent:{ava.self.AGENT_ID}"),
         ]
 
 

@@ -11,7 +11,7 @@ tags:
 
 > Design lead #2862 · design v0.4 (2026-08-07) · **status: convergence point A LANDED on main (2026-08-06); B/C/D remain planned**
 
-> Landing status (audit round-2 config.md §四): **A (EnvRegistry) is live** —
+> Landing status (audit round-2 config.md §4): **A (EnvRegistry) is live** —
 > `shared/env_registry.py` projections (child_env / env_authority_drop_set /
 > env_keep_set) derive from the field registry, and test_env_registry.py +
 > test_gateway_consumer_guard.py are derivation-rule verifiers, not snapshot
@@ -66,7 +66,7 @@ Invariants: D1 exactly one retry loop in the repo (grep-provable); D2 one error-
 
 ## Open decision point
 
-- **Q1 — idempotency/delivery semantics**: the same endpoint today has opposite client decisions — SDK `send_message` treats it non-idempotent and never retries (fear of duplicates); IM bridge retries all 5xx (fear of loss). Option A: user rules now, R2 migrates once (recommended); Option B: annotate as-is, ruling deferred to R3's boundary declaration. (Shared with R3 门①.)
+- **Q1 — idempotency/delivery semantics**: the same endpoint today has opposite client decisions — SDK `send_message` treats it non-idempotent and never retries (fear of duplicates); IM bridge retries all 5xx (fear of loss). Option A: user rules now, R2 migrates once (recommended); Option B: annotate as-is, ruling deferred to R3's boundary declaration. (Shared with R3 door ①.)
 
 ## Related as-is nodes
 

@@ -303,7 +303,9 @@ async def test_send_attaches_inline_keyboard_buttons(env: Any) -> None:
     async with httpx.AsyncClient(transport=transport) as client:
         adapter = TelegramAdapter(FakeCore(), client=client)
         await adapter.send(
-            "42", "选择 agent", buttons=[("405 Ava", "/switch 405"), ("228 CEO", "/switch 228")]
+            "42",
+            "\u9009\u62e9 agent",
+            buttons=[("405 Ava", "/switch 405"), ("228 CEO", "/switch 228")],
         )
     (request,) = captured
     markup = json.loads(request.content)["reply_markup"]

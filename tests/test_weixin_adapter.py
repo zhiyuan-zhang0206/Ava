@@ -104,7 +104,7 @@ async def test_poll_forwards_message_and_caches_context_token(env: Any, tmp_path
     """A user text message reaches core; context_token caches and sync buf persists."""
     core = FakeCore()
     transport, _captured = _transport(
-        [httpx.Response(200, json=_updates(_message(text="你好", context_token="tok-abc")))]  # noqa: S106  (test fixture value)
+        [httpx.Response(200, json=_updates(_message(text="\u4f60\u597d", context_token="tok-abc")))]  # noqa: S106  (test fixture value)
     )
     async with httpx.AsyncClient(transport=transport) as client:
         adapter = WeixinAdapter(core, client=client)
@@ -113,7 +113,7 @@ async def test_poll_forwards_message_and_caches_context_token(env: Any, tmp_path
         await adapter.stop()
 
     assert core.inbound == [
-        InboundMessage(channel="weixin", chat_id="peer-1", text="你好", message_id="msg-1")
+        InboundMessage(channel="weixin", chat_id="peer-1", text="\u4f60\u597d", message_id="msg-1")
     ]
     assert adapter._tokens.get("peer-1") == "tok-abc"
     tokens = json.loads(_state_file(tmp_path, "weixin_context_tokens.json").read_text())

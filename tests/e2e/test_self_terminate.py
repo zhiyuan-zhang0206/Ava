@@ -30,7 +30,7 @@ def test_self_terminate_marks_agent_terminated(e2e_env: E2EEnv) -> None:
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
-    page.fill('[data-testid="composer-input"]', "再见")
+    page.fill('[data-testid="composer-input"]', "\u518d\u89c1")
     page.click('[data-testid="composer-send"]')
 
     wait_for_status(agent_id, AgentStatus.TERMINATED.value)

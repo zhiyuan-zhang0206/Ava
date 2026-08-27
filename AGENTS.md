@@ -10,7 +10,9 @@ Small core, minimal by design. One tool (`execute_code`), one namespace (`ava.*`
 3. **Don't reinvent** — LangGraph, psycopg, uv; swap only when they get in the way.
 4. **Single tool** — `execute_code(code: str)` + `ava.*` namespace = all capabilities.
 5. **Approved stable** — Python 3.12, Postgres 17, Redis 8.2; upgrades require manual approval; no beta/nightly.
-6. **English primary** — docs, comments, prompts, error messages in English.
+6. **English only — no raw CJK** — docs, comments, prompts, error messages
+   in English; the only exemption is frontend i18n locale files (user ruling
+   2026-08-27, enforced repo-wide by `scripts/lint_no_cjk.py`).
 
 Full elaboration: [`conventions/philosophy.md`](conventions/philosophy.md)
 

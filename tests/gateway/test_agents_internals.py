@@ -321,11 +321,11 @@ class TestSpawnAgent:
         """When the launch fails, the create+launch helper does **not** clean the DB — that is the job of monitoring / weekly cleanup tasks."""
 
         def boom(_id: int, **_kw: object) -> None:
-            raise RuntimeError("launch 故意挂")
+            raise RuntimeError("launch \u6545\u610f\u6302")
 
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", boom)
 
-        with pytest.raises(RuntimeError, match="launch 故意挂"):
+        with pytest.raises(RuntimeError, match="launch \u6545\u610f\u6302"):
             _spawn_agent()
 
         with db_conn.cursor() as cur:
@@ -1523,14 +1523,14 @@ class TestResurrectAgent:
         db_conn.commit()
 
         def boom(_id: int, **_kw: object) -> None:
-            raise RuntimeError("launch 故意挂")
+            raise RuntimeError("launch \u6545\u610f\u6302")
 
         # disable retries: this test only verifies the "permanent failure -> force-terminate + re-raise" contract,
         # the retry path is covered separately by TestLaunchRetry (otherwise it would sleep + repeatedly _kill_stale_session).
         monkeypatch.setattr("ops.agent_launch._LAUNCH_MAX_RETRIES", 0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", boom)
 
-        with pytest.raises(RuntimeError, match="launch 故意挂"):
+        with pytest.raises(RuntimeError, match="launch \u6545\u610f\u6302"):
             resurrect_agent(agent_id, resurrected_by="user", prompt="test")
 
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
@@ -1679,13 +1679,13 @@ class TestRespawnAgent:
         agent_id = self._setup_restarting(db_conn, monkeypatch, original_source="user")
 
         def boom(_id: int, **_kw: object) -> None:
-            raise RuntimeError("launch 故意挂")
+            raise RuntimeError("launch \u6545\u610f\u6302")
 
         # disable retries: same as resurrect version, only verify force-terminate + re-raise contract.
         monkeypatch.setattr("ops.agent_launch._LAUNCH_MAX_RETRIES", 0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", boom)
 
-        with pytest.raises(RuntimeError, match="launch 故意挂"):
+        with pytest.raises(RuntimeError, match="launch \u6545\u610f\u6302"):
             respawn_agent(agent_id)
 
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]

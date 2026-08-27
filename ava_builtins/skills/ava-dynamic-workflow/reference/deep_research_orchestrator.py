@@ -113,7 +113,11 @@ W1 = [
         "GitHub Copilot, Cursor, Claude Code, Codex, Replit Agent",
     ),
     ("explore-opensource", "Open Source Ecosystem", "Aider, Continue, Cline, OpenHands, SWE-Agent"),
-    ("explore-china", "Chinese Market", "通义灵码, Baidu Comate, 豆包MarsCode, 腾讯云AI代码助手"),
+    (
+        "explore-china",
+        "Chinese Market",
+        "\u901a\u4e49\u7075\u7801, Baidu Comate, \u8c46\u5305MarsCode, \u817e\u8baf\u4e91AI\u4ee3\u7801\u52a9\u624b",
+    ),
     (
         "explore-academic",
         "Academic Frontier",

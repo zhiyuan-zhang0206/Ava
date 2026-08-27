@@ -67,7 +67,7 @@ def test_handler_emits_expected_wire(reason, cls):
 )
 def test_sdk_reconstructs_from_wire(reason, cls):
     """client-side: feed synthetic wire body to _raise_from_response; it reconstructs same
-    cls + message。"""
+    cls + message."""
     body = {"detail": "forced wire-test message", "reason": reason.value}
     resp = httpx.Response(
         status_code=cls.http_status,

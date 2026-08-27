@@ -1,13 +1,14 @@
 'use strict';
 
 /**
- * store.js — 纯数据层（无 DOM 依赖）。
- * 职责：任务新增/移动/删除、标题规范化（trim + 120 字截断）、
- * 空标题拒绝、同日内最新任务在前、localStorage 持久化、
- * 损坏数据恢复、每列最多 20 条的窗口逻辑。
+ * store.js — pure data layer (no DOM dependency).
+ * Responsibilities: add/move/delete tasks, title normalization
+ * (trim + 120-char truncation), empty-title rejection, newest task first
+ * within a day, localStorage persistence, corrupted-data recovery, and the
+ * 20-per-column window logic.
  *
- * 浏览器中暴露为全局 WeeklyPlannerStore；Node 中通过
- * module.exports 导出，供 test.js 直接 require 测试。
+ * Exposed as the global WeeklyPlannerStore in browsers; exported via
+ * module.exports in Node so test.js can require it directly.
  */
 (function (root, factory) {
   if (typeof module !== 'undefined' && module.exports) {
@@ -18,12 +19,12 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var DAY_COUNT = 7; // 0=周一 … 6=周日
+  var DAY_COUNT = 7; // 0=Mon ... 6=Sun
   var MAX_TITLE_LENGTH = 120;
-  var DAY_WINDOW = 20; // 每列默认最多显示的任务数
+  var DAY_WINDOW = 20; // default max tasks shown per column
   var STORAGE_KEY = 'weekly-planner.v1';
 
-  /** 把 day 规整为 0..6 的整数；非法返回 null。 */
+  /** Normalize day to an integer 0..6; return null when invalid. */
   function clampDay(day) {
     var n = Number(day);
     if (!isFinite(n) || Math.floor(n) !== n || n < 0 || n > DAY_COUNT - 1) {
@@ -32,13 +33,13 @@
     return n;
   }
 
-  /** 规范化标题：去除首尾空白；超过 120 字符在存储数据里直接截断。 */
+  /** Normalize a title: trim whitespace; truncate past 120 chars in the stored data. */
   function normalizeTitle(raw) {
     if (typeof raw !== 'string') return '';
     return raw.trim().slice(0, MAX_TITLE_LENGTH);
   }
 
-  /** 空状态：nextId 自增 id；days[dayIndex] = 任务数组（最新在前）。 */
+  /** Empty state: nextId auto-increments ids; days[dayIndex] = task array (newest first). */
   function createState() {
     return { nextId: 1, days: {} };
   }
@@ -68,9 +69,9 @@
   }
 
   /**
-   * 新增任务（直接变更 state）。
-   * 返回 { ok, task } 或 { ok:false, error: 'EMPTY_TITLE' | 'BAD_DAY' }。
-   * 空标题拒绝；不做任何去重/合并；新任务排在当天最前。
+   * Add a task (mutates state directly).
+   * Returns { ok, task } or { ok:false, error: 'EMPTY_TITLE' | 'BAD_DAY' }.
+   * Empty titles are rejected; no dedup/merge happens; the new task goes first that day.
    */
   function addTask(state, day, rawTitle) {
     var d = clampDay(day);
@@ -83,7 +84,7 @@
     return { ok: true, task: task };
   }
 
-  /** 把任务移动到另一天；目标天里它排在最前。 */
+  /** Move a task to another day; it lands first in the target day. */
   function moveTask(state, taskId, toDay) {
     var d = clampDay(toDay);
     if (d === null) return { ok: false, error: 'BAD_DAY' };
@@ -96,7 +97,7 @@
     return { ok: true, task: found.task, moved: true };
   }
 
-  /** 删除任务。 */
+  /** Delete a task. */
   function deleteTask(state, taskId) {
     var found = findTask(state, taskId);
     if (!found) return { ok: false, error: 'NOT_FOUND' };
@@ -104,7 +105,7 @@
     return { ok: true, task: found.task };
   }
 
-  /** 返回某天的任务副本（最新在前）。 */
+  /** Return a copy of one day's tasks (newest first). */
   function getTasks(state, day) {
     var d = clampDay(day);
     if (d === null) return [];
@@ -121,9 +122,10 @@
   }
 
   /**
-   * 解析 localStorage 里的原始字符串；任何损坏都回退为干净的空状态，
-   * 绝不抛出。逐条校验任务：非法条目丢弃，标题重新规范化，
-   * nextId 至少大于现存最大 id（防止新任务 id 冲突）。
+   * Parse the raw localStorage string; any corruption falls back to a clean
+   * empty state and never throws. Validates tasks one by one: invalid entries
+   * are dropped, titles are re-normalized, and nextId is at least greater than
+   * the largest existing id (so new task ids never collide).
    */
   function parseStored(raw) {
     var fresh = createState();
@@ -169,7 +171,7 @@
     return { nextId: nextId, days: days };
   }
 
-  /** 保存到 storage；storage 不可用时静默返回 false（应用仍可内存运行）。 */
+  /** Save to storage; silently returns false when storage is unavailable (the app still runs in memory). */
   function saveState(storage, state) {
     if (!storage || typeof storage.setItem !== 'function') return false;
     try {
@@ -180,7 +182,7 @@
     }
   }
 
-  /** 从 storage 读取；读不到或损坏都返回干净空状态。 */
+  /** Read from storage; missing or corrupted data returns a clean empty state. */
   function loadState(storage) {
     if (!storage || typeof storage.getItem !== 'function') return createState();
     var raw = null;
@@ -193,8 +195,8 @@
   }
 
   /**
-   * 每日窗口逻辑：默认最多显示 20 条（最新的 20 条）。
-   * 返回 { visible, hasMore, total }。
+   * Per-day window logic: shows at most 20 (the newest 20) by default.
+   * Returns { visible, hasMore, total }.
    */
   function windowTasks(list, limit) {
     var arr = Array.isArray(list) ? list : [];

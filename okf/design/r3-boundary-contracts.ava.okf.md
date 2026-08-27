@@ -51,7 +51,7 @@ One metaphor, one new concept (the rest are existing ideas re-declared at bounda
 ## Explicit handoffs (no gaps)
 
 - **With R2 (skill identity)**: identity definition (fold at construction, canonical at render) = R2's `SkillIdentity`; `SkillIndex.build()` consumes that entity as the index key — materialization = R3.
-- **With R2 (idempotency)**: the doorplate declares the semantic; R2's `resilience.Policy.idempotent` is the client-side execution parameter. Shared decision point (R3 门① / R2 Q1).
+- **With R2 (idempotency)**: the doorplate declares the semantic; R2's `resilience.Policy.idempotent` is the client-side execution parameter. Shared decision point (R3 door ① / R2 Q1).
 - **With R1 (pause)**: R1 owns pause *state* (`host_deploy_state.posture`); R3 owns the *exemption policy* (which routes survive a migration, per-route, test-backed).
 - **With R1 (exit self-report)**: leases make liveness independent of self-report (R1); self-reports that remain are contractually declared (R3).
 - **With R4**: SSE fold/notice frontend work is R4's; R3 ends at the read endpoints.

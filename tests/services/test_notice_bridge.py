@@ -86,7 +86,7 @@ def _notice(
     return {
         "id": nid,
         "agent_id": agent,
-        "agent_label": "测试",
+        "agent_label": "\u6d4b\u8bd5",
         "title": title,
         "content": "body",
         "priority": priority,
@@ -156,9 +156,9 @@ def test_reply_mode_window_resolves_notice(tmp_path: Any, monkeypatch: pytest.Mo
     assert "12345" in bridge._reply_modes
 
     # a plain text inside the window resolves with that text
-    out = asyncio.run(bridge.handle_inbound("12345", "我同意"))
+    out = asyncio.run(bridge.handle_inbound("12345", "\u6211\u540c\u610f"))
     assert out is not None
-    assert gateway.resolved == [(7, 42, "answer", "我同意")]
+    assert gateway.resolved == [(7, 42, "answer", "\u6211\u540c\u610f")]
     assert "12345" not in bridge._reply_modes
 
 
@@ -197,9 +197,9 @@ def test_fyi_reply_mode_resolves_answer(tmp_path: Any, monkeypatch: pytest.Monke
     # arm reply mode on the FYI notice and answer
     hint = asyncio.run(bridge.handle_callback("12345", "notice:reply:1:1"))
     assert hint is not None and "Reply mode" in hint
-    out = asyncio.run(bridge.handle_inbound("12345", "收到，谢谢"))
+    out = asyncio.run(bridge.handle_inbound("12345", "\u6536\u5230\uff0c\u8c22\u8c22"))
     assert out is not None
-    assert gateway.resolved == [(1, 1, "answer", "收到，谢谢")]
+    assert gateway.resolved == [(1, 1, "answer", "\u6536\u5230\uff0c\u8c22\u8c22")]
 
 
 def test_reply_mode_drops_on_resolve_failure(
@@ -215,7 +215,7 @@ def test_reply_mode_drops_on_resolve_failure(
     import asyncio
 
     asyncio.run(bridge.handle_callback("12345", "notice:reply:7:42"))
-    out = asyncio.run(bridge.handle_inbound("12345", "我同意"))
+    out = asyncio.run(bridge.handle_inbound("12345", "\u6211\u540c\u610f"))
     assert out is not None and "Reply failed to send" in out
     # mode popped: the next message flows through to the normal chat path
     assert "12345" not in bridge._reply_modes
@@ -237,8 +237,8 @@ def test_reply_hint_warns_when_notice_agent_is_not_switched(
     import asyncio
 
     asyncio.run(bridge.handle_callback("12345", "notice:reply:7:42"))
-    out = asyncio.run(bridge.handle_inbound("12345", "回复内容"))
-    assert gateway.resolved == [(7, 42, "answer", "回复内容")]
+    out = asyncio.run(bridge.handle_inbound("12345", "\u56de\u590d\u5185\u5bb9"))
+    assert gateway.resolved == [(7, 42, "answer", "\u56de\u590d\u5185\u5bb9")]
     assert out == copy.REPLY_SENT_OTHER_AGENT.format(agent_id=7, switched=405)
 
     # same-agent notice: plain confirmation, no cross-agent warning
@@ -276,7 +276,7 @@ def test_list_queue_pushes_each_open_notice(tmp_path: Any, monkeypatch: pytest.M
     assert hint is not None and "2 notices open" in hint
     assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert "Queue 1/2" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
-    # 每条带处理按钮
+    # each row carries an action button
     b0 = adapter.sent[0][2]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     b1 = adapter.sent[1][2]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     assert b0 is not None and b0[0][0] == "✏️ Reply"  # emoji-ok: button label
@@ -284,7 +284,7 @@ def test_list_queue_pushes_each_open_notice(tmp_path: Any, monkeypatch: pytest.M
         b1 is not None and b1[0][0] == "✏️ Reply"  # emoji-ok: button label
     )  # emoji-ok: button label  # FYI answerable too (Task #1061)
     assert b1 is not None and b1[1][0] == "✓ Got it"
-    # 队列按钮
+    # queue button
     assert b0 is not None and b0[-1][1] == "notice:list"
 
 

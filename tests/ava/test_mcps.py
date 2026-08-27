@@ -793,7 +793,7 @@ def test_remote_client_request_ids_increment(monkeypatch: pytest.MonkeyPatch) ->
     assert (id1, id2) == (1, 2)
 
 
-# ─── response-id matching + close-on-failure (MCP 串话, Task #1147) ────────
+# --- response-id matching + close-on-failure (MCP cross-talk, Task #1147) ---
 
 
 def test_remote_client_skips_stale_response_with_foreign_id(
@@ -857,7 +857,7 @@ def test_remote_client_closes_socket_on_recv_timeout(monkeypatch: pytest.MonkeyP
     """A request-timeout leaves the stream ambiguous: the daemon may still be
     processing and its response may arrive later. Closing the socket (and
     forgetting it) means the next request reconnects fresh — a late response
-    can never be consumed by the next request (the 串话 enabler)."""
+    can never be consumed by the next request (the \u4e32\u8bdd enabler)."""
     sock = _FakeSocket()
     sock.recv_queue = [TimeoutError()]
     _patch_socket(monkeypatch, sock)

@@ -315,7 +315,7 @@ describe("DisplaySettingsPage", () => {
     });
   });
 
-  // i18n MVP: the Language row renders English/中文 options and writes the
+  // i18n MVP: the Language row renders English/zh options and writes the
   // display.language setting on change.
   it("renders the Language row and persists a locale choice", async () => {
     renderPage();
@@ -324,7 +324,7 @@ describe("DisplaySettingsPage", () => {
       expect(screen.getAllByText("Language").length).toBeGreaterThan(0);
     });
     const english = screen.getByLabelText("English") as unknown as HTMLInputElement;
-    const chinese = screen.getByLabelText("中文") as unknown as HTMLInputElement;
+    const chinese = screen.getByLabelText("\u4e2d\u6587") as unknown as HTMLInputElement;
     expect(english.checked).toBe(true);
     expect(chinese.checked).toBe(false);
 

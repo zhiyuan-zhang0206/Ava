@@ -39,7 +39,9 @@ from tests.e2e.fakes.scenarios.compact_flow import (
     SUMMARY_TEXT,
 )
 
-_UNRECOGNIZED_RE = re.compile(r"Unrecognized system_marker|无法识别的 system_marker")
+_UNRECOGNIZED_RE = re.compile(
+    "Unrecognized system_marker|\u65e0\u6cd5\u8bc6\u522b\u7684 system_marker"
+)
 
 
 def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:
@@ -84,7 +86,7 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2E
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
     # ── 1. conversation content ──
-    page.fill('[data-testid="composer-input"]', "你好")
+    page.fill('[data-testid="composer-input"]', "\u4f60\u597d")
     page.click('[data-testid="composer-send"]')
     page.wait_for_selector(f"text={FIRST_REPLY}", timeout=30_000)
     wait_for_status(agent_id, AgentStatus.IDLING.value)
@@ -127,7 +129,7 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2E
     page.wait_for_selector(f"text={POST_COMPACT_NARRATION}", timeout=15_000)
 
     # ── 4. the agent still works post-compact ──
-    page.fill('[data-testid="composer-input"]', "还在吗")
+    page.fill('[data-testid="composer-input"]', "\u8fd8\u5728\u5417")
     page.click('[data-testid="composer-send"]')
     page.wait_for_selector(f"text={POST_COMPACT_REPLY}", timeout=30_000)
     wait_for_status(agent_id, AgentStatus.IDLING.value)
