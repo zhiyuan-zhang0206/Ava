@@ -18,8 +18,8 @@ tags:
 ## API Overview
 
 ```python
-task = ava.tasks.create(title, description, owner=None, priority="P2")  # Create; defaults to self as owner
-task, aid = ava.tasks.create_and_assign(title, description)   # Create + spawn agent to claim
+task = ava.tasks.create(title, description, parent=root_id, owner=None, priority="P2")  # Create; parent is required (root id 1 for top-level tasks)
+task, aid = ava.tasks.create_and_assign(title, description, parent=root_id)   # Create + spawn agent to claim
 task = ava.tasks.get(task_id)                                 # Read by id
 tasks = ava.tasks.list(owner=..., status=...)                 # Filter list
 ava.tasks.update(task_id, status=..., owner=..., priority=..., note=...)  # Change status/results/owner/priority + append progress
