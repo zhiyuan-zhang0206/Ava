@@ -294,8 +294,9 @@ def test_preflight_verify_and_dials_use_the_state_hosts(
 
     # scope=both: preflight probes owner + runner, verify re-probes both with
     # the NEW credentials — every probe must carry the state's URL-derived host.
+    # preflight returns bool; verify returns None and RAISES on any failed probe.
     assert rotate.preflight(state) is True
-    assert rotate.verify(state) is True
+    rotate.verify(state)
     assert pg_urls == [
         # preflight: owner (old creds), then runner (old creds)
         "postgresql://ava_main:old-db@10.0.0.7:15433/ava_main",
