@@ -162,17 +162,75 @@ def test_failing_start_sh_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         _lgtm.ensure_lgtm_stack_step(ctx)
 
 
-def test_native_backend_ports_are_unconditionally_loopback_only() -> None:
-    """The native Loki and Prometheus listeners stay pinned to loopback."""
+def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The native Loki and Prometheus listeners are rendered from
+    settings.observability.lgtm_listen_host; the loopback default reproduces the
+    pre-parameterization output byte for byte (the contract lock for the
+    AVA_LGTM_LISTEN_HOST knob)."""
     native = Path(__file__).resolve().parents[2] / "deploy/lgtm/native"
     loki = (native / "config/loki.yaml").read_text(encoding="utf-8")
-    assert "http_listen_address: 127.0.0.1" in loki
-    assert "grpc_listen_address: 127.0.0.1" in loki
+    assert "http_listen_address: __LGTM_LISTEN_HOST__" in loki
+    assert "grpc_listen_address: __LGTM_LISTEN_HOST__" in loki
+    # Single-binary internal addresses stay pinned to loopback by design.
     assert "instance_addr: 127.0.0.1" in loki
+    assert "address: 127.0.0.1" in loki
     assert (
-        "--web.listen-address=127.0.0.1:9090"
+        "--web.listen-address={lgtm_listen_host}:9090"
         in _lgtm_native._NATIVE_CONSTANTS["prometheus"].arguments
     )
+
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "127.0.0.1")
+    _lgtm_native._render_configs(repo, native_dir, home)
+    rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
+    assert "http_listen_address: 127.0.0.1" in rendered_loki
+    assert "grpc_listen_address: 127.0.0.1" in rendered_loki
+    prometheus_plist = plistlib.loads(
+        _lgtm_native._render_plist("prometheus", native_dir, home).encode()
+    )
+    assert "--web.listen-address=127.0.0.1:9090" in prometheus_plist["ProgramArguments"]
+
+    # A non-loopback setting flows through to the rendered listeners.
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "10.0.0.5")
+    _lgtm_native._render_configs(repo, native_dir, home)
+    rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
+    assert "http_listen_address: 10.0.0.5" in rendered_loki
+    assert "grpc_listen_address: 10.0.0.5" in rendered_loki
+    prometheus_plist = plistlib.loads(
+        _lgtm_native._render_plist("prometheus", native_dir, home).encode()
+    )
+    assert "--web.listen-address=10.0.0.5:9090" in prometheus_plist["ProgramArguments"]
+
+
+def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Grafana's http_addr is rendered from settings.observability.lgtm_grafana_listen_host;
+    the 0.0.0.0 default writes out the historical all-interfaces bind explicitly —
+    the one byte-level change the parameterization makes (semantics preserved)."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    monkeypatch.setattr(
+        "shared.config.settings.observability.lgtm_grafana_listen_host",
+        "0.0.0.0",  # noqa: S104 — asserted config default, not a bind
+    )
+    _lgtm_native._render_configs(repo, native_dir, home)
+    grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
+    assert "http_addr = 0.0.0.0" in grafana_ini
+    assert "http_port = 3003" in grafana_ini
+
+    monkeypatch.setattr(
+        "shared.config.settings.observability.lgtm_grafana_listen_host", "100.64.0.5"
+    )
+    _lgtm_native._render_configs(repo, native_dir, home)
+    grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
+    assert "http_addr = 100.64.0.5" in grafana_ini
+    assert "http_port = 3003" in grafana_ini
 
 
 def test_native_grafana_renders_from_the_repo_and_host_setting(

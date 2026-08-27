@@ -65,7 +65,7 @@ _NATIVE_CONSTANTS: dict[str, _NativeService] = {
             "--storage.tsdb.retention.time=15d",
             "--storage.tsdb.retention.size=8GB",
             "--web.enable-otlp-receiver",
-            "--web.listen-address=127.0.0.1:9090",
+            "--web.listen-address={lgtm_listen_host}:9090",
         ),
         gomemlimit="1GiB",
         archive_member="prometheus-3.13.2.darwin-arm64/prometheus",
@@ -144,6 +144,8 @@ def _binary_path(name: str, native_dir: Path) -> Path:
 
 def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
     """Render one owner-scoped launchd plist with absolute program paths."""
+    from shared.config import settings
+
     service = _NATIVE_CONSTANTS[name]
     resolved_native = native_dir.resolve()
     resolved_home = ava_home.resolve()
@@ -151,6 +153,7 @@ def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
         "config": str(resolved_native / "config"),
         "data": str(resolved_native / "data"),
         "homepath": str(resolved_native / "grafana-home"),
+        "lgtm_listen_host": settings.observability.lgtm_listen_host,
     }
     program_arguments = (
         [str(resolved_native / "grafana" / "run.sh")]
@@ -332,6 +335,7 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     provisioning_dir = repo / "deploy/lgtm/config/grafana/provisioning"
     tempo_query_url = settings.observability.telemetry_tempo_query_url.rstrip("/")
     tempo_intake_endpoint = settings.observability.telemetry_tempo_endpoint.rstrip("/")
+    lgtm_listen_host = settings.observability.lgtm_listen_host
     if _has_loopback_host(tempo_query_url) != _has_loopback_host(tempo_intake_endpoint):
         print(
             "lgtm native: AVA_TELEMETRY_TEMPO_QUERY_URL resolves to "
@@ -345,6 +349,7 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         "GRAFANA_PROVISIONING_PATH": str(provisioning_dir / "dashboards"),
         "AVA_TEMPO_QUERY_URL": tempo_query_url,
         "REPO": str(repo),
+        "lgtm_grafana_listen_host": settings.observability.lgtm_grafana_listen_host,
     }
     for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
         template = (source_dir / name).read_text(encoding="utf-8")
@@ -359,6 +364,11 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         content = template
         for key, value in template_substitutions.items():
             content = content.replace(f"{{{{{key}}}}}", value)
+        # The loki listener host cannot ride the {{...}} pass: a YAML plain
+        # scalar must not start with '{' (it would parse as a flow mapping), and
+        # the rendered line must stay byte-identical to the historical unquoted
+        # address — so the template carries a brace-free token instead.
+        content = content.replace("__LGTM_LISTEN_HOST__", lgtm_listen_host)
         if name == "loki.yaml":
             rendered = yaml.safe_load(content)
             if not isinstance(rendered, dict):

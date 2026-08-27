@@ -223,6 +223,44 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    lgtm_listen_host: str = Field(
+        default="127.0.0.1",
+        alias="AVA_LGTM_LISTEN_HOST",
+        description=(
+            "Host/IP the native Loki and Prometheus listeners bind to on the LGTM "
+            "host (Loki HTTP+gRPC, Prometheus web API). The loopback default keeps "
+            "the unauthenticated backend APIs host-local; 0.0.0.0 or a tailnet IP is "
+            "the external-migration form. Rendered into the native configs and the "
+            "launchd plist at converge; applies on the next LGTM restart."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    lgtm_grafana_listen_host: str = Field(
+        default="0.0.0.0",  # noqa: S104 — a config default value, not a bind
+        alias="AVA_LGTM_GRAFANA_LISTEN_HOST",
+        description=(
+            "Host/IP Grafana's HTTP listener binds to on the LGTM host. The "
+            "0.0.0.0 default preserves the historical all-interfaces bind "
+            "(Grafana's own default); narrow it to 127.0.0.1 or a tailnet IP to "
+            "restrict the anonymous read-only UI. Rendered into grafana.ini at "
+            "converge; applies on the next Grafana restart."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     otel_collector_metrics_port: int = Field(
         default=8888,
         alias="AVA_OTELCOL_METRICS_PORT",
