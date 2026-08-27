@@ -37,7 +37,7 @@ import asyncio
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -193,13 +193,18 @@ def _human_ttl(seconds: float) -> str:
 
 
 def _wall_clock(dt: datetime) -> str:
-    """Local wall-clock HH:MM for the notice (cluster timezone when set)."""
+    """Local wall-clock for the notice: HH:MM, or MM-DD HH:MM when the moment
+    is not on the cluster's today (a TTL can cross midnight).
+
+    Renders in the cluster timezone; ``None`` falls back to the host zone
+    (``dt.astimezone(None)``) — the shared/config contract that ``None`` is
+    the host-zone fallback signal."""
     tz = cluster_tz()
-    return (
-        dt.astimezone(tz).strftime("%H:%M")
-        if tz is not None
-        else dt.astimezone(UTC).strftime("%H:%M")
-    )
+    local = dt.astimezone(tz)
+    stamp = local.strftime("%H:%M")
+    if local.date() != datetime.now(tz).date():
+        stamp = f"{local.strftime('%m-%d')} {stamp}"
+    return stamp
 
 
 def _delete_shell_row_blocking(
