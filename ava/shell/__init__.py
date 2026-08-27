@@ -47,17 +47,43 @@ class ShellResult(str):
     The value is a plain string and behaves exactly like the old return
     value; the extra fields tell you how the command ended: `.returncode`
     is 0 on success and non-zero on failure, `.stderr` holds the standard
-    error output.
+    error output. Both fields are read-only.
+
+    Equality and hashing follow the string content only, so two results
+    with the same text compare equal regardless of their fields. String
+    operations (`+`, `.strip()`, slicing, ...) return a plain `str`
+    without the fields — keep the result around while you still need the
+    exit status.
     """
 
-    returncode: int
-    stderr: str
+    _returncode: int
+    _stderr: str
 
     def __new__(cls, stdout: str, *, returncode: int, stderr: str) -> "ShellResult":
         obj = str.__new__(cls, stdout)
-        obj.returncode = returncode
-        obj.stderr = stderr
+        obj._returncode = returncode
+        obj._stderr = stderr
         return obj
+
+    def __getnewargs_ex__(self) -> tuple[tuple[str, ...], dict[str, int | str]]:
+        """Pickle/copy reconstruction: rebuild with the same fields."""
+        return ((str(self),), {"returncode": self._returncode, "stderr": self._stderr})
+
+    @property
+    def returncode(self) -> int:
+        """Exit status of the command: 0 = success, non-zero = failure."""
+        return self._returncode
+
+    @property
+    def stderr(self) -> str:
+        """Standard error output of the command."""
+        return self._stderr
+
+    def __repr__(self) -> str:
+        return (
+            f"ShellResult({str.__repr__(self)}, "
+            f"returncode={self._returncode!r}, stderr={self._stderr!r})"
+        )
 
 
 def run(
@@ -74,7 +100,8 @@ def run(
     command's exit status attached: `.returncode` is 0 on success and
     non-zero on failure, and `.stderr` carries the standard error output.
     Check `.returncode` instead of parsing stdout to tell success from
-    failure.
+    failure. The fields are read-only, and string operations (like
+    `.strip()` or concatenation) return a plain `str` without them.
 
     For commands expected to outlive the timeout, use `run_background`
     instead — it reports back when the command finishes."""

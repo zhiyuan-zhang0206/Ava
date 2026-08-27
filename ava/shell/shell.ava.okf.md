@@ -14,7 +14,7 @@ Interface for executing shell commands. Three modes: one-shot `run()`, backgroun
 ## Core API
 
 ### One-shot
-- `run(cmd, *, cwd=None, timeout=30.0) → ShellResult` — Run command, return stdout as a string with the exit status attached: `.returncode` (0 = success, non-zero = failure) and `.stderr`. Non-zero exit does not raise an exception; after `timeout` seconds kill the command and raise `subprocess.TimeoutExpired`. Default working directory is agent's workspace.
+- `run(cmd, *, cwd=None, timeout=30.0) → ShellResult` — Run command, return stdout as a string with the exit status attached: read-only `.returncode` (0 = success, non-zero = failure) and `.stderr`. String operations on the result return a plain `str` without these fields. Non-zero exit does not raise an exception; after `timeout` seconds kill the command and raise `subprocess.TimeoutExpired`. Default working directory is agent's workspace.
 
 ### Background (auto-report on completion)
 - `run_background(cmd, *, name, cwd=None, keep=False, ttl) → BackgroundRun` — Run a long command in a new persistent session, return immediately, send you a message when the command exits (exit code + log path + output tail), then the session auto-closes. Output is streamed to `.shell_logs/<sid>_<name>.log` in workspace (relative path, can read/grep to view progress). `keep=True` retains the session after command ends. Use for one-shot long tasks like build/test/download; interactive programs still use `sessions`. Returns `BackgroundRun(session_id, output_path)`.
