@@ -59,7 +59,7 @@ const STATUS_LABEL: Record<string, string> = {
   open: "Open",
   in_progress: "In progress",
   done: "Done",
-  cancelled: "Cancelled",
+  cancelled: "Canceled",
   ongoing: "Root",
 };
 
@@ -462,7 +462,7 @@ export function TaskGraph({
                   </span>
                 ))}
               </div>
-              <p>uniform node size</p>
+              <p>Uniform node size</p>
             </div>
           }
         />
