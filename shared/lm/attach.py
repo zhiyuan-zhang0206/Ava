@@ -99,12 +99,25 @@ def _new_skipped_paths() -> list[tuple[str, str]]:
     return []
 
 
+def _new_delivered_flags() -> list[bool]:
+    return []
+
+
 @dataclass
 class _PackingState:
-    """The ordered pack output while files are accepted or skipped."""
+    """The ordered pack output while files are accepted or skipped.
+
+    ``line_blocks`` / ``delivered_flags`` run in ENTRY order (one text block and
+    one flag per entry, delivered or skipped) so the final content blocks can
+    interleave each entry's caption line with its media block — the model sees
+    every file's label right beside its image, and the frontend timeline can
+    pair each delivered image with its own caption line structurally.
+    """
 
     media_blocks: list[dict[str, object]] = field(default_factory=_new_media_blocks)
     caption_lines: list[str] = field(default_factory=lambda: [_ATTACH_NOTICE])
+    line_blocks: list[dict[str, object]] = field(default_factory=_new_media_blocks)
+    delivered_flags: list[bool] = field(default_factory=_new_delivered_flags)
     delivered: list[str] = field(default_factory=_new_delivered_paths)
     skipped: list[tuple[str, str]] = field(default_factory=_new_skipped_paths)
     delivered_bytes: int = 0
@@ -112,16 +125,17 @@ class _PackingState:
 
     def skip(self, index: int, label: str | None, attachment: _SkippedAttachment) -> None:
         self.skipped.append((attachment.path, attachment.reason))
-        self.caption_lines.append(
-            _caption_line(
-                index,
-                attachment.path,
-                attachment.mime,
-                attachment.size,
-                label,
-                attachment.reason,
-            )
+        line = _caption_line(
+            index,
+            attachment.path,
+            attachment.mime,
+            attachment.size,
+            label,
+            attachment.reason,
         )
+        self.caption_lines.append(line)
+        self.line_blocks.append({"type": "text", "text": line})
+        self.delivered_flags.append(False)
 
     def deliver(
         self,
@@ -138,9 +152,10 @@ class _PackingState:
         self.delivered_bytes += len(data)
         if attachment.media_type == "image":
             self.delivered_images += 1
-        self.caption_lines.append(
-            _caption_line(index, attachment.path_text, attachment.mime, len(data), label, None)
-        )
+        line = _caption_line(index, attachment.path_text, attachment.mime, len(data), label, None)
+        self.caption_lines.append(line)
+        self.line_blocks.append({"type": "text", "text": line})
+        self.delivered_flags.append(True)
 
 
 def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack | None:
@@ -180,8 +195,20 @@ def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack |
         state.deliver(model, index, entry.label, attachment, data)
 
     text = "\n".join(state.caption_lines)
+    # Interleave each entry's caption line with its media block, ahead of the
+    # leading notice: [text(notice), text(line1), media1, text(line2), media2, ...].
+    # Every delivered media block is immediately preceded by its own caption
+    # text block, so consumers can pair a file's label with its image without
+    # re-parsing the joined caption (shared/timeline._attach_image_captions).
+    blocks: list[dict[str, object]] = [{"type": "text", "text": state.caption_lines[0]}]
+    media_index = 0
+    for line_block, delivered_flag in zip(state.line_blocks, state.delivered_flags, strict=True):
+        blocks.append(line_block)
+        if delivered_flag:
+            blocks.append(state.media_blocks[media_index])
+            media_index += 1
     return AttachmentPack(
-        blocks=[{"type": "text", "text": text}, *state.media_blocks],
+        blocks=blocks,
         text=text,
         delivered=state.delivered,
         skipped=state.skipped,

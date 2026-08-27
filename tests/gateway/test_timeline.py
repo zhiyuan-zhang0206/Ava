@@ -577,6 +577,11 @@ class TestAttachItems:
         assert item.item_id == "0.0"
         assert item.images is not None and len(item.images) == 1
         assert item.images[0].startswith("data:image/png;base64,")
+        # The image's own caption line rides beside the thumbnail (1:1 with
+        # images) so the frontend can interleave label and image.
+        assert item.image_captions is not None and len(item.image_captions) == 1
+        assert "[1] render.png" in item.image_captions[0]
+        assert "after fix" in item.image_captions[0]
         # Caption text only — the base64 must never reach the payload.
         assert "base64" not in item.payload
         assert "data:image" not in item.payload
@@ -600,7 +605,70 @@ class TestAttachItems:
         item = items[0]
         assert item.kind == "attach"
         assert item.images is None
+        assert item.image_captions is None
         assert "not delivered" in item.payload
+
+    def test_legacy_single_caption_block_has_no_image_captions(self, tmp_path: Path):
+        # Pre-interleave attach messages stored ONE caption text block followed
+        # by the image blocks; per-image pairing cannot be recovered there, so
+        # image_captions stays None and the frontend falls back to the legacy
+        # all-text-then-all-images layout instead of mispairing.
+        msg = self._attach_message(
+            tmp_path,
+            blocks_override=[
+                {"type": "text", "text": "[system] Files attached:\n- [1] a.png (image/png)"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,QUJDRA=="},
+                },
+            ],
+        )
+        items, _ = build_timeline_items([msg], [])
+        assert len(items) == 1
+        item = items[0]
+        assert item.kind == "attach"
+        assert item.images == ["data:image/png;base64,QUJDRA=="]
+        assert item.image_captions is None
+
+    def test_multiple_images_carry_aligned_image_captions(self, tmp_path: Path):
+        # Two delivered images with interleaved blocks: image_captions must be
+        # the two per-file caption lines in image order, and skipped entries
+        # must not shift the alignment.
+        msg = self._attach_message(
+            tmp_path,
+            blocks_override=[
+                {
+                    "type": "text",
+                    "text": "[system] Files attached during this turn:",
+                },
+                {"type": "text", "text": '- [1] first.png (image/png, 1 B) — "one"'},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,RklyU1Q="},
+                },
+                {"type": "text", "text": "- [2] notes.txt (unknown) — not delivered"},
+                {"type": "text", "text": '- [3] second.png (image/png, 2 B) — "two"'},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,U0VDT05E"},
+                },
+            ],
+        )
+        items, _ = build_timeline_items([msg], [])
+        assert len(items) == 1
+        item = items[0]
+        assert item.images == ["data:image/png;base64,RklyU1Q=", "data:image/png;base64,U0VDT05E"]
+        assert item.image_captions == [
+            '- [1] first.png (image/png, 1 B) — "one"',
+            '- [3] second.png (image/png, 2 B) — "two"',
+        ]
+        # The joined payload keeps every line (notice + all three entries).
+        assert item.payload == (
+            "[system] Files attached during this turn:\n"
+            '- [1] first.png (image/png, 1 B) — "one"\n'
+            "- [2] notes.txt (unknown) — not delivered\n"
+            '- [3] second.png (image/png, 2 B) — "two"'
+        )
 
     def test_non_image_media_blocks_never_leak_into_payload_or_images(self, tmp_path: Path):
         # pdf document blocks + media blocks are not thumbnailable; they must be
