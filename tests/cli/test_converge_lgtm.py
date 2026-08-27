@@ -8,6 +8,8 @@ carrying the $AVA_HOME/lgtm-host marker.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import os
 import plistlib
 import shutil
@@ -18,7 +20,7 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
-from cli.commands import _lgtm, _lgtm_native
+from cli.commands import _lgtm, _lgtm_native, _observatory_urls
 from cli.commands._converge_spec import ConvergeCtx
 
 # S104-flagged literal reused by the mismatch-warning parametrize — a config
@@ -237,6 +239,41 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     assert "http_port = 3003" in grafana_ini
 
 
+def _assert_rendered_provisioning(
+    native_dir: Path,
+    *,
+    loki: str | None = None,
+    prometheus: str | None = None,
+    pg: str | None = None,
+    webhook: str | None = None,
+) -> None:
+    """Parse the converge-rendered provisioning tree and lock the datasource
+    and webhook URL values (default rendering output contract)."""
+    rendered_datasources = yaml.safe_load(
+        (native_dir / "config/provisioning/datasources/datasources.yml").read_text(encoding="utf-8")
+    )
+    by_uid = {ds["uid"]: ds["url"] for ds in rendered_datasources["datasources"]}
+    if loki is not None:
+        assert by_uid["loki"] == loki
+    if prometheus is not None:
+        assert by_uid["prometheus"] == prometheus
+    if pg is not None:
+        assert by_uid["ops"] == pg
+    datasources_text = (native_dir / "config/provisioning/datasources/datasources.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "{{" not in datasources_text
+    rendered_contact = yaml.safe_load(
+        (native_dir / "config/provisioning/alerting/contact.yml").read_text(encoding="utf-8")
+    )
+    if webhook is not None:
+        assert rendered_contact["contactPoints"][0]["receivers"][0]["settings"]["url"] == webhook
+    contact_text = (native_dir / "config/provisioning/alerting/contact.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "{{" not in contact_text
+
+
 def test_native_grafana_renders_from_the_repo_and_host_setting(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -265,10 +302,7 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     assert "{{" not in grafana_ini
     assert "{{" not in runtime_env
     assert "{{" not in run_script
-    assert (
-        f"GRAFANA_PROVISIONING_PATH={repo}/deploy/lgtm/config/grafana/provisioning/dashboards"
-        in runtime_env
-    )
+    assert f"GRAFANA_PROVISIONING_PATH={native_dir}/config/provisioning/dashboards" in runtime_env
     assert "AVA_TELEMETRY_TEMPO_QUERY_URL=http://tempo.test:3200" in runtime_env
     assert "admin_password" in run_script
     assert 'export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"' in run_script
@@ -281,11 +315,253 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
         job["job_name"]: job["static_configs"][0]["targets"] for job in prometheus["scrape_configs"]
     }["tempo"] == ["tempo.test:3200"]
 
-    datasources = (
+    # The repo datasources.yml is a template; the rendered copy under the
+    # native dir carries the baked URLs (default = loopback, byte-identical
+    # to the pre-parameterization content).
+    template = (
         repo / "deploy/lgtm/config/grafana/provisioning/datasources/datasources.yml"
     ).read_text(encoding="utf-8")
-    assert "100.78.137.46" not in datasources
-    assert "$__env{AVA_TELEMETRY_TEMPO_QUERY_URL}" in datasources
+    assert "$__env{AVA_TELEMETRY_LOKI_URL}" in template
+    assert "$__env{AVA_TELEMETRY_PROMETHEUS_URL}" in template
+    assert "$__env{AVA_PG_URL}" in template
+    assert "$__env{AVA_TELEMETRY_TEMPO_QUERY_URL}" in template
+    assert "{{" not in template
+    # The rendered provisioning tree keeps the $__env{} references verbatim;
+    # the two-state VALUES are baked into runtime.env (Grafana expands at
+    # runtime from its process env).
+    rendered_datasources = (
+        native_dir / "config/provisioning/datasources/datasources.yml"
+    ).read_text(encoding="utf-8")
+    assert "$__env{AVA_TELEMETRY_LOKI_URL}" in rendered_datasources
+    assert "{{" not in rendered_datasources
+    rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
+    assert "AVA_TELEMETRY_LOKI_URL=http://127.0.0.1:3100" in rendered_runtime_env
+    assert "AVA_TELEMETRY_PROMETHEUS_URL=http://127.0.0.1:9090" in rendered_runtime_env
+    assert "AVA_PG_URL=127.0.0.1:5433" in rendered_runtime_env
+    assert "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts" in rendered_runtime_env
+    _assert_rendered_provisioning(native_dir, loki="$__env{AVA_TELEMETRY_LOKI_URL}")
+
+
+def test_native_provisioning_renders_remote_observatory_urls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AVA_OBSERVABILITY_URL set -> the datasources + alert webhook render the
+    remote observatory endpoints; unset -> the current loopback defaults
+    (locked by test_native_grafana_renders_from_the_repo_and_host_setting)."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    monkeypatch.setattr(
+        "shared.config.settings.observability.observability_url",
+        "http://100.78.137.46",
+    )
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.10")
+
+    _lgtm_native._render_configs(repo, native_dir, home)
+
+    rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
+    assert "AVA_TELEMETRY_LOKI_URL=http://100.78.137.46:3100" in rendered_runtime_env
+    assert "AVA_TELEMETRY_PROMETHEUS_URL=http://100.78.137.46:9090" in rendered_runtime_env
+    assert "AVA_PG_URL=100.78.137.46:5433" in rendered_runtime_env
+    assert "AVA_ALERTS_WEBHOOK_URL=http://100.64.0.10:8000/api/alerts" in rendered_runtime_env
+    _assert_rendered_provisioning(
+        native_dir,
+        loki="$__env{AVA_TELEMETRY_LOKI_URL}",
+        prometheus="$__env{AVA_TELEMETRY_PROMETHEUS_URL}",
+        pg="$__env{AVA_PG_URL}",
+        webhook="$__env{AVA_ALERTS_WEBHOOK_URL}",
+    )
+
+
+def test_native_provisioning_webhook_stays_loopback_without_observatory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No observatory -> the webhook stays byte-identical 127.0.0.1:8000 even
+    when reachable_host() would resolve to a tailnet address — self-dialing
+    a tailnet IP from the gateway host can hit VPN hairpin filtering."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    monkeypatch.setattr(
+        "shared.config.settings.observability.observability_url",
+        "",
+    )
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.10")
+
+    _lgtm_native._render_configs(repo, native_dir, home)
+
+    rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
+    assert "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts" in rendered_runtime_env
+    assert "100.64.0.10" not in rendered_runtime_env
+    _assert_rendered_provisioning(native_dir, webhook="$__env{AVA_ALERTS_WEBHOOK_URL}")
+
+
+def test_native_provisioning_preserves_user_edited_rendered_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A rendered provisioning file the user hand-edited is warned about and
+    preserved on the next converge — never overwritten (web-sources precedent)."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+
+    _lgtm_native._render_configs(repo, native_dir, home)
+    datasources = native_dir / "config/provisioning/datasources/datasources.yml"
+    # The rendered tree carries $__env{} references (URLs live in runtime.env),
+    # so a meaningful user edit replaces a reference with a hardcoded URL.
+    user_edit = datasources.read_text(encoding="utf-8").replace(
+        "$__env{AVA_TELEMETRY_LOKI_URL}", "http://user.example:3100"
+    )
+    assert user_edit != datasources.read_text(encoding="utf-8")
+    datasources.write_text(user_edit, encoding="utf-8")
+
+    _lgtm_native._render_configs(repo, native_dir, home)
+
+    assert "http://user.example:3100" in datasources.read_text(encoding="utf-8")
+    assert "$__env{AVA_TELEMETRY_LOKI_URL}" not in datasources.read_text(encoding="utf-8")
+    assert "modified locally" in capsys.readouterr().err
+
+
+def test_native_provisioning_removes_stale_rendered_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A rendered file whose source template vanished is removed when untouched
+    (pure derived state) — matching the web-sources cleanup rule."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+
+    _lgtm_native._render_configs(repo, native_dir, home)
+    stale = native_dir / "config/provisioning/datasources/old.yml"
+    stale.write_text("stale", encoding="utf-8")
+    hashes_path = native_dir / "config/provisioning-hashes.json"
+    hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
+    hashes["datasources/old.yml"] = hashlib.sha256(b"stale").hexdigest()
+    hashes_path.write_text(json.dumps(hashes), encoding="utf-8")
+
+    _lgtm_native._render_configs(repo, native_dir, home)
+
+    assert not stale.exists()
+
+
+def test_ensure_kickstarts_grafana_when_config_changed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A converge that changes the rendered grafana config (INI, runtime env,
+    or provisioning tree) kicks the running Grafana so the new config takes
+    effect — a running instance never re-reads its INI (QA P1)."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    (native_dir / "config").mkdir(parents=True)
+    monkeypatch.setattr(
+        _lgtm_native,
+        "platform_tag",
+        lambda: "darwin_arm64",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(
+        _lgtm_native,
+        "_load_versions",
+        lambda _repo: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(
+        _lgtm_native,
+        "_download_and_verify",
+        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(
+        _lgtm_native,
+        "_agents_dir",
+        lambda: tmp_path / "plists",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr("shared.config.settings.alerts.grafana_admin_password", None)
+    calls: list[list[str]] = []
+
+    def fake_launchctl(*args: str) -> object:
+        calls.append(list(args))
+        if args[0] == "print":
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(_lgtm_native, "_launchctl", fake_launchctl)
+    monkeypatch.setattr(
+        _lgtm_native, "platform", type("P", (), {"system": staticmethod(lambda: "Darwin")})()
+    )
+
+    _lgtm_native.ensure_lgtm_native(repo, home)
+
+    kickstarts = [c for c in calls if c[0] == "kickstart"]
+    assert len(kickstarts) == 1, kickstarts
+    assert kickstarts[0][1] == "-k"
+    assert kickstarts[0][2] == f"gui/{os.getuid()}/{_lgtm_native.native_label('grafana', home)}"
+    assert "kickstarted" in capsys.readouterr().err
+
+
+def test_ensure_no_kickstart_when_config_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Steady state: a converge that renders nothing new leaves the running
+    Grafana alone (kickstart only on change)."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    (native_dir / "config").mkdir(parents=True)
+    monkeypatch.setattr(
+        _lgtm_native,
+        "platform_tag",
+        lambda: "darwin_arm64",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(
+        _lgtm_native,
+        "_load_versions",
+        lambda _repo: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(
+        _lgtm_native,
+        "_download_and_verify",
+        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(
+        _lgtm_native,
+        "_agents_dir",
+        lambda: tmp_path / "plists",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr("shared.config.settings.alerts.grafana_admin_password", None)
+    calls: list[list[str]] = []
+
+    def fake_launchctl(*args: str) -> object:
+        calls.append(list(args))
+        if args[0] == "print":
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(_lgtm_native, "_launchctl", fake_launchctl)
+    monkeypatch.setattr(
+        _lgtm_native, "platform", type("P", (), {"system": staticmethod(lambda: "Darwin")})()
+    )
+
+    _lgtm_native.ensure_lgtm_native(repo, home)
+    first = len(calls)
+    _lgtm_native.ensure_lgtm_native(repo, home)
+
+    kickstarts = [c for c in calls[first:] if c[0] == "kickstart"]
+    assert kickstarts == []
+
+
+def test_observability_url_validation_warns_and_falls_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A malformed AVA_OBSERVABILITY_URL is warned about and falls back to the
+    loopback endpoints instead of silently rendering broken URLs (QA P3)."""
+    monkeypatch.setattr(
+        "shared.config.settings.observability.observability_url",
+        "10.0.0.1:1234",  # no scheme — malformed
+    )
+    loki, prometheus, pg = _observatory_urls._observability_datasource_urls()
+    assert loki == "http://127.0.0.1:3100"
+    assert prometheus == "http://127.0.0.1:9090"
+    assert pg == "127.0.0.1:5433"
+    assert "malformed" in capsys.readouterr().err
 
 
 def test_native_converge_renders_grafana_password_only_when_configured(

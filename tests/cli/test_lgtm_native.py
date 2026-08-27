@@ -190,7 +190,15 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
         "loki.yaml",
         "prometheus.yml",
         "runtime.env",
+        # Converge-copied Grafana provisioning tree + its hash sidecar
+        # (task #1791 A3: datasource/webhook URLs are $__env{} references
+        # resolved from the rendered runtime.env).
+        "provisioning",
+        "provisioning-hashes.json",
     }
+    assert (config_dir / "provisioning/datasources/datasources.yml").is_file()
+    assert (config_dir / "provisioning/alerting/contact.yml").is_file()
+    assert (config_dir / "provisioning/alerting/rules.yml").is_file()
     assert loki_config["common"]["path_prefix"] == f"{home}/lgtm/native/data/loki"
     assert loki_config["frontend"]["address"] == "127.0.0.1"
     assert (

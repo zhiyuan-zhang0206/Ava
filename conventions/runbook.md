@@ -1293,8 +1293,10 @@ The response is judgment, not a runbook branch: identify the consumer, then
 investigate, hibernate idle agents to shed load, or tell the user — and
 sometimes conclude the machine is busy for a good reason and do nothing. The
 thresholds live in `deploy/lgtm/config/grafana/provisioning/alerting/rules.yml`
-as deployment-tunable rule config; a box whose normal state trips a rule wants
-its threshold edited there, not a special case in code.
+(the converge-rendered source template — converge copies it verbatim into
+`$AVA_HOME/lgtm/native/config/provisioning/`) as deployment-tunable rule
+config; a box whose normal state trips a rule wants its threshold edited
+there, not a special case in code.
 
 ## Logging / diagnostics
 

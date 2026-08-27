@@ -34,6 +34,7 @@ from string import Template
 from urllib.parse import unquote, urlsplit
 
 from cli.commands._converge_spec import ConvergeCtx
+from cli.commands._rendered_file import write_rendered_guarded
 from shared.machine import MachineRoles
 from shared.observability import collector_allowed_for_home
 
@@ -439,10 +440,11 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
             authorization=_yaml_quote(_cluster_bearer()),
         )
     obs = settings.observability
+    loki_base, prom_base = _lgtm_fanout_bases()
     return _BACKEND_EXPORTERS.format(
         tempo_endpoint=_yaml_quote(obs.telemetry_tempo_endpoint.rstrip("/")),
-        loki_base=_yaml_quote(obs.telemetry_loki_url.rstrip("/") + "/otlp"),
-        prom_base=_yaml_quote(obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp"),
+        loki_base=_yaml_quote(loki_base),
+        prom_base=_yaml_quote(prom_base),
     )
 
 
@@ -453,6 +455,7 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
     from shared.machine import machine_name
 
     obs = settings.observability
+    loki_base, prom_base = _lgtm_fanout_bases()
     data_plane_block, data_plane_pipeline = _data_plane_receivers(roles)
     substitutions = {
         "AVA_HOME": str(ava_home),
@@ -461,8 +464,8 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
         # Kept as named generation inputs for small downstream/custom templates;
         # the shipped template consumes the role-specific OTLP_EXPORTERS block.
         "TEMPO_ENDPOINT": obs.telemetry_tempo_endpoint.rstrip("/"),
-        "LOKI_BASE": obs.telemetry_loki_url.rstrip("/") + "/otlp",
-        "PROM_BASE": obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp",
+        "LOKI_BASE": loki_base,
+        "PROM_BASE": prom_base,
         "RETENTION_DAYS": str(obs.trace_retention_days),
         "SELF_METRICS_PORT": str(settings.observability.otel_collector_metrics_port),
         "DATA_PLANE_RECEIVERS": data_plane_block,
@@ -568,14 +571,30 @@ def _download_and_verify(tag: str, dest_dir: Path) -> None:
     (dest_dir / _VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
 
 
-def _write_config(path: Path, rendered: str) -> None:
-    """Atomically publish a config that is owner-only from first creation.
+def _lgtm_fanout_bases() -> tuple[str, str]:
+    """The gateway collector's LGTM fan-out base URLs (loki, prometheus).
 
-    Split runners carry the cluster bearer and gateways may additionally carry
-    data-plane credentials. ``write_text`` then ``chmod`` briefly exposes a
-    newly-created file through the process umask; ``mkstemp`` creates 0600 and
-    replacement publishes only the fully-written private file.
+    Two-state on AVA_OBSERVABILITY_URL (task #1791, A3): empty (default) keeps
+    the per-service settings URLs, whose defaults are this host's loopback
+    backends; non-empty points the fan-out at the remote observatory station
+    (base URL + the service's own port). The runner relay path is unaffected —
+    it always relays to the gateway collector.
     """
+    from cli.commands._observatory_urls import _validated_observability_base
+    from shared.config import settings
+
+    obs = settings.observability
+    base = _validated_observability_base(obs.observability_url)
+    if base:
+        return f"{base}:3100/otlp", f"{base}:9090/api/v1/otlp"
+    return (
+        obs.telemetry_loki_url.rstrip("/") + "/otlp",
+        obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp",
+    )
+
+
+def _atomic_write(path: Path, rendered: str) -> None:
+    """Replace ``path`` with ``rendered`` atomically (mkstemp + rename)."""
     fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
@@ -588,14 +607,39 @@ def _write_config(path: Path, rendered: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _write_config(path: Path, rendered: str) -> None:
+    """Publish the rendered collector config with user-edit protection.
+
+    Content-hash guarded (web-sources precedent, task #1791 A3): a config.yaml
+    the user hand-edited since the last converge write is warned about and
+    preserved, never overwritten. The write itself stays atomic and owner-only
+    from first creation — split runners carry the cluster bearer and gateways
+    may additionally carry data-plane credentials, so the file must never be
+    exposed through the process umask (``mkstemp`` creates 0600 and
+    replacement publishes only the fully-written private file).
+    """
+    hashes_path = path.parent / "rendered-hashes.json"
+    warning = write_rendered_guarded(
+        path,
+        rendered,
+        hashes_path,
+        path.name,
+        writer=_atomic_write,
+    )
+    if warning is not None:
+        print(f"  ! otel-collector: {warning}", file=sys.stderr)
+
+
 def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None) -> None:
     """Idempotent install: pinned binary present + config regenerated.
 
     Binary download is skipped when the version marker matches. Config is
-    ALWAYS regenerated (template changes and setting changes propagate on the
-    next converge). Unsupported platforms warn and skip — the sidecar session
-    will not start and the agent preflight disables OTLP export with a
-    reported warning.
+    re-rendered on every converge (template changes and setting changes
+    propagate on the next converge) — except a config.yaml the user hand-edited
+    since the last converge write, which is warned about and preserved
+    (content-hash guard, web-sources precedent). Unsupported platforms warn
+    and skip — the sidecar session will not start and the agent preflight
+    disables OTLP export with a reported warning.
     """
     tag = platform_tag()
     if tag is None:
