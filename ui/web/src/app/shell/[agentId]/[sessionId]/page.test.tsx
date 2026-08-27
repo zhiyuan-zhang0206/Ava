@@ -102,6 +102,22 @@ describe("ShellMonitorPage", () => {
     expect(screen.getByText(/TTL 2h 11m · expires \d{1,2}\/\d{1,2} \d{2}:\d{2}/)).toBeTruthy();
   });
 
+  it("clamps an already-expired TTL deadline to 0s remaining", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+    getAgentShell.mockResolvedValue(
+      shellData({
+        created_at: new Date(Date.now() - 3600_000).toISOString(),
+        uptime_seconds: 3600,
+        expires_at: new Date(Date.now() - 10_000).toISOString(),
+      }),
+    );
+    render();
+
+    await waitFor(() => expect(screen.getByText("Runtime 1h 0m")).toBeTruthy());
+    expect(screen.getByText(/TTL 0s · expires/)).toBeTruthy();
+  });
+
   it("falls back to the probe uptime and shows No TTL when the session has neither", async () => {
     getAgentShell.mockResolvedValue(
       shellData({ created_at: null, uptime_seconds: 45, expires_at: null }),
