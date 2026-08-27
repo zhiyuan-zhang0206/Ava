@@ -30,12 +30,12 @@ def test_pgbouncer_line_uses_registry_port(
     monkeypatch.setattr(
         ci,
         "_pg_running",
-        lambda _p: False,  # pyright: ignore[reportUnknownArgumentType]
+        lambda _p, _h: False,  # pyright: ignore[reportUnknownArgumentType]
     )  # skip the real pg probe/connect  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         ci,
         "_redis_reachable",
-        lambda _p: False,  # pyright: ignore[reportUnknownArgumentType]
+        lambda _p, _h: False,  # pyright: ignore[reportUnknownArgumentType]
     )  # skip the real redis probe  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
 
@@ -63,8 +63,8 @@ def test_pgbouncer_line_without_registry_record_says_so(
 ) -> None:
     """No registry record (an unusual host): the pooler port is a registry fact,
     so status says it cannot resolve the port instead of printing a false :0."""
-    monkeypatch.setattr(ci, "_pg_running", lambda _p: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(ci, "_redis_reachable", lambda _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "_pg_running", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "_redis_reachable", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
     monkeypatch.setattr(cl, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pgb, "pgbouncer_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -86,8 +86,8 @@ def test_postgres_probe_dials_pooled_front_door(
     backend hop); a direct probe would test a path no consumer uses."""
     import shared.db
 
-    monkeypatch.setattr(ci, "_pg_running", lambda _p: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(ci, "_redis_reachable", lambda _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "_pg_running", lambda _p, _h: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "_redis_reachable", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
 
     calls: list[dict[str, object]] = []
 

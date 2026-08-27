@@ -223,7 +223,7 @@ def test_interrupted_split_journals_one_secret_set_and_replays_it(
     def _record_role(*_args: object, **kwargs: object) -> None:
         role_passwords.append(str(kwargs["db_admin_password"]))
 
-    def _redis_admin(_port: int, _candidates: tuple[str, ...]) -> str:
+    def _redis_admin(_host: str, _port: int, _candidates: tuple[str, ...]) -> str:
         return _NEW_REDIS_ADMIN
 
     class _Redis:

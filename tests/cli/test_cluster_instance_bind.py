@@ -319,7 +319,7 @@ def _wire_pg_start(
     """Common mocks for _start_pg: a not-running pg on a scratch data dir, with
     subprocess.run captured."""
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
-    monkeypatch.setattr(_ci, "_pg_running", lambda _port: running)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: running)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []
 

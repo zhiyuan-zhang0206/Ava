@@ -61,8 +61,28 @@ from shared.pg_tools import PG_BIN_LINUX, brew_prefix, is_macos, pg_shm_args, pg
 from shared.platform_backend import get_backend
 from shared.private_storage import ensure_private_dir, write_private_bytes
 from shared.process_env import inherited_process_env
+from shared.url_secret import url_host
 
 _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
+
+
+def _pg_dial_host() -> str:
+    """The host this cluster's own Postgres is dialed at — read from this
+    cluster's AVA_DB_URL (the URL is the one dial source every consumer uses;
+    DataPlaneSettings rewrites a self-host URL to loopback before anything
+    dials). At install-time birth no `.env` exists yet and the never-dialed
+    boot sentinel (host 127.0.0.1) stands in, so the derived host is loopback
+    exactly as before — the fallback is a defensive floor, not a behavior
+    change. External data plane (Task #1752): the URL names the foreign host
+    and the probes dial it."""
+    return url_host(settings.data_plane.db_url)
+
+
+def _redis_dial_host() -> str:
+    """The host this cluster's own Redis is dialed at — read from this
+    cluster's AVA_REDIS_URL (see `_pg_dial_host`)."""
+    return url_host(settings.data_plane.redis_url)
+
 
 # A single cluster's own pg needs far less than a per-host shared budget. `main`
 # on its own instance carries the whole prod fleet, so keep enough headroom (the
@@ -261,9 +281,9 @@ def _live_pg_socket_dir(pg_port: int, probe_root: Path = Path("/tmp")) -> Path: 
     return canonical
 
 
-def _pg_running(pg_port: int) -> bool:
+def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
     out = subprocess.run(
-        [_pg_bin("pg_isready"), "-h", "127.0.0.1", "-p", str(pg_port)],
+        [_pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
         capture_output=True,
         check=False,
     )
@@ -273,8 +293,9 @@ def _pg_running(pg_port: int) -> bool:
 def _start_pg(pg_port: int, cluster_secret: str) -> int:
     data = _ensure_pg_data()
     (data / "pg_hba.conf").write_text(_pg_hba_body(cluster_secret))
-    if _pg_running(pg_port):
-        print(f"  ✓ postgres already running (127.0.0.1:{pg_port})")
+    dial_host = _pg_dial_host()
+    if _pg_running(pg_port, dial_host):
+        print(f"  ✓ postgres already running ({dial_host}:{pg_port})")
         # The hba file was just rewritten; a running server keeps the copy it
         # loaded at start until reloaded. Install-time birth starts pg BEFORE
         # the cluster's .env exists (no secret yet -> trust hba), and the first
@@ -343,7 +364,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"  ✓ postgres started (127.0.0.1:{pg_port})")
+    print(f"  ✓ postgres started ({dial_host}:{pg_port})")
     return 0
 
 
@@ -372,9 +393,9 @@ def _redis_cli_env(redis_admin_password: str) -> dict[str, str]:
     return inherited_process_env({"REDISCLI_AUTH": redis_admin_password})
 
 
-def _redis_running(redis_port: int, redis_admin_password: str) -> bool:
+def _redis_running(redis_port: int, redis_admin_password: str, host: str = "127.0.0.1") -> bool:
     out = subprocess.run(
-        [_redis_cli_bin(), "-h", "127.0.0.1", "-p", str(redis_port), "ping"],
+        [_redis_cli_bin(), "-h", host, "-p", str(redis_port), "ping"],
         env=_redis_cli_env(redis_admin_password),
         capture_output=True,
         text=True,
@@ -415,13 +436,16 @@ def _start_redis(
     # explicit in this boundary's signature even though Redis itself is always
     # loopback-only and uses the independent admin/runtime passwords below.
     del cluster_secret
-    if _redis_running(redis_port, redis_admin_password):
-        print(f"  ✓ redis already running (127.0.0.1:{redis_port})")
+    dial_host = _redis_dial_host()
+    if _redis_running(redis_port, redis_admin_password, dial_host):
+        print(f"  ✓ redis already running ({dial_host}:{redis_port})")
         _write_redis_conf(_redis_data_dir(), redis_admin_password)
         # Re-affirm the ACL user on every start (survives a restart that drops
         # the in-memory ACL) — including no-secret clusters, whose identity
         # user is created with `nopass` (see _ensure_redis_acl).
-        return _ensure_redis_acl(redis_port, redis_admin_password, runtime_password, identity)
+        return _ensure_redis_acl(
+            redis_port, redis_admin_password, runtime_password, identity, dial_host
+        )
     data = _redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
@@ -451,23 +475,29 @@ def _start_redis(
         return 1
     # redis-server --daemonize returns immediately; wait for the port to answer.
     for _ in range(60):
-        if _redis_running(redis_port, redis_admin_password):
+        if _redis_running(redis_port, redis_admin_password, dial_host):
             break
         time.sleep(0.1)
     else:
         print(f"  ✗ redis did not become ready on :{redis_port}", file=sys.stderr)
         return 1
-    print(f"  ✓ redis started (127.0.0.1:{redis_port})")
+    print(f"  ✓ redis started ({dial_host}:{redis_port})")
     # A no-secret cluster keeps requirepass off, but the ACL user still exists
     # with `nopass` (see _ensure_redis_acl) — the runtime URLs carry the
     # identity as username, and redis-py AUTHes when a URL has a username, so a
     # missing user would WRONGPASS forever and the redis wake bus would never
     # deliver to agents.
-    return _ensure_redis_acl(redis_port, redis_admin_password, runtime_password, identity)
+    return _ensure_redis_acl(
+        redis_port, redis_admin_password, runtime_password, identity, dial_host
+    )
 
 
 def _ensure_redis_acl(
-    redis_port: int, redis_admin_password: str, runtime_password: str, identity: str
+    redis_port: int,
+    redis_admin_password: str,
+    runtime_password: str,
+    identity: str,
+    redis_host: str,
 ) -> int:
     """Add the cluster's ACL user (the runtime identity, names-as-data — passed in
     by the caller, never derived from a name) on top of `requirepass`. requirepass
@@ -478,9 +508,9 @@ def _ensure_redis_acl(
     user is created with `nopass` — the identity-carrying runtime URLs still
     AUTH as a named user, and the AUTH must succeed for the wake bus."""
     admin = (
-        f"redis://default:{redis_admin_password}@127.0.0.1:{redis_port}"
+        f"redis://default:{redis_admin_password}@{redis_host}:{redis_port}"
         if redis_admin_password
-        else f"redis://127.0.0.1:{redis_port}"
+        else f"redis://{redis_host}:{redis_port}"
     )
     try:
         ensure_cluster_redis_acl(
@@ -597,14 +627,14 @@ def ensure_cluster_instance(
     return 0
 
 
-def _redis_reachable(redis_port: int) -> bool:
+def _redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
     """True if this cluster's Redis answers PING as its `default` user (using
     the gateway-only Redis admin password). Used by `ava status`; degrades to
     False on any error."""
     import redis as _redis
 
     client = _redis.Redis(
-        host="127.0.0.1",
+        host=redis_host,
         port=redis_port,
         # A no-secret cluster has no requirepass — pass None so redis-py sends
         # no AUTH (an empty-string password would send `AUTH ""` and fail).
@@ -644,20 +674,28 @@ def print_data_plane_status() -> None:
     is direct anyway."""
     import shared.db
 
+    # Both probes dial the host their own URL names (self-host URLs are
+    # loopback-rewritten by DataPlaneSettings; an external data plane is probed
+    # at its own address — Task #1752).
+    pg_host = _pg_dial_host()
+    redis_host = _redis_dial_host()
     pg_port = urlsplit(settings.data_plane.db_url).port or 5432
     redis_port = urlsplit(settings.data_plane.redis_url).port or 6379
-    if not _pg_running(pg_port):
-        print(f"  ✗ postgres (127.0.0.1:{pg_port}) unreachable")
+    if not _pg_running(pg_port, pg_host):
+        print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
     else:
         try:
             with shared.db.connect() as conn:  # pooled front door (PgBouncer when enabled)
                 conn.execute("select 1")
-            print(f"  ✓ postgres (127.0.0.1:{pg_port})")
+            print(f"  ✓ postgres ({pg_host}:{pg_port})")
         except Exception as exc:
             lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
             detail = lines[-1] if lines else "connection failed"
-            print(f"  ✗ postgres (127.0.0.1:{pg_port}) reachable but connect failed: {detail}")
-    print(f"  {'✓' if _redis_reachable(redis_port) else '✗'} redis (127.0.0.1:{redis_port})")
+            print(f"  ✗ postgres ({pg_host}:{pg_port}) reachable but connect failed: {detail}")
+    print(
+        f"  {'✓' if _redis_reachable(redis_port, redis_host) else '✗'} "
+        f"redis ({redis_host}:{redis_port})"
+    )
     if settings.data_plane.pgbouncer_enabled:
         from cli.commands._pgbouncer import pgbouncer_reachable
         from shared.cluster import db_identity, get_record, record_pgbouncer_port
