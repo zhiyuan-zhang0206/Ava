@@ -378,5 +378,13 @@ def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch
     from gateway import ttl_reaper
 
     monkeypatch.setattr(ttl_reaper, "cluster_tz", lambda: None)
-    dt = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    # A moment on the host's today: the fallback stamp carries no date prefix.
+    # (A fixed past date would cross midnight and gain the MM-DD prefix the
+    # next day — a time-bomb assertion that expired 2026-08-28.)
+    dt = (
+        datetime.now()
+        .astimezone()
+        .replace(hour=12, minute=0, second=0, microsecond=0)
+        .astimezone(UTC)
+    )
     assert ttl_reaper._wall_clock(dt) == dt.astimezone(None).strftime("%H:%M")
