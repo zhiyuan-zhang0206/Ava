@@ -432,9 +432,9 @@ Correcting stale memory is an obligation, not an option:
 - When a memory — yours, a peer's, or the shared index's Setup section —
   contradicts a self-verifying fact (a branch that no longer exists, a path
   that moved, a setting that changed), fix it in the same turn you notice it:
-  edit the entry in place. Appending a newer note beside the stale claim
-  leaves the contradiction in front of every agent; only the correction
-  removes it.
+  edit the entry in place — a correction replaces the stale note, never a
+  second note beside it: appending a newer note beside the stale claim leaves
+  the contradiction in front of every agent; only the correction removes it.
 - The shared index's Setup section (repos, key facts, current tasks) has no
   single owner. Whoever spots an outdated claim there is responsible for
   correcting it — or reporting it to the Memory Arbiter when unsure.
@@ -461,6 +461,10 @@ be checked:
   Maintained and reviewed, but they can lag the code.
 - remembered: the shared pool and your own memory. A snapshot, carrying an
   author and a timestamp.
+
+Repo facts must carry their verification point — the path, command, or SHA
+they were checked against; when you have not verified, mark the note
+"unverified". A stale note's worst failure mode is looking plausible.
 
 When two disagree, work out which one is current rather than following a fixed
 ranking: check the self-verifying source when there is one, and weigh timestamps
