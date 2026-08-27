@@ -55,6 +55,33 @@ def test_run_returns_stdout_string() -> None:
     assert isinstance(out, str)
 
 
+def test_run_result_carries_returncode_and_stderr() -> None:
+    """The returned value is a str with the command's exit status attached —
+    `.returncode` (0 = success, non-zero = failure) and `.stderr`."""
+    res = ava.shell.run("echo hi; echo err >&2; exit 3")
+    assert res.returncode == 3
+    assert res.stderr.strip() == "err"
+    assert res.strip() == "hi"
+
+
+def test_run_returncode_zero_on_success() -> None:
+    assert ava.shell.run("echo ok").returncode == 0
+
+
+def test_run_result_preserves_str_behavior() -> None:
+    """The result stays a plain string for every existing usage — str
+    methods, equality, membership, formatting."""
+    from ava.shell import ShellResult
+
+    out = ava.shell.run("printf 'a\\nb\\n'")
+    assert isinstance(out, ShellResult)
+    assert isinstance(out, str)
+    assert out.splitlines() == ["a", "b"]  # str methods still work
+    assert "b" in out  # membership still works
+    assert f"{out}" == "a\nb\n"  # formatting still works
+    assert out == "a\nb\n"  # equality against a plain str still works
+
+
 def test_run_non_zero_exit_returns_stdout_without_raising() -> None:
     """check=False: non-zero exit does not raise, stdout still returned (valid use case: grep no-match)."""
     out = ava.shell.run("echo before-exit && exit 3")

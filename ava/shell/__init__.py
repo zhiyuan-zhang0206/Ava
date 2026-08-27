@@ -41,15 +41,40 @@ from .sessions import (
 )
 
 
+class ShellResult(str):
+    """Stdout of a finished shell command with its exit status attached.
+
+    The value is a plain string and behaves exactly like the old return
+    value; the extra fields tell you how the command ended: `.returncode`
+    is 0 on success and non-zero on failure, `.stderr` holds the standard
+    error output.
+    """
+
+    returncode: int
+    stderr: str
+
+    def __new__(cls, stdout: str, *, returncode: int, stderr: str) -> "ShellResult":
+        obj = str.__new__(cls, stdout)
+        obj.returncode = returncode
+        obj.stderr = stderr
+        return obj
+
+
 def run(
     cmd: str,
     *,
     cwd: str | None = None,
     timeout: float = 30.0,
-) -> str:
+) -> ShellResult:
     """Run a shell command and return its stdout. Non-zero exit does not
     raise; exceeding `timeout` seconds kills the command and raises
     `subprocess.TimeoutExpired`. `cwd` defaults to your workspace.
+
+    The returned value is a string that works exactly as before, with the
+    command's exit status attached: `.returncode` is 0 on success and
+    non-zero on failure, and `.stderr` carries the standard error output.
+    Check `.returncode` instead of parsing stdout to tell success from
+    failure.
 
     For commands expected to outlive the timeout, use `run_background`
     instead — it reports back when the command finishes."""
@@ -78,8 +103,14 @@ def run(
     )
     # The command itself is deliberately not part of `source`: it routinely
     # carries credentials (a curl with an Authorization header), and the
-    # findings file is not a place to copy them into.
-    return scan_content(completed.stdout, source="shell.run")
+    # findings file is not a place to copy them into. Both streams are
+    # scanned: stdout is the return value itself, stderr is exposed on the
+    # result, so either one can carry fetched content into the agent.
+    return ShellResult(
+        scan_content(completed.stdout, source="shell.run"),
+        returncode=completed.returncode,
+        stderr=scan_content(completed.stderr, source="shell.run"),
+    )
 
 
 class BackgroundRun(NamedTuple):
