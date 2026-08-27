@@ -157,6 +157,13 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     _mark_current(home)
     _redirect_plists(monkeypatch, tmp_path / "plists")
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    # Pin the listen-host settings to their defaults so the rendered bytes are
+    # deterministic regardless of the runner's environment.
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "127.0.0.1")
+    monkeypatch.setattr(
+        "shared.config.settings.observability.lgtm_grafana_listen_host",
+        "0.0.0.0",  # noqa: S104 — pinned config default, not a bind
+    )
 
     _lgtm_native.ensure_lgtm_native(_repo(), home)
 

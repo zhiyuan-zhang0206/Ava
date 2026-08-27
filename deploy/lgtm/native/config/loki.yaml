@@ -9,8 +9,13 @@ auth_enabled: false
 
 server:
   http_listen_port: 3100
-  http_listen_address: 127.0.0.1
-  grpc_listen_address: 127.0.0.1
+  # Listen host comes from the AVA_LGTM_LISTEN_HOST setting (default loopback);
+  # the external-migration form widens it to 0.0.0.0 or a tailnet IP. The
+  # brace-free token keeps this a valid YAML plain scalar — a {{...}} token
+  # would parse as a flow mapping — and renders byte-identically to the
+  # historical unquoted address.
+  http_listen_address: __LGTM_LISTEN_HOST__
+  grpc_listen_address: __LGTM_LISTEN_HOST__
   # Querier-to-frontend result messages exceed the gRPC default 4MiB on
   # 10-minute raw-line queries (~5k rows) and drop the client connection
   # (RemoteProtocolError). Both directions need the cap raised: recv bounds
@@ -42,9 +47,10 @@ common:
   ring:
     kvstore:
       store: inmemory
-    # Native Loki advertises the LAN address by default (en0); ExpressVPN's
-    # global filter closes hairpin connections to it, causing ratestore and
-    # scheduler RPC failures. This single binary has no cross-host ring peers.
+    # Single-binary internal address — must stay loopback: Loki advertises the
+    # LAN address by default (en0) and ExpressVPN's global filter closes hairpin
+    # connections to it, causing ratestore and scheduler RPC failures. This
+    # single binary has no cross-host ring peers.
     instance_addr: 127.0.0.1
 
 schema_config:
@@ -186,11 +192,11 @@ query_range:
         ttl: 1h
 
 frontend:
-  # Native-only: same ExpressVPN hairpin issue as common.ring.instance_addr —
-  # the query-frontend advertises the en0 LAN IP by default, the querier
-  # health-check fails against it, and every query hangs.
-  # (interface_names does NOT work: lo0's 127.0.0.1 is not a global-unicast
-  # address and gets filtered out by the address picker.)
+  # Single-binary internal address — must stay loopback: same ExpressVPN
+  # hairpin issue as common.ring.instance_addr — the query-frontend advertises
+  # the en0 LAN IP by default, the querier health-check fails against it, and
+  # every query hangs. (interface_names does NOT work: lo0's 127.0.0.1 is not a
+  # global-unicast address and gets filtered out by the address picker.)
   address: 127.0.0.1
 
 
