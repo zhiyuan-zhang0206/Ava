@@ -21,6 +21,8 @@ from psycopg.types.json import Jsonb
 import shared.alerts as shared_alerts
 from shared import alerts_copy as copy
 from shared.alerts import display_language, format_local, frontend_base_url, notify_text
+from shared.config import settings
+from shared.config.general import GeneralSettings
 
 
 def _alert(*, status: str = "firing", severity: str = "error") -> dict[str, Any]:
@@ -156,6 +158,34 @@ def test_format_local_carries_year_and_zone() -> None:
 
 def test_format_local_empty_for_none() -> None:
     assert format_local(None) == ""
+
+
+def test_format_local_renders_cluster_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """User ruling 2026-08-27: the IM alert timestamp follows the cluster's
+    AVA_TIMEZONE (one cluster clock), not the host OS zone — a runner whose
+    OS zone differs must not show a different wall clock from every other
+    surface."""
+
+    monkeypatch.setattr(
+        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
+    )
+    ts = datetime.datetime(2026, 1, 3, 9, 5, tzinfo=datetime.UTC)
+    text = format_local(ts)
+    assert text == "2026-01-03 17:05 CST"
+
+
+def test_format_local_host_zone_without_authoritative_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Settings-lite (gateway down) has no authoritative cluster timezone:
+    the timestamp degrades to the host zone — the documented lite behavior —
+    and must still carry year + a zone token."""
+
+    monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
+    ts = datetime.datetime(2026, 1, 3, 9, 5, tzinfo=datetime.UTC)
+    text = format_local(ts)
+    assert text.startswith("2026-01-03 ")
+    assert text.split(" ")[-1] != ""
 
 
 def test_display_language_defaults_to_zh(db_conn: psycopg.Connection) -> None:

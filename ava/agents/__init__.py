@@ -25,6 +25,7 @@ from shared.agents import InvalidModelConfig as InvalidModelConfig
 from shared.agents import MachineNotRegistered as MachineNotRegistered
 from shared.agents import ResurrectError as ResurrectError
 from shared.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
+from shared.config import cluster_tz
 
 from . import presets as presets
 
@@ -127,7 +128,7 @@ class Neighbor:
 
 def _relative_time(dt: datetime) -> str:
     """Convert a datetime into a human-readable relative time string."""
-    delta = datetime.now().astimezone() - dt.astimezone()
+    delta = datetime.now().astimezone(cluster_tz()) - dt.astimezone(cluster_tz())
     seconds = int(delta.total_seconds())
     if seconds < 60:
         return f"{seconds}s ago"

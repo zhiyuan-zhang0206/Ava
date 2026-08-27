@@ -42,7 +42,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.config import settings
+from shared.config import cluster_tz, settings
 from shared.machine import is_agent_runner, is_gateway, machine_name
 from shared.paths import ava_home, gateway_memory_dir, memory_dir
 from shared.platform import CREATE_NO_WINDOW
@@ -444,7 +444,7 @@ def status() -> RepoStatus:
                 fetch_head.stat().st_mtime,
                 tz=datetime.UTC,
             )
-            .astimezone()
+            .astimezone(cluster_tz())
             .isoformat(timespec="seconds")
         )
     else:

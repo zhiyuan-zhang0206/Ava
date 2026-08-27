@@ -92,9 +92,10 @@ Enforced by `scripts/lint_turn_scoped_config.py`.
 from __future__ import annotations
 
 import os
+import time
 from datetime import UTC, datetime
 from typing import Any, cast
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
 
@@ -355,7 +356,86 @@ else:
     # `ava start`'s preflight gate is the fail-fast for the unenrolled runner.
     _plant_lite_placeholders()
 
+
+# ── Cluster timezone — one clock for the whole cluster (Task #1758) ──
+#
+# User ruling 2026-08-27: the timezone is a cluster-level setting; every agent
+# runner pulls it from the gateway and must NOT fall back to its own machine's
+# OS timezone (a WSL runner whose OS zone was never switched exposed the
+# mismatch). ``AVA_TIMEZONE`` (scope ``cluster-pinned``) already travels
+# gateway -> runner: a pure agent-runner fetches it from ``GET /api/bootstrap``
+# at every process start and the gateway unit keeps it in its own ``.env``, so
+# a process that has the value in its environment holds the *authoritative*
+# cluster timezone. The two helpers below are the one place that turns that
+# value into a wall clock. They read ``os.environ`` rather than ``settings``
+# deliberately: this module is still being built when ``apply_cluster_timezone``
+# runs, and the env is the same single source the Settings field is built from.
+
+
+def cluster_tz() -> ZoneInfo | None:
+    """The cluster's timezone as a ``ZoneInfo``, or ``None`` when this process
+    holds no authoritative ``AVA_TIMEZONE`` (settings-lite / bare checkout).
+
+    ``None`` is the *host-zone fallback signal*: ``dt.astimezone(None)`` is
+    machine-local, which is the documented degradation of a maintenance verb
+    running while the gateway is down. Authoritative means the field was
+    explicitly set at Settings build (env / unit ``.env`` / bootstrap fetch),
+    not the silent ``America/Los_Angeles`` field default. A value that fails
+    to parse as IANA (belt and braces — Settings already fails fast on it at
+    construction) also yields ``None`` rather than crashing a display path.
+    """
+    if "timezone" not in settings.general.model_fields_set:
+        return None
+    try:
+        return ZoneInfo(settings.general.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
+def apply_cluster_timezone() -> None:
+    """Apply the cluster timezone to this process's wall clock (POSIX).
+
+    Sets ``os.environ["TZ"]`` and calls ``time.tzset()`` when the process
+    holds an authoritative ``AVA_TIMEZONE`` (the gateway unit's ``.env``, a
+    runner's bootstrap fetch, a schedule runner's pinned spawn env). After
+    this, every naive local-time read — ``datetime.now()``, no-arg
+    ``.astimezone()``, loguru's ``{time}`` stamp, ``time.localtime()``, and
+    children inheriting the env — follows the cluster clock. Before this
+    hook existed, those reads used the host's OS zone, so a runner whose OS
+    zone differs from the cluster's rendered machine-local wall clocks in
+    logs and displays (2026-08-27 WSL mismatch, Task #1758).
+
+    A process WITHOUT an authoritative value (settings-lite maintenance
+    verbs, a bare checkout, CI) is left untouched: there is no cluster clock
+    to apply, and forcing the field default ``America/Los_Angeles`` onto it
+    would be wrong.
+
+    No-op on Windows beyond exporting ``TZ`` for children: ``tzset`` does not
+    exist there, and the explicit ``cluster_tz()`` reads cover the display
+    paths instead.
+    """
+    if "timezone" not in settings.general.model_fields_set:
+        return
+    name = settings.general.timezone
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return
+    os.environ["TZ"] = name
+    if hasattr(time, "tzset"):
+        time.tzset()
+
+
 settings = Settings()
+
+# One cluster clock (user ruling 2026-08-27, Task #1758): a configured
+# process that holds an authoritative AVA_TIMEZONE applies it as its own TZ
+# (os.environ["TZ"] + time.tzset() on POSIX) so every naive local-time read
+# — datetime.now(), no-arg .astimezone(), loguru's {time} stamp, subprocess
+# children — follows the cluster timezone instead of the host's OS zone. A
+# settings-lite / bare-checkout process has no authoritative value and is
+# left on its host zone (the documented lite degradation). See
+apply_cluster_timezone()
 
 
 def refresh_data_plane_settings() -> None:
