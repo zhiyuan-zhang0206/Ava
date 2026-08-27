@@ -211,6 +211,18 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    telemetry_grafana_url: str = Field(
+        default="http://127.0.0.1:3003",
+        alias="AVA_TELEMETRY_GRAFANA_URL",
+        description="Grafana base URL (HTTP port) for the LGTM dashboard and health-read path — the lgtm healthcheck's /api/health readiness probe and the Grafana-evaluated ops alerts read from the same instance (task #1789).",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     otel_collector_metrics_port: int = Field(
         default=8888,
         alias="AVA_OTELCOL_METRICS_PORT",
