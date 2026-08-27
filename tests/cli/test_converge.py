@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import cast
 
@@ -147,7 +148,7 @@ def test_prod_editable_pth_converge_step_repairs_and_warns(
     pth = source_root / ".venv" / "Lib" / "site-packages" / "_editable_impl_ava.pth"
     pth.parent.mkdir(parents=True)
     pth.write_text(str(tmp_path / "deleted-worktree"))
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source_root)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
     step = next(
         (step for step in _converge.CONVERGE_STEPS if step.name == "prod editable .pth target"),
         None,
@@ -158,6 +159,71 @@ def test_prod_editable_pth_converge_step_repairs_and_warns(
 
     assert pth.read_text() == str(source_root)
     assert "poisoned editable install" in capsys.readouterr().err
+
+
+def test_prod_editable_pth_converge_step_repairs_poisoned_direct_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The converge assertion covers the direct_url record, not only the pointer."""
+    source_root = tmp_path / "prod" / "source"
+    du = (
+        source_root
+        / ".venv"
+        / "lib"
+        / "python3.12"
+        / "site-packages"
+        / "ava-0.1.5.dist-info"
+        / "direct_url.json"
+    )
+    du.parent.mkdir(parents=True)
+    du.write_text(
+        json.dumps(
+            {"url": (tmp_path / "deleted-worktree").as_uri(), "dir_info": {"editable": True}}
+        )
+    )
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "prod editable .pth target"),
+        None,
+    )
+
+    if step is not None:
+        step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert json.loads(du.read_text()) == {
+        "url": source_root.as_uri(),
+        "dir_info": {"editable": True},
+    }
+    assert "poisoned editable install" in capsys.readouterr().err
+
+
+def test_prod_editable_pth_converge_step_leaves_healthy_direct_url_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record already naming the source root must pass the assertion untouched."""
+    source_root = tmp_path / "prod" / "source"
+    du = (
+        source_root
+        / ".venv"
+        / "lib"
+        / "python3.12"
+        / "site-packages"
+        / "ava-0.1.5.dist-info"
+        / "direct_url.json"
+    )
+    du.parent.mkdir(parents=True)
+    du.write_text(json.dumps({"url": source_root.as_uri(), "dir_info": {"editable": True}}))
+    original = du.read_text()
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "prod editable .pth target"),
+        None,
+    )
+
+    if step is not None:
+        step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert du.read_text() == original
 
 
 def test_worktree_converge_does_not_touch_its_editable_pth(

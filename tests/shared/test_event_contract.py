@@ -93,7 +93,8 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     telemetry_read_recovered / otlp_backend_disabled / otlp_backend_recovered
     (runner-observability staleness and OTLP recovery state) + exec_envelope
     (2026-08-24 runner batch R-4 — exec envelope transfer size/time cost) +
-    editable_pth_repaired (Task #1572's prod editable-install repair audit) +
+    editable_pth_repaired + editable_direct_url_repaired (Task #1572's prod
+    editable-install repair audit, extended to the direct_url record) +
     checkpoint_table_sizes (Task #1545a's post-vacuum absolute gauges) +
     agent_boot_failed (Task #1704's visible process-boot failure marker) +
     gate_auth_probe_failed (Task #1736's gate auth-probe failure
@@ -108,7 +109,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # checkpoint_table_sizes and Task #1572's repair audit raise it to 114;
     # agent_boot_failed raises it to 115; gate_auth_probe_failed (Task #1736)
     # raises it to 116.
-    assert len(_TELEMETRY_KINDS) == 116
+    assert len(_TELEMETRY_KINDS) == 117
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

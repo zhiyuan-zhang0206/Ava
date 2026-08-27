@@ -959,6 +959,11 @@ EVENTS: dict[str, EventSpec] = {
         "poisoned editable-install pointer repaired to the prod source root",
         tier="anomaly",
     ),
+    "editable_direct_url_repaired": _telemetry(
+        "editable_direct_url_repaired",
+        "poisoned editable-install direct_url repaired to the prod source root",
+        tier="anomaly",
+    ),
     # labeler / trace housekeeping
     "label_generated": _telemetry("label_generated", "label auto-generated", tier="noise"),
     "label_generate_failed": _telemetry(
