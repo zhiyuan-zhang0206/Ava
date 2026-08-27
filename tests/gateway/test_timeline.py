@@ -2497,6 +2497,8 @@ class TestTimelineCompactHistory:
 
         # The head (prompt + notes + compact summary) is returned once more for
         # frontend de-duplication, then the next older segment's tail follows.
+        # The segment's SystemMessage is stripped by the segment loader, so the
+        # _segment fixture renders as s1.0.0 (compact summary) + s1.1.0 (chat).
         assert [item["item_id"] for item in page["items"]] == [
             "0.0",
             "1.0",
@@ -2507,7 +2509,6 @@ class TestTimelineCompactHistory:
             "6.0",
             f"s1.{boundary_id}.0.0",
             f"s1.{boundary_id}.1.0",
-            f"s1.{boundary_id}.2.0",
         ]
         assert page["has_more"] is False
 
@@ -2564,9 +2565,11 @@ class TestTimelineCompactHistory:
         )
         monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
 
-        # Cursor on s1's second standing head note (1.0 = exec_timeout,
-        # 2.0 = timezone): everything before it is standing context, so the
-        # response crosses to s2 instead of looping on the segment head.
+        # Cursor on s1's third standing head note (0.0 = exec_timeout,
+        # 1.0 = timezone, 2.0 = memory — the segment's SystemMessage is
+        # stripped, so its notes start at 0.0): everything before it is
+        # standing context, so the response crosses to s2 instead of looping
+        # on the segment head.
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s1.{boundary_1}.2.0", "limit": 50},
@@ -2577,6 +2580,5 @@ class TestTimelineCompactHistory:
             f"s1.{boundary_1}.1.0",
             f"s2.{boundary_2}.0.0",
             f"s2.{boundary_2}.1.0",
-            f"s2.{boundary_2}.2.0",
         ]
         assert page["has_more"] is False
