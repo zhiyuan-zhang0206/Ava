@@ -113,7 +113,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
-    """The post-vacuum table-size state is emitted as three absolute gauges."""
+    """The hourly table-size state is emitted as six absolute gauges: three
+    physical sizes plus the three live row counts (live growth vs dead-tuple
+    bloat are separable in the growth curve)."""
     from shared.events.contract import payload_keys
     from shared.telemetry_otlp import _METRIC_DISPOSITION
 
@@ -121,6 +123,9 @@ def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
         "blobs_bytes",
         "checkpoints_bytes",
         "writes_bytes",
+        "blobs_live",
+        "checkpoints_live",
+        "writes_live",
     )
     assert {
         key: _METRIC_DISPOSITION[key]
@@ -128,11 +133,17 @@ def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
             ("checkpoint_table_sizes", "blobs_bytes"),
             ("checkpoint_table_sizes", "checkpoints_bytes"),
             ("checkpoint_table_sizes", "writes_bytes"),
+            ("checkpoint_table_sizes", "blobs_live"),
+            ("checkpoint_table_sizes", "checkpoints_live"),
+            ("checkpoint_table_sizes", "writes_live"),
         )
     } == {
         ("checkpoint_table_sizes", "blobs_bytes"): "gauge",
         ("checkpoint_table_sizes", "checkpoints_bytes"): "gauge",
         ("checkpoint_table_sizes", "writes_bytes"): "gauge",
+        ("checkpoint_table_sizes", "blobs_live"): "gauge",
+        ("checkpoint_table_sizes", "checkpoints_live"): "gauge",
+        ("checkpoint_table_sizes", "writes_live"): "gauge",
     }
 
 

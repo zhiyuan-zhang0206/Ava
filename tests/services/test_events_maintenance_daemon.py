@@ -37,12 +37,22 @@ class _FakePool:
     maintenance-pass tests fake every slice, but `_run_maintenance` opens a
     `with pool.connection()` wrapper around each one."""
 
+    class _Cursor:
+        def __enter__(self) -> _FakePool._Cursor:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
     class _Conn:
         def __enter__(self) -> _FakePool._Conn:
             return self
 
         def __exit__(self, *exc: object) -> None:
             return None
+
+        def cursor(self) -> _FakePool._Cursor:
+            return _FakePool._Cursor()
 
     def connection(self) -> _FakePool._Conn:
         return self._Conn()
@@ -198,6 +208,7 @@ def _instrument_maintenance_slices(
         "reindex": _CallRecorder(empty),
         "reap": _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0)),
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
+        "emit_sizes": _CallRecorder(None),
     }
     monkeypatch.setattr(daemon, "ensure_month_partitions", rec["partitions"])
     monkeypatch.setattr(daemon, "apply_retention", rec["retention"])
@@ -207,6 +218,7 @@ def _instrument_maintenance_slices(
     monkeypatch.setattr(daemon, "run_governance_pass", rec["reindex"])
     monkeypatch.setattr(daemon, "reap_stale_checkpoints", rec["reap"])
     monkeypatch.setattr(daemon, "run_blob_vacuum", rec["vacuum"])
+    monkeypatch.setattr(daemon, "emit_checkpoint_table_sizes", rec["emit_sizes"])
     return rec
 
 
@@ -242,7 +254,8 @@ def test_maintenance_pass_reaps_when_events_disabled(monkeypatch: pytest.MonkeyP
     assert rec["replay"].calls == 1
     assert rec["reap"].calls == 1
     assert rec["vacuum"].calls == 1
-    assert beats == 3
+    assert rec["emit_sizes"].calls == 1  # hourly size gauge runs unconditionally
+    assert beats == 4
     assert progress.snapshot()["last_success_at"] is not None
     for name in _EVENTS_SLICES:
         assert rec[name].calls == 0, f"events slice {name} ran with the flag off"
@@ -269,9 +282,9 @@ def test_maintenance_pass_runs_events_slices_when_enabled(
 
     daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
 
-    for name in (*_EVENTS_SLICES, "rollup", "replay", "reap", "vacuum"):
+    for name in (*_EVENTS_SLICES, "rollup", "replay", "reap", "vacuum", "emit_sizes"):
         assert rec[name].calls == 1, name
-    assert beats == 7
+    assert beats == 8
     assert progress.snapshot()["last_success_at"] is not None
 
 

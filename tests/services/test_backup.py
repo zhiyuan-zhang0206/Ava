@@ -179,6 +179,61 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
     assert path.name == "ava-20260609T190000Z.dump.gz.enc"
 
 
+def test_db_size_breakdown_real_db(db_conn: Any) -> None:
+    """The composition query itself is pinned against a real throwaway DB with
+    the partitioned `events` schema: the pg_inherits sum covers the month
+    partitions and a fresh DB without the checkpoint tables reads 0 instead
+    of failing (to_regclass path)."""
+    from tests.services.test_events_maintenance_ttl import _throwaway_db
+
+    _ = db_conn  # dependency: the session cluster is up
+    gen = cast(Any, _throwaway_db())  # keep the generator alive — GC would run its finally
+    url = next(gen)
+    try:
+        line = backup._db_size_breakdown(url)
+    finally:
+        gen.close()
+    assert line.startswith("db=") and "events=" in line and "rest=" in line
+    assert line != "unavailable"
+    # A fresh schema.sql DB has the events partitions but no checkpoint tables.
+    assert "checkpoint=0MiB" in line
+    assert "events=0MiB" in line  # empty partitions — the sum is still well-formed
+
+
+def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The backup log line reports the DB composition that dominates dump
+    time: total, the frozen events archive, the checkpoint tables, and the
+    rest. Best-effort: a failed sample degrades to "unavailable", never
+    fails the backup."""
+
+    class _FakeConn:
+        def __enter__(self) -> _FakeConn:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def execute(self, _sql: str) -> _FakeConn:
+            return self
+
+        def fetchone(self) -> tuple[int, ...]:
+            # db, events, blobs, checkpoints, writes
+            return (4_240_000_000, 2_800_000_000, 1_240_000_000, 130_000_000, 30_000_000)
+
+    def _fake_connect(**_: object) -> _FakeConn:
+        return _FakeConn()
+
+    monkeypatch.setattr(backup, "connect", _fake_connect)  # pyright: ignore[reportUnknownArgumentType]
+    line = backup._db_size_breakdown()
+    assert line == "db=4044MiB events=2670MiB checkpoint=1335MiB rest=38MiB"
+
+    def _boom(**_: object) -> object:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(backup, "connect", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    assert backup._db_size_breakdown() == "unavailable"
+
+
 def test_run_backup_repairs_storage_permissions(
     bdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

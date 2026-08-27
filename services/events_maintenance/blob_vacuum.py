@@ -76,8 +76,29 @@ def in_low_traffic_window(now: datetime | None = None) -> bool:
     return _WINDOW_START_HOUR <= local.hour < _WINDOW_END_HOUR
 
 
-def _physical_state(cur: Any) -> tuple[int, int, int, int]:
-    """Checkpoint-table physical sizes and ``checkpoint_blobs`` dead tuples.
+@dataclass(frozen=True)
+class CheckpointTableSizes:
+    """One checkpoint-table state sample: physical sizes + live row counts.
+
+    Both are statistics, not instantaneous measurements: `pg_total_relation_size`
+    reflects `pg_class.relpages`, refreshed by VACUUM/ANALYZE/autovacuum, and
+    `pg_stat_get_live_tuples` the commit-time stats — so a series of hourly
+    samples inside one day mostly repeats the values as of the last vacuum.
+    Sizes and live counts lag together, so the live-vs-bloat decomposition of
+    the physical-size curve stays valid.
+    """
+
+    blobs_bytes: int
+    checkpoints_bytes: int
+    writes_bytes: int
+    blobs_live: int
+    checkpoints_live: int
+    writes_live: int
+
+
+def _checkpoint_state(cur: Any) -> tuple[CheckpointTableSizes, int]:
+    """Checkpoint-table physical sizes, live tuple counts, and
+    ``checkpoint_blobs`` dead tuples.
 
     Both references pin the `public` schema explicitly: pg_stat_user_tables
     reports every schema, and a same-named table in another schema (e.g. the
@@ -90,6 +111,9 @@ def _physical_state(cur: Any) -> tuple[int, int, int, int]:
         SELECT pg_total_relation_size('public.checkpoint_blobs'::regclass),
                pg_total_relation_size('public.checkpoints'::regclass),
                pg_total_relation_size('public.checkpoint_writes'::regclass),
+               COALESCE(pg_stat_get_live_tuples('public.checkpoint_blobs'::regclass), 0),
+               COALESCE(pg_stat_get_live_tuples('public.checkpoints'::regclass), 0),
+               COALESCE(pg_stat_get_live_tuples('public.checkpoint_writes'::regclass), 0),
                COALESCE((SELECT n_dead_tup FROM pg_stat_user_tables
                          WHERE schemaname = 'public'
                            AND relname = 'checkpoint_blobs'), 0)
@@ -97,7 +121,51 @@ def _physical_state(cur: Any) -> tuple[int, int, int, int]:
     )
     row = cur.fetchone()
     assert row is not None  # noqa: S101 — aggregate over a fixed table always returns one row
-    return int(row[0]), int(row[1]), int(row[2]), int(row[3])
+    sizes = CheckpointTableSizes(
+        blobs_bytes=int(row[0]),
+        checkpoints_bytes=int(row[1]),
+        writes_bytes=int(row[2]),
+        blobs_live=int(row[3]),
+        checkpoints_live=int(row[4]),
+        writes_live=int(row[5]),
+    )
+    return sizes, int(row[6])
+
+
+def _sizes_attributes(sizes: CheckpointTableSizes) -> dict[str, int]:
+    """OTLP attribute dict for the `checkpoint_table_sizes` telemetry event."""
+    return {
+        "blobs_bytes": sizes.blobs_bytes,
+        "checkpoints_bytes": sizes.checkpoints_bytes,
+        "writes_bytes": sizes.writes_bytes,
+        "blobs_live": sizes.blobs_live,
+        "checkpoints_live": sizes.checkpoints_live,
+        "writes_live": sizes.writes_live,
+    }
+
+
+def emit_checkpoint_table_sizes(cur: Any) -> CheckpointTableSizes | None:
+    """Sample the checkpoint tables and emit the size/row-count gauge.
+
+    The gauge feeds the ava-ops checkpoint high-water rules and the growth
+    curve. The daemon emits it every hourly maintenance pass so the series
+    stays dense outside the vacuum window (rate/delta queries need more than
+    one sample a day), and the vacuum pass emits it again after each run so
+    the post-reclamation state is recorded. Returns None (no emit) on a fresh
+    cluster before the PostgresSaver has created the tables — the same
+    defensive posture as `run_blob_vacuum`: a missing table must not crash
+    the maintenance daemon (its error handler exits the daemon).
+    """
+    try:
+        sizes, _ = _checkpoint_state(cur)
+    except psycopg.errors.UndefinedTable:
+        logger.info(
+            "[events-maintenance] checkpoint size sample skipped: checkpoint tables"
+            " not present (fresh cluster before the PostgresSaver created them)"
+        )
+        return None
+    telemetry.emit("telemetry", "checkpoint_table_sizes", attributes=_sizes_attributes(sizes))
+    return sizes
 
 
 def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
@@ -113,25 +181,17 @@ def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
     state <=150MB).
     """
     with conn.cursor() as cur:
-        before = _physical_state(cur)
+        before, _ = _checkpoint_state(cur)
         for table in _TABLES:
             cur.execute(f"VACUUM (ANALYZE) {table}")  # table names are module constants
-        after = _physical_state(cur)
-    result = VacuumResult(ran=True, total_bytes=after[0], dead_tuples=after[3])
-    telemetry.emit(
-        "telemetry",
-        "checkpoint_table_sizes",
-        attributes={
-            "blobs_bytes": after[0],
-            "checkpoints_bytes": after[1],
-            "writes_bytes": after[2],
-        },
-    )
+        after, dead = _checkpoint_state(cur)
+    result = VacuumResult(ran=True, total_bytes=after.blobs_bytes, dead_tuples=dead)
+    telemetry.emit("telemetry", "checkpoint_table_sizes", attributes=_sizes_attributes(after))
     logger.info(
         "[events-maintenance] blob vacuum: {} (before={}MB dead={})",
         result.summary(),
-        _mb(before[0]),
-        before[3],
+        _mb(before.blobs_bytes),
+        dead,
     )
     return result
 
