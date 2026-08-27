@@ -30,6 +30,12 @@ from shared.task_timestamps import render_task_timestamps
 # spelled `builtins.list[...]`.
 __all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", "update"]
 
+# The four statuses an agent can assign to a task. 'ongoing' is deliberately NOT
+# here: it is the system root task's permanent state (schema CHECK + DB constraint
+# agent_tasks_root_status_ongoing), set only by the schema seed / migration, never
+# by create()/update() -- the root itself is immutable (see _write_task_update),
+# and a non-root task must never be 'ongoing'. list(status=...) additionally
+# accepts 'ongoing' (a read filter, so the root is addressable by status there).
 _STATUSES = frozenset({"open", "in_progress", "done", "cancelled"})
 
 # The stakes axis of a task (P0 highest .. P3 lowest) — same four rungs as a
@@ -359,6 +365,11 @@ def _resolve_update_args(
     """Validate the status rung and resolve the deprecated content alias;
     returns (status, results)."""
     if status is not None and status not in _STATUSES:
+        if status == "ongoing":
+            raise ValueError(
+                "'ongoing' is the system root task's permanent state and cannot be "
+                "assigned via update() -- the root task itself is immutable"
+            )
         raise ValueError(f"status must be one of {sorted(_STATUSES)}, got {status!r}")
     if content is not None:
         if results is not None:
@@ -876,8 +887,8 @@ def list(
         parent: keep only direct subtasks of this task; with recursive=True,
             its whole descendant subtree.
     """
-    if status is not None and status not in _STATUSES:
-        raise ValueError(f"status must be one of {sorted(_STATUSES)}, got {status!r}")
+    if status is not None and status not in _STATUSES and status != "ongoing":
+        raise ValueError(f"status must be one of {sorted(_STATUSES)} or 'ongoing', got {status!r}")
 
     sql, params = _build_list_query(parent, owner, status, recursive)
     with ava.DB.cursor() as cur:

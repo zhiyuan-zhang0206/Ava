@@ -703,7 +703,7 @@ CREATE TABLE agent_tasks (
     description TEXT NOT NULL,                          -- full detail of what to do; read before working
     results     TEXT,                                   -- result log (what was done, output paths); replaced by update, appended by log
     status      TEXT NOT NULL DEFAULT 'open'
-                CHECK (status IN ('open', 'in_progress', 'done', 'cancelled')),
+                CHECK (status IN ('open', 'in_progress', 'done', 'cancelled', 'ongoing')),
     priority    TEXT NOT NULL DEFAULT 'P2'
                 CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),  -- stakes axis (P0 highest); orders the board within a status column and seeds a stall-escalation notice's priority
     owner       BIGINT REFERENCES agents(id),           -- current owner agent; NULL only on the system root task (every other task always has an owner)
@@ -716,6 +716,12 @@ CREATE TABLE agent_tasks (
     last_reminded_at   TIMESTAMPTZ,            -- last time the daemon reminded the owner
     reminder_count      INTEGER NOT NULL DEFAULT 0  -- reminders sent for the current overdue window
 );
+
+-- The system root task is permanently 'ongoing': it is the tree anchor and can
+-- never be completed, cancelled, or reopened (update()/PATCH reject it, and this
+-- CHECK makes the state itself self-verifying against direct DB writes too).
+ALTER TABLE agent_tasks
+    ADD CONSTRAINT agent_tasks_root_status_ongoing CHECK (NOT is_root OR status = 'ongoing');
 
 CREATE INDEX idx_agent_tasks_owner_status   ON agent_tasks (owner, status);
 CREATE INDEX idx_agent_tasks_parent         ON agent_tasks (parent_id);
@@ -733,7 +739,7 @@ CREATE UNIQUE INDEX agent_tasks_title_unique_open ON agent_tasks (title) WHERE s
 -- and the root (id 1) is the one id callers pass for a top-level task.
 -- Idempotent so re-bootstrapping is a no-op.
 INSERT INTO agent_tasks (title, description, results, status, created_by, is_root)
-SELECT 'Root', 'System root task -- all tasks descend from here.', 'Root task for the task registry tree.', 'in_progress', 'system', TRUE
+SELECT 'Root', 'System root task -- all tasks descend from here.', 'Root task for the task registry tree.', 'ongoing', 'system', TRUE
 WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE is_root = TRUE);
 
 -- Deferred FK: agent_notices.task_id -> agent_tasks(id). Declared here, not

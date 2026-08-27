@@ -608,7 +608,9 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
 // The task registry — persistent, process-decoupled work items that outlive
 // the agent doing them. Backs the Task Graph (a free D3-force view).
 
-export type TaskStatus = "open" | "in_progress" | "done" | "cancelled";
+// 'ongoing' is the system root task's permanent state (schema CHECK + DB
+// constraint); it can never be assigned to a regular task.
+export type TaskStatus = "open" | "in_progress" | "done" | "cancelled" | "ongoing";
 
 // The task's stakes axis (P0 highest .. P3 lowest) — the same four rungs as a
 // notice priority, so it reuses the PRIORITY_* style maps in lib/notices.ts.

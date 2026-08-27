@@ -42,19 +42,25 @@ import { TaskKanban } from "./task-kanban";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
 
 // Task status → color class for the node's fill (and the Kanban left strip).
+// 'ongoing' is the system root task's permanent state (never assignable to a
+// regular task): it gets a dedicated color so the root stands apart from every
+// status-colored node in the graph — status colors have no meaning for it.
 const STATUS_FILL: Record<string, string> = {
   open: "text-slate-400",
   in_progress: "text-sky-500",
   done: "text-emerald-500",
   cancelled: "text-destructive",
+  ongoing: "text-violet-500",
 };
 
-// Human-readable status label (Kanban columns).
+// Human-readable status label (Kanban columns; 'ongoing' shows in the legend
+// as the root's own swatch).
 const STATUS_LABEL: Record<string, string> = {
   open: "Open",
   in_progress: "In progress",
   done: "Done",
   cancelled: "Cancelled",
+  ongoing: "Root",
 };
 
 // The task graph is an independent UI from the Agent Graph (user ruling
