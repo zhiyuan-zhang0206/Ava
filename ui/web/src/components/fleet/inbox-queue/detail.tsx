@@ -1,10 +1,12 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 
 import { ChatMarkdown } from "@/components/markdown";
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { formatRelativeTime } from "@/lib/sidebar";
+import { dropOpenNotices } from "@/lib/use-notices";
 import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/types";
 
 import { fmtLabel, openKey, type OpenItem } from "./keys";
@@ -54,6 +56,7 @@ export function OpenDetail({
   onAdvance: (key: string | null) => void;
   onSelectAgent?: (agentId: number | null) => void;
 }) {
+  const queryClient = useQueryClient();
   const idx = openItems.findIndex((it) => it.notice.id === item.notice.id);
 
   // Move the selection to the neighbour at `idx + dir`, if any (arrow cycling).
@@ -67,12 +70,15 @@ export function OpenDetail({
 
   // After a resolve, advance to the next open notice (or the previous if this was
   // last). Computed from the CURRENT list — the just-resolved item is still
-  // present at this instant; the SSE drops it a beat later.
+  // present at this instant (Task #1814: we drop it from the cache right here,
+  // so the list reflects the read immediately instead of ~2s later when the
+  // SSE-triggered refetch lands).
   const advanceAfterResolve = () => {
     const next =
       idx + 1 < openItems.length ? openItems[idx + 1] : idx - 1 >= 0 ? openItems[idx - 1] : null;
     onAdvance(next ? openKey(next.notice.id) : null);
     if (next) onSelectAgent?.(next.agentId);
+    dropOpenNotices(queryClient, [item.notice.id]);
   };
 
   return (

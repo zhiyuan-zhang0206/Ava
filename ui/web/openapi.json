@@ -2431,6 +2431,47 @@
         }
       }
     },
+    "/api/notices/resolve-batch": {
+      "post": {
+        "summary": "Post Notices Resolve Batch",
+        "description": "Mark many open FYI notices 'read' in one transaction (the Inbox's\n\"Mark all read\" — Task #1814).\n\nThe single-notice resolve path (POST /api/agents/{id}/notices/{notice_id}/resolve)\ncosts one HTTP round trip + one publish per notice, and each published\nnotice_resolved refetches the whole open queue — clearing a pile of FYI\nnotices one by one is N requests and N queue refetches. This endpoint does\nthe whole pile in ONE transaction and returns before the UI reconciles.\n\nBatch semantics are deliberately permissive (idempotent): a row that is\nalready resolved, or that needs a response, is skipped — counted in\n`skipped`, never an error — so a race with another resolver cannot fail\nthe whole request. The batch action is always 'read' (an FYI close); a\nrequire_response notice can only be answered or dismissed one at a time.\nNo replies are possible here (bare reads wake no agent).\n\nReturns {\"resolved\": n, \"skipped\": m}. 422 on an empty or oversized list.",
+        "operationId": "post_notices_resolve_batch_api_notices_resolve_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveBatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Post Notices Resolve Batch Api Notices Resolve Batch Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/notices": {
       "post": {
         "summary": "Post Notice Create",
@@ -11186,6 +11227,23 @@
         ],
         "title": "Priority",
         "description": "Stakes rung: P0 (highest) through P3 (lowest)."
+      },
+      "ResolveBatchIn": {
+        "properties": {
+          "notice_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Notice Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "notice_ids"
+        ],
+        "title": "ResolveBatchIn",
+        "description": "POST /api/notices/resolve-batch request body.\n\n`notice_ids` — the global agent_notices ids of the FYI notices to mark\nread in ONE transaction (the Inbox's \"Mark all read\" path). Idempotent\nbatch semantics: a row already resolved, or one that needs a response, is\nskipped (counted in `skipped`), never an error — the batch clears what is\nstill open, so a concurrent resolve cannot fail the whole request."
       },
       "ResolveNoticeIn": {
         "properties": {

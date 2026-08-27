@@ -17,7 +17,7 @@
 
 "use client";
 
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/react-query";
 
 import { api } from "./api";
 import type { NoticeItem } from "./types";
@@ -33,6 +33,16 @@ const PAGE_SIZE = 30;
 interface ResolvedCursor {
   beforeAt: string;
   beforeId: number;
+}
+
+
+/** Wire shape of GET /api/notices as cached under NOTICES_QUERY_KEY (the
+ *  useQuery data — camelCase fields, unlike the hook's flattened NoticesFeed). */
+export interface NoticesFeedWire {
+  open: NoticeItem[];
+  awaiting: NoticeItem[];
+  resolved_page: NoticeItem[];
+  next_cursor: { before_at: string; before_id: number } | null;
 }
 
 export interface NoticesFeed {
@@ -89,4 +99,26 @@ export function useNotices(): NoticesFeed {
     resolvedError: resolvedQuery.isError,
     isLoading: feedQuery.isLoading || resolvedQuery.isLoading,
   };
+}
+
+
+/** Remove notices from the open-queue cache — the instant local half of a
+ *  resolve (Task #1814). The Inbox used to wait for the SSE notice_resolved
+ *  round trip + the fold's debounced refetch, so a mark-read row stayed
+ *  visible ~2s after the click; dropping it here makes the queue reflect the
+ *  read immediately. The SSE-triggered refetch reconciles a beat later (and
+ *  is a no-op against server truth), and the resolved history still arrives
+ *  from the server. Only the open feed is touched — awaiting entries are
+ *  filtered too (defensive: batch resolves only send FYI ids). */
+export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): void {
+  if (noticeIds.length === 0) return;
+  const gone = new Set(noticeIds);
+  queryClient.setQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY, (old) => {
+    if (!old) return old;
+    return {
+      ...old,
+      open: old.open.filter((n) => !gone.has(n.id)),
+      awaiting: old.awaiting.filter((n) => !gone.has(n.id)),
+    };
+  });
 }
