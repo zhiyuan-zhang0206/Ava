@@ -466,6 +466,61 @@ def test_live_sessions_keeps_live_legacy_record_with_clock_drift(
     )
 
 
+def test_retained_record_warning_is_deduped_across_scans(
+    sessions: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, object]],
+) -> None:
+    """A retained (identity-fail) record must warn ONCE per (record, reason),
+    not on every scan — the page-server daemon scans every ~2s pass and an
+    unchanged warning would flood the log (2026-08-28 incident). A swept
+    record's entry is dropped, so a re-created record warns again."""
+    import shared.pty_sessions.cli as pty_cli_mod
+
+    name = "ava-test-retain-dedupe"
+    retained = SessionRecord(
+        pid=os.getpid(),
+        create_time=1.0,
+        cmd="test",
+        cwd=str(sessions),
+        started_at=time.time(),
+    )
+    monkeypatch.setattr(pty_cli_mod, "_retained_warning_reasons", {})
+
+    def _warn_count() -> int:
+        return sum(
+            "pty retaining live session record" in str(record["message"])
+            for record in loguru_records
+        )
+
+    retained.write(record_path(name))
+    assert pty_cli_mod._record_alive(retained) is False
+    assert pty_cli_mod.live_sessions(prefix="ava-test-retain-") == {}
+    assert record_path(name).exists()
+    assert _warn_count() == 1
+
+    # A second scan of the same unchanged record stays silent.
+    assert pty_cli_mod.live_sessions(prefix="ava-test-retain-") == {}
+    assert _warn_count() == 1
+
+    # Once the record becomes sweepable (its pid is gone) the entry is
+    # dropped; a fresh retained record of the same name warns again.
+    dead = SessionRecord(
+        pid=999999,
+        create_time=0.0,
+        cmd="test",
+        cwd=str(sessions),
+        started_at=time.time(),
+    )
+    dead.write(record_path(name))
+    assert pty_cli_mod.live_sessions(prefix="ava-test-retain-") == {}
+    assert not record_path(name).exists()
+
+    retained.write(record_path(name))
+    assert pty_cli_mod.live_sessions(prefix="ava-test-retain-") == {}
+    assert _warn_count() == 2
+
+
 # ---------------------------------------------------------------------------
 # PtySessionBackend in-process enumeration (task #1200)
 # ---------------------------------------------------------------------------
