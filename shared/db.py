@@ -509,6 +509,7 @@ def insert_inbound_message(
     # insert_compact_request_inbound).
     _kind_to_event: dict[str, str | None] = {
         "chat": "send_message",
+        "system_note": "send_message",
         "terminate": "terminate",
         "restart": "restart",
         "cancel": "cancel",

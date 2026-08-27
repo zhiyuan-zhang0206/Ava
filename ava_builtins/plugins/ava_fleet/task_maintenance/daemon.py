@@ -13,7 +13,7 @@ whoever takes over spawns a new agent. Counter updates stay direct DB writes.
 
 - Remind: every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (default 5 min), find
   in-progress tasks whose owner has not touched them within their
-  `remind_interval_seconds` window and deliver one chat digest per owner. An
+  `remind_interval_seconds` window and deliver one system-note digest per owner. An
   overdue window repeats at max(backoff, remind_interval_seconds), so a P3 task
   (4h interval) is not nagged hourly; `last_reminded_at` gates it. A failed
   task-counter write is retried without re-delivering (same-cause dedup).
@@ -37,6 +37,7 @@ exit in `_dispatch_loop` is revived on the next round instead of staying dead.
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -69,15 +70,19 @@ _LIVENESS_BEAT_STEP_S = 30.0
 
 
 def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
-    """Insert a system chat inbound, refresh its badge, then wake its agent.
+    """Insert a task-reminder system-note inbound, refresh its badge, then wake.
 
-    Direct delivery intentionally cannot resurrect a terminated agent; its inbox
-    row remains inspectable while escalation directs the work onward."""
+    A reminder is a system notification, not peer chatter: kind='system_note'
+    with the `task` note tag, so the claim node renders it as a system note
+    (system_marker) in the timeline. Direct delivery intentionally cannot
+    resurrect a terminated agent; its inbound row remains inspectable while
+    escalation directs the work onward (user ruling 2026-08-27 -- plain
+    notifications never resurrect)."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, %s, 'chat', 'system') RETURNING id",
-            (agent_id, message),
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'system', %s::jsonb) RETURNING id",
+            (agent_id, message, json.dumps({"note_tag": "task"})),
         )
         inbound_id = int(cur.fetchone()[0])  # type: ignore[index]
         publish_agent_updated_sync(conn, agent_id)

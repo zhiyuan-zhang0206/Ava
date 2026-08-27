@@ -839,6 +839,56 @@
         }
       }
     },
+    "/api/agents/{agent_id}/system-note": {
+      "post": {
+        "summary": "Post Agent System Note",
+        "description": "Deliver a framework system note to the specified agent.\n\nThe note is queued as a kind='system_note' inbound; the agent's claim\nrenders it as a system note (system_marker, NoteTag `body.note_tag`) in\nits timeline — no Agent prefix, no peer timestamp — instead of a chat\npeer message. Task notifications (assign / update / reminder) are the\ncurrent family (`note_tag='task'`).\n\n`body.resurrect` mirrors the chat path's auto-resurrect but is a choice,\nnot a given: task assignment (a delegator direction) wakes a terminated\nowner, while plain update / reminder notices must not (user ruling\n2026-08-27 — notification messages never resurrect a terminated owner).\n\n404: agent_id does not exist. 413: content exceeds the 1 MiB transport\nlimit. 422: note_tag is not a NoteTag value, or source is not a legal\nenvelope source.",
+        "operationId": "post_agent_system_note_api_agents__agent_id__system_note_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemNoteIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMessageEnqueued"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/messages/reconcile": {
       "post": {
         "summary": "Reconcile Agent Message",
@@ -12546,6 +12596,38 @@
         ],
         "title": "StatsWindowHours",
         "description": "Whitelisted `?hours=` windows for stats, inspect, and fleet — 0 = last\n5 minutes / 1h / 6h / 24h / 3d / 7d. An enum (not `int` + range check)\nso FastAPI 422s any other value instead of silently aggregating an arbitrary window.\n(A `Literal[1, 6, ...]` won't do: query params arrive as strings and\nint-literal validation doesn't coerce them, 422ing even valid values.)"
+      },
+      "SystemNoteIn": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source",
+            "default": "system"
+          },
+          "note_tag": {
+            "type": "string",
+            "title": "Note Tag",
+            "default": "task"
+          },
+          "resurrect": {
+            "type": "boolean",
+            "title": "Resurrect",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "SystemNoteIn",
+        "description": "POST /api/agents/{id}/system-note request body — a framework system\nnotification delivered to the agent as a system note (system_marker in\nthe timeline), never a peer chat message.\n\n`content` is the note text. `source` follows the same envelope whitelist\nas chat messages (system / agent:N / user / ...), defaulting to 'system';\nit is recorded for audit but the note itself renders without a sender\nprefix. `note_tag` picks the timeline chip — must be a NoteTag value\n(closed set); `task` is the task-notification family. `resurrect`\ncontrols whether a terminated target is woken to receive the note: task\nassignment (a delegator direction) resurrects, plain update notices do\nnot (user ruling 2026-08-27 — notifications never resurrect an owner)."
       },
       "SystemStatus": {
         "properties": {

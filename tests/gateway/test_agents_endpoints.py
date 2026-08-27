@@ -707,6 +707,98 @@ class TestAutoResurrect:
         assert resp.status_code == 422
 
 
+class TestSystemNote:
+    def test_system_note_inserts_system_note_inbound(self, db_conn: psycopg.Connection) -> None:
+        """POST /system-note → kind='system_note' inbound with the task note tag
+        (no peer-chat row), delivered to a live agent without resurrection."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/system-note",
+                json={"content": 'Task #1 "t" is now assigned to you.'},
+            )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["status"] == "idling"
+        assert body["inbound_id"] is not None
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT content, kind, source, payload FROM inbound_messages WHERE agent_id = %s",
+                (agent_id,),
+            )
+            rows = cur.fetchall()
+        assert len(rows) == 1
+        content, kind, source, payload = rows[0]
+        assert kind == "system_note"
+        assert source == "system"
+        assert "assigned to you" in content
+        assert payload == {"note_tag": "task"}
+        # No resurrect row for a live agent.
+        assert all(r[1] != "resurrect" for r in rows)
+
+    def test_system_note_to_terminated_agent_resurrects_when_requested(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """resurrect=True (task assignment) revives a terminated target, like chat."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
+                )
+            db_conn.commit()
+            resp = client.post(
+                f"/api/agents/{agent_id}/system-note",
+                json={"content": 'Task #1 "t" is now assigned to you.'},
+            )
+        assert resp.status_code == 201
+        rows = _inbound_rows(db_conn, agent_id)
+        # Auto-resurrect inserts its 'resurrect' lifecycle inbound before the note
+        assert ("", "resurrect", "system") in rows
+        assert any(kind == "system_note" for _, kind, _ in rows)
+
+    def test_system_note_to_terminated_agent_no_resurrect_when_denied(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """resurrect=False (plain update / reminder notice) never revives a
+        terminated owner — the note stays queued (user ruling 2026-08-27)."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
+                )
+            db_conn.commit()
+            resp = client.post(
+                f"/api/agents/{agent_id}/system-note",
+                json={"content": 'Task #1 "t" was updated.', "resurrect": False},
+            )
+        assert resp.status_code == 201
+        rows = _inbound_rows(db_conn, agent_id)
+        assert rows == [('Task #1 "t" was updated.', "system_note", "system")]
+        assert all(r[1] != "resurrect" for r in rows)
+
+    def test_system_note_unknown_tag_rejected_422(self, db_conn: psycopg.Connection) -> None:
+        """note_tag outside the closed NoteTag set → 422 (fail loud)."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/system-note",
+                json={"content": "x", "note_tag": "not_a_tag"},
+            )
+        assert resp.status_code == 422
+
+    def test_system_note_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
+        """source not in envelope allowlist → 422."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/system-note",
+                json={"content": "x", "source": "ui:web"},
+            )
+        assert resp.status_code == 422
+
+
 class TestRestart:
     def test_restart_inserts_inbound_and_returns_enqueued(
         self, db_conn: psycopg.Connection

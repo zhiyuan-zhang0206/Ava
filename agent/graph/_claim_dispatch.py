@@ -61,6 +61,7 @@ from agent.hooks.compact import (
     generate_summary,
 )
 from agent.messages import NoteTag, system_note_message
+from ava.security import scan_content
 from shared.agents import AgentStatus
 from shared.config import now_timestamp, settings
 from shared.config.turn_view import turn_settings
@@ -179,6 +180,46 @@ async def _handle_chat(
     else:
         st.new_msgs.append(build_chat_inbound(item))
     st.committed_chat_ids.append(item.id)
+
+
+def _system_note_tag(payload: dict[str, object] | None) -> NoteTag:
+    """The NoteTag for a system_note inbound, carried in its payload.
+
+    `note_tag` is the one payload key this kind reads; missing, non-string,
+    or unknown fails loud rather than silently defaulting — a wrong tag is a
+    writer bug and renders as the wrong timeline chip.
+    """
+    if not payload:
+        raise ValueError("system_note inbound requires a payload with 'note_tag'")
+    raw = payload.get("note_tag")
+    if not isinstance(raw, str):
+        raise TypeError(f"system_note inbound 'note_tag' must be a NoteTag value, got {raw!r}")
+    try:
+        return NoteTag(raw)
+    except ValueError as exc:
+        raise ValueError(f"system_note inbound 'note_tag' {raw!r} is not a NoteTag value") from exc
+
+
+async def _handle_system_note(
+    item: ClaimedInbound,
+    st: _BatchState,
+) -> None:
+    """SYSTEM_NOTE inbound: render as a system note (system_marker), not chat.
+
+    The note's content is peer-authored (the task title / description / change
+    summary written by another agent), so it passes through the same
+    injection scan as inbound chat before entering the conversation.
+    """
+    content = item.content
+    if settings.agent.security_scan_enabled:
+        content = scan_content(content, source=f"inbound.system_note:{item.source}")
+    st.new_msgs.append(
+        system_note_message(
+            content=f"{_ts_prefix()}{content}",
+            tag=_system_note_tag(item.payload),
+            created_at=item.created_at,
+        )
+    )
 
 
 async def _handle_compact_summary(
@@ -528,6 +569,8 @@ async def dispatch_batch(
             continue
         if kind == InboundKind.CHAT:
             await _handle_chat(item, st)
+        elif kind == InboundKind.SYSTEM_NOTE:
+            await _handle_system_note(item, st)
         elif kind == InboundKind.COMPACT_SUMMARY:
             await _handle_compact_summary(item, st)
         elif kind == InboundKind.COMPACT_REQUEST:

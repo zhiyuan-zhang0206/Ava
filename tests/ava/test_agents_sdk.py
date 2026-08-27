@@ -340,6 +340,56 @@ class TestSendMessage:
         ava.agents.send_message(peer_id, "hi")
 
 
+class TestSendSystemNote:
+    def test_send_system_note_inserts_system_note_inbound_with_task_tag(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """send_system_note posts a kind='system_note' inbound (agent source +
+        task note tag) — never a peer chat row."""
+        ava._boot._agent_id = _spawn_agent()
+        peer_id = ava.agents.spawn()
+
+        inbound_id = ava.agents.send_system_note(
+            peer_id, 'Task #1 "t" is now assigned to you (by agent #1).'
+        )
+        assert isinstance(inbound_id, int)
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT content, kind, source, payload FROM inbound_messages WHERE agent_id = %s",
+                (peer_id,),
+            )
+            rows = cur.fetchall()
+        assert len(rows) == 1
+        content, kind, source, payload = rows[0]
+        assert kind == "system_note"
+        assert source == f"agent:{ava.self.AGENT_ID}"
+        assert "assigned to you" in content
+        assert payload == {"note_tag": "task"}
+
+    def test_send_system_note_to_terminated_is_fine(self, db_conn: psycopg.Connection) -> None:
+        """A note with resurrect=True (task assignment) reaches a terminated
+        agent — auto-resurrect is the gateway delivery detail, the SDK just
+        posts the note and returns its id."""
+        ava._boot._agent_id = _spawn_agent()
+        peer_id = ava.agents.spawn()
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
+        db_conn.commit()
+
+        inbound_id = ava.agents.send_system_note(peer_id, 'Task #1 "t" is now assigned to you.')
+        assert isinstance(inbound_id, int)
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT kind FROM inbound_messages WHERE agent_id = %s", (peer_id,))
+            kinds = [row[0] for row in cur.fetchall()]
+        assert "system_note" in kinds
+
+    def test_send_system_note_to_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
+        ava._boot._agent_id = _spawn_agent()
+        with pytest.raises(AgentNotFound):
+            ava.agents.send_system_note(9999, "ghost")
+
+
 class TestGetNeighbors:
     """SDK get_neighbors maps the gateway rows to Neighbor dataclasses (status to
     the AgentStatus enum). The graph behaviors (Loki live tail + archive stitch)

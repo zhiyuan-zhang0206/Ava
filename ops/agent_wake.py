@@ -128,7 +128,7 @@ def _transition_terminated_to_unclaimed_idling(
     agent_id: int,
     *,
     trigger_inbound_id: int | None,
-    trigger_inbound_kind: Literal["chat", "compact_request"] | None,
+    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
     auto_claim: AutoResurrectClaim | None,
 ) -> datetime:
     """Run the one final resurrection CAS with a fully static SQL shape."""
@@ -227,7 +227,7 @@ def _prepare_resurrect_attempt(
     resurrected_by: str,
     prompt: str | None,
     trigger_inbound_id: int | None,
-    trigger_inbound_kind: Literal["chat", "compact_request"] | None,
+    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
     auto_claim: AutoResurrectClaim | None,
 ) -> _PreparedResurrect:
     """Transition, persist lifecycle rows, and create the session under one row lock."""
@@ -379,7 +379,7 @@ def resurrect_agent(
     resurrected_by: str,
     prompt: str | None = None,
     trigger_inbound_id: int | None = None,
-    trigger_inbound_kind: Literal["chat", "compact_request"] | None = None,
+    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
     auto_claim: AutoResurrectClaim | None = None,
 ) -> int:
     """Resurrect an already-terminated agent: UPDATE 'terminated' -> unclaimed 'idling'

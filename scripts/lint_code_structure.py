@@ -171,6 +171,10 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # The whole ava.tasks SDK surface in one module: Task model,
     # create/get/list/update/log, validation, owner-notification helpers.
     "ava_builtins/plugins/ava_fleet/task_registry.py": ("#405", 500, "2026-12-31"),
+    # One cohesive SDK<->gateway HTTP client (one module per SDK namespace);
+    # crossed the ceiling when concurrent main work landed beside the
+    # system-note delivery function (Task #1838).
+    "ava/_gateway_client.py": ("#405", 800, "2026-12-31"),
     # The whole ava.watcher SDK surface in one module: spawn (at/cron/launch),
     # script+bootstrap generation, registry registration, and the boot
     # reconcile all share the session/registry primitives; the reconcile-split

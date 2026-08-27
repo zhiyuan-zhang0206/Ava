@@ -18,6 +18,6 @@ Inter-agent interaction is the communication layer of the fleet — how agents d
 ## Relationship to Other Subsystems
 
 - [[spawn.ava.okf.md|Spawn]] — spawn/fork/resurrect establish ties
-- [[ava_builtins/plugins/ava_fleet/tasks/tasks.ava.okf.md|Tasks]] — send_message notification on task owner change
+- [[ava_builtins/plugins/ava_fleet/tasks/tasks.ava.okf.md|Tasks]] — system-note notification (NoteTag `task`) on task owner change
 - [[ava_builtins/plugins/ava_fleet/self.ava.okf.md|Self]] — discover peers via label
 - [[ava_builtins/plugins/ava_fleet/ava_fleet.ava.okf.md|Ava Fleet]] — overview

@@ -466,7 +466,7 @@ class LifecyclePayload(BaseModel):
     path: str
     body: dict[str, Any] = Field(default_factory=dict)
     trigger_inbound_id: int | None = Field(default=None, gt=0)
-    trigger_inbound_kind: Literal["chat", "compact_request"] | None = None
+    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None
 
 
 class ClusterUpdatePayload(BaseModel):
