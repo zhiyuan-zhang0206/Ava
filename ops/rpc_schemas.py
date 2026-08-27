@@ -345,7 +345,12 @@ class ShellInfo(BaseModel):
     `…-agent-<id>-shell-<sid>[-<name>]`. `id` is the agent-local session id
     (the int the agent uses to drive it); `name` is the optional slug label
     (a watcher carries the conventional name "watcher"), None when unnamed.
-    The agent's own process session has no `-shell-` segment and is excluded."""
+    The agent's own process session has no `-shell-` segment and is excluded.
+
+    `created_at` / `uptime_seconds` come from the runner's session record
+    (the launch epoch, resolved to the cluster timezone); `expires_at` is
+    the gateway-owned TTL deadline from `agent_shell_ttls` — None when the
+    session has no TTL (watcher sessions and legacy pre-TTL shells)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -353,6 +358,7 @@ class ShellInfo(BaseModel):
     name: str | None = None
     created_at: datetime | None = None
     uptime_seconds: int = 0
+    expires_at: datetime | None = None
 
 
 class PageRow(BaseModel):

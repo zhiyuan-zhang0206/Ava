@@ -260,7 +260,15 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
     assert status == "completed"
     assert seen == {"agent_id": 42}
     assert result == {
-        "shells": [{"id": 5, "name": "build", "created_at": None, "uptime_seconds": 42}]
+        "shells": [
+            {
+                "id": 5,
+                "name": "build",
+                "created_at": None,
+                "uptime_seconds": 42,
+                "expires_at": None,
+            }
+        ]
     }
 
 

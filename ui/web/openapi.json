@@ -12219,6 +12219,18 @@
             "type": "integer",
             "title": "Uptime Seconds",
             "default": 0
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
           }
         },
         "type": "object",
@@ -12226,7 +12238,7 @@
           "id"
         ],
         "title": "ShellInfo",
-        "description": "One live persistent-shell session of an agent — a session named\n`…-agent-<id>-shell-<sid>[-<name>]`. `id` is the agent-local session id\n(the int the agent uses to drive it); `name` is the optional slug label\n(a watcher carries the conventional name \"watcher\"), None when unnamed.\nThe agent's own process session has no `-shell-` segment and is excluded."
+        "description": "One live persistent-shell session of an agent — a session named\n`…-agent-<id>-shell-<sid>[-<name>]`. `id` is the agent-local session id\n(the int the agent uses to drive it); `name` is the optional slug label\n(a watcher carries the conventional name \"watcher\"), None when unnamed.\nThe agent's own process session has no `-shell-` segment and is excluded.\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch, resolved to the cluster timezone); `expires_at` is\nthe gateway-owned TTL deadline from `agent_shell_ttls` — None when the\nsession has no TTL (watcher sessions and legacy pre-TTL shells)."
       },
       "SkillEnableUpdate": {
         "properties": {

@@ -71,6 +71,7 @@ const SENTENCE_CASE_ALLOW = [
   "PID",
   "CPU",
   "RAM",
+  "TTL",
   "RSS",
   "GET",
   "POST",
