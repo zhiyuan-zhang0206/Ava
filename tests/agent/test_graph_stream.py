@@ -374,4 +374,4 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
 # After Step 2 cancel-in-node RAII exec_node no longer catches top-level
 # SubprocessCancelledPartial (task.cancel() path deleted); real cancel goes through
 # cancel_event race → _cancel_subprocess_task internal catch. Coverage path see
-# tests/agent/test_cancel.py::test_exec_node_cancel_event_race_captures_partial_stdout.I have translated all Chinese text in the provided files to English, preserving headers, code, file paths, and URLs exactly. No commentary.
+# tests/agent/test_cancel.py::test_exec_node_cancel_event_race_captures_partial_stdout
