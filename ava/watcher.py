@@ -333,6 +333,7 @@ def _spawn(
     cron_timezone: str | None = None,
     cron_end_at: Any = None,
     timeout_secs: float | None = None,
+    _exclude_session: int | None = None,
 ) -> int:
     """Start a watcher child running ``code``; return its watcher id.
 
@@ -389,21 +390,66 @@ def _spawn(
     # swallowed (the old fail-soft left a live watcher the boot reconcile can
     # never rebuild — the registry is the only record of "should exist").
     try:
-        from shared.watcher_registry import register_watcher
+        if kind == "cron":
+            # Task #1825 dedupe, atomic (N2): one transaction — xact lock,
+            # re-check, insert (shared.watcher_registry.register_cron_atomic).
+            # The re-check needs a FRESH session list (a just-registered
+            # winner must be visible), computed here, not the reconcile's
+            # snapshotted one.
+            from shared.watcher_registry import register_cron_atomic
 
-        register_watcher(
-            agent_id,
-            session_id,
-            kind=kind,
-            name=name,
-            message=message,
-            fires_at=fires_at,
-            cron_expr=cron_expr,
-            cron_timezone=cron_timezone,
-            cron_end_at=cron_end_at,
-            timeout_secs=timeout_secs,
-            template_version=TEMPLATE_VERSION,
-        )
+            try:
+                alive = set(_sessions.list())
+            except Exception:
+                # Session list unavailable — cannot verify liveness, so no
+                # dedupe (spawning is the fail-safe: a duplicate is
+                # recoverable, a reused dead session would silently lose the
+                # schedule).
+                alive = None
+            # kind == 'cron' guarantees the schedule payload (cron() always
+            # passes it); narrow for register_cron_atomic's str contract.
+            from typing import cast
+
+            reused = register_cron_atomic(
+                agent_id,
+                session_id,
+                name=name,
+                message=message,
+                cron_expr=cast(str, cron_expr),
+                cron_timezone=cast(str, cron_timezone),
+                cron_end_at=cron_end_at,
+                alive=alive,
+                exclude_session=_exclude_session,
+                template_version=TEMPLATE_VERSION,
+            )
+            if reused is not None:
+                # A concurrent registration won the race — the schedule is
+                # already live under `reused`. Dispose the session we created
+                # and hand the caller the winner's id.
+                logger.info(
+                    "[watcher] cron %r already live as session %s — reusing (dedupe)",
+                    cron_expr,
+                    reused,
+                )
+                with contextlib.suppress(Exception):
+                    _sessions.kill(session_id)
+                return reused
+        else:
+            from shared.watcher_registry import register_watcher
+
+            register_watcher(
+                agent_id,
+                session_id,
+                kind=kind,
+                name=name,
+                message=message,
+                fires_at=fires_at,
+                cron_expr=cron_expr,
+                cron_timezone=cron_timezone,
+                cron_end_at=cron_end_at,
+                timeout_secs=timeout_secs,
+                template_version=TEMPLATE_VERSION,
+            )
     except Exception:
         logger.error(
             "[watcher] registry write failed for session %s — refusing to start "
@@ -505,36 +551,6 @@ def cron(
     tz = timezone if timezone is not None else (cluster_tz_name() or host_tz_name())
     validate_timezone(tz)
     et = normalize_end_time(end_time)
-    # Dedupe (Task #1825): a second registration of a schedule that is already
-    # live under another session must not stack a new generation — the
-    # kill/rebuild + restart cycle created exactly that double instance twice
-    # (#2811 triple, CEO #228 sessions 52+53). Reuse the live session instead.
-    # `_exclude_session` lets the stale-template rebuild skip the very session
-    # it is replacing (it must spawn a fresh one with the new template).
-    # Fail-soft: a registry/list blip yields no duplicate and the spawn
-    # proceeds — the dedupe is advisory, the registration is not.
-    try:
-        alive = set(_sessions.list())
-    except Exception:
-        # Session list unavailable — cannot verify liveness, so no dedupe
-        # (spawning is the fail-safe: a duplicate is recoverable, a reused
-        # dead session would silently lose the schedule).
-        alive = None
-    existing = _live_cron_session(
-        _agent_id(),
-        cron_expr=expr,
-        cron_timezone=tz,
-        cron_end_at=et,
-        alive=alive,
-        exclude_session=_exclude_session,
-    )
-    if existing is not None:
-        logger.info(
-            "[watcher] cron %r already live as session %s — reusing (dedupe)",
-            expr,
-            existing,
-        )
-        return existing
     code = build_cron_script(
         expr=expr,
         message=message,
@@ -543,6 +559,11 @@ def cron(
     )
     # The generated script self-terminates (it stops looping past end_time, or
     # recurs indefinitely by design for a standing reminder), so no watchdog.
+    # Registration carries the Task #1825 dedupe — atomically: one transaction
+    # (pg_advisory_xact_lock + re-check + insert, shared.watcher_registry.
+    # register_cron_atomic), so a concurrent registration of the same schedule
+    # can never slip between the check and the insert (N2). `_exclude_session`
+    # lets the stale-template rebuild skip the very session it is replacing.
     return _spawn(
         code,
         None,
@@ -552,6 +573,7 @@ def cron(
         cron_expr=expr,
         cron_timezone=tz,
         cron_end_at=et,
+        _exclude_session=_exclude_session,
     )
 
 

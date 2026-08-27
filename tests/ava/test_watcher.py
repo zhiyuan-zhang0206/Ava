@@ -1546,3 +1546,206 @@ def test_reconcile_collapses_two_dead_rows_into_one_rebuild(
     assert rows[52]["status"] == "rebuilt"
     assert rows[53]["status"] == "rebuilt"
     assert any(f"rebuilt as session {live_id}" in a for a in actions)
+
+
+# ─── atomic registration (Task #1825 N2) ────────────────────────────────────
+
+
+def _run_cron_racers(
+    agent_id: int,
+    *,
+    tmp_path: pathlib.Path,
+    db_url: str | None = None,
+    timeout: float = 90.0,
+) -> list[int]:
+    """Spawn two independent processes that both call
+    `ava.watcher.cron("0 9 * * *", ...)` at a shared GO signal; return the
+    session ids they printed. Each process is a fresh interpreter with its
+    own DB connections — the exact topology of two concurrent registrations
+    (a restart-overlap pair both running the boot reconcile)."""
+    go = tmp_path / "race-go"
+    ready_files = [tmp_path / f"race-ready-{i}" for i in range(2)]
+    script = (
+        "import os, time, sys\n"
+        "import ava\n"
+        "open(os.environ['RACE_READY'], 'w').close()\n"
+        "while not os.path.exists(os.environ['RACE_GO']):\n"
+        "    time.sleep(0.005)\n"
+        "print(ava.watcher.cron('0 9 * * *', 'race', timezone='UTC', name='race'), flush=True)\n"
+    )
+    procs: list[subprocess.Popen[str]] = []
+    for ready in ready_files:
+        env = os.environ.copy()
+        env["AVA_AGENT_ID"] = str(agent_id)
+        env["AVA_PROCESS_PROFILE"] = "agent"
+        env["RACE_READY"] = str(ready)
+        env["RACE_GO"] = str(go)
+        if db_url is not None:
+            env["AVA_DB_URL"] = db_url
+        procs.append(
+            subprocess.Popen(  # noqa: S603 — test-harness interpreter
+                [sys.executable, "-c", script],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        )
+    try:
+        # both racers at the gate before firing — otherwise the race is vacuous
+        deadline = time.time() + 30
+        while time.time() < deadline and not all(f.exists() for f in ready_files):
+            time.sleep(0.01)
+        go.touch()
+        outs: list[int] = []
+        for p in procs:
+            out, err = p.communicate(timeout=timeout)
+            if p.returncode != 0:
+                raise AssertionError(f"racer failed (rc={p.returncode}): {err[-2000:]}")
+            outs.append(int(out.strip()))
+        return outs
+    finally:
+        for p in procs:
+            if p.poll() is None:
+                p.kill()
+
+
+def test_cron_concurrent_registration_yields_one_winner(
+    _agent_row: int, tmp_path: pathlib.Path
+) -> None:
+    """The N2 property, end to end: two concurrent registrations of the same
+    cron schedule — separate processes, separate DB connections — must yield
+    exactly ONE live watcher. The loser's registration serializes on the
+    transaction-scoped advisory lock and reuses the winner's session instead
+    of stacking a second generation. (Direct-connection environment; the
+    pooled-URL variant runs in
+    test_cron_concurrent_registration_through_pooler when a PgBouncer binary
+    is available.)"""
+    from shared.watcher_registry import watcher_rows
+
+    ids = _run_cron_racers(_agent_row, tmp_path=tmp_path)
+
+    assert len(ids) == 2
+    assert ids[0] == ids[1], f"two winners registered: {ids}"
+    rows = [r for r in watcher_rows(agent_id=_agent_row) if r["kind"] == "cron"]
+    running = [r for r in rows if r["status"] == "running"]
+    assert len(running) == 1, f"expected exactly one running cron row, got {rows}"
+    assert running[0]["session_id"] == ids[0]
+
+
+def test_cron_concurrent_registration_through_pooler(
+    _agent_row: int, tmp_path: pathlib.Path, _provisioned_db: str
+) -> None:
+    """Production-equivalent lock semantics (QA #794 BLOCK): the registration
+    race through a REAL PgBouncer in `pool_mode = transaction` with
+    `server_reset_query = DISCARD ALL` — the exact config that silently
+    dropped the session-level advisory lock of the previous revision. The
+    transaction-scoped lock must survive the pooler: exactly one winner.
+    Skipped where no pgbouncer binary exists (CI Linux has none)."""
+    import shutil
+
+    bin_path = shutil.which("pgbouncer")
+    if bin_path is None:
+        pytest.skip("pgbouncer binary not available on this host")
+    import socket
+    from contextlib import suppress
+
+    import psycopg
+
+    from shared.watcher_registry import watcher_rows
+
+    # the provisioned test PG (trust auth) + a free port for the pooler
+    pg_port = int(_provisioned_db.rsplit(":", 1)[1].split("/", 1)[0])
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        pooler_port = s.getsockname()[1]
+
+    # PgBouncer's trust mode still requires the user in an auth_file (it
+    # trusts the password, not the username); the password field is ignored.
+    auth_file = tmp_path / "pgbouncer-users.txt"
+    auth_file.write_text('"ava_citest" ""\n"ava" ""\n')
+    ini = tmp_path / "pgbouncer.ini"
+    ini.write_text(
+        f"""[databases]
+ava_citest = host=127.0.0.1 port={pg_port} dbname=ava_citest
+
+[pgbouncer]
+listen_addr = 127.0.0.1
+listen_port = {pooler_port}
+auth_type = trust
+auth_file = {auth_file}
+pool_mode = transaction
+server_reset_query = DISCARD ALL
+ignore_startup_parameters = extra_float_digits,options
+max_client_conn = 100
+default_pool_size = 4
+pidfile = {tmp_path}/pgbouncer.pid
+logfile = {tmp_path}/pgbouncer.log
+"""
+    )
+    proc = subprocess.Popen(  # noqa: S603 — throwaway pooler for the test
+        [bin_path, str(ini)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    try:
+        # wait for the pooler's listener
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(("127.0.0.1", pooler_port)) == 0:
+                    break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("pgbouncer did not become ready: " + _pooler_tail(ini))
+        # sanity: the pooled URL really reaches the test DB through the pooler
+        pooled_url = f"postgresql://ava_citest@127.0.0.1:{pooler_port}/ava_citest"
+        with psycopg.connect(pooled_url, autocommit=True) as conn:
+            row = conn.execute("SELECT 1").fetchone()
+            assert row is not None and row[0] == 1
+
+        race_tmp = tmp_path / "pooled-race"
+        race_tmp.mkdir()
+        ids = _run_cron_racers(_agent_row, tmp_path=race_tmp, db_url=pooled_url)
+
+        assert len(ids) == 2
+        assert ids[0] == ids[1], f"two winners registered through the pooler: {ids}"
+        rows = [r for r in watcher_rows(agent_id=_agent_row) if r["kind"] == "cron"]
+        running = [r for r in rows if r["status"] == "running"]
+        assert len(running) == 1, f"expected one running cron row, got {rows}"
+        assert running[0]["session_id"] == ids[0]
+    finally:
+        proc.terminate()
+        with suppress(Exception):
+            proc.wait(timeout=10)
+        if proc.poll() is None:
+            proc.kill()
+
+
+def _pooler_tail(ini_path: pathlib.Path) -> str:
+    """Tail the throwaway pooler's log for failure diagnostics."""
+
+    log_path = ini_path.parent / "pgbouncer.log"
+    if log_path.exists():
+        return (log_path.read_text() or "")[-1500:]
+    return "(no pooler log found)"
+
+
+def test_cron_advisory_key_is_stable_and_schedule_scoped() -> None:
+    """The advisory-lock key is a pure function of (agent, expr, timezone,
+    end time): identical schedules key identically across calls; a different
+    agent, timezone, or end time keys differently (so they serialize
+    independently)."""
+    from shared.watcher_registry import cron_advisory_key
+
+    end = datetime.datetime(2026, 12, 31, 16, 0, tzinfo=datetime.UTC)
+    assert cron_advisory_key(1, "0 9 * * *", "UTC", None) == cron_advisory_key(
+        1, "0 9 * * *", "UTC", None
+    )
+    assert cron_advisory_key(1, "0 9 * * *", "UTC", None) != cron_advisory_key(
+        2, "0 9 * * *", "UTC", None
+    )
+    assert cron_advisory_key(1, "0 9 * * *", "UTC", None) != cron_advisory_key(
+        1, "0 9 * * *", "Asia/Shanghai", None
+    )
+    assert cron_advisory_key(1, "0 9 * * *", "UTC", None) != cron_advisory_key(
+        1, "0 9 * * *", "UTC", end
+    )
