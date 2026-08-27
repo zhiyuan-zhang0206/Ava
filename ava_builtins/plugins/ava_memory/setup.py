@@ -93,7 +93,7 @@ def _ensure_memory_repo() -> None:
         return
 
     branch = branch_name()
-    print(f"    first-time setup: clone memory pool -> {memory_dir()} on branch {branch!r}")
+    print(f"    first-time setup: bring up memory pool -> {memory_dir()} on branch {branch!r}")
     try:
         init()
     except subprocess.CalledProcessError as e:

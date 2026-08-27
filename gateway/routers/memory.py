@@ -8,6 +8,10 @@ differ).
 `refresh` fast-forwards the gateway memory checkout to the consolidated
 pool (`origin/main`); the memory indexer then re-embeds the changed files.
 
+`pool` serves the consolidated pool as a git bundle (real main ancestry) —
+the bootstrap source a fresh agent-runner fetches when it has no memory
+remote (memory_repo.bootstrap_from_gateway).
+
 `graph` returns concept notes and cross-links as a graph for the frontend
 OKF knowledge-graph page.
 """
@@ -15,11 +19,12 @@ OKF knowledge-graph page.
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import (
@@ -273,3 +278,66 @@ async def post_memory_refresh() -> MemoryRefreshResponse:
 def get_memory_graph() -> MemoryGraphResponse:
     """Return concept notes and cross-links from the gateway memory bundle."""
     return _build_memory_graph(gateway_memory_dir())
+
+
+@router.get("/api/memory/pool", response_class=Response)
+def get_memory_pool() -> Response:
+    """Download the consolidated memory pool as a git bundle.
+
+    Serves `gateway_memory_dir()` — the consolidated checkout on `main` — as a
+    `git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch
+    is a true descendant of `main` and converges cleanly when a memory remote
+    is configured later). A fresh agent-runner whose memory remote is not
+    configured (headless enroll, no GitHub credentials) fetches this over its
+    gateway URL and clones it as its initial pool, so the shared index and
+    notes reach its agents without GitHub. Untracked machine-local paths
+    (`.cache`, `.githooks`, …) never ride a bundle — git only carries the
+    tracked tree. Sits behind the normal Bearer/session middleware like every
+    /api route. `X-Pool-Head` carries the checkout's HEAD sha so the receiver
+    can verify what it cloned is the advertised snapshot.
+    """
+    root = gateway_memory_dir()
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="gateway memory pool not initialized")
+    try:
+        head, data = _build_pool_bundle(root)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise HTTPException(status_code=500, detail=f"memory pool bundle failed: {e}") from e
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "X-Pool-Head": head,
+            "Content-Disposition": 'attachment; filename="memory-pool.bundle"',
+        },
+    )
+
+
+def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
+    """git-bundle HEAD of the consolidated checkout. Raises HTTPException on
+    git failure — outside any try here, so the route's except only wraps the
+    transport/OS layer."""
+    import tempfile
+
+    from shared.proc import run_bounded
+
+    with tempfile.TemporaryDirectory(prefix="memory-pool-bundle-") as tmp:
+        bundle_path = Path(tmp) / "pool.bundle"
+        result = run_bounded(
+            ["git", "-C", str(root), "bundle", "create", str(bundle_path), "HEAD"],
+            timeout=60.0,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"git bundle create failed: {(result.stderr or '').strip()[:200]}",
+            )
+        head = run_bounded(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            timeout=30.0,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return head, bundle_path.read_bytes()
