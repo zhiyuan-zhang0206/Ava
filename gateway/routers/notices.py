@@ -441,29 +441,18 @@ async def post_notices_resolve_batch(body: ResolveBatchIn, request: Request) -> 
 
     def _resolve_many(pool: ConnectionPool) -> list[tuple[int, int]]:
         """Resolve every listed FYI notice that is still open; return the
-        (agent_id, notice_id) pairs to announce. One transaction, row locks
-        held — the per-row UPDATE is a plain guard, never a re-check."""
-        resolved_pairs: list[tuple[int, int]] = []
+        (agent_id, notice_id) pairs to announce. One transaction, ONE
+        statement — the WHERE clause IS the skip filter (already-resolved and
+        require_response rows never match), so the whole batch is a single
+        UPDATE ... RETURNING instead of a per-row select+update loop."""
         with pool.connection() as conn, conn.cursor() as cur:
-            for notice_id in ids:
-                cur.execute(
-                    "SELECT agent_id, require_response, resolved_at FROM agent_notices "
-                    "WHERE id = %s FOR UPDATE",
-                    (notice_id,),
-                )
-                row = cur.fetchone()
-                if row is None:
-                    continue  # gone entirely — nothing to resolve
-                agent_id, require_response, resolved_at = row
-                if resolved_at is not None or require_response:
-                    continue  # already resolved, or not an FYI — skip, not error
-                cur.execute(
-                    "UPDATE agent_notices SET resolved_at = now(), resolution = 'read' "
-                    "WHERE id = %s",
-                    (notice_id,),
-                )
-                resolved_pairs.append((int(agent_id), int(notice_id)))
-        return resolved_pairs
+            cur.execute(
+                "UPDATE agent_notices SET resolved_at = now(), resolution = 'read' "
+                "WHERE id = ANY(%s) AND resolved_at IS NULL AND NOT require_response "
+                "RETURNING agent_id, id",
+                (ids,),
+            )
+            return [(int(agent_id), int(notice_id)) for agent_id, notice_id in cur.fetchall()]
 
     pool = request.app.state.db_pool
     resolved_pairs = await asyncio.to_thread(_resolve_many, pool)
