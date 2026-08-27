@@ -139,9 +139,26 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
     window_hours: 24,
     since_compact: false,
     shells: [
-      { id: 0, name: "dev-server", created_at: "2026-06-14T12:00:00Z", uptime_seconds: 8040 },
-      { id: 1, name: null, created_at: null, uptime_seconds: 45 },
-      { id: 2, name: "watcher", created_at: "2026-06-14T12:00:00Z", uptime_seconds: 660 },
+      // created_at is offset from fixture-build time so the tick-computed
+      // runtime lands on the same formatted span as uptime_seconds (8040s /
+      // 660s) no matter when the test runs; dev-server also carries a TTL
+      // deadline 7900s ahead, which stays "TTL 2h 11m" under render skew
+      // under 40s.
+      {
+        id: 0,
+        name: "dev-server",
+        created_at: new Date(Date.now() - 8040_000).toISOString(),
+        uptime_seconds: 8040,
+        expires_at: new Date(Date.now() + 7900_000).toISOString(),
+      },
+      { id: 1, name: null, created_at: null, uptime_seconds: 45, expires_at: null },
+      {
+        id: 2,
+        name: "watcher",
+        created_at: new Date(Date.now() - 660_000).toISOString(),
+        uptime_seconds: 660,
+        expires_at: null,
+      },
     ],
     config_overlay: { llm_model: "claude-opus-4-8", auto_compact_fraction: 0.7 },
     cost: {
@@ -293,9 +310,17 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("dev-server")).toBeTruthy();
     expect(screen.getByText("(unnamed)")).toBeTruthy();
     expect(screen.getByText("watcher")).toBeTruthy();
-    expect(screen.getByText("2h 14m")).toBeTruthy(); // 8040s
-    expect(screen.getByText("45s")).toBeTruthy();
-    expect(screen.getByText("11m")).toBeTruthy(); // 660s
+    // runtime: tick-computed from created_at (8040s / 660s), probe snapshot
+    // when created_at is missing (45s)
+    expect(screen.getByText("Runtime 2h 14m")).toBeTruthy(); // 8040s
+    expect(screen.getByText("Runtime 45s")).toBeTruthy();
+    expect(screen.getByText("Runtime 11m")).toBeTruthy(); // 660s
+    // created: browser-local launch time per row; "—" when unknown
+    expect(screen.getAllByText(/^Created /)).toHaveLength(3);
+    expect(screen.getByText("Created —")).toBeTruthy();
+    // TTL: remaining + expiry when the gateway row exists; "No TTL" otherwise
+    expect(screen.getByText(/TTL 2h 11m · expires/)).toBeTruthy(); // ~7900s remaining
+    expect(screen.getAllByText("No TTL")).toHaveLength(2); // unnamed + watcher
     // each shell row links to its monitor page /shell/{agentId}/{shellId}
     expect(screen.getByText("dev-server").closest("a")?.getAttribute("href")).toBe("/shell/1/0");
     expect(screen.getByText("watcher").closest("a")?.getAttribute("href")).toBe("/shell/1/2");
@@ -512,7 +537,27 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("long-shell")).toBeTruthy());
-    expect(screen.getByText("24d 3h")).toBeTruthy();
+    expect(screen.getByText("Runtime 24d 3h")).toBeTruthy();
+  });
+
+  it("clamps an already-expired TTL deadline to 0s remaining", async () => {
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        shells: [
+          {
+            id: 9,
+            name: "expiring-shell",
+            created_at: new Date(Date.now() - 3600_000).toISOString(),
+            uptime_seconds: 3600,
+            expires_at: new Date(Date.now() - 10_000).toISOString(),
+          },
+        ],
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("expiring-shell")).toBeTruthy());
+    expect(screen.getByText(/TTL 0s · expires/)).toBeTruthy();
   });
 
   it("activity durations show em dashes when alive is 0 while TPS remains visible", async () => {
