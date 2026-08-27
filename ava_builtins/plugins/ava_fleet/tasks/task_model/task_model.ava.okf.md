@@ -44,7 +44,7 @@ class Task:
 
 - [[ava_builtins/plugins/ava_fleet/tasks/task_model/task_model_fields.ava.okf.md|Field Details]] — `id`, `parent_id`, `title`/`description`, `results`, `status`, `owner`, `created_by`, timestamps, `priority`
 - [[ava_builtins/plugins/ava_fleet/tasks/task_model/task_model_reminders.ava.okf.md|Reminder Mechanism]] — `remind_interval_seconds`, `last_reminded_at`, `reminder_count`, daemon backoff & escalation
-- [[ava_builtins/plugins/ava_fleet/tasks/task_model/task_model_root.ava.okf.md|Root Task]] — system root, immutability, default parent
+- [[ava_builtins/plugins/ava_fleet/tasks/task_model/task_model_root.ava.okf.md|Root Task]] — system root, immutability, top-level-task anchor
 - [[ava_builtins/plugins/ava_fleet/tasks/task_model/task_model_database.ava.okf.md|Database Mapping & Task Tree]] — `agent_tasks` table, `_COLS`, recursive subtree queries
 
 See also: [[task_lifecycle.ava.okf.md|Task Lifecycle]], [[task_notification.ava.okf.md|Task Notification]].

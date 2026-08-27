@@ -1220,6 +1220,27 @@ def test_create_and_assign_uses_default_preset(
         ava._boot._agent_id = original
 
 
+def test_create_and_assign_rejects_bad_parent_before_spawn(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """A missing parent is rejected before the agent spawns, so no orphaned
+    agent is left behind."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        with (
+            patch("ava.agents.spawn") as mock_spawn,
+            pytest.raises(ValueError, match="parent task 999999 does not exist"),
+        ):
+            task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
+                "orphan-child", "d", parent=999_999
+            )
+        mock_spawn.assert_not_called()
+    finally:
+        ava._boot._agent_id = original
+
+
 # ── create() — duplicate title rejection ──────────────────────────────────
 
 
@@ -1662,6 +1683,34 @@ def test_create_rejects_missing_parent(db_conn: psycopg.Connection, root_task_id
     try:
         with pytest.raises(ValueError, match="parent task 999999 does not exist"):
             task_registry.create("orphan", "detail", parent=999_999)
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_create_rejects_parent_1_when_not_root(db_conn: psycopg.Connection) -> None:
+    """The documented root id (1) is enforced: on a deployment where task 1 is
+    not the system root, create(parent=1) fails loudly instead of silently
+    attaching a top-level task under a different parent."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        # Self-contained: pin task 1 (non-root) and task 2 (the root), so the
+        # assertion does not depend on the fixture-seeded root's id.
+        with db_conn.cursor() as cur:
+            cur.execute("DELETE FROM agent_tasks")
+            cur.execute(
+                "INSERT INTO agent_tasks (id, title, description, status, created_by, owner, is_root) "
+                "VALUES (1, 'not-root', 'd', 'open', %s, %s, FALSE), "
+                "(2, 'Root', 'root', 'in_progress', 'system', NULL, TRUE)",
+                (str(agent_id), agent_id),
+            )
+        db_conn.commit()
+        with pytest.raises(ValueError, match="not the system root task"):
+            task_registry.create("wants-root", "d", parent=1)
+        # The actual root id works as a top-level parent.
+        task = task_registry.create("top-level", "d", parent=2)
+        assert task.parent_id == 2
     finally:
         ava._boot._agent_id = original
 

@@ -125,6 +125,30 @@ def _row_to_task(row: tuple) -> Task:
     return Task(*render_task_timestamps(row, _COLS))
 
 
+def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
+    """Validate `parent` names an existing task; raise ValueError otherwise.
+
+    Also rejects parent=1 on a deployment where task 1 is not the system root
+    (a migrated database whose root carries another id): the documented root
+    id (1) must not silently attach a top-level task under a different parent.
+    Runs inside the caller's transaction/cursor."""
+    cur.execute("SELECT id, is_root FROM agent_tasks WHERE id = %s", (parent,))
+    row = cur.fetchone()
+    if row is None:
+        raise ValueError(
+            f"parent task {parent} does not exist -- create the parent first, "
+            "or pass the system root task id (1) for a top-level task"
+        )
+    if parent == 1 and not row[1]:
+        cur.execute("SELECT id FROM agent_tasks WHERE is_root ORDER BY id LIMIT 1")
+        root = cur.fetchone()
+        what = f"task #{root[0]}" if root is not None else "unseeded (no root exists)"
+        raise ValueError(
+            f"task 1 is not the system root task -- the root is {what}; "
+            "pass its id for a top-level task"
+        )
+
+
 def _insert_task(
     cur: psycopg.Cursor,
     title: str,
@@ -213,7 +237,8 @@ def create(
             tasks of the whole system; every other task must pass the id of
             an existing task as its parent (create a parent first, then
             create its subtasks with that id). Raises ValueError when the
-            parent does not exist.
+            parent does not exist (or, for parent=1, when task 1 is not the
+            system root on this deployment).
         remind_interval_seconds: seconds without updates before the owner is reminded.
             Cannot be disabled: None means the priority default (P0 30m / P1 1h /
             P2 2h / P3 4h), capped at 24h. An explicit value wins over the default.
@@ -229,15 +254,10 @@ def create(
     effective_owner = owner if owner is not None else actor
     with ava.DB.transaction(), ava.DB.cursor() as cur:
         # parent is required: only the system root task (id 1) may parent the
-        # cluster's top-level tasks; every other task must name an existing
-        # task as its parent. Validate existence here for a friendly error
-        # instead of a raw foreign-key violation from the INSERT.
-        cur.execute("SELECT id FROM agent_tasks WHERE id = %s", (parent,))
-        if cur.fetchone() is None:
-            raise ValueError(
-                f"parent task {parent} does not exist -- create the parent first, "
-                "or pass the system root task id (1) for a cluster top-level task"
-            )
+        # deployment's top-level tasks; every other task must name an existing
+        # task as its parent. Validate here for a friendly error instead of a
+        # raw foreign-key violation from the INSERT.
+        _ensure_parent_exists(cur, parent)
         task = _insert_task(
             cur,
             title,
@@ -280,10 +300,17 @@ def create_and_assign(
     ava.agents.spawn(). ``machine`` defaults to your own machine.
     ``parent`` is required, same rule as create(): the id of an existing task
     this task descends from (the system root task id 1 for a top-level task).
+    The parent is validated before the agent spawns, so a bad parent never
+    leaves an orphaned agent behind.
 
     Returns:
         (task, agent_id).
     """
+    # 0. Validate the parent before spawning: create() would reject a bad
+    # parent after the agent exists, leaving an orphaned agent behind.
+    with ava.DB.transaction(), ava.DB.cursor() as cur:
+        _ensure_parent_exists(cur, parent)
+
     # 1. Spawn the agent — must exist before task creation so it can be the owner.
     agent_id = ava.agents.spawn(
         preset=preset,
