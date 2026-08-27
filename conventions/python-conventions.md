@@ -55,6 +55,17 @@ kernel but is otherwise unlayered (it straddles). `plugins` is ungoverned
 Enforced by import-linter (config in `pyproject.toml [tool.importlinter]`,
 hook `lint-imports`).
 
+## contextvars are allowlisted, not free
+
+`contextvars` imports are banned by ruff `TID251` except in the mechanism
+files on the allowlist (`pyproject.toml` — `flake8-tidy-imports.banned-api`
+plus the `per-file-ignores` entries). LangGraph's runtime itself propagates
+contextvars (pregel `copy_context`, `get_runtime`), and the SDK / log /
+telemetry / retry-policy readers sit outside node signatures, so a blanket
+ban is not possible — but every use is a mechanism-layer decision. A new use
+point needs a written justification in the PR description before joining the
+allowlist.
+
 ## Model new cross-process / cross-layer wire shapes
 
 A payload crossing a process boundary (gateway↔agent-runner RPC, SSE events,
