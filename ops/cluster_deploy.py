@@ -97,7 +97,7 @@ from shared.config import settings
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.gitenv import git_env
 from shared.platform import LockTimeoutError
-from shared.proc import run_bounded
+from shared.proc import run_bounded, timeout_stderr_tail
 from shared.session_env import venv_activation_prefix
 
 
@@ -387,9 +387,12 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # (including a timeout) validate_migrations_at_ref fails closed on the
         # unreadable ref. Bounded so a stalled network cannot block this
         # synchronous call indefinitely (see _VALIDATE_FETCH_TIMEOUT_S above).
+        # Per-attempt logs: a 30s timeout here is part of the op's Phase-B time.
+        _validate_fetch_t0 = time.monotonic()
+        _log.info("[cluster] validate fetch start (bound %.0fs)", _VALIDATE_FETCH_TIMEOUT_S)
         try:
             fetch = run_bounded(
-                ["git", "fetch", "origin"],
+                ["git", "fetch", "--progress", "origin"],
                 cwd=_REPO_ROOT,
                 capture_output=True,
                 env=git_env(),
@@ -398,16 +401,18 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             if fetch.returncode != 0:
                 _log.warning(
                     "validate-before-kill git fetch failed with rc=%s; stderr=%s; "
-                    "validation fails closed if its ref is unreadable",
+                    "elapsed=%.1fs; validation fails closed if its ref is unreadable",
                     fetch.returncode,
                     fetch.stderr,
+                    time.monotonic() - _validate_fetch_t0,
                 )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             _log.warning(
-                "validate-before-kill git fetch timed out after %.0fs; proceeding "
-                "to validate_migrations_at_ref against whatever is already local "
-                "(fails closed if %s is unreadable)",
+                "validate-before-kill git fetch timed out after %.0fs; last stderr: %r; "
+                "proceeding to validate_migrations_at_ref against whatever is already "
+                "local (fails closed if %s is unreadable)",
                 _VALIDATE_FETCH_TIMEOUT_S,
+                timeout_stderr_tail(exc),
                 ref,
             )
         shared.migrations.validate_migrations_at_ref(ref, repo_root=_REPO_ROOT)
@@ -438,8 +443,12 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # forward_env_dict has already put this venv's bin dir on the child PATH,
         # so `ava` resolves without an activation prefix.
         native_cmd = (
+            # Per-stage markers (`cli.commands._updater_stage`; cmd.exe expands
+            # %TIME% once per command line). Fail-soft (`|| ver>nul`).
             f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
+            f" && (python -m cli.commands._updater_stage restart || ver>nul)"
             f" && {_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}"
+            f" & (python -m cli.commands._updater_stage done || ver>nul)"
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}"
         )
     else:
@@ -497,11 +506,18 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             f" && (python -m cli.commands._source_switch_marker on || ver>nul)"
             f" && echo [updater] force-checkout to {native_ref} -- discards any unpushed "
             f"local commits or a dirty tree, recover via git reflog"
+            # Per-stage markers (`cli.commands._updater_stage`; cmd.exe expands
+            # %TIME% once per command line): the checkout/uv/stop/start
+            # subdivision the updater log was missing. Fail-soft (`|| ver>nul`)
+            # so a tree that predates the module never breaks the ladder.
+            f" && (python -m cli.commands._updater_stage fetch || ver>nul)"
             f" && git fetch origin"
             f" && git checkout --force -B {_native_arg(branch)} {native_ref}"
             f" && git diff --quiet && git diff --cached --quiet"
+            f" && (python -m cli.commands._updater_stage uv-sync || ver>nul)"
             f" && python -m cli.commands._update_uv_sync"
             f" && (python -m cli.commands._installed_sha || ver>nul)"  # see that module
+            f" && (python -m cli.commands._updater_stage restart || ver>nul)"
             f" && ({_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}) || ("
             f"echo [updater] checkout/sync or tree verification FAILED -- refusing to "
             f"start services on a possibly-mixed tree; the host stays on its current code{SOURCE_SWITCH_OFF}"
@@ -518,6 +534,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             # waits on the same host again.
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}{SOURCE_SWITCH_OFF}"
             f" & exit /b 1)"
+            f" & (python -m cli.commands._updater_stage done || ver>nul)"
             f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}{SOURCE_SWITCH_OFF}"
         )
     # One log holds every native run, so its tail needs a seam to be read by (#1117).

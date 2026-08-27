@@ -166,6 +166,19 @@ def _refresh_builtin_skills(repo: Path, ava_bin: Path) -> None:
         print(f"  ! builtin skill refresh failed (non-fatal): rc={rc}", file=sys.stderr)
 
 
+def _stage_marker() -> str:
+    """Wall-clock marker for the updater log's stage lines.
+
+    Lazy import: `cli.commands.__init__` imports this module, so a module-level
+    import would put `_updater_stage` in sys.modules before
+    `python -m cli.commands._updater_stage` runs it and runpy would print a
+    RuntimeWarning into every stage-marker line of the updater log.
+    """
+    from cli.commands._updater_stage import now_marker
+
+    return now_marker()
+
+
 @contextlib.contextmanager
 def _source_switch_window() -> Generator[None, None, None]:
     """Open the source-switch window around an update leg that writes the tree.
@@ -208,7 +221,9 @@ def _run_agent_runner_self_update_inner(
     import cli.commands as _ns
 
     if restart_only:
-        print("\n→ restart-only: skip git checkout / uv sync (bounce on current code)")
+        print(
+            f"\n→ [{_stage_marker()}] restart-only: skip git checkout / uv sync (bounce on current code)"
+        )
     else:
         # 1+2) force-checkout the pinned target + uv sync, inside the
         # source-switch window. Phase B passes target_sha; a direct operator
@@ -223,7 +238,7 @@ def _run_agent_runner_self_update_inner(
         # complete tree and relaunches everything.
         with _source_switch_window():
             sha = target_sha if target_sha is not None else git_resolve_origin_main()
-            print(f"\n→ git checkout {sha[:7]} (pinned rollout target)")
+            print(f"\n→ [{_stage_marker()}] git checkout {sha[:7]} (pinned rollout target)")
             try:
                 from_sha = git_checkout_sha(sha)
             except GitPullFailed as e:
@@ -231,7 +246,7 @@ def _run_agent_runner_self_update_inner(
                 return 1
             print(f"  ✓ {from_sha[:7]} → {sha[:7]}")
 
-            print("\n→ uv sync")
+            print(f"\n→ [{_stage_marker()}] uv sync")
             sync_result = run_uv_sync(repo, runner=subprocess.run)
             if sync_result.returncode != 0:
                 print("  ✗ uv sync failed", file=sys.stderr)
@@ -271,7 +286,7 @@ def _run_agent_runner_self_update_inner(
     #    A transient gateway outage or network blip at this point would otherwise
     #    leave the host in "services dead, can't start" after the stop below.
     #    On failure the host keeps serving — abort without stopping.
-    print("\n→ preflight probes (validate-before-kill)")
+    print(f"\n→ [{_stage_marker()}] preflight probes (validate-before-kill)")
     rc = _ns._preflight_probes()
     if rc != 0:
         print(
@@ -354,7 +369,7 @@ def _run_agent_runner_self_update_inner(
     #    against a fresh shared.memory_repo) and crash on a large version jump. The
     #    child `ava start` still returns the posture row to idle at the end, pulling
     #    this host back from paused to serving.
-    print("\n→ ava start (fresh process, new code)")
+    print(f"\n→ [{_stage_marker()}] ava start (fresh process, new code)")
     # --persist-services: an internal restart must not rewrite the operator's
     # durable --disable-service marker (a no-flag start would re-enable everything).
     # Strip the settings-lite opt-out before spawning `ava start`: the

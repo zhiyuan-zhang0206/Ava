@@ -175,8 +175,14 @@ def _stop_sessions(sessions: list[str], *, graceful: bool) -> None:
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands as _ns
 
+    # Wall-clock prefix (`cli.commands._updater_stage.now_marker`): the stop
+    # boundary of every stop/update/restart path — including the updater logs
+    # this line lands in — gets a timestamp, so an updater's stop stage is
+    # subdividable from its log alone (2026-08-27 forensics).
+    from cli.commands._updater_stage import now_marker
+
     label = "graceful stop" if graceful else "kill sessions"
-    print(f"\n→ {label}")
+    print(f"\n→ [{now_marker()}] {label}")
     for session in sessions:
         if graceful:
             ok, mode = _ns._graceful_kill_session(session, expected=True)

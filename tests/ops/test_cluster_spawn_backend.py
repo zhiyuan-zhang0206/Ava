@@ -477,6 +477,34 @@ def test_native_updater_chains_touch_and_clear_the_lease(
 
 
 @pytest.mark.real_cluster_spawn
+@pytest.mark.parametrize("restart_only", [False, True])
+def test_native_ladder_marks_per_stage_wall_clock_boundaries(
+    restart_only: bool, native_host: _FakeSessionBackend
+) -> None:
+    """The native ladder emits `_updater_stage` markers at the fetch / uv-sync /
+    restart boundaries (and a `done` marker on the tail) so the updater log
+    subdivides checkout / uv / stop / start — the breakdown a 75.9s Windows
+    updater decision could not honestly provide (2026-08-27 forensics). Each
+    step is fail-soft (`|| ver>nul`) like the source-switch marker: a tree that
+    predates the module must not break the ladder over a log line, and the
+    marker must never be able to abort an update."""
+    cluster_mod.spawn_update(restart_only=restart_only)
+
+    cmd = native_host.spawned[0][1]
+    stage = "python -m cli.commands._updater_stage"
+    assert f"({stage} restart || ver>nul)" in cmd
+    assert f"({stage} done || ver>nul)" in cmd
+    if not restart_only:
+        assert f"({stage} fetch || ver>nul)" in cmd
+        assert f"({stage} uv-sync || ver>nul)" in cmd
+        # The fetch marker must precede the fetch; the uv marker the sync; the
+        # restart marker the restart ladder.
+        assert cmd.index("_updater_stage fetch") < cmd.index("git fetch origin")
+        assert cmd.index("_updater_stage uv-sync") < cmd.index("cli.commands._update_uv_sync")
+        assert cmd.index("_updater_stage restart") < cmd.index("ava restart")
+
+
+@pytest.mark.real_cluster_spawn
 def test_the_native_update_chain_records_the_installed_sha_after_its_sync(
     native_host: _FakeSessionBackend,
 ) -> None:
