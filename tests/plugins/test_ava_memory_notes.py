@@ -129,6 +129,8 @@ def test_discipline_carries_the_criteria_triggers_and_source_ranking(memory_plug
     assert "answering is not saving" in section  # a correction is due that same turn
     assert "not a source of truth" in section  # a memory is a claim to check
     assert "self-verifying" in section  # ...against sources that differ in kind
+    assert "verification point" in section  # repo facts name how they were checked
+    assert "unverified" in section  # ...or say so instead of looking plausible
 
 
 def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plugin: Any) -> None:
@@ -141,6 +143,8 @@ def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plug
     assert "Don't \"notice and" in section
     assert "wait for consolidation" in section
     assert "possibly stale" in section  # unsure still means act, not leave alone
+    assert "replaces the stale note" in section  # correction edits in place
+    assert "second note beside it" in section  # ...not a contradicting new note
 
 
 def test_discipline_keeps_the_shared_pool_restrained_and_personal_verbose(
