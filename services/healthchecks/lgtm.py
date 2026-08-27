@@ -33,15 +33,21 @@ from shared.config import settings
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 
-# The locally managed backends' readiness endpoints, derived from the
-# observability settings' base URLs (defaults keep the historical loopback +
-# fixed-port contract). The marker pins this check to the owner host. Remote
-# Tempo intentionally has no readiness probe here.
-READINESS_PROBES: tuple[tuple[str, str], ...] = (
-    ("loki", f"{settings.observability.telemetry_loki_url}/ready"),
-    ("prometheus", f"{settings.observability.telemetry_prometheus_url}/-/ready"),
-    ("grafana", f"{settings.observability.telemetry_grafana_url}/api/health"),
-)
+
+def readiness_probes() -> tuple[tuple[str, str], ...]:
+    """The locally managed backends' readiness endpoints, derived from the
+    observability settings' base URLs (defaults keep the historical loopback +
+    fixed-port contract). A trailing slash on a base URL is stripped before the
+    probe path is appended — without it a configured
+    ``http://host:port/`` would probe ``//ready`` and get a 404 counted as
+    alive (any HTTP answer is alive; only connection failure means down). The
+    marker pins this check to the owner host. Remote Tempo intentionally has no
+    readiness probe here."""
+    return (
+        ("loki", f"{settings.observability.telemetry_loki_url.rstrip('/')}/ready"),
+        ("prometheus", f"{settings.observability.telemetry_prometheus_url.rstrip('/')}/-/ready"),
+        ("grafana", f"{settings.observability.telemetry_grafana_url.rstrip('/')}/api/health"),
+    )
 
 
 def lgtm_host_marker() -> Path:
@@ -71,7 +77,7 @@ def _endpoint_answers(url: str) -> bool:
 
 def probe_statuses() -> list[tuple[str, bool]]:
     """(backend name, listener answered) for each local readiness probe."""
-    return [(name, _endpoint_answers(url)) for name, url in READINESS_PROBES]
+    return [(name, _endpoint_answers(url)) for name, url in readiness_probes()]
 
 
 def down_probes() -> list[str]:
