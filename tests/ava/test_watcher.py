@@ -859,6 +859,72 @@ def test_reconcile_rebuilds_missing_cron(_agent_row: int, monkeypatch: pytest.Mo
     assert rows and rows[0]["status"] == "rebuilt"
 
 
+def test_reconcile_drops_already_fired_one_shot_without_alert(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task #1858: a one-shot whose moment passed AND whose wake was already
+    delivered (child fired, but its clean-exit row delete failed or raced the
+    reconcile) is dropped silently — the wake was not lost, so the "marked
+    missed" alert is a false alarm."""
+    from ava.shell import sessions as _sessions
+    from shared.db import connect
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    sent: list[str] = []
+    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+
+    past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
+    register_watcher(_agent_row, 424245, kind="at", name="fired", message="go", fires_at=past)
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, source, content, kind) "
+            "VALUES (%s, %s, %s, 'chat')",
+            (_agent_row, "watcher:424245", "go"),
+        )
+    actions = watcher.reconcile()
+    assert not any("missed" in a for a in actions)
+    assert any("already fired" in a for a in actions)
+    rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 424245]
+    assert rows == []  # stale row dropped, not marked missed
+    assert sent == []  # no false alert
+
+
+def test_reconcile_completion_notice_does_not_count_as_delivered(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QA discriminator (PR #826 review): the shell completion notice carries
+    the same kind+source tag as the wake, so a child that died BEFORE waking
+    (notice present, wake absent) must still be marked missed + alerted."""
+    from ava.shell import sessions as _sessions
+    from shared.db import connect
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    sent: list[str] = []
+    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+
+    past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
+    register_watcher(
+        _agent_row, 424246, kind="at", name="crashed-before-wake", message="go", fires_at=past
+    )
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, source, content, kind) "
+            "VALUES (%s, %s, %s, 'chat')",
+            (
+                _agent_row,
+                "watcher:424246",
+                "Watcher 'crashed-before-wake' exited with code 1. Full output",
+            ),
+        )
+    actions = watcher.reconcile()
+    assert any("missed" in a for a in actions)
+    rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 424246]
+    assert rows and rows[0]["status"] == "missed"
+    assert sent and "crashed-before-wake" in sent[0]
+
+
 def test_reconcile_marks_missed_one_shot_and_alerts(
     _agent_row: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:

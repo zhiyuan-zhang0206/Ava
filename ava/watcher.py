@@ -317,7 +317,13 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "            int(os.environ['AVA_WATCHER_SESSION_ID']),\n"
         "        )\n"
         "    except Exception:\n"
-        "        pass\n"
+        "        # Not bare: a failed delete leaves a stale row the boot\n"
+        "        # reconcile then misreads (task #1858) — make it visible.\n"
+        "        import logging\n"
+        "        logging.getLogger('watcher').warning(\n"
+        "            'watcher registry row delete failed on clean exit',\n"
+        "            exc_info=True,\n"
+        "        )\n"
     )
 
 
@@ -723,7 +729,7 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[i
     import contextlib
 
     from ava import agents as _agents
-    from shared.watcher_registry import delete_watcher, mark_status
+    from shared.watcher_registry import delete_watcher, mark_status, wake_delivered
 
     agent_id = _agent_id()
     session_id = row["session_id"]
@@ -772,6 +778,16 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[i
                 new_id = at(row["fires_at"], row["message"] or "", name=name)
                 mark_status(agent_id, session_id, "rebuilt")
                 return f"one-shot watcher '{name}' rebuilt as session {new_id}"
+            # Delivery check (task #1858): the child deletes its own row on a
+            # clean exit, but that delete can fail or race the reconcile, and
+            # a one-shot that already fired and delivered its wake must not be
+            # reported as missed (observed 2026-08-27: the wake arrived at
+            # 18:30:00 and the same session was alerted "marked missed" two
+            # seconds later). A delivered wake means the row is stale, not a
+            # lost moment: drop it silently.
+            if wake_delivered(agent_id, session_id, row["message"] or "", row["created_at"]):
+                delete_watcher(agent_id, session_id)
+                return f"one-shot watcher '{name}' already fired; row dropped"
             mark_status(agent_id, session_id, "missed")
             with contextlib.suppress(Exception):
                 _agents.send_message(
@@ -855,6 +871,9 @@ def reconcile() -> list[str]:
     - `at` — re-spawned while its moment is still in the future; once the
       moment has passed the wake is lost, so the row is marked `missed` and the
       agent is told (it created the one-shot; it should know it never fired).
+      A passed one-shot whose wake WAS delivered (its child fired, but the
+      clean-exit row delete failed or raced) is dropped silently instead — the
+      moment was not lost, so no alert (task #1858).
     - `launch` — one-shot scripts are not re-run at boot (their work is
       time-bound and probably stale); marked `missed` + alerted.
 
