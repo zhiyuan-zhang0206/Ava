@@ -220,8 +220,3 @@ Two stores, one positioning (user ruling 2026-08-28):
 
 Unsure which store? Personal — the pool is for rules other agents will use, not
 your working details.
-
-Repo facts carry their verification point (the path, command, or SHA they were
-checked against) or are marked "unverified" — a stale note's worst failure mode
-is looking plausible. Corrections edit the note in place, never a second note
-beside it.
