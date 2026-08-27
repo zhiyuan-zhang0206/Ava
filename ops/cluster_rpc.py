@@ -313,10 +313,18 @@ async def dispatch_to_machine(
             last = exc
             if attempt < retries:
                 delay = _retry_delay_s(attempt)
-                # Intermediate failures are DEBUG for every kind: the final
-                # outcome (success, or the exhausted WARNING below) is what an
-                # operator needs; each intermediate line is retry machinery.
-                _log.debug(
+                # Intermediate failures are DEBUG for every kind except
+                # `cluster_fetch`: the final outcome (success, or the exhausted
+                # WARNING below) is what an operator needs, and each intermediate
+                # line is retry machinery. The fetch is the exception because its
+                # retries are not cheap machinery — each transport timeout IS a
+                # full 30s host-side `git fetch` that ran and died (observed on
+                # win/wsl: two timeouts, success on the third), and the rollout
+                # log (Phase 0) is where the long tail is read. Every attempt
+                # must be visible there, or "69s Phase 0" is a gap with no
+                # breakdown (2026-08-27 forensics).
+                attempt_log = _log.warning if kind == "cluster_fetch" else _log.debug
+                attempt_log(
                     "cluster_rpc %s -> machine=%s attempt %d/%d failed, retrying in %.1fs: %r",
                     kind,
                     target_machine,

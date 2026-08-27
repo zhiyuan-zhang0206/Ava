@@ -304,6 +304,36 @@ async def test_transient_failure_retries_then_succeeds(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
+async def test_fetch_retries_are_warning_other_kinds_stay_debug(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`cluster_fetch` intermediate retries log at WARNING while every other
+    kind stays DEBUG — a fetch retry is not cheap retry machinery, it is a full
+    30s host-side `git fetch` that ran and died (two timeouts then success on
+    win/wsl, 2026-08-27), and the rollout log only carries WARNING+ from the
+    detached session. Every attempt must be visible where Phase 0 is read."""
+
+    def _flaky(_r: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("no answer")
+
+    _patch(monkeypatch, handler=_flaky)
+    _pin_retry(monkeypatch)
+
+    with caplog.at_level(logging.DEBUG, logger="ops.cluster_rpc"):
+        with pytest.raises(cluster_rpc.ClusterOpUnreachable):
+            await cluster_rpc.dispatch_to_machine("win", "cluster_fetch", {}, retries=1)
+        with pytest.raises(cluster_rpc.ClusterOpUnreachable):
+            await cluster_rpc.dispatch_to_machine("win", "status_probe", {}, retries=1)
+
+    retry_lines = [r for r in caplog.records if "retrying in" in r.getMessage()]
+    assert len(retry_lines) == 2  # one intermediate retry line per dispatch
+    fetch_line = [r for r in retry_lines if "cluster_fetch" in r.getMessage()]
+    probe_line = [r for r in retry_lines if "status_probe" in r.getMessage()]
+    assert fetch_line and fetch_line[0].levelno == logging.WARNING
+    assert probe_line and probe_line[0].levelno == logging.DEBUG
+
+
+@pytest.mark.asyncio
 async def test_retries_exhausted_raises_after_all_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

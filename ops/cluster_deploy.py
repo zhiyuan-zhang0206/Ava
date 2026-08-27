@@ -97,7 +97,7 @@ from shared.config import settings
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.gitenv import git_env
 from shared.platform import LockTimeoutError
-from shared.proc import run_bounded
+from shared.proc import run_bounded, timeout_stderr_tail
 from shared.session_env import venv_activation_prefix
 
 
@@ -390,7 +390,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # synchronous call indefinitely (see _VALIDATE_FETCH_TIMEOUT_S above).
         try:
             fetch = run_bounded(
-                ["git", "fetch", "origin"],
+                ["git", "fetch", "--progress", "origin"],
                 cwd=_REPO_ROOT,
                 capture_output=True,
                 env=git_env(),
@@ -403,12 +403,12 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
                     fetch.returncode,
                     fetch.stderr,
                 )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             _log.warning(
-                "validate-before-kill git fetch timed out after %.0fs; proceeding "
-                "to validate_migrations_at_ref against whatever is already local "
-                "(fails closed if %s is unreadable)",
+                "validate-before-kill git fetch timed out after %.0fs; last stderr: %r; "
+                "proceeding to validate_migrations_at_ref (fails closed if %s is unreadable)",
                 _VALIDATE_FETCH_TIMEOUT_S,
+                timeout_stderr_tail(exc),
                 ref,
             )
         shared.migrations.validate_migrations_at_ref(ref, repo_root=_REPO_ROOT)
