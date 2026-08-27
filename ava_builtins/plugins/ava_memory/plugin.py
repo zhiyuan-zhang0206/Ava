@@ -133,7 +133,9 @@ _MEMORY_DOC = """Long-term notes as markdown files, with semantic search to find
 
 Two stores:
 
-- Shared pool (`ava.memory.PATH`): notes visible to every agent.
+- Shared pool (`ava.memory.PATH`): notes visible to every agent. Restrained:
+  reusable rules, repeatedly-referenced facts, and user rulings only; events
+  stay out by default (git history already carries them).
 - Per-agent memory (`<workspace>/memory/`): your own durable state.
   `MEMORY.md` there is the index — one line per memory, injected into your
   context at cold start and after each compact; each memory is one file
@@ -225,8 +227,19 @@ def _write_atomically(path: Path, content: str) -> None:
         raise
 
 
+_INDEX_DESCRIPTION_MAX = 120
+"""Cap on the description text rendered into a MEMORY.md pointer line.
+
+The index is injected into agent context at cold start and after each compact,
+so an unbounded description would leak into every agent's context budget — the
+one unbounded input on this path. The note itself keeps the full text; only
+the index line is truncated."""
+
+
 def _pointer_line(title: str, relative_path: str, description: str) -> str:
     """Render the one-line index entry for a durable memory note."""
+    if len(description) > _INDEX_DESCRIPTION_MAX:
+        description = description[:_INDEX_DESCRIPTION_MAX].rstrip() + "..."
     return f"- [{title}]({relative_path}) — {description or title}"
 
 
@@ -374,6 +387,9 @@ Your memory — two stores, one discipline.
   you alone. Verbose is fine here: process details, half-formed understanding,
   notes of uncertain future value — keep them personal until they earn a place
   in the pool.
+
+Unsure which store? Personal — the pool is for rules other agents will use,
+not your working details.
 
 Each store puts its index in front of you when a session starts and after a
 compact; the entries themselves you read on demand.

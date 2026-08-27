@@ -159,6 +159,7 @@ def test_discipline_keeps_the_shared_pool_restrained_and_personal_verbose(
     assert "behave differently" in section
     assert "Verbose is fine here" in section
     assert "until they earn a place" in section
+    assert "Unsure which store" in section  # tiebreak: uncertain goes personal
 
 
 @pytest.mark.parametrize(
