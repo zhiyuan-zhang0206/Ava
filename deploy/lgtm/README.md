@@ -58,6 +58,10 @@ metrics, and trace exploration while keeping the rest of the product's OTel
 pipeline unchanged. Loki, Prometheus, and Grafana use verified native release
 assets on the LGTM host, and Tempo is selected by per-cluster configuration.
 Grafana and Tempo compose copies are used only during a manual rollback. The
+compose provisioning files are valid as checked in — datasource and webhook
+URLs use Grafana's native `$__env{}` expansion against the static defaults in
+`config/grafana/runtime.env` (loopback, identical to the native default), so a
+compose rollback never needs rendered templates. The
 native collector sidecar is still the one
 local OTLP entry on port 4318 for this marked home; its filelog receivers also
 own session-log shipping. OTLP records carry the home-derived `cluster`
@@ -103,8 +107,10 @@ is available. A newly bootstrapped job
 must answer within 30 seconds or the launcher fails loudly. Neither script
 touches the Docker daemon or compose.
 
-For a controlled Grafana configuration restart, converge the changed templates
-and run `launchctl kickstart -k gui/$(id -u)/com.ava.grafana.<home-slug>`.
+A converge that changes the rendered Grafana config (INI, runtime env, or the
+provisioning tree) kickstarts the running Grafana automatically so the change
+takes effect — a running instance never re-reads its INI. For a manual
+restart, run `launchctl kickstart -k gui/$(id -u)/com.ava.grafana.<home-slug>`.
 The watchdog does not restart a working backend just to apply a configuration
 change.
 
@@ -148,6 +154,9 @@ Copy `.env.example` to `.env` only when an override is needed.
 |---|---|---|
 | `GRAFANA_ROOT_URL` | `http://localhost:3003` | Grafana redirect URL |
 | `GRAFANA_PROVISIONING_PATH` | checkout provisioning directory | Rendered by converge for native Grafana; do not set it in `.env` |
+| `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` | `http://127.0.0.1:3100` / `http://127.0.0.1:9090` | Datasource URLs, expanded by Grafana from `$__env{}` references in the provisioning files. Native converge renders the two-state values (observatory base when `AVA_OBSERVABILITY_URL` is set); compose keeps the static loopback defaults |
+| `AVA_PG_URL` | `127.0.0.1:5433` | Read-only Postgres datasource URL (scheme-less host:port); same two-state expansion as the Loki/Prometheus URLs |
+| `AVA_ALERTS_WEBHOOK_URL` | `http://127.0.0.1:8000/api/alerts` | Alert webhook URL; two-state: loopback default, or the gateway's reachable address when `AVA_OBSERVABILITY_URL` is set |
 | `AVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
 | `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
 | `AVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form — the matching `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` must follow (converge warns otherwise) |

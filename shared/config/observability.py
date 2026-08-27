@@ -261,6 +261,31 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    observability_url: str = Field(
+        default="",
+        alias="AVA_OBSERVABILITY_URL",
+        description=(
+            "Base URL (scheme://host, no port, no trailing slash) of the remote "
+            "observability station. Empty (default) = every LGTM consumer stays "
+            "on its current local loopback endpoint (this host's native "
+            "Loki/Prometheus/Grafana). Non-empty = the two-state switch that "
+            "re-renders the converge-baked consumers at the station: the Grafana "
+            "Loki/Prometheus/PG datasource URLs (deploy/lgtm provisioning "
+            "datasources.yml) and the gateway otel-collector's LGTM fan-out "
+            "endpoints. Each consumer appends its own port (:3100 / :9090 / "
+            ":5433) to this base. NOT used for the alert webhook target — that "
+            "always points at this gateway's own reachable address (reachable_host), "
+            "loopback 127.0.0.1 when the station is local."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     otel_collector_metrics_port: int = Field(
         default=8888,
         alias="AVA_OTELCOL_METRICS_PORT",

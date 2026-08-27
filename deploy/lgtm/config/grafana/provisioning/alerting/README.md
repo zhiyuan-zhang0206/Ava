@@ -28,9 +28,14 @@ dashboards).
 ## Where these run (LGTM stack)
 
 Native Grafana on the LGTM host (port 3003) evaluates these rules from the
-source checkout's `deploy/lgtm/config/grafana/provisioning/alerting`
-directory. The contact point posts to `127.0.0.1:8000`, reaching the gateway
-on the same host loopback.
+converge-rendered provisioning tree (`$AVA_HOME/lgtm/native/config/
+provisioning/`, copied verbatim by `cli/commands/_lgtm_native.py` from the
+source checkout's `deploy/lgtm/config/grafana/provisioning` — rendered files
+carry content-hash user-edit protection; the webhook URL is a Grafana-native
+`$__env{AVA_ALERTS_WEBHOOK_URL}` reference resolved from the process env).
+The contact point posts to the gateway's alert ingest endpoint — loopback
+`127.0.0.1:8000` when the observatory is local, the gateway's reachable
+address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
 ## Rules (22)
 
