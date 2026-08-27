@@ -70,6 +70,19 @@ describe("ChatMarkdown", () => {
     expect(link?.parentElement?.nextSibling?.textContent).toBe("x");
   });
 
+  it("renders the reported bold URL without swallowed delimiters", () => {
+    const content =
+      "方案报告在 **http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/**，附三项需你决策的清单：**events drop / N-step canary / Loki archive 365d**——你有空看时拍板，不急。";
+    const { container } = render(<ChatMarkdown content={content} />);
+
+    const link = container.querySelector("strong > a");
+    expect(link?.getAttribute("href")).toBe(
+      "http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/",
+    );
+    expect(link?.textContent).not.toContain("**");
+    expect(container.textContent).not.toContain("**");
+  });
+
   it("leaves delimiter characters in a bare literal URL", () => {
     const { container } = render(
       <ChatMarkdown content="http://example.com/a**b" />,

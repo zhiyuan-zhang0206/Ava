@@ -1,4 +1,13 @@
-import type { Link, Nodes, Parents, Root, Text } from "mdast";
+import type {
+  Emphasis,
+  Link,
+  Nodes,
+  Parents,
+  PhrasingContent,
+  Root,
+  Strong,
+  Text,
+} from "mdast";
 import type { VFile } from "vfile";
 
 interface DelimiterRun {
@@ -6,6 +15,8 @@ interface DelimiterRun {
   start: number;
   length: number;
 }
+
+type DelimiterWrapper = Emphasis | Strong;
 
 function isParent(node: Nodes): node is Parents {
   return "children" in node;
@@ -53,36 +64,79 @@ function lastDelimiterRun(value: string): DelimiterRun | undefined {
   return { marker, start, length: end - start + 1 };
 }
 
-function hasExactTrailingRun(text: Text, run: DelimiterRun): boolean {
-  const openerStart = text.value.length - run.length;
+function lastMatchingDelimiterRun(
+  value: string,
+  target: DelimiterRun,
+): DelimiterRun | undefined {
+  const delimiter = target.marker.repeat(target.length);
+  for (let start = value.length - target.length; start >= 0; start -= 1) {
+    if (
+      value.slice(start, start + target.length) === delimiter &&
+      value[start - 1] !== target.marker &&
+      value[start + target.length] !== target.marker
+    ) {
+      return { marker: target.marker, start, length: target.length };
+    }
+  }
+  return undefined;
+}
+
+function isPlausibleOpener(
+  value: string,
+  run: DelimiterRun,
+  allowAtEnd: boolean,
+): boolean {
+  const suffix = value.slice(run.start + run.length);
   return (
-    openerStart >= 0 &&
-    text.value.slice(openerStart) === run.marker.repeat(run.length) &&
-    (openerStart === 0 || text.value[openerStart - 1] !== run.marker)
+    (allowAtEnd && suffix.length === 0) ||
+    /^[^\s\p{P}]/u.test(suffix)
   );
+}
+
+function stripLinkDelimiter(
+  link: Link,
+  child: Text,
+  run: DelimiterRun,
+): string {
+  const urlPrefixLength = link.url.length - child.value.length;
+  const remainder = child.value.slice(run.start + run.length);
+  link.url = link.url.slice(0, run.start + urlPrefixLength);
+  child.value = child.value.slice(0, run.start);
+  return remainder;
 }
 
 function restoreDelimitedLink(
   link: Link,
   opener: Text,
   source: string,
-): { delimiterLength: number; remainder: string } | undefined {
+):
+  | { delimiterLength: number; remainder: string; suffix: string }
+  | undefined {
   const child = literalLinkText(link, source);
   if (child === undefined) {
     return undefined;
   }
 
   const run = lastDelimiterRun(child.value);
-  if (run === undefined || !hasExactTrailingRun(opener, run)) {
+  if (run === undefined) {
     return undefined;
   }
 
-  const urlPrefixLength = link.url.length - child.value.length;
-  const remainder = child.value.slice(run.start + run.length);
-  link.url = link.url.slice(0, run.start + urlPrefixLength);
-  child.value = child.value.slice(0, run.start);
-  opener.value = opener.value.slice(0, -run.length);
-  return { delimiterLength: run.length, remainder };
+  const openerRun = lastMatchingDelimiterRun(opener.value, run);
+  if (
+    openerRun === undefined ||
+    !isPlausibleOpener(opener.value, openerRun, true)
+  ) {
+    return undefined;
+  }
+
+  const suffix = opener.value.slice(openerRun.start + openerRun.length);
+  opener.value = opener.value.slice(0, openerRun.start);
+  return {
+    delimiterLength: run.length,
+    remainder: stripLinkDelimiter(link, child, run),
+    suffix,
+  };
 }
 
 function appendRemainder(parent: Parents, index: number, remainder: string): void {
@@ -96,6 +150,98 @@ function appendRemainder(parent: Parents, index: number, remainder: string): voi
   parent.children.splice(index + 1, 0, { type: "text", value: remainder });
 }
 
+function matchingWrapper(
+  wrapper: DelimiterWrapper,
+  run: DelimiterRun,
+  source: string,
+): boolean {
+  const delimiterLengthMatches =
+    (wrapper.type === "strong" && run.length >= 2) ||
+    (wrapper.type === "emphasis" && run.length === 1);
+  const startOffset = wrapper.position?.start.offset;
+  return (
+    delimiterLengthMatches &&
+    startOffset !== undefined &&
+    source[startOffset] === run.marker
+  );
+}
+
+function sameTypeWrapper(
+  wrapper: DelimiterWrapper,
+  children: PhrasingContent[],
+): DelimiterWrapper {
+  return wrapper.type === "strong"
+    ? { type: "strong", children }
+    : { type: "emphasis", children };
+}
+
+function restoreLinkInWrapper(
+  parent: Parents,
+  parentIndex: number,
+  wrapper: DelimiterWrapper,
+  source: string,
+): number {
+  for (let linkIndex = 0; linkIndex < wrapper.children.length; linkIndex += 1) {
+    const link = wrapper.children[linkIndex];
+    if (link.type !== "link") {
+      continue;
+    }
+
+    const linkText = literalLinkText(link, source);
+    const run =
+      linkText === undefined ? undefined : lastDelimiterRun(linkText.value);
+    if (
+      linkText === undefined ||
+      run === undefined ||
+      !matchingWrapper(wrapper, run, source)
+    ) {
+      continue;
+    }
+
+    const remainder = stripLinkDelimiter(link, linkText, run);
+    if (remainder.length > 0) {
+      appendRemainder(wrapper, linkIndex, remainder);
+    }
+
+    if (linkIndex + 1 >= wrapper.children.length) {
+      return 0;
+    }
+    const tail = wrapper.children[linkIndex + 1];
+    if (tail.type !== "text") {
+      return 0;
+    }
+    const tailRun = lastMatchingDelimiterRun(tail.value, run);
+    if (
+      tailRun === undefined ||
+      !isPlausibleOpener(tail.value, tailRun, false)
+    ) {
+      return 0;
+    }
+
+    const prefix = tail.value.slice(0, tailRun.start);
+    tail.value = tail.value.slice(tailRun.start + tailRun.length);
+    if (linkIndex === 0) {
+      // The later opener starts a second span; split the parser's oversized
+      // wrapper so prose between the two source spans keeps its source order.
+      const trailingChildren = wrapper.children.splice(linkIndex + 1);
+      const inserted: PhrasingContent[] = [];
+      if (prefix.length > 0) {
+        inserted.push({ type: "text", value: prefix });
+      }
+      inserted.push(sameTypeWrapper(wrapper, trailingChildren));
+      parent.children.splice(parentIndex + 1, 0, ...inserted);
+      return 0;
+    }
+
+    if (prefix.length > 0) {
+      parent.children.splice(parentIndex, 0, { type: "text", value: prefix });
+      return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
+
 function restoreLinksIn(parent: Parents, source: string): void {
   for (let index = 0; index < parent.children.length; index += 1) {
     const child = parent.children[index];
@@ -107,9 +253,14 @@ function restoreLinksIn(parent: Parents, source: string): void {
           parent.children.splice(index - 1, 1);
           index -= 1;
         }
+        const wrapperChildren: PhrasingContent[] = [];
+        if (restored.suffix.length > 0) {
+          wrapperChildren.push({ type: "text", value: restored.suffix });
+        }
+        wrapperChildren.push(child);
         parent.children[index] = {
           type: restored.delimiterLength >= 2 ? "strong" : "emphasis",
-          children: [child],
+          children: wrapperChildren,
         };
         if (restored.remainder.length > 0) {
           appendRemainder(parent, index, restored.remainder);
@@ -118,6 +269,9 @@ function restoreLinksIn(parent: Parents, source: string): void {
       }
     }
 
+    if (child.type === "strong" || child.type === "emphasis") {
+      index += restoreLinkInWrapper(parent, index, child, source);
+    }
     if (isParent(child)) {
       restoreLinksIn(child, source);
     }
@@ -125,8 +279,8 @@ function restoreLinksIn(parent: Parents, source: string): void {
 }
 
 /**
- * Restore emphasis delimiters that GFM literal autolinks swallowed before
- * adjacent prose. Matching opener and closer runs keep bare URL paths intact.
+ * Restore emphasis delimiters swallowed by GFM literal autolinks. Matching
+ * opener and closer runs plus source positions keep bare URL paths intact.
  */
 export default function remarkAutolinkDelimiter() {
   return (tree: Root, file: VFile): void => {
