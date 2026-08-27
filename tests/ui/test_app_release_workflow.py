@@ -22,6 +22,14 @@ def test_tag_releases_fail_closed_without_every_platform_signature() -> None:
     assert "Release tags require updater signing" in text
     assert "Release tags require Apple signing and notarization" in text
     assert "Release tags require Windows code-signing" in text
+
+
+def test_android_release_workflow_is_separate_and_fails_closed() -> None:
+    """Android publishing lives in release-android.yml (android-v* tags); its
+    tag path must still fail closed without the Android signing secrets."""
+    android_workflow = _REPO_ROOT / ".github" / "workflows" / "release-android.yml"
+    text = android_workflow.read_text()
+    assert "android-v[0-9]+.[0-9]+.[0-9]+" in text
     assert "Release tags require Android signing" in text
 
 

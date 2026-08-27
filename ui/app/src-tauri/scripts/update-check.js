@@ -1,7 +1,7 @@
 // Android update check.
 //
 // `tauri-plugin-updater` is desktop-only — there is no in-place APK swap — so
-// Android checks the GitHub Releases API for a newer `app-v*` tag and, when
+// Android checks the GitHub Releases API for a newer `android-v*` tag and, when
 // it finds one, offers the APK. Delivery is a browser download the user
 // confirms, not a silent install.
 //
@@ -17,7 +17,7 @@
   if (!window.sessionStorage || window.sessionStorage.getItem(MARKER)) return;
   window.sessionStorage.setItem(MARKER, "1");
 
-  var TAG_PREFIX = "app-v";
+  var TAG_PREFIX = "android-v";
 
   /** Compare dotted numeric versions; >0 when `a` is newer than `b`. */
   function compare(a, b) {
@@ -109,7 +109,7 @@
       var release = releases[i];
       if (!release || release.draft || release.prerelease) continue;
       var tag = String(release.tag_name || "");
-      if (!/^app-v\d+\.\d+\.\d+$/.test(tag)) continue;
+      if (!/^android-v\d+\.\d+\.\d+$/.test(tag)) continue;
       var version = tag.slice(TAG_PREFIX.length);
       if (compare(version, cfg.version) <= 0) continue;
       var assets = release.assets || [];
