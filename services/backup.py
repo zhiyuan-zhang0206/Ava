@@ -81,6 +81,9 @@ _PRE_UPDATE_MARKER = "pre-update"  # filename kind segment for `ava cluster upda
 # 60 min: a full dump with checkpoint history takes about 6.3 min. This is
 # headroom against a stall, not an expected runtime.
 _DUMP_TIMEOUT_S = 60 * 60
+# Bound the composition-sample connection (a dead DB must stall the backup log
+# line only this long before degrading to "unavailable", never hang it).
+_BREAKDOWN_CONNECT_TIMEOUT_S = 10
 _NAME_RE = re.compile(
     r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z|\d{8}-\d{6})"
     r"(?:\.(?P<kind>pre-update))?\.dump(?:\.gz\.enc)?$"
@@ -352,12 +355,13 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
     "unavailable" and never fails the backup.
 
     `db_url` mirrors `_run_backup`'s override: the composition is measured on
-    the SAME database the dump will read (the scheduler passes none and both
-    fall back to the admin-plane direct URL).
+    the SAME database the dump will read. `_run_backup` always passes the
+    resolved admin-plane direct URL; a None `db_url` (direct callers) falls
+    back to the same settings-derived connection.
     """
     try:
         with (
-            psycopg.connect(db_url, autocommit=True)
+            psycopg.connect(db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S)
             if db_url is not None
             else connect(direct=True, autocommit=True)
         ) as conn:
