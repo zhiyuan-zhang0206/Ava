@@ -78,7 +78,10 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.events_maintenance.blob_vacuum import run_blob_vacuum
+from services.events_maintenance.blob_vacuum import (
+    emit_checkpoint_table_sizes,
+    run_blob_vacuum,
+)
 from services.events_maintenance.checkpoint_reaper import (
     reap_stale_checkpoints,
     trim_overgrown_threads,
@@ -213,9 +216,16 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
         )
     reaped = reap_stale_checkpoints(pool)
     progress.beat()
+    # Hourly checkpoint size/row-count sample: the gauge is also emitted after
+    # each blob vacuum, but the vacuum only runs inside the 05:00-08:00
+    # cluster-time window — emitting here on every pass keeps the series dense
+    # enough for growth-curve and rate queries the rest of the day.
+    with pool.connection() as conn, conn.cursor() as cur:
+        emit_checkpoint_table_sizes(cur)
+    progress.beat()
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window
-    # (05:00-08:00 America/Los_Angeles). Logs size + dead tuples each run.
+    # (05:00-08:00 CLUSTER time). Logs size + dead tuples each run.
     vacuum_result = run_blob_vacuum()
     progress.beat()
     if vacuum_result.ran:

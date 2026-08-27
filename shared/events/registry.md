@@ -213,7 +213,7 @@ consumers: see the comments at each emit point.
 | `warning_reopened` | class-level warning dismissal reopened manually or by the burst safety valve | anomaly | category, level, event_name, source, agent_id, dismissed_by, note, reopened_by, triggered_by_count | — | 90d | events |
 | `error_reopened` | class-level error/critical dismissal reopened manually or by the burst safety valve | anomaly | category, level, event_name, source, agent_id, dismissed_by, note, reopened_by, triggered_by_count | — | 90d | events |
 | `resolution_status` | absolute unresolved warning/error class counts over the daemon's fixed six-hour window | noise | unresolved_warnings, unresolved_errors, window | — | 90d | events |
-| `checkpoint_table_sizes` | checkpoint table physical sizes after each blob vacuum run | observation | blobs_bytes, checkpoints_bytes, writes_bytes | — | 90d | events |
+| `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | 90d | events |
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | 90d | events |
 
 ## 4. Log (bare logs, category=log)

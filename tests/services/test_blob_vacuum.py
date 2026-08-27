@@ -173,7 +173,9 @@ def test_run_vacuums_in_window(pool: ConnectionPool[Any]) -> None:
 def test_vacuum_emits_checkpoint_table_physical_sizes(
     monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
 ) -> None:
-    """A completed pass reports absolute sizes for all checkpoint tables."""
+    """A completed pass reports absolute sizes AND live row counts for all
+    checkpoint tables — the live counts let the growth curve separate live
+    growth from dead-tuple bloat."""
     emitted: list[tuple[str, str, dict[str, int]]] = []
 
     def _capture(category: str, event_name: str, *, attributes: dict[str, int]) -> None:
@@ -187,8 +189,49 @@ def test_vacuum_emits_checkpoint_table_physical_sizes(
     assert len(emitted) == 1
     category, event_name, attributes = emitted[0]
     assert (category, event_name) == ("telemetry", "checkpoint_table_sizes")
-    assert set(attributes) == {"blobs_bytes", "checkpoints_bytes", "writes_bytes"}
+    assert set(attributes) == {
+        "blobs_bytes",
+        "checkpoints_bytes",
+        "writes_bytes",
+        "blobs_live",
+        "checkpoints_live",
+        "writes_live",
+    }
     assert all(isinstance(value, int) for value in attributes.values())
+
+
+def test_emit_checkpoint_table_sizes_samples_without_vacuuming(
+    monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
+) -> None:
+    """The hourly emit (daemon `_run_maintenance`) samples sizes + live rows
+    and emits the gauge WITHOUT vacuuming — it must be callable from the
+    pooled connection on every pass, not only inside the vacuum window."""
+    emitted: list[tuple[str, str, dict[str, int]]] = []
+
+    def _capture(category: str, event_name: str, *, attributes: dict[str, int]) -> None:
+        emitted.append((category, event_name, attributes))
+
+    monkeypatch.setattr(blob_vacuum, "telemetry", SimpleNamespace(emit=_capture), raising=False)
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, "
+                "checkpoint, metadata) VALUES ('t', '', 'c1', '{}', '{}')"
+            )
+            # VACUUM (ANALYZE) refreshes the live-tuple stats synchronously so
+            # the assertion below cannot race the stats collector.
+            cur.execute("VACUUM (ANALYZE) checkpoints")
+        with conn.cursor() as cur:
+            sizes = blob_vacuum.emit_checkpoint_table_sizes(cur)
+
+    assert sizes.blobs_live == 0  # nothing inserted into blobs
+    assert sizes.checkpoints_live == 1  # the row just inserted
+    assert len(emitted) == 1
+    category, event_name, attributes = emitted[0]
+    assert (category, event_name) == ("telemetry", "checkpoint_table_sizes")
+    assert attributes["checkpoints_live"] == 1
+    assert attributes["blobs_bytes"] >= 0
 
 
 def test_run_skips_missing_tables_fresh_cluster(
