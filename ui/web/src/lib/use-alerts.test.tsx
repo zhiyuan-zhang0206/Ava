@@ -179,6 +179,29 @@ describe("AlertsProvider connection auth gating", () => {
     expect(lastInstance).toBeNull();
   });
 
+  it("reconnect invalidates only the default alerts snapshot", async () => {
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    await waitForInstance();
+    const queryClient = queryClients.at(-1);
+    if (!queryClient) throw new Error("QueryClient was not constructed");
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    act(() => {
+      expectInstance().onopen?.(new Event("open"));
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["alerts"],
+      exact: true,
+    });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: ["alerts", "section"],
+    });
+  });
+
   it("CLOSED with an invalid session → auth becomes unauthenticated and never reopens", async () => {
     const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
 

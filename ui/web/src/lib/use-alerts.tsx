@@ -172,6 +172,10 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     const es = new EventSource(`${API_BASE}/api/alerts/stream`, { withCredentials: true });
     es.onopen = () => {
       failCountRef.current = 0;
+      // Alerts have their own stream and staleTime: Infinity, so this provider
+      // owns the precise reconnect repair for frames missed while disconnected.
+      // Exact matching avoids refetching the heavier section history.
+      void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY, exact: true });
       armWatchdog();
     };
     es.onmessage = (e) => {

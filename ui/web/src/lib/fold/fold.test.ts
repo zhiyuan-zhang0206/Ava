@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentRow, PageRow, SystemEvent } from "../types";
-import { foldAgents } from "./agents";
+import { AGENTS_QUERY_KEY, foldAgents, TERMINATED_AGENTS_QUERY_KEY } from "./agents";
 import { foldFleetGraph } from "./graph";
 import { foldAgainstCache, ALL_PAGES_QUERY_KEY } from "./index";
 import { foldNotices, NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY } from "./notices";
@@ -79,6 +79,32 @@ describe("foldAgents", () => {
       snapshot: { ...baseAgent, last_active_at: "2026-05-10T02:00:00Z" },
     } as unknown as SystemEvent);
     expect(noop).toBe(base);
+  });
+
+  it("moves a terminated update out of the live cache and into seeded history", () => {
+    const terminated = {
+      role: "agent_updated",
+      agent_id: 1,
+      snapshot: { ...baseAgent, status: "terminated" },
+    } as unknown as SystemEvent;
+
+    expect(foldAgents(base, terminated, "live")).toEqual([]);
+    expect(foldAgents([], terminated, "terminated")?.[0]).toMatchObject({
+      agent_id: 1,
+      status: "terminated",
+    });
+  });
+
+  it("moves a resurrected update out of terminated history and into live", () => {
+    const previous = [{ ...baseAgent, status: "terminated" as const }];
+    const resurrected = {
+      role: "agent_updated",
+      agent_id: 1,
+      snapshot: { ...baseAgent, status: "idling" },
+    } as unknown as SystemEvent;
+
+    expect(foldAgents(previous, resurrected, "terminated")).toEqual([]);
+    expect(foldAgents([], resurrected, "live")?.[0]?.status).toBe("idling");
   });
 
   it("keeps a liveness-only snapshot update even when public status stays idling", () => {
@@ -219,7 +245,7 @@ describe("foldAgainstCache — the dispatch", () => {
 
   it("writes agents + pages folds into their keys", () => {
     const cache = new Map<string, unknown>();
-    cache.set(JSON.stringify(["agents"]), [baseAgent]);
+    cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
     cache.set(JSON.stringify(["all-pages"]), []);
     cache.set(JSON.stringify(["agent-pages", 1]), []);
 
@@ -231,9 +257,28 @@ describe("foldAgainstCache — the dispatch", () => {
     expect((writes.get(JSON.stringify(["agent-pages", 1])) as PageRow[])[0]?.name).toBe("p1");
   });
 
+  it("writes lifecycle transitions to both seeded roster scopes", () => {
+    const cache = new Map<string, unknown>();
+    cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
+    cache.set(JSON.stringify(TERMINATED_AGENTS_QUERY_KEY), []);
+    const event = {
+      role: "agent_updated",
+      agent_id: 1,
+      snapshot: { ...baseAgent, status: "terminated" },
+    } as unknown as SystemEvent;
+
+    const outcome = foldAgainstCache(ctxWith(cache), event);
+    const writes = new Map(outcome.writes.map((write) => [JSON.stringify(write.key), write.value]));
+
+    expect(writes.get(JSON.stringify(AGENTS_QUERY_KEY))).toEqual([]);
+    expect(writes.get(JSON.stringify(TERMINATED_AGENTS_QUERY_KEY))).toEqual([
+      expect.objectContaining({ agent_id: 1, status: "terminated" }),
+    ]);
+  });
+
   it("never writes an un-fetched per-agent pages key (empty-cache guard)", () => {
     const cache = new Map<string, unknown>();
-    cache.set(JSON.stringify(["agents"]), [baseAgent]);
+    cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
     cache.set(JSON.stringify(ALL_PAGES_QUERY_KEY), []);
 
     const outcome = foldAgainstCache(ctxWith(cache), pageOpened({ name: "p1" }));
@@ -244,7 +289,7 @@ describe("foldAgainstCache — the dispatch", () => {
 
   it("emits notices invalidations from a notice event", () => {
     const cache = new Map<string, unknown>();
-    cache.set(JSON.stringify(["agents"]), [baseAgent]);
+    cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
     const outcome = foldAgainstCache(ctxWith(cache), {
       role: "notice_resolved",
       agent_id: 1,
@@ -257,7 +302,7 @@ describe("foldAgainstCache — the dispatch", () => {
 
   it("events that touch nothing produce NO_FOLD", () => {
     const cache = new Map<string, unknown>();
-    cache.set(JSON.stringify(["agents"]), [baseAgent]);
+    cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
     const outcome = foldAgainstCache(ctxWith(cache), {
       role: "token_usage",
       agent_id: 1,

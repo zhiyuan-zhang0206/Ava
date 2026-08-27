@@ -62,9 +62,10 @@ export function AgentSidebar(props: Props) {
   // Show-terminated is a DB-backed user setting (display.show_terminated), the
   // single source of truth shared with the Display settings page — toggling
   // either place updates the same ["user-settings"] cache, so they stay in
-  // lockstep across the sidebar and settings. Default true (USER_SETTING_DEFAULTS).
+  // lockstep across the sidebar and settings. Default false
+  // (USER_SETTING_DEFAULTS); opaque non-boolean DB values remain opt-out.
   const { settings: userSettings, setSetting, isLoading: settingsLoading } = useUserSettings();
-  const showTerminated = userSettings["display.show_terminated"] !== false;
+  const showTerminated = userSettings["display.show_terminated"] === true;
   const setShowTerminated = (v: boolean) => setSetting("display.show_terminated", v);
   const queryClient = useQueryClient();
 

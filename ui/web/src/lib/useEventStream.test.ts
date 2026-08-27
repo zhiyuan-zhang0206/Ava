@@ -21,7 +21,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "./store";
 import { AuthProvider, useAuth } from "./auth-context";
+import { RECONNECT_QUERY_KEYS } from "./fold";
 import { useFoldOwner } from "./fold/owner";
+import { AGENTS_QUERY_KEY } from "./fold/agents";
 import type { AgentRow } from "./types";
 import type { SystemEvent } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
@@ -977,7 +979,7 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
   it("fold subscription survives the Provider re-render that SSE onopen triggers", async () => {
     const { qc, wrapper } = withProviderAndClient();
     // Seed the agents cache so the fold's empty-cache guard accepts the merge.
-    qc.setQueryData(["agents"], []);
+    qc.setQueryData(AGENTS_QUERY_KEY, []);
     renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
     await waitForInstance();
 
@@ -1001,7 +1003,7 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
       );
     });
 
-    const agents = qc.getQueryData<AgentRow[]>(["agents"]);
+    const agents = qc.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY);
     expect(agents?.map((a) => a.agent_id)).toEqual([2]);
   });
 
@@ -1014,7 +1016,7 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
     expect(result.current).toBe(first);
   });
 
-  it("reconnect reconcile throttles the full invalidate to one per 30s window", async () => {
+  it("reconnect reconcile throttles the scoped invalidations to one batch per 30s window", async () => {
     try {
       const { qc, wrapper } = withProviderAndClient();
       const spy = vi.spyOn(qc, "invalidateQueries");
@@ -1022,9 +1024,9 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
       await waitForInstance();
       vi.useFakeTimers();
 
-      // Initial open → the full repair invalidate fires.
+      // Initial open → one scoped repair batch fires.
       act(() => expectInstance().fireOpen());
-      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
 
       // Flaky-network reconnect burst (another open inside the 30s window —
       // mobile Safari CONNECTING/OPEN jitter, watchdog force-reopen) → no
@@ -1037,7 +1039,7 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
       // Window elapsed → the next open repairs again.
       act(() => { vi.advanceTimersByTime(26_000); });
       act(() => expectInstance().fireOpen());
-      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
     } finally {
       vi.useRealTimers();
     }

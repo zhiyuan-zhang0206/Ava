@@ -13,8 +13,9 @@ live tail + historical REST query) live in routers/agent_events.py.
 from __future__ import annotations
 
 import asyncio
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
 from gateway.routers.agents_forward import _forward_spawn_to_remote
@@ -113,23 +114,23 @@ def get_models() -> ModelsResponse:
 
 
 @router.get("/api/agents")
-def get_agents(request: Request) -> list[AgentRow]:
-    """List all agents and their full lifecycle state.
+def get_agents(
+    request: Request,
+    scope: Annotated[agent_snapshot.AgentListScope, Query()] = "all",
+) -> list[AgentRow]:
+    """List agent snapshots for the requested roster scope.
 
-    No pagination — agents_meta rows accumulate one per agent ever created
-    (terminated agents are returned too; the frontend filters by status
-    itself), so the list is O(agents) and the per-agent lookups are all
-    index-assisted (audit P1-1): last_active_at is a LATERAL MAX over
-    inbound_messages, not a full join.
+    ``all`` is the compatibility default for SDK / ops callers.
+    Frontend fleet/sidebar readers request ``live`` so Postgres excludes
+    terminated history before evaluating the per-agent snapshot lookups.
+    The sidebar's explicit history toggle requests ``terminated`` separately.
 
-    `last_active_at` is MAX(inbound_messages.created_at) — any-kind inbound
-    enqueue counts as activity (chat / compact / lifecycle are all
-    user-perceivable). COALESCE falls back to started_at / spawned_at for
-    agents with no inbound — the frontend uses this to desc-sort within
-    status groups.
+    All scopes remain unpaginated for wire compatibility.  The default live
+    path is bounded by the currently active roster; terminated history is only
+    paid for when a caller asks for it explicitly.
     """
     with request.app.state.db_pool.connection() as conn:
-        snapshots = agent_snapshot.select_all(conn)
+        snapshots = agent_snapshot.select_all(conn, scope=scope)
     return [AgentRow.model_validate(s.model_dump()) for s in snapshots]
 
 

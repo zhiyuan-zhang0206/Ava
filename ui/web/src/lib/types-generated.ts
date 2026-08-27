@@ -244,19 +244,16 @@ export interface paths {
         };
         /**
          * Get Agents
-         * @description List all agents and their full lifecycle state.
+         * @description List agent snapshots for the requested roster scope.
          *
-         *     No pagination — agents_meta rows accumulate one per agent ever created
-         *     (terminated agents are returned too; the frontend filters by status
-         *     itself), so the list is O(agents) and the per-agent lookups are all
-         *     index-assisted (audit P1-1): last_active_at is a LATERAL MAX over
-         *     inbound_messages, not a full join.
+         *     ``all`` is the compatibility default for SDK / ops callers.
+         *     Frontend fleet/sidebar readers request ``live`` so Postgres excludes
+         *     terminated history before evaluating the per-agent snapshot lookups.
+         *     The sidebar's explicit history toggle requests ``terminated`` separately.
          *
-         *     `last_active_at` is MAX(inbound_messages.created_at) — any-kind inbound
-         *     enqueue counts as activity (chat / compact / lifecycle are all
-         *     user-perceivable). COALESCE falls back to started_at / spawned_at for
-         *     agents with no inbound — the frontend uses this to desc-sort within
-         *     status groups.
+         *     All scopes remain unpaginated for wire compatibility.  The default live
+         *     path is bounded by the currently active roster; terminated history is only
+         *     paid for when a caller asks for it explicitly.
          */
         get: operations["get_agents_api_agents_get"];
         put?: never;
@@ -7494,7 +7491,9 @@ export interface operations {
     };
     get_agents_api_agents_get: {
         parameters: {
-            query?: never;
+            query?: {
+                scope?: "all" | "live" | "terminated";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7508,6 +7507,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
