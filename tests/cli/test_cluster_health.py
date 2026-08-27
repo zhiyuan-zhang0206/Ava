@@ -14,6 +14,7 @@ exactly one IM notification and one alerts row per transition.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -300,6 +301,7 @@ def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
+    monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
 
 
 @pytest.fixture
@@ -1812,6 +1814,7 @@ def test_run_health_probe_allowed_from_prod_checkout(
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
+    monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
 
     rc = _cluster_health.run_health_probe()
 
@@ -1859,3 +1862,226 @@ def test_agent_min_explicit_overrides_settings(
     rc = _cluster_health.run_health_probe(agent_min=2)
     assert rc == 0
     assert seen == [2]
+
+
+# ─── editable-install records check (7): read-only venv-pointer probe ────────
+
+
+@pytest.fixture
+def _prod_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the probe at a throwaway prod checkout, never the real venv."""
+    import shared.cluster_drift
+
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: source_root)
+    return source_root
+
+
+def _write_editable_records(
+    source_root: Path,
+    *,
+    pth_target: str | None = None,
+    direct_url: str | None = None,
+) -> tuple[Path, Path]:
+    """Create a fake prod venv's editable-install records; None = leave absent."""
+    site = source_root / ".venv" / "lib" / "python3.12" / "site-packages"
+    site.mkdir(parents=True)
+    pth = site / "_editable_impl_ava.pth"
+    if pth_target is not None:
+        pth.write_text(pth_target)
+    record = site / "ava-0.1.5.dist-info" / "direct_url.json"
+    if direct_url is not None:
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(direct_url)
+    return pth, record
+
+
+def _legal_direct_url(source_root: Path) -> str:
+    return json.dumps({"url": source_root.resolve().as_uri(), "dir_info": {"editable": True}})
+
+
+def test_editable_install_healthy_records_are_silent(_prod_source: Path) -> None:
+    """Legal pointers (prod root + editable URL) keep the probe green."""
+    _write_editable_records(
+        _prod_source,
+        pth_target=str(_prod_source.resolve()),
+        direct_url=_legal_direct_url(_prod_source),
+    )
+    assert _cluster_health._editable_install_failure() is None
+
+
+def test_editable_install_allowlisted_dev_clone_is_silent(_prod_source: Path) -> None:
+    """~/Ava is a legal pointer target for the prod venv, mirroring the guard."""
+    _write_editable_records(
+        _prod_source,
+        pth_target=str((Path.home() / "Ava").resolve()),
+        direct_url=_legal_direct_url(_prod_source),
+    )
+    assert _cluster_health._editable_install_failure() is None
+
+
+def test_editable_install_missing_records_are_silent(_prod_source: Path) -> None:
+    """A venv with no editable records has nothing to assert (guard: no-op)."""
+    assert _cluster_health._editable_install_failure() is None
+
+
+def test_editable_install_no_prod_source_is_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No installed prod checkout → nothing to probe (runner-only hosts)."""
+    import shared.cluster_drift
+
+    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: None)
+    assert _cluster_health._editable_install_failure() is None
+
+
+def test_editable_install_poisoned_pth_alerts(_prod_source: Path, tmp_path: Path) -> None:
+    """A pointer naming a worktree is the poison class — alert, listing the record."""
+    worktree = tmp_path / "deleted-worktree"
+    _write_editable_records(
+        _prod_source,
+        pth_target=str(worktree),
+        direct_url=_legal_direct_url(_prod_source),
+    )
+    failure = _cluster_health._editable_install_failure()
+    assert failure is not None
+    assert "_editable_impl_ava.pth" in failure
+    assert str(worktree) in failure
+    assert "direct_url" not in failure  # the healthy record is not noise
+
+
+def test_editable_install_poisoned_direct_url_alerts(_prod_source: Path, tmp_path: Path) -> None:
+    """A direct_url naming a worktree is the same poison recorded elsewhere."""
+    worktree = tmp_path / "deleted-worktree"
+    _write_editable_records(
+        _prod_source,
+        pth_target=str(_prod_source.resolve()),
+        direct_url=json.dumps({"url": worktree.resolve().as_uri(), "dir_info": {"editable": True}}),
+    )
+    failure = _cluster_health._editable_install_failure()
+    assert failure is not None
+    assert "direct_url.json" in failure
+    assert "deleted-worktree" in failure
+    assert "_editable_impl_ava.pth" not in failure
+
+
+def test_editable_install_both_poisoned_records_are_listed(
+    _prod_source: Path, tmp_path: Path
+) -> None:
+    """The two records drift independently (2026-08-27 QA finding); both report."""
+    worktree = tmp_path / "deleted-worktree"
+    _write_editable_records(
+        _prod_source,
+        pth_target=str(worktree),
+        direct_url=json.dumps({"url": worktree.resolve().as_uri(), "dir_info": {"editable": True}}),
+    )
+    failure = _cluster_health._editable_install_failure()
+    assert failure is not None
+    assert "_editable_impl_ava.pth" in failure and "direct_url.json" in failure
+
+
+def test_editable_install_unparsable_direct_url_alerts(_prod_source: Path) -> None:
+    """A record that cannot be parsed cannot be verified — alert."""
+    _write_editable_records(
+        _prod_source,
+        pth_target=str(_prod_source.resolve()),
+        direct_url="{not json",
+    )
+    failure = _cluster_health._editable_install_failure()
+    assert failure is not None and "direct_url.json" in failure
+
+
+def test_editable_install_non_editable_direct_url_alerts(_prod_source: Path) -> None:
+    """A record not marked editable disagrees with the pointer — alert."""
+    _write_editable_records(
+        _prod_source,
+        pth_target=str(_prod_source.resolve()),
+        direct_url=json.dumps(
+            {"url": _prod_source.resolve().as_uri(), "dir_info": {"editable": False}}
+        ),
+    )
+    failure = _cluster_health._editable_install_failure()
+    assert failure is not None and "direct_url.json" in failure
+
+
+def test_editable_install_empty_pth_alerts(_prod_source: Path) -> None:
+    """An empty pointer is not a legal target."""
+    _write_editable_records(_prod_source, pth_target="")
+    failure = _cluster_health._editable_install_failure()
+    assert failure is not None and "(empty)" in failure
+
+
+def test_editable_install_unreadable_record_alerts(_prod_source: Path) -> None:
+    """A record that cannot be read cannot be verified — alert, never crash."""
+    pth, _record = _write_editable_records(_prod_source, pth_target=str(_prod_source.resolve()))
+    pth.unlink()
+    pth.mkdir()  # read_text() on a directory raises OSError on every platform
+    failure = _cluster_health._editable_install_failure()
+    assert failure is not None and "unreadable" in failure
+
+
+def test_editable_install_failure_alerts_without_rollback_counter(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+) -> None:
+    """A poisoned venv record fails the probe (exit 1) and alerts the owner, but
+    never feeds the auto-rollback counter — rolling back code does not fix a
+    venv record; the converge guard repairs it (the 2026-08-27 outage class)."""
+    detail = (
+        "prod venv editable install names non-allowlisted source: "
+        ".../_editable_impl_ava.pth names '.../deleted-worktree'"
+    )
+    monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: detail)
+    _write_aged_alert_state(_home, f"FAIL: editable install — {detail}")
+
+    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+
+    assert rc == 1
+    assert _read_count(_home).splitlines()[0] == "0"  # alert-only: reset, never advanced
+    assert len(_sent_alerts) == 1
+    assert "editable install" in _sent_alerts[0]
+
+
+def test_editable_install_deploy_pauses_alert_grade(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+) -> None:
+    """A live deploy runs the converge guard that repairs the records, so its
+    window pauses grading (unlike disk pressure, which no deploy explains)."""
+    from ops.deploy_window import DeployWindow
+
+    monkeypatch.setattr(
+        "ops.deploy_window.deploy_in_flight",
+        lambda **_kw: DeployWindow(active=True, detail="rollout live"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    detail = "prod venv editable install names non-allowlisted source: x"
+    monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: detail)
+    _write_aged_alert_state(_home, f"FAIL: editable install — {detail}", age=timedelta(minutes=11))
+
+    assert _cluster_health.run_health_probe() == 1
+    assert _sent_alerts == []
+
+
+def test_editable_install_healthy_records_keep_probe_green(
+    _home: Path, _prod_source: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: legal records run the real check inside the probe and pass."""
+    _write_editable_records(
+        _prod_source,
+        pth_target=str(_prod_source.resolve()),
+        direct_url=_legal_direct_url(_prod_source),
+    )
+    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: True)
+    monkeypatch.setattr(_cluster_health, "_agent_population", lambda _min: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
+    monkeypatch.setattr(_cluster_health, "_service_probes", list)
+    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
+    monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
+
+    assert _cluster_health.run_health_probe() == 0
