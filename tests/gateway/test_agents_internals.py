@@ -2534,6 +2534,125 @@ class TestSpawnFork:
         with pytest.raises(ValueError, match="prompt and prompt_source must be provided as a pair"):
             _spawn_agent(prompt_source="user")
 
+    def test_fork_event_target_is_fork_source_not_executor(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """User ruling 2026-08-28 (task #1879): the fork event's
+        target_agent_id is the fork SOURCE (the lineage parent), never the
+        executor who triggered the fork; the executor stays in `source`. The
+        agents_meta spawner column records the fork source the same way (it
+        is the frontend tree's parent fallback)."""
+        import json
+        from datetime import UTC, datetime
+
+        from shared import telemetry
+        from shared.paths import logs_dir
+
+        source = _spawn_agent()
+        executor = _spawn_agent()
+        _insert_checkpoint(db_conn, source, "ck")
+
+        new_id = _spawn_agent(spawner=f"agent:{executor}", fork_from=source, fork_checkpoint="ck")
+
+        telemetry.sync()
+        day = datetime.now(UTC).strftime("%Y%m%d")
+        path = logs_dir() / f"events-{day}.jsonl"
+        fork_rows: list[dict[str, Any]] = []  # pyright: ignore[reportUnknownVariableType]
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if obj.get("event_name") != "fork" or obj.get("agent_id") != new_id:
+                    continue
+                fork_rows.append(obj)
+        assert len(fork_rows) == 1  # pyright: ignore[reportUnknownArgumentType]
+        assert fork_rows[0]["source"] == f"agent:{executor}"  # pyright: ignore[reportUnknownVariableType]
+        assert fork_rows[0]["target_agent_id"] == source  # pyright: ignore[reportUnknownVariableType]
+        assert fork_rows[0]["attributes"]["fork_from"] == source  # pyright: ignore[reportUnknownVariableType]
+
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT spawner FROM agents_meta WHERE id = %s", (new_id,))
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] == f"agent:{source}"
+
+    def test_spawn_event_target_is_spawner(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A plain spawn keeps the old direction: target_agent_id = the
+        spawner (its lineage parent), and the spawner column records it
+        verbatim — the fork-source override must not leak into spawns."""
+        import json
+        from datetime import UTC, datetime
+
+        from shared import telemetry
+        from shared.paths import logs_dir
+
+        parent = _spawn_agent()
+        new_id = _spawn_agent(spawner=f"agent:{parent}")
+
+        telemetry.sync()
+        day = datetime.now(UTC).strftime("%Y%m%d")
+        path = logs_dir() / f"events-{day}.jsonl"
+        spawn_rows: list[dict[str, Any]] = []  # pyright: ignore[reportUnknownVariableType]
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if obj.get("event_name") != "spawn" or obj.get("agent_id") != new_id:
+                    continue
+                spawn_rows.append(obj)
+        assert len(spawn_rows) == 1  # pyright: ignore[reportUnknownArgumentType]
+        assert spawn_rows[0]["source"] == f"agent:{parent}"  # pyright: ignore[reportUnknownVariableType]
+        assert spawn_rows[0]["target_agent_id"] == parent  # pyright: ignore[reportUnknownVariableType]
+
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT spawner FROM agents_meta WHERE id = %s", (new_id,))
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] == f"agent:{parent}"
+
+    def test_fork_inbound_via_unified_path_emits_fork_source_target(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The unified inbound writer's kind='fork' mapping (currently
+        reached by no caller; the fork inbound is inserted with raw SQL in
+        create_agent_row) must emit the same direction: target = the fork
+        source parsed from the "agent:{fork_source}" identity marker, never
+        None — a latent wrong-target path for the same ruling."""
+        import json
+        from datetime import UTC, datetime
+
+        from shared import telemetry
+        from shared.paths import logs_dir
+
+        source = _spawn_agent()
+        new_id = _spawn_agent()
+        shared.db.insert_inbound_message(db_conn, new_id, "", source=f"agent:{source}", kind="fork")
+
+        telemetry.sync()
+        day = datetime.now(UTC).strftime("%Y%m%d")
+        path = logs_dir() / f"events-{day}.jsonl"
+        fork_rows: list[dict[str, Any]] = []  # pyright: ignore[reportUnknownVariableType]
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if obj.get("event_name") != "fork" or obj.get("agent_id") != new_id:
+                    continue
+                fork_rows.append(obj)
+        # The event carries the inbound id in its payload — the raw-SQL fork
+        # path emits no such event, so exactly this one row is expected.
+        assert len(fork_rows) == 1  # pyright: ignore[reportUnknownArgumentType]
+        assert fork_rows[0]["target_agent_id"] == source  # pyright: ignore[reportUnknownVariableType]
+        assert fork_rows[0]["source"] == f"agent:{source}"  # pyright: ignore[reportUnknownVariableType]
+
 
 @pytest.mark.real_agent_launch
 class TestEnvForward:

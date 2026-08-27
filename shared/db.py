@@ -518,7 +518,11 @@ def insert_inbound_message(
         "fork": "fork",
     }
     event_type = _kind_to_event.get(kind)
-    # Parse sender id from source for inter-agent chat messages.
+    # Parse the lineage parent from source. For inter-agent chat it is the
+    # sender; for a kind='fork' lifecycle inbound the source is the fork
+    # identity marker "agent:{fork_source}" — and per the fork-lineage ruling
+    # (2026-08-28, task #1879) the fork event's target_agent_id must be the
+    # fork SOURCE (the lineage parent), never the executor.
     target_agent_id: int | None = None
     if event_type == "send_message" and source.startswith("agent:"):
         with contextlib.suppress(ValueError):
@@ -526,6 +530,9 @@ def insert_inbound_message(
     elif event_type == "send_message":
         # user/UI → agent chat is not an inter-agent event; skip event write
         event_type = None
+    elif event_type == "fork" and source.startswith("agent:"):
+        with contextlib.suppress(ValueError):
+            target_agent_id = int(source.removeprefix("agent:"))
 
     with db.cursor() as cur:
         cur.execute(

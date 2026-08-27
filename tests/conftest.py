@@ -697,6 +697,8 @@ _PER_TEST_TRUNCATE_TABLES = (
     "rollup_day_state",
     "agents",
     "ledger_unpriced_backfill_20260824",
+    "fork_lineage_fix_backfill_agents_meta",
+    "fork_lineage_fix_backfill_events",
     "alerts",
     "machines",
     "machine_probe",

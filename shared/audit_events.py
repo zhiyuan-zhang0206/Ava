@@ -87,8 +87,11 @@ def insert_event_log(
             external client — the events table takes NULL agent_id).
         source: who triggered the event — 'agent:<N>', 'user',
             'system', 'self', etc.
-        target_agent_id: for directed operations (send_message, spawn, fork)
-            — the other agent.
+        target_agent_id: for directed operations — the other agent (for
+            send_message the recipient, for spawn the spawner, for fork the
+            FORK SOURCE — the lineage parent, never the executor; the
+            executor who triggered the operation is `source`, see the
+            fork-lineage ruling 2026-08-28).
         payload: optional JSON-serializable dict with operation-specific data.
             Left untyped here on purpose; see the module docstring's payload
             tiering rule for when an event's payload gets a model instead.

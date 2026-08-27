@@ -94,6 +94,11 @@ CREATE TABLE agents (
 --                             - "agent:<id>"    — peer agent via ava.agents.spawn(...)
 --                             - "<other>"       — claude-code / cli / any external trigger
 --                             root also uses "user" — no NULL, simplifies frontend tree construction
+--                             For a fork this column records the fork SOURCE (the lineage
+--                             parent, "agent:<fork_source_agent_id>") — NOT the executor who
+--                             triggered the fork; the executor stays traceable via the fork
+--                             event's `source` and the fork prompt inbound's source (user
+--                             ruling 2026-08-28, task #1879)
 --   fork_source_agent_id      source agent of a fork; NULL for non-fork spawns
 --   fork_source_checkpoint_id exact checkpoint id of the source agent (filled when forking);
 --                             LangGraph's checkpoints are append-only, so a fork must
@@ -409,6 +414,20 @@ CREATE TABLE agent_model_tokens_daily (
     unpriced_calls   BIGINT NOT NULL DEFAULT 0,
     estimated_calls  BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, day, model)
+);
+
+-- Rollback snapshots retained by the 2026-08-27 fork-lineage-target-fix
+-- migration. A production upgrade fills them from the pre-fix state; a fresh
+-- database keeps them empty because there is no historical misrecorded fork
+-- lineage to restore.
+CREATE TABLE fork_lineage_fix_backfill_agents_meta (
+    id       BIGINT,
+    spawner  TEXT
+);
+
+CREATE TABLE fork_lineage_fix_backfill_events (
+    id               BIGINT,
+    target_agent_id  BIGINT
 );
 
 -- Rollback snapshot retained by the 2026-08-24 unpriced-cost backfill. A

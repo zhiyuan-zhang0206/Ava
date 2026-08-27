@@ -200,6 +200,11 @@ def create_agent_row(
             tree by the spawner field (agent:N relations) + gives non-agent:
             prefixes their own root section. Default "user" lets admin /
             scripts / browser buttons call directly without passing.
+            For a fork the stored spawner is the fork SOURCE (the lineage
+            parent, "agent:<fork_from>") — NOT the executor who triggered the
+            fork; the executor stays traceable via the fork event's `source`
+            and the fork prompt inbound's source (user ruling 2026-08-28,
+            task #1879).
         fork_from: source agent_id. If given, copy its state at
             fork_checkpoint into the new agent. Must be passed together with
             fork_checkpoint (None or both).
@@ -276,13 +281,18 @@ def create_agent_row(
             cur.execute("SELECT birth_config FROM agents_meta WHERE id = %s", (fork_from,))
             inherited = fetch_one(cur, "spawn: read fork source birth_config")[0]
         birth_config = resolve_birth_config(cur, config, inherited=inherited)
+        # For a fork, spawner records the fork SOURCE — the lineage parent
+        # (user ruling 2026-08-28, task #1879). The executor who triggered the
+        # fork stays traceable via the fork event's `source` and the fork
+        # prompt inbound's source; it is not what the spawner column means.
+        lineage_spawner = f"agent:{fork_from}" if fork_from is not None else spawner
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, fork_source_agent_id, "
             "fork_source_checkpoint_id, status, machine, config_overlay, birth_config) "
             "VALUES (%s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb)",
             (
                 new_id,
-                spawner,
+                lineage_spawner,
                 fork_from,
                 fork_checkpoint,
                 target_machine,
@@ -313,7 +323,12 @@ def create_agent_row(
         # row (agent_id NOT NULL) was silently skipped, losing the FleetView
         # parent/child edge for every spawn. After commit the row is visible
         # and the mirror row lands.
-        # Parse spawner for the optional source agent (agent:N → target=N).
+        # Lineage direction (user ruling 2026-08-28, task #1879): the event's
+        # target_agent_id is the lineage PARENT — the spawner for a plain
+        # spawn, the FORK SOURCE for a fork (one agent may fork another from a
+        # third; the parent is the source, never the executor). The executor
+        # who triggered the operation stays in `source`: for a fork that is
+        # the calling agent, not the fork source.
         spawner_target: int | None = None
         if spawner.startswith("agent:"):
             import contextlib
@@ -325,7 +340,7 @@ def create_agent_row(
             event_type=event_type,
             agent_id=new_id,
             source=spawner,
-            target_agent_id=spawner_target,
+            target_agent_id=fork_from if fork_from is not None else spawner_target,
             payload={
                 "machine": target_machine,
                 "fork_from": fork_from,
