@@ -93,5 +93,5 @@ cd ../../..
 Tags matching `app-v<major>.<minor>.<patch>` drive
 `.github/workflows/release-app.yml`. macOS/Windows updater assets are listed
 in `latest.json` only when their Tauri signatures exist. Tag builds fail unless
-updater, OS, and Android signing credentials are present; manual dispatch keeps
+updater and OS signing credentials are present; manual dispatch keeps
 the explicit unsigned validation path without publishing a GitHub Release.
