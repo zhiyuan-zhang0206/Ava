@@ -57,6 +57,16 @@ def test_clean_output_records_nothing(findings: list[tuple[str, list[str]]]) -> 
     assert findings == []
 
 
+def test_run_scans_stderr_too(findings: list[tuple[str, list[str]]]) -> None:
+    """stderr is exposed on the result, so it is an ingestion surface like
+    stdout — a flagged line written to stderr must be recorded."""
+    res = sh.run(f"printf '%s' {_INJECTION!r} >&2")
+    assert res.stderr == _INJECTION
+    assert res.returncode == 0
+    assert [src for src, _ in findings] == ["shell.run"]
+    assert _INJECTION in findings[0][1]
+
+
 def test_source_omits_the_command(findings: list[tuple[str, list[str]]]) -> None:
     """Commands carry credentials — an Authorization header, a token argument.
     The findings file records where content came from, never the invocation.
