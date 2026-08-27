@@ -297,6 +297,28 @@ def test_revoke_endpoint_refuses_current_session_by_suffix() -> None:
     assert check.json()["authenticated"] is True
 
 
+def test_revoke_endpoint_ambiguous_suffix_excludes_current_session(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The current session is filtered out of suffix matches BEFORE ambiguity
+    is judged: current + two others sharing a suffix still 409s on the two."""
+    with TestClient(app) as client:
+        current = _login(client)
+        suffix = current[-8:]
+        with db_conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
+                [(f"other-one-{suffix}",), (f"other-two-{suffix}",)],
+            )
+        db_conn.commit()
+        response = client.post(f"/api/auth/sessions/{suffix}/revoke")
+        check = client.get("/api/auth/check")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "session suffix is ambiguous"
+    assert check.json()["authenticated"] is True  # current session untouched
+
+
 def test_revoke_endpoint_rejects_longer_than_masked_suffix(
     db_conn: psycopg.Connection,
 ) -> None:
