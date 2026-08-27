@@ -315,7 +315,7 @@ export default function DisplaySettingsPage() {
           icon={EyeOff}
           label="Show terminated agents"
           description="Show terminated agents (red status dot) in the sidebar; off shows only live agents"
-          value={settings["display.show_terminated"] as boolean}
+          value={settings["display.show_terminated"] === true}
           onChange={(v) => setSetting("display.show_terminated", v)}
         />
         <ToggleRow

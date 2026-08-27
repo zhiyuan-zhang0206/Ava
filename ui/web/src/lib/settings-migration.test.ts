@@ -72,10 +72,17 @@ describe("migrateLegacyLocalStorageSettings", () => {
     expect(localStorage.getItem("ava:show-output")).toBeNull();
   });
 
-  it("migrates show_terminated=false (the moved #630 case)", async () => {
+  it("drops show_terminated=false because it matches the quiet default", async () => {
     localStorage.setItem("ava.sidebar.showTerminated", "false");
     await migrateLegacyLocalStorageSettings(write);
-    expect(write).toHaveBeenCalledWith("display.show_terminated", false);
+    expect(write).not.toHaveBeenCalled();
+    expect(localStorage.getItem("ava.sidebar.showTerminated")).toBeNull();
+  });
+
+  it("migrates show_terminated=true as an explicit history opt-in", async () => {
+    localStorage.setItem("ava.sidebar.showTerminated", "true");
+    await migrateLegacyLocalStorageSettings(write);
+    expect(write).toHaveBeenCalledWith("display.show_terminated", true);
     expect(localStorage.getItem("ava.sidebar.showTerminated")).toBeNull();
   });
 

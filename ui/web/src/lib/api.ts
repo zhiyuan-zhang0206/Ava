@@ -360,8 +360,8 @@ export const api = {
   // Selecting a sidebar row = selecting the agent to view;
   // spawn / terminate all operate by agent_id.
 
-  listAgents: (): Promise<AgentRow[]> => {
-    return f("/api/agents")
+  listAgents: (scope: "live" | "terminated" | "all" = "live"): Promise<AgentRow[]> => {
+    return f(`/api/agents?scope=${scope}`)
       .then(ok<WireAgentRow[]>)
       .then((rows) => rows.map(projectAgentStatus));
   },

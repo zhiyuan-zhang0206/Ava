@@ -802,6 +802,18 @@ describe("terminated toggle", () => {
     expect(screen.getByTestId("row-2")).toBeTruthy();
   });
 
+  it("malformed persisted setting stays opt-out", () => {
+    state.agents = [
+      makeAgent({ agent_id: 1, status: "idling" }),
+      makeAgent({ agent_id: 2, status: "terminated" }),
+    ];
+    state.userSettings["display.show_terminated"] = "true";
+    wrap(<AgentSidebar {...handlers} />);
+
+    expect(screen.getByText("Show terminated")).toBeTruthy();
+    expect(screen.queryByTestId("row-2")).toBeNull();
+  });
+
   it("all agents terminated + hidden → toggle still shows so they can be revealed", () => {
     state.agents = [makeAgent({ agent_id: 2, status: "terminated" })];
     state.showTerminated = false;

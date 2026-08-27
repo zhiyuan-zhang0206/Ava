@@ -10,7 +10,7 @@ producers (gateway list endpoints + lifecycle publish helpers) compute
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, LiteralString
 
 import psycopg
 from pydantic import BaseModel, Field
@@ -80,6 +80,18 @@ _FROM = (
 # Every join above yields at most one row per agent (agents PK, LATERAL MAX),
 # and the notices are scalar subqueries — no GROUP BY needed.
 _GROUP = ""
+
+AgentListScope = Literal["all", "live", "terminated"]
+
+# Scope is part of the query text, not a post-fetch Python filter.  The three
+# statements are fixed literals selected from the validated vocabulary, so a
+# live roster never evaluates the per-agent LATERAL / notice subqueries for
+# historical terminated rows.
+_SELECT_ALL_SQL: dict[AgentListScope, LiteralString] = {
+    "all": f"SELECT {_COLS} {_FROM} {_GROUP} ORDER BY a.id",
+    "live": (f"SELECT {_COLS} {_FROM} WHERE a.status <> 'terminated' {_GROUP} ORDER BY a.id"),
+    "terminated": (f"SELECT {_COLS} {_FROM} WHERE a.status = 'terminated' {_GROUP} ORDER BY a.id"),
+}
 
 
 class OpenNotice(BaseModel):
@@ -222,10 +234,20 @@ async def select_one_async(
     return _row_to_snapshot(row) if row else None
 
 
-def select_all(conn: psycopg.Connection) -> list[AgentSnapshot]:
-    """List all agents' snapshots ordered by id asc."""
+def select_all(
+    conn: psycopg.Connection,
+    *,
+    scope: AgentListScope = "all",
+) -> list[AgentSnapshot]:
+    """List agent snapshots for ``scope``, ordered by id ascending.
+
+    ``all`` preserves the historical SDK / ops contract.  Frontend roster
+    readers request ``live`` so terminated history is excluded by Postgres
+    before the snapshot's per-agent lookups run.  ``terminated`` is the
+    explicit history surface.
+    """
     with conn.cursor() as cur:
-        cur.execute(f"SELECT {_COLS} {_FROM} {_GROUP} ORDER BY a.id")
+        cur.execute(_SELECT_ALL_SQL[scope])
         rows = cur.fetchall()
     return [_row_to_snapshot(r) for r in rows]
 

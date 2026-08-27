@@ -4,8 +4,8 @@
 // cross-table invariant the unified inbox depends on: notice_resolved
 // invalidates BOTH the open queue (a resolution can move a row out of open or
 // awaiting) AND the resolved history, notice_posted refreshes only the open
-// queue, and a reconnect refetches everything. Since R4 layer 1 the
-// invalidation policy lives in the FOLD (lib/fold/notices) inside the real
+// queue, and a reconnect refetches the fold-owned snapshots. Since R4 layer 1
+// the invalidation policy lives in the FOLD (lib/fold/notices) inside the real
 // EventStreamProvider — these tests drive the fold through a stubbed
 // EventSource, exactly like use-agents.test.ts.
 
@@ -197,11 +197,19 @@ describe("useNotices", () => {
     const callsBefore = vi.mocked(api.getNotices).mock.calls.length;
     const spy = vi.spyOn(queryClient, "invalidateQueries");
 
-    // The fold owner's central reconnect reconcile: one bare invalidate-all,
-    // and the two observed queries refetch.
+    // The fold owner's central reconnect reconcile invalidates the two notice
+    // families explicitly; unrelated caches are outside this repair fan-out.
     fireOpen();
 
-    expect(spy).toHaveBeenCalledWith();
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: NOTICES_QUERY_KEY,
+      exact: false,
+    });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: NOTICES_RESOLVED_QUERY_KEY,
+      exact: false,
+    });
+    expect(spy).not.toHaveBeenCalledWith();
     await waitFor(() =>
       expect(vi.mocked(api.getNotices).mock.calls.length).toBeGreaterThan(callsBefore + 1),
     );

@@ -1,13 +1,12 @@
 // useAgents — agent list + lifecycle actions, all driven by server truth.
 //
-// Reads through TanStack Query (`AGENTS_QUERY_KEY`); initial load is one
-// fetch. The shared ["agents"] cache is kept live by the R4 fold (layer 1):
-// EventStreamProvider's fold owner applies the AgentSpawned / AgentUpdated /
-// LabelUpdated events into this cache (lib/fold/agents.ts). useAgents itself
-// does not subscribe — it reads that cache and drives the lifecycle
-// mutations. No polling, no optimistic writes — the cache mirrors the server
-// byte for byte, so the sidebar never flips an item to a state the backend
-// later contradicts.
+// Reads the SQL-bounded live roster through TanStack Query
+// (`AGENTS_QUERY_KEY`). Terminated history has a separate cache and is fetched
+// only when the persistent show-terminated setting opts in. EventStreamProvider
+// folds lifecycle events into both seeded scopes (lib/fold/agents.ts).
+// useAgents itself does not subscribe — it reads and combines those caches and
+// drives lifecycle mutations. No polling, no optimistic writes: each scoped
+// cache mirrors server truth.
 //
 // Lifecycle mutations (spawn / fork / terminate / restart / resurrect)
 // flip `isPending` only; the sidebar shows a spinner on the affected row
@@ -17,29 +16,38 @@
 
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { api } from "./api";
 import { errMsg } from "./errors";
 import { useStore } from "./store";
 import { useAgentActions } from "./use-agent-actions";
-import { AGENTS_QUERY_KEY } from "./fold/agents";
-import type { AgentRow } from "./types";
+import {
+  AGENTS_QUERY_KEY,
+  AGENTS_SNAPSHOT_BUFFER_KEY,
+  TERMINATED_AGENTS_QUERY_KEY,
+  TERMINATED_AGENTS_SNAPSHOT_BUFFER_KEY,
+  allocateAgentSnapshotGeneration,
+  finishAgentSnapshotGeneration,
+  replayAgentSnapshotEvents,
+  startAgentSnapshotGeneration,
+  type AgentRosterScope,
+  type AgentSnapshotEventBuffer,
+} from "./fold/agents";
+import type { AgentRow, SystemEvent } from "./types";
+import { useUserSettings } from "./use-user-settings";
 
 // R4 layer 1: the agents fold (upsert / label patch) lives in lib/fold/agents
 // and runs inside EventStreamProvider; this module re-exports the merge rule
 // for readers that share it (the fleet view) and the query key.
-export { AGENTS_QUERY_KEY, upsertAgent } from "./fold/agents";
+export { AGENTS_QUERY_KEY, TERMINATED_AGENTS_QUERY_KEY, upsertAgent } from "./fold/agents";
 
 // EXEMPT from the localStorage→DB migration (kept per-device by design): the
 // last-viewed agent is an ephemeral "which conversation am I looking at right
 // now" selection, not a durable preference — each device / tab tracks its own,
 // so it stays in localStorage rather than syncing through user_settings.
 const ACTIVE_ID_KEY = "ava.active.agent_id";
-
-/** TanStack Query cache key; shares one agents dataset across hooks. */
-
 
 // Persist the last-viewed agent_id so the same conversation comes
 // back after refresh. If the agent no longer exists (DB reset / id
@@ -60,6 +68,43 @@ function readPersistedActiveId(): number | null {
     return Number.isFinite(n) ? n : null;
   } catch {
     return null;
+  }
+}
+
+function releaseAgentSnapshotGeneration(
+  queryClient: QueryClient,
+  bufferKey: readonly unknown[],
+  generation: number,
+): SystemEvent[] {
+  const current = queryClient.getQueryData<AgentSnapshotEventBuffer>(bufferKey);
+  const { events, remaining } = finishAgentSnapshotGeneration(current, generation);
+  if (remaining === undefined) {
+    queryClient.removeQueries({ queryKey: bufferKey, exact: true });
+  } else {
+    queryClient.setQueryData(bufferKey, remaining);
+  }
+  return events;
+}
+
+export async function fetchAgentRoster(
+  queryClient: QueryClient,
+  scope: AgentRosterScope,
+): Promise<AgentRow[]> {
+  const bufferKey =
+    scope === "live"
+      ? AGENTS_SNAPSHOT_BUFFER_KEY
+      : TERMINATED_AGENTS_SNAPSHOT_BUFFER_KEY;
+  const generation = allocateAgentSnapshotGeneration();
+  queryClient.setQueryData<AgentSnapshotEventBuffer>(bufferKey, (previous) =>
+    startAgentSnapshotGeneration(previous, generation),
+  );
+  try {
+    const snapshot = await api.listAgents(scope);
+    const events = releaseAgentSnapshotGeneration(queryClient, bufferKey, generation);
+    return replayAgentSnapshotEvents(snapshot, events, scope);
+  } catch (error) {
+    releaseAgentSnapshotGeneration(queryClient, bufferKey, generation);
+    throw error;
   }
 }
 
@@ -85,9 +130,11 @@ export interface UseAgentsResult {
 
 export function useAgents(showError: (msg: string) => void): UseAgentsResult {
   const queryClient = useQueryClient();
-  const { data: agents = [], error: agentsError, isLoading } = useQuery({
+  const { settings, isLoading: settingsLoading } = useUserSettings();
+  const showTerminated = settings["display.show_terminated"] === true;
+  const { data: liveAgents = [], error: agentsError, isLoading: liveLoading } = useQuery({
     queryKey: AGENTS_QUERY_KEY,
-    queryFn: api.listAgents,
+    queryFn: () => fetchAgentRoster(queryClient, "live"),
     // No refetchInterval, staleTime Infinity — the agent list is SSE-driven:
     // AgentSpawned / AgentUpdated events merge into the cache (here +
     // the root fold), so it is kept fresh without polling and
@@ -95,6 +142,24 @@ export function useAgents(showError: (msg: string) => void): UseAgentsResult {
     // to resync. The initial cold fetch still runs (no cached data yet).
     staleTime: Infinity,
   });
+  const {
+    data: terminatedAgents = [],
+    error: terminatedAgentsError,
+    isLoading: terminatedLoading,
+  } = useQuery({
+    queryKey: TERMINATED_AGENTS_QUERY_KEY,
+    queryFn: () => fetchAgentRoster(queryClient, "terminated"),
+    enabled: showTerminated,
+    // Historical rows are also kept current by the global lifecycle fold once
+    // this explicit cache has been seeded.
+    staleTime: Infinity,
+  });
+  const rosterLoading =
+    settingsLoading || liveLoading || (showTerminated && terminatedLoading);
+  const agents = useMemo(() => {
+    if (!showTerminated) return liveAgents;
+    return [...liveAgents, ...terminatedAgents].sort((a, b) => a.agent_id - b.agent_id);
+  }, [liveAgents, showTerminated, terminatedAgents]);
 
   // Lifecycle actions live in use-agent-actions.ts (R4 layer-1 line budget);
   // this hook keeps the reader half + the activeId handling.
@@ -114,6 +179,11 @@ export function useAgents(showError: (msg: string) => void): UseAgentsResult {
   useEffect(() => {
     if (agentsError) showError(`Failed to list agents: ${errMsg(agentsError)}`);
   }, [agentsError, showError]);
+  useEffect(() => {
+    if (terminatedAgentsError) {
+      showError(`Failed to list terminated agents: ${errMsg(terminatedAgentsError)}`);
+    }
+  }, [showError, terminatedAgentsError]);
 
   // -- activeId uses the Zustand store as the single source --
   //    Components (AgentSidebar / HomeContent) read from the store; no
@@ -191,6 +261,7 @@ export function useAgents(showError: (msg: string) => void): UseAgentsResult {
   // query lands it picks the first alive agent, jumping away from the
   // user's previous selection.
   useEffect(() => {
+    if (rosterLoading) return;
     if (agents.length === 0) return;
     const prev = useStore.getState().activeId;
     if (prev != null && agents.some((a) => a.agent_id === prev)) return;
@@ -199,13 +270,13 @@ export function useAgents(showError: (msg: string) => void): UseAgentsResult {
     // selection, so we never emit a redundant setActiveId (which would ripple
     // into the URL / localStorage sync effects for no reason).
     if (next !== prev) setActiveId(next);
-  }, [agents, setActiveId]);
+  }, [agents, rosterLoading, setActiveId]);
 
   const refresh = useCallback(async () => {
     await queryClient.refetchQueries({ queryKey: AGENTS_QUERY_KEY });
   }, [queryClient]);
 
-  // No SSE subscription here. The shared ["agents"] cache has a SINGLE
+  // No SSE subscription here. The shared ["agents", "live"] cache has a SINGLE
   // writer — the root fold (EventStreamProvider), which folds
   // agent_spawned / agent_updated / label_updated events and issues the
   // reconnect refetch. useAgents is a pure reader of that cache (plus the
@@ -219,7 +290,7 @@ export function useAgents(showError: (msg: string) => void): UseAgentsResult {
     pendingActions,
     pendingSpawnCount,
     forkPending,
-    isLoading,
+    isLoading: rosterLoading,
     spawn,
     fork,
     terminate,

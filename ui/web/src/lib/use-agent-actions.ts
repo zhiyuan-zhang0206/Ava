@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "./api";
 import { errMsg } from "./errors";
-import { AGENTS_QUERY_KEY } from "./fold/agents";
+import { AGENTS_QUERY_KEY, TERMINATED_AGENTS_QUERY_KEY } from "./fold/agents";
 import { track } from "./telemetry";
 import { useStore } from "./store";
 import type { AgentRow } from "./types";
@@ -79,9 +79,14 @@ export function useAgentActions(
     // throw directly so the onError path showErrors instead of
     // silently masking the real bug.
     mutationFn: ({ sourceId, prompt }: { sourceId: number; prompt?: string }) => {
-      const source = (
-        queryClient.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY) ?? []
-      ).find((a) => a.agent_id === sourceId);
+      // Fork remains available while a terminated conversation is selected.
+      // Resolve at mutation time from both authoritative scoped caches instead
+      // of a render-time closure, so a recent SSE move between scopes cannot
+      // strand the source row in the sibling cache.
+      const source = [
+        ...(queryClient.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY) ?? []),
+        ...(queryClient.getQueryData<AgentRow[]>(TERMINATED_AGENTS_QUERY_KEY) ?? []),
+      ].find((agent) => agent.agent_id === sourceId);
       if (!source) throw new Error(`Fork source agent #${sourceId} not in cache`);
       // A prompt requires prompt_source (backend rejects prompt without it);
       // a frontend prompt always comes from the user. No prompt → omit both.

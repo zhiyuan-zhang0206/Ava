@@ -82,7 +82,7 @@ export const SETTINGS_MIGRATIONS: readonly MigrationEntry[] = [
   { legacyKey: "ava.sidebar.viewMode", settingKey: "display.sidebar_view_mode", parse: parseEnum(["flat", "tree"]), default: "flat" },
   { legacyKey: "ava.sidebar.flatSort.v2", settingKey: "display.sidebar_sort", parse: parseJson },
   { legacyKey: "ava.sidebar.statsWindowHours", settingKey: "display.stats_window_hours", parse: parseStatsWindow, default: 24 },
-  { legacyKey: "ava.sidebar.showTerminated", settingKey: "display.show_terminated", parse: parseBool, default: true },
+  { legacyKey: "ava.sidebar.showTerminated", settingKey: "display.show_terminated", parse: parseBool, default: false },
   { legacyKey: "ava.fleet.leftView", settingKey: "display.fleet_left_view", parse: parseEnum(["graph", "tasks"]), default: "graph" },
   { legacyKey: "ava.fleet.queueCollapsed.v1", settingKey: "display.fleet_queue_collapsed", parse: parseBool, default: false },
   { legacyKey: "ava.fleet.taskGraphMode", settingKey: "display.task_graph_mode", parse: parseEnum(["graph", "kanban"]), default: "graph" },

@@ -567,11 +567,14 @@ def get_ancestors(agent_id: int) -> list[dict]:
 
 
 def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list[dict]:
-    """GET /api/agents → full agent list (optional status filter).
+    """GET /api/agents → agent list (optional status filter).
 
     Returns list[dict], each dict is the JSON representation of an AgentRow.
-    Filtering done on the SDK side — Gateway always returns the full list,
-    terminated included.
+    The gateway first applies the broadest safe SQL scope: filters that cannot
+    match terminated rows request ``scope=live``; a terminated-only filter
+    requests ``scope=terminated``; mixed / unfiltered calls preserve the full
+    historical ``scope=all`` contract.  The exact public-status filter remains
+    client-side after ops-only status projection.
 
     ``filter_by_status``: a non-empty tuple of AgentStatus values to keep;
     None or an empty tuple returns all agents unfiltered.
@@ -580,7 +583,14 @@ def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list
     (`hibernating` → `idling`) BEFORE the filter runs, so a swapped-out agent is
     kept by an `idling` filter and reads as `idling` to every SDK caller.
     """
-    resp = _get("/api/agents")
+    scope = "all"
+    if filter_by_status:
+        requested = set(filter_by_status)
+        if requested == {AgentStatus.TERMINATED}:
+            scope = "terminated"
+        elif AgentStatus.TERMINATED not in requested:
+            scope = "live"
+    resp = _get("/api/agents", params={"scope": scope})
     _raise_from_response(resp)
     rows: list[dict] = [_project_ops_status(r) for r in resp.json()]
     if filter_by_status:

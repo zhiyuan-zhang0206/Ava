@@ -75,6 +75,24 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("Confirm before force kill")).toBeTruthy();
   });
 
+  it("treats a malformed show-terminated setting as opt-out", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({
+      settings: [
+        {
+          key: "display.show_terminated",
+          value: "true",
+          updated_at: "2026-08-27T00:00:00Z",
+        },
+      ],
+    });
+    renderPage();
+
+    const label = await screen.findByText("Show terminated agents");
+    const row = label.parentElement?.parentElement?.parentElement;
+    const toggle = row?.querySelector<HTMLButtonElement>('[role="switch"]');
+    expect(toggle?.getAttribute("aria-checked")).toBe("false");
+  });
+
   it("renders the Timeline defaults toggle", async () => {
     renderPage();
 

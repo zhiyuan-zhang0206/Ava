@@ -3,8 +3,9 @@
 // ONE subscriber owns every domain's snapshot×SSE reconciliation for the
 // global broadcast: applyEvent folds system events into the query cache, and
 // the connection "open" handler runs the central reconnect reconcile
-// (invalidate all queries — events missed during a disconnect gap are
-// repaired wholesale). This replaced the per-hook folding skeletons
+// (invalidate fold-owned query families — events missed during a disconnect
+// gap are repaired without refetching unrelated caches). This replaced the
+// per-hook folding skeletons
 // (useAgentsCacheSync and friends); hooks only read their keys now.
 //
 // Debounce policy (the invalidating domains): fleet-graph / tasks bursts
@@ -15,7 +16,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import { applyEvent, type FoldContext } from "./index";
+import {
+  AGENTS_QUERY_KEY,
+  RECONNECT_QUERY_KEYS,
+  TERMINATED_AGENTS_QUERY_KEY,
+  applyEvent,
+  type FoldContext,
+} from "./index";
 import type { SystemEvent } from "../types";
 import type { ConnectionEvent } from "../useEventStream";
 
@@ -94,25 +101,27 @@ export function useFoldOwner(): FoldOwner {
     [ctx],
   );
 
-  // Last full-repair timestamp — throttles the invalidate-all below.
+  // Last reconnect-repair timestamp — throttles the scoped invalidations below.
   const lastFullInvalidateAtRef = useRef(0);
   // Last logged corrupt frame — dedupe for the parse-failed watch below.
   const lastParseFailedRawRef = useRef<string | null>(null);
 
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
-      // Central reconnect reconcile (moved from useAgentsCacheSync): on a
-      // (re)open of the global broadcast, invalidate ALL queries — events
-      // pushed while the socket was down were missed, so every cached view
-      // could be stale. Throttled to one per RECONNECT_INVALIDATE_WINDOW_MS —
-      // reconnect bursts (see the constant) used to each trigger the full
-      // 6-8-query refetch storm; a short gap misses few events, and the live
-      // stream folds new ones in as they arrive anyway.
+      // Central reconnect reconcile: only cache families owned by the global
+      // fold can have missed these events. Invalidating unrelated active
+      // queries (settings, config, inspector aggregates, status) multiplied a
+      // reconnect into a fleet-wide request storm without repairing anything.
       if (ev.type === "open") {
         const now = Date.now();
         if (now - lastFullInvalidateAtRef.current >= RECONNECT_INVALIDATE_WINDOW_MS) {
           lastFullInvalidateAtRef.current = now;
-          void queryClient.invalidateQueries();
+          for (const queryKey of RECONNECT_QUERY_KEYS) {
+            const exact =
+              queryKey === AGENTS_QUERY_KEY ||
+              queryKey === TERMINATED_AGENTS_QUERY_KEY;
+            void queryClient.invalidateQueries({ queryKey, exact });
+          }
         }
       } else if (ev.type === "parse-failed") {
         // The global stream's parse-failed had NO consumer (the all-events
