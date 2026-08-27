@@ -103,9 +103,10 @@ def test_apply_noop_without_authoritative_value(
 
 def test_apply_sets_env_even_without_tzset(monkeypatch: pytest.MonkeyPatch) -> None:
     """On Windows there is no time.tzset: the hook still exports TZ for
-    subprocess children and must not raise."""
-    if hasattr(time, "tzset"):
-        monkeypatch.delattr(time, "tzset", raising=False)
+    subprocess children and must not raise. The tzset indirection (_tzset) is
+    patched — never the time module itself — so the process wall clock stays
+    untouched and no TZ state leaks into later tests."""
+    monkeypatch.setattr("shared.config._tzset", lambda: None)
     _set_cluster_tz(monkeypatch, "Asia/Shanghai")
     apply_cluster_timezone()
     assert os.environ["TZ"] == "Asia/Shanghai"

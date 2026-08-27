@@ -185,13 +185,11 @@ _AT_TEMPLATE = """\
 _TEMPLATE_VERSION = {template_version}
 import datetime as _dt
 import time as _time
-from zoneinfo import ZoneInfo
 
 {wake_helper}
 _WHEN = _dt.datetime.fromisoformat({when_iso!r})
 _MESSAGE = {message!r}
-_TZ = ZoneInfo({timezone!r})
-
+{tz_setup}
 # Announce the target on stdout (the watcher's session output + log): a
 # sleeping watcher is otherwise indistinguishable from a stuck one — the
 # session shows only the launch command. One line at startup is enough for a
@@ -201,7 +199,7 @@ _TZ = ZoneInfo({timezone!r})
 # script's tz-aware display. ASCII only: a C-locale stdout would raise
 # UnicodeEncodeError on a non-ASCII character and kill the watcher — the very
 # silent death these lines prevent.
-print("[watcher] one-shot -> fires at " + _WHEN.astimezone(_TZ).isoformat(), flush=True)
+print({announce}, flush=True)
 
 while True:
     _delay = (_WHEN - _dt.datetime.now(_dt.UTC)).total_seconds()
@@ -290,21 +288,31 @@ def build_at_script(
     *,
     when_iso: str,
     message: str,
-    timezone: str,
+    timezone: str | None,
     template_version: int = TEMPLATE_VERSION,
 ) -> str:
     """Build a one-shot time-watcher script that sleeps until ``when_iso`` (an
     ISO-8601 UTC string) then wakes the launching agent once and exits.
 
-    ``timezone`` (IANA name) only drives the startup announcement's wall
-    clock — the sleep itself is UTC-based, so a wrong display zone can never
-    move the fire time.
+    ``timezone`` (IANA name or None) only drives the startup announcement's
+    wall clock — the sleep itself is UTC-based, so a wrong display zone can
+    never move the fire time. None renders the announcement in the watcher
+    process's own wall clock (the settings-lite degradation: a maintenance
+    verb has no authoritative cluster timezone, so the announcement matches
+    the wall clock its operator is looking at).
     """
+    if timezone is None:
+        tz_setup = ""
+        announce = '"[watcher] one-shot -> fires at " + _WHEN.astimezone().isoformat()'
+    else:
+        tz_setup = f"from zoneinfo import ZoneInfo\n_TZ = ZoneInfo({timezone!r})\n"
+        announce = '"[watcher] one-shot -> fires at " + _WHEN.astimezone(_TZ).isoformat()'
     return _tw.dedent(_AT_TEMPLATE).format(
         wake_helper=_WAKE_HELPER,
         when_iso=when_iso,
         message=message,
-        timezone=timezone,
+        tz_setup=tz_setup,
+        announce=announce,
         template_version=template_version,
     )
 

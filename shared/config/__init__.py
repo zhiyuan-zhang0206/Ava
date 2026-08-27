@@ -392,6 +392,18 @@ def cluster_tz() -> ZoneInfo | None:
         return None
 
 
+def _tzset() -> None:
+    """Re-read the process TZ from ``os.environ["TZ"]`` where supported.
+
+    ``time.tzset`` is POSIX-only (Windows CPython reads the OS zone directly
+    and has no such function); the indirection exists so the Windows branch
+    is exercised in tests without mutating the ``time`` module.
+    """
+    tzset = getattr(time, "tzset", None)
+    if tzset is not None:
+        tzset()
+
+
 def apply_cluster_timezone() -> None:
     """Apply the cluster timezone to this process's wall clock (POSIX).
 
@@ -422,8 +434,7 @@ def apply_cluster_timezone() -> None:
     except (ZoneInfoNotFoundError, ValueError):
         return
     os.environ["TZ"] = name
-    if hasattr(time, "tzset"):
-        time.tzset()
+    _tzset()
 
 
 settings = Settings()
