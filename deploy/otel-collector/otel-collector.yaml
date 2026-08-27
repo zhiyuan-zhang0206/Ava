@@ -263,11 +263,13 @@ $OTLP_EXPORTERS
   # Segment size is the structural bound on the ACTIVE file (the file
   # exporter exposes no time-based rotation, so size is the only trigger):
   # at 64 MiB the mirror rotates roughly every half hour at peak volume.
-  # max_backups caps the un-compressed window at ~1.5 GiB; old segments are
-  # gzipped and day-pruned by the agent-side pass (`shared/trace.py`'s
-  # `_gzip_old_mirror` / `_prune_old_mirror` on every agent start), which is
-  # the real retention — max_backups only bounds the window before that pass
-  # runs (it stops counting backups once they are renamed `.jsonl.gz`).
+  # max_backups counts BOTH plain and gzipped backups (timberjack parses the
+  # `.gz` name), so it is the de-facto retention at peak volume: ~24 segments
+  # = the last ~12h of a 2.9 GB/day mirror. The agent-side day retention
+  # (`trace_retention_days`, `shared/trace.py`'s `_prune_old_mirror` on every
+  # agent start) binds at low volume, when 24 segments span more days than
+  # the setting; `_gzip_old_mirror` shrinks each kept segment ~5-10x, keeping
+  # the whole mirror around a few hundred MiB at peak.
   #
   # No `localtime` key below — timberjack's default (false) stamps the
   # rotated filename's timestamp in UTC. `shared/trace.py`'s `_prune_old_mirror`
