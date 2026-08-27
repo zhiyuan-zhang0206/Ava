@@ -16,7 +16,6 @@ and produced a snapshot missing the just-claimed inbound.
 
 from __future__ import annotations
 
-import ast as _ast
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
@@ -42,14 +41,7 @@ from shared.message_kwargs import (
     message_content,
     read_ava_kwargs,
 )
-
-
-class SdkCall(BaseModel):
-    """One SDK method's call count in an agent_code block, e.g.
-    ``SdkCall(method="files.read", count=3)`` for ``ava.files.read(...)`` x3."""
-
-    method: str
-    count: int
+from shared.sdk_call_extract import SdkCall, extract_sdk_calls
 
 
 class TimelineItem(BaseModel):
@@ -751,46 +743,3 @@ def _tool_call_items(
             )
         )
     return out
-
-
-def extract_sdk_calls(code: str) -> list[SdkCall]:
-    """Parse Python code with ``ast`` and return the SDK calls it contains.
-
-    Returns an empty list on syntax errors (streaming partial code, invalid
-    Python) -- the frontend falls back to regex for those items."""
-    if not code.strip():
-        return []
-    try:
-        tree = _ast.parse(code)
-    except SyntaxError:
-        return []
-    counts: dict[str, int] = {}
-    for node in _ast.walk(tree):
-        if isinstance(node, _ast.Call):
-            method = _resolve_ava_call(node.func)
-            if method:
-                counts[method] = counts.get(method, 0) + 1
-    return [
-        SdkCall(method=m, count=c) for m, c in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
-    ]
-
-
-def _resolve_ava_call(node: _ast.expr) -> str | None:
-    """If *node* is ``ava.x.y(...)``, return ``"x.y"``.  Otherwise ``None``.
-
-    Walks ``ast.Attribute`` chains down to the root name::
-
-        ava.files.read(...)  ->  "files.read"
-        ava.help(...)        ->  "help"
-        ava.x.y.z(...)       ->  "x.y.z"
-
-    A bare ``ava(...)`` or a call on anything not rooted at ``ava`` returns
-    ``None`` -- only calls that start with ``ava.`` count as SDK calls."""
-    parts: list[str] = []
-    current: _ast.expr = node
-    while isinstance(current, _ast.Attribute):
-        parts.append(current.attr)
-        current = current.value
-    if isinstance(current, _ast.Name) and current.id == "ava":
-        return ".".join(reversed(parts))
-    return None
