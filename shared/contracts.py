@@ -403,6 +403,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/messages/reconcile"): RouteContract(
         note="idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery"
     ),
+    ("POST", "/api/agents/{agent_id}/system-note"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="deliver a framework system note (task assign/update/reminder) — renders as a system marker, not peer chat; resurrect is a body choice",
+    ),
     # ── gateway/routers/status.py ───────────────────────────────────
     ("GET", "/api/stats/dashboard"): RouteContract(),
     ("GET", "/api/status"): RouteContract(),

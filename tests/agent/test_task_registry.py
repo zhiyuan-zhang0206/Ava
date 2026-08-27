@@ -591,7 +591,7 @@ def test_create_explicit_owner(db_conn: psycopg.Connection, root_task_id: int) -
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        with patch("ava.agents.send_message"):
+        with patch("ava.agents.send_system_note"):
             task = task_registry.create("title", "detail", owner=other_id, parent=root_task_id)
         assert task.owner == other_id
         assert _persisted_owner(db_conn, task.id) == other_id
@@ -606,7 +606,7 @@ def test_create_with_owner_notifies_target(db_conn: psycopg.Connection, root_tas
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task = task_registry.create("title", "detail", owner=other_id, parent=root_task_id)
             mock_send.assert_called_once()
             call_args = mock_send.call_args
@@ -616,6 +616,9 @@ def test_create_with_owner_notifies_target(db_conn: psycopg.Connection, root_tas
             assert "title" in msg
             assert "detail" in msg
             assert "assigned to you" in msg
+            # An assignment is a delegator direction: the new owner is
+            # auto-resurrected so the task never strands on a dead agent.
+            assert call_args.kwargs["resurrect"] is True
     finally:
         ava._boot._agent_id = original
 
@@ -628,7 +631,7 @@ def test_create_with_owner_self_no_notification(
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.create("title", "detail", owner=agent_id, parent=root_task_id)
             mock_send.assert_not_called()
     finally:
@@ -643,7 +646,7 @@ def test_create_without_owner_no_notification(
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.create("title", "detail", parent=root_task_id)
             mock_send.assert_not_called()
     finally:
@@ -662,13 +665,14 @@ def test_update_owner_reassign_notifies(db_conn: psycopg.Connection, root_task_i
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("title", "detail", parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, owner=other_id)
             # Only new owner notified; old owner == actor is skipped
             mock_send.assert_called_once()
             call_args = mock_send.call_args
             assert call_args[0][0] == other_id
             assert "now assigned" in call_args[0][1]
+            assert call_args.kwargs["resurrect"] is True
     finally:
         ava._boot._agent_id = original
 
@@ -713,9 +717,9 @@ def test_update_owner_self_no_notification(db_conn: psycopg.Connection, root_tas
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("title", "detail", parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, owner=agent_id)
-            # send_message should not be called because old_owner == new_owner
+            # send_system_note should not be called because old_owner == new_owner
             mock_send.assert_not_called()
     finally:
         ava._boot._agent_id = original
@@ -724,19 +728,21 @@ def test_update_owner_self_no_notification(db_conn: psycopg.Connection, root_tas
 def test_update_owner_new_terminated_still_notified(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    """A terminated new owner IS notified — send_message auto-resurrects it, so
-    an assigned task never strands on a dead agent."""
+    """A terminated new owner IS notified — the system-note delivery is asked
+    to auto-resurrect it (resurrect=True), so an assigned task never strands
+    on a dead agent."""
     agent_id = _seed_agent(db_conn)
     dead_id = _seed_agent(db_conn, status="terminated")
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("title", "detail", parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, owner=dead_id)
             mock_send.assert_called_once()
             assert mock_send.call_args[0][0] == dead_id
             assert "now assigned" in mock_send.call_args[0][1]
+            assert mock_send.call_args.kwargs["resurrect"] is True
     finally:
         ava._boot._agent_id = original
 
@@ -760,7 +766,7 @@ def test_update_owner_old_terminated_leg_skipped(db_conn: psycopg.Connection) ->
             )
             task_id = cur.fetchone()[0]  # type: ignore[index]
         db_conn.commit()
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task_id, owner=new_owner)  # pyright: ignore[reportUnknownArgumentType]
             # Only the new owner is told; the terminated old owner is skipped.
             mock_send.assert_called_once()
@@ -780,9 +786,9 @@ def test_update_non_owner_notifies_owner(db_conn: psycopg.Connection, root_task_
     original = ava._boot._agent_id
     ava._boot._agent_id = actor_id
     try:
-        with patch("ava.agents.send_message"):
+        with patch("ava.agents.send_system_note"):
             task = task_registry.create("title", "detail", owner=owner_id, parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, status="cancelled")
             mock_send.assert_called_once()
             recipient, msg = mock_send.call_args[0]
@@ -791,6 +797,9 @@ def test_update_non_owner_notifies_owner(db_conn: psycopg.Connection, root_task_
             assert '"title"' in msg
             assert "status → cancelled" in msg
             assert f"agent #{actor_id}" in msg
+            # A plain update notice is a notification, not a delegator
+            # direction: it must never resurrect a terminated owner.
+            assert mock_send.call_args.kwargs["resurrect"] is False
     finally:
         ava._boot._agent_id = original
 
@@ -802,7 +811,7 @@ def test_update_by_owner_no_notification(db_conn: psycopg.Connection, root_task_
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("title", "detail", parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, status="done", results="shipped")
             mock_send.assert_not_called()
     finally:
@@ -820,9 +829,9 @@ def test_update_non_owner_skips_terminated_owner(
     original = ava._boot._agent_id
     ava._boot._agent_id = actor_id
     try:
-        with patch("ava.agents.send_message"):
+        with patch("ava.agents.send_system_note"):
             task = task_registry.create("title", "detail", owner=dead_owner, parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, status="done")
             mock_send.assert_not_called()
     finally:
@@ -840,10 +849,10 @@ def test_update_parent_only_by_non_owner_no_notification(
     original = ava._boot._agent_id
     ava._boot._agent_id = actor_id
     try:
-        with patch("ava.agents.send_message"):
+        with patch("ava.agents.send_system_note"):
             parent = task_registry.create("notify-parent", "d", parent=root_task_id)
             task = task_registry.create("notify-child", "d", owner=owner_id, parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, parent_id=parent.id)
             mock_send.assert_not_called()
         assert _persisted_parent(db_conn, task.id) == parent.id
@@ -855,17 +864,17 @@ def test_update_parent_only_terminated_owner_not_resurrected(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """The exact incident shape: a batch reparent moves a task owned by a
-    terminated agent — the owner must stay asleep (no send_message, so no
+    terminated agent — the owner must stay asleep (no send_system_note, so no
     auto-resurrect)."""
     actor_id = _seed_agent(db_conn)
     dead_owner = _seed_agent(db_conn, status="terminated")
     original = ava._boot._agent_id
     ava._boot._agent_id = actor_id
     try:
-        with patch("ava.agents.send_message"):
+        with patch("ava.agents.send_system_note"):
             parent = task_registry.create("storm-parent", "d", parent=root_task_id)
             task = task_registry.create("storm-child", "d", owner=dead_owner, parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, parent_id=parent.id)
             mock_send.assert_not_called()
         assert _persisted_parent(db_conn, task.id) == parent.id
@@ -883,10 +892,10 @@ def test_update_parent_plus_business_field_still_notifies(
     original = ava._boot._agent_id
     ava._boot._agent_id = actor_id
     try:
-        with patch("ava.agents.send_message"):
+        with patch("ava.agents.send_system_note"):
             parent = task_registry.create("mixed-parent", "d", parent=root_task_id)
             task = task_registry.create("mixed-child", "d", owner=owner_id, parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, parent_id=parent.id, status="cancelled")
             mock_send.assert_called_once()
             recipient, msg = mock_send.call_args[0]
@@ -909,15 +918,18 @@ def test_update_owner_change_appends_changes_to_new_owner(
     original = ava._boot._agent_id
     ava._boot._agent_id = actor_id
     try:
-        with patch("ava.agents.send_message"):
+        with patch("ava.agents.send_system_note"):
             task = task_registry.create("title", "detail", owner=old_owner, parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, status="cancelled", owner=new_owner)
             assert mock_send.call_count == 2
             msgs = {call.args[0]: call.args[1] for call in mock_send.call_args_list}
+            flags = {call.args[0]: call.kwargs["resurrect"] for call in mock_send.call_args_list}
             assert "now assigned" in msgs[new_owner]
             assert "status → cancelled" in msgs[new_owner]
             assert "no longer assigned" in msgs[old_owner]
+            # New owner (assignment): resurrect; old owner (released): never.
+            assert flags == {new_owner: True, old_owner: False}
     finally:
         ava._boot._agent_id = original
 
@@ -929,9 +941,9 @@ def test_log_by_non_owner_notifies_owner(db_conn: psycopg.Connection, root_task_
     original = ava._boot._agent_id
     ava._boot._agent_id = actor_id
     try:
-        with patch("ava.agents.send_message"):
+        with patch("ava.agents.send_system_note"):
             task = task_registry.create("title", "detail", owner=owner_id, parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.log(task.id, "progress update")
             mock_send.assert_called_once()
             assert mock_send.call_args[0][0] == owner_id
@@ -1087,7 +1099,7 @@ def test_create_and_assign_returns_task_and_agent_id(
     try:
         with (
             patch("ava.agents.spawn", return_value=spawned_id) as mock_spawn,
-            patch("ava.agents.send_message"),
+            patch("ava.agents.send_system_note"),
         ):
             task, aid = task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
         assert isinstance(task, task_registry.Task)
@@ -1108,7 +1120,10 @@ def test_create_and_assign_task_owned_by_spawned_agent(
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        with patch("ava.agents.spawn", return_value=spawned_id), patch("ava.agents.send_message"):
+        with (
+            patch("ava.agents.spawn", return_value=spawned_id),
+            patch("ava.agents.send_system_note"),
+        ):
             task, _ = task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
         assert task.owner == spawned_id
         assert _persisted_owner(db_conn, task.id) == spawned_id
@@ -1127,7 +1142,7 @@ def test_create_and_assign_passes_spawn_args(
     try:
         with (
             patch("ava.agents.spawn", return_value=spawned_id) as mock_spawn,
-            patch("ava.agents.send_message"),
+            patch("ava.agents.send_system_note"),
         ):
             task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
                 "title",
@@ -1159,12 +1174,12 @@ def test_create_and_assign_sends_notification(
     try:
         with (
             patch("ava.agents.spawn", return_value=spawned_id),
-            patch("ava.agents.send_message") as mock_send,
+            patch("ava.agents.send_system_note") as mock_send,
         ):
             task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
                 "my title", "my description", parent=root_task_id
             )
-        # create(owner=spawned_id) calls _notify_owner_change → send_message
+        # create(owner=spawned_id) calls _notify_owner_change → send_system_note
         mock_send.assert_called_once()
         call_args = mock_send.call_args
         assert call_args[0][0] == spawned_id
@@ -1187,7 +1202,7 @@ def test_create_and_assign_no_notification_when_spawn_fails(
     try:
         with (
             patch("ava.agents.spawn", side_effect=RuntimeError("spawn failed")),
-            patch("ava.agents.send_message") as mock_send,
+            patch("ava.agents.send_system_note") as mock_send,
             pytest.raises(RuntimeError, match="spawn failed"),
         ):
             task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
@@ -1204,7 +1219,10 @@ def test_create_and_assign_honours_parent(db_conn: psycopg.Connection, root_task
     ava._boot._agent_id = agent_id
     try:
         parent_task = task_registry.create("parent", "detail", parent=root_task_id)
-        with patch("ava.agents.spawn", return_value=spawned_id), patch("ava.agents.send_message"):
+        with (
+            patch("ava.agents.spawn", return_value=spawned_id),
+            patch("ava.agents.send_system_note"),
+        ):
             task, _ = task_registry.create_and_assign("child", "detail", parent=parent_task.id)  # pyright: ignore[reportUnknownMemberType]
         assert task.parent_id == parent_task.id
     finally:
@@ -1220,7 +1238,10 @@ def test_create_and_assign_honours_remind_interval_seconds(
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        with patch("ava.agents.spawn", return_value=spawned_id), patch("ava.agents.send_message"):
+        with (
+            patch("ava.agents.spawn", return_value=spawned_id),
+            patch("ava.agents.send_system_note"),
+        ):
             task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
                 "title", "detail", remind_interval_seconds=3600, parent=root_task_id
             )
@@ -1236,7 +1257,10 @@ def test_create_and_assign_honours_priority(db_conn: psycopg.Connection, root_ta
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        with patch("ava.agents.spawn", return_value=spawned_id), patch("ava.agents.send_message"):
+        with (
+            patch("ava.agents.spawn", return_value=spawned_id),
+            patch("ava.agents.send_system_note"),
+        ):
             task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
                 "title", "detail", priority="P0", parent=root_task_id
             )
@@ -1256,7 +1280,10 @@ def test_create_and_assign_remind_interval_none(
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        with patch("ava.agents.spawn", return_value=spawned_id), patch("ava.agents.send_message"):
+        with (
+            patch("ava.agents.spawn", return_value=spawned_id),
+            patch("ava.agents.send_system_note"),
+        ):
             task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
                 "title", "detail", remind_interval_seconds=None, parent=root_task_id
             )
@@ -1276,7 +1303,7 @@ def test_create_and_assign_uses_default_preset(
     try:
         with (
             patch("ava.agents.spawn", return_value=spawned_id) as mock_spawn,
-            patch("ava.agents.send_message"),
+            patch("ava.agents.send_system_note"),
         ):
             task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
         mock_spawn.assert_called_once_with(
@@ -1499,7 +1526,7 @@ def test_update_title_reassign_notifies_with_new_title(db_conn, root_task_id: in
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("old title", "detail", parent=root_task_id)
-        with patch("ava.agents.send_message") as mock_send:
+        with patch("ava.agents.send_system_note") as mock_send:
             task_registry.update(task.id, title="new title", owner=other_id)
         assert any("new title" in call.args[1] for call in mock_send.call_args_list)
     finally:

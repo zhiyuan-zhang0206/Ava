@@ -291,6 +291,9 @@ class TestAiMessageItems:
             # A skill appearing mid-window is something that happened at a
             # moment, unlike the standing listing it amends.
             NoteTag.NEW_SKILLS,
+            # A task notification is an event (the assignment / update /
+            # reminder happened at a moment) — the wall clock belongs.
+            NoteTag.TASK,
         }
         hidden = {
             NoteTag.MEMORY,

@@ -1505,6 +1505,74 @@ async def test_claim_restart_completed_kind_appends_marker_and_continues(
     assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_restart"  # pyright: ignore[reportUnknownMemberType]
 
 
+async def test_claim_system_note_kind_appends_system_note_and_continues(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """system_note inbound (task assign/update/reminder delivery) → claim appends
+    a system note (NoteTag 'task') + goto BEFORE_LLM — never a chat peer message."""
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'agent:405', %s::jsonb) RETURNING id",
+            (
+                tid,
+                'Task #1 "my task" is now assigned to you (by agent #405).',
+                '{"note_tag": "task"}',
+            ),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        inbound_id = int(row[0])
+    db_conn.commit()
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+        _config(tid),
+    )
+
+    assert cmd.goto == "before_llm"
+    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    note = msgs[0]
+    assert isinstance(note, HumanMessage)
+    assert 'Task #1 "my task" is now assigned to you (by agent #405).' in note.content  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs.get("ava_note_tag") == "task"  # pyright: ignore[reportUnknownMemberType]
+    # The inbound row is consumed (done at claim, like other lifecycle kinds).
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (inbound_id,))
+        status = cur.fetchone()
+        assert status is not None and status[0] == "done"
+
+
+async def test_claim_system_note_unknown_tag_fails_loud(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """A system_note inbound carrying a non-NoteTag payload fails loud — a
+    writer bug must not silently render as the wrong timeline chip."""
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'system', %s::jsonb)",
+            (tid, "boom", '{"note_tag": "not_a_tag"}'),
+        )
+    db_conn.commit()
+
+    with pytest.raises(ValueError, match="not a NoteTag value"):
+        await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+            _config(tid),
+        )
+
+
 async def test_claim_restart_while_idle_commits_halted_true(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

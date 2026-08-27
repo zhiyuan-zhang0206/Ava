@@ -89,6 +89,7 @@ from gateway.schemas.messages import (
     PendingInbound,
     ResolveBatchIn,
     ResolveNoticeIn,
+    SystemNoteIn,
     TraceCheckpointMessagesResponse,
     UserMessageIn,
 )
@@ -260,6 +261,7 @@ __all__ = [
     "StatsDashboard",
     "StatsTokens",
     "StatsWindowHours",
+    "SystemNoteIn",
     "SystemStatus",
     "TaskListResponse",
     "TaskRow",

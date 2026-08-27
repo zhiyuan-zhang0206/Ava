@@ -277,8 +277,9 @@ def create(
 
     # Notify the assigned owner when it differs from the creator — same
     # post-transaction pattern as update() to avoid waking an agent inside a
-    # transaction. The new owner is told even when terminated (send_message
-    # auto-resurrects it), so an assigned task never strands on a dead agent.
+    # transaction. The new owner is told even when terminated (the system-note
+    # delivery auto-resurrects it), so an assigned task never strands on a dead
+    # agent.
     if owner is not None and owner != actor:
         _notify_owner_change(task.id, title, None, owner, actor, description=description)
 
@@ -753,17 +754,21 @@ def _notify_owner_change(
     """Tell the new owner the task is theirs and the previous owner it is not,
     never notifying the caller (`actor`) about its own action.
 
-    The new owner is always told, even when terminated: `send_message` routes
-    through the gateway delivery path, which auto-resurrects a terminated target
-    (`resurrect_if_terminated`), so an assigned task never strands on a dead
-    agent. The previous owner is the one deliberate skip -- waking a terminated
-    former owner just to say the task left it is wasteful, and it never asked to
-    be resurrected.
+    The new owner is always told, even when terminated: the system-note
+    delivery auto-resurrects a terminated target (an assignment is a delegator
+    direction, not a plain notification), so an assigned task never strands on
+    a dead agent. The previous owner is the one deliberate skip -- waking a
+    terminated former owner just to say the task left it is wasteful, and it
+    never asked to be resurrected.
 
     When `description` is provided (from create()), it is appended to the new
     owner's message so they know what the task is about without a separate lookup.
     `changes` (from update()) is likewise appended, so a reassignment that also
     edits the task reports the other fields in the same message.
+
+    Delivery is a system note (NoteTag `task`), not a peer chat: the timeline
+    renders it as a system marker without an Agent prefix or peer timestamp
+    (user ruling 2026-08-27).
     """
     if new_owner is not None and new_owner != actor:
         new_msg = f'Task #{task_id} "{title}" is now assigned to you (by agent #{actor}).'
@@ -771,10 +776,15 @@ def _notify_owner_change(
             new_msg += "\n\n" + "\n".join(f"- {c}" for c in changes)
         if description:
             new_msg += f"\n\n{description}"
-        ava.agents.send_message(new_owner, new_msg)
+        # A task assignment is a delegator direction: the new owner is always
+        # told, even when terminated — the system-note delivery auto-resurrects
+        # so an assigned task never strands on a dead agent.
+        ava.agents.send_system_note(new_owner, new_msg, resurrect=True)
     if _should_notify_previous_owner(old_owner, actor):
-        ava.agents.send_message(
-            old_owner, f'Task #{task_id} "{title}" you owned is no longer assigned to you.'
+        ava.agents.send_system_note(
+            old_owner,
+            f'Task #{task_id} "{title}" you owned is no longer assigned to you.',
+            resurrect=False,
         )
 
 
@@ -794,15 +804,18 @@ def _notify_owner_updated(
     deliberately left asleep: this is a notification, not a delegator
     direction, so it must not auto-resurrect the owner just to be told (user
     ruling 2026-08-27 -- notification messages never resurrect a terminated
-    owner; only real delegator/user business messages may). `actor` is never
-    notified about its own action -- update() only calls this when
-    `actor != owner`.
+    owner; only real delegator/user business messages may). Delivered as a
+    system note with resurrect=False, so the delivery path itself enforces
+    the ruling. `actor` is never notified about its own action -- update()
+    only calls this when `actor != owner`.
     """
     if _is_terminated(owner):
         return
     detail = "\n".join(f"- {c}" for c in changes)
-    ava.agents.send_message(
-        owner, f'Task #{task_id} "{title}" was updated by agent #{actor}:\n{detail}'
+    ava.agents.send_system_note(
+        owner,
+        f'Task #{task_id} "{title}" was updated by agent #{actor}:\n{detail}',
+        resurrect=False,
     )
 
 

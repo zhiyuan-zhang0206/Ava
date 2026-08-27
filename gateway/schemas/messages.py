@@ -12,10 +12,13 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    field_validator,
 )
 
 from ops.rpc_schemas import _UserContent
 from shared.agents import AgentStatus
+from shared.envelope import validate_source
+from shared.message_kwargs import NoteTag
 from shared.priority import Priority
 
 
@@ -76,6 +79,42 @@ class AgentMessageEnqueued(BaseModel):
 
     status: AgentStatus
     inbound_id: int | None = None
+
+
+class SystemNoteIn(BaseModel):
+    """POST /api/agents/{id}/system-note request body — a framework system
+    notification delivered to the agent as a system note (system_marker in
+    the timeline), never a peer chat message.
+
+    `content` is the note text. `source` follows the same envelope whitelist
+    as chat messages (system / agent:N / user / ...), defaulting to 'system';
+    it is recorded for audit but the note itself renders without a sender
+    prefix. `note_tag` picks the timeline chip — must be a NoteTag value
+    (closed set); `task` is the task-notification family. `resurrect`
+    controls whether a terminated target is woken to receive the note: task
+    assignment (a delegator direction) resurrects, plain update notices do
+    not (user ruling 2026-08-27 — notifications never resurrect an owner).
+    """
+
+    content: str = Field(min_length=1)
+    source: str = Field(default="system", min_length=1, max_length=64)
+    note_tag: str = "task"
+    resurrect: bool = True
+
+    @field_validator("note_tag")
+    @classmethod
+    def _check_note_tag(cls, v: str) -> str:
+        try:
+            NoteTag(v)
+        except ValueError as exc:
+            raise ValueError(f"note_tag {v!r} is not a NoteTag value") from exc
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _check_envelope_source(cls, v: str) -> str:
+        validate_source(v)
+        return v
 
 
 class ResolveBatchIn(BaseModel):

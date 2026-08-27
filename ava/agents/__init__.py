@@ -341,6 +341,35 @@ def send_message(agent_id: int, content: str) -> None:
     _client.send_message(agent_id, content=content, source=source)
 
 
+def send_system_note(
+    agent_id: int,
+    content: str,
+    *,
+    tag: str = "task",
+    resurrect: bool = True,
+) -> int:
+    """Deliver a framework system note to another agent.
+
+    The note appears in the target agent's timeline as a system note (no
+    sender prefix, no peer timestamp), not as a chat message from you. `tag`
+    selects the note chip — a NoteTag value; `task` is the task-notification
+    family (assign / update / reminder). `resurrect` revives a terminated
+    target so it can receive the note: pass True only for real work
+    directions (a task assignment), never for plain notifications (user
+    ruling 2026-08-27).
+
+    Returns the durable inbound id. Does not wait for the target to act.
+    """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
+    source = ava._boot.require_actor()
+    return _client.send_system_note(
+        agent_id,
+        content=content,
+        note_tag=tag,
+        source=source,
+        resurrect=resurrect,
+    )
+
+
 def get_last_message(agent_id: int) -> str | None:
     """Return the text of an agent's last message, or None when it has
     produced none yet.

@@ -521,6 +521,23 @@ def send_message(
     _raise_from_response(resp)
 
 
+def send_system_note(
+    agent_id: int, *, content: str, note_tag: str, source: str, resurrect: bool
+) -> int:
+    """POST /api/agents/{id}/system-note — deliver a framework system note.
+
+    Returns the durable inbound id; renders as a system note (no sender
+    prefix), waking a live agent, reviving a terminated one when `resurrect`
+    is set (same 120 s per-call timeout as send_message).
+    """
+    import httpx
+
+    body = {"content": content, "note_tag": note_tag, "source": source, "resurrect": resurrect}
+    resp = _post(f"/api/agents/{agent_id}/system-note", body, timeout=httpx.Timeout(120.0))
+    _raise_from_response(resp)
+    return int(resp.json()["inbound_id"])
+
+
 def get_last_message(agent_id: int, caller: str) -> str | None:
     """GET /api/agents/{id}/last-message → text of the last AI message."""
     resp = _get(f"/api/agents/{agent_id}/last-message", params={"caller": caller})

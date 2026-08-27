@@ -36,6 +36,7 @@ def test_note_tag_value_set() -> None:
     assert {tag.value for tag in NoteTag} == {
         "sdk_hint",
         "agent_reply",
+        "task",
         "compact_reminder",
         "history_dump",
         "silent_idle_continue",

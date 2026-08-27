@@ -57,11 +57,14 @@ class NoteTag(StrEnum):
 
     The lifecycle_* members are process-lifecycle transitions (terminate /
     restart-complete / resurrect / fork identity); the rest are one-time
-    guidance notes surfaced before the agent's next turn.
+    guidance notes surfaced before the agent's next turn. `task` marks a
+    task-system notification (assign / update / reminder) delivered through
+    the inbound queue and claimed into a note, like `heartbeat`.
     """
 
     SDK_HINT = "sdk_hint"
     AGENT_REPLY = "agent_reply"
+    TASK = "task"
     COMPACT_REMINDER = "compact_reminder"
     HISTORY_DUMP = "history_dump"
     SILENT_IDLE_CONTINUE = "silent_idle_continue"

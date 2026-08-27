@@ -29,6 +29,7 @@ class InboundKind(StrEnum):
     """
 
     CHAT = "chat"
+    SYSTEM_NOTE = "system_note"
     COMPACT_SUMMARY = "compact_summary"
     COMPACT_REQUEST = "compact_request"
     CANCEL = "cancel"

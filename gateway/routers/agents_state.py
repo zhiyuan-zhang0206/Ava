@@ -14,6 +14,7 @@ import logging
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from psycopg_pool import ConnectionPool
 
 from gateway.routers._delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.routers._eval_guard import caller_eval_isolation, deny_isolated_result_read
@@ -25,9 +26,11 @@ from gateway.schemas import (
     ContextSection,
     LastMessageResponse,
     PendingInbound,
+    SystemNoteIn,
     TokenUsageResponse,
     TraceCheckpointMessagesResponse,
 )
+from ops import ops_lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
 from shared import agent_snapshot
@@ -38,7 +41,8 @@ from shared.checkpoint import (
     load_checkpoint_messages_by_trace,
 )
 from shared.config import settings
-from shared.db import agent_exists, list_pending_inbounds
+from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
+from shared.inbound import InboundKind
 from shared.lm.content import content_blocks
 from shared.lm.factory import model_supports_vision, vision_capable_provider_names
 from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
@@ -224,6 +228,80 @@ async def post_agent_message(
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
+
+
+def _system_note_blocking(
+    pool: ConnectionPool,
+    agent_id: int,
+    content: str,
+    source: str,
+    note_tag: str,
+) -> int:
+    """Sync system-note INSERT — via to_thread (pool work off the event loop)."""
+    with pool.connection() as conn:
+        return insert_inbound_message(
+            conn,
+            agent_id,
+            content=content,
+            source=source,
+            kind=InboundKind.SYSTEM_NOTE.value,
+            payload={"note_tag": note_tag},
+        )
+
+
+@router.post("/api/agents/{agent_id}/system-note", status_code=201)
+async def post_agent_system_note(
+    agent_id: int,
+    body: SystemNoteIn,
+    request: Request,
+) -> AgentMessageEnqueued:
+    """Deliver a framework system note to the specified agent.
+
+    The note is queued as a kind='system_note' inbound; the agent's claim
+    renders it as a system note (system_marker, NoteTag `body.note_tag`) in
+    its timeline — no Agent prefix, no peer timestamp — instead of a chat
+    peer message. Task notifications (assign / update / reminder) are the
+    current family (`note_tag='task'`).
+
+    `body.resurrect` mirrors the chat path's auto-resurrect but is a choice,
+    not a given: task assignment (a delegator direction) wakes a terminated
+    owner, while plain update / reminder notices must not (user ruling
+    2026-08-27 — notification messages never resurrect a terminated owner).
+
+    404: agent_id does not exist. 413: content exceeds the 1 MiB transport
+    limit. 422: note_tag is not a NoteTag value, or source is not a legal
+    envelope source.
+    """
+    if len(body.content.encode("utf-8")) > _MAX_MESSAGE_CONTENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "system note content exceeds the 1 MiB limit; write large content "
+                "to a file and send the file path instead"
+            ),
+        )
+    await asyncio.to_thread(get_agent_status, agent_id)
+    inbound_id = await asyncio.to_thread(
+        _system_note_blocking,
+        request.app.state.db_pool,
+        agent_id,
+        body.content,
+        body.source,
+        body.note_tag,
+    )
+    # Announce for the live UI (frontend badge / turn active), like chat.
+    await _ops.publish_inbound_arrived(
+        agent_id, inbound_id, InboundKind.SYSTEM_NOTE.value, body.source, body.content
+    )
+    if body.resurrect:
+        status = await _ops.resurrect_if_terminated(
+            agent_id,
+            trigger_inbound_id=inbound_id,
+            trigger_inbound_kind=InboundKind.SYSTEM_NOTE.value,
+        )
+    else:
+        status = await asyncio.to_thread(get_agent_status, agent_id)
+    return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 
 @router.post("/api/agents/{agent_id}/messages/reconcile")

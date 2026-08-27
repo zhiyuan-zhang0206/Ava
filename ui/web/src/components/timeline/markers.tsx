@@ -46,6 +46,7 @@ export type MarkerClass =
 export const NOTE_SOURCES = new Set([
   "sdk_hint",
   "agent_reply",
+  "task",
   "compact_reminder",
   "history_dump",
   "silent_idle_continue",
