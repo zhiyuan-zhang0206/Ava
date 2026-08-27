@@ -78,6 +78,12 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     params: list[object] = []
     if body.status is not None:
         if body.status not in ("open", "in_progress", "done", "cancelled"):
+            if body.status == "ongoing":
+                raise HTTPException(
+                    status_code=422,
+                    detail="'ongoing' is the system root task's permanent state and cannot be "
+                    "assigned via PATCH -- the root task itself is immutable.",
+                )
             raise HTTPException(
                 status_code=422,
                 detail=f"Invalid status: {body.status!r}. Must be one of: open, in_progress, done, cancelled.",
@@ -129,9 +135,10 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
     """Partially update a task; omitted fields stay unchanged.
 
     status, priority, title, description, and results are taken when non-null
-    (priority must be one of P0..P3; a title colliding with another
-    open/in_progress task's is rejected). owner reassigns to another agent (an
-    explicit null is rejected — a task cannot be released).
+    (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
+    the system root's permanent state, never assignable; a title colliding with
+    another open/in_progress task's is rejected). owner reassigns to another
+    agent (an explicit null is rejected — a task cannot be released).
     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
     null is rejected — reminders cannot be disabled). Any write resets the
     reminder counters, same as the SDK update path. Unlike the SDK, an owner change here

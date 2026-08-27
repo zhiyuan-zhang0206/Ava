@@ -44,7 +44,7 @@ def root_task_id(db_conn: psycopg.Connection) -> Iterator[int]:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-            "VALUES ('Root', 'root', 'in_progress', 'system', TRUE) RETURNING id"
+            "VALUES ('Root', 'root', 'ongoing', 'system', TRUE) RETURNING id"
         )
         rid = cur.fetchone()[0]  # type: ignore[index]
     db_conn.commit()
@@ -1677,8 +1677,26 @@ def test_update_root_task_is_rejected(db_conn: psycopg.Connection, root_task_id:
             task_registry.update(root_id, owner=agent_id)
         # The rejected writes never landed — the root row is unchanged.
         root = task_registry.get(root_id)
-        assert root.status == "in_progress"
+        assert root.status == "ongoing"
         assert root.owner is None
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_non_root_rejects_ongoing_status(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """'ongoing' is the system root's permanent state: update() refuses to
+    assign it to a regular task, and the DB CHECK backs the same rule."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create("regular-task", "detail", parent=root_task_id)
+        with pytest.raises(ValueError, match="permanent state"):
+            task_registry.update(task.id, status="ongoing")
+        # The rejected write never landed.
+        assert task_registry.get(task.id).status == "open"
     finally:
         ava._boot._agent_id = original
 
@@ -1768,7 +1786,7 @@ def test_create_rejects_parent_1_when_not_root(db_conn: psycopg.Connection) -> N
             cur.execute(
                 "INSERT INTO agent_tasks (id, title, description, status, created_by, owner, is_root) "
                 "VALUES (1, 'not-root', 'd', 'open', %s, %s, FALSE), "
-                "(2, 'Root', 'root', 'in_progress', 'system', NULL, TRUE)",
+                "(2, 'Root', 'root', 'ongoing', 'system', NULL, TRUE)",
                 (str(agent_id), agent_id),
             )
         db_conn.commit()

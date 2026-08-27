@@ -86,7 +86,7 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
 
 function sampleTasks(): TaskRow[] {
   return [
-    task(1, { title: "root", status: "open" }),
+    task(1, { title: "root", status: "ongoing" }),
     task(2, { title: "subtask-open", status: "open", parent_id: 1 }),
     task(3, { title: "subtask-ip", status: "in_progress", parent_id: 1 }),
     task(4, { title: "subtask-done", status: "done", parent_id: 1 }),
@@ -113,7 +113,7 @@ describe("TaskGraph (graph mode)", () => {
     render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     const legend = screen.getByLabelText("Task graph legend");
-    for (const label of ["Open", "In progress", "Done", "Cancelled"]) {
+    for (const label of ["Open", "In progress", "Done", "Cancelled", "Root"]) {
       expect(legend.textContent).toContain(label);
     }
     expect(legend.textContent).toContain("uniform node size");
@@ -178,7 +178,7 @@ describe("TaskGraph (graph mode)", () => {
     // Use tasks where the done task has a parent_id so it shows in kanban
     // (kanban filters to parent_id !== null — subtasks only).
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "open" }),
+      task(1, { title: "root", status: "ongoing" }),
       task(2, { title: "child", status: "in_progress", parent_id: 1 }),
       task(3, { title: "done-child", status: "done", parent_id: 1 }),
     ];

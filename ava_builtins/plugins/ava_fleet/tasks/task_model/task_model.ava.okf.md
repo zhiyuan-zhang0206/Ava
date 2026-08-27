@@ -20,7 +20,7 @@ class Task:
     title: str                 # short title; unique among open/in_progress; can be renamed
     description: str           # full description — the first thing an assignee should read
     results: str | None        # result log — appended via log/note or replaced via update
-    status: str                # "open" | "in_progress" | "done" | "cancelled"
+    status: str                # "open" | "in_progress" | "done" | "cancelled" ("ongoing" = root-only permanent state)
     owner: int | None          # responsible agent id; NULL only on root task
     created_by: str            # creator agent's id string ("system" for root)
     created_at: datetime       # creation time

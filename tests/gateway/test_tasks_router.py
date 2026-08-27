@@ -60,7 +60,7 @@ def _make_root_task(db: psycopg.Connection) -> int:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-            "VALUES ('Root', 'root', 'in_progress', 'system', TRUE) RETURNING id"
+            "VALUES ('Root', 'root', 'ongoing', 'system', TRUE) RETURNING id"
         )
         tid = cur.fetchone()[0]  # type: ignore[index]
     db.commit()
@@ -215,7 +215,7 @@ class TestRootTaskImmutable:
             resp = client.patch(f"/api/tasks/{root_id}", json={"status": "done"})
         assert resp.status_code == 422
         assert "root task" in resp.json()["detail"]
-        assert _status(db_conn, root_id) == "in_progress"  # unchanged
+        assert _status(db_conn, root_id) == "ongoing"  # unchanged
 
     def test_reassign_is_rejected(self, db_conn: psycopg.Connection) -> None:
         root_id = _make_root_task(db_conn)
@@ -229,6 +229,17 @@ class TestRootTaskImmutable:
         with TestClient(app) as client:
             resp = client.patch("/api/tasks/999999", json={"status": "done"})
         assert resp.status_code == 404
+
+    def test_patch_ongoing_status_rejected(self, db_conn: psycopg.Connection) -> None:
+        """'ongoing' is the system root's permanent state — a regular task
+        cannot be patched into it."""
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner, title="regular")
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"status": "ongoing"})
+        assert resp.status_code == 422
+        assert "permanent state" in resp.json()["detail"]
+        assert _status(db_conn, tid) == "in_progress"  # unchanged
 
 
 class TestParentClose:

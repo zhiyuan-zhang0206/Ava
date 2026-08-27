@@ -35,7 +35,7 @@ Old field name `content` is a deprecated alias (Task attribute + `update` parame
 
 ## `status`
 
-One of four valid values (`CHECK` constraint): `"open"`, `"in_progress"`, `"done"`, `"cancelled"`. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
+One of four values an agent can assign (`CHECK` constraint): `"open"`, `"in_progress"`, `"done"`, `"cancelled"`. The `CHECK` also admits `"ongoing"` — the system root task's permanent state, never assignable via `create()`/`update()`/PATCH and pinned by the `agent_tasks_root_status_ongoing` DB constraint. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
 
 ## `owner`
 
