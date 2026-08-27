@@ -541,11 +541,15 @@ def at(
             "Provide a future time, or use a positive timedelta."
         )
     # The announcement's wall clock follows the cluster timezone (user ruling
-    # 2026-08-27: one cluster clock); the sleep is UTC-based regardless.
+    # 2026-08-27: one cluster clock); the sleep is UTC-based regardless. A
+    # settings-lite process (no authoritative cluster timezone) passes None so
+    # the announcement renders in the watcher's own wall clock — the same
+    # degradation every other display path uses.
+    tz = settings.general.timezone if "timezone" in settings.general.model_fields_set else None
     code = build_at_script(
         when_iso=due_at.isoformat(),
         message=message,
-        timezone=settings.general.timezone,
+        timezone=tz,
     )
     # The one-shot script sleeps until `when`, wakes you once, and exits — it
     # ends itself, so no watchdog.

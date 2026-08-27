@@ -98,6 +98,19 @@ def test_build_at_script_has_wake_and_sleep() -> None:
     compile(script, "<at-script>", "exec")  # must be valid Python
 
 
+def test_build_at_script_none_timezone_uses_host_wall_clock() -> None:
+    """A settings-lite process has no authoritative cluster timezone: the
+    one-shot announcement renders in the watcher process's own wall clock
+    (the documented lite degradation), and the script needs no ZoneInfo."""
+
+    when = dt.datetime(2030, 1, 1, 0, 0, tzinfo=dt.UTC)
+    script = build_at_script(when_iso=when.isoformat(), message="hi there", timezone=None)
+    assert "ZoneInfo" not in script
+    assert "_WHEN.astimezone().isoformat()" in script
+    assert "_WHEN.astimezone(_TZ).isoformat()" not in script
+    compile(script, "<at-script>", "exec")  # must be valid Python
+
+
 def test_build_at_script_announcement_uses_cluster_zone() -> None:
     """The one-shot startup announcement renders in the passed cluster
     timezone (user ruling 2026-08-27: one cluster clock), never the host OS
