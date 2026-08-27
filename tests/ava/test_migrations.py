@@ -18,6 +18,7 @@ Coverage of the three cutover paths the design requires:
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Generator, Iterable, Iterator
@@ -355,6 +356,119 @@ def test_force_terminate_fence_migration_backfills_current_death_intent() -> Non
     assert post_force_chat > current_marker
     assert no_current_marker_chat > historical_marker
     assert pre_force_chat < current_marker_after_chat
+
+
+_SKILL_MATCH_CLEANUP_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260827T165000_drop-skill-match-config-keys.sql"
+)
+_SKILL_MATCH_KEYS = (
+    "skill_match_enabled",
+    "skill_match_top_k",
+    "skill_match_min_score",
+    "skill_match_budget_ms",
+)
+
+
+def test_skill_match_config_cleanup_migration_strips_residue() -> None:
+    """The deleted skill matcher's config keys are removed from every persisted
+    agent-configuration home; unrelated keys and NULL rows survive.
+
+    The matcher was removed per user ruling 2026-08-27 but a later merge
+    accidentally restored it, so stored overlays on deployed clusters still
+    carry the keys. The overlay resolver rejects unknown keys, so leftover
+    keys would break agent boot once the fields are unregistered — this
+    migration deletes them (user report 2026-08-28).
+    """
+    residue = {
+        "llm_model": "claude-opus-4-8",
+        "skill_match_enabled": True,
+        "skill_match_top_k": 3,
+        "skill_match_min_score": 0.35,
+        "skill_match_budget_ms": 300,
+    }
+    with (
+        _throwaway_database("skill_match_cleanup") as url,
+        psycopg.connect(url, autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        cur.execute(sql.SQL(cast(LiteralString, _SCHEMA_SQL.read_text())), prepare=False)
+        cur.execute("INSERT INTO agents (id) SELECT generate_series(1, 4)")
+        cur.execute(
+            "INSERT INTO agents_meta (id, status, config_overlay, birth_config) VALUES "
+            "(1, 'idling', %s::jsonb, NULL), "  # every residue key + an unrelated key
+            "(2, 'idling', %s::jsonb, NULL), "  # no residue key — untouched
+            "(3, 'idling', NULL, NULL), "  # both columns NULL — stay NULL
+            "(4, 'idling', NULL, %s::jsonb)",  # residue key in birth_config
+            (
+                json.dumps(residue),
+                json.dumps({"llm_model": "claude-opus-4-8"}),
+                json.dumps({"syntax_fix_ruff_format": True, "skill_match_enabled": True}),
+            ),
+        )
+        cur.execute(
+            "INSERT INTO agent_presets (name, label, config) VALUES (%s, %s, %s::jsonb)",
+            ("residue", "Residue", json.dumps(residue)),
+        )
+
+        cur.execute(
+            sql.SQL(cast(LiteralString, _SKILL_MATCH_CLEANUP_MIGRATION.read_text())),
+            prepare=False,
+        )
+
+        cur.execute("SELECT id, config_overlay, birth_config FROM agents_meta ORDER BY id")
+        overlays: list[Any] = []
+        births: list[Any] = []
+        for row in cur.fetchall():
+            overlays.append(row[1])
+            births.append(row[2])
+        cur.execute("SELECT config FROM agent_presets WHERE name = 'residue'")
+        row = cur.fetchone()
+        assert row is not None
+        preset = row[0]
+        cur.execute("SELECT config_overlay FROM agents_meta WHERE id = 1")
+        row = cur.fetchone()
+        assert row is not None
+        cleaned = row[0]
+
+    assert overlays[0] == {"llm_model": "claude-opus-4-8"}
+    assert all(k not in overlays[0] for k in _SKILL_MATCH_KEYS)
+    assert overlays[1] == {"llm_model": "claude-opus-4-8"}
+    assert overlays[2] is None
+    assert births[0] is None
+    assert births[1] is None
+    assert births[2] is None
+    assert births[3] == {"syntax_fix_ruff_format": True}
+    assert preset == {"llm_model": "claude-opus-4-8"}
+    assert cleaned == {"llm_model": "claude-opus-4-8"}
+
+
+def test_skill_match_config_cleanup_migration_is_idempotent() -> None:
+    """A second application changes nothing (the WHERE clauses already skipped
+    the cleaned rows), and the no-op down runs without error."""
+    with (
+        _throwaway_database("skill_match_cleanup2") as url,
+        psycopg.connect(url, autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        cur.execute(sql.SQL(cast(LiteralString, _SCHEMA_SQL.read_text())), prepare=False)
+        cur.execute("INSERT INTO agents (id) VALUES (1)")
+        cur.execute(
+            "INSERT INTO agents_meta (id, status, config_overlay) VALUES (1, 'idling', %s::jsonb)",
+            (json.dumps({"skill_match_enabled": True, "llm_model": "x"}),),
+        )
+        migration = _SKILL_MATCH_CLEANUP_MIGRATION.read_text()
+        cur.execute(sql.SQL(cast(LiteralString, migration)), prepare=False)
+        cur.execute(sql.SQL(cast(LiteralString, migration)), prepare=False)
+        down = _SKILL_MATCH_CLEANUP_MIGRATION.with_suffix(".down.sql").read_text()
+        cur.execute(sql.SQL(cast(LiteralString, down)), prepare=False)
+        cur.execute("SELECT config_overlay FROM agents_meta WHERE id = 1")
+        row = cur.fetchone()
+        assert row is not None
+        overlay = row[0]
+
+    assert overlay == {"llm_model": "x"}
 
 
 # ─── apply_pending: post-baseline delta ───────────────────────────────────────

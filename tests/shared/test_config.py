@@ -130,6 +130,27 @@ def test_runner_mode_defaults_to_process_and_is_not_per_agent() -> None:
     assert FIELD_INFOS["runner_mode"].alias == "AVA_RUNNER_MODE"
 
 
+def test_skill_match_fields_are_unregistered() -> None:
+    """The deleted skill semantic matcher leaves no settings residue.
+
+    The matcher was removed per user ruling 2026-08-27; a later merge
+    accidentally restored its fields on main and they re-entered the config
+    surface (Inspector Configuration Overlay) and per-agent overlay
+    acceptance. Regression guard: the four keys must stay unregistered —
+    a resurrected field would surface in the config UI again and be accepted
+    in `ava.self.restart(config_overlay=...)`.
+    """
+    from shared.config import FIELD_INFOS
+
+    for name in (
+        "skill_match_enabled",
+        "skill_match_top_k",
+        "skill_match_min_score",
+        "skill_match_budget_ms",
+    ):
+        assert name not in FIELD_INFOS, f"{name} must not be a registered settings field"
+
+
 def test_runner_mode_rejects_an_unknown_value() -> None:
     """Fail fast on an unknown mode rather than defaulting to one: a typo'd
     `AVA_RUNNER_MODE` must not silently leave the cluster in process mode (or,
