@@ -198,8 +198,9 @@ def test_plugin_loads_and_writes_without_fcntl(
 ) -> None:
     """Windows smoke: plugin import + index update with no fcntl module.
 
-    CI has no Windows runner — the root cause of b4b9689, where an unguarded
-    top-level ``import fcntl`` crashed every Windows agent at plugin load.
+    CI has no Windows runner — the root cause of 6e96b1554, where an
+    unguarded top-level ``import fcntl`` crashed every Windows agent at
+    plugin load.
     Simulate Windows's missing fcntl in-process by making ``import fcntl``
     raise ImportError while the plugin loads and writes. Trade-off vs a real
     Windows runner: only the fcntl absence is simulated, not msvcrt or other
