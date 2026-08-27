@@ -698,7 +698,7 @@ COMMENT ON COLUMN agent_archive_stats.computed_at IS
 -- agents_meta.status at query time, not tracked here.
 CREATE TABLE agent_tasks (
     id          BIGSERIAL PRIMARY KEY,
-    parent_id   BIGINT REFERENCES agent_tasks(id),      -- parent task; every task descends from the root, so NULL marks only the root itself (task_registry.create() defaults a parentless task to the root)
+    parent_id   BIGINT REFERENCES agent_tasks(id),      -- parent task; every task descends from the root, so NULL marks only the root itself (task_registry.create() requires an explicit parent)
     title       TEXT NOT NULL,                          -- short one-line name, shown in listings; renameable via update()/PATCH, unique among open/in_progress tasks (app-level check)
     description TEXT NOT NULL,                          -- full detail of what to do; read before working
     results     TEXT,                                   -- result log (what was done, output paths); replaced by update, appended by log
@@ -728,10 +728,10 @@ CREATE INDEX idx_agent_tasks_status_created ON agent_tasks (status, created_at);
 -- earlier task leaves open/in_progress.
 CREATE UNIQUE INDEX agent_tasks_title_unique_open ON agent_tasks (title) WHERE status IN ('open', 'in_progress');
 
--- The root task: system-owned, always in_progress, default parent for tasks
--- created without an explicit parent (enforced by task_registry.create(), which
--- resolves this row as the parent when none is passed). Idempotent so
--- re-bootstrapping is a no-op.
+-- The root task: system-owned, always in_progress, parent of the cluster's
+-- top-level tasks only. task_registry.create() requires an explicit parent,
+-- and the root (id 1) is the one id callers pass for a top-level task.
+-- Idempotent so re-bootstrapping is a no-op.
 INSERT INTO agent_tasks (title, description, results, status, created_by, is_root)
 SELECT 'Root', 'System root task -- all tasks descend from here.', 'Root task for the task registry tree.', 'in_progress', 'system', TRUE
 WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE is_root = TRUE);

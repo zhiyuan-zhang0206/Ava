@@ -3,9 +3,9 @@ write surfaces (SDK `update()` and gateway `PATCH /api/tasks/{id}`).
 
 Both accept a `parent_id` change. The checks are identical: the parent must
 exist, must not be the task itself, and must not be one of its own descendants
-(no cycles); an explicit `None` resolves to the system root task (the same
-anchor `create(parent=None)` uses). Kept here so the two surfaces cannot drift
-apart.
+(no cycles); an explicit `None` resolves to the system root task (the anchor
+`create()` requires callers to pass explicitly -- id 1 -- for top-level tasks).
+Kept here so the two surfaces cannot drift apart.
 """
 
 from __future__ import annotations

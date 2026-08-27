@@ -26,18 +26,18 @@ open ──→ in_progress ──→ done
 
 ## API
 
-### `create(title, description, *, parent=None, owner=None, priority="P2", remind_interval_seconds=None) -> Task`
+### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None) -> Task`
 
 Create a task and return the full `Task`. `title` is a single line (unique among `open`/`in_progress`); `description` is the task description.
 
+- **`parent` is required** — the id of an existing task this task descends from. The system root task (**id 1**) is the parent of the cluster's top-level tasks **only**; a subtask must pass the id of an existing task as its parent (create the parent first). A missing parent id raises `ValueError`.
 - **Creator defaults to owner** (`owner=None`); when explicitly passing another agent id, the task is directly assigned to that agent, and that agent receives a notification including title + description.
-- `parent` forms a task tree; **default `None` falls back to the system root task**—no orphaned top-level nodes.
 - `priority`: `"P0"` (highest)..`"P3"` (lowest), default `"P2"`; illegal value raises `ValueError` (#663; board sorts within a status column by this).
 - `remind_interval_seconds`: no-update duration after which the owner is reminded. Default scales with priority — P0 30m / P1 1h / P2 2h / P3 4h. **Cannot be disabled**—`None` falls back to the priority default; an explicit value wins; cap 24h; out-of-range raises `ValueError`.
 - **Rejects duplicate titles** among `open`/`in_progress` tasks (`ValueError`).
 - Triggers a `task_create` event log + publishes `task_created` (SSE, board invalidates and refetches).
 
-### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent=None, priority="P2", remind_interval_seconds=None) -> (Task, int)`
+### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", remind_interval_seconds=None) -> (Task, int)`
 
 Spawn an agent and create a task assigned to it in one call: spawns per `preset`/`config_overlay` (the agent must exist to be an owner), then `create(owner=that agent)`—the create notification already carries task id + title + description, no separate `send_message` needed. Returns `(task, agent_id)`.
 
