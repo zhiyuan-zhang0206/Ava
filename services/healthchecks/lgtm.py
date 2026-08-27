@@ -33,13 +33,14 @@ from shared.config import settings
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 
-# The locally managed backends' readiness endpoints, on their fixed host ports.
-# The marker pins this check to the owner host, so loopback + fixed ports is the
-# contract. Remote Tempo intentionally has no readiness probe here.
+# The locally managed backends' readiness endpoints, derived from the
+# observability settings' base URLs (defaults keep the historical loopback +
+# fixed-port contract). The marker pins this check to the owner host. Remote
+# Tempo intentionally has no readiness probe here.
 READINESS_PROBES: tuple[tuple[str, str], ...] = (
-    ("loki", "http://127.0.0.1:3100/ready"),
-    ("prometheus", "http://127.0.0.1:9090/-/ready"),
-    ("grafana", "http://127.0.0.1:3003/api/health"),
+    ("loki", f"{settings.observability.telemetry_loki_url}/ready"),
+    ("prometheus", f"{settings.observability.telemetry_prometheus_url}/-/ready"),
+    ("grafana", f"{settings.observability.telemetry_grafana_url}/api/health"),
 )
 
 

@@ -182,6 +182,34 @@ def test_is_alive_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
+def test_is_alive_probes_configured_otlp_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The liveness probe follows the settings OTLP endpoint, not a hardcoded URL
+    — and keeps any base path the endpoint carries."""
+    seen: list[str] = []
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            return None
+
+    def _open(req: urllib.request.Request, **_kw: object) -> _Resp:
+        seen.append(req.full_url)
+        return _Resp()
+
+    monkeypatch.setattr(
+        hc.settings.observability,
+        "telemetry_otlp_endpoint",
+        "http://collector.example:4318/base",
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", _open)  # pyright: ignore[reportUnknownArgumentType]
+    assert hc._is_alive() is True
+    assert seen == ["http://collector.example:4318/base/v1/traces"]
+
+
 def test_is_alive_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """Connection-level failure — the sidecar is down."""
 

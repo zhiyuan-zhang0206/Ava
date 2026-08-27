@@ -1,7 +1,8 @@
 """OTel Collector sidecar healthcheck — called every 60s by the watchdog.
 
-Probes the sidecar's OTLP/HTTP receiver at 127.0.0.1:4318 with a valid empty
-ExportTraceServiceRequest and requires a 2xx. A socket that merely answers 401
+Probes the sidecar's OTLP/HTTP receiver at the settings OTLP endpoint (default
+http://127.0.0.1:4318) with a valid empty ExportTraceServiceRequest and requires
+a 2xx. A socket that merely answers 401
 or 415 is not a working ingestion path. It also reads the collector's pinned
 loopback Prometheus endpoint (the per-unit AVA_OTELCOL_METRICS_PORT, default
 8888) for current exporter queue saturation. Remote pressure is logged, not
@@ -82,8 +83,11 @@ def _labels(text: str) -> dict[str, str]:
 def _is_alive() -> bool:
     """A valid OTLP/JSON request accepted by the local pipeline = alive."""
     try:
-        req = urllib.request.Request(  # noqa: S310 — loopback probe, deliberate
-            urllib.parse.urljoin("http://127.0.0.1:4318/", "v1/traces"),
+        req = urllib.request.Request(  # noqa: S310 — configured-endpoint probe, deliberate
+            urllib.parse.urljoin(
+                settings.observability.telemetry_otlp_endpoint.rstrip("/") + "/",
+                "v1/traces",
+            ),
             method="POST",
             data=b'{"resourceSpans":[]}',
             headers={"Content-Type": "application/json"},
