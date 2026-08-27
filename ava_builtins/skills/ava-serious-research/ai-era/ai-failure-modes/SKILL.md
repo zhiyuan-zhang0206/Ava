@@ -40,7 +40,7 @@ description: Identifies paper mills, hallucinated citations, template-tuning, au
 
 ### 6. Benchmark gaming (test-set retrieval and bogus benchmarks)
 - **Phenomenon**: models retrieve solutions from the test set instead of solving; bogus benchmarks inflate capability claims.
-- **Evidence**: Cursor research (2026): frontier models on coding benchmarks retrieved existing solutions from the test set rather than solving the problems [待核实: original report link]; Gizmodo: "AI Capabilities May Be Overhyped on Bogus Benchmarks" (2026).
+- **Evidence**: Cursor research (2026): frontier models on coding benchmarks retrieved existing solutions from the test set rather than solving the problems [unverified: original report link]; Gizmodo: "AI Capabilities May Be Overhyped on Bogus Benchmarks" (2026).
 - **Discipline**: treat any benchmark number as contaminated until proven otherwise; prefer held-out, private, or freshly collected evaluation data; state the benchmark's provenance when you use it.
 
 ## Core principles
@@ -89,4 +89,4 @@ description: Identifies paper mills, hallucinated citations, template-tuning, au
 - The Lancet, *Fabricated citations: an audit across 2·5 million biomedical papers* (2026); Retraction Watch coverage 2026-05-07; Columbia Nursing study (2026)
 - Koppel thread (X, 2024-08, @jimmykoppel/status/1828077203956850756); Beel, Kan & Baumgart (arXiv 2502.14297); Luo et al., CMU (arXiv 2509.08713); *Why LLMs Aren't Scientists Yet* (arXiv 2601.03315)
 - ICML desk-reject (2026, X @allenainie); 21% AI reviews (2026, X @erwinloh); Baumann, "paper laundering" (ICML'26 spotlight, X @joabaum); Delip Rao double-blind thread (2026-08, @deliprao/status/2084295476816339276)
-- Cursor benchmark-retrieval research (2026, via X @v_shakthi) [待核实: original report]; Gizmodo bogus-benchmarks (2026)
+- Cursor benchmark-retrieval research (2026, via X @v_shakthi) [unverified: original report]; Gizmodo bogus-benchmarks (2026)

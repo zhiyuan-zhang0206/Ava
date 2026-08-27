@@ -35,7 +35,7 @@ _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 RESTART_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="重启自己。",
+        content="\u91cd\u542f\u81ea\u5df1\u3002",
         tool_calls=[
             {
                 "id": "call_restart",
@@ -47,7 +47,9 @@ RESTART_SCRIPT: tuple[AIMessage, ...] = (
     ),
 )
 
-IDLE_SCRIPT: tuple[AIMessage, ...] = (AIMessage(content="我已重启完成。", usage_metadata=_USAGE),)
+IDLE_SCRIPT: tuple[AIMessage, ...] = (
+    AIMessage(content="\u6211\u5df2\u91cd\u542f\u5b8c\u6210\u3002", usage_metadata=_USAGE),
+)
 
 
 def _is_post_restart_process() -> bool:

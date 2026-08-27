@@ -78,16 +78,16 @@ round, spawn a separate quality-check supervisor that judges *this round's* outp
          target_id,
          "Not done. Defects:
 "
-         "1. [遗漏] <requirement not implemented at all> — <path:line where it "
+         "1. [omitted] <requirement not implemented at all> — <path:line where it "
          "should be; what you observed instead>.
 "
-         "2. [误解] <requirement implemented wrong> — <path:line, what the code "
+         "2. [misunderstood] <requirement implemented wrong> — <path:line, what the code "
          "does vs what the goal says>.
 "
-         "3. [偷懒] <check skipped or shallow> — <e.g. test.js has no case for X; "
+         "3. [slacked] <check skipped or shallow> — <e.g. test.js has no case for X; "
          "repro: node test.js | grep X>.
 "
-         "Fix all of the above; anything marked 遗漏 needs a real implementation, "
+         "Fix all of the above; anything marked omitted needs a real implementation, "
          "not a comment.",
      )
      watcher = ava.files.read(f"{ava.skills.ava_goal.path}/reference/watch_idle.py")
@@ -95,8 +95,8 @@ round, spawn a separate quality-check supervisor that judges *this round's* outp
      ava.watcher.launch(watcher, timeout="6h")
      ```
 
-   Categories: **[遗漏] omitted** — a required piece is absent; **[误解]
-   misunderstood** — present but does the wrong thing; **[偷懒] slacked** — a
+   Categories: **[omitted]** — a required piece is absent; **[misunderstood]**
+   — present but does the wrong thing; **[slacked]** — a
    check or test is skipped, shallow, or fake-green. Keep a per-round log
    (verdict + defects + evidence) — it is the run record you report later.
 

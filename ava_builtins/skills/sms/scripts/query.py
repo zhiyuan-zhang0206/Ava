@@ -34,11 +34,15 @@ DEFAULT_LOOKBACK_HOURS = 12
 # Each pattern captures one group: the code digits.
 VERIFICATION_PATTERNS: list[re.Pattern[str]] = [
     # Chinese keywords
-    re.compile(r"(?:验证码|校验码|动态码|短信验证码)\D{0,5}?(\d{4,8})"),
+    re.compile(
+        r"(?:\u9a8c\u8bc1\u7801|\u6821\u9a8c\u7801|\u52a8\u6001\u7801|\u77ed\u4fe1\u9a8c\u8bc1\u7801)\D{0,5}?(\d{4,8})"
+    ),
     # Korean keywords
-    re.compile(r"(?:인증번호|인증\s*코드)\D{0,5}?(\d{4,8})"),
+    re.compile(r"(?:\uc778\uc99d\ubc88\ud638|\uc778\uc99d\s*\ucf54\ub4dc)\D{0,5}?(\d{4,8})"),
     # Japanese keywords
-    re.compile(r"(?:認証コード|確認コード)\D{0,5}?(\d{4,8})"),
+    re.compile(
+        r"(?:\u8a8d\u8a3c\u30b3\u30fc\u30c9|\u78ba\u8a8d\u30b3\u30fc\u30c9)\D{0,5}?(\d{4,8})"
+    ),
     # Google-style
     re.compile(r"G-(\d{4,8})\s+is\s+your", re.IGNORECASE),
     # English keywords
@@ -47,7 +51,7 @@ VERIFICATION_PATTERNS: list[re.Pattern[str]] = [
         re.IGNORECASE,
     ),
     # Generic "code: 123456"
-    re.compile(r"(?:code|pin|密码)\D{0,5}?(\d{4,8})", re.IGNORECASE),
+    re.compile(r"(?:code|pin|\u5bc6\u7801)\D{0,5}?(\d{4,8})", re.IGNORECASE),
     # Standalone 6-digit sequences
     re.compile(r"(?:^|\s)(\d{6})(?:\s|$)", re.MULTILINE),
     # Square bracket codes

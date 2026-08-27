@@ -731,7 +731,7 @@ def test_live_live_edge_still_returned_after_filter(
     assert edges["send_message"]["weight"] == 1.0
 
 
-# ── category 负样本: audit 专属边, telemetry 不得成边 ─────────────────────
+# -- category negative samples: audit-only edges, telemetry must not form edges ---
 
 
 def test_telemetry_send_message_does_not_become_edge(db_conn: psycopg.Connection) -> None:

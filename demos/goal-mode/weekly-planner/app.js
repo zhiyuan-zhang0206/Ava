@@ -1,13 +1,14 @@
 'use strict';
 
 /**
- * app.js — 界面层：周一到周日七列布局、添加/移动/删除、
- * 键盘操作（方向键移动任务、Esc 取消删除确认）、可见焦点、
- * 屏幕阅读器角色/标签与 aria-live 播报、每列最多 20 条 + 显示更多、
- * 删除二次确认、日期格式化（Mon 8/13）。
+ * app.js — UI layer: seven-column Monday-to-Sunday layout, add/move/delete,
+ * keyboard operation (arrow keys move tasks, Esc cancels delete confirmation),
+ * visible focus, screen-reader roles/labels with aria-live announcements,
+ * a 20-per-column window with show-more, delete double-confirmation,
+ * and date formatting (Mon 8/13).
  *
- * 纯工具函数（日期相关）通过 module.exports 守卫导出，Node 可直接
- * require 测试；DOM 初始化只在浏览器里运行。
+ * Pure (date-related) helpers are exported behind a module.exports guard so
+ * Node can require-test them directly; DOM initialization only runs in a browser.
  */
 (function (root, factory) {
   if (typeof module !== 'undefined' && module.exports) {
@@ -19,24 +20,24 @@
   'use strict';
 
   var WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  var DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  var DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  /** 本周（周一起始）的周一。 */
+  /** The Monday of the current week (week starts Monday). */
   function toMonday(date) {
     var d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    var dow = (d.getDay() + 6) % 7; // 周一 = 0
+    var dow = (d.getDay() + 6) % 7; // Monday = 0
     d.setDate(d.getDate() - dow);
     return d;
   }
 
-  /** 日期显示为 'Mon 8/13' 这种形式，绝不出现 ISO 字符串。 */
+  /** Dates render as 'Mon 8/13' - never an ISO string. */
   function formatDayHeader(date) {
     return (
       WEEKDAYS[date.getDay()] + ' ' + (date.getMonth() + 1) + '/' + date.getDate()
     );
   }
 
-  /** 从周一起连续 7 天的日期数组。 */
+  /** 7 consecutive dates starting from Monday. */
   function dayDates(now) {
     var mon = toMonday(now);
     var out = [];
@@ -54,13 +55,13 @@
     );
   }
 
-  /** 相邻天（不越界，越界返回 null）。 */
+  /** Adjacent day (never out of range; returns null past the edges). */
   function adjacentDay(day, delta) {
     var d = day + delta;
     return d >= 0 && d <= 6 ? d : null;
   }
 
-  /** 探测 localStorage 是否可用（file:// 或隐私模式下可能抛错）。 */
+  /** Detect whether localStorage works (may throw under file:// or private mode). */
   function getStorage() {
     try {
       if (typeof localStorage === 'undefined' || localStorage === null) return null;
@@ -80,15 +81,15 @@
     var state = Store.loadState(storage);
 
     var liveRegion = document.getElementById('live-region');
-    var cellEls = []; // 每列：{form, input, errorEl, listEl, moreBtn, countEl, mcountEl}
-    var expanded = {}; // 天索引 -> true（该天已展开全部）
-    var confirming = {}; // 任务 id -> true（删除确认中）
+    var cellEls = []; // per column: {form, input, errorEl, listEl, moreBtn, countEl, mcountEl}
+    var expanded = {}; // day index -> true (fully expanded)
+    var confirming = {}; // task id -> true (delete confirmation pending)
     var lastAddedId = null;
 
     function announce(message) {
       if (!liveRegion) return;
       liveRegion.textContent = '';
-      void liveRegion.offsetWidth; // 强制重排，连续相同播报也会重新朗读
+      void liveRegion.offsetWidth; // force reflow so repeated identical announcements re-read
       liveRegion.textContent = message;
     }
 
@@ -112,7 +113,7 @@
       return null;
     }
 
-    /** 填充表头日期、今天标记，收集每列的 DOM 引用。 */
+    /** Fill header dates and today markers; collect each column's DOM refs. */
     function buildRows() {
       var dates = dayDates(new Date());
       var today = new Date();
@@ -135,7 +136,7 @@
         var text = formatDayHeader(date);
         var label = DAY_LABELS[i] + ' ' + text;
         if (head) head.setAttribute('aria-label', label);
-        if (cell) cell.setAttribute('aria-label', label + ' 的任务');
+        if (cell) cell.setAttribute('aria-label', label + ' tasks');
         if (dateEl) dateEl.textContent = text;
         if (mdateEl) mdateEl.textContent = text;
         var isToday = isSameDay(date, today);
@@ -156,14 +157,14 @@
       }
     }
 
-    /** 渲染某一天：任务列表（窗口）、数量、显示更多按钮。 */
+    /** Render one day: task list (window), count, and the show-more button. */
     function renderDay(day) {
       var el = cellEls[day];
       if (!el || !el.listEl) return;
       var tasks = Store.getTasks(state, day);
       var win = Store.windowTasks(tasks, Store.DAY_WINDOW);
       var shown = expanded[day] ? tasks : win.visible;
-      var countText = tasks.length ? tasks.length + ' 项' : '';
+      var countText = tasks.length ? tasks.length + ' items' : '';
       if (el.countEl) {
         el.countEl.textContent = countText;
         el.countEl.hidden = tasks.length === 0;
@@ -178,7 +179,7 @@
       }
       if (!expanded[day] && win.hasMore) {
         el.moreBtn.textContent =
-          '显示更多（还剩 ' + (win.total - win.visible.length) + ' 条）';
+          'Show more (' + (win.total - win.visible.length) + ' left)';
         el.moreBtn.hidden = false;
       } else {
         el.moreBtn.hidden = true;
@@ -196,7 +197,7 @@
       persist();
       renderDay(fromDay);
       renderDay(toDay);
-      announce('已把任务「' + res.task.title + '」移动到' + DAY_LABELS[toDay]);
+      announce('Moved \u201c' + res.task.title + '\u201d to ' + DAY_LABELS[toDay]);
       focusTask(taskId);
     }
 
@@ -214,14 +215,14 @@
       focusTask(taskId);
     }
 
-    /** 构建一行任务。任务行可聚焦；左右方向键把任务移到相邻天。 */
+    /** Build one task row. The row is focusable; left/right arrows move the task to an adjacent day. */
     function buildTaskRow(dayIndex, task) {
       var li = document.createElement('li');
       li.className = 'task' + (task.id === lastAddedId ? ' task-added' : '');
       li.setAttribute('role', 'listitem');
       li.tabIndex = 0;
       li.setAttribute('data-id', String(task.id));
-      li.setAttribute('aria-label', '任务：' + task.title);
+      li.setAttribute('aria-label', 'Task: ' + task.title);
 
       var main = document.createElement('div');
       main.className = 'task-main';
@@ -234,10 +235,10 @@
       var controls = document.createElement('span');
       controls.className = 'task-controls';
 
-      // 每个任务都带一个移动到另一天的小控件（下拉选择）
+      // Every task carries a small move-to-another-day control (a select)
       var select = document.createElement('select');
       select.className = 'move-select';
-      select.setAttribute('aria-label', '移动任务到另一天');
+      select.setAttribute('aria-label', 'Move task to another day');
       for (var d = 0; d < 7; d++) {
         var opt = document.createElement('option');
         opt.value = String(d);
@@ -253,8 +254,8 @@
       var del = document.createElement('button');
       del.type = 'button';
       del.className = 'delete-btn';
-      del.textContent = '删除';
-      del.setAttribute('aria-label', '删除任务：' + task.title);
+      del.textContent = 'Delete';
+      del.setAttribute('aria-label', 'Delete task: ' + task.title);
       del.addEventListener('click', function () {
         enterConfirm(dayIndex, task.id);
       });
@@ -263,7 +264,7 @@
       main.appendChild(controls);
       li.appendChild(main);
 
-      // 任务行获得焦点时，左右方向键直接移动任务
+      // When a task row has focus, left/right arrows move the task directly
       li.addEventListener('keydown', function (e) {
         var tag = e.target && e.target.tagName;
         if (tag === 'SELECT' || tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA') {
@@ -278,28 +279,28 @@
         }
       });
 
-      // 删除二次确认
+      // Delete double-confirmation
       if (confirming[task.id]) {
         li.classList.add('confirming');
         var bar = document.createElement('div');
         bar.className = 'confirm-bar';
         var msg = document.createElement('span');
         msg.className = 'confirm-msg';
-        msg.textContent = '确认删除？';
+        msg.textContent = 'Delete this task?';
         bar.appendChild(msg);
 
         var yes = document.createElement('button');
         yes.type = 'button';
         yes.className = 'confirm-yes';
         yes.setAttribute('data-id', String(task.id));
-        yes.textContent = '删除';
+        yes.textContent = 'Delete';
         yes.addEventListener('click', function () {
           var res = Store.deleteTask(state, task.id);
           if (!res.ok) return;
           delete confirming[task.id];
           persist();
           renderDay(dayIndex);
-          announce('已删除任务「' + res.task.title + '」');
+          announce('Deleted task \u201c' + res.task.title + '\u201d');
           var first = cellEls[dayIndex].listEl.querySelector('.task');
           if (first) first.focus();
           else cellEls[dayIndex].input.focus();
@@ -309,7 +310,7 @@
         var no = document.createElement('button');
         no.type = 'button';
         no.className = 'confirm-no';
-        no.textContent = '取消';
+        no.textContent = 'Cancel';
         no.addEventListener('click', function () {
           cancelConfirm(task.id);
         });
@@ -321,13 +322,13 @@
       return li;
     }
 
-    /** 从输入框添加任务；空标题就地显示行内错误。 */
+    /** Add a task from the input; empty titles show an inline error in place. */
     function addFromInput(day) {
       var el = cellEls[day];
       var res = Store.addTask(state, day, el.input.value);
       if (!res.ok) {
         if (res.error === 'EMPTY_TITLE') {
-          el.errorEl.textContent = '任务不能为空';
+          el.errorEl.textContent = 'Task title cannot be empty';
           el.errorEl.hidden = false;
           el.input.focus();
         }
@@ -339,7 +340,7 @@
       el.input.value = '';
       persist();
       renderDay(day);
-      announce('已添加任务「' + res.task.title + '」');
+      announce('Added task \u201c' + res.task.title + '\u201d');
       el.input.focus();
     }
 
@@ -361,14 +362,14 @@
           el.moreBtn.addEventListener('click', function () {
             expanded[day] = true;
             renderDay(day);
-            announce('已显示全部任务');
+            announce('Showing all tasks');
             var first = el.listEl.querySelector('.task');
             if (first) first.focus();
             else el.input.focus();
           });
         })(i);
       }
-      // Esc 取消删除确认
+      // Esc cancels the delete confirmation
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && Object.keys(confirming).length) {
           var ids = Object.keys(confirming);

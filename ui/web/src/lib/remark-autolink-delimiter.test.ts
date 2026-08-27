@@ -65,49 +65,49 @@ function paragraphChildren(markdown: string): PhrasingContent[] {
 describe("remarkAutolinkDelimiter", () => {
   it("restores both strong spans in the reported message", () => {
     const markdown =
-      "方案报告在 **http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/**，附三项需你决策的清单：**events drop / N-step canary / Loki archive 365d**——你有空看时拍板，不急。";
+      "\u65b9\u6848\u62a5\u544a\u5728 **http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/**\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a**events drop / N-step canary / Loki archive 365d**——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002";
 
     const children = paragraphChildren(markdown);
 
     expect(children).toMatchObject([
-      text("方案报告在 "),
+      text("\u65b9\u6848\u62a5\u544a\u5728 "),
       wrappedLink(
         "strong",
         "http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/",
       ),
-      text("，附三项需你决策的清单："),
+      text("\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a"),
       {
         type: "strong",
         children: [
           text("events drop / N-step canary / Loki archive 365d"),
         ],
       },
-      text("——你有空看时拍板，不急。"),
+      text("——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002"),
     ] satisfies ExpectedChild[]);
   });
 
   it("restores a non-adjacent strong opener before a labeled URL", () => {
     const children = paragraphChildren(
-      "**Grafana：http://100.103.96.72:3003**（匿名 viewer，无需登录）",
+      "**Grafana\uff1ahttp://100.103.96.72:3003**\uff08\u533f\u540d viewer\uff0c\u65e0\u9700\u767b\u5f55\uff09",
     );
 
     expect(children).toMatchObject([
       {
         type: "strong",
         children: [
-          text("Grafana："),
+          text("Grafana\uff1a"),
           link("http://100.103.96.72:3003"),
         ],
       },
-      text("（匿名 viewer，无需登录）"),
+      text("\uff08\u533f\u540d viewer\uff0c\u65e0\u9700\u767b\u5f55\uff09"),
     ] satisfies ExpectedChild[]);
   });
 
   it("restores a swallowed closer for a non-first link inside strong", () => {
-    const children = paragraphChildren("**a http://x.com/p2/**，b**c**");
+    const children = paragraphChildren("**a http://x.com/p2/**\uff0cb**c**");
 
     expect(children).toMatchObject([
-      text("，b"),
+      text("\uff0cb"),
       {
         type: "strong",
         children: [
@@ -126,10 +126,10 @@ describe("remarkAutolinkDelimiter", () => {
   }>([
     {
       name: "restores strong around a literal URL before a CJK period",
-      markdown: "**http://127.0.0.1:18025**。",
+      markdown: "**http://127.0.0.1:18025**\u3002",
       expected: [
         wrappedLink("strong", "http://127.0.0.1:18025"),
-        text("。"),
+        text("\u3002"),
       ],
     },
     {
@@ -155,11 +155,11 @@ describe("remarkAutolinkDelimiter", () => {
     },
     {
       name: "leaves correctly parsed strong autolinks unchanged",
-      markdown: "前 **http://127.0.0.1:18025** 后",
+      markdown: "\u524d **http://127.0.0.1:18025** \u540e",
       expected: [
-        text("前 "),
+        text("\u524d "),
         wrappedLink("strong", "http://127.0.0.1:18025"),
-        text(" 后"),
+        text(" \u540e"),
       ],
     },
     {
@@ -169,8 +169,8 @@ describe("remarkAutolinkDelimiter", () => {
     },
     {
       name: "leaves a CommonMark full autolink unchanged",
-      markdown: "<https://ip.sb：显示>",
-      expected: [link("https://ip.sb：显示")],
+      markdown: "<https://ip.sb\uff1a\u663e\u793a>",
+      expected: [link("https://ip.sb\uff1a\u663e\u793a")],
     },
     {
       name: "leaves an explicit link unchanged",
@@ -179,8 +179,8 @@ describe("remarkAutolinkDelimiter", () => {
     },
     {
       name: "leaves a non-emphasized CJK-bounded literal link unchanged",
-      markdown: "https://ip.sb。",
-      expected: [link("https://ip.sb"), text("。")],
+      markdown: "https://ip.sb\u3002",
+      expected: [link("https://ip.sb"), text("\u3002")],
     },
     {
       name: "leaves inline code unchanged",

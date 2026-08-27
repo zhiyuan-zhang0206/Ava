@@ -1,7 +1,7 @@
 # 06 · Conjectures and Refutations — Reference
 
 **Author**: Karl R. Popper (1963; full title *Conjectures and Refutations: The Growth of Scientific Knowledge*)
-**Source**: Routledge (1963); Chinese translation 《猜想与反驳》.
+**Source**: Routledge (1963); Chinese translation: Conjectures and Refutations.
 **Role in this skill**: the epistemological anchor of `principles/falsifiability` and `principles/honesty`; the philosophical basis of the question-outcome typology (answers / better-posed confusion / reframed questions) and of refutation-first experiment design in `practices/question` and `practices/verify`.
 **Review status (Chinese edition)**: ⏳ pending user review (2026-08-07, epistemology supplement group).
 

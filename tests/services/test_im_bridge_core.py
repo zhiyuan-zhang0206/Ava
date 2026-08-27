@@ -138,7 +138,7 @@ def test_cmd_list_renders_agent_id() -> None:
     """/list renders rows from the real shape — regression for KeyError('id')."""
     gateway = FakeGateway(
         agents=[
-            _row(405, label="Ava 负责人"),
+            _row(405, label="Ava \u8d1f\u8d23\u4eba"),
             _row(228, label=None, status="running"),
             _row(999, label="gone", status="terminated"),  # filtered out
         ]
@@ -148,7 +148,7 @@ def test_cmd_list_renders_agent_id() -> None:
     out = asyncio.run(_core(gateway)._cmd_list("telegram"))
     assert isinstance(out, Reply)
     text = _text(out)
-    assert "405  Ava 负责人  [idling]" in text
+    assert "405  Ava \u8d1f\u8d23\u4eba  [idling]" in text
     assert f"228  {copy.UNNAMED_LABEL}  [running]" in text
     assert "999" not in text
     assert copy.LIVE_AGENTS_TITLE_BUTTONS in text
@@ -164,7 +164,7 @@ def test_cmd_list_no_alive_agents() -> None:
 def test_cmd_switch_matches_agent_id() -> None:
     """/switch 405 selects the row by agent_id and starts the subscription."""
     gateway = FakeGateway(
-        agents=[_row(405, label="Ava 负责人")],
+        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
         timeline=[
             {"kind": "agent_chat", "item_id": "3.1", "payload": "hello"},
         ],
@@ -174,27 +174,27 @@ def test_cmd_switch_matches_agent_id() -> None:
     out = asyncio.run(core._cmd_switch(state, "405"))
     text = _text(out)
     assert state.current_agent_id == 405
-    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava 负责人") in text
+    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
     assert "hello" in text
     assert core._last_pushed.get(("telegram", "12345", 405)) == "3.1"
 
 
 def test_cmd_switch_matches_label() -> None:
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "ava 负责人"))
+    out = asyncio.run(core._cmd_switch(state, "ava \u8d1f\u8d23\u4eba"))
     assert state.current_agent_id == 405
-    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava 负责人") in _text(out)
+    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in _text(out)
 
 
 def test_cmd_switch_replays_five_dialog_items_amid_non_dialog() -> None:
     """/switch replays the most recent 5 dialog messages even when the raw
     timeline mixes in non-dialog items (agent_updated etc.) — the old
     limit=5 on raw items could yield as few as 2 messages (user feedback
-    2026-08-05: "只推送最近 2 条太少了")."""
+    2026-08-05: "\u53ea\u63a8\u9001\u6700\u8fd1 2 \u6761\u592a\u5c11\u4e86")."""
     gateway = FakeGateway(
-        agents=[_row(405, label="Ava 负责人")],
+        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
         timeline=[
             {"kind": "agent_updated", "item_id": "1.0"},
             {"kind": "agent_chat", "item_id": "1.1", "payload": "m1"},
@@ -217,7 +217,7 @@ def test_cmd_switch_replays_five_dialog_items_amid_non_dialog() -> None:
 def test_cmd_switch_replay_caps_at_five() -> None:
     """More than 5 dialog messages -> only the most recent 5 are replayed."""
     gateway = FakeGateway(
-        agents=[_row(405, label="Ava 负责人")],
+        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
         timeline=[
             {"kind": "agent_chat", "item_id": f"{i}.1", "payload": f"m{i}"} for i in range(1, 9)
         ],
@@ -234,7 +234,7 @@ def test_cmd_switch_replay_caps_at_five() -> None:
 
 
 def test_cmd_switch_unknown_agent() -> None:
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, "999"))
@@ -243,13 +243,13 @@ def test_cmd_switch_unknown_agent() -> None:
 
 
 def test_cmd_status_reads_agent_id() -> None:
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人", status="running")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba", status="running")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     state.current_agent_id = 405
     out = asyncio.run(core._cmd_status(state))
     text = _text(out)
-    assert copy.STATUS_DETAIL_LINE.format(agent_id=405, label="Ava 负责人") in text
+    assert copy.STATUS_DETAIL_LINE.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
     assert copy.STATUS_STATE_LINE.format(status="running") in text
 
 
@@ -291,7 +291,7 @@ def test_chat_forwards_to_current_agent() -> None:
 def test_switch_without_arg_is_usage_error() -> None:
     """/switch with no argument is an error — the picker lives on /list's
     tap-to-switch card, not here (user ruling 2026-08-03)."""
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, ""))
@@ -308,7 +308,7 @@ def test_restore_subscriptions_rebuilds_after_restart(
     persisted switch_state — agent replies must flow again without the user
     re-running /switch (Task #804)."""
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     asyncio.run(core._cmd_switch(state, "405"))
@@ -342,7 +342,7 @@ def test_switch_persists_across_restart(monkeypatch: pytest.MonkeyPatch, tmp_pat
     """The switched agent survives a core restart: state is read back from
     the switch_state file when the chat is next seen."""
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     asyncio.run(core._cmd_switch(state, "405"))
@@ -359,7 +359,7 @@ def test_switch_state_cleared_when_agent_vanishes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     asyncio.run(core._cmd_switch(state, "405"))
@@ -396,7 +396,7 @@ def test_switch_summary_uses_strict_filter() -> None:
     """Recent-messages summary shows only user+agent text — code/output rows
     from the same window are not echoed."""
     gateway = FakeGateway(
-        agents=[_row(405, label="Ava 负责人")],
+        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
         timeline=[
             {"kind": "inbound_chat", "source": "agent:1818", "item_id": "1.0", "payload": "peer"},
             {"kind": "agent_chat", "item_id": "2.0", "payload": "real answer"},
@@ -530,7 +530,7 @@ def test_list_on_button_channel_is_text_one_liner_plus_buttons() -> None:
     live on the buttons (user ruling 2026-08-03)."""
     gateway = FakeGateway(
         agents=[
-            _row(405, label="Ava 负责人"),
+            _row(405, label="Ava \u8d1f\u8d23\u4eba"),
             _row(228, label=None, status="running"),
             _row(999, label="gone", status="terminated"),  # filtered out
         ]
@@ -544,19 +544,19 @@ def test_list_on_button_channel_is_text_one_liner_plus_buttons() -> None:
     assert out.buttons is not None
     labels = [b[0] for b in out.buttons]
     cmds = [b[1] for b in out.buttons]
-    assert labels == [f"228 {copy.UNNAMED_LABEL} [running]", "405 Ava 负责人 [idling]"]
+    assert labels == [f"228 {copy.UNNAMED_LABEL} [running]", "405 Ava \u8d1f\u8d23\u4eba [idling]"]
     assert cmds == ["/switch 228", "/switch 405"]
 
 
 def test_list_on_plain_channel_keeps_full_text_list() -> None:
     """WeChat/Feishu never render buttons — /list keeps the full text list
     there or it would be unusable."""
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     core.register(FakePlainAdapter())
     out = asyncio.run(core._cmd_list("weixin"))
     assert isinstance(out, Reply)
-    assert "405  Ava 负责人  [idling]" in out.text
+    assert "405  Ava \u8d1f\u8d23\u4eba  [idling]" in out.text
     assert out.buttons is None
 
 
@@ -916,7 +916,7 @@ def test_list_includes_hibernating_projected_to_idling() -> None:
     they appear in /list and their status shows as idling."""
     gateway = FakeGateway(
         agents=[
-            _row(405, label="Ava 负责人", status="hibernating"),
+            _row(405, label="Ava \u8d1f\u8d23\u4eba", status="hibernating"),
             _row(228, label="CEO", status="running"),
             _row(999, label="gone", status="terminated"),  # still filtered
         ]
@@ -929,21 +929,21 @@ def test_list_includes_hibernating_projected_to_idling() -> None:
     assert "hibernating" not in out.text
     assert out.buttons is not None
     labels = [b[0] for b in out.buttons]
-    assert labels == ["228 CEO [running]", "405 Ava 负责人 [idling]"]
+    assert labels == ["228 CEO [running]", "405 Ava \u8d1f\u8d23\u4eba [idling]"]
     assert [b[1] for b in out.buttons] == ["/switch 228", "/switch 405"]
 
 
 def test_switch_accepts_hibernating() -> None:
     """Tapping a hibernating agent's /list button must switch (it is live)."""
     gateway = FakeGateway(
-        agents=[_row(405, label="Ava 负责人", status="hibernating")],
+        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba", status="hibernating")],
         timeline=[{"kind": "agent_chat", "item_id": "3.1", "payload": "hello"}],
     )
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, "405"))
     assert state.current_agent_id == 405
-    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava 负责人") in _text(out)
+    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in _text(out)
 
 
 def test_plain_channel_list_projects_hibernating_too() -> None:
@@ -1062,7 +1062,7 @@ def test_weixin_push_recovery_hints_on_next_inbound() -> None:
 
     async def scenario() -> None:
         await core.handle_inbound(
-            InboundMessage(channel="weixin", chat_id="o9cq804", text="在", message_id="m1")
+            InboundMessage(channel="weixin", chat_id="o9cq804", text="\u5728", message_id="m1")
         )
         texts = [t for _, t in wx.sent]
         assert any("push link failed earlier and has now recovered" in t for t in texts)
@@ -1078,7 +1078,7 @@ def test_restore_subscriptions_skips_disabled_channels(
     stops pushing snapshots to a channel with no adapter (Task #855)."""
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
     monkeypatch.setattr(settings.services, "im_disabled_adapters", [])
-    gateway = FakeGateway(agents=[_row(405, label="Ava 负责人")])
+    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)  # nothing disabled: both subscribe
     for channel, chat_id in (("weixin", "wx123"), ("telegram", "12345")):
         state = ChatState(channel, chat_id)

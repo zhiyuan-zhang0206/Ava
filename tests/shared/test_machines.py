@@ -300,10 +300,10 @@ def test_pause_sets_latch_and_excludes_from_fanout(_machine_setup) -> None:  # p
     _machine_setup(name="away", role="agent-runner", home="~/.ava")
     machines.register_self(url="http://away:9000")
 
-    assert machines.pause("away", reason="休假一周") is True
+    assert machines.pause("away", reason="\u4f11\u5047\u4e00\u5468") is True
     paused_at, pause_reason = _read_pause("away")
     assert paused_at is not None
-    assert pause_reason == "休假一周"
+    assert pause_reason == "\u4f11\u5047\u4e00\u5468"
     assert machines.list_agent_runners() == [("prod", "http://prod:9000")]
     assert machines.list_paused() == [("away", "http://away:9000")]
     # the stop complement is untouched — a paused machine is neither a rollout

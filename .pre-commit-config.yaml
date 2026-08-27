@@ -106,6 +106,19 @@ repos:
         types: [python]
         pass_filenames: false
 
+      # Ban raw CJK characters anywhere in the repo — English-only source
+      # (user ruling 2026-08-27, tightening English-primary). Exemption: i18n /
+      # locale copy only (<dir>/messages/*.json, */locales/*, *.po, and
+      # shared/alerts_copy.py — the IM alert-copy locale module). Skill bodies,
+      # code comments, docs, tests, fixtures, demos all fail on raw CJK;
+      # functional CJK data is written as \uXXXX escapes (runtime-identical).
+      # Whole-repo scan via git ls-files; see scripts/lint_no_cjk.py header.
+      - id: lint-no-cjk
+        name: lint no CJK (repo-wide, English-only source)
+        entry: .venv/bin/python scripts/lint_no_cjk.py
+        language: system
+        pass_filenames: false
+
       # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
       # (cli/, ui/) and prose/content (skills/, docs/, ui/web/) are exempt and
       # not scanned. A line that genuinely needs the character uses an inline

@@ -47,8 +47,8 @@ def no_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_write_then_read_round_trip(tmp_path: Path) -> None:
     p = tmp_path / "hello.txt"
-    ava.files.write(str(p), "你好 world\n")
-    assert ava.files.read(str(p)) == "你好 world\n"
+    ava.files.write(str(p), "\u4f60\u597d world\n")
+    assert ava.files.read(str(p)) == "\u4f60\u597d world\n"
 
 
 def test_read_returns_full_content(tmp_path: Path) -> None:
@@ -417,9 +417,9 @@ def test_append_relative_resolves_to_workspace(workspace: Path) -> None:
 def test_append_utf8_encoding(tmp_path: Path) -> None:
     """append uses utf-8 (consistent with read/write)."""
     p = tmp_path / "cn.txt"
-    ava.files.write(str(p), "你好")
-    ava.files.append(str(p), " 世界")
-    assert ava.files.read(str(p)) == "你好 世界"
+    ava.files.write(str(p), "\u4f60\u597d")
+    ava.files.append(str(p), " \u4e16\u754c")
+    assert ava.files.read(str(p)) == "\u4f60\u597d \u4e16\u754c"
 
 
 # ── edit ────────────────────────────────────────────────────────────────

@@ -96,29 +96,29 @@ _PROD_LABELS = [
     "Review PR #60 using auto-review skill",
     "Review PR #68 with auto-review skill",
     "Review PR #67 with auto-review",
-    "仅作为总指挥",
-    "前端Markdown渲染横向滚动失效问题",
-    "功能规划与待办梳理",
-    "实现agent活动追踪、push、PR与CI监控",
-    "在 Sidebar 中添加显示已停止 agents 的切换开关",
-    "请自行处理preview集群测试",
-    "Agent消息架构表格渲染异常排查",
-    "Google Drive用户行为数据分析与视频理解",
-    "音频转录",
-    "审查PR #54并执行自动代码审查",
-    "下载Claude配置保存到本地",
-    "读取并验证声明后写入JSON",
-    "将JSON写入文件并终止",
-    "审计 SWE-bench runner 改为流式输出的代码改动点",
-    "创建AI agent深度对比表并产出HTML页面",
-    "修复serve_markdown模板缺失",
-    "为enum增加Jina Reader升级以适配人民网抓取",
-    "清理config_overlay中skills_to_inject_into_system_prompt的旧格式skill名",
-    "调查集群拓扑与单机多cluster问题",
-    "代码层全量重命名原生辅助工具为ava-desktop-helper",
-    "修复pg_tools._free_port的TOCTOU竞态问题",
-    "钉住chrome-devtools-mcp版本并审计未钉依赖",
-    "调查消息投递延迟与轮询机制审计",
+    "\u4ec5\u4f5c\u4e3a\u603b\u6307\u6325",
+    "\u524d\u7aefMarkdown\u6e32\u67d3\u6a2a\u5411\u6eda\u52a8\u5931\u6548\u95ee\u9898",
+    "\u529f\u80fd\u89c4\u5212\u4e0e\u5f85\u529e\u68b3\u7406",
+    "\u5b9e\u73b0agent\u6d3b\u52a8\u8ffd\u8e2a\u3001push\u3001PR\u4e0eCI\u76d1\u63a7",
+    "\u5728 Sidebar \u4e2d\u6dfb\u52a0\u663e\u793a\u5df2\u505c\u6b62 agents \u7684\u5207\u6362\u5f00\u5173",
+    "\u8bf7\u81ea\u884c\u5904\u7406preview\u96c6\u7fa4\u6d4b\u8bd5",
+    "Agent\u6d88\u606f\u67b6\u6784\u8868\u683c\u6e32\u67d3\u5f02\u5e38\u6392\u67e5",
+    "Google Drive\u7528\u6237\u884c\u4e3a\u6570\u636e\u5206\u6790\u4e0e\u89c6\u9891\u7406\u89e3",
+    "\u97f3\u9891\u8f6c\u5f55",
+    "\u5ba1\u67e5PR #54\u5e76\u6267\u884c\u81ea\u52a8\u4ee3\u7801\u5ba1\u67e5",
+    "\u4e0b\u8f7dClaude\u914d\u7f6e\u4fdd\u5b58\u5230\u672c\u5730",
+    "\u8bfb\u53d6\u5e76\u9a8c\u8bc1\u58f0\u660e\u540e\u5199\u5165JSON",
+    "\u5c06JSON\u5199\u5165\u6587\u4ef6\u5e76\u7ec8\u6b62",
+    "\u5ba1\u8ba1 SWE-bench runner \u6539\u4e3a\u6d41\u5f0f\u8f93\u51fa\u7684\u4ee3\u7801\u6539\u52a8\u70b9",
+    "\u521b\u5efaAI agent\u6df1\u5ea6\u5bf9\u6bd4\u8868\u5e76\u4ea7\u51faHTML\u9875\u9762",
+    "\u4fee\u590dserve_markdown\u6a21\u677f\u7f3a\u5931",
+    "\u4e3aenum\u589e\u52a0Jina Reader\u5347\u7ea7\u4ee5\u9002\u914d\u4eba\u6c11\u7f51\u6293\u53d6",
+    "\u6e05\u7406config_overlay\u4e2dskills_to_inject_into_system_prompt\u7684\u65e7\u683c\u5f0fskill\u540d",
+    "\u8c03\u67e5\u96c6\u7fa4\u62d3\u6251\u4e0e\u5355\u673a\u591acluster\u95ee\u9898",
+    "\u4ee3\u7801\u5c42\u5168\u91cf\u91cd\u547d\u540d\u539f\u751f\u8f85\u52a9\u5de5\u5177\u4e3aava-desktop-helper",
+    "\u4fee\u590dpg_tools._free_port\u7684TOCTOU\u7ade\u6001\u95ee\u9898",
+    "\u9489\u4f4fchrome-devtools-mcp\u7248\u672c\u5e76\u5ba1\u8ba1\u672a\u9489\u4f9d\u8d56",
+    "\u8c03\u67e5\u6d88\u606f\u6295\u9012\u5ef6\u8fdf\u4e0e\u8f6e\u8be2\u673a\u5236\u5ba1\u8ba1",
 ]
 
 
@@ -144,11 +144,11 @@ _FIRST_PERSON_PROMPT_LABELS = [
     "Windows greeting",
     "Reply hello from Windows",
     "Write JSON and terminate",
-    "spawn报错agent起不来",
-    "诊断spawn报错agent无法启动",
-    "labeler 为什么给 agent 起怪名字",
-    "询问 labeler 命名 agent 的原因",
-    "标签器如何决定智能体显示名",
+    "spawn\u62a5\u9519agent\u8d77\u4e0d\u6765",
+    "\u8bca\u65adspawn\u62a5\u9519agent\u65e0\u6cd5\u542f\u52a8",
+    "labeler \u4e3a\u4ec0\u4e48\u7ed9 agent \u8d77\u602a\u540d\u5b57",
+    "\u8be2\u95ee labeler \u547d\u540d agent \u7684\u539f\u56e0",
+    "\u6807\u7b7e\u5668\u5982\u4f55\u51b3\u5b9a\u667a\u80fd\u4f53\u663e\u793a\u540d",
 ]
 
 
@@ -293,11 +293,16 @@ class TestGenerateLabelRejectsNonLabels:
         monkeypatch.setattr(
             labeler_module,
             "build_chat_model",
-            lambda _m, **_: _FakeLLM("验证预览集群时区统一并测试SDK"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _m, **_: _FakeLLM(
+                "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
+            ),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
 
         result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")
 
         assert result is True
-        assert _label_of(db_conn, tid) == "验证预览集群时区统一并测试SDK"
+        assert (
+            _label_of(db_conn, tid)
+            == "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
+        )
         assert len(_no_publish) == 1

@@ -1,7 +1,7 @@
 # 08 · The Beginning of Infinity — Reference
 
 **Author**: David Deutsch (2011; full title *The Beginning of Infinity: Explanations That Transform the World*)
-**Source**: Allen Lane / Viking (2011); Chinese translation 《无穷的开始》.
+**Source**: Allen Lane / Viking (2011); Chinese translation: The Beginning of Infinity.
 **Role in this skill**: the teleology of the whole skill family — the mission's purpose chain (truth → understanding → human flourishing) and the philosophical criterion behind anti-overfitting: a good explanation is hard to vary. Foundational for `practices/question`'s outcome typology, `principles/parsimony`, and `practices/present` (explanation as first-class output).
 **Review status (Chinese edition)**: ⏳ pending user review (2026-08-07, epistemology supplement group).
 

@@ -68,7 +68,7 @@ Calibrate exists because a plan is only as good as the model it is built on. Whe
 
 - **Run it** when the user's statements about the subject are vague, hedged, or contradicted by what you find; when they ask "how does X work" as part of a larger task; or when they are new to the system/domain.
 - **Skip it** when the user names specific files, configs, or behaviors correctly, corrects *your* statements about the subject, or says they know it and your quick check finds nothing off.
-- **Not sure? Ask.** One sentence — "这块你熟吗？" — costs nothing and beats a wasted loop either way.
+- **Not sure? Ask.** One sentence — "are you familiar with this area?" — costs nothing and beats a wasted loop either way.
 - **Calibrate per-slice, not per-task.** The user may know A well and be fuzzy on B; only run the loop where the model is uncalibrated, and skip the rest.
 
 ## The Phases Are a Network, Not a Pipeline

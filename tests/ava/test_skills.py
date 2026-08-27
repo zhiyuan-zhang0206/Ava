@@ -84,11 +84,17 @@ def test_names_empty_when_no_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_names_finds_skill(fake_skills_dir: Path) -> None:
-    _write_skill(fake_skills_dir, "research", "name: research\ndescription: 多源搜索 + 整合")
+    _write_skill(
+        fake_skills_dir,
+        "research",
+        "name: research\ndescription: \u591a\u6e90\u641c\u7d22 + \u6574\u5408",
+    )
     out = skills_mod._names()
     assert len(out) == 1
     assert out[0]["name"] == "research"
-    assert "多源搜索" in out[0]["description"]  # skill description from test fixture
+    assert (
+        "\u591a\u6e90\u641c\u7d22" in out[0]["description"]
+    )  # skill description from test fixture
     assert out[0]["path"].endswith("/research")
 
 
@@ -225,7 +231,7 @@ def test_module_getattr_handles_dash_in_name(fake_skills_dir: Path) -> None:
     _write_skill(
         fake_skills_dir,
         "xiaohongshu-crawler",
-        "name: xiaohongshu-crawler\ndescription: 小红书爬虫",
+        "name: xiaohongshu-crawler\ndescription: \u5c0f\u7ea2\u4e66\u722c\u866b",
     )
     proxy = skills_mod.xiaohongshu_crawler
     assert isinstance(proxy, skills_mod._SkillProxy)

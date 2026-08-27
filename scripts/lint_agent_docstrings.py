@@ -70,8 +70,8 @@ import sys
 from pathlib import Path
 
 # Match CJK characters + CJK punctuation + fullwidth ASCII range.
-# Includes Han ideographs, 。，、《》「」 etc., and ！？－＋ etc.
-_CJK_RE = re.compile(r"[一-鿿　-〿＀-￯]")
+# Includes Han ideographs, CJK punctuation, and fullwidth forms.
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]")
 
 # Markdown bold emphasis (`**text**`). Both delimiters must hug non-space
 # content, so `**kwargs` / `**args` (no closing pair on the same line) and a

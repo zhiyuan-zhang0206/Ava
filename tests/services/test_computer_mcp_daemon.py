@@ -246,11 +246,11 @@ async def test_snapshot_include_ocr_adds_text_boxes(
     monkeypatch.setattr(
         daemon_mod.ocr_mod,
         "ocr_image",
-        lambda _path: [{"text": "你好", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _path: [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     d = _daemon()
     result = await _ok_result(d, "snapshot", {"include_ocr": True})
-    assert result["ocr"] == [{"text": "你好", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}]
+    assert result["ocr"] == [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}]
     assert "ocr_error" not in result
 
 
@@ -300,7 +300,7 @@ async def test_snapshot_without_include_ocr_skips_ocr(
 
 async def test_type_key_scroll_window_session(fake_helper: FakeHelper, audit_log: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     d = _daemon()
-    assert (await _ok_result(d, "type_text", {"text": "你好"}))["typed"] == 2
+    assert (await _ok_result(d, "type_text", {"text": "\u4f60\u597d"}))["typed"] == 2
     assert (await _ok_result(d, "key", {"key": "return", "cmd": True}))["pressed"] == 36
     assert (await _ok_result(d, "scroll", {"x": 5, "y": 6, "dy": -20}))["scrolled"] == -20
     assert (await _ok_result(d, "window_info", {"owner": "Finder"}))["owner"] == "Finder"

@@ -145,7 +145,7 @@ export function wrapLabel(label: string, r: number): string[] {
     // No space/hyphen on this line: `cut` falls inside a narrow (Latin/digit)
     // run. When that run started after a full-width prefix, break at the run's
     // start instead of splitting the word — a mixed label like
-    // "资源监控（Cluster Ops 域）" must not render "资源监控（C" / "luster Ops"
+    // "\u8d44\u6e90\u76d1\u63a7\uff08Cluster Ops \u57df\uff09" must not render "\u8d44\u6e90\u76d1\u63a7\uff08C" / "luster Ops"
     // (QA #651 deploy verification). Only split a run when it starts the line,
     // i.e. the word itself is wider than the line budget.
     if (cut > 0 && !FULL_WIDTH_RE.test(remaining[cut - 1])) {

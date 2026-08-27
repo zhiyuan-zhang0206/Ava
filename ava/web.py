@@ -94,9 +94,9 @@ _WALL_MARKERS = (
     "attention required! | cloudflare",
     "enable javascript and cookies to continue",
     "verify you are human",
-    "安全验证",
-    "请您登录后查看",
-    "登录后查看更多",
+    "\u5b89\u5168\u9a8c\u8bc1",
+    "\u8bf7\u60a8\u767b\u5f55\u540e\u67e5\u770b",
+    "\u767b\u5f55\u540e\u67e5\u770b\u66f4\u591a",
 )
 _WALL_MAX_LEN = 2_000
 

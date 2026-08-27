@@ -1,7 +1,7 @@
 ---
 type: doc
 title: consolidation skill — Daily Consolidation
-description: "Daily consolidation process for the shared memory pool (git repo), a sub-skill of ava.skills.ava_memory.consolidation: skills/scripts consolidate/steward/arbiter_merge 脚本一步 commit + push + refresh index; single-box self-managed, multi-host orchestrated by arbiter (resident machine, holds schedule) with per-machine steward creating PRs, then refresh + rebase after merge."
+description: "Daily consolidation process for the shared memory pool (git repo), a sub-skill of ava.skills.ava_memory.consolidation: skills/scripts consolidate/steward/arbiter_merge run a one-step commit + push + refresh index; single-box self-managed, multi-host orchestrated by arbiter (resident machine, holds schedule) with per-machine steward creating PRs, then refresh + rebase after merge."
 tags:
 - extensions
 - agent-instruction

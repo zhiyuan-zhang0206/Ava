@@ -23,7 +23,7 @@ Specific coverage (**all mandatory**):
 
 Three hard rules:
 
-1. **All English** — the audience is the LLM. CJK characters (including punctuation `——`, `，`, `。`, `「」`)
+1. **All English** — the audience is the LLM. CJK characters (including punctuation: em dash, fullwidth comma, fullwidth period, corner brackets)
    are entirely forbidden. A docstring is prompt text, not a dev note.
 2. **Don't expose internal implementation** — the agent neither needs nor should know how the system is built.
    Exposing = adding prompt noise + letting the agent make decisions based on a wrong mental model.
@@ -69,7 +69,7 @@ Writing rules alone doesn't work; rely on mechanism:
 - `scripts/lint_agent_docstrings.py` runs in pre-commit — scans
   `ava/*.py` and `plugins/*/*.py` for module / public function /
   `register_namespace`-bound module / `register_system_prompt_section`-
-  return-string-producer; matching CJK characters (`[一-鿿]`) or known impl-detail
+  return-string-producer; matching CJK characters (`[\u4e00-\u9fff]`) or known impl-detail
   keywords (`state_handle` / `LangGraph` / `POSIX` / `PR #...` etc.)
   fails immediately. When a new violation pattern is found, **add it to the lint blacklist** so the discipline accumulates.
 - After modifying any agent-visible docstring, locally run `build_system_prompt()` once and

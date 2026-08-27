@@ -43,7 +43,7 @@ def test_resurrect_brings_back_terminated_agent(e2e_env: E2EEnv) -> None:
     first_pid: int = row[0]
 
     # turn 1: agent self-terminate
-    page.fill('[data-testid="composer-input"]', "再见")
+    page.fill('[data-testid="composer-input"]', "\u518d\u89c1")
     page.click('[data-testid="composer-send"]')
     wait_for_status(agent_id, AgentStatus.TERMINATED.value)
 

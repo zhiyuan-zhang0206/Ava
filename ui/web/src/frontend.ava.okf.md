@@ -36,7 +36,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
                               Top header: chat link + title; left two-level anchor nav (ControlNav) + right single scroll container (replaces TabBar)
                               Structure + data queries all ready on first screen (not expanded on scroll); IntersectionObserver only pauses polling after leaving viewport (enabled:visible,_visibility.tsx, saves connection budget)
                               Anchor jump instant (scrollIntoView behavior:auto)
-                              Old /control#status、#metrics (and #metrics-* sub-anchors) deep-link → router.replace to /insights corresponding anchor
+                              Old /control#status, #metrics (and #metrics-* sub-anchors) deep-link → router.replace to /insights corresponding anchor
                               Section components are also bare routes: control/{guide,config,display,presets,schedules,inventory,skills}/page.tsx
                               inventory/page.tsx exports PluginsInventory/McpInventory (shared /api/inventory query) as Plugins+MCP sections
 /insights                     Observation surface (read) — Status + Ops + Alerts sections, same shell as Control (sharing ControlNav + single scroll container INSIGHTS_SCROLL_ID)

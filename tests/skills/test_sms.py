@@ -45,7 +45,13 @@ def chat_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     conn.execute("INSERT INTO handle (ROWID, id) VALUES (1, '+15551231118')")
     now = datetime.now(tz=UTC)
     rows = [
-        ("【微信】验证码 654321，请勿泄露", now - timedelta(minutes=5), 0, "SMS", 1),
+        (
+            "\u3010\u5fae\u4fe1\u3011\u9a8c\u8bc1\u7801 654321\uff0c\u8bf7\u52ff\u6cc4\u9732",
+            now - timedelta(minutes=5),
+            0,
+            "SMS",
+            1,
+        ),
         ("G-778899 is your Google verification code", now - timedelta(minutes=10), 0, "SMS", 1),
         ("hey are we still on for lunch?", now - timedelta(minutes=15), 0, "SMS", 1),
         ("old code 111111", now - timedelta(hours=48), 0, "SMS", 1),  # outside default lookback
@@ -62,7 +68,9 @@ def chat_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_extract_codes_multilingual() -> None:
-    assert sms._extract_codes("【微信】验证码 654321，请勿泄露") == ["654321"]
+    assert sms._extract_codes(
+        "\u3010\u5fae\u4fe1\u3011\u9a8c\u8bc1\u7801 654321\uff0c\u8bf7\u52ff\u6cc4\u9732"
+    ) == ["654321"]
     assert sms._extract_codes("G-778899 is your Google verification code") == ["778899"]
     assert sms._extract_codes("hey are we still on for lunch?") == []
 

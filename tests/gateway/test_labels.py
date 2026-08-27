@@ -81,11 +81,14 @@ class TestNormalize:
         assert _normalize('  "abc"  ') == "abc"
 
     def test_chinese_quote_brackets(self) -> None:
-        assert _normalize("「测试任务」") == "测试任务"
+        assert _normalize("\u300c\u6d4b\u8bd5\u4efb\u52a1\u300d") == "\u6d4b\u8bd5\u4efb\u52a1"
 
     def test_truncate_at_max_chars(self) -> None:
         # Within 64 chars — no truncation
-        assert _normalize("一二三四五六七八九十") == "一二三四五六七八九十"
+        assert (
+            _normalize("\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341")
+            == "\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341"
+        )
 
     def test_first_line_only(self) -> None:
         assert _normalize("first line\nsecond line") == "first line"
@@ -103,7 +106,7 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(
             labels_module,
             "build_chat_model",
-            lambda _m, **_: _FakeLLM("查 X 模块"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _m, **_: _FakeLLM("\u67e5 X \u6a21\u5757"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         published: list[str] = []
 
@@ -115,14 +118,16 @@ class TestGenerateLabelAsync:
         # patch publish path — don't hit real redis
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        await generate_label_async(tid, "查一下 X 模块怎么调", "deepseek-v4-pro")
-        assert _label_of(db_conn, tid) == "查 X 模块"
+        await generate_label_async(
+            tid, "\u67e5\u4e00\u4e0b X \u6a21\u5757\u600e\u4e48\u8c03", "deepseek-v4-pro"
+        )
+        assert _label_of(db_conn, tid) == "\u67e5 X \u6a21\u5757"
         # LLM write does not flip sticky bit — user can still PATCH rename (LLM-written label counts as "not yet user-touched")
         # only user PATCH flips it
         assert _label_user_set(db_conn, tid) is False
         assert len(published) == 1
         assert '"label_updated"' in published[0]
-        assert '"label":"查 X 模块"' in published[0]
+        assert '"label":"\u67e5 X \u6a21\u5757"' in published[0]
 
     @pytest.mark.asyncio
     async def test_cas_skips_when_label_already_set(
@@ -132,11 +137,15 @@ class TestGenerateLabelAsync:
         tid = create_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agents SET label='用户改的', label_user_set=TRUE WHERE id=%s",
+                "UPDATE agents SET label='\u7528\u6237\u6539\u7684', label_user_set=TRUE WHERE id=%s",
                 (tid,),
             )
         db_conn.commit()
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _FakeLLM("LLM 起的"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(
+            labels_module,
+            "build_chat_model",
+            lambda _m, **_: _FakeLLM("LLM \u8d77\u7684"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        )
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str) -> int:
@@ -145,8 +154,8 @@ class TestGenerateLabelAsync:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        await generate_label_async(tid, "原始 prompt", "deepseek-v4-pro")
-        assert _label_of(db_conn, tid) == "用户改的"
+        await generate_label_async(tid, "\u539f\u59cb prompt", "deepseek-v4-pro")
+        assert _label_of(db_conn, tid) == "\u7528\u6237\u6539\u7684"
         # CAS miss → do not publish
         assert published == []
 
@@ -165,7 +174,11 @@ class TestGenerateLabelAsync:
                 (tid,),
             )
         db_conn.commit()
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _FakeLLM("LLM 起的"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(
+            labels_module,
+            "build_chat_model",
+            lambda _m, **_: _FakeLLM("LLM \u8d77\u7684"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        )
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str) -> int:
@@ -174,7 +187,7 @@ class TestGenerateLabelAsync:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        await generate_label_async(tid, "原始 prompt", "deepseek-v4-pro")
+        await generate_label_async(tid, "\u539f\u59cb prompt", "deepseek-v4-pro")
         assert _label_of(db_conn, tid) is None
         assert published == []
 
@@ -320,16 +333,18 @@ class TestPatchThread:
         tid = create_agent(db_conn)
         assert _label_user_set(db_conn, tid) is False
         with TestClient(app) as client:
-            resp = client.patch(f"/api/agents/{tid}", json={"label": "我自己起的名"})
+            resp = client.patch(
+                f"/api/agents/{tid}", json={"label": "\u6211\u81ea\u5df1\u8d77\u7684\u540d"}
+            )
         assert resp.status_code == 204
-        assert _label_of(db_conn, tid) == "我自己起的名"
+        assert _label_of(db_conn, tid) == "\u6211\u81ea\u5df1\u8d77\u7684\u540d"
         assert _label_user_set(db_conn, tid) is True
 
     def test_patch_reset_also_flips_user_set(self, db_conn: psycopg.Connection) -> None:
         """Empty string reset is also an active user operation — sticky bit is also flipped TRUE, LLM can no longer overwrite."""
         tid = create_agent(db_conn)
         with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents SET label='临时' WHERE id=%s", (tid,))
+            cur.execute("UPDATE agents SET label='\u4e34\u65f6' WHERE id=%s", (tid,))
         db_conn.commit()
         with TestClient(app) as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": ""})
@@ -340,7 +355,7 @@ class TestPatchThread:
     def test_patch_empty_resets_to_null(self, db_conn: psycopg.Connection) -> None:
         tid = create_agent(db_conn)
         with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents SET label='临时' WHERE id=%s", (tid,))
+            cur.execute("UPDATE agents SET label='\u4e34\u65f6' WHERE id=%s", (tid,))
         db_conn.commit()
         with TestClient(app) as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": ""})
@@ -391,7 +406,7 @@ class TestSpawnAgentSchedulesLabelGeneration:
         monkeypatch.setattr(
             labels_module,
             "build_chat_model",
-            lambda _m, **_: _FakeLLM("迁移数据"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _m, **_: _FakeLLM("\u8fc1\u79fb\u6570\u636e"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
 
         async def _noop_publish(_self: Any, channel: str, payload: str) -> int:
@@ -402,7 +417,7 @@ class TestSpawnAgentSchedulesLabelGeneration:
         with TestClient(app) as client:
             resp = client.post(
                 "/api/agents",
-                json={"prompt": "迁移数据库 schema", "prompt_source": "user"},
+                json={"prompt": "\u8fc1\u79fb\u6570\u636e\u5e93 schema", "prompt_source": "user"},
             )
         assert resp.status_code == 201
         new_id = resp.json()["id"]
@@ -440,7 +455,7 @@ class TestPublishLabelUpdated:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        await publish_label_updated(42, "短名")
+        await publish_label_updated(42, "\u77ed\u540d")
         assert captured["channel"] == settings.data_plane.events_channel
         assert '"agent_id":42' in captured["payload"]
-        assert '"label":"短名"' in captured["payload"]
+        assert '"label":"\u77ed\u540d"' in captured["payload"]

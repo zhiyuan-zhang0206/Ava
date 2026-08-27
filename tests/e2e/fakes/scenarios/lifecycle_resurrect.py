@@ -34,7 +34,7 @@ _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 TERMINATE_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="再见,等会复活我。",
+        content="\u518d\u89c1,\u7b49\u4f1a\u590d\u6d3b\u6211\u3002",
         tool_calls=[
             {
                 "id": "call_terminate",
@@ -46,7 +46,9 @@ TERMINATE_SCRIPT: tuple[AIMessage, ...] = (
     ),
 )
 
-IDLE_SCRIPT: tuple[AIMessage, ...] = (AIMessage(content="我已被复活。", usage_metadata=_USAGE),)
+IDLE_SCRIPT: tuple[AIMessage, ...] = (
+    AIMessage(content="\u6211\u5df2\u88ab\u590d\u6d3b\u3002", usage_metadata=_USAGE),
+)
 
 
 def _is_post_resurrect_process() -> bool:

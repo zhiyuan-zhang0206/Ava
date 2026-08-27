@@ -33,7 +33,9 @@ from tests.e2e.fakes.scenarios.message_flow import REPLY_TEXT
 
 # The unrecognized-marker red alarm copy, en + zh. The #1017 user-visible
 # warning; its ABSENCE is the semantic assertion of every marker case.
-_UNRECOGNIZED_RE = re.compile(r"Unrecognized system_marker|无法识别的 system_marker")
+_UNRECOGNIZED_RE = re.compile(
+    "Unrecognized system_marker|\u65e0\u6cd5\u8bc6\u522b\u7684 system_marker"
+)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.message_flow:build")
@@ -53,7 +55,7 @@ def test_message_flow_renders_full_turn_without_unrecognized_marker(e2e_env: E2E
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
-    page.fill('[data-testid="composer-input"]', "1+2 等于几？")
+    page.fill('[data-testid="composer-input"]', "1+2 \u7b49\u4e8e\u51e0\uff1f")
     page.click('[data-testid="composer-send"]')
 
     # Turn committed: status flips IDLING at claim entry; the checkpoint write
@@ -89,7 +91,7 @@ def test_message_flow_renders_full_turn_without_unrecognized_marker(e2e_env: E2E
     ], f"timeline fan-out wrong: {turn_kinds} (full: {[it['kind'] for it in items]})"
 
     reasoning = next(it for it in items if it["kind"] == "agent_reasoning")
-    assert "写代码算" in reasoning["payload"], reasoning
+    assert "\u5199\u4ee3\u7801\u7b97" in reasoning["payload"], reasoning
     code = next(it for it in items if it["kind"] == "agent_code")
     assert "print(1 + 2)" in code["payload"], code
     output = next(it for it in items if it["kind"] == "code_output")

@@ -409,7 +409,7 @@ def test_list_open_page_names_returns_open_only(db_conn: psycopg.Connection) -> 
 
 
 def test_register_page_with_serve_dir(db_conn: psycopg.Connection) -> None:
-    """serve_dir（serve()/serve_markdown() 记录的服务目录）随注册透传到行 + 响应。"""
+    """serve_dir\uff08serve()/serve_markdown() \u8bb0\u5f55\u7684\u670d\u52a1\u76ee\u5f55\uff09\u968f\u6ce8\u518c\u900f\u4f20\u5230\u884c + \u54cd\u5e94\u3002"""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
         resp = client.post(
@@ -427,13 +427,13 @@ def test_register_page_with_serve_dir(db_conn: psycopg.Connection) -> None:
 
 
 def test_register_page_upsert_updates_serve_dir(db_conn: psycopg.Connection) -> None:
-    """ops.register_page 同名 upsert（UPDATE 分支）：port/title/serve_dir 一起更新，行 id 不变。"""
+    """ops.register_page \u540c\u540d upsert\uff08UPDATE \u5206\u652f\uff09\uff1aport/title/serve_dir \u4e00\u8d77\u66f4\u65b0\uff0c\u884c id \u4e0d\u53d8\u3002"""
     from ops.pages import register_page
 
     aid = create_agent(db_conn)
     r1 = register_page(db_conn, aid, "p", 8001, _HOST, None, serve_dir="/data/a")
     r2 = register_page(db_conn, aid, "p", 8002, "100.64.0.2", "v2", serve_dir="/data/b")
-    assert r2.id == r1.id  # UPDATE 而非 INSERT
+    assert r2.id == r1.id  # UPDATE, not INSERT
     assert r2.port == 8002
     assert r2.title == "v2"
     assert r2.serve_dir == "/data/b"
@@ -443,7 +443,7 @@ def test_register_page_upsert_updates_serve_dir(db_conn: psycopg.Connection) -> 
 
 
 def test_register_page_without_serve_dir_leaves_null(db_conn: psycopg.Connection) -> None:
-    """show() 路径不带 serve_dir → 行里保持 NULL。"""
+    """show() \u8def\u5f84\u4e0d\u5e26 serve_dir → \u884c\u91cc\u4fdd\u6301 NULL\u3002"""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
         resp = client.post(

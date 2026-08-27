@@ -68,7 +68,7 @@ _FYI_NOTICE = {
     "id": 2,
     "agent_id": 1,
     "agent_label": "layout-test",
-    "title": "轻提醒：" + "x" * 40,
+    "title": "\u8f7b\u63d0\u9192\uff1a" + "x" * 40,
     "content": "Just so you know.",
     "priority": "P3",
     "require_response": False,

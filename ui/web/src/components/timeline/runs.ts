@@ -330,7 +330,7 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
       }),
     );
   }
-  // Work items — action names are translated ("thinking" → "思考" etc.).
+  // Work items — action names are translated ("thinking" → the zh label etc.).
   const counts: Record<string, number> = { thinking: summary.thinking, code: summary.code, output: summary.output };
   for (const key of ACTION_ORDER) {
     const n = counts[key];

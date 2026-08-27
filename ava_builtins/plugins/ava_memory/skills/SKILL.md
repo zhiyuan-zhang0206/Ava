@@ -95,7 +95,7 @@ Check items:
 - **Deduplication**: semantic search for duplicates → merge or delete
 - **Stale Content**: Mark notes >30 days untouched and no longer relevant → move to archive/
 - **Index Consistency**: `python3 validate.py` (and the pre-commit hook) already report pointers to missing files, duplicate pointers, and notes nothing points at; act on those
-- **Fact-Check (Setup 真实性)**: Setup 可验证事实用 `<!-- fact-check: <cmd> -->` 注释（`!` 取反，白名单 git/test/ls）
+- **Fact-Check (Setup truthfulness)**: Setup verifiable facts use the `<!-- fact-check: <cmd> -->` comment (`!` negates; allowlist git/test/ls)
 - **Directory Structure** (hard rules, from the AvaMemory template repo's
   `validate.py` — never skip): every directory holds at most **20 md notes**
   and at most **20 subdirectories**. Depth is deliberately **unlimited** —
@@ -115,7 +115,7 @@ When other agents complete tasks, they may generate knowledge that needs to be w
 
 1. Receive an agent message: "Please merge the following information into memory: <content>"
 2. Determine whether the content deserves to be written to the shared index (refer to memory-vault-rule.md)
-3. Search first (先查后写): grep 现有条目 — 就地更新/修正（含 Setup 段），无才新建
+3. Search first: grep existing entries — update/fix in place (including the Setup section); create only when nothing exists
 4. Create/update the corresponding .md file, following OKF format
 5. Update `MEMORY.md`
 6. Reply with confirmation

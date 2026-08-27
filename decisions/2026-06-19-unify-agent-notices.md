@@ -17,7 +17,7 @@ questions ride the agent snapshot inline; reports stay off it as a count + feed)
 The duplication was real machinery: two routers (6 endpoints), two event roles,
 two Pydantic model families, two frontend fetch paths. `supervision-queue.md` (since removed)
 had explicitly **rejected** unifying them ("don't merge into one `agent_messages` + `kind`
-列"). This entry reverses that.
+column"). This entry reverses that.
 
 ## Decision
 

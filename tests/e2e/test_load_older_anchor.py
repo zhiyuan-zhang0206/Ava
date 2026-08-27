@@ -94,7 +94,7 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     # The scripted scenario runs when an inbound arrives — drive it, then wait
     # until the final reply is committed in the timeline (the whole script
     # ran; IDLING alone is racy — the agent idles between turns too).
-    page.fill('[data-testid="composer-input"]', "跑完全部步骤。")
+    page.fill('[data-testid="composer-input"]', "\u8dd1\u5b8c\u5168\u90e8\u6b65\u9aa4\u3002")
     page.click('[data-testid="composer-send"]')
     deadline = time.monotonic() + 120.0
     while True:
@@ -103,7 +103,11 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
             timeout=90.0,
         ).json()["items"]
         if (
-            any(it["kind"] == "agent_chat" and "全部执行完毕" in it["payload"] for it in items)
+            any(
+                it["kind"] == "agent_chat"
+                and "\u5168\u90e8\u6267\u884c\u5b8c\u6bd5" in it["payload"]
+                for it in items
+            )
             or time.monotonic() > deadline
         ):
             break

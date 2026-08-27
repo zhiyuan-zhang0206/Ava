@@ -57,7 +57,7 @@ prints the run counts.
 **Correction signals** (two new data sources since 2026-07):
 
 - `corrections` — user messages classified as redirection/criticism via
-  keyword detection (不对, 错了, 重新, wrong, incorrect, etc.); split from
+  keyword detection (\u4e0d\u5bf9, \u9519\u4e86, \u91cd\u65b0, wrong, incorrect, etc.); split from
   `followup_prompts` because a correction is a stronger failure signal than a
   neutral follow-up.
 - `peer_feedback` — agent-to-agent messages (`source LIKE 'agent:%'`)

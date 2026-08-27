@@ -34,7 +34,7 @@ The consolidated lexicon (single source of truth / registry / lease / doorplate 
 ## Cross-design handoffs (explicit, no gaps)
 
 - **R2 ↔ R3 (skill identity)**: identity definition (fold at construction, canonical at render) belongs to R2's `SkillIdentity`; R3's `SkillIndex.build()` consumes that entity as index key — materialization belongs to R3.
-- **R2 ↔ R3 (idempotency)**: R3 declares idempotency at the API boundary (service-side promise, `idempotency` field on the doorplate); R2's `resilience.Policy.idempotent` is the client-side execution parameter. One shared decision point (R2 Q1 / R3 门①): same question, two perspectives.
+- **R2 ↔ R3 (idempotency)**: R3 declares idempotency at the API boundary (service-side promise, `idempotency` field on the doorplate); R2's `resilience.Policy.idempotent` is the client-side execution parameter. One shared decision point (R2 Q1 / R3 door ①): same question, two perspectives.
 - **R1 ↔ R3 (pause)**: R1 owns the pause *state* (`host_deploy_state.posture`); R3 owns the pause *exemption policy* (which routes survive a migration, declared per-route with tests).
 - **R1 ↔ R3 (exit self-report)**: R1 replaces liveness dependence on the exit-notify HTTP chain with leases; R3 guarantees that self-reports which remain (e.g. `/exited`) are contractually declared.
 

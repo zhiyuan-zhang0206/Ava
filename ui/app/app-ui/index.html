@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -97,10 +97,10 @@
   <body>
     <main>
       <section id="setup" hidden>
-        <h1>连接到 Ava</h1>
-        <p>填 Ava 服务器地址；密钥可选，填了直达已登录</p>
+        <h1>Connect to Ava</h1>
+        <p>Enter the Ava server address; the secret is optional — with it you land already signed in</p>
         <form id="setup-form">
-          <label for="server">服务器地址</label>
+          <label for="server">Server address</label>
           <input
             id="server"
             name="server"
@@ -113,7 +113,7 @@
             required
           />
           <div id="secret-field" style="margin-top: 14px">
-            <label for="cluster-secret">集群密钥 <span class="optional">（可选）</span></label>
+            <label for="cluster-secret">Cluster secret <span class="optional">(optional)</span></label>
             <div class="secret-input">
               <input
                 id="cluster-secret"
@@ -124,14 +124,14 @@
                 autocorrect="off"
                 spellcheck="false"
               />
-              <button type="button" class="secret-toggle" id="secret-visibility" aria-pressed="false">显示</button>
+              <button type="button" class="secret-toggle" id="secret-visibility" aria-pressed="false">Show</button>
             </div>
-            <p class="hint">不填则连接后到网页登录页输入</p>
+            <p class="hint">Leave empty to sign in on the web login page after connecting</p>
           </div>
           <details id="advanced-options">
-            <summary>高级选项</summary>
+            <summary>Advanced options</summary>
             <div>
-              <label for="gateway">网关地址覆盖（可选）</label>
+              <label for="gateway">Gateway address override (optional)</label>
               <input
                 id="gateway"
                 name="gateway"
@@ -140,42 +140,42 @@
                 autocapitalize="none"
                 autocorrect="off"
                 spellcheck="false"
-                placeholder="默认从服务器地址推导"
+                placeholder="Derived from the server address by default"
               />
               <label class="toggle">
                 <input id="background-service" type="checkbox" />
-                后台驻留
+                Run in background
               </label>
               <label class="toggle">
                 <input id="notifications" type="checkbox" />
-                通知
+                Notifications
               </label>
             </div>
           </details>
           <p class="error" id="setup-error" aria-live="polite"></p>
-          <button type="submit" id="setup-submit">连接</button>
-          <button type="button" class="secondary" id="setup-cancel" hidden>取消</button>
+          <button type="submit" id="setup-submit">Connect</button>
+          <button type="button" class="secondary" id="setup-cancel" hidden>Cancel</button>
         </form>
       </section>
 
       <section id="connecting" hidden style="text-align: center">
         <div class="spinner" style="margin-inline: auto"></div>
-        <h1>正在连接…</h1>
+        <h1>Connecting…</h1>
         <p id="connecting-target"></p>
         <ol class="steps" id="connecting-steps">
-          <li>探测控制台</li>
-          <li>交换会话</li>
-          <li>载入界面</li>
+          <li>Probe the console</li>
+          <li>Exchange sessions</li>
+          <li>Load the UI</li>
         </ol>
         <p class="countdown" id="connecting-countdown"></p>
       </section>
 
       <section id="unreachable" hidden style="text-align: center">
-        <h1>连接失败</h1>
+        <h1>Connection failed</h1>
         <p id="unreachable-target"></p>
         <p id="unreachable-reason"></p>
-        <button type="button" id="retry">重试</button>
-        <button type="button" class="secondary" id="change-server">修改地址</button>
+        <button type="button" id="retry">Retry</button>
+        <button type="button" class="secondary" id="change-server">Change address</button>
       </section>
     </main>
 
@@ -186,10 +186,10 @@
       const CONNECTING_DEADLINE_MS = 30_000;
       const AUTH_ERROR_PREFIX = "AUTH_FAILED:";
       const failureCopy = {
-        unreachable: "手机网络到不了这个地址——检查 Tailscale 登录、局域网、地址抄写",
-        http: "服务器在但控制台没起来——稍后重试",
-        auth: "密钥不对——重输或清空跳过到网页登录页",
-        "update-window": "服务器可能正在升级或回滚，请稍后重试。",
+        unreachable: "This device cannot reach the address - check Tailscale login, the LAN, and that the address was copied correctly",
+        http: "The server is up but the console is not - retry shortly",
+        auth: "Wrong secret - re-enter it or clear it to fall through to the web login page",
+        "update-window": "The server may be upgrading or rolling back; retry shortly.",
       };
       let connectingTimer = null;
 
@@ -227,7 +227,7 @@
           const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
           const activeStep = seconds > 20 ? 0 : seconds > 10 ? 1 : 2;
           steps.forEach((step, index) => step.classList.toggle("active", index === activeStep));
-          document.getElementById("connecting-countdown").textContent = `最多再等待 ${seconds} 秒`;
+          document.getElementById("connecting-countdown").textContent = `waiting at most ${seconds} more seconds`;
         };
         update();
         connectingTimer = window.setInterval(update, 1_000);
@@ -280,7 +280,7 @@
         const visible = secret.type === "password";
         secret.type = visible ? "text" : "password";
         const button = document.getElementById("secret-visibility");
-        button.textContent = visible ? "隐藏" : "显示";
+        button.textContent = visible ? "Hide" : "Show";
         button.setAttribute("aria-pressed", String(visible));
       });
 
@@ -309,7 +309,7 @@
             if (settled && window.location.hash !== "#connecting") return;
             timedOut = true;
             submit.disabled = false;
-            showSetupError("连接超时，请重试。");
+            showSetupError("Connection timed out - please retry.");
           };
           if (document.visibilityState === "visible") {
             recover();

@@ -3,7 +3,7 @@
 Persistent shells intentionally survive agent turns and lifecycle restarts, so
 automatic cleanup would destroy useful long-running work. The reminder design
 keeps ownership with the agent: the system asks, names the exact SDK session id
-to close, and never kills a session itself. A reply containing `保留` turns the
+to close, and never kills a session itself. A reply echoing the retention keyword (the zh word for "keep") turns the
 covered sessions into standing exceptions until they end.
 
 Terminal output silence was rejected as the primary idle signal because a

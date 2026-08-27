@@ -75,10 +75,10 @@ def test_old_history_collapses_to_task_prompt(
         _insert_agent(cur, 1)
         _insert_agent(cur, 2)
         _insert_inbound(cur, 1, "user", "task prompt", "10 days")
-        _insert_inbound(cur, 1, "user", "old correction 错了", "8 days")
+        _insert_inbound(cur, 1, "user", "old correction \u9519\u4e86", "8 days")
         _insert_inbound(cur, 1, "user", "window follow-up", "1 hour")
         _insert_inbound(cur, 2, "user", "task prompt 2", "30 days")
-        _insert_inbound(cur, 2, "agent:99", "old peer ping 别忘了", "29 days")
+        _insert_inbound(cur, 2, "agent:99", "old peer ping \u522b\u5fd8\u4e86", "29 days")
     db_conn.commit()
 
     with db_conn.cursor() as cur:
@@ -234,7 +234,7 @@ def _patch_client(collect_mod: Any, monkeypatch: pytest.MonkeyPatch, client: _Fa
 def test_fetch_slices_and_orders_oldest_first(
     collect_mod: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 2500 行 > 单页预算 → 时间二分；每片一次 offset=0 查询
+    # 2500 rows > single-page budget -> binary-search time; one offset=0 query per slice
     rows = [_row(i, _ts_after(i * 2)) for i in range(2500)]
     client = _FakeClient(rows)
     _patch_client(collect_mod, monkeypatch, client)
@@ -244,7 +244,7 @@ def test_fetch_slices_and_orders_oldest_first(
     assert len(out) == 2500
     tss = [str(r["ts"]) for r in out]
     assert tss == sorted(tss)
-    # 无 offset 分页：每个请求都是 offset=0 limit=1000（Loki offset 分页会超时/丢数据）
+    # No offset pagination: every request is offset=0 limit=1000 (Loki offset pagination times out / drops data)
     for _, p, _h in client.requests:
         assert p["offset"] == 0
         assert p["limit"] == 1000
@@ -253,7 +253,7 @@ def test_fetch_slices_and_orders_oldest_first(
 def test_fetch_bisects_oversized_slices_without_loss(
     collect_mod: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 9000 行分布在 5 小时窗口 → 总行数超 4000 预算 → 必须二分切小
+    # 9000 rows across a 5-hour window -> over the 4000-row budget -> must split via binary search
     rows = [_row(i, _ts_after(i * 2)) for i in range(9000)]
     client = _FakeClient(rows)
     _patch_client(collect_mod, monkeypatch, client)
@@ -270,8 +270,8 @@ def test_fetch_bisects_oversized_slices_without_loss(
 def test_fetch_dedups_inclusive_slice_boundaries(
     collect_mod: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 边界行（恰好落在二分中点）会被相邻两片同时包含（窗口两端皆含）→ 按 id 去重
-    boundary = _row(999, _ts_after(1800))  # 窗口中点 = 二分切点，两端皆含
+    # Boundary rows (exactly at the bisection midpoint) are included by both adjacent slices (window includes both ends) -> dedupe by id
+    boundary = _row(999, _ts_after(1800))  # window midpoint = bisection cut, both ends include it
     rows = [_row(i, _ts_after(i * 2)) for i in range(2500)] + [boundary]
     client = _FakeClient(rows)
     _patch_client(collect_mod, monkeypatch, client)

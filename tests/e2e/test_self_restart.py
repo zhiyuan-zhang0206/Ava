@@ -42,7 +42,7 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
     assert row is not None and row[0] is not None, "first process pid should be non-NULL"
     first_pid: int = row[0]
 
-    page.fill('[data-testid="composer-input"]', "重启")
+    page.fill('[data-testid="composer-input"]', "\u91cd\u542f")
     page.click('[data-testid="composer-send"]')
 
     # restart cycle: services/restarter daemon 1s poll → respawn → new process IDLING

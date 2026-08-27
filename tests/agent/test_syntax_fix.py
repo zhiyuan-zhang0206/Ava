@@ -94,7 +94,7 @@ class TestFixChinesePunctuation:
     def test_in_string_punctuation_preserved(self):
         # Fullwidth comma inside a string literal is intended text, not a code
         # fat-finger -- must be left untouched.
-        src = 'msg = "你好，世界"'
+        src = 'msg = "\u4f60\u597d\uff0c\u4e16\u754c"'
         code, n = _fix_chinese_punctuation(src)
         assert code == src
         assert n == 0
@@ -103,14 +103,14 @@ class TestFixChinesePunctuation:
         # The agent68 class of bug: a Chinese prompt in a triple-quoted string.
         # Rewriting fullwidth quotes inside could forge a closing \"\"\" and break
         # the literal. The string must survive verbatim and still compile.
-        src = 'p = """问题背景：请用 “智能” 模式。"""'
+        src = 'p = """\u95ee\u9898\u80cc\u666f\uff1a\u8bf7\u7528 \u201c\u667a\u80fd\u201d \u6a21\u5f0f\u3002"""'
         code, n = _fix_chinese_punctuation(src)
         assert code == src
         assert n == 0
         compile(code, "<t>", "exec")  # still valid
 
     def test_comment_punctuation_preserved(self):
-        src = "x = 1  # 调用（重要）"
+        src = "x = 1  # \u8c03\u7528\uff08\u91cd\u8981\uff09"
         code, n = _fix_chinese_punctuation(src)
         assert code == src
         assert n == 0
@@ -118,18 +118,18 @@ class TestFixChinesePunctuation:
     def test_code_position_fixed_but_string_preserved(self):
         # Same line: fullwidth paren in code position is fixed; fullwidth comma
         # inside the string argument is preserved.
-        src = 'print（"a，b"）'
+        src = 'print\uff08"a\uff0cb"\uff09'
         code, n = _fix_chinese_punctuation(src)
-        assert code == 'print("a，b")'
+        assert code == 'print("a\uff0cb")'
         assert n == 2
 
     def test_fullwidth_quote_delimiters_fixed_interior_preserved(self):
         # Model used fullwidth quotes AS string delimiters. Pass 1 converts the
         # delimiters to ASCII so the body becomes a real string token; pass 2
         # then leaves the interior comma alone. Delimiters fixed, text intact.
-        src = "msg = “你好，世界”"
+        src = "msg = \u201c\u4f60\u597d\uff0c\u4e16\u754c\u201d"
         code, n = _fix_chinese_punctuation(src)
-        assert code == 'msg = "你好，世界"'
+        assert code == 'msg = "\u4f60\u597d\uff0c\u4e16\u754c"'
         assert n == 2  # only the two quotes; the interior fullwidth comma stays
         compile(code, "<t>", "exec")
 
@@ -137,7 +137,7 @@ class TestFixChinesePunctuation:
         # Unterminated paren makes tokenize raise TokenError; rather than risk
         # corrupting in-string text we return the source unchanged and let
         # compile()/LLM repair handle it downstream.
-        src = 'x = ("a，b"'
+        src = 'x = ("a\uff0cb"'
         code, n = _fix_chinese_punctuation(src)
         assert code == src
         assert n == 0

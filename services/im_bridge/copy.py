@@ -102,7 +102,7 @@ REPLY_SENT_OTHER_AGENT = "⚠️ That notice belongs to agent #{agent_id} (this 
 
 # -- push watchdog ----------------------------------------------------------
 
-PUSH_FAILURE_ALERT = '「{channel}」 push link failed {failures} times consecutively. Send a message to the {channel} bot (e.g. "hi") to restore the push; if messages still do not arrive, the QR login must be redone — contact the administrator.'
+PUSH_FAILURE_ALERT = '\u300c{channel}\u300d push link failed {failures} times consecutively. Send a message to the {channel} bot (e.g. "hi") to restore the push; if messages still do not arrive, the QR login must be redone — contact the administrator.'
 PUSH_RECOVERED_HINT = (
     "(system note: the '{channel}' push link failed earlier and has now recovered)"
 )

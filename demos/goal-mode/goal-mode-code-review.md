@@ -11,8 +11,8 @@ real exercise.** As of 2026-08-13 there are four recorded real runs (detailed
 below). The first three — small builds — all completed on the first judgment
 round with nothing to reject. The fourth — a multi-hour ledger app — finally
 drove the loop for real: **two genuine rejections** (round 1: four missing
-files, category [遗漏]; round 2: a boot-crash API bug + a skipped verification,
-categories [误解]+[偷懒]), each with path/line/repro evidence, then a verified
+files, category [omitted]; round 2: a boot-crash API bug + a skipped verification,
+categories [misunderstood]+[slacked]), each with path/line/repro evidence, then a verified
 completion. That is the core multi-round path working once — not a measured
 capability. A second mechanism bug was found and fixed mid-campaign (the
 watcher redis-py-8 timeout, below). Treat goal mode as: watcher loop verified,
@@ -96,8 +96,8 @@ Deliberately too large for one turn, so rounds are physical, not cosmetic.
 
 | Round | Verdict | Defects (category → evidence) |
 |---|---|---|
-| 1 | **reject** | [遗漏] ×4 — index.html/style.css/app.js absent, no DOM verification possible (`ls` shows only store.js+test.js). store.js+test.js passed review and were declared do-not-rework. |
-| 2 | **reject** | [误解] ×1 — `app.js` calls `store.sortedEntries()` but the store API (store.js:592-608) does not expose it → `TypeError` at boot, whole UI dead (jsdom repro, app.js:125). [偷懒] ×1 — shipped without running the app once; the worker's own report admitted no DOM verification, and one boot would have caught defect 1. |
+| 1 | **reject** | [omitted] ×4 — index.html/style.css/app.js absent, no DOM verification possible (`ls` shows only store.js+test.js). store.js+test.js passed review and were declared do-not-rework. |
+| 2 | **reject** | [misunderstood] ×1 — `app.js` calls `store.sortedEntries()` but the store API (store.js:592-608) does not expose it → `TypeError` at boot, whole UI dead (jsdom repro, app.js:125). [slacked] ×1 — shipped without running the app once; the worker's own report admitted no DOM verification, and one boot would have caught defect 1. |
 | 3 | **goal met** | Worker fixed both, caught a Chrome-only debounce bug (`setTimeout` dereferenced → Illegal invocation) via a real-browser run, and added its own 24-check jsdom harness. Supervisor re-verified independently: 53/53 tests, worker's harness re-run 24/24, a separate 30-check supervisor smoke (fresh assertions) green with zero errors. |
 
 What this run establishes: on a long task the reject loop engages for real and

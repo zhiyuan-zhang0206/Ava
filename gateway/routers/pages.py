@@ -41,9 +41,15 @@ from ops.pages import (
 )
 from ops.rpc_schemas import PageRow
 from shared.agents import AgentStatus
+from shared.alerts import display_language
 from shared.config import settings
 from shared.db import agent_exists
 from shared.live_events import PageClosed, PageOpened
+from shared.pages_copy import (
+    PAGE_EXPIRED_BODY,
+    PAGE_EXPIRED_TITLE,
+    PAGE_LANGUAGE_DEFAULT,
+)
 from shared.redis_client import publish_best_effort
 
 router = APIRouter()
@@ -58,14 +64,31 @@ _page_host_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _page_host_cache_lock = threading.Lock()
 
 
-def _EXPIRED_PAGE_HTML(agent_id: int, name: str) -> str:  # noqa: N802 — fixed contract name
-    """Small self-contained response for links whose page TTL elapsed."""
+def _page_language(pool: ConnectionPool) -> str:
+    """The page copy language — ``user_settings`` display.language (zh | en).
+
+    Same single-language-source mechanism as the IM alert copy
+    (``shared.alerts.display_language``); a missing row or unknown value
+    falls back to ``PAGE_LANGUAGE_DEFAULT``.
+    """
+    with pool.connection() as conn:
+        return display_language(conn)
+
+
+def _EXPIRED_PAGE_HTML(agent_id: int, name: str, lang: str) -> str:  # noqa: N802 — fixed contract name
+    """Small self-contained response for links whose page TTL elapsed.
+
+    Copy follows the user's display language (``shared/pages_copy.py``, the
+    locale module); the page name and agent id pass through untranslated.
+    """
     escaped_name = _html.escape(name)
+    title = PAGE_EXPIRED_TITLE.get(lang, PAGE_EXPIRED_TITLE[PAGE_LANGUAGE_DEFAULT])
+    body = PAGE_EXPIRED_BODY.get(lang, PAGE_EXPIRED_BODY[PAGE_LANGUAGE_DEFAULT])
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
-        "<title>Page expired</title></head><body><main>"
-        "<h1>Page expired</h1>"
-        "<p>页面已过期，请让 agent 重新 serve</p>"  # noqa: RUF001 — PM-specified user-facing copy (fullwidth comma is part of the text)
+        f"<title>{title}</title></head><body><main>"
+        f"<h1>{title}</h1>"
+        f"<p>{body}</p>"
         f"<p>Page {escaped_name} · agent {agent_id}</p>"
         "</main></body></html>"
     )
@@ -241,10 +264,11 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
             _page_expired_blocking, request.app.state.db_pool, agent_id, name
         )
         if expired:
+            lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
             return Response(
                 status_code=410,
                 media_type="text/html",
-                content=_EXPIRED_PAGE_HTML(agent_id, name),
+                content=_EXPIRED_PAGE_HTML(agent_id, name, lang),
             )
         raise HTTPException(status_code=404, detail=f"page {name!r} not open (agent {agent_id})")
     host, port = target_row
