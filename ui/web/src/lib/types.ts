@@ -667,7 +667,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.language": "en",
   "display.show_machine_name": true,
   "display.time_mode": "last_active",
-  "display.show_terminated": true,
+  "display.show_terminated": false,
   "display.date_format": "relative",
   "display.show_activity_line": false,
   "display.show_agent_status": false,

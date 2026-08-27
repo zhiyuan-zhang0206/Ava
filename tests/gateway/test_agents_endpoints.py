@@ -763,6 +763,34 @@ class TestList:
         assert by_id[a_id]["label"] is None
         assert by_id[b_id]["label"] is None
 
+    def test_get_agents_scopes_live_and_terminated_in_the_database_contract(
+        self,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        """The default stays historical; frontend scopes partition the roster."""
+        with TestClient(app) as client:
+            live_id = client.post("/api/agents", json={}).json()["id"]
+            terminated_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s",
+                    (terminated_id,),
+                )
+            db_conn.commit()
+
+            all_rows = client.get("/api/agents").json()
+            live_rows = client.get("/api/agents", params={"scope": "live"}).json()
+            terminated_rows = client.get("/api/agents", params={"scope": "terminated"}).json()
+
+        assert {row["agent_id"] for row in all_rows} == {live_id, terminated_id}
+        assert [row["agent_id"] for row in live_rows] == [live_id]
+        assert [row["agent_id"] for row in terminated_rows] == [terminated_id]
+
+    def test_get_agents_rejects_unknown_scope(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/api/agents", params={"scope": "future"})
+        assert response.status_code == 422
+
     def test_get_agents_joins_thread_label(
         self,
         db_conn: psycopg.Connection,

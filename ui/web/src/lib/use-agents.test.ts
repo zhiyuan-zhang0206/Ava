@@ -26,7 +26,9 @@ import { useStore } from "./store";
 import type { AgentRow, SystemEvent, WireAgentRow } from "./types";
 import { projectAgentStatus } from "./types";
 import { AGENTS_QUERY_KEY, upsertAgent, useAgents } from "./use-agents";
-import { foldAgents } from "./fold/agents";
+import { foldAgents, TERMINATED_AGENTS_QUERY_KEY } from "./fold/agents";
+import { RECONNECT_QUERY_KEYS } from "./fold";
+import { SETTINGS_QUERY_KEY } from "./use-user-settings";
 import { EventStreamProvider } from "./useEventStream";
 
 vi.mock("./api", () => ({
@@ -40,6 +42,8 @@ vi.mock("./api", () => ({
     restartAgent: vi.fn(),
     resurrectAgent: vi.fn(),
     checkAuth: vi.fn(),
+    getSettings: vi.fn(),
+    putSetting: vi.fn(),
   },
 }));
 
@@ -163,8 +167,11 @@ beforeEach(() => {
   _qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  vi.mocked(api.listAgents).mockResolvedValue(MOCK_AGENTS);
+  vi.mocked(api.listAgents).mockImplementation((scope = "live") =>
+    Promise.resolve(scope === "terminated" ? [] : MOCK_AGENTS),
+  );
   vi.mocked(api.checkAuth).mockResolvedValue({ authenticated: true });
+  vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
 });
 afterEach(() => {
   cleanup();
@@ -202,6 +209,154 @@ describe("useAgents activeId / store sync", () => {
       expect(result.current.activeId).toBe(2);
     });
     expect(useStore.getState().activeId).toBe(2);
+  });
+
+  it("fetches terminated history only when the persistent setting explicitly enables it", async () => {
+    const terminated = { ...MOCK_AGENTS[0], agent_id: 9, status: "terminated" as const };
+    _qc.setQueryData(SETTINGS_QUERY_KEY, { "display.show_terminated": true });
+    vi.mocked(api.listAgents).mockImplementation((scope = "live") =>
+      Promise.resolve(scope === "terminated" ? [terminated] : MOCK_AGENTS),
+    );
+
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.agents.map((agent) => agent.agent_id)).toEqual([1, 2, 9]);
+    });
+    expect(vi.mocked(api.listAgents)).toHaveBeenCalledWith("live");
+    expect(vi.mocked(api.listAgents)).toHaveBeenCalledWith("terminated");
+    expect(_qc.getQueryData(TERMINATED_AGENTS_QUERY_KEY)).toEqual([terminated]);
+  });
+
+  it("replays a termination SSE over an older first history snapshot", async () => {
+    const terminated = { ...MOCK_AGENTS[0], status: "terminated" as const };
+    _qc.setQueryData(SETTINGS_QUERY_KEY, { "display.show_terminated": true });
+    let resolveHistory!: (rows: AgentRow[]) => void;
+    const history = new Promise<AgentRow[]>((resolve) => {
+      resolveHistory = resolve;
+    });
+    vi.mocked(api.listAgents).mockImplementation((scope = "live") =>
+      scope === "terminated" ? history : Promise.resolve(MOCK_AGENTS),
+    );
+
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(result.current.agents).toEqual(MOCK_AGENTS));
+    await waitForEventSource();
+    act(() => {
+      deliverSseMessage({
+        role: "agent_updated",
+        agent_id: terminated.agent_id,
+        snapshot: terminated,
+      });
+    });
+
+    await act(async () => {
+      resolveHistory([]); // stale DB snapshot taken before the termination
+      await history;
+    });
+
+    await waitFor(() => {
+      expect(_qc.getQueryData(TERMINATED_AGENTS_QUERY_KEY)).toEqual([terminated]);
+      expect(result.current.agents.find((agent) => agent.agent_id === 1)?.status).toBe(
+        "terminated",
+      );
+    });
+  });
+
+  it("replays a resurrection SSE over an older terminated snapshot", async () => {
+    const oldTerminated = {
+      ...MOCK_AGENTS[0],
+      agent_id: 9,
+      status: "terminated" as const,
+    };
+    const resurrected = { ...oldTerminated, status: "idling" as const };
+    _qc.setQueryData(SETTINGS_QUERY_KEY, { "display.show_terminated": true });
+    let resolveHistory!: (rows: AgentRow[]) => void;
+    const history = new Promise<AgentRow[]>((resolve) => {
+      resolveHistory = resolve;
+    });
+    vi.mocked(api.listAgents).mockImplementation((scope = "live") =>
+      scope === "terminated" ? history : Promise.resolve(MOCK_AGENTS),
+    );
+
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(result.current.agents).toEqual(MOCK_AGENTS));
+    await waitForEventSource();
+    act(() => {
+      deliverSseMessage({
+        role: "agent_updated",
+        agent_id: resurrected.agent_id,
+        snapshot: resurrected,
+      });
+    });
+
+    await act(async () => {
+      resolveHistory([oldTerminated]); // stale snapshot taken before resurrection
+      await history;
+    });
+
+    await waitFor(() => {
+      expect(_qc.getQueryData(TERMINATED_AGENTS_QUERY_KEY)).toEqual([]);
+      const rows = result.current.agents.filter((agent) => agent.agent_id === 9);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe("idling");
+    });
+  });
+
+  it("preserves a deep-linked terminated selection until settings and history settle", async () => {
+    const terminated = {
+      ...MOCK_AGENTS[0],
+      agent_id: 9,
+      status: "terminated" as const,
+    };
+    let resolveSettings!: (value: {
+      settings: { key: string; value: boolean; updated_at: string }[];
+    }) => void;
+    const settings = new Promise<{
+      settings: { key: string; value: boolean; updated_at: string }[];
+    }>((resolve) => {
+      resolveSettings = resolve;
+    });
+    let resolveHistory!: (rows: AgentRow[]) => void;
+    const history = new Promise<AgentRow[]>((resolve) => {
+      resolveHistory = resolve;
+    });
+    vi.mocked(api.getSettings).mockReturnValue(settings);
+    vi.mocked(api.listAgents).mockImplementation((scope = "live") =>
+      scope === "terminated" ? history : Promise.resolve(MOCK_AGENTS),
+    );
+    setUrlSearch("?agent_id=9");
+
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(_qc.getQueryData(AGENTS_QUERY_KEY)).toEqual(MOCK_AGENTS));
+    expect(result.current.activeId).toBe(9);
+    expect(result.current.isLoading).toBe(true);
+
+    await act(async () => {
+      resolveSettings({
+        settings: [
+          {
+            key: "display.show_terminated",
+            value: true,
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+        ],
+      });
+      await settings;
+    });
+    await waitFor(() =>
+      expect(vi.mocked(api.listAgents)).toHaveBeenCalledWith("terminated"),
+    );
+    expect(result.current.activeId).toBe(9);
+    expect(result.current.isLoading).toBe(true);
+
+    await act(async () => {
+      resolveHistory([terminated]);
+      await history;
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.activeId).toBe(9);
+    expect(result.current.agents.some((agent) => agent.agent_id === 9)).toBe(true);
   });
 
   it("returned agents reflect the listAgents result (no store mirror)", async () => {
@@ -335,6 +490,12 @@ describe("useAgents hydration (URL / localStorage)", () => {
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => {
       expect(result.current.activeId).toBe(2);
+    });
+    // Explicitly clearing a selection is only meaningful once both roster
+    // inputs have settled. Before that, the guarded initial auto-select still
+    // owns the transition from the hydrated sentinel to a valid roster row.
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
     });
     act(() => {
       result.current.setActiveId(null);
@@ -544,6 +705,30 @@ describe("useAgents.fork", () => {
     expect(api.spawnAgent).toHaveBeenCalledWith({ fork_from: 2, machine: "wsl" });
     expect(returned).toBe(99);
     expect(useStore.getState().activeId).toBe(99);
+  });
+
+  it("forks a selected terminated conversation from the history cache", async () => {
+    const terminated = {
+      ...MOCK_AGENTS[0],
+      agent_id: 9,
+      machine: "archive-host",
+      status: "terminated" as const,
+    };
+    _qc.setQueryData(SETTINGS_QUERY_KEY, { "display.show_terminated": true });
+    _qc.setQueryData(TERMINATED_AGENTS_QUERY_KEY, [terminated]);
+    setUrlSearch("?agent_id=9");
+    vi.mocked(api.spawnAgent).mockResolvedValue({ id: 43 });
+
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(result.current.activeId).toBe(9));
+    await act(async () => {
+      await result.current.fork(9);
+    });
+
+    expect(api.spawnAgent).toHaveBeenCalledWith({
+      fork_from: 9,
+      machine: "archive-host",
+    });
   });
 
   it("fork with prompt → passes prompt + prompt_source 'user'", async () => {
@@ -974,8 +1159,9 @@ describe("useAgents listAgents error", () => {
 // ─────────────────────────────────────────────────────────────
 
 describe("AGENTS_QUERY_KEY", () => {
-  it("export value is ['agents']", () => {
-    expect(AGENTS_QUERY_KEY).toEqual(["agents"]);
+  it("keeps live and terminated snapshots on sibling, non-overlapping keys", () => {
+    expect(AGENTS_QUERY_KEY).toEqual(["agents", "live"]);
+    expect(TERMINATED_AGENTS_QUERY_KEY).toEqual(["agents", "terminated"]);
   });
 });
 
@@ -1035,7 +1221,7 @@ describe("useAgents SSE merge (regression)", () => {
     expect(vi.mocked(api.listAgents).mock.calls.length).toBe(fetchesBefore);
   });
 
-  it("AgentUpdated event flips an existing row's status without a refetch", async () => {
+  it("AgentUpdated termination removes the row from the live cache without a refetch", async () => {
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => {
       expect(result.current.agents).toEqual(MOCK_AGENTS);
@@ -1053,9 +1239,7 @@ describe("useAgents SSE merge (regression)", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.agents.find((a) => a.agent_id === 1)?.status).toBe(
-        "terminated",
-      );
+      expect(result.current.agents.find((a) => a.agent_id === 1)).toBeUndefined();
     });
     // The second row stays exactly as it was — the merge is by id, not
     // a full-list replacement (which would race with concurrent updates).
@@ -1254,7 +1438,7 @@ describe("useAgents SSE merge (regression)", () => {
   it("agent_spawned before the initial list fetch lands → cache is NOT seeded (empty-cache guard)", async () => {
     // The fold (applyEvent → foldAgents) refuses to seed a one-agent partial
     // from an SSE event that races ahead of the initial list fetch: a lone
-    // snapshot is not the whole fleet. Every ["agents"] writer converges onto
+    // snapshot is not the whole fleet. Every live-roster writer converges onto
     // this one guarded path — the old fleet-view writer lacked the guard
     // (R15), so seeding was inconsistent by entry point.
     // Park listAgents so the cache stays empty (undefined) for the whole test.
@@ -1321,12 +1505,7 @@ describe("public three-state agent status projection", () => {
 });
 
 describe("fold owner reconnect reconcile", () => {
-  it("invalidates ALL queries when the global SSE connection (re)opens", async () => {
-    // The single central reconcile (fold owner inside EventStreamProvider): on
-    // reopen, every cached view (agents, tasks, fleet-graph, notices, …) could
-    // have missed events during the gap, so one bare invalidateQueries() marks
-    // them all stale — replacing the per-leaf-hook "refetch my own query on
-    // open" obligation.
+  it("invalidates only global-fold query families when the SSE connection opens", async () => {
     const invalidateSpy = vi.spyOn(_qc, "invalidateQueries");
     renderHook(() => undefined, { wrapper });
     await waitForEventSource();
@@ -1338,7 +1517,45 @@ describe("fold owner reconnect reconcile", () => {
       );
     });
 
-    // No filter argument = invalidate everything.
-    expect(invalidateSpy).toHaveBeenCalledWith();
+    expect(invalidateSpy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
+    for (const queryKey of RECONNECT_QUERY_KEYS) {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey,
+        exact:
+          queryKey === AGENTS_QUERY_KEY ||
+          queryKey === TERMINATED_AGENTS_QUERY_KEY,
+      });
+    }
+    expect(invalidateSpy).not.toHaveBeenCalledWith();
+  });
+
+  it("refetches each scoped roster exactly once on reconnect", async () => {
+    _qc.setQueryData(SETTINGS_QUERY_KEY, { "display.show_terminated": true });
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => {
+      // Wait for both initial snapshots to publish. Invalidating a query while
+      // its first request is still in flight deliberately reuses that request,
+      // so firing open earlier would not exercise reconnect refetch behavior.
+      expect(result.current.isLoading).toBe(false);
+      expect(vi.mocked(api.listAgents).mock.calls.filter(([scope]) => scope === "live")).toHaveLength(1);
+      expect(
+        vi.mocked(api.listAgents).mock.calls.filter(([scope]) => scope === "terminated"),
+      ).toHaveLength(1);
+    });
+    await waitForEventSource();
+
+    act(() => {
+      lastEventSource?.onopen?.call(
+        lastEventSource as unknown as EventSource,
+        new Event("open"),
+      );
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(api.listAgents).mock.calls.filter(([scope]) => scope === "live")).toHaveLength(2);
+      expect(
+        vi.mocked(api.listAgents).mock.calls.filter(([scope]) => scope === "terminated"),
+      ).toHaveLength(2);
+    });
   });
 });

@@ -3,7 +3,7 @@
 // with each agent's self-reported activity, so a human can judge many agents at
 // once without opening any single conversation. See components/fleet/fleet-view.tsx.
 //
-// FleetView reads the shared ["agents"] cache (useFleetAgents), kept live by
+// FleetView reads the shared ["agents", "live"] cache (useFleetAgents), kept live by
 // The R4 fold owner (inside EventStreamProvider) — the single writer subscribed to the global /api/system
 // broadcast provided once at the app root (components/providers.tsx) — so it
 // stays fresh across page navigation without the fleet view running its own SSE

@@ -16,7 +16,7 @@
 //   doesn't subscribe to SSE itself. The global /api/system broadcast is
 //   provided once at the app root (components/providers.tsx), so it persists
 //   across page navigation; the toast renderer lives there too (ToastHost).
-// - HomeShell: calls useAgents (a pure reader of the ["agents"] cache that
+// - HomeShell: calls useAgents (a reader of the scoped agents caches that
 //   the root fold keeps live), owns activeId and the lifecycle
 //   action wrappers, owns the inspector panel open state + preload queries,
 //   threads agents/pendingActions/pendingSpawnCount/forkPending down as props.

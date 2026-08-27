@@ -32,7 +32,7 @@ beforeEach(() => {
       // GET /api/agents returns an array by contract (listAgents maps over it);
       // every other stubbed endpoint here only has its URL/method asserted, so a
       // bare object suffices.
-      const isListAgents = !init?.method && url.endsWith("/api/agents");
+      const isListAgents = !init?.method && /\/api\/agents(?:\?|$)/.test(url);
       return Promise.resolve(
         new Response(JSON.stringify(isListAgents ? [] : {}), {
           status: 200,
@@ -120,14 +120,19 @@ describe("browser API timing", () => {
 });
 
 describe("lifecycle endpoints", () => {
-  it("listAgents GETs /api/agents", async () => {
+  it("listAgents defaults to the SQL-bounded live roster", async () => {
     await api.listAgents();
     expect(calls).toHaveLength(1);
     // After happy-dom provides window, API_BASE is inferred as http://localhost:8000;
     // tests only anchor the endpoint path (gateway contract); host part is ignored.
-    expect(calls[0].url).toMatch(/\/api\/agents$/);
+    expect(calls[0].url).toMatch(/\/api\/agents\?scope=live$/);
     // GET goes through the f() wrapper by default (no method, no body).
     expect(calls[0].init?.method).toBeUndefined();
+  });
+
+  it("listAgents requests terminated history only when explicit", async () => {
+    await api.listAgents("terminated");
+    expect(calls[0].url).toMatch(/\/api\/agents\?scope=terminated$/);
   });
 
   it("listAgents projects every internal transition to the public three-state model", async () => {

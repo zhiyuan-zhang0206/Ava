@@ -308,19 +308,46 @@
     "/api/agents": {
       "get": {
         "summary": "Get Agents",
-        "description": "List all agents and their full lifecycle state.\n\nNo pagination — agents_meta rows accumulate one per agent ever created\n(terminated agents are returned too; the frontend filters by status\nitself), so the list is O(agents) and the per-agent lookups are all\nindex-assisted (audit P1-1): last_active_at is a LATERAL MAX over\ninbound_messages, not a full join.\n\n`last_active_at` is MAX(inbound_messages.created_at) — any-kind inbound\nenqueue counts as activity (chat / compact / lifecycle are all\nuser-perceivable). COALESCE falls back to started_at / spawned_at for\nagents with no inbound — the frontend uses this to desc-sort within\nstatus groups.",
+        "description": "List agent snapshots for the requested roster scope.\n\n``all`` is the compatibility default for SDK / ops callers.\nFrontend fleet/sidebar readers request ``live`` so Postgres excludes\nterminated history before evaluating the per-agent snapshot lookups.\nThe sidebar's explicit history toggle requests ``terminated`` separately.\n\nAll scopes remain unpaginated for wire compatibility.  The default live\npath is bounded by the currently active roster; terminated history is only\npaid for when a caller asks for it explicitly.",
         "operationId": "get_agents_api_agents_get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "live",
+                "terminated"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Scope"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/AgentRow"
                   },
-                  "type": "array",
                   "title": "Response Get Agents Api Agents Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -332,14 +359,14 @@
         "description": "Spawn a new agent — uniform HTTP path for SDK / frontend / scripts.\n\nSpawn is HTTP-uniform: every spawn funnels through\n`create_and_launch_agent`, which creates the agent row in the gateway\nprocess (the main data-plane identity — the target runner's ops server\nruns as the least-privilege `ava_runner` role and cannot INSERT agents)\nand forwards a launch-only op to the target runner's ops server, whether\nthe runner is remote or co-located on this box (localhost) — one code\npath, uniform logs/traces, no in-process shortcut. Auto label generation\nis done asynchronously by the services/labeler daemon — does not block\nthe spawn response.\n\nFork prompt delivery: for a fork, the prompt is inserted pre-launch by\ncreate_agent_row (the forked agent inherits a full history and would\notherwise start a turn on the inherited task before a post-launch prompt\nlanded), with no InboundArrived (the agent's claim emits InboundCommitted\nonce it picks the prompt up — same as resurrect); for a plain spawn, the\nlaunch op delivers the first prompt post-launch and publishes\nInboundArrived so all UIs see the new agent received its first task in\nreal time.\n\nbody.machine = None targets the local machine (which must be a registered\nagent-runner).\n\n400: the target machine is registered but has no agent-runner capability\n(wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the\nregistry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).",
         "operationId": "post_agents_api_agents_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SpawnAgentRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {

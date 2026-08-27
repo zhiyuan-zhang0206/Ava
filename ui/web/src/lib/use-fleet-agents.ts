@@ -11,11 +11,10 @@
 
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "./api";
 import type { AgentRow } from "./types";
-import { AGENTS_QUERY_KEY } from "./use-agents";
+import { AGENTS_QUERY_KEY, fetchAgentRoster } from "./use-agents";
 
 // Module-level stable empty default — mirrors EMPTY_GRAPH / EMPTY_TASKS in the
 // sibling fleet hooks. A `= []` inline default would construct a NEW array on
@@ -25,9 +24,10 @@ import { AGENTS_QUERY_KEY } from "./use-agents";
 const EMPTY_AGENTS: AgentRow[] = [];
 
 export function useFleetAgents(): AgentRow[] {
+  const queryClient = useQueryClient();
   const { data: agents = EMPTY_AGENTS } = useQuery({
     queryKey: AGENTS_QUERY_KEY,
-    queryFn: () => api.listAgents(),
+    queryFn: () => fetchAgentRoster(queryClient, "live"),
     // SSE-driven (same cache as useAgents, kept fresh by the root fold at
     // the root) — no refetch on navigating to the fleet view.
     staleTime: Infinity,
