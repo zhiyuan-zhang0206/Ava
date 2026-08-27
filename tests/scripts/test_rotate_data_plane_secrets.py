@@ -227,10 +227,14 @@ def test_dry_run_never_calls_a_mutating_phase(monkeypatch: pytest.MonkeyPatch) -
     assert mutations == []
 
 
-def test_probes_and_dials_use_the_state_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The rotation probes and admin dials must go to the URL-derived hosts on
-    RotationState — asserted against a foreign host, so a re-hardcoded loopback
-    literal fails this test (the loopback default alone would be vacuous)."""
+def test_preflight_verify_and_dials_use_the_state_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rotation probes must be WIRED through preflight/verify to the
+    URL-derived state hosts (QA nit: direct probe calls would prove the probe
+    signature, not the wiring), and the admin dials must hit the same hosts —
+    asserted against a foreign host, so a re-hardcoded loopback literal fails
+    (the loopback default alone would be vacuous)."""
     state = _state()
     state.pg_host = "10.0.0.7"
     state.redis_host = "10.0.0.7"
@@ -288,20 +292,24 @@ def test_probes_and_dials_use_the_state_hosts(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
     monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert (
-        rotate._pg_probe(state.pg_host, "ava_main", "ava_main", state.pg_port, "probe-pw") is True
-    )
-    assert (
-        rotate._redis_probe(state.redis_host, state.redis_port, "probe-pw", username="default")
-        is True
-    )
-    assert pg_urls == ["postgresql://ava_main:probe-pw@10.0.0.7:15433/ava_main"]
-    assert redis_hosts == ["10.0.0.7"]
+    # scope=both: preflight probes owner + runner, verify re-probes both with
+    # the NEW credentials — every probe must carry the state's URL-derived host.
+    assert rotate.preflight(state) is True
+    assert rotate.verify(state) is True
+    assert pg_urls == [
+        # preflight: owner (old creds), then runner (old creds)
+        "postgresql://ava_main:old-db@10.0.0.7:15433/ava_main",
+        "postgresql://ava_runner:old-runner-db@10.0.0.7:15433/ava_main",
+        # verify: owner + runner with the rotated credentials
+        "postgresql://ava_main:def@10.0.0.7:15433/ava_main",
+        "postgresql://ava_runner:ghi@10.0.0.7:15433/ava_main",
+    ]
+    assert redis_hosts == ["10.0.0.7"] * 4
 
     rotate.apply_admin(state)
     rotate.apply_runner(state)
     # The CONFIG SET dial and the ACL-provisioning admin URL both hit the host.
-    assert redis_hosts == ["10.0.0.7", "10.0.0.7"]
+    assert redis_hosts == ["10.0.0.7"] * 5
     assert acl_urls == ["redis://default:old-redis-admin@10.0.0.7:16380"]
 
 
