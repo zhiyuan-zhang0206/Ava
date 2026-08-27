@@ -433,6 +433,32 @@ def _kill_target_groups(session: PtySession) -> set[int]:
     return groups
 
 
+def _op_busy(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
+    """Whether the session carries live work beyond its idle shell.
+
+    A session is idle when its shell sits at the prompt: no foreground job
+    owns the tty and no descendant process survives. The foreground job is
+    detected through the tty's current foreground pgrp (the same signal the
+    kill op uses — `_kill_target_groups`); background jobs through the
+    shell's live descendants. A shell that cannot be inspected answers busy
+    (fail-open: a session we cannot prove idle may well be running work).
+    """
+    del req  # the busy probe takes no arguments
+    if session.dead or not session.pid_matches():
+        return ok({"busy": False})
+    try:
+        foreground = os.tcgetpgrp(session.master_fd)
+    except OSError:
+        foreground = -1
+    if foreground > 0 and foreground != session.pid:
+        return ok({"busy": True})
+    try:
+        busy = bool(psutil.Process(session.pid).children(recursive=True))
+    except psutil.Error:
+        busy = True  # cannot inspect — assume the worst
+    return ok({"busy": busy})
+
+
 def _op_kill(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     if session.dead:
         return ok({"mode": "noop"})  # idempotent, like posixproc
@@ -484,6 +510,7 @@ _OPS: dict[str, Callable[[PtySession, dict[str, Any]], dict[str, Any]]] = {
     "capture": _op_capture,
     "resize": _op_resize,
     "kill": _op_kill,
+    "busy": _op_busy,
 }
 
 

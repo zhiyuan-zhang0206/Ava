@@ -955,3 +955,72 @@ def test_kill_then_immediate_same_name_new_is_a_real_session(sessions: Path) -> 
     assert second.pid != first.pid, "must be a fresh shell, not the dying one"
     _send(home, name, "echo reborn-ok")
     _output_until(home, name, "reborn-ok")
+
+
+# ---------------------------------------------------------------------------
+# busy — the TTL reaper's interrupt probe
+# ---------------------------------------------------------------------------
+
+
+def _busy(home: Path, name: str) -> str:
+    result = _run_cli(home, name, "busy")
+    assert result.returncode == 0, f"busy failed: {result.stderr}"
+    return result.stdout.strip()
+
+
+def test_busy_idle_at_prompt(sessions: Path) -> None:
+    """A shell sitting at its prompt with no job is idle — the empty-shell
+    case the 2026-08-27 ruling reaps silently."""
+    home = sessions
+    name = "ava-test-busy-idle-1"
+    _new(home, name)
+    _send(home, name, "echo busy-idle-ready")
+    _output_until(home, name, "busy-idle-ready")
+    assert _busy(home, name) == "idle"
+
+
+def test_busy_foreground_job(sessions: Path) -> None:
+    """A foreground job owns the tty — the session carries running work."""
+    home = sessions
+    name = "ava-test-busy-fg-1"
+    _new(home, name)
+    _send(home, name, "echo busy-fg-ready")
+    _output_until(home, name, "busy-fg-ready")
+    _send(home, name, "sleep 300")
+
+    def _running() -> bool:
+        return _busy(home, name) == "busy"
+
+    assert _wait(_running, timeout=10.0), "foreground job never read busy"
+    _keys(home, name, "C-c")
+    assert _wait(lambda: _busy(home, name) == "idle", timeout=10.0), (
+        "session must read idle after the job is interrupted"
+    )
+
+
+def test_busy_background_job(sessions: Path) -> None:
+    """A background job (children of the shell, no tty) also counts as
+    running work — the brief's '活跃进程/后台 job'."""
+    home = sessions
+    name = "ava-test-busy-bg-1"
+    _new(home, name)
+    _send(home, name, "echo busy-bg-ready")
+    _output_until(home, name, "busy-bg-ready")
+    _send(home, name, "sleep 300 &")
+    assert _wait(lambda: _busy(home, name) == "busy", timeout=10.0), (
+        "background job never read busy"
+    )
+    # SIGKILL, not `kill %1`: the pty host ignores SIGTERM (the survive-storm
+    # invariant) and bash hands that inherited SIG_IGN to background children,
+    # so a TERM-based job kill is a silent no-op on them.
+    _send(home, name, "kill -9 %1")
+    assert _wait(lambda: _busy(home, name) == "idle", timeout=10.0), (
+        "session must read idle after the background job is killed"
+    )
+
+
+def test_busy_absent_session_exits_3(sessions: Path) -> None:
+    """The busy op follows the ops contract: no such session -> exit 3."""
+    home = sessions
+    result = _run_cli(home, "ava-test-busy-absent-1", "busy")
+    assert result.returncode == 3

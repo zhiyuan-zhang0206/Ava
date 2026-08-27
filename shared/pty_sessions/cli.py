@@ -31,6 +31,10 @@ Ops (session ops take the session name first):
                             Falls back to record-pid kills when the host
                             itself is wedged, so a kill is authoritative
                             even against a broken host.
+- ``busy <name>``            print `busy` when the session carries live
+                            processes beyond its idle shell (a foreground
+                            or background job), `idle` otherwise — the TTL
+                            reaper's interrupt-detection probe.
 - ``list [prefix]``         live session names, one per line (record scan —
                             no process to dial; sweeps dead records).
 - ``list-started-at [prefix]``     every live session's launch epoch.
@@ -577,6 +581,20 @@ def _kill_by_record(name: str) -> int:
     return 0
 
 
+def _op_busy(name: str, rest: list[str]) -> int:
+    if rest:
+        sys.stderr.write(f"usage: pty_sessions.cli {name} busy\n")
+        return 2
+    try:
+        resp = session_request(name, {"op": "busy"})
+    except OSError as exc:
+        return _no_host(name, "busy", exc)
+    if not resp.get("ok"):
+        return _finish_op(resp)
+    sys.stdout.write("busy\n" if resp["data"]["busy"] else "idle\n")
+    return 0
+
+
 def _op_kill(name: str, rest: list[str]) -> int:
     graceful = "--graceful" in rest
     unexpected = [a for a in rest if a != "--graceful"]
@@ -678,6 +696,8 @@ def main(argv: list[str] | None = None) -> int:
         return _op_resize(name, rest)
     if op == "kill":
         return _op_kill(name, rest)
+    if op == "busy":
+        return _op_busy(name, rest)
     sys.stderr.write(f"unknown op {op!r} for session {name!r}\n")
     return 2
 

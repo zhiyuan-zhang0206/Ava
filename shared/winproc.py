@@ -244,6 +244,26 @@ def has_session(name: str) -> bool:
     return _process_for_record(rec) is not None
 
 
+def session_has_active_processes(name: str) -> bool:
+    """True when the session carries live descendants beyond its own process.
+
+    The TTL reaper's interrupt probe: a session whose recorded process has
+    children is running work inside it (the session process itself is the
+    idle shell / cmd, not "work"). A session that cannot be inspected answers
+    True — fail-open, a session that cannot be proven idle may be running
+    something."""
+    rec = _read_record(name)
+    if rec is None:
+        return False  # session absent — nothing to interrupt
+    proc = _process_for_record(rec)
+    if proc is None:
+        return False  # session process gone — nothing to interrupt
+    try:
+        return bool(proc.children(recursive=True))
+    except psutil.Error:
+        return True  # cannot inspect — assume the worst
+
+
 def new_session(
     name: str,
     cmd: str | list[str],

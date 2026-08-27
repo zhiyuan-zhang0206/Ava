@@ -212,8 +212,14 @@ def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
     from shared.cluster import session_name
 
     killed: list[str] = []
+    probed: list[str] = []
 
     class _Backend:
+        @staticmethod
+        def session_has_active_processes(name: str) -> bool:
+            probed.append(name)
+            return True
+
         @staticmethod
         def kill_session(name: str) -> tuple[bool, str]:
             killed.append(name)
@@ -226,13 +232,68 @@ def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
 
-    assert cluster_status.kill_shell(7, 3) == "killed"
+    # busy probe runs before the kill and rides the result as `interrupted`
+    assert cluster_status.kill_shell(7, 3) == ("killed", True)
     assert killed == [session_name("agent-7-shell-3-build")]
+    assert probed == [session_name("agent-7-shell-3-build")]
+
+
+def test_kill_shell_uninspectable_backend_reports_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A backend that cannot inspect a session's processes is treated as
+    busy (fail-open): the reap may interrupt work it cannot see, so the
+    notice must not be dropped."""
+    from ops.rpc_schemas import ShellInfo
+
+    class _Backend:
+        @staticmethod
+        def session_has_active_processes(_name: str) -> bool:
+            raise NotImplementedError
+
+        @staticmethod
+        def kill_session(_name: str) -> tuple[bool, str]:
+            return True, "forced"
+
+    monkeypatch.setattr(
+        cluster_status,
+        "agent_shell_sessions",
+        lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
+
+    assert cluster_status.kill_shell(7, 3) == ("killed", True)
+
+
+def test_kill_shell_idle_session_reports_not_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An idle shell (no running job) is reclaimed silently — interrupted
+    False is what makes the gateway skip the notice."""
+    from ops.rpc_schemas import ShellInfo
+
+    class _Backend:
+        @staticmethod
+        def session_has_active_processes(_name: str) -> bool:
+            return False
+
+        @staticmethod
+        def kill_session(_name: str) -> tuple[bool, str]:
+            return True, "forced"
+
+    monkeypatch.setattr(
+        cluster_status,
+        "agent_shell_sessions",
+        lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
+
+    assert cluster_status.kill_shell(7, 3) == ("killed", False)
 
 
 def test_kill_shell_missing_session_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluster_status, "agent_shell_sessions", lambda _agent_id: [])  # pyright: ignore[reportUnknownArgumentType]
-    assert cluster_status.kill_shell(7, 99) == "absent"
+    assert cluster_status.kill_shell(7, 99) == ("absent", False)
 
 
 def test_capture_shell_capture_failure_raises(monkeypatch: pytest.MonkeyPatch):

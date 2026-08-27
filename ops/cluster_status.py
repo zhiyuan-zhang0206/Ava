@@ -280,20 +280,33 @@ def capture_shell(agent_id: int, session_id: int, lines: int = 200) -> tuple[str
     return full_name, captured_lines
 
 
-def kill_shell(agent_id: int, session_id: int) -> str:
-    """Kill one host-local persistent shell, or report that it is already absent."""
+def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool]:
+    """Kill one host-local persistent shell, or report that it is already absent.
+
+    Returns ``(mode, interrupted)``: ``mode`` is ``"killed"`` or ``"absent"``;
+    ``interrupted`` is True when the killed session carried live processes (a
+    running foreground or background job) at kill time — the TTL reaper uses
+    it to decide whether the reclamation deserves a notice to the owner (an
+    empty shell's reaping is silent). A backend that cannot inspect the
+    session's processes reports interrupted=True (fail-open: a session that
+    cannot be proven idle may well be running work)."""
     shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
     if shell is None:
-        return "absent"
+        return "absent", False
     full_name = shared.cluster.session_name(f"agent-{agent_id}-shell-{session_id}") + (
         f"-{shell.name}" if shell.name else ""
     )
     from shared.session_backend import get_shell_backend
 
-    ok, _mode = get_shell_backend().kill_session(full_name)
+    backend = get_shell_backend()
+    try:
+        interrupted = backend.session_has_active_processes(full_name)
+    except NotImplementedError:
+        interrupted = True  # cannot inspect — assume the worst
+    ok, _mode = backend.kill_session(full_name)
     if not ok:
         raise RuntimeError(f"failed to kill session {full_name!r}")
-    return "killed"
+    return "killed", interrupted
 
 
 def _collect_sessions() -> tuple[list[SessionInfo], int, int]:

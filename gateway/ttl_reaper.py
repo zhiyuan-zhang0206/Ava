@@ -20,7 +20,10 @@ their deadline:
 
 Owners are notified (inbound, source ``"system"``) only when the agent is
 running or idling — a terminated agent's page expiring is exactly the cleanup
-the TTL exists for, and must not resurrect it.
+the TTL exists for, and must not resurrect it. Shell reclamations notify only
+when the reap interrupted a running job (the runner reports whether the
+session carried live processes at kill time); an empty shell's reaping is
+silent, and an already-absent session never notifies.
 
 The pass is fail-open by design (never raises out of the loop): a DB or
 dispatch failure logs and retries next interval, and every reclaim is a CAS
@@ -173,19 +176,25 @@ def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int]]:
         return [(row[0], row[1]) for row in cur.fetchall()]
 
 
-def _delete_shell_row_blocking(pool: ConnectionPool, agent_id: int, session_id: int) -> None:
-    """Drop a reclaimed shell's tracking row and notify its live owner."""
+def _delete_shell_row_blocking(
+    pool: ConnectionPool, agent_id: int, session_id: int, *, interrupted: bool
+) -> None:
+    """Drop a reclaimed shell's tracking row; notify its live owner only when
+    the reclamation interrupted a running job (an empty shell's reaping is
+    silent — user ruling 2026-08-27)."""
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
                 (agent_id, session_id),
             )
-        _notify_owner(
-            conn,
-            agent_id,
-            f"Shell session {session_id} (agent {agent_id}) was reclaimed after its TTL expired.",
-        )
+        if interrupted:
+            _notify_owner(
+                conn,
+                agent_id,
+                f"Shell session {session_id} (agent {agent_id}) was reclaimed after its TTL "
+                "expired, interrupting a running task.",
+            )
 
 
 async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
@@ -231,13 +240,26 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
                 result,
             )
             continue
-        await asyncio.to_thread(_delete_shell_row_blocking, pool, agent_id, session_id)
+        # Notify only when the reap cut short a running job. A missing
+        # `interrupted` field means a pre-policy runner — default True so a
+        # version-skewed fleet keeps the old notify-always behavior instead of
+        # silently swallowing a legit interruption notice. Absent sessions
+        # never notify (nothing was interrupted).
+        interrupted = mode == "killed" and bool(result.get("interrupted", True))
+        await asyncio.to_thread(
+            _delete_shell_row_blocking, pool, agent_id, session_id, interrupted=interrupted
+        )
         telemetry.emit(
             "log",
             "shell_ttl_expired",
             level="info",
             agent_id=agent_id,
-            attributes={"agent_id": agent_id, "session_id": session_id, "mode": mode},
+            attributes={
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "mode": mode,
+                "interrupted": interrupted,
+            },
         )
         reaped.append((agent_id, session_id))
     return reaped
