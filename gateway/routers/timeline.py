@@ -64,11 +64,15 @@ def _standing_head_note_ids(items: list[TimelineItem]) -> set[str]:
     idx = 0
     # The current segment's prompt is always the plain "0.0" item (historical
     # segments carry segment-prefixed ids), and the standing notes directly
-    # follow it — that ordering invariant is what makes this prefix scan
-    # unambiguous.
+    # follow it. Historical segments have their SystemMessage stripped by
+    # ``load_checkpoint_messages_segment``, so their standing notes sit at
+    # items[0] — the run starts there when no prompt is present.
     while idx < len(items) and items[idx].kind != "system_prompt":
         idx += 1
-    idx += 1  # past the prompt itself
+    if idx < len(items):
+        idx += 1  # past the prompt itself
+    else:
+        idx = 0  # no prompt (historical segment): its notes start at the front
     while idx < len(items) and items[idx].kind == "system_marker" and items[idx].source is not None:
         head.add(items[idx].item_id)
         idx += 1
