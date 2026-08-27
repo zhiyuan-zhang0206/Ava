@@ -7,7 +7,7 @@ Two modes:
   traces (id, duration, matched span count). Run this first to get trace ids.
 - **Fetch** (`--trace-id <hex-32>`): pull one trace's full span set and write
   `trace_raw.json` for `read_trace.py`. Sources:
-    - `mirror` (default): scan `$AVA_HOME/traces/spans*.jsonl` (active `spans.jsonl` + rotated `spans-<ISO>.jsonl`) — the durable
+    - `mirror` (default): scan `$AVA_HOME/traces/spans*.jsonl*` (active `spans.jsonl` + rotated `spans-<ISO>(-size|-time)?.jsonl`, gzipped old segments read transparently) — the durable
       record, complete, no size cap, no network. Needs filesystem access to
       the machine that recorded the trace. Every file in range is scanned
       and spans are merged (a trace can straddle the sidecar's rotation
@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import gzip
 import json
 import os
 import re
@@ -206,9 +207,10 @@ def _mirror_day(fp: Path) -> datetime.date | None:
 
 def _mirror_files(directory: Path, days: int) -> list[Path]:
     """Mirror files within the last `days` days, newest first: the active
-    `spans.jsonl` (day = mtime) plus rotated/legacy `spans-*.jsonl`."""
+    `spans.jsonl` (day = mtime) plus rotated/legacy `spans-*.jsonl` and
+    gzipped old segments (`*.jsonl.gz`)."""
     cutoff = datetime.now(UTC).date() - timedelta(days=days - 1)
-    files = sorted(directory.glob("spans*.jsonl"), reverse=True)
+    files = sorted(directory.glob("spans*.jsonl*"), reverse=True)
     kept = []
     for fp in files:
         day = _mirror_day(fp)
@@ -232,7 +234,10 @@ def fetch_from_mirror(args, hex_trace_id: str) -> list[dict]:
     by_span: dict[str, dict] = {}
     for fp in files:
         found = 0
-        with fp.open(encoding="utf-8") as f:
+        # Old segments are gzipped by the agent-side compression pass; read
+        # them transparently (gzip.open with text mode + encoding).
+        opener = gzip.open if fp.name.endswith(".gz") else fp.open
+        with opener(fp, "rt", encoding="utf-8") as f:
             for line in f:
                 if not any(needle in line for needle in needles):
                     continue

@@ -35,10 +35,12 @@ are still read — a host upgraded mid-window replays its old files too.
 
 from __future__ import annotations
 
+import gzip
 import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -103,9 +105,9 @@ def _require_ship_config() -> _ShipTarget:
 
 def _file_day(path: Path) -> date:
     """Day stamp of a mirror file: legacy `spans-YYYYMMDD-<pid>.jsonl` names,
-    the collector's rotated `spans-<ISO-timestamp>.jsonl` names, else the
-    file's mtime (the active `spans.jsonl` carries no stamp — its content is
-    today's)."""
+    the collector's rotated `spans-<ISO-timestamp>(-size|-time)?.jsonl` names
+    (`.gz` suffix tolerated), else the file's mtime (the active `spans.jsonl`
+    carries no stamp — its content is today's)."""
     from shared.trace import _mirror_day
 
     day = _mirror_day(path)
@@ -122,8 +124,14 @@ def _load_watermark() -> dict[str, int]:
         return {}
     marks: dict[str, int] = json.loads(path.read_text(encoding="utf-8"))
     # Drop entries for files retention-pruned out of the mirror, so the watermark
-    # does not grow unbounded as per-pid daily files cycle.
-    return {name: off for name, off in marks.items() if (traces_dir() / name).exists()}
+    # does not grow unbounded as per-pid daily files cycle. A key survives when
+    # its base file OR the gzipped variant exists — the gzip pass renames a
+    # segment to `<name>.gz` and the watermark key stays the base name.
+    return {
+        name: off
+        for name, off in marks.items()
+        if (traces_dir() / name).exists() or (traces_dir() / f"{name}.gz").exists()
+    }
 
 
 def _save_watermark(marks: dict[str, int]) -> None:
@@ -167,6 +175,16 @@ def _post_line(client: httpx.Client, target: _ShipTarget, line: str) -> int:
     return sum(len(ss.spans) for rs in request.resource_spans for ss in rs.scope_spans)
 
 
+def _discard(f: Any, n: int) -> None:
+    """Read and discard `n` bytes from a non-seekable stream (gzip)."""
+    remaining = n
+    while remaining > 0:
+        chunk = f.read(min(remaining, 1024 * 1024))
+        if not chunk:
+            break
+        remaining -= len(chunk)
+
+
 def _ship_files(
     files: list[Path],
     marks: dict[str, int],
@@ -183,6 +201,14 @@ def _ship_files(
     Binary mode: seek/offset are true byte positions, so an interrupted ship
     resumes exactly after the last POSTed line (text-mode tell() is an opaque
     cookie and is disabled mid-iteration).
+
+    Gzipped segments (the agent-side compression pass renames a segment to
+    `.jsonl.gz`) are decompressed on read and keyed in the watermark by the
+    BASE name (the `.gz` stripped), so a gzip pass never strands unshipped
+    lines and a re-run after compression continues exactly where the plain
+    file left off. A gzip stream cannot seek, so the already-shipped prefix
+    is read-and-discarded instead — the cost of a fully-shipped segment is
+    decompression only, never a re-POST.
     """
     total_lines = 0
     total_spans = 0
@@ -195,11 +221,18 @@ def _ship_files(
         # the same reason: NO_PROXY does not bypass the macOS system-config
         # branch httpx reads.
         for path in files:
-            start = 0 if windowed else marks.get(path.name, 0)
-            if start >= path.stat().st_size:
+            gzipped = path.name.endswith(".gz")
+            # Watermark continuity across the gzip pass: key by the base name.
+            wm_key = path.name[:-3] if gzipped else path.name
+            start = 0 if windowed else marks.get(wm_key, 0)
+            if not gzipped and start >= path.stat().st_size:
                 continue
-            with path.open("rb") as f:
-                f.seek(start)
+            with gzip.open(path, "rb") if gzipped else path.open("rb") as f:
+                if gzipped:
+                    # A gzip stream cannot seek; discard the shipped prefix.
+                    _discard(f, start)
+                else:
+                    f.seek(start)
                 offset = start
                 file_lines = 0
                 file_spans = 0
@@ -220,7 +253,7 @@ def _ship_files(
                     # Advance the watermark per line so a crash never re-sends or
                     # skips. Windowed re-imports are idempotent, so skip the bump.
                     if not windowed:
-                        marks[path.name] = offset
+                        marks[wm_key] = offset
                         _save_watermark(marks)
             if file_lines:
                 shipped_files += 1
@@ -246,9 +279,11 @@ def cmd_trace_ship(*, since: str | None, until: str | None, dry_run: bool) -> in
 
     from shared.trace import _mirror_sort_key
 
-    # Active `spans.jsonl` + rotated `spans-<ts>.jsonl` + legacy
-    # `spans-YYYYMMDD-<pid>.jsonl`; oldest first, the active file last.
-    files = sorted(traces_dir().glob("spans*.jsonl"), key=_mirror_sort_key)
+    # Active `spans.jsonl` + rotated `spans-<ts>(-size|-time)?.jsonl` + legacy
+    # `spans-YYYYMMDD-<pid>.jsonl` + gzipped old segments (`*.jsonl.gz` — the
+    # agent-side compression pass; read transparently in `_ship_files`);
+    # oldest first, the active file last.
+    files = sorted(traces_dir().glob("spans*.jsonl*"), key=_mirror_sort_key)
     if windowed:
         files = [p for p in files if lo <= _file_day(p) <= hi]
 
