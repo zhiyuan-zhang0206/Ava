@@ -18,8 +18,7 @@
 #   APPLE_CERTIFICATE[_PASSWORD], APPLE_SIGNING_IDENTITY,
 #     APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID    Developer ID + notarization
 #   WINDOWS_CERTIFICATE[_PASSWORD]               Authenticode
-#   ANDROID_KEYSTORE, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
-#
+# #
 # `uses:` is pinned to a commit SHA with the version in a trailing comment, for
 # the same supply-chain reason as ci.yml.
 

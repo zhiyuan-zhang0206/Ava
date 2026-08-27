@@ -98,7 +98,7 @@ silent installs.
 
 `Cargo.toml` is version `0.4.0`. `.github/workflows/ci-app.yml` path-filters
 Rust format/clippy, Android-target checking, and overlay/manifest tests.
-`release-app.yml` builds universal macOS DMG, Windows NSIS, and Android APK
+`release-app.yml` builds universal macOS DMG and Windows NSIS; `release-android.yml` builds the Android APK (`android-v*` tags)
 artifacts for `app-v*` tags. OS signing and updater signing activate only for
 complete secret groups; tag releases fail closed when any required signing
 group is absent, while manual dispatch may still produce unsigned evidence.
