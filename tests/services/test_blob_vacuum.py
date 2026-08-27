@@ -225,6 +225,7 @@ def test_emit_checkpoint_table_sizes_samples_without_vacuuming(
         with conn.cursor() as cur:
             sizes = blob_vacuum.emit_checkpoint_table_sizes(cur)
 
+    assert sizes is not None  # the fixture's tables exist, so the emit ran
     assert sizes.blobs_live == 0  # nothing inserted into blobs
     assert sizes.checkpoints_live == 1  # the row just inserted
     assert len(emitted) == 1
