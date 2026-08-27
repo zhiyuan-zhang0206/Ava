@@ -184,13 +184,11 @@ def test_db_size_breakdown_real_db(db_conn: Any) -> None:
     the partitioned `events` schema: the pg_inherits sum covers the month
     partitions and a fresh DB without the checkpoint tables reads 0 instead
     of failing (to_regclass path)."""
-    from collections.abc import Iterator
-
     from tests.services.test_events_maintenance_ttl import _throwaway_db
 
     _ = db_conn  # dependency: the session cluster is up
-    gen: Iterator[str] = _throwaway_db()
-    url = next(gen)  # keep the generator alive — GC would run its finally (DROP DATABASE)
+    gen = cast(Any, _throwaway_db())  # keep the generator alive — GC would run its finally
+    url = next(gen)
     try:
         line = backup._db_size_breakdown(url)
     finally:
