@@ -40,6 +40,15 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 - `install.sh --mirror cn`: route PyPI / npm / Homebrew through China mirrors.
 
 ### Changed
+- The local trace mirror now stays disk-bounded end to end: the collector's
+  file exporter rotates `spans.jsonl` at 64 MiB (was 256) with 24 backups,
+  old segments are gzipped to `.jsonl.gz` by an agent-start pass (5-10x
+  smaller), and the agent-side retention/dir-cap prunes now recognize the
+  timberjack-suffixed rotated names (`spans-<ts>-size.jsonl`), the manual
+  `spans.cut-*` shape, and `.gz` variants — previously those files were
+  invisible to retention and could even outlive the active file in a cap
+  prune. `ava trace ship` and the inspect-a-trace mirror fetcher read gzipped
+  segments transparently, continuing from the same per-file watermark.
 - Pure agent-runners now relay OTLP traces/logs/metrics through a
   bearer-authenticated gateway collector receiver instead of writing to
   nonexistent loopback LGTM backends. Tempo/Loki/Prometheus stay gateway-local;

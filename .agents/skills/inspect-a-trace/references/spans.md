@@ -82,8 +82,11 @@ proxy (`/api/datasources/proxy/uid/tempo/...`).
 
 The mirror is written by the OTel Collector sidecar's file exporter — one
 OTLP/JSON request per line, active `spans.jsonl` plus rotated
-`spans-<ISO>.jsonl`, retention-pruned. `ava trace ship` replays a shed window
-into Tempo when the sidecar's live fan-out missed it.
+`spans-<ISO>(-size|-time)?.jsonl` (64 MiB size rotation; timberjack appends
+the trigger reason). Old segments are gzipped to `.jsonl.gz` by the
+agent-side compression pass and retention-pruned by day; `fetch_trace.py`
+and `ava trace ship` read them transparently. `ava trace ship` replays a
+shed window into Tempo when the sidecar's live fan-out missed it.
 
 ## Read
 

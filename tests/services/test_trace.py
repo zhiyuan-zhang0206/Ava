@@ -329,6 +329,165 @@ def test_prune_old_mirror_removes_stale_keeps_recent(
     assert other.exists()
 
 
+def test_mirror_day_parses_all_collector_name_shapes(tmp_path: Path) -> None:
+    """`_mirror_day` parses every mirror filename shape in the wild: legacy
+    pid-dated files, collector-rotated backups WITH the timberjack trigger
+    suffix (`-size` / `-time`), older unsuffixed rotated backups, manual
+    `spans.cut-*` orphans, and the `.gz` variants of each — while the
+    unstamped ACTIVE `spans.jsonl` stays None (never a prune target)."""
+    from datetime import date
+
+    from shared.trace import _mirror_day
+
+    cases = {
+        "spans-20200101-1.jsonl": date(2020, 1, 1),
+        "spans-20200101-1.jsonl.gz": date(2020, 1, 1),
+        "spans-2026-08-13T23-28-01.123.jsonl": date(2026, 8, 13),
+        "spans-2026-08-27T03-29-10.942-size.jsonl": date(2026, 8, 27),
+        "spans-2026-08-27T03-29-10.942-time.jsonl": date(2026, 8, 27),
+        "spans-2026-08-27T03-29-10.942-size.jsonl.gz": date(2026, 8, 27),
+        "spans.cut-20260827.jsonl": date(2026, 8, 27),
+        "spans.cut-20260827.jsonl.gz": date(2026, 8, 27),
+        "spans.jsonl": None,
+        "spans.jsonl.gz": None,
+        ".ship-watermark.json": None,
+    }
+    for name, expected in cases.items():
+        p = tmp_path / name
+        p.touch()
+        assert _mirror_day(p) == expected, name
+
+
+def test_mirror_sort_key_orders_suffixed_rotated_and_cut_files(
+    tmp_path: Path,
+) -> None:
+    """The cap-prune order key handles timberjack-suffixed backups and manual
+    cuts (day from the name, sub-day epoch from the timestamp), so a cap prune
+    deletes them oldest-first instead of treating them like the active file."""
+    from shared.trace import _mirror_sort_key
+
+    names = [
+        "spans-2026-08-01T00-00-00.000-size.jsonl",
+        "spans-2026-08-01T01-00-00.000-time.jsonl",
+        "spans.cut-20260802.jsonl",
+        "spans.jsonl",
+    ]
+    keys = [_mirror_sort_key(tmp_path / n) for n in names]
+    # Both 08-01 segments before the 08-02 cut, all before the active file.
+    assert keys == sorted(keys)
+
+
+def test_prune_old_mirror_removes_stale_suffixed_and_gz(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """_prune_old_mirror deletes stale files regardless of the rotation
+    naming era — timberjack-suffixed (`-size`), manual cuts, and gzipped
+    segments — and keeps the ACTIVE `spans.jsonl` untouched."""
+    from shared.trace import _prune_old_mirror
+
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    old_suffixed = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
+    old_gz = tmp_path / "spans-2020-01-01T01-00-00.000-time.jsonl.gz"
+    old_cut = tmp_path / "spans.cut-20200101.jsonl"
+    recent = tmp_path / "spans-2099-01-01T00-00-00.000-size.jsonl"
+    active = tmp_path / "spans.jsonl"
+    for p in (old_suffixed, old_gz, old_cut, recent, active):
+        p.write_text("{}\n", encoding="utf-8")
+
+    _prune_old_mirror(retention_days=14)
+
+    assert not old_suffixed.exists()
+    assert not old_gz.exists()
+    assert not old_cut.exists()
+    assert recent.exists()
+    assert active.exists()
+
+
+def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """The cap prune counts suffixed rotated and gzipped files toward the
+    directory size and deletes oldest-first, and never deletes the ACTIVE
+    `spans.jsonl` even when every other file carries an unrecognized-era
+    name (the pre-fix bug: suffixed backups sorted with the active file and
+    could be deleted in either order)."""
+    from shared.trace import _enforce_dir_cap
+
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    oldest = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
+    newest = tmp_path / "spans-2026-01-02T00-00-00.000-time.jsonl.gz"
+    active = tmp_path / "spans.jsonl"
+    for p in (oldest, newest, active):
+        p.write_bytes(b"x" * (1024 * 1024))
+
+    removed = _enforce_dir_cap(max_mb=2)
+    assert removed == 1
+    remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl*"))
+    assert remaining == ["spans-2026-01-02T00-00-00.000-time.jsonl.gz", "spans.jsonl"]
+
+
+def test_gzip_old_mirror_compresses_rotated_keeps_active(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """_gzip_old_mirror compresses every non-active mirror file (rotated,
+    suffixed, cut, legacy) to `.jsonl.gz` with lossless content, leaves the
+    ACTIVE `spans.jsonl` alone, and is idempotent on re-run."""
+    import gzip as gz
+
+    from shared.trace import _gzip_old_mirror
+
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    rotated = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
+    cut = tmp_path / "spans.cut-20260827.jsonl"
+    active = tmp_path / "spans.jsonl"
+    rotated.write_text('{"a":1}\n{"a":2}\n', encoding="utf-8")
+    cut.write_text('{"b":1}\n', encoding="utf-8")
+    active.write_text('{"c":1}\n', encoding="utf-8")
+
+    assert _gzip_old_mirror(grace_seconds=-1) == 2
+    assert rotated.exists() is False
+    assert cut.exists() is False
+    gz_rotated = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz"
+    gz_cut = tmp_path / "spans.cut-20260827.jsonl.gz"
+    assert gz_rotated.exists()
+    assert gz_cut.exists()
+    assert active.exists()  # never compressed
+    assert not (tmp_path / "spans.jsonl.gz").exists()
+    with gz.open(gz_rotated, "rt", encoding="utf-8") as fh:
+        assert fh.read() == '{"a":1}\n{"a":2}\n'
+    with gz.open(gz_cut, "rt", encoding="utf-8") as fh:
+        assert fh.read() == '{"b":1}\n'
+    # Idempotent: already-compressed files are skipped.
+    assert _gzip_old_mirror(grace_seconds=-1) == 0
+
+
+def test_gzip_old_mirror_skips_recently_written_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A file written within the grace window is skipped (a freshly cut
+    active file may still be appended by the collector until its next size
+    rotation); the next pass with no grace compresses it."""
+    import time
+
+    from shared.trace import _gzip_old_mirror
+
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    fresh = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
+    fresh.write_text("x\n", encoding="utf-8")
+    # Touch mtime to "now" (write_text already did; keep explicit for clarity).
+    now = time.time()
+    import os
+
+    os.utime(fresh, (now, now))
+
+    assert _gzip_old_mirror(grace_seconds=3600) == 0
+    assert fresh.exists()
+    assert not (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz").exists()
+
+    assert _gzip_old_mirror(grace_seconds=-1) == 1
+    assert not fresh.exists()
+
+
 def test_prune_old_mirror_disabled_when_nonpositive(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):

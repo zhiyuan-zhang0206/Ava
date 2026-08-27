@@ -53,6 +53,7 @@ agent-side mirror -> local collector sidecar (task #1266) 2026-08-14.
 from __future__ import annotations
 
 import contextlib
+import gzip
 import json
 import os
 import re
@@ -202,25 +203,43 @@ _init_lock = threading.Lock()
 
 # Mirror filenames (sidecar file exporter layout since task #1266):
 #   spans.jsonl                          — the ACTIVE file the collector appends to
-#   spans-<ISO-timestamp>.jsonl          — rotated backups (file exporter rotation;
-#                                          `spans-2026-08-13T23-28-01.123.jsonl`)
+#   spans-<ISO-timestamp>-size.jsonl     — collector-rotated backups (timberjack
+#                                          1.4.5, pinned by otelcol-contrib 0.155.0,
+#                                          appends the trigger reason to the
+#                                          backup name: `-size` / `-time`;
+#                                          `spans-2026-08-27T03-29-10.942-size.jsonl`,
+#                                          stamped in UTC)
+#   spans-<ISO-timestamp>.jsonl          — older collector-rotated backups
+#                                          (pre-0.155.0 lumberjack, no reason suffix)
 #   spans-YYYYMMDD-<pid>.jsonl           — legacy agent-side mirror (pre-#1266)
+#   spans.cut-YYYYMMDD.jsonl             — manual "cut" of the active file (ops
+#                                          one-off): the collector keeps appending
+#                                          to the renamed inode until its next size
+#                                          rotation, then a fresh spans.jsonl is born
+#   <any of the above>.gz                — compressed by `_gzip_old_mirror` once the
+#                                          file stops being written; consumers
+#                                          (`ava trace ship`, inspect-a-trace) read
+#                                          these transparently
 # Old and rotated names parse their day from the name; the active file has no day
 # stamp and is therefore never a retention/prune target (the collector's own
 # rotation bounds it).
-_MIRROR_DAY_RE = re.compile(r"^spans-(\d{8})-(\d+)\.jsonl$")
+_MIRROR_DAY_RE = re.compile(r"^spans-(\d{8})-(\d+)\.jsonl(?:\.gz)?$")
 _MIRROR_ROTATED_RE = re.compile(
-    r"^spans-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})\.\d+\.jsonl$"
+    r"^spans-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})\.\d+"
+    r"(?:-(?:size|time))?\.jsonl(?:\.gz)?$"
 )
+_MIRROR_CUT_RE = re.compile(r"^spans\.cut-(\d{8})\.jsonl(?:\.gz)?$")
 
 
 def _mirror_day(path: Path) -> date | None:
     """Day stamp of a mirror file from its name; None when it carries none.
 
     Old agent-side files stamp `spans-YYYYMMDD-<pid>.jsonl`; the collector's
-    rotated backups stamp `spans-YYYY-MM-DDTHH-MM-SS.<ms>.jsonl`; the ACTIVE
-    `spans.jsonl` carries no stamp at all (never pruned, bounded by the
-    collector's own rotation).
+    rotated backups stamp `spans-YYYY-MM-DDTHH-MM-SS.<ms>(-size|-time)?.jsonl`
+    (timberjack 1.4.5 appends the trigger reason; optional `.gz` after the
+    agent-side gzip pass); manual cuts stamp `spans.cut-YYYYMMDD.jsonl`; the
+    ACTIVE `spans.jsonl` carries no stamp at all (never pruned, bounded by
+    the collector's own rotation).
     """
     m = _MIRROR_DAY_RE.match(path.name)
     if m:
@@ -228,6 +247,9 @@ def _mirror_day(path: Path) -> date | None:
     m = _MIRROR_ROTATED_RE.match(path.name)
     if m:
         return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    m = _MIRROR_CUT_RE.match(path.name)
+    if m:
+        return datetime.strptime(m.group(1), "%Y%m%d").date()  # noqa: DTZ007 — date-only
     return None
 
 
@@ -243,6 +265,7 @@ def _mirror_epoch(path: Path) -> int:
     if m:
         y, mo, d, h, mi, s = (int(m.group(i)) for i in range(1, 7))
         return int(datetime(y, mo, d, h, mi, s, tzinfo=UTC).timestamp())
+    # A manual cut carries no sub-day order key; the day stamp alone orders it.
     return 0
 
 
@@ -259,7 +282,9 @@ def _prune_old_mirror(retention_days: int) -> None:
         return
     cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).date()
     removed = 0
-    for path in traces_dir().glob("spans*.jsonl"):
+    # `.jsonl.gz` included: the gzip pass renames old segments, and retention
+    # must still reach them (their day stamp parses from the name).
+    for path in traces_dir().glob("spans*.jsonl*"):
         day = _mirror_day(path)
         if day is not None and day < cutoff:
             path.unlink(missing_ok=True)
@@ -271,6 +296,65 @@ def _prune_old_mirror(retention_days: int) -> None:
             removed=removed,
             cutoff=cutoff.isoformat(),
         )
+
+
+def _gzip_old_mirror(grace_seconds: int = 60) -> int:
+    """gzip rotated (non-active) mirror files; return the number compressed.
+
+    The collector's file exporter cannot compress its own rotated backups
+    (fileexporter 0.155.0 forces timberjack Compression "none"; its zstd
+    option applies to the ACTIVE stream and would break the grep surface),
+    so this pass — running on each agent start next to the retention prune —
+    compresses every mirror file except the ACTIVE `spans.jsonl`. JSONL
+    compresses ~5-10x, so the recovery mirror's disk footprint drops
+    accordingly. Consumers read `.jsonl.gz` transparently: `ava trace ship`
+    continues from the per-file watermark keyed by the base name (a gzip pass
+    never strands unshipped lines), and the inspect-a-trace mirror fetcher
+    decompresses on read.
+
+    Idempotent: already-compressed `.gz` files are skipped; a crash between
+    writing the `.gz` and unlinking the original leaves both, and the next
+    pass re-compresses (overwrites) and unlinks. A manual "cut" of the active
+    file (the collector keeps appending to the renamed inode until its next
+    size rotation) is skipped within `grace_seconds` of its last write, so a
+    file still being appended is never compressed mid-write; timberjack-
+    rotated backups are static by construction and only the cut edge case is
+    guarded. The tail written after the rename-away is bounded loss under the
+    mirror's documented contract (it still reached Tempo through the
+    collector's live fan-out). A negative grace compresses regardless of
+    mtime (tests).
+    """
+    cutoff = time.time() - grace_seconds
+    compressed = 0
+    for path in traces_dir().glob("spans*.jsonl*"):
+        if path.name == "spans.jsonl" or path.name.endswith(".gz"):
+            continue
+        try:
+            if path.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        gz_path = Path(f"{path}.gz")
+        try:
+            # mtime=0 keeps the compressed bytes deterministic (tests, dedup).
+            with (
+                path.open("rb") as src,
+                gzip.GzipFile(gz_path, mode="wb", compresslevel=6, mtime=0) as dst,
+            ):
+                shutil.copyfileobj(src, dst, length=1024 * 1024)
+            path.unlink(missing_ok=True)
+        except OSError:
+            gz_path.unlink(missing_ok=True)
+            continue
+        compressed += 1
+    if compressed:
+        logger.info(
+            "gzipped old trace mirror files",
+            event="trace",
+            compressed=compressed,
+            grace_seconds=grace_seconds,
+        )
+    return compressed
 
 
 def _mirror_sort_key(p: Path) -> tuple[int, int]:
@@ -317,7 +401,7 @@ def _enforce_dir_cap(max_mb: int) -> int:
     if max_mb <= 0:
         return 0
     cap_bytes = max_mb * 1024 * 1024
-    files = sorted(traces_dir().glob("spans*.jsonl"), key=_mirror_sort_key)
+    files = sorted(traces_dir().glob("spans*.jsonl*"), key=_mirror_sort_key)
     total = sum(_mirror_size(p) for p in files)
     removed = 0
     for p in files:
@@ -505,6 +589,8 @@ def initialize_tracing() -> None:
     Guards (each independently configurable):
     - disk watermark (`trace_disk_watermark`): data disk over the fraction ->
       recording skipped, warning event emitted (auto-degrade).
+    - compression (`_gzip_old_mirror`): rotated (non-active) mirror segments
+      gzipped first, so retention and the cap see the compressed footprint.
     - retention (`trace_retention_days`): day-stamped mirror files older than
       N days pruned first (the collector's rotation also bounds them).
     - directory cap (`trace_max_dir_mb`): oldest mirror files deleted until
@@ -540,7 +626,10 @@ def initialize_tracing() -> None:
         )
         return
 
-    # Bounded disk: retention (days) first, then the hard directory cap.
+    # Bounded disk: compress old segments first (so the cap and the day
+    # retention see the post-compression footprint), then retention (days),
+    # then the hard directory cap.
+    _gzip_old_mirror()
     _prune_old_mirror(settings.observability.trace_retention_days)
     _enforce_dir_cap(settings.observability.trace_max_dir_mb)
 
