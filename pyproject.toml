@@ -271,6 +271,15 @@ ignore = [
                     # with typed Python convention. Allowed across the codebase.
 ]
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# contextvars allowlist lock (user ruling 2026-08-27, audit #3607): contextvar
+# usage is a mechanism-layer concern — LangGraph's runtime itself propagates
+# contextvars (pregel copy_context / get_runtime), and the SDK / log /
+# telemetry / retry-policy readers sit outside node signatures, so a blanket
+# ban is not possible. New uses need a written justification in the PR
+# description before joining the per-file-ignores allowlist below.
+"contextvars" = { msg = "contextvars is allowlisted only — owners: shared/turn_identity.py, shared/config/turn_view.py, shared/plugin_config_view.py, shared/plugin_context.py, shared/redis_client.py, gateway/mcp_endpoint.py, ava/_exports/help.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
 "demos/*" = ["RUF001", "RUF002", "RUF003", "ARG001", "ERA001", "S108"]
@@ -323,6 +332,20 @@ ignore = [
 "ava_builtins/plugins/ava_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
 # CJK regex explanation comment — legitimate.
 "scripts/lint_agent_docstrings.py" = ["RUF003"]
+
+# contextvar mechanism owners — the only files allowed to import contextvars
+# (allowlist lock, user ruling 2026-08-27, audit #3607). New use points must be
+# justified in the PR description before joining this list.
+"shared/turn_identity.py" = ["TID251"]
+"shared/config/turn_view.py" = ["TID251"]
+"shared/plugin_config_view.py" = ["TID251"]
+"shared/plugin_context.py" = ["TID251"]
+"shared/redis_client.py" = ["TID251"]
+"gateway/mcp_endpoint.py" = ["TID251"]
+"ava/_exports/help.py" = ["TID251"]
+# tests may import contextvars to exercise the propagation contracts
+"tests/shared/test_turn_identity.py" = ["TID251"]
+"tests/agent/test_turn_scoped_retry.py" = ["TID251"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["ava", "cli", "shared", "runtime"]
