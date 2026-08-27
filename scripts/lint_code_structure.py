@@ -173,6 +173,11 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # The whole ava.tasks SDK surface in one module: Task model,
     # create/get/list/update/log, validation, owner-notification helpers.
     "ava_builtins/plugins/ava_fleet/task_registry.py": ("#405", 500, "2026-12-31"),
+    # The whole ava.watcher SDK surface in one module: spawn (at/cron/launch),
+    # script+bootstrap generation, registry registration, and the boot
+    # reconcile all share the session/registry primitives; the reconcile-split
+    # refactor is tracked, not forgotten (Task #1825 pushed it over the line).
+    "ava/watcher.py": ("#405", 500, "2026-12-31"),
 }
 
 
