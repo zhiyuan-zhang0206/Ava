@@ -22,6 +22,9 @@ This module handles:
 - first-time init for each checkout (`init()` for agent-runner,
   `init_gateway()` for gateway)
 - `pull_main()`: fast-forward the gateway checkout to origin/main
+- `bootstrap_from_gateway()`: fetch the gateway-served pool snapshot
+  (GET /api/memory/pool) and lay it down as a fresh runner's initial
+  checkout — the no-GitHub path for split runners without a remote
 - status report (used by CLI `ava memory status`)
 
 When `AVA_MEMORY_KEEP_LOCAL` is set, each checkout is a local-only git repo:
@@ -41,6 +44,7 @@ import datetime
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from shared.config import cluster_tz, settings
 from shared.machine import is_agent_runner, is_gateway, machine_name
@@ -66,6 +70,10 @@ _DEFAULT_GITIGNORE = """\
 
 class MemoryRemoteMissing(RuntimeError):  # noqa: N818 — "state description" naming, same as MachineNameMissing
     """Neither env `AVA_MEMORY_REMOTE` nor `$AVA_HOME/memory_remote` is set — multi-machine memory setup is incomplete."""
+
+
+class MemoryPoolBootstrapFailed(RuntimeError):  # noqa: N818
+    """The gateway pool snapshot fetch for a fresh split-runner memory checkout failed — the runner has no memory remote and could not bootstrap the shared pool from its gateway."""
 
 
 class MemoryRepoUninitialized(RuntimeError):  # noqa: N818
@@ -222,6 +230,142 @@ def _strip_remotes(cwd: Path) -> None:
         _run_git("remote", "remove", name, cwd=cwd)
 
 
+# The gateway's pool snapshot is small (markdown notes); the cap is a tripwire,
+# not a sizing target — a corrupted or unexpectedly large body must fail the
+# bootstrap, never fill the runner's disk.
+_POOL_SNAPSHOT_MAX_BYTES = 256 * 1024 * 1024
+_POOL_FETCH_TIMEOUT_S = 120.0
+
+
+def _stream_pool(client: Any, url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
+    """Stream one pool-bundle response body, enforcing the size cap mid-download
+    (never buffers past it). Returns `(X-Pool-Head or None, bytes)`.
+
+    Raises:
+        MemoryPoolBootstrapFailed: non-200 or cap exceeded.
+    """
+    with client.stream("GET", url, headers=headers) as resp:
+        if resp.status_code != 200:
+            raise MemoryPoolBootstrapFailed(f"GET {url} -> HTTP {resp.status_code}")
+        declared = resp.headers.get("Content-Length")
+        if declared and int(declared) > _POOL_SNAPSHOT_MAX_BYTES:
+            raise MemoryPoolBootstrapFailed(
+                f"pool snapshot declared at {declared} bytes, over the {_POOL_SNAPSHOT_MAX_BYTES}-byte cap"
+            )
+        buf = bytearray()
+        for chunk in resp.iter_bytes():
+            buf += chunk
+            if len(buf) > _POOL_SNAPSHOT_MAX_BYTES:
+                raise MemoryPoolBootstrapFailed(
+                    f"pool snapshot exceeds the {_POOL_SNAPSHOT_MAX_BYTES}-byte cap"
+                )
+        head = resp.headers.get("X-Pool-Head")
+        return head, bytes(buf)
+
+
+def _download_pool_snapshot(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
+    """Fetch the gateway-served pool bundle, wrapping transport errors.
+
+    Raises:
+        MemoryPoolBootstrapFailed: transport error, non-200, or cap exceeded.
+    """
+    import httpx
+
+    try:
+        with httpx.Client(timeout=_POOL_FETCH_TIMEOUT_S) as client:
+            return _stream_pool(client, url, headers)
+    except httpx.HTTPError as e:
+        raise MemoryPoolBootstrapFailed(f"GET {url} failed: {e}") from e
+
+
+def bootstrap_from_gateway() -> None:
+    """Fetch the consolidated pool from the gateway and lay it down as this
+    machine's initial memory checkout.
+
+    For a split agent-runner whose memory remote is not configured (headless
+    enroll, no GitHub credentials): the shared pool must still reach its
+    agents, so the gateway — which holds the consolidated checkout on `main` —
+    serves it directly as a git bundle (GET /api/memory/pool, authenticated
+    with the cluster secret like every runner-to-gateway call). The bundle
+    carries real `main` ancestry, so the machine branch cloned from it is a
+    true descendant of `main` — configuring a memory remote later converges
+    cleanly (no add/add storms on the first steward PR). The junk bundle-path
+    origin the clone records is removed; a remote is only ever attached by
+    explicit memory-remote configuration. The whole checkout is built in a
+    temp dir and atomically swapped into place, so a failed attempt leaves no
+    residue to poison a later retry.
+
+    2026-08-27 company-mini incident: before this, a fresh runner with no
+    remote silently got a stub local pool and its agents saw no shared memory.
+    Note: a pool that was already initialized as a stub (pre-fix) is not
+    self-healed — `init()` no-ops on an existing checkout; recover such a
+    machine by removing `$AVA_HOME/memory` and re-running `ava start`.
+
+    Raises:
+        MemoryPoolBootstrapFailed: gateway URL missing/unreachable, non-200,
+            over-cap, corrupt bundle, or any git step failure — always the
+            wrapped single exception, never a raw traceback.
+    """
+    import shutil
+    import tempfile
+
+    from shared.machine import gateway_api_base, gateway_auth_headers
+
+    try:
+        base = gateway_api_base()
+    except Exception as e:  # GatewayApiBaseMissing (shared.machine) — wrap into the guided failure
+        raise MemoryPoolBootstrapFailed(f"gateway URL unavailable: {e}") from e
+    url = f"{base}/api/memory/pool"
+    head, bundle_bytes = _download_pool_snapshot(url, gateway_auth_headers())
+    target = memory_dir()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = Path(tempfile.mkdtemp(prefix=".memory-bootstrap-", dir=str(target.parent)))
+    try:
+        checkout_dir = _unpack_bundle(bundle_bytes, head, tmp_dir)
+        if target.exists():
+            # Pre-init leftovers only — init() never calls this on a git
+            # checkout, so nothing authored is here to lose.
+            shutil.rmtree(target, ignore_errors=True)
+        checkout_dir.replace(target)
+    except MemoryPoolBootstrapFailed:
+        raise
+    except (subprocess.CalledProcessError, OSError) as e:
+        raise MemoryPoolBootstrapFailed(f"pool bootstrap failed: {e}") from e
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _unpack_bundle(bundle_bytes: bytes, head: str | None, tmp_dir: Path) -> Path:
+    """Clone the served bundle into a temp checkout, verify its HEAD against the
+    advertised X-Pool-Head, drop the junk bundle-path origin, and cut the machine
+    branch. Returns the ready checkout dir. Raises MemoryPoolBootstrapFailed on
+    any failure — raised here, outside any try, so it is never re-wrapped."""
+    bundle_path = tmp_dir / "pool.bundle"
+    bundle_path.write_bytes(bundle_bytes)
+    checkout_dir = tmp_dir / "pool"
+    result = run_bounded(
+        ["git", "clone", "-q", str(bundle_path), str(checkout_dir)],
+        timeout=_GIT_TIMEOUT_S,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise MemoryPoolBootstrapFailed(
+            f"git clone from bundle failed: {(result.stderr or '').strip()[:200]}"
+        )
+    if head:
+        actual = _run_git("rev-parse", "HEAD", cwd=checkout_dir)
+        if actual != head:
+            raise MemoryPoolBootstrapFailed(
+                f"bundle HEAD {actual} does not match the advertised pool HEAD {head}"
+            )
+    # The bundle-path origin the clone records is junk (a temp file) —
+    # a remote is only ever attached by explicit memory-remote setup.
+    _run_git("remote", "remove", "origin", cwd=checkout_dir)
+    _run_git("checkout", "-q", "-b", branch_name(), cwd=checkout_dir)
+    return checkout_dir
+
+
 @dataclass(frozen=True)
 class RepoStatus:
     """Structured form of `ava memory status` output (CLI prints directly; also convenient for future callers)."""
@@ -254,11 +398,16 @@ def init() -> None:
         checkout, may have unpushed in-flight work; let the user handle).
     - Local missing + memory_remote set: `git clone` central remote
       -> checkout the role's branch -> write .gitignore + commit + push.
-    - Local missing + memory_remote not set (e.g. bench container /
-      offline personal dev): `git init -b <branch>` local empty repo +
-      empty commit; do not connect remote. Later `ava memory push/pull`
-      raises MemoryRemoteMissing; the user runs `ava start
-      --memory-remote <url>` to reconfigure if they want to sync.
+    - Local missing + memory_remote not set:
+      - split agent-runner: bootstrap the pool from the gateway's
+        consolidated checkout (bootstrap_from_gateway); on fetch failure
+        raise MemoryRemoteMissing (loud — a stub pool must never reach
+        agents silently).
+      - gateway-capable unit (single-box fresh install, bench, offline
+        personal dev): `git init -b <branch>` local empty repo + empty
+        commit; do not connect remote. Later `ava memory push/pull`
+        raises MemoryRemoteMissing; the user runs `ava start
+        --memory-remote <url>` to reconfigure if they want to sync.
 
     Raises:
         MachineNameMissing: `$AVA_HOME/machine_name` not set.
@@ -300,7 +449,26 @@ def init() -> None:
     try:
         remote = memory_remote()
     except MemoryRemoteMissing:
-        # No remote: local empty repo (bench / offline dev), no origin
+        if is_agent_runner() and not is_gateway():
+            # Split agent-runner without a configured remote: the shared pool
+            # must still reach its agents, so bootstrap from the gateway's
+            # consolidated checkout. Never a silent local stub (2026-08-27
+            # company-mini incident) — when the gateway cannot be reached
+            # either, fail loud instead of birthing an empty pool.
+            try:
+                bootstrap_from_gateway()
+            except MemoryPoolBootstrapFailed as e:
+                raise MemoryRemoteMissing(
+                    "memory remote not configured and the gateway pool snapshot "
+                    f"fetch failed ({e}). Set AVA_MEMORY_REMOTE (or "
+                    "$AVA_HOME/memory_remote) for the GitHub sync path, fix the "
+                    "gateway URL / cluster secret, or set AVA_MEMORY_KEEP_LOCAL=true "
+                    "to run an explicitly local-only pool."
+                ) from e
+            return
+        # A gateway-capable unit (single-box fresh install): on first boot its
+        # own gateway half is not serving yet, so there is nothing to fetch
+        # from — a local repo is the only option and stays silent, as before.
         _init_local_repo(branch, memory_dir())
         return
 

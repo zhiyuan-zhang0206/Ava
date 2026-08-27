@@ -3140,6 +3140,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/memory/pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Memory Pool
+         * @description Download the consolidated memory pool as a git bundle.
+         *
+         *     Serves `gateway_memory_dir()` — the consolidated checkout on `main` — as a
+         *     `git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch
+         *     is a true descendant of `main` and converges cleanly when a memory remote
+         *     is configured later). A fresh agent-runner whose memory remote is not
+         *     configured (headless enroll, no GitHub credentials) fetches this over its
+         *     gateway URL and clones it as its initial pool, so the shared index and
+         *     notes reach its agents without GitHub. Untracked machine-local paths
+         *     (`.cache`, `.githooks`, …) never ride a bundle — git only carries the
+         *     tracked tree. Sits behind the normal Bearer/session middleware like every
+         *     /api route. `X-Pool-Head` carries the checkout's HEAD sha so the receiver
+         *     can verify what it cloned is the advertised snapshot.
+         */
+        get: operations["get_memory_pool_api_memory_pool_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mcp/clients": {
         parameters: {
             query?: never;
@@ -10819,6 +10851,24 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MemoryGraphResponse"];
                 };
+            };
+        };
+    };
+    get_memory_pool_api_memory_pool_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
