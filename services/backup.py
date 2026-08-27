@@ -290,7 +290,10 @@ def gunzip_if_needed(path: Path, *, timeout_s: float = _DUMP_TIMEOUT_S) -> None:
         return
     decompressed = path.with_name(path.name + ".raw")
     try:
-        with decompressed.open("wb") as output:
+        # 0600 like every other decrypted intermediate: the plaintext dump must
+        # not widen to umask (typically 0644) when the archive is replaced.
+        fd = os.open(decompressed, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as output:
             proc = subprocess.run(  # noqa: S603
                 ["gzip", "--decompress", "--stdout", str(path)],
                 stdout=output,

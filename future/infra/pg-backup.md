@@ -31,8 +31,9 @@
 > history.
 >
 > **Update 2026-08-26 (#3347): pre-update snapshots get their own retention slot.**
-> Each `ava cluster update` that applies migrations writes a `<db>-<ts>.pre-update.dump.gz.enc`
-> snapshot into the same pool before stopping anything. Prune keeps the newest
+> Each `ava cluster update` that applies migrations writes a `<db>-<ts>.pre-update.dump.enc`
+> snapshot into the same pool before stopping anything (pre-2026-08-27 artifacts
+> carry `.dump.gz.enc`; both stay managed). Prune keeps the newest
 > `BACKUP_KEEP = 7` **daily** dumps plus the newest one pre-update snapshot — an
 > update never silently consumes a daily-dump slot, and the newest snapshot (the
 > most recent full dump before a migration) is always retained. Local and Drive

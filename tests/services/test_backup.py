@@ -606,6 +606,7 @@ def test_gunzip_if_needed_decompresses_legacy_artifact_layer(
     layered.write_bytes(gzip.compress(raw))
     backup.gunzip_if_needed(layered)
     assert layered.read_bytes() == raw
+    assert layered.stat().st_mode & 0o777 == 0o600  # never widened by umask
     # A current-format dump (no gzip magic) passes through untouched.
     plain = bdir / "current.dump"
     plain.write_bytes(raw)
