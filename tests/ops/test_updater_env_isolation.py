@@ -153,10 +153,6 @@ def _stub_all_deploy_write_seams(
         lambda _prefix: _PROD_HOME / "logs" / "probe.log",  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        "ops.cluster_deploy._assert_no_orchestration_in_flight",
-        lambda **_: None,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(
         "ops.cluster_deploy._wait_for_ui_owner",
         lambda **_k: None,  # pyright: ignore[reportUnknownArgumentType]
     )

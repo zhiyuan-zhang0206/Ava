@@ -97,7 +97,13 @@ def wait_for_ui_owner(
 
 
 def assert_no_orchestration_in_flight(*, force: bool = False) -> None:
-    """Refuse a second deploy locally and, unless forced, cluster-wide."""
+    """Refuse a deploy that this host may not perform.
+
+    Two refusals, in order: this checkout may not act on the production home
+    (`assert_prod_home_has_its_own_checkout` — the deploy-trigger half of the
+    2026-08-27 incident fix), then a second deploy locally and, unless forced,
+    cluster-wide."""
+    assert_prod_home_has_its_own_checkout()
     session = cluster_session.live_orchestration_session()
     if session is not None:
         raise ClusterUpdateInProgress(
