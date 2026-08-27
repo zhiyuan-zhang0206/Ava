@@ -168,7 +168,7 @@ def test_register_cron_atomic_inserts_when_no_live_duplicate() -> None:
         cron_expr="0 9 * * *",
         cron_timezone="UTC",
         cron_end_at=None,
-        alive=set(),
+        alive_provider=set,
     )
     assert reused is None
     rows = wr.watcher_rows(agent_id=42)
@@ -197,7 +197,7 @@ def test_register_cron_atomic_reuses_live_duplicate() -> None:
         cron_expr="0 9 * * *",
         cron_timezone="UTC",
         cron_end_at=None,
-        alive={2002},
+        alive_provider=lambda: {2002},
     )
     assert reused == 2002
     rows = wr.watcher_rows(agent_id=42)
@@ -224,7 +224,7 @@ def test_register_cron_atomic_ignores_dead_duplicate() -> None:
         cron_expr="0 9 * * *",
         cron_timezone="UTC",
         cron_end_at=None,
-        alive=set(),  # 2004's session is gone
+        alive_provider=set,  # 2004's session is gone
     )
     assert reused is None
     rows = {r["session_id"] for r in wr.watcher_rows(agent_id=42)}
@@ -253,7 +253,7 @@ def test_register_cron_atomic_schedule_scoped() -> None:
         cron_expr="0 9 * * *",
         cron_timezone="Asia/Shanghai",
         cron_end_at=None,
-        alive={2006},
+        alive_provider=lambda: {2006},
     )
     assert reused is None
     # same timezone, different end time — separate watcher
@@ -265,7 +265,7 @@ def test_register_cron_atomic_schedule_scoped() -> None:
         cron_expr="0 9 * * *",
         cron_timezone="UTC",
         cron_end_at=_FUTURE,
-        alive={2006},
+        alive_provider=lambda: {2006},
     )
     assert reused is None
     rows = {r["session_id"] for r in wr.watcher_rows(agent_id=42)}
@@ -292,9 +292,70 @@ def test_register_cron_atomic_exclude_session() -> None:
         cron_expr="0 9 * * *",
         cron_timezone="UTC",
         cron_end_at=None,
-        alive={2009},
+        alive_provider=lambda: {2009},
         exclude_session=2009,
     )
     assert reused is None  # the live 2009 was excluded — 2010 inserted
     rows = {r["session_id"] for r in wr.watcher_rows(agent_id=42)}
     assert rows == {2009, 2010}
+
+
+def test_register_cron_atomic_calls_alive_provider_under_lock() -> None:
+    """The alive provider runs INSIDE the lock (QA nit, #794 delta2): at the
+    moment it is called, the registration transaction holds the schedule's
+    advisory xact lock — visible in pg_locks from a separate connection. A
+    snapshot taken before the lock would miss a concurrent winner's session."""
+    from shared.db import connect as _connect
+
+    observed: list[bool] = []
+
+    def provider() -> set[int]:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted"
+            ).fetchone()
+        assert row is not None
+        observed.append(int(row[0]) >= 1)
+        return set()
+
+    wr.register_cron_atomic(
+        42,
+        2100,
+        name="locked",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=None,
+        alive_provider=provider,
+    )
+    assert observed == [True], "alive provider was not called under the lock"
+
+
+def test_register_cron_atomic_exclude_session_zero() -> None:
+    """exclude_session=0 (an agent's very first session — session_index
+    starts at 0) must exclude row 0, not degrade to the -1 sentinel (QA nit,
+    #794 delta2): the stale-template rebuild of the first watcher must
+    replace it, not dedupe against it."""
+    wr.register_watcher(
+        42,
+        0,
+        kind="cron",
+        name="first",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+    reused = wr.register_cron_atomic(
+        42,
+        2011,
+        name="first",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=None,
+        alive_provider=lambda: {0},
+        exclude_session=0,
+    )
+    assert reused is None  # row 0 excluded → 2011 inserted
+    rows = {r["session_id"] for r in wr.watcher_rows(agent_id=42)}
+    assert rows == {0, 2011}

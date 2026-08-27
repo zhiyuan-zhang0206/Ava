@@ -394,18 +394,22 @@ def _spawn(
             # Task #1825 dedupe, atomic (N2): one transaction — xact lock,
             # re-check, insert (shared.watcher_registry.register_cron_atomic).
             # The re-check needs a FRESH session list (a just-registered
-            # winner must be visible), computed here, not the reconcile's
-            # snapshotted one.
+            # winner must be visible), fetched INSIDE the lock via the
+            # provider — a snapshot taken here would have a window where a
+            # concurrent winner's session does not yet exist (QA nit,
+            # #794 delta2).
             from shared.watcher_registry import register_cron_atomic
 
-            try:
-                alive = set(_sessions.list())
-            except Exception:
-                # Session list unavailable — cannot verify liveness, so no
-                # dedupe (spawning is the fail-safe: a duplicate is
-                # recoverable, a reused dead session would silently lose the
-                # schedule).
-                alive = None
+            def _fresh_alive() -> set[int] | None:
+                try:
+                    return set(_sessions.list())
+                except Exception:
+                    # Session list unavailable — cannot verify liveness, so
+                    # no dedupe (spawning is the fail-safe: a duplicate is
+                    # recoverable, a reused dead session would silently lose
+                    # the schedule).
+                    return None
+
             # kind == 'cron' guarantees the schedule payload (cron() always
             # passes it); narrow for register_cron_atomic's str contract.
             from typing import cast
@@ -418,7 +422,7 @@ def _spawn(
                 cron_expr=cast(str, cron_expr),
                 cron_timezone=cast(str, cron_timezone),
                 cron_end_at=cron_end_at,
-                alive=alive,
+                alive_provider=_fresh_alive,
                 exclude_session=_exclude_session,
                 template_version=TEMPLATE_VERSION,
             )
