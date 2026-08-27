@@ -287,7 +287,9 @@ runner surface: SELECT on every table (plus sequence USAGE), SELECT/UPDATE on
 server dedupes /ops calls), INSERT/UPDATE on `agent_tasks` (`ava.tasks`),
 INSERT/UPDATE/DELETE on `agent_watchers` (`ava.watcher`; DELETE is the watcher
 child's clean-exit row removal), UPDATE on `agent_pages` (page close at
-exit), and full CRUD on the LangGraph checkpoint tables. `agents` INSERT,
+exit), INSERT on `agent_shell_ttls` (TTL deadline rows; the gateway
+reaper reads and deletes them), and full CRUD on the LangGraph checkpoint
+tables. `agents` INSERT,
 `agents_meta` INSERT, notices writes, the cluster deploy-state tables and any
 DDL fail under it by construction — the 2026-08-12 pollution class (full write
 credential on the runner) is structurally impossible. That table-wide SELECT is
