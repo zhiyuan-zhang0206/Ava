@@ -86,8 +86,13 @@ def prod_service_checkout_error(repo: Path) -> str | None:
     a dev cluster's own home is anchored to its own checkout, and running that
     checkout's code is exactly what its home is for.
     """
-    home = ava_home()
-    if home != Path.home() / ".ava":
+    # Both sides resolved: a non-canonical AVA_HOME spelling that resolves to the
+    # prod home (`$HOME/../.ava`, a symlinked path) must not bypass the refusal —
+    # the filesystem would land the writes in the same directory either way
+    # (same-class hardening as `_assert_env_agrees_with_checkout`'s resolve
+    # comparison).
+    home = ava_home().resolve()
+    if home != (Path.home() / ".ava").resolve():
         return None
     expected = Path.home() / ".ava" / "source"
     if repo.resolve() == expected.resolve():

@@ -66,7 +66,7 @@ import shared.migrations
 import shared.paths
 import shared.ui_update_state
 import shared.updater_handoff
-from ops import cluster_pause, cluster_session
+from ops import cluster_pause, cluster_session, deploy_spawn
 from ops._update_shell import SOURCE_SWITCH_OFF, _restart_recovery_cmd
 from ops.cluster_session import (
     _CLUSTER_RESTART_SERVICE,
@@ -351,6 +351,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         OrchestrationSpawnFailed: the session backend declined to start the
             updater session.
     """
+    deploy_spawn.assert_prod_home_has_its_own_checkout()
     # Standalone self-heals (watchdog pin/code controllers, the management
     # endpoint, an operator's direct `ava cluster update` on a runner) quiesce
     # this host's agents before the bounce — the per-host analogue of the
