@@ -252,6 +252,27 @@ def mark_status(agent_id: int, session_id: int, status: str) -> None:
         )
 
 
+def wake_delivered(agent_id: int, session_id: int, since: Any) -> bool:
+    """Whether a `watcher:<session_id>`-tagged wake already reached the agent
+    after `since` (the row's `created_at`).
+
+    The missed judgment's delivery check (task #1858): a one-shot whose child
+    fired and delivered its wake but whose clean-exit row delete failed (or
+    raced a boot reconcile) must be dropped silently, not marked `missed` +
+    alerted — the wake was NOT lost, so the "your watcher never fired" alert
+    is a false alarm (observed 2026-08-27: fired wake at 18:30:00, "marked
+    missed" alert at 18:30:02, same session).
+    """
+    with connect(autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM inbound_messages "
+            "WHERE agent_id = %s AND kind = 'chat' AND source = %s AND created_at > %s "
+            "LIMIT 1",
+            (agent_id, f"watcher:{session_id}", since),
+        )
+        return cur.fetchone() is not None
+
+
 def watcher_rows(agent_id: int | None = None) -> list[dict[str, Any]]:
     """Every watcher registry row, newest first; `agent_id` narrows to one agent.
 
