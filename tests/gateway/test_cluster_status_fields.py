@@ -175,7 +175,7 @@ def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.Monkey
     _stub_sessions(monkeypatch, stub)
     captured: dict[str, object] = {}
     _stub_capture_backend(monkeypatch, captured, output="line one\nline two\n")
-    name, lines = cluster_status.capture_shell(7, 3, lines=200)
+    name, lines, _, _ = cluster_status.capture_shell(7, 3, lines=200)
     assert name == f"{session_name('agent-7-shell-3')}-watcher"
     assert lines == ["line one", "line two"]
     assert captured["name"] == name
@@ -190,7 +190,7 @@ def test_capture_shell_unnamed_session_no_suffix(monkeypatch: pytest.MonkeyPatch
     stub = f"{session_name('agent-7')}-shell-1"
     _stub_sessions(monkeypatch, stub)
     _stub_capture_backend(monkeypatch, output="")
-    name, lines = cluster_status.capture_shell(7, 1)
+    name, lines, _, _ = cluster_status.capture_shell(7, 1)
     assert name == f"{session_name('agent-7-shell-1')}"
     assert lines == []
 

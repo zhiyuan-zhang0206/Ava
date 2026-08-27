@@ -108,6 +108,9 @@ def test_shell_capture_success(
         "session_id": 3,
         "session_name": f"ava-agent-{aid}-shell-3-watcher",
         "lines": ["line one", "line two"],
+        "created_at": None,
+        "uptime_seconds": 0,
+        "expires_at": None,
     }
     # Uniform path: dispatched to the agent's machine (a remote runner here),
     # never probed locally.
@@ -137,6 +140,45 @@ def test_shell_capture_custom_lines_forwarded(
         resp = client.get(f"/api/agents/{aid}/shell/1?lines=500")
     assert resp.status_code == 200
     assert seen["payload"] == {"agent_id": aid, "session_id": 1, "lines": 500}
+
+
+def test_shell_capture_carries_created_at_and_ttl_deadline(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The monitor page's title-bar meta: the runner's created_at/uptime ride
+    the op result, and the gateway merges expires_at from its own
+    `agent_shell_ttls` row (a split runner has no DB access). A session
+    without a row keeps expires_at=None."""
+    from datetime import UTC, datetime, timedelta
+
+    aid = _insert_agent(db_conn, machine="wsl")
+    launched = datetime.now(tz=UTC) - timedelta(minutes=30)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES (%s, %s, %s)",
+            (aid, 3, datetime.now(tz=UTC) + timedelta(hours=2)),
+        )
+    db_conn.commit()
+
+    async def _meta_dispatch(
+        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return {
+            "session_name": f"ava-agent-{aid}-shell-3-dev",
+            "lines": ["line one"],
+            "created_at": launched.isoformat(),
+            "uptime_seconds": 1800,
+        }
+
+    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _meta_dispatch)
+
+    with TestClient(app) as client:
+        body = client.get(f"/api/agents/{aid}/shell/3").json()
+    # The response model parses the op's ISO string into a datetime and
+    # re-serializes it (UTC "Z" suffix) — compare instants, not spellings.
+    assert body["created_at"] == launched.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    assert body["uptime_seconds"] == 1800
+    assert body["expires_at"] is not None  # agent_shell_ttls row -> deadline set
 
 
 def test_shell_machine_unreachable_503(

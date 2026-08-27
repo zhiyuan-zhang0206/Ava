@@ -228,7 +228,9 @@ class ShellNotFoundError(LookupError):
     """No live shell with this session id exists on this host."""
 
 
-def capture_shell(agent_id: int, session_id: int, lines: int = 200) -> tuple[str, list[str]]:
+def capture_shell(
+    agent_id: int, session_id: int, lines: int = 200
+) -> tuple[str, list[str], datetime | None, int]:
     """Capture the terminal tail of one of an agent's persistent shells.
 
     Resolves `session_id` against this host's live shell sessions for the agent
@@ -237,8 +239,9 @@ def capture_shell(agent_id: int, session_id: int, lines: int = 200) -> tuple[str
     shell session backend (per-session pty hosts on POSIX; the native supervisor on
     Windows — the backend's exact-match capture pins it to that one session,
     never a prefix neighbour `shell-3` vs `shell-30`, or its `-watcher`). Returns
-    (full_name, captured_lines) — lines newline-split with the trailing
-    newline stripped.
+    (full_name, captured_lines, created_at, uptime_seconds) — lines newline-split
+    with the trailing newline stripped; created_at / uptime_seconds come from the
+    resolved session record (the launch epoch + probe-time uptime).
 
     Host scope matches `agent_shell_sessions`: this host's session backend only.
     The gateway's shell-monitor endpoint runs this locally for agents on this
@@ -277,7 +280,7 @@ def capture_shell(agent_id: int, session_id: int, lines: int = 200) -> tuple[str
         captured_lines.pop(0)
     while captured_lines and not captured_lines[-1].strip():
         captured_lines.pop()
-    return full_name, captured_lines
+    return full_name, captured_lines, shell.created_at, shell.uptime_seconds
 
 
 def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
