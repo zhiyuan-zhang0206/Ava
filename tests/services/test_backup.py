@@ -179,6 +179,29 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
     assert path.name == "ava-20260609T190000Z.dump.gz.enc"
 
 
+def test_db_size_breakdown_real_db(db_conn: Any) -> None:
+    """The composition query itself is pinned against a real throwaway DB with
+    the partitioned `events` schema: the pg_inherits sum covers the month
+    partitions and a fresh DB without the checkpoint tables reads 0 instead
+    of failing (to_regclass path)."""
+    from collections.abc import Iterator
+
+    from tests.services.test_events_maintenance_ttl import _throwaway_db
+
+    _ = db_conn  # dependency: the session cluster is up
+    gen: Iterator[str] = _throwaway_db()
+    url = next(gen)  # keep the generator alive — GC would run its finally (DROP DATABASE)
+    try:
+        line = backup._db_size_breakdown(url)
+    finally:
+        gen.close()
+    assert line.startswith("db=") and "events=" in line and "rest=" in line
+    assert line != "unavailable"
+    # A fresh schema.sql DB has the events partitions but no checkpoint tables.
+    assert "checkpoint=0MiB" in line
+    assert "events=0MiB" in line  # empty partitions — the sum is still well-formed
+
+
 def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch) -> None:
     """The backup log line reports the DB composition that dominates dump
     time: total, the frozen events archive, the checkpoint tables, and the

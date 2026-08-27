@@ -235,6 +235,29 @@ def test_emit_checkpoint_table_sizes_samples_without_vacuuming(
     assert attributes["blobs_bytes"] >= 0
 
 
+def test_emit_skips_missing_tables_fresh_cluster(
+    monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
+) -> None:
+    """The hourly emit must read as a no-op on a greenfield cluster (no
+    checkpoint tables yet): the maintenance daemon exits on ProgrammingError,
+    so an unguarded UndefinedTable here would crash-loop the hourly pass —
+    same defensive posture as the vacuum's `test_run_skips_missing_tables_fresh_cluster`."""
+    emitted: list[tuple[str, str, dict[str, int]]] = []
+
+    def _capture(category: str, event_name: str, *, attributes: dict[str, int]) -> None:
+        emitted.append((category, event_name, attributes))
+
+    monkeypatch.setattr(blob_vacuum, "telemetry", SimpleNamespace(emit=_capture), raising=False)
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
+            sizes = blob_vacuum.emit_checkpoint_table_sizes(cur)
+
+    assert sizes is None  # skipped, nothing emitted
+    assert emitted == []
+
+
 def test_run_skips_missing_tables_fresh_cluster(
     monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
 ) -> None:

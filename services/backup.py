@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import cast
 from zoneinfo import ZoneInfo
 
+import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from shared.config import settings
@@ -340,7 +341,7 @@ def run_backup(
         return _run_backup(now, db_url=db_url, timeout_s=timeout_s, pre_update=pre_update)
 
 
-def _db_size_breakdown() -> str:
+def _db_size_breakdown(db_url: str | None = None) -> str:
     """One-line DB composition for the backup log: total, the frozen `events`
     archive, the LangGraph checkpoint tables, and everything else.
 
@@ -349,9 +350,17 @@ def _db_size_breakdown() -> str:
     each artifact carry its own baseline for growth tracking. Best-effort by
     contract: a failure (e.g. a fresh cluster missing the tables) degrades to
     "unavailable" and never fails the backup.
+
+    `db_url` mirrors `_run_backup`'s override: the composition is measured on
+    the SAME database the dump will read (the scheduler passes none and both
+    fall back to the admin-plane direct URL).
     """
     try:
-        with connect(direct=True, autocommit=True) as conn:
+        with (
+            psycopg.connect(db_url, autocommit=True)
+            if db_url is not None
+            else connect(direct=True, autocommit=True)
+        ) as conn:
             row = conn.execute(
                 """
                 SELECT pg_database_size(current_database()),
@@ -406,7 +415,7 @@ def _run_backup(
             stale.unlink()
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
-    _log.info("[backup] db composition: %s", _db_size_breakdown())
+    _log.info("[backup] db composition: %s", _db_size_breakdown(db_url))
     target = _available_target(directory, dbname, now, pre_update=pre_update)
     stem = target.name.removesuffix(".dump.gz.enc")
     dump_partial = directory / f"{stem}.dump.partial"
