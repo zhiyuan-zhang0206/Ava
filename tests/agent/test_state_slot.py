@@ -843,11 +843,15 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     attach_msg = messages[-1]
     assert isinstance(attach_msg, HumanMessage)
     assert attach_msg.additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value  # pyright: ignore[reportUnknownMemberType]
-    # The caption names the file; the packed image block follows the text block.
+    # Interleaved pack: the notice leads, then the file's own caption line.
+    # The exec-node context model here is a bare MagicMock (no media
+    # capability), so the pack is caption-only — no media block.
     content = attach_msg.content  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(content, list)
-    first_block = cast("dict[str, Any]", content[0])
-    assert "render.png" in first_block["text"]
+    assert [cast("dict[str, Any]", b)["type"] for b in content] == ["text", "text"]
+    assert "Files attached during this turn" in cast("dict[str, Any]", content[0])["text"]
+    caption_block = cast("dict[str, Any]", content[1])
+    assert "render.png" in caption_block["text"]
 
 
 async def test_exec_node_compact_path_drops_notes_and_clears_findings(

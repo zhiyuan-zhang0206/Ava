@@ -16,7 +16,7 @@
 // have no card and render bare through EphemeralSystemMarker.
 
 import { useTranslations } from "next-intl";
-import { Fragment, memo, useEffect, useState } from "react";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
 
 import { CopyButton } from "@/components/copy-button";
 import { ChatMarkdown } from "@/components/markdown";
@@ -64,19 +64,40 @@ function splitEnvelope(payload: string): { header: string; body: string } {
 function Thumbnail({ src, alt }: { src: string; alt: string }) {
   // Click-to-zoom overlay: no navigation (user ruling 2026-08-27 — the old
   // <a target="_blank"> opened the raw data-URI in a new tab). Click anywhere
-  // on the backdrop (or the image) or press Escape to close.
+  // on the backdrop (or the image) or press Escape to close. While open the
+  // dialog holds focus (Tab is trapped — the dialog is the only focusable
+  // node), background scroll is locked, and closing returns focus to the
+  // trigger button (QA review #831 nit).
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    const trigger = buttonRef.current;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+      } else if (e.key === "Tab") {
+        // Focus trap: keep Tab inside the modal instead of escaping to the
+        // background content behind the overlay.
+        e.preventDefault();
+        dialogRef.current?.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      trigger?.focus();
+    };
   }, [open]);
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen(true)}
         aria-label={alt}
@@ -93,12 +114,14 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
       </button>
       {open ? (
         <div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label={alt}
           data-testid="attach-lightbox"
+          tabIndex={-1}
           onClick={() => setOpen(false)}
-          className={cn("fixed inset-0 z-50 cursor-zoom-out items-center justify-center bg-black/80 p-4", FLEX)}
+          className={cn("fixed inset-0 z-50 cursor-zoom-out items-center justify-center bg-black/80 p-4 outline-none", FLEX)}
         >
           {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
           <img

@@ -2874,6 +2874,39 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(screen.queryByTestId("attach-lightbox")).toBeNull();
   });
 
+  it("lightbox traps focus while open and returns it to the trigger on close", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload,
+            images: [IMG1, IMG2],
+            image_captions: [LINE1, LINE2],
+          }),
+        ]}
+      />,
+    );
+    const [thumb0, thumb1] = screen.getAllByTestId("attach-thumbnail");
+    fireEvent.click(thumb0);
+    const lightbox = screen.getByTestId("attach-lightbox");
+    // Focus moves into the dialog on open.
+    expect(document.activeElement).toBe(lightbox);
+    // Background scroll is locked while open.
+    expect(document.body.style.overflow).toBe("hidden");
+    // Tab stays inside the modal (trap).
+    fireEvent.keyDown(lightbox, { key: "Tab" });
+    expect(document.activeElement).toBe(lightbox);
+    // Escape closes and focus returns to the trigger button; scroll unlocks.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("attach-lightbox")).toBeNull();
+    expect(document.activeElement).toBe(thumb0);
+    expect(document.body.style.overflow).toBe("");
+    // Re-opening focuses the dialog again (not the button).
+    fireEvent.click(thumb1);
+    expect(document.activeElement).toBe(screen.getByTestId("attach-lightbox"));
+  });
+
   it("legacy attach (images without image_captions) still renders thumbnails without navigation", () => {
     render(
       <TimelineView

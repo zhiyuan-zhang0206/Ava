@@ -28,8 +28,9 @@ from shared.lm.attach import AttachEntry, pack_attachments
 def build_attach_message(pending: AttachState, model: str) -> HumanMessage | None:
     """Pack one attach message from pending attachments, or None when empty.
 
-    The message's first content block is the caption text (listing every file,
-    delivered or skipped); following blocks carry the provider-native media.
+    The message's content blocks are interleaved per file — a leading notice
+    text block, then each file's caption line directly before its media block
+    (delivered or skipped).
     """
     if not pending.pending:
         return None
