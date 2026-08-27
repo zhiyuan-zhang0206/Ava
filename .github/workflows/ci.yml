@@ -122,7 +122,7 @@ jobs:
 
   backend-static:
     name: backend static (ruff + pyright + migration smoke)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, ci]
     timeout-minutes: 15
     needs: [classify]
     if: ${{ needs.classify.outputs.backend == 'true' }}
@@ -194,7 +194,7 @@ jobs:
     # backend-schema <-> frontend-generated-file contract, which a frontend-only
     # edit can break.
     name: backend structure (pre-commit lint + codegen freshness)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, ci]
     timeout-minutes: 25
     needs: [classify]
     if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
@@ -236,7 +236,7 @@ jobs:
 
   backend-shard:
     name: backend shard (${{ matrix.group }}/8)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, ci]
     timeout-minutes: 20
     needs: [classify]
     if: ${{ needs.classify.outputs.backend == 'true' }}
@@ -287,7 +287,7 @@ jobs:
 
   backend-serial:
     name: backend serial (flaky)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, ci, backend-serial]
     timeout-minutes: 25
     needs: [classify]
     if: ${{ needs.classify.outputs.backend == 'true' }}
@@ -334,7 +334,7 @@ jobs:
     # iff the static job and every pytest shard are green AND the combined
     # coverage clears the gate.
     name: backend (pytest + pyright)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, ci]
     timeout-minutes: 10
     needs: [classify, backend-static, backend-structure, backend-shard, backend-serial]
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
@@ -391,7 +391,7 @@ jobs:
 
   frontend:
     name: frontend (eslint + tsc + vitest)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, ci]
     timeout-minutes: 20
     needs: [classify]
     if: ${{ needs.classify.outputs.frontend == 'true' }}
@@ -459,7 +459,7 @@ jobs:
 
   e2e-shard:
     name: e2e shard (${{ matrix.group }}/4)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, ci]
     timeout-minutes: 30
     needs: [classify]
     # e2e is the integration net: it runs whenever EITHER side changed.
@@ -529,7 +529,7 @@ jobs:
     # Aggregator carrying the branch-protection / Mergify check name; skipped
     # (= satisfied) on docs-only diffs.
     name: e2e (Playwright happy path)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, ci]
     timeout-minutes: 5
     needs: [classify, e2e-shard]
     if: ${{ always() && needs.classify.result == 'success' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') }}
