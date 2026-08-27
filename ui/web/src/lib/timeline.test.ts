@@ -9,6 +9,7 @@ import {
   parseItemId,
   parseItemIdParts,
   sortByItemId,
+  standingHeadNoteIds,
 } from "./timeline";
 import type { BackendTimelineItem, SystemEvent } from "./types";
 
@@ -29,6 +30,69 @@ function item(overrides: Partial<BackendTimelineItem>): BackendTimelineItem {
 function kinds(items: BackendTimelineItem[]): string[] {
   return items.map((i) => i.kind);
 }
+
+describe("standingHeadNoteIds", () => {
+  it("returns the contiguous system_marker run right after 0.0", () => {
+    const items = [
+      item({ item_id: "0.0", kind: "system_prompt" }),
+      item({ item_id: "1.0", kind: "system_marker", source: "exec_timeout" }),
+      item({ item_id: "2.0", kind: "system_marker", source: "timezone" }),
+      item({ item_id: "3.0", kind: "system_marker", source: "memory" }),
+      item({ item_id: "4.0", kind: "system_marker", source: "agent_id" }),
+      item({ item_id: "5.0", kind: "system_marker", source: "agent_memory" }),
+      item({ item_id: "6.0", kind: "inbound_compact_summary" }),
+    ];
+    expect(standingHeadNoteIds(items)).toEqual(new Set(["1.0", "2.0", "3.0", "4.0", "5.0"]));
+  });
+
+  it("stops the run at the first non-marker (compact summary / real item)", () => {
+    const items = [
+      item({ item_id: "0.0", kind: "system_prompt" }),
+      item({ item_id: "1.0", kind: "system_marker", source: "exec_timeout" }),
+      item({ item_id: "2.0", kind: "inbound_compact_summary" }),
+      // Mid-conversation markers are NOT head notes — they sit after real items.
+      item({ item_id: "3.0", kind: "inbound_chat" }),
+      item({ item_id: "4.0", kind: "system_marker", source: "memory" }),
+    ];
+    expect(standingHeadNoteIds(items)).toEqual(new Set(["1.0"]));
+  });
+
+  it("stops the run at an untagged marker (source=null catch-all rows are not head notes)", () => {
+    // Pre-tag checkpoint rows / retired markers render as system_marker with
+    // source=null via the catch-all. They are stale rows, not standing head
+    // notes, and must end the run — otherwise old data would be re-attached
+    // to every window and skipped in paging.
+    const items = [
+      item({ item_id: "0.0", kind: "system_prompt" }),
+      item({ item_id: "1.0", kind: "system_marker", source: "exec_timeout" }),
+      item({ item_id: "2.0", kind: "system_marker", source: null, payload: "legacy" }),
+      item({ item_id: "3.0", kind: "system_marker", source: "memory" }),
+    ];
+    expect(standingHeadNoteIds(items)).toEqual(new Set(["1.0"]));
+  });
+
+  it("returns an empty set when there is no 0.0 prompt", () => {
+    expect(
+      standingHeadNoteIds([item({ item_id: "1.0", kind: "system_marker", source: "memory" })]),
+    ).toEqual(new Set());
+  });
+
+  it("returns an empty set for an empty list", () => {
+    expect(standingHeadNoteIds([])).toEqual(new Set());
+  });
+
+  it("does not treat historical segment head notes as current head notes", () => {
+    const items = [
+      item({ item_id: "s2.cpid2.0.0", kind: "system_prompt" }),
+      item({ item_id: "s2.cpid2.1.0", kind: "system_marker", source: "exec_timeout" }),
+      item({ item_id: "0.0", kind: "system_prompt" }),
+      item({ item_id: "1.0", kind: "system_marker", source: "exec_timeout" }),
+      item({ item_id: "2.0", kind: "system_marker", source: "memory" }),
+      item({ item_id: "6.0", kind: "inbound_compact_summary" }),
+    ];
+    expect(standingHeadNoteIds(items)).toEqual(new Set(["1.0", "2.0"]));
+  });
+});
 
 describe("parseItemId", () => {
   it("standard format '5.1' → [5, 1]", () => {

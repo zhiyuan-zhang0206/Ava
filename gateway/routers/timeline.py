@@ -39,6 +39,46 @@ from shared.timeline import (
 router = APIRouter()
 _log = logging.getLogger(__name__)
 _REATTACHED_KINDS = frozenset({"system_prompt", "inbound_compact_summary"})
+
+
+def _standing_head_note_ids(items: list[TimelineItem]) -> set[str]:
+    """Item ids of the standing head notes: the contiguous ``system_marker``
+    run immediately after the system prompt.
+
+    These are the notes ``agent/graph/_context_notes.py`` lays down at window
+    establishment (exec timeout / timezone / cluster memory / agent id / agent
+    memory / preloaded skills), rendered as ``system_marker`` items right
+    behind the prompt. They are standing context of the same class as the
+    prompt itself: ``_initial_window`` re-attaches them at the window head,
+    and the paging paths treat them as re-attached context (a cursor that
+    would select one must cross to the next older segment instead of looping
+    on the re-attached head).
+
+    The run requires ``source is not None`` (a real NoteTag): the catch-all
+    fallback renders untagged HumanMessages — pre-tag checkpoint rows and
+    retired markers that old data may still carry right after the prompt —
+    as ``system_marker`` with ``source=None``, and treating those as head
+    notes would re-attach stale rows to every window and skip them in paging.
+    """
+    head: set[str] = set()
+    idx = 0
+    # The current segment's prompt is always the plain "0.0" item (historical
+    # segments carry segment-prefixed ids), and the standing notes directly
+    # follow it. Historical segments have their SystemMessage stripped by
+    # ``load_checkpoint_messages_segment``, so their standing notes sit at
+    # items[0] — the run starts there when no prompt is present.
+    while idx < len(items) and items[idx].kind != "system_prompt":
+        idx += 1
+    if idx < len(items):
+        idx += 1  # past the prompt itself
+    else:
+        idx = 0  # no prompt (historical segment): its notes start at the front
+    while idx < len(items) and items[idx].kind == "system_marker" and items[idx].source is not None:
+        head.add(items[idx].item_id)
+        idx += 1
+    return head
+
+
 _MAX_CURSOR_LENGTH = 512
 _MAX_CURSOR_INDEX_DIGITS = 20
 
@@ -149,15 +189,17 @@ def _window_or_cross(
     """Return a segment-local page or signal that the cursor is at its head.
 
     The frontend never uses re-attached context as a cursor. When every item
-    before its oldest real item is re-attached context, return that small head
-    once more while signaling the caller to append the next older segment.
+    before its oldest real item is re-attached context (the prompt, the
+    standing head notes, compact summaries), return that small head once more
+    while signaling the caller to append the next older segment.
     Frontend de-duplication converges repeated standing context, and returning
     it here guarantees a compact summary cannot fall between page boundaries.
     """
     idx = next((i for i, item in enumerate(items) if item.item_id == before), None)
     if idx is None:
         return [], False, False
-    if all(item.kind in _REATTACHED_KINDS for item in items[:idx]):
+    head_note_ids = _standing_head_note_ids(items)
+    if all(item.kind in _REATTACHED_KINDS or item.item_id in head_note_ids for item in items[:idx]):
         return items[:idx], older_segment_available, True
     start = max(0, idx - limit) if limit > 0 else 0
     return items[start:idx], start > 0 or older_segment_available, False
@@ -313,24 +355,49 @@ def _initial_window(
     # The system-prompt item (0.0) is the OLDEST item and falls off the tail
     # window for a long conversation. Re-attach it without counting it
     # against the page limit or creating a phantom older-page affordance.
+    prompt = None
     if not any(item.item_id == "0.0" for item in window):
         prompt = next((item for item in items if item.kind == "system_prompt"), None)
-        if prompt is not None:
-            window = [prompt, *window]
-            has_more = has_more and len(items) - 1 > limit
+
+    # The standing head notes — the contiguous system_marker run right after
+    # the prompt (exec timeout / timezone / cluster memory / agent id / agent
+    # memory / preloaded skills, agent/graph/_context_notes.py) — are the same
+    # class of standing context as the prompt: laid down at window
+    # establishment, they fall off the tail window for any conversation past
+    # `limit` rendered items. Re-attach the missing ones right after the
+    # prompt so a long conversation's head reads like a fresh window (user
+    # report 2026-08-27: agent 2992's head showed only "system prompt ·
+    # compact summary" while a fresh agent shows "system prompt · 2 memories ·
+    # 3 system notes"). Deduped by item_id; not counted against `limit`.
+    head_note_ids = _standing_head_note_ids(items)
+    notes_missing = [
+        item
+        for item in items
+        if item.item_id in head_note_ids
+        and not any(window_item.item_id == item.item_id for window_item in window)
+    ]
 
     # Compact summaries are standing context too. Once the prompt is
     # re-attached, a cursor can never page to summaries older than it, so keep
-    # every missing summary immediately after the prompt.
+    # every missing summary immediately after the head notes.
     compact_missing = [
         item
         for item in items
         if item.kind == "inbound_compact_summary"
         and not any(window_item.item_id == item.item_id for window_item in window)
     ]
-    if compact_missing:
-        window = [*window[:1], *compact_missing, *window[1:]]
-        has_more = has_more and len(items) - 1 - len(compact_missing) > limit
+
+    reattached = (0 if prompt is None else 1) + len(notes_missing) + len(compact_missing)
+    if reattached:
+        # Standing context heads the window in reading order: prompt, head
+        # notes, compact summaries, then the raw tail window.
+        window = [
+            *([prompt] if prompt is not None else []),
+            *notes_missing,
+            *compact_missing,
+            *window,
+        ]
+        has_more = has_more and len(items) - reattached > limit
     return window, has_more or historical_segments_available
 
 

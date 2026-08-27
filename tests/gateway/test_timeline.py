@@ -2337,3 +2337,248 @@ class TestTimelineCompactHistory:
 
         assert response.status_code == 200
         assert response.json() == {"items": [], "msg_count": 3, "has_more": False}
+
+    def test_long_conversation_keeps_standing_head_notes(
+        self, db_conn: psycopg.Connection, test_client: TestClient
+    ) -> None:
+        """Head context notes (exec timeout / timezone / cluster memory / agent
+        id / agent memory — agent/graph/_context_notes.py) fall off the tail
+        window in a long conversation; GET must re-attach them right after the
+        prompt so the head reads like a fresh window (user report 2026-08-27:
+        agent 2992's head showed only "system prompt · compact summary" while a
+        fresh agent shows "system prompt · 2 memories · 3 system notes").
+        Not counted against `limit`; has_more recomputed."""
+        from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+
+        tid = create_agent(db_conn)
+        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory"):
+            messages.append(
+                HumanMessage(
+                    content=f"[system] {tag} note",
+                    additional_kwargs={
+                        "ava_msg_type": "system_note",
+                        "ava_note_tag": tag,
+                        "ava_created_at": "2026-08-27T00:00:00+00:00",
+                    },
+                )
+            )
+        for i in range(60):
+            messages.append(
+                HumanMessage(
+                    content=f"user msg {i}",
+                    additional_kwargs={
+                        "ava_msg_type": "inbound",
+                        "ava_created_at": f"2026-08-27T00:01:{i:02d}+00:00",
+                        "ava_source": "user",
+                    },
+                )
+            )
+        self._put_checkpoint(tid, messages, version="1")  # pyright: ignore[reportUnknownMemberType]
+
+        resp = test_client.get(f"/api/agents/{tid}/timeline")
+        assert resp.status_code == 200
+        data = resp.json()
+        # 60 inbounds + 5 notes + 1 system prompt = 66 items; window = 50 + prompt + 5 notes
+        assert [item["item_id"] for item in data["items"][:6]] == [
+            "0.0",
+            "1.0",
+            "2.0",
+            "3.0",
+            "4.0",
+            "5.0",
+        ]
+        assert [item["source"] for item in data["items"][1:6]] == [
+            "exec_timeout",
+            "timezone",
+            "memory",
+            "agent_id",
+            "agent_memory",
+        ]
+        assert len(data["items"]) == 56
+        # The newest window follows the standing context in order (16.0 is the
+        # first item of the 50-item tail).
+        assert data["items"][6]["item_id"] == "16.0"
+        assert data["items"][-1]["item_id"] == "65.0"
+        assert data["has_more"] is True
+
+    def test_short_conversation_head_notes_not_duplicated(
+        self, db_conn: psycopg.Connection, test_client: TestClient
+    ) -> None:
+        """Head notes inside the tail window are not re-attached a second time."""
+        from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+
+        tid = create_agent(db_conn)
+        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory"):
+            messages.append(
+                HumanMessage(
+                    content=f"[system] {tag} note",
+                    additional_kwargs={
+                        "ava_msg_type": "system_note",
+                        "ava_note_tag": tag,
+                        "ava_created_at": "2026-08-27T00:00:00+00:00",
+                    },
+                )
+            )
+        for i in range(5):
+            messages.append(
+                HumanMessage(
+                    content=f"user msg {i}",
+                    additional_kwargs={
+                        "ava_msg_type": "inbound",
+                        "ava_created_at": f"2026-08-27T00:01:{i:02d}+00:00",
+                        "ava_source": "user",
+                    },
+                )
+            )
+        self._put_checkpoint(tid, messages, version="1")  # pyright: ignore[reportUnknownMemberType]
+
+        resp = test_client.get(f"/api/agents/{tid}/timeline")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert [item["item_id"] for item in data["items"]] == [
+            "0.0",
+            "1.0",
+            "2.0",
+            "3.0",
+            "4.0",
+            "5.0",
+            "6.0",
+            "7.0",
+            "8.0",
+            "9.0",
+            "10.0",
+        ]
+        assert data["has_more"] is False
+
+    def test_cursor_past_head_notes_crosses_to_older_segment(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A paging cursor on the first real item past the re-attached head
+        notes crosses to the older segment instead of looping on the head."""
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        boundary_id = self._put_checkpoint(
+            tid, self._segment("history", 1), version="1", boundary=True
+        )
+        notes = [
+            HumanMessage(
+                content=f"[system] {tag} note",
+                additional_kwargs={
+                    "ava_msg_type": "system_note",
+                    "ava_note_tag": tag,
+                    "ava_created_at": "2026-08-27T00:00:00+00:00",
+                },
+            )
+            for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory")
+        ]
+        self._put_checkpoint(
+            tid,
+            [
+                SystemMessage(content="system"),
+                *notes,
+                self._summary("current summary"),
+                AIMessage(content="current item"),
+            ],
+            version="2",
+        )
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+
+        page = test_client.get(
+            f"/api/agents/{tid}/timeline", params={"before": "7.0", "limit": 50}
+        ).json()
+
+        # The head (prompt + notes + compact summary) is returned once more for
+        # frontend de-duplication, then the next older segment's tail follows.
+        # The segment's SystemMessage is stripped by the segment loader, so the
+        # _segment fixture renders as s1.0.0 (compact summary) + s1.1.0 (chat).
+        assert [item["item_id"] for item in page["items"]] == [
+            "0.0",
+            "1.0",
+            "2.0",
+            "3.0",
+            "4.0",
+            "5.0",
+            "6.0",
+            f"s1.{boundary_id}.0.0",
+            f"s1.{boundary_id}.1.0",
+        ]
+        assert page["has_more"] is False
+
+    def test_historical_head_note_cursor_crosses_to_next_older_segment(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A cursor on a historical segment's own standing head note crosses
+        to the next older segment. The frontend never guards historical head
+        notes (segment-prefixed ids), so the backend cross must recognize them
+        as standing context or paging would loop on the segment head (review
+        nit, PR #787)."""
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        boundary_2 = self._put_checkpoint(
+            tid, self._segment("oldest", 1), version="1", boundary=True
+        )
+        notes = [
+            HumanMessage(
+                content=f"[system] {tag} note",
+                additional_kwargs={
+                    "ava_msg_type": "system_note",
+                    "ava_note_tag": tag,
+                    "ava_created_at": "2026-08-27T00:00:00+00:00",
+                },
+            )
+            for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory")
+        ]
+        boundary_1 = self._put_checkpoint(
+            tid,
+            [
+                SystemMessage(content="system"),
+                *notes,
+                self._summary("middle summary"),
+                AIMessage(content="middle item"),
+            ],
+            version="2",
+            boundary=True,
+        )
+        self._put_checkpoint(
+            tid,
+            [
+                SystemMessage(content="system"),
+                *notes,
+                self._summary("current summary"),
+                AIMessage(content="current item"),
+            ],
+            version="3",
+        )
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+
+        # Cursor on s1's third standing head note (0.0 = exec_timeout,
+        # 1.0 = timezone, 2.0 = memory — the segment's SystemMessage is
+        # stripped, so its notes start at 0.0): everything before it is
+        # standing context, so the response crosses to s2 instead of looping
+        # on the segment head.
+        page = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s1.{boundary_1}.2.0", "limit": 50},
+        ).json()
+
+        assert [item["item_id"] for item in page["items"]] == [
+            f"s1.{boundary_1}.0.0",
+            f"s1.{boundary_1}.1.0",
+            f"s2.{boundary_2}.0.0",
+            f"s2.{boundary_2}.1.0",
+        ]
+        assert page["has_more"] is False

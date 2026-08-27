@@ -1200,6 +1200,35 @@ describe("prependOlder / load-older flags", () => {
     expect(s.items.filter((i) => i.item_id === "5.0")).toHaveLength(1);
     expect(s.hasMoreOlder).toBe(true);
   });
+  it("prependOlder stops paging when a page adds nothing but claims more (stuck standing-context cursor)", () => {
+    // A version-mixed gateway returns only the standing context the frontend
+    // already holds (the re-attached prompt + head notes) while has_more stays
+    // true — the old gateway cannot cross the head. Paging must stop, not
+    // loop on the same cursor forever.
+    act(() => {
+      useTimelineStore.setState({
+        items: [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "prompt" }),
+          item({ item_id: "1.0", kind: "system_marker", source: "memory", payload: "m" }),
+          item({ item_id: "7.0", kind: "inbound_chat", payload: "current" }),
+        ],
+        hasMoreOlder: true,
+        loadingOlder: true,
+      });
+      useTimelineStore.getState().prependOlder(
+        [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "prompt" }),
+          item({ item_id: "1.0", kind: "system_marker", source: "memory", payload: "m" }),
+        ],
+        true,
+      );
+    });
+    const s = useTimelineStore.getState();
+    expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "7.0"]);
+    expect(s.hasMoreOlder).toBe(false);
+    expect(s.loadingOlder).toBe(false);
+  });
+
 
   it("prepends history beyond the old 6000 cap without dropping items", () => {
     // Task #1734: crossing the former 6000-item ceiling no longer discards
