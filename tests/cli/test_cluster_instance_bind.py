@@ -272,6 +272,46 @@ def test_redis_config_keeps_previous_complete_value_when_replace_fails(
 # ─── task #1303: postgres gets the same secret-gated reachable-bind wait ──────
 
 
+def test_start_probes_receive_the_url_hosts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The bring-up probes must be WIRED to the host their own URLs name —
+    asserted against foreign URLs, so a re-hardcoded loopback literal fails
+    (matching the test env's own loopback URL would be vacuous)."""
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:p@10.0.0.7:15433/ava")
+    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://ava:p@10.0.0.7:16380/0")
+    seen: dict[str, tuple[int, str]] = {}
+
+    def _pg_running(port: int, host: str) -> bool:
+        seen["pg"] = (port, host)
+        return True
+
+    def _redis_running(port: int, _password: str, host: str) -> bool:
+        seen["redis"] = (port, host)
+        return True
+
+    def _ensure_redis_acl(*_args: object, **_kwargs: object) -> int:
+        return 0
+
+    monkeypatch.setattr(_ci, "_pg_running", _pg_running)
+    monkeypatch.setattr(_ci, "_redis_running", _redis_running)
+    monkeypatch.setattr(_ci, "_ensure_redis_acl", _ensure_redis_acl)
+    monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
+    calls: list[list[str]] = []
+
+    def _run(cmd: list[str], **_: object) -> object:
+        calls.append(cmd)
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(_ci.subprocess, "run", _run)
+
+    assert _ci._start_pg(15433, "") == 0
+    assert _ci._start_redis(16380, "admin", "runtime", "", "ava") == 0
+    assert seen == {"pg": (15433, "10.0.0.7"), "redis": (16380, "10.0.0.7")}
+
+
 def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The predictable /tmp socket location cannot follow a pre-placed symlink."""
     home = tmp_path / "home"

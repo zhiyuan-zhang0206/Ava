@@ -37,3 +37,19 @@ A settings-only host (no registry field) was rejected: derivation happens at
 birth, before the home's `.env` exists, so the record is the only durable
 per-cluster source. Threading a host parameter through every dial site without
 a shared `url_host` read was rejected as the same pattern repeated five times.
+
+## Follow-up (QA PASS-with-nits, same day)
+
+QA #3242 flagged two gaps, folded into a follow-up PR:
+
+- `scripts/rotate_data_plane_secrets.py` still dialed literal `127.0.0.1` in
+  four places (the pg/redis preflight+verify probes, the CONFIG SET dial, and
+  the ACL-provisioning admin URL). `RotationState` now carries
+  `pg_host`/`redis_host` (defaulted loopback, so a pre-upgrade rotation journal
+  resumes unchanged), derived from the cluster's own URLs at `build_state`;
+  every probe and dial threads them.
+- The dial-layer host wiring had zero assertions (the same vacuous-gap family
+  #724 caught): tests now assert the probes/dials receive the URL host against
+  a FOREIGN host (loopback would match a re-hardcoded literal and prove
+  nothing) for `ava status` probes, the bring-up probes, the credential-split
+  admin dials, and the rotation script.
