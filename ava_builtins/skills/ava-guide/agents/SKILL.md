@@ -38,7 +38,7 @@ SDK reference: `ava.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
 `send_message` / `list_agents` / `list_machines` / `get_neighbors` /
 `get_ancestors` / `commands` / `get_last_message`).
 
-## Command（user-level command）
+## Command (user-level command)
 
 A **command** is a `/name <natural language instruction>` — issued from the
 frontend Composer or via `send_message` between peers. `expand_command` expands

@@ -975,8 +975,8 @@ describe("SpawnButton model dropdown", () => {
   });
 
   // Task #568: picking a preset that carries a model (config.llm_model) must
-  // override the previously selected model — the user's exact complaint ("选中
-  // Ultra Speed Worker，model 我以前选中了什么就还是什么").
+  // override the previously selected model — the user's exact complaint ("when I pick
+  // Ultra Speed Worker, the model I picked before stays as-is").
   it("preset with a model overrides the model picker and the spawn", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(modelsWithMimo());

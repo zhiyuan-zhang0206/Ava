@@ -4,8 +4,8 @@
 // History: `--font-sans` carried "PingFang SC" / "Microsoft YaHei" from the
 // start, but `--font-mono` had NO CJK fonts — and the UI is font-mono-heavy
 // (fleet view, sidebar, timeline). On Windows the mono CJK glyphs fell through
-// to the generic `monospace` → SimSun (宋体), which is what the user reported
-// as "Win 上中文太丑". The mono stack now mirrors the sans stack: PingFang SC
+// to the generic `monospace` → SimSun (\u5b8b\u4f53), which is what the user reported
+// as "CJK glyphs look ugly on Windows". The mono stack now mirrors the sans stack: PingFang SC
 // (macOS) → Microsoft YaHei (Windows) → Noto Sans SC (Linux), with the generic
 // fallback last.
 

@@ -236,21 +236,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function showWin() {
     overlayActionsEl.innerHTML = "";
     overlayActionsEl.appendChild(
-      mkButton("继续游戏", () => {
+      mkButton("Keep going", () => {
         state.keepGoing = true;
         hideOverlay();
         if (isGameOver(state.board)) showGameOver();
       })
     );
-    overlayActionsEl.appendChild(mkButton("重新开始", restart));
-    showOverlay("🎉 你赢了！");
+    overlayActionsEl.appendChild(mkButton("Restart", restart));
+    showOverlay("🎉 You won!");
   }
 
   function showGameOver() {
     state.over = true;
     overlayActionsEl.innerHTML = "";
-    overlayActionsEl.appendChild(mkButton("重新开始", restart));
-    showOverlay("游戏结束");
+    overlayActionsEl.appendChild(mkButton("Restart", restart));
+    showOverlay("Game over");
   }
 
   function restart() {

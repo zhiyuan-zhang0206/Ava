@@ -196,9 +196,9 @@ class TestSpawn:
 
     def test_spawn_with_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"prompt": "查 X", "prompt_source": "user"})
+            resp = client.post("/api/agents", json={"prompt": "\u67e5 X", "prompt_source": "user"})
         new_id = resp.json()["id"]
-        assert _inbound_rows(db_conn, new_id) == [("查 X", "chat", "user")]
+        assert _inbound_rows(db_conn, new_id) == [("\u67e5 X", "chat", "user")]
 
     def test_spawn_with_long_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
         """Long reports are delivered through the shared user-content schema."""
@@ -278,7 +278,7 @@ class TestSpawn:
         """prompt given but prompt_source missing → 422 (model_validator blocks).
         Prevents the anti-pattern of "caller forgot field silently attributed to user"."""
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"prompt": "查 X"})
+            resp = client.post("/api/agents", json={"prompt": "\u67e5 X"})
         assert resp.status_code == 422
         # detail contains validator's Chinese-language prompt
         assert "prompt_source" in resp.text
@@ -798,11 +798,11 @@ class TestList:
         """label field fetched from agents JOIN — after PATCH write, GET should see it."""
         with TestClient(app) as client:
             a_id = client.post("/api/agents", json={}).json()["id"]
-            client.patch(f"/api/agents/{a_id}", json={"label": "我的 agent"})
+            client.patch(f"/api/agents/{a_id}", json={"label": "\u6211\u7684 agent"})
             resp = client.get("/api/agents")
         assert resp.status_code == 200
         by_id = {r["agent_id"]: r for r in resp.json()}
-        assert by_id[a_id]["label"] == "我的 agent"
+        assert by_id[a_id]["label"] == "\u6211\u7684 agent"
 
     def test_get_single_agent_returns_label(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:

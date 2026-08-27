@@ -9468,7 +9468,7 @@
         },
         "type": "object",
         "title": "MachinePauseRequest",
-        "description": "POST /api/cluster/machines/{name}/pause body.\n\n`reason` is free-text why the machine is being pulled out (e.g. \"休假一周\")\n— recorded on the machines row as `pause_reason` for the resume checklist."
+        "description": "POST /api/cluster/machines/{name}/pause body.\n\n`reason` is free-text why the machine is being pulled out (e.g. \"a week off\")\n— recorded on the machines row as `pause_reason` for the resume checklist."
       },
       "MachinePauseResponse": {
         "properties": {

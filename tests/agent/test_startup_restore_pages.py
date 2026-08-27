@@ -90,7 +90,7 @@ async def test_reserves_dead_server(monkeypatch: pytest.MonkeyPatch) -> None:
     await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
 
     assert served == [((("/data/report", "report", 18001, "Report"), {}))]
-    # 没有 UPDATE closed（serve_dir 存在 → 重 serve 而非关闭）
+    # no UPDATE closed (serve_dir exists -> re-serve instead of closing)
     assert not any("UPDATE agent_pages" in sql for sql, _ in pool.executed)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -128,7 +128,7 @@ async def test_closes_dead_page_without_serve_dir(monkeypatch: pytest.MonkeyPatc
     )
     await reconcile_open_pages(pool, 7, event_publisher=_Pub())  # type: ignore[arg-type]
 
-    # report 重 serve；plain 关闭 + PageClosed
+    # report re-served; plain closed + PageClosed
     assert served == [((("/data/report", "report", 18001, None), {}))]
     updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
     assert updates == [(7, "plain")]
@@ -220,5 +220,5 @@ async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) ->
     _pool, agent_id, publisher = calls[0]
     assert agent_id == 7
     assert publisher is _Ctx.event_publisher
-    # 心跳 system note 仍然照常追加
+    # heartbeat system note still appended as usual
     assert len(st.new_msgs) == 1

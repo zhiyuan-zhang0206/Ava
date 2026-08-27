@@ -1,4 +1,4 @@
-/* 周计划 — 本地单文件应用样式（无外部资源） */
+/* Weekly planner - local single-file app styles (no external resources) */
 
 :root {
   --bg: #f6f5f1;
@@ -7,7 +7,7 @@
   --ink-soft: #77716a;
   --line: #e5e1da;
   --line-strong: #d8d3ca;
-  --accent: #67786d;        /* 灰调鼠尾草绿，安静不甜腻 */
+  --accent: #67786d;        /* muted sage green, calm not cloying */
   --accent-strong: #4e5f54;
   --accent-wash: #eef1ec;
   --today-wash: #f2f4ef;
@@ -34,7 +34,7 @@ body {
 
 [hidden] { display: none !important; }
 
-/* 屏幕阅读器专用文本 */
+/* Screen-reader-only text */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -47,7 +47,7 @@ body {
   border: 0;
 }
 
-/* 所有可交互元素都有清晰可见的焦点 */
+/* Every interactive element has a clearly visible focus */
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -79,7 +79,7 @@ body {
   margin-top: 14px;
 }
 
-/* 表头行：竖向滚动时吸顶 */
+/* Header row: sticks to the top on vertical scroll */
 .grid-head-row {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -135,7 +135,7 @@ body {
   border-radius: var(--radius);
 }
 
-/* 移动端（<=860px）把表头行隐藏，每列变成整宽卡片 */
+/* Mobile (<=860px): hide the header row; each column becomes a full-width card */
 .mobile-head { display: none; }
 
 .add-form {
@@ -299,7 +299,7 @@ body {
 }
 .more-btn:hover { background: #e4eae3; }
 
-/* 移动端：每天一列整宽卡片，375px 也完全可用 */
+/* Mobile: one full-width card per day; fully usable at 375px */
 @media (max-width: 860px) {
   .page-header { padding: 20px 16px 4px; }
   .app-main { padding: 0 14px 36px; }
@@ -328,7 +328,7 @@ body {
   .mobile-head .day-count { margin-left: auto; }
 }
 
-/* 系统开启“减弱动态效果”时，动画基本消失 */
+/* With reduced-motion enabled, animations mostly disappear */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

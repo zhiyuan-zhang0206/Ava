@@ -266,9 +266,15 @@ def test_ingest_every_severity_notifies() -> None:
     # default template language is zh (user ruling 2026-08-13: IM copy follows
     # user_settings display.language, default zh) — the en path is covered by
     # test_ingest_uses_display_language_setting
-    assert "⚠️ 告警 [CRITICAL]" in notified[0]  # emoji-ok: asserting the user-designated IM format
-    assert "⚠️ 告警 [WARNING]" in notified[1]  # emoji-ok: asserting the user-designated IM format
-    assert "⚠️ 告警 [ERROR]" in notified[2]  # emoji-ok: asserting the user-designated IM format
+    assert (
+        "⚠️ \u544a\u8b66 [CRITICAL]" in notified[0]  # emoji-ok: IM alert head format
+    )
+    assert (
+        "⚠️ \u544a\u8b66 [WARNING]" in notified[1]  # emoji-ok: IM alert head format
+    )
+    assert (
+        "⚠️ \u544a\u8b66 [ERROR]" in notified[2]  # emoji-ok: IM alert head format
+    )
 
 
 def test_ingest_notify_im_false_stores_and_publishes_without_im(

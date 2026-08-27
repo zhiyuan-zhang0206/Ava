@@ -2482,14 +2482,16 @@ class TestMachinePauseResume:
         _seed_open_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
 
         with TestClient(app) as client:
-            r = client.post("/api/cluster/machines/away/pause", json={"reason": "休假一周"})
+            r = client.post(
+                "/api/cluster/machines/away/pause", json={"reason": "\u4f11\u5047\u4e00\u5468"}
+            )
         assert r.status_code == 200
         body = r.json()
         assert body["paused"] is True
         assert body["terminated_agents"] == 2
         assert body["force_marked_agents"] == 0
         assert body["reassigned_tasks"] == 1
-        assert body["pause_reason"] == "休假一周"
+        assert body["pause_reason"] == "\u4f11\u5047\u4e00\u5468"
         assert body["paused_at"] is not None
 
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]

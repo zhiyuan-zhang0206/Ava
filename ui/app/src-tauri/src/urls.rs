@@ -27,7 +27,7 @@ const GATE_PORT: u16 = 3000;
 /// ports remain available through the advanced gateway override.
 #[cfg(any(target_os = "android", test))]
 pub(crate) const CUSTOM_ENTRY_PORT_ERROR: &str =
-    "控制台端口为 3000，网关端口 8000 自动推导；自定义端口请走高级设置。";
+    "Console port defaults to 3000 and the gateway port derives automatically from 8000; custom ports go through advanced settings.";
 
 /// The pair of URLs the app talks to.
 #[derive(Clone, Debug, PartialEq, Eq)]

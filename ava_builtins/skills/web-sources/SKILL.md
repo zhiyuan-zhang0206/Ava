@@ -63,7 +63,7 @@ Each adapter persists a platform-shaped `post.json` in its mirror, then projects
 | field | meaning |
 |---|---|
 | `platform` | which adapter produced the item (`rss` / `web` / `youtube` / `gmail`) |
-| `source_id` | the platform's own durable id for this item (entry guid / page URL / BV号 / video id / Message-Id) |
+| `source_id` | the platform's own durable id for this item (entry guid / page URL / BV id / video id / Message-Id) |
 | `url` | canonical web permalink, or `null` when the source has none |
 | `author` | `{id, name}` — **`id` is the durable follow key** (feed URL / site domain / uploader mid / channel id / List-Id), so all items of one source share it |
 | `matrix_entity` | optional caller-supplied tag meaning "same real-world source seen across platforms"; `null` unless the caller passes `--matrix-entity` |

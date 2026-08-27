@@ -35,7 +35,7 @@ Multi-stage pipeline: the main pipeline in `plugin.py`, followed by a batch of d
 ### 1. Chinese/fullwidth punctuation → ASCII (manual, not covered by ruff)
 
 - `_translate_outside_strings` based on Python `tokenize` only replaces **outside strings**, preserving Chinese content inside strings
-- `，`→`,`、`。`→`.`、`：`→`:`、fullwidth quotation marks `"" ''` → ASCII quotation marks
+- fullwidth comma → `,`, fullwidth period → `.`, fullwidth colon → `:`, fullwidth quotation marks → ASCII quotation marks
   (`_FULLWIDTH_QUOTE_MAP` first, `_PUNCT_MAP` after)
 - Must run first, otherwise subsequent ruff/tokenize parsing fails
 

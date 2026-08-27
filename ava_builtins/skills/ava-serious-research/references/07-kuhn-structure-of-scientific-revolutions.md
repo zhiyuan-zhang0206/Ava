@@ -1,7 +1,7 @@
 # 07 · The Structure of Scientific Revolutions — Reference
 
 **Author**: Thomas S. Kuhn (1962; 2nd ed. 1970 adds the postscript, 3rd ed. 1996)
-**Source**: University of Chicago Press; Chinese translation 《科学革命的结构》.
+**Source**: University of Chicago Press; Chinese translation: The Structure of Scientific Revolutions.
 **Role in this skill**: the structural model behind `practices/question` (anomaly-driven research), `practices/measure` (framework-relative metrics), `practices/verify` (anomaly vs noise), and `practices/present` (honest reporting of crisis/confusion as a legitimate outcome).
 **Review status (Chinese edition)**: ⏳ pending user review (2026-08-07, epistemology supplement group).
 

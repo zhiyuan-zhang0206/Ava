@@ -381,8 +381,8 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
   // window: the HTTP snapshot is dropped inside it, and the first
   // *incremental* snapshot (the full one already passed, the agent may
   // still be streaming) replaces the fresh seed wholesale — the timeline
-  // ends up showing only the tail ("只显示最后一个 detail block，之前
-  // 所有消息不触发加载", Task #994). Consume the marker here: the full
+  // ends up showing only the tail ("show only the last detail block, earlier
+  // messages never trigger loading", Task #994). Consume the marker here: the full
   // snapshot happened, nothing is left to protect.
   if (ev.role === "timeline_snapshot" && state.compactedThreadIds.has(ev.agent_id)) {
     const nextCompacted = new Set(state.compactedThreadIds);

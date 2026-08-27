@@ -777,7 +777,7 @@ describe("useTimeline agentId switch", () => {
   });
 
   it("compact_done defers the refetch to the first NON-EMPTY post-compact snapshot (avoids caching the lagging pre-compact checkpoint)", async () => {
-    // Regression for "compact 完成后 context UI 不立即刷新": invalidating on
+    // Regression for "context UI does not refresh right after compact": invalidating on
     // compact_done itself reads the checkpoint BEFORE the compact commits
     // (a beat later locally, seconds on remote machines) and caches the
     // lagging pre-compact snapshot; a later switch-back then seeds it and

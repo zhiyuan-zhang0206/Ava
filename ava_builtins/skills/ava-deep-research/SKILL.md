@@ -77,7 +77,7 @@ budget is spent, never when the report looks long.
 3. Pre-register the budget: breadth (queries per wave), depth (max iteration
    waves), fetch cap, wall-clock cap. Defaults: breadth 6–10, depth 3,
    ~200 fetches — search and fetch are cheap, so the cap bounds worker drift,
-   not API spend (user ruling 2026-08-09: "fetch/search 不值钱", raised from
+   not API spend (user ruling 2026-08-09: "fetch/search is cheap", raised from
    ~60 after the #1108 overrun). **When parallelizing with workers, the fetch
    cap is a GLOBAL budget: distribute it so the per-worker caps sum exactly to
    max_fetches** (cap_i = max_fetches // n, +1 to the first max_fetches % n

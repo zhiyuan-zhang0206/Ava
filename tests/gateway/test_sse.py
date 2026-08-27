@@ -246,8 +246,10 @@ def test_sse_role_filter_system_passes_chat_streaming(
     """chat_delta like code_delta is in SYSTEM_ROLES, both pass."""
     tid = create_agent(db_conn)
     payloads = [
-        ChatDelta(agent_id=tid, item_id="5.0", content="agent 回复").model_dump_json(),
-        CodeDelta(agent_id=tid, item_id="5.0", content="代码片段").model_dump_json(),
+        ChatDelta(agent_id=tid, item_id="5.0", content="agent \u56de\u590d").model_dump_json(),
+        CodeDelta(
+            agent_id=tid, item_id="5.0", content="\u4ee3\u7801\u7247\u6bb5"
+        ).model_dump_json(),
     ]
     frames = asyncio.run(
         _collect_frames(

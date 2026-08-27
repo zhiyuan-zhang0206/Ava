@@ -1,10 +1,10 @@
 # pyright: reportOptionalSubscript=false
-# Command.update type dict | None；tests always have update field, narrowing too verbose
+# Command.update type dict | None; tests always have update field, narrowing too verbose
 """agent/graph.py streaming behavior tests (async).
 
 mock `BaseChatModel.astream` returns async chunk iterator + AsyncMock redis, validate:
   - llm_node first publishes a code_start
-  - each chunk publishes a code_delta（content = chunk.content）
+  - each chunk publishes a code_delta (content = chunk.content)
   - llm_node returns AIMessage.content = all chunks concatenated
   - exec_node publishes exec_start at the start
   - exec_node publishes exec_output after finishing
@@ -29,13 +29,13 @@ from tests.agent._fakes import make_fake_ops_pool
 
 
 def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
-    """test helper：assemble AvaContext into Runtime；ops_pool / inbound_listener
+    """test helper: assemble AvaContext into Runtime; ops_pool / inbound_listener
     placeholders for nodes that don't actually borrow conns.
 
     llm_node now `ctx.llm.bind_tools(...)` then astream——set bind_tools
     return llm itself, so fake_llm.astream stub still works after chaining.
 
-    SSE fan-out now goes through `ctx.event_publisher.emit`（non-blocking）；default inject a MagicMock
+    SSE fan-out now goes through `ctx.event_publisher.emit` (non-blocking); default inject a MagicMock
     so node's `assert ctx.event_publisher` passes, tests verifying events pass their own mock in
     to assert `pub.emit.call_args_list`.
     """
@@ -52,7 +52,7 @@ def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
 
 
 def _ai_with_code(code: str) -> AIMessage:
-    """Single tool reconstructed wire format：AIMessage with execute_code tool_call."""
+    """Single tool reconstructed wire format: AIMessage with execute_code tool_call."""
     return AIMessage(
         content="",
         tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call_test"}],
@@ -60,7 +60,7 @@ def _ai_with_code(code: str) -> AIMessage:
 
 
 async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
-    """Helper：wrap list into async iterator——assign fake_llm.astream.return_value
+    """Helper: wrap list into async iterator -- assign fake_llm.astream.return_value
     this generator so `async for` can consume. Each test creates a new generator,
     not reusing across tests (generators are single-use)."""
     for c in chunks:
@@ -312,14 +312,14 @@ async def test_exec_node_publishes_exec_start_and_output(
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """exec_node's two events:
-    - before executing publish `exec_start`（UI draws [executing] marker）
-    - after finishing publish `exec_output`（UI dev mode sees agent-visible stdout）
+    - before executing publish `exec_start` (UI draws [executing] marker)
+    - after finishing publish `exec_output` (UI dev mode sees agent-visible stdout)
     """
     pub = MagicMock()
     state = AgentState(messages=[_ai_with_code('print("ok")')], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
-    # exec_node actually runs subprocess（async）——use simplest code to avoid side effects
+    # exec_node actually runs subprocess (async) -- use simplest code to avoid side effects
     await exec_node(state, _make_runtime(event_publisher=pub), config)
 
     events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
@@ -372,6 +372,6 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
 # Removed test_exec_node_cancel_output_uses_wrap_code_output_cancelled——it used
 # mock _run_in_subprocess synchronously throw SubprocessCancelledPartial simulating cancel.
 # After Step 2 cancel-in-node RAII exec_node no longer catches top-level
-# SubprocessCancelledPartial（task.cancel() path deleted）；real cancel goes through
+# SubprocessCancelledPartial (task.cancel() path deleted); real cancel goes through
 # cancel_event race → _cancel_subprocess_task internal catch. Coverage path see
 # tests/agent/test_cancel.py::test_exec_node_cancel_event_race_captures_partial_stdout.I have translated all Chinese text in the provided files to English, preserving headers, code, file paths, and URLs exactly. No commentary.

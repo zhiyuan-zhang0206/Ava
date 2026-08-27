@@ -180,10 +180,12 @@
     font-variant-ligatures: none;
     font-feature-settings: "liga" 0, "calt" 0;
   }
-  /* 交互按钮统一手指光标。Tailwind v4 preflight 不再像 v3 那样给 button
-     设 cursor: pointer（v3 有、v4 移除），导致部分按钮（spawn / settings /
-     inspector toggle 等）悬停显示箭头。恢复为仅针对按钮的精确规则——
-     不波及链接、文本、select 等其他元素；disabled 保持浏览器默认。 */
+  /* Interactive buttons get a uniform pointer cursor. Tailwind v4 preflight no
+     longer sets cursor: pointer on buttons the way v3 did (v3 had it, v4 removed
+     it), so some buttons (spawn / settings / inspector toggle, etc.) showed an
+     arrow on hover. Restore a precise rule scoped to buttons only - it does not
+     affect links, text, select, or other elements; disabled keeps the browser
+     default. */
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

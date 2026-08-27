@@ -786,7 +786,7 @@ describe("reloadSnapshot", () => {
 
 describe("compact_done hard reset (incremental design)", () => {
   it("active-thread compact_done KEEPS the pre-compact items visible and arms the reset window", () => {
-    // Regression for "compact 完成后 context UI 不立即刷新": clearing the
+    // Regression for "context UI does not refresh right after compact": clearing the
     // items on compact_done blanked the context panel for the whole reset
     // window (sub-second locally, seconds on remote machines). The old
     // context stays until the first post-compact snapshot replaces it.
@@ -892,8 +892,8 @@ describe("compact_done hard reset (incremental design)", () => {
     // bucketless and is dropped; a later switch-back then sees the marker and
     // arms a stale reset window — the GET is dropped inside the window and the
     // FIRST incremental snapshot (agent still streaming) replaces the fresh
-    // seed wholesale, leaving only the tail ("只显示最后一个 detail block，
-    // 之前所有消息不触发加载").
+    // seed wholesale, leaving only the tail ("show only the last detail block,
+    // earlier messages never trigger loading").
     // Active on thread 2; thread 1 has no bucket.
     act(() => {
       useTimelineStore.getState().switchThread(2, [item({ item_id: "2.0", payload: "other" })], false);

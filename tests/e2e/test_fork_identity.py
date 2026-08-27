@@ -41,7 +41,7 @@ def test_fork_delivers_identity_marker_and_prompt(e2e_env: E2EEnv) -> None:
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
     # turn 1: source runs a turn so it commits a checkpoint the fork can copy.
-    page.fill('[data-testid="composer-input"]', "源 agent 跑一轮")
+    page.fill('[data-testid="composer-input"]', "\u6e90 agent \u8dd1\u4e00\u8f6e")
     page.click('[data-testid="composer-send"]')
     wait_for_status(source_id, AgentStatus.IDLING.value)
 

@@ -133,9 +133,9 @@ def _fix_chinese_punctuation(code: str) -> tuple[str, int]:
     positions only -- never inside string / f-string literals or comments.
 
     Targets the model fat-fingering fullwidth punctuation in code (e.g.
-    ``print（x）`` or fullwidth quotes used as string delimiters). Punctuation
+    ``print(\uff08x\uff09)`` or fullwidth quotes used as string delimiters). Punctuation
     inside a string literal is the agent's intended text (a Chinese prompt's
-    ``，「」``); rewriting it corrupts that text and can forge an accidental
+    ``\uff0c\u300c\u300d``); rewriting it corrupts that text and can forge an accidental
     closing triple-quote that breaks the literal. Returns (fixed_code,
     num_changes).
 

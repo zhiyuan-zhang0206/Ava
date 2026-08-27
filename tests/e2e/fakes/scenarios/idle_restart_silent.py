@@ -41,7 +41,7 @@ CWD_WITNESS = "/tmp/e2e-idle-restart-cwd"  # noqa: S108 -- deterministic witness
 
 PRE_RESTART_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="设置工作目录。",
+        content="\u8bbe\u7f6e\u5de5\u4f5c\u76ee\u5f55\u3002",
         tool_calls=[
             {
                 "id": "call_set_cwd",
@@ -57,7 +57,7 @@ PRE_RESTART_SCRIPT: tuple[AIMessage, ...] = (
         ],
         usage_metadata=_USAGE,
     ),
-    AIMessage(content="工作目录已设置。", usage_metadata=_USAGE),
+    AIMessage(content="\u5de5\u4f5c\u76ee\u5f55\u5df2\u8bbe\u7f6e\u3002", usage_metadata=_USAGE),
 )
 
 # Post-restart the agent must stay silent: any LLM call exhausts the empty

@@ -421,8 +421,11 @@ async def test_send_with_buttons_renders_interactive_card(adapter: FeishuAdapter
     try:
         await adapter.send(
             "ou_user_1",
-            "在线 agent，点一个切换：",
-            buttons=[("405 Ava 负责人", "/switch 405"), ("队列", "notice:list")],
+            "\u5728\u7ebf agent\uff0c\u70b9\u4e00\u4e2a\u5207\u6362\uff1a",
+            buttons=[
+                ("405 Ava \u8d1f\u8d23\u4eba", "/switch 405"),
+                ("\u961f\u5217", "notice:list"),
+            ],
         )
     finally:
         thread.release()
@@ -432,7 +435,7 @@ async def test_send_with_buttons_renders_interactive_card(adapter: FeishuAdapter
     assert request.request_body.msg_type == "interactive"
     card = json.loads(request.request_body.content)
     actions = card["elements"][1]["actions"]
-    assert [a["text"]["content"] for a in actions] == ["405 Ava 负责人", "队列"]
+    assert [a["text"]["content"] for a in actions] == ["405 Ava \u8d1f\u8d23\u4eba", "\u961f\u5217"]
     assert [a["value"]["key"] for a in actions] == ["/switch 405", "notice:list"]
 
 

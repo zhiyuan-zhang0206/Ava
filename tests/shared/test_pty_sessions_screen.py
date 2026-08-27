@@ -50,13 +50,13 @@ def test_scrollback_render_returns_history_tail() -> None:
 
 def test_incremental_utf8_split_across_reads() -> None:
     s = PtyScreen(cols=20, rows=5)
-    # '你' is 3 UTF-8 bytes; split across two feeds must not render U+FFFD.
-    b = "你".encode()
+    # '\u4f60' is 3 UTF-8 bytes; split across two feeds must not render U+FFFD.
+    b = "\u4f60".encode()
     s.feed(b[:1])
     s.feed(b[1:])
-    _feed(s, "好世界")
+    _feed(s, "\u597d\u4e16\u754c")
     out = s.render(scrollback=False)
-    assert "你好世界" in out
+    assert "\u4f60\u597d\u4e16\u754c" in out
     assert "\ufffd" not in out
 
 

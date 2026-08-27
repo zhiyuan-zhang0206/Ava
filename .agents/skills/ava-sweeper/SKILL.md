@@ -91,7 +91,7 @@ A skill's `description` is its index line, and
 `AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT` now defaults to `*` — so every
 installed skill's description sits in every system prompt, and the cost is
 universal rather than scoped to a chosen few. One skill's slack is paid by every
-agent on the cluster, on every turn. Length is measured in *units* (one CJK 字
+agent on the cluster, on every turn. Length is measured in *units* (one CJK char
 = 1, one non-CJK word = 1; a flat char count is unfair across languages). The
 hard ceiling (80 units) is enforced mechanically by
 `scripts/lint_skill_descriptions.py` in pre-commit; this class covers the

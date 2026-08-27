@@ -251,8 +251,8 @@ $CLUSTER_AUTH_EXTENSION
 
 exporters:
 $OTLP_EXPORTERS
-  # Local JSONL mirror — the grep surface (user ruling: "agent debug 时 grep
-  # 最方便"). One line per export batch, each line a standard OTLP/JSON
+  # Local JSONL mirror — the grep surface (user ruling: "grep is the most
+  # convenient way to debug"). One line per export batch, each line a standard OTLP/JSON
   # ExportTraceServiceRequest. Rotation (timberjack) gives append semantics
   # across collector restarts: the ACTIVE file is never truncated, and
   # max_days / max_backups bound the directory. `spans.jsonl` -> rotated

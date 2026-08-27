@@ -19,7 +19,7 @@ _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="再见。",
+        content="\u518d\u89c1\u3002",
         tool_calls=[
             {
                 "id": "call_terminate",

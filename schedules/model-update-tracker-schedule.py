@@ -19,7 +19,7 @@ CRON = "0 6 * * *"
 # The cluster default is Asia/Shanghai. Keeping this config-derived matches the
 # other built-ins and preserves one cluster wall clock when operators change it.
 TZ = settings.general.timezone
-_REPORT_LABEL = "Ava 负责人"
+_REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
 _REPORT_AGENT_ENV = "AVA_MODEL_UPDATE_REPORT_AGENT"
 _TIMEOUT_SECONDS = 120
 

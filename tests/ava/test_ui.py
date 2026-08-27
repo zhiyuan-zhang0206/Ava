@@ -354,7 +354,7 @@ class TestServeMarkdown:
         leaked it through as literal text — user bug #1268)."""
         from ava.ui import _render_markdown
 
-        md = """- **Python snippet**：
+        md = """- **Python snippet**\uff1a
 
   ```python
   def finish_current_turn():
@@ -371,7 +371,9 @@ class TestServeMarkdown:
         (finish_current_turn must not render as finish<em>current</em>turn)."""
         from ava.ui import _render_markdown
 
-        html = _render_markdown("调用 finish_current_turn 结束本轮；foo_bar_baz。")
+        html = _render_markdown(
+            "\u8c03\u7528 finish_current_turn \u7ed3\u675f\u672c\u8f6e\uff1bfoo_bar_baz\u3002"
+        )
         assert "<em>" not in html
         assert "finish_current_turn" in html
         assert "foo_bar_baz" in html
@@ -396,15 +398,17 @@ class TestServeMarkdown:
         """GFM strikethrough was silently missing under python-markdown."""
         from ava.ui import _render_markdown
 
-        html = _render_markdown("~~删除线~~ 和 ~~done~~")
-        assert "<s>删除线</s>" in html
+        html = _render_markdown("~~\u5220\u9664\u7ebf~~ \u548c ~~done~~")
+        assert "<s>\u5220\u9664\u7ebf</s>" in html
         assert "<s>done</s>" in html
 
     def test_render_markdown_math_delimiters_preserved(self) -> None:
         """LaTeX `$...$`/`$$...$$` is left untouched for client-side KaTeX."""
         from ava.ui import _render_markdown
 
-        html = _render_markdown("行内 $E = mc^2$，块级：\n\n$$\\int_0^1 x^2 dx$$")
+        html = _render_markdown(
+            "\u884c\u5185 $E = mc^2$\uff0c\u5757\u7ea7\uff1a\n\n$$\\int_0^1 x^2 dx$$"
+        )
         assert "$E = mc^2$" in html
         assert "$$\\int_0^1 x^2 dx$$" in html
         assert "<em>" not in html
@@ -412,18 +416,18 @@ class TestServeMarkdown:
     def test_render_markdown_nested_list(self) -> None:
         from ava.ui import _render_markdown
 
-        md = """1. 第一项
-   - 子项 A
-   - 子项 B
-2. 第二项
-   1. 孙项 1"""
+        md = """1. \u7b2c\u4e00\u9879
+   - \u5b50\u9879 A
+   - \u5b50\u9879 B
+2. \u7b2c\u4e8c\u9879
+   1. \u5b59\u9879 1"""
         html = _render_markdown(md)
         assert html.count("<li>") >= 4
 
     def test_render_markdown_link_and_image(self) -> None:
         from ava.ui import _render_markdown
 
-        md = "[链接](https://github.com) 和 ![alt](https://example.com/x.png)"
+        md = "[\u94fe\u63a5](https://github.com) \u548c ![alt](https://example.com/x.png)"
         html = _render_markdown(md)
         assert '<a href="https://github.com">' in html
         assert '<img src="https://example.com/x.png" alt="alt"' in html
@@ -431,7 +435,7 @@ class TestServeMarkdown:
     def test_render_markdown_inline_code_and_emphasis(self) -> None:
         from ava.ui import _render_markdown
 
-        html = _render_markdown("`code_here`、*italic*、**bold**")
+        html = _render_markdown("`code_here`\u3001*italic*\u3001**bold**")
         assert "<code>code_here</code>" in html
         assert "<em>italic</em>" in html
         assert "<strong>bold</strong>" in html

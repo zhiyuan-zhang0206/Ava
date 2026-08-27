@@ -180,7 +180,7 @@ def test_to_s1_shape() -> None:
         "url": "https://www.youtube.com/watch?v=dRsjO-88nBs",
         "title": "T",
         "description": "D",
-        "channel": {"id": "UCdemodemodemodemodemo22", "name": "示例频道"},
+        "channel": {"id": "UCdemodemodemodemodemo22", "name": "\u793a\u4f8b\u9891\u9053"},
         "published_at": "2025-07-31T18:22:30Z",
         "transcript": "hello",
         "fetched_at": "2026-06-06T00:00:00Z",
@@ -190,7 +190,7 @@ def test_to_s1_shape() -> None:
     s1 = feed.to_s1(post, matrix_entity="quantbit")
     assert s1["platform"] == "youtube"
     assert s1["source_id"] == "dRsjO-88nBs"
-    assert s1["author"] == {"id": "UCdemodemodemodemodemo22", "name": "示例频道"}
+    assert s1["author"] == {"id": "UCdemodemodemodemodemo22", "name": "\u793a\u4f8b\u9891\u9053"}
     assert s1["matrix_entity"] == "quantbit"
     assert s1["text"] == "D" and s1["transcript"] == "hello"
     assert s1["media"] == []  # no video downloaded

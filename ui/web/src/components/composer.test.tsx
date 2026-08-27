@@ -306,7 +306,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
     const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
-    fireEvent.change(ta, { target: { value: "你好" } });
+    fireEvent.change(ta, { target: { value: "\u4f60\u597d" } });
     // RTL fireEvent.keyDown forwards nativeEvent props
     fireEvent.keyDown(ta, { key: "Enter", isComposing: true });
     await Promise.resolve();
@@ -318,7 +318,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
     const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
-    fireEvent.change(ta, { target: { value: "你好" } });
+    fireEvent.change(ta, { target: { value: "\u4f60\u597d" } });
     fireEvent.keyDown(ta, { key: "Process", isComposing: false });
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();

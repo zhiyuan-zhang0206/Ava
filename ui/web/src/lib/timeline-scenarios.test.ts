@@ -15,7 +15,7 @@
 // the test **manually** calls reload to control timing, which can
 // simulate "snapshot early / late" races. Reducer behavior itself is
 // identical to the real hook (uses the same applySystemEvent +
-// mergeSnapshotWithStreaming)。
+// mergeSnapshotWithStreaming).
 
 import { describe, expect, it } from "vitest";
 

@@ -544,8 +544,8 @@ def test_unmarked_local_subtree_not_preserved(unit_home: Path, tmp_path: Path) -
     (d / "SKILL.md").write_text(
         "---\nname: newadapter\ndescription: local\n---\n", encoding="utf-8"
     )
-    # 包源变更 → converge 不会更新（bootstrap-only），所以直接验证 tree_hash 与 _copy_tree 语义：
-    # 未标记子树计入 drift（不是 preserved）
+    # Package-source change -> converge does not update (bootstrap-only), so verify tree_hash and _copy_tree semantics directly:
+    # Untagged subtrees count as drift (not preserved)
     skip = reg.preserved_subpaths(unit_home / "skills" / "web-sources")
     assert skip == frozenset()  # no marker, no protection
     assert reg.tree_hash(unit_home / "skills" / "web-sources") != reg.tree_hash(

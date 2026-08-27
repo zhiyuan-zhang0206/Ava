@@ -64,7 +64,7 @@ describe("LanguageProvider", () => {
         <Probe />
       </LanguageProvider>,
     );
-    expect(screen.getByText("创建 agent")).toBeTruthy();
+    expect(screen.getByText("\u521b\u5efa agent")).toBeTruthy();
     expect(document.documentElement.lang).toBe("zh-CN");
   });
 
@@ -83,9 +83,9 @@ describe("LanguageProvider", () => {
       setMockSetting("display.language", "zh");
     });
 
-    expect(screen.getByText("创建 agent")).toBeTruthy();
+    expect(screen.getByText("\u521b\u5efa agent")).toBeTruthy();
     expect(document.documentElement.lang).toBe("zh-CN");
     rerender(<LanguageProvider><Probe /></LanguageProvider>);
-    expect(screen.getByText("创建 agent")).toBeTruthy();
+    expect(screen.getByText("\u521b\u5efa agent")).toBeTruthy();
   });
 });

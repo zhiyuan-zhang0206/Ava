@@ -18,8 +18,8 @@ The `telegram` skill is **removed entirely**. The IM Bridge is the **only**
 surface that talks to Telegram. Agents never call the Bot API directly.
 
 User ruling (2026-08-03): an agent sending the owner a message straight through
-the bot API (bypassing the frontend) was confusing — "我们既然是前端，就纯前端
-就行了，不要有 Telegram 的 skill". This supersedes the earlier position that a
+the bot API (bypassing the frontend) was confusing — "since we are a frontend, stay
+pure frontend — no Telegram skill" (user, translated). This supersedes the earlier position that a
 low-frequency push channel belongs at skill altitude.
 
 ## Consequences

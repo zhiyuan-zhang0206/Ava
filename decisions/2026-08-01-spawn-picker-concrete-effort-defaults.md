@@ -8,13 +8,13 @@ Status: adopted
 
 The spawn dialog's reasoning-effort select always led with a synthetic
 "Effort: default" (`""`) option meaning "the provider's own server-side
-default". The user's words (2026-08-01): *"我们选择了某个 Model 之后，应该直接
-选中它 default 的 effort。怎么会单独有一个选项叫 'effort:default' 呢？这完全是
-错误的。"* — selecting a model should bring up that model's default effort, not a
+default". The user's words (2026-08-01, translated): *"after we pick a model, its default
+effort should be selected directly. Why is there a separate 'effort:default' option at
+all? That is simply wrong."* — selecting a model should bring up that model's default effort, not a
 vague standalone option. And a second defect in the same dialog: picking a
 preset (e.g. Ultra Speed Worker, whose config pins `llm_model`) left the model
-picker on whatever was selected before — *"选中 preset 的时候，它应该把 model 的
-东西也一起覆盖了才对"*.
+picker on whatever was selected before — *"when a preset is picked, it should overwrite
+the model's settings along with everything else"*.
 
 The first half is the design question left open by #1009 (rejected) and #1046
 (closed): `""` = "provider default" is a real state, but it has no concrete rung

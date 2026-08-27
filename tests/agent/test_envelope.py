@@ -67,7 +67,10 @@ class TestPageCallback:
 class TestSystemSource:
     def test_system_not_wrapped(self) -> None:
         """source='system' is a framework internal insert, gets [system] prefix, no timestamp."""
-        assert wrap_inbound("请梳理并调 ava.compact", "system") == "[system] 请梳理并调 ava.compact"
+        assert (
+            wrap_inbound("\u8bf7\u68b3\u7406\u5e76\u8c03 ava.compact", "system")
+            == "[system] \u8bf7\u68b3\u7406\u5e76\u8c03 ava.compact"
+        )
 
     @pytest.mark.parametrize(
         "source",

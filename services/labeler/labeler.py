@@ -28,6 +28,10 @@ _LABEL_SYSTEM_PROMPT = (
 )
 
 
+# CJK corner/angle brackets stripped from labels (escaped; repo rule: no raw CJK).
+_CJK_BRACKETS = "\u300c\u300d\u300e\u300f\u300a\u300b"
+
+
 def _normalize(raw: str) -> str:
     """Finish the LLM output: take the first line -> strip leading/trailing
     whitespace / common quote wrappers -> truncate to LABEL_MAX_CHARS.
@@ -43,7 +47,7 @@ def _normalize(raw: str) -> str:
     bad prompt.
     """
     first_line = raw.strip().splitlines()[0] if raw.strip() else ""
-    stripped = first_line.strip().strip('"').strip("'").strip("「」『』《》").strip()
+    stripped = first_line.strip().strip('"').strip("'").strip(_CJK_BRACKETS).strip()
     return stripped[:LABEL_MAX_CHARS]
 
 

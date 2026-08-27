@@ -54,8 +54,8 @@ def test_alert_format_literals_not_hardcoded_in_alerts_module() -> None:
     for literal in (
         "⚠️ ALERT",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
         "✅ RESOLVED",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
-        "⚠️ 告警",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
-        "✅ 已恢复",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
+        "⚠️ \u544a\u8b66",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
+        "✅ \u5df2\u6062\u590d",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
     ):
         assert literal not in src
 
@@ -104,7 +104,7 @@ def test_notify_text_default_language_is_zh() -> None:
 
     text = notify_text(_alert())
     assert text.startswith(_head("zh", resolved=False))
-    assert "触发时间 " in text
+    assert "\u89e6\u53d1\u65f6\u95f4 " in text
 
 
 def test_notify_text_language_variants() -> None:
@@ -121,7 +121,7 @@ def test_notify_text_language_variants() -> None:
     assert zh_resolved.startswith(_head("zh", resolved=True))
     assert en_resolved.startswith(_head("en", resolved=True))
     assert "triggered " in en_firing
-    assert "触发时间 " in zh_firing
+    assert "\u89e6\u53d1\u65f6\u95f4 " in zh_firing
 
     # labels/annotations data is never translated
     assert "test-rule" in zh_firing and "test-rule" in en_firing
