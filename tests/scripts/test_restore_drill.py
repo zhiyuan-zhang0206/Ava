@@ -84,7 +84,7 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
 def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The command path decrypts, unzips, restores, and proves a checkpoint
+    """The command path decrypts, restores, and proves a checkpoint
     reader can consume the restored conversation without touching the source DB.
 
     The test DB carries the prod role set (ava_main / ava_runner / grafana_ro
