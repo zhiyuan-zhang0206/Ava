@@ -31,7 +31,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("ends a literal autolink before fullwidth punctuation and CJK text", () => {
-    render(<ChatMarkdown content="\u6d4f\u89c8\u5668\u5f00 https://ip.sb\uff1a\u663e\u793a" />);
+    render(<ChatMarkdown content={"\u6d4f\u89c8\u5668\u5f00 https://ip.sb\uff1a\u663e\u793a"} />);
 
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
@@ -41,7 +41,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("keeps a CJK period outside a literal autolink", () => {
-    render(<ChatMarkdown content="https://ip.sb\u3002" />);
+    render(<ChatMarkdown content={"https://ip.sb\u3002"} />);
 
     const link = screen.getByRole("link", { name: "https://ip.sb" });
     expect(link.getAttribute("href")).toBe("https://ip.sb");
@@ -50,7 +50,7 @@ describe("ChatMarkdown", () => {
 
   it("renders a CJK-bounded literal URL inside strong", () => {
     const { container } = render(
-      <ChatMarkdown content="**http://127.0.0.1:18025**\u3002" />,
+      <ChatMarkdown content={"**http://127.0.0.1:18025**\u3002"} />,
     );
 
     const link = container.querySelector("strong > a");
@@ -96,7 +96,7 @@ describe("ChatMarkdown", () => {
 
   it("renders a literal URL with query parameters inside strong", () => {
     const { container } = render(
-      <ChatMarkdown content="**https://example.com/a?b=c&d=1**\u3002" />,
+      <ChatMarkdown content={"**https://example.com/a?b=c&d=1**\u3002"} />,
     );
 
     const link = container.querySelector("strong > a");
