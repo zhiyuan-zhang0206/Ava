@@ -349,7 +349,8 @@ def _wrapped_shell_run(
     timeout: float = 30.0,
 ) -> str:
     """Run a shell command and return its stdout. Non-zero exit does not
-    raise; the command is killed after `timeout` seconds.
+    raise; the command is killed after `timeout` seconds. The returned
+    string carries `.returncode` (0 = success) and `.stderr`.
 
     Runs in your tracked working directory (`ava.cwd`) unless `cwd` is passed.
     """
