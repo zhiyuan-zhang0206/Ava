@@ -413,11 +413,14 @@ def shell_probe_op(agent_id: int) -> ShellProbeResult:
 
 
 def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
-    """Kill one persistent shell on this runner for TTL reclamation."""
+    """Kill one persistent shell on this runner for TTL reclamation.
+
+    ``interrupted`` reports whether the kill cut short a running job — the
+    gateway notifies the owner only then (an empty shell's reaping is silent)."""
     match kill_shell(agent_id, session_id):
-        case "killed":
-            return ShellKillResult(mode="killed")
-        case "absent":
+        case ("killed", interrupted):
+            return ShellKillResult(mode="killed", interrupted=interrupted)
+        case ("absent", _interrupted):
             return ShellKillResult(mode="absent")
         case mode:
             raise AssertionError(f"unknown shell kill mode {mode!r}")

@@ -185,6 +185,18 @@ class SessionBackend(abc.ABC):
         """Capture output from a session's terminal. PTY only."""
         raise NotImplementedError(f"{type(self).__name__} does not support capture_pane")
 
+    def session_has_active_processes(self, name: str) -> bool:
+        """Whether the named session carries live processes beyond its idle shell.
+
+        Asked by the TTL reaper before reclaiming an expired session: a
+        reclamation that interrupts running work must notify the owner, an
+        empty shell's is silent. Backends that cannot inspect a session's
+        processes raise NotImplementedError — the caller treats that as busy
+        (fail-open: a session that cannot be proven idle may well be running
+        something).
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support process inspection")
+
 
 # ── POSIX: native process supervisor ─────────────────────────────────────
 
@@ -386,6 +398,12 @@ class PtySessionBackend(SessionBackend):
         result = self._cli(name, "kill", "--graceful") if graceful else self._cli(name, "kill")
         return result.returncode == 0, "graceful" if graceful else "forced"
 
+    def session_has_active_processes(self, name: str) -> bool:
+        result = self._cli(name, "busy")
+        if result.returncode != 0:
+            raise RuntimeError(f"pty CLI busy {name!r} failed: {result.stderr.strip()}")
+        return result.stdout.strip() == "busy"
+
     def list_sessions(self, prefix: str = "") -> list[str]:
         """Live session names from the record scan — no subprocess, no socket.
 
@@ -499,6 +517,11 @@ class WinprocSessionBackend(SessionBackend):
         from shared import winproc
 
         return winproc.session_log_path(name)
+
+    def session_has_active_processes(self, name: str) -> bool:
+        from shared import winproc
+
+        return winproc.session_has_active_processes(name)
 
 
 _backend: SessionBackend | None = None

@@ -664,9 +664,15 @@ class ShellProbeResult(BaseModel):
 
 
 class ShellKillResult(BaseModel):
-    """`shell_kill` result; absent means the session already ended."""
+    """`shell_kill` result; absent means the session already ended.
+
+    `interrupted` is True when the killed session carried live processes (a
+    running foreground/background job) at kill time — the gateway notifies
+    the owner only then, so an empty shell's reaping stays silent. Absent
+    sessions always report False."""
 
     mode: Literal["killed", "absent"]
+    interrupted: bool = False
 
 
 class OpsCommandItem(BaseModel):
