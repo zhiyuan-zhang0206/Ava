@@ -1,6 +1,6 @@
 // Task Kanban — the list view paired with the Task Graph. Tasks are grouped
 // into one full-width section per task status, stacked top to bottom
-// (Open / In Progress / Done / Cancelled); each card is one row spanning the
+// (Open / In Progress / Done / Canceled); each card is one row spanning the
 // board. Read-only: cards cannot be moved between sections.
 // Selection highlights sync with the graph view.
 
@@ -15,7 +15,7 @@ import type { TaskRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 
-export const KANBAN_LANES = ["Open", "In progress", "Done", "Cancelled"] as const;
+export const KANBAN_LANES = ["Open", "In progress", "Done", "Canceled"] as const;
 
 export const STATUS_TO_LANE: Record<string, number> = {
   open: 0,
