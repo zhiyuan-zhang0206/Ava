@@ -53,7 +53,9 @@ class ClusterStatus(BaseModel):
     # rollout left the flag; recoverable via /api/cluster/recover).
     current_orchestration: OrchestrationKind | None = None
     # How this host's last updater session ended, when this host is paused and the
-    # log speaks for the *current* update (`ops.updater_outcome`); None otherwise.
+    # log speaks for the *current* update — or freshly-idle within the
+    # no-progress window, so a just-converged host's COMPLETED stage breakdown
+    # rides the probe that saw it resume (Task #1820); None otherwise.
     #
     # It rides beside `paused` / `current_orchestration` because those two are what
     # produce the rollout poll's `POLL_STALLED` verdict, and that verdict is exactly

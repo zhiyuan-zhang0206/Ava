@@ -31,7 +31,7 @@ Two kinds of module live here, distinguished by filename:
   permission-prompt watcher),
   `_update_git` /
   `_update_orchestration` / `_update_agent_runner` / `_update_uv_sync` /
-  `_updater_lease` / `_update_recover` /
+  `_updater_lease` / `_updater_stage` (the cmd.exe ladder's per-step telemetry marker) / `_update_recover` /
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_warmup`,
   `_pkg_source`, `_pgbouncer`, `_lgtm`,
   `_claude_code_plugin`, `_cluster_health` /

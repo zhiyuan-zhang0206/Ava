@@ -205,7 +205,7 @@ def test_local_launch_failure_downgrades_the_rollout_without_aborting_it(
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda _hosts: {"wsl": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"wsl": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     fanned: list[str] = []

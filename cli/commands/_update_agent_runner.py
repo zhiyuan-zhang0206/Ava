@@ -23,6 +23,7 @@ from cli.commands._update_uv_sync import run_uv_sync
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.migrations import MigrationLayoutError, validate_migrations_at_ref
 from shared.platform_backend import get_backend as platform_backend
+from shared.rollout_telemetry import updater_stage
 
 
 def _run_agent_runner_self_update(
@@ -188,7 +189,7 @@ def _source_switch_window() -> Generator[None, None, None]:
         clear_switching()
 
 
-def _run_agent_runner_self_update_inner(
+def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's checkout -> sync -> vet -> stop -> start sequence; each step is one statement
     repo: Path,
     *,
     target_sha: str | None = None,
@@ -224,15 +225,17 @@ def _run_agent_runner_self_update_inner(
         with _source_switch_window():
             sha = target_sha if target_sha is not None else git_resolve_origin_main()
             print(f"\n→ git checkout {sha[:7]} (pinned rollout target)")
-            try:
-                from_sha = git_checkout_sha(sha)
-            except GitPullFailed as e:
-                print(f"  ✗ {e}", file=sys.stderr)
-                return 1
+            with updater_stage("checkout"):
+                try:
+                    from_sha = git_checkout_sha(sha)
+                except GitPullFailed as e:
+                    print(f"  ✗ {e}", file=sys.stderr)
+                    return 1
             print(f"  ✓ {from_sha[:7]} → {sha[:7]}")
 
             print("\n→ uv sync")
-            sync_result = run_uv_sync(repo, runner=subprocess.run)
+            with updater_stage("uv_sync"):
+                sync_result = run_uv_sync(repo, runner=subprocess.run)
             if sync_result.returncode != 0:
                 print("  ✗ uv sync failed", file=sys.stderr)
                 return 1
@@ -310,7 +313,8 @@ def _run_agent_runner_self_update_inner(
     #    restart-only — a bounce changes no code, so there is nothing to
     #    refresh to.
     if not restart_only:
-        _refresh_builtin_skills(repo, ava_bin)
+        with updater_stage("skills"):
+            _refresh_builtin_skills(repo, ava_bin)
 
     # 3.75) quiesce this host's agents BEFORE the stop — the per-host analogue of
     #    the rollout's stop-the-world. A standalone self-update (operator `ava
@@ -326,9 +330,11 @@ def _run_agent_runner_self_update_inner(
     #    quiesce already drained the fleet; only `force_reap` (the quiesce-timeout
     #    backstop) applies there.
     if mode != "none":
-        _ns._quiesce_local_agents(mode)
+        with updater_stage("quiesce"):
+            _ns._quiesce_local_agents(mode)
     if force_reap or mode == "force":
-        _ns._force_reap_local_agents()
+        with updater_stage("force_reap"):
+            _ns._force_reap_local_agents()
 
     # 4) graceful stop. keep_infra=True: an internal self-update bounces this
     #    host's service sessions, never the shared pg/redis — on a co-located
@@ -346,7 +352,8 @@ def _run_agent_runner_self_update_inner(
     #    rather than one rollout late. `shared/session_backend.py`'s method-local
     #    imports are what make that true; `tests/cli/test_update_import_timing.py`
     #    fails if either end of the arrangement is broken.
-    _ns._do_stop(repo, graceful=True, require_confirmation=False, keep_infra=True)
+    with updater_stage("stop"):
+        _ns._do_stop(repo, graceful=True, require_confirmation=False, keep_infra=True)
 
     # 5) start in a FRESH process so it loads the just-synced new code. Calling
     #    cmd_start() in-process would mix already-imported old modules with the
@@ -367,12 +374,13 @@ def _run_agent_runner_self_update_inner(
     for _key in ("AVA_CONFIG_FETCH", "AVA_CONFIG_SOURCE"):
         start_env.pop(_key, None)
     try:
-        return subprocess.run(
-            [str(ava_bin), "start", "--persist-services"],
-            cwd=repo,
-            env=start_env,
-            check=False,
-        ).returncode
+        with updater_stage("start"):
+            return subprocess.run(
+                [str(ava_bin), "start", "--persist-services"],
+                cwd=repo,
+                env=start_env,
+                check=False,
+            ).returncode
     except OSError as exc:
         # Vetted as present in step 3.5, so reaching here means it vanished (or is
         # not executable) inside the stop window. Services are already down: say so

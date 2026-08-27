@@ -19,6 +19,7 @@ from cli.commands._session_lifecycle import (
 )
 from shared import stop_timing
 from shared.platform import IS_WINDOWS
+from shared.rollout_telemetry import updater_stage
 
 # The browser service runs a headed Chrome on a persistent login profile. An
 # in-place stop / backend update preserves it by default (keep_browser=True):
@@ -611,12 +612,18 @@ def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool
     repo = _repo_root()
     print(f"[ava restart] cwd = {repo}")
 
+    # Each step below is timed as an `[updater] stage=` line (Task #1820): the
+    # Windows updater ladder runs this command behind a cmd.exe chain whose
+    # own fetch/checkout/uv markers are emitted by `ops.cluster_deploy`, and
+    # `ops.updater_outcome` pairs the two into the per-host stage breakdown the
+    # rollout report shows.
     # Preflight: probe gateway + register machine BEFORE stopping services.
     # A transient gateway outage or network blip would otherwise leave the
     # host in "services dead, can't start" after the stop below.
     # On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
-    rc = _ns._preflight_probes()
+    with updater_stage("preflight"):
+        rc = _ns._preflight_probes()
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
         _release_self_heal_pause()
@@ -628,17 +635,21 @@ def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool
     # the caller (spawn_update / Phase A), resumed by the start below — respawns
     # them on new code.
     if quiesce:
-        _ns._quiesce_local_agents(mode)
+        with updater_stage("quiesce"):
+            _ns._quiesce_local_agents(mode)
     if force_reap:
-        _ns._force_reap_local_agents()
+        with updater_stage("force_reap"):
+            _ns._force_reap_local_agents()
 
     # keep_infra=True: an internal restart bounces this host's service sessions,
     # never this cluster's own pg/redis instance — stopping the data plane mid-orchestration
     # kills the gateway orchestrator's own DB polling (same failure mode as
     # the self-update leg; see _run_agent_runner_self_update).
-    rc = _ns._do_stop(repo, graceful=False, require_confirmation=False, keep_infra=True)
+    with updater_stage("stop"):
+        rc = _ns._do_stop(repo, graceful=False, require_confirmation=False, keep_infra=True)
     if rc != 0:
         return rc
     # Internal restart: preserve the operator's durable --disable-service marker
     # (a no-flag operator start would rewrite it to empty and re-enable everything).
-    return _ns._cmd_start_body(persist_services=False)
+    with updater_stage("start"):
+        return _ns._cmd_start_body(persist_services=False)

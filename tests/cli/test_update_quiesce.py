@@ -279,7 +279,11 @@ def test_orchestration_quiesces_after_phase_a_before_local_update(
         return 0
 
     monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_poll_until_unpaused", lambda _hosts: order.append("poll") or {})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _cli,
+        "_poll_until_unpaused",
+        lambda _hosts, **_unused: order.append("poll") or {},  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0

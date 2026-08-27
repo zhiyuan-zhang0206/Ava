@@ -22,7 +22,16 @@ from shared.log import logger
 from shared.uploads import fetch_upload_b64, parse_upload_url
 
 
-def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:
+def expanded_chat_text(item: ClaimedInbound) -> str:
+    """The command-expanded text used by both skill matching and delivery."""
+    raw_blocks = item.payload.get("content_blocks") if item.payload else None
+    if not isinstance(raw_blocks, list):
+        return expand_command(item.content)
+    blocks = cast("list[dict[str, Any]]", raw_blocks)
+    return expand_command("\n".join(b["text"] for b in blocks if b.get("type") == "text"))
+
+
+def build_chat_inbound(item: ClaimedInbound, *, expanded_text: str | None = None) -> HumanMessage:
     """Build the HumanMessage for a kind='chat' inbound row.
 
     Plain text (no content_blocks payload): a `/<name> ...` composer message is
@@ -47,7 +56,7 @@ def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:
     scan_src = f"inbound.chat:{item.source}"
     raw_blocks = item.payload.get("content_blocks") if item.payload else None
     if not isinstance(raw_blocks, list):
-        raw = expand_command(item.content)
+        raw = expanded_chat_text(item) if expanded_text is None else expanded_text
         if settings.agent.security_scan_enabled:
             raw = scan_content(raw, source=scan_src)
         wrapped = wrap_inbound(raw, item.source, created_at=item.created_at)
@@ -59,8 +68,7 @@ def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:
         )
     blocks = cast("list[dict[str, Any]]", raw_blocks)
 
-    text = "\n".join(b["text"] for b in blocks if b.get("type") == "text")
-    raw_text = expand_command(text)
+    raw_text = expanded_chat_text(item) if expanded_text is None else expanded_text
     if settings.agent.security_scan_enabled:
         raw_text = scan_content(raw_text, source=scan_src)
     wrapped_text = wrap_inbound(raw_text, item.source, created_at=item.created_at)

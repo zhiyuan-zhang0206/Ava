@@ -24,6 +24,12 @@ Installed skills mount as a namespace mirroring the folder shape; the
 `# Capabilities` index in the system prompt lists name + one-line description,
 and a drift check names newly installed skills before the next LLM call.
 
+An agent may opt into semantic skill hints for chat inbounds. Ava compares the
+command-expanded text with that same Capabilities set and, for above-threshold
+matches, adds a short skill-loading note immediately before the unchanged user
+message. The feature is default-off and fail-open; a cold cache or embedding
+failure simply omits the note.
+
 ## Design decisions
 
 - [Skill system](../../okf/skills/skills.ava.okf.md)

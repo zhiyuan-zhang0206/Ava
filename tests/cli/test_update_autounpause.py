@@ -110,7 +110,7 @@ def test_gateway_local_finally_finalizes_the_pause_journal(
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda _hosts: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
@@ -178,7 +178,7 @@ def test_gateway_local_finally_swallows_a_finalize_failure(
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda _hosts: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     # must not raise out of the finally despite the journal write failing
@@ -198,7 +198,7 @@ def test_success_path_does_not_resume(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda _hosts: {"a": _cli.PollVerdict("ok"), "b": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"a": _cli.PollVerdict("ok"), "b": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
@@ -249,7 +249,7 @@ def test_phase_b_unconverged_host_is_resumed(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda _hosts: {  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {  # pyright: ignore[reportUnknownArgumentType]
             "a": _cli.PollVerdict(_cli.POLL_OK),
             "b": _cli.PollVerdict(_cli.POLL_CONVERGING),
         },
@@ -329,7 +329,7 @@ def test_phase_b_unconverged_resume_preserves_ops_url(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
-        lambda _hosts: {  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {  # pyright: ignore[reportUnknownArgumentType]
             "a": _cli.PollVerdict(_cli.POLL_OK),
             "b": _cli.PollVerdict(_cli.POLL_STALLED),
         },

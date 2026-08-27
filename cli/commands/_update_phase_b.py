@@ -30,7 +30,7 @@ import asyncio
 import contextlib
 import sys
 import time
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from cli.commands._gateway_ready import (
     GatewayReadiness,
@@ -42,7 +42,7 @@ from cli.commands._update_fanout import (
     _print_fan_out_results,
 )
 from cli.commands._update_recover import RolloutOutcome
-from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
+from shared.deploy_timing import HARVEST_GRACE_S, NO_PROGRESS_TIMEOUT_S
 from shared.host_deploy_state import POSTURE_IDLE, POSTURE_PAUSED, read
 
 # How long Phase B waits for one agent-runner to come back. The family's single
@@ -85,6 +85,30 @@ POLL_STALLED = "stalled"  # reachable, still paused, no updater running: not com
 # the same too-eager verdict this rewrite exists to remove — one interval apart it
 # costs `_POLL_INTERVAL_S`, not a rollout.
 _STALL_CONFIRMATIONS = 2
+
+
+def _capture_host_stages(
+    host_outcomes: dict[str, dict[str, float]] | None,
+    name: str,
+    result: object,
+) -> None:
+    """Copy `result`'s updater stage times into `host_outcomes[name]` when it has
+    any, keeping the LAST non-empty reading (a mid-run probe catches the growing
+    partial breakdown; a converged host's fresh-idle probe carries the completed
+    one — see `ops.updater_outcome.last_updater_outcome`)."""
+    if host_outcomes is None or not isinstance(result, dict):
+        return
+    raw: object | None = cast(dict[str, object], result).get("last_updater_outcome")
+    if isinstance(raw, dict):
+        stages: object | None = cast(dict[str, object], raw).get("stages")
+        if isinstance(stages, dict):
+            parsed = {
+                str(k): round(float(v), 1)
+                for k, v in cast(dict[str, object], stages).items()
+                if isinstance(v, (int, float))
+            }
+            if parsed:
+                host_outcomes[name] = parsed
 
 
 class PollVerdict(NamedTuple):
@@ -180,11 +204,21 @@ def _probe_verdict(
 
 
 async def _probe_one_until_unpaused(
-    name: str, deadline: float, ops_url: str | None = None
+    name: str,
+    deadline: float,
+    ops_url: str | None = None,
+    host_outcomes: dict[str, dict[str, float]] | None = None,
 ) -> tuple[str, PollVerdict]:
     """Repeatedly POST status_probe to one agent-runner's ops server until it
     converges, provably stops, or the shared deadline expires. Returns
     (name, verdict) — one of the three POLL_* above.
+
+    `host_outcomes` (optional out-dict) collects the host's updater stage times
+    from every probe response that carried them (Task #1820): each response's
+    `last_updater_outcome.stages` is written under `name`, keeping the LAST
+    non-empty reading — a mid-run probe catches the growing partial breakdown,
+    and the final converged probe reports none (an idle host has no pause anchor),
+    so the last non-empty one is the best snapshot the poll saw.
 
     Each probe carries one short timeout; an unreachable ops server means the
     agent-runner is mid-restart — `ops` is itself a service its own self-update
@@ -229,8 +263,33 @@ async def _probe_one_until_unpaused(
             # The op ran but could not resolve status (also mid-restart). Same reading
             # as unreachable, and for the same reason.
             pass  # fail-fast-ok: same mid-restart reading as unreachable
+        _capture_host_stages(host_outcomes, name, result)
         verdict, stalls = _probe_verdict(result, stalls, name)
         if verdict is not None:
+            if (
+                verdict.status == POLL_OK
+                and host_outcomes is not None
+                and (name not in host_outcomes or "start" not in host_outcomes[name])
+            ):
+                # One harvest re-probe after a short grace: the updater's final
+                # `start` stage line lands after the posture row goes idle (a
+                # convergence probe can beat it by milliseconds), and a host that
+                # converged between probes carried no stages at all. The
+                # fresh-idle read in `ops.updater_outcome` serves both, given the
+                # moment for the last line to land. Best-effort: a failed or
+                # empty harvest changes nothing about the verdict.
+                await asyncio.sleep(HARVEST_GRACE_S)
+                try:
+                    harvest = await cr.dispatch_to_machine(
+                        target_machine=name,
+                        kind="status_probe",
+                        payload={},
+                        timeout_s=1.0,
+                        ops_url=ops_url,
+                    )
+                except (cr.ClusterOpUnreachable, cr.ClusterOpFailed):
+                    harvest = None
+                _capture_host_stages(host_outcomes, name, harvest)
             return name, verdict
         # Pace the loop explicitly. `slice_timeout` bounds one *dial*, not one pass:
         # a host that answers instantly (which a paused-but-reachable one does) would
@@ -285,12 +344,17 @@ async def _renew_lease_while_polling(holder: str) -> None:
             print(f"  · lease renewal round failed ({exc!r}); retrying", file=sys.stderr)
 
 
-def _poll_until_unpaused(agent_runners: list[tuple[str, str | None]]) -> dict[str, PollVerdict]:
+def _poll_until_unpaused(
+    agent_runners: list[tuple[str, str | None]],
+    host_outcomes: dict[str, dict[str, float]] | None = None,
+) -> dict[str, PollVerdict]:
     """Poll each agent-runner's paused state via direct status_probe POSTs to its
     ops server until it converges, provably stops, or `_POLL_TIMEOUT_S` elapses.
 
     Returns name -> verdict (one of the POLL_* above). The `gateway_url` field
     in the input tuple is unused but kept for caller-signature compatibility.
+    `host_outcomes`, when given, is filled per host with the updater stage times
+    the probes carried (see `_probe_one_until_unpaused`).
 
     The lease renewal rides here rather than in the caller because this is the one
     stretch of the orchestration long enough to matter, and because the holder is
@@ -310,7 +374,9 @@ def _poll_until_unpaused(agent_runners: list[tuple[str, str | None]]) -> dict[st
         renewal = asyncio.ensure_future(_renew_lease_while_polling(holder))
         try:
             tasks = [
-                _ns._probe_one_until_unpaused(name, deadline, ops_url=url)
+                _ns._probe_one_until_unpaused(
+                    name, deadline, ops_url=url, host_outcomes=host_outcomes
+                )
                 for name, url in agent_runners
             ]
             return dict(await asyncio.gather(*tasks))
@@ -407,6 +473,7 @@ def _phase_b_and_poll(
     restart_only: bool,
     force_reap: bool = False,
     mode: str = "smooth",
+    host_outcomes: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, PollVerdict]:
     """Phase B + poll: fan out each agent-runner's self-update (or restart-only
     bounce), then poll each back to healthy; return name -> terminal poll state
@@ -415,6 +482,10 @@ def _phase_b_and_poll(
     host must not keep a `paused` journal); the caller resumes whichever the poll
     still reports non-'ok'. No abort on a Phase-B 5xx (already migrated); a failed
     host is only marked degraded.
+
+    `host_outcomes` is filled per host with the updater stage times the poll
+    captured (Task #1820) — the per-host `checkout`/`uv`/`stop`/`start` breakdown
+    the rollout log's telemetry summary carries.
 
     `target_sha` (the pinned rollout commit) rides each host's `cluster_update`
     payload so every agent-runner force-checks-out the *same* commit the gateway
@@ -459,7 +530,7 @@ def _phase_b_and_poll(
         f"paused=false (up to {_POLL_TIMEOUT_S / 60:.0f}m each, cut short the moment a host "
         f"provably stops)"
     )
-    polls = _ns._poll_until_unpaused(to_poll)
+    polls = _ns._poll_until_unpaused(to_poll, host_outcomes=host_outcomes)
     for name, status, _ in results:
         if status != "ok":
             polls.setdefault(name, PollVerdict(status))
@@ -497,6 +568,7 @@ def _phase_b_outcome(
     runner_urls: dict[str, str | None],
     unconverged: list[str] | None,
     force_reap: bool = False,
+    host_outcomes: dict[str, dict[str, float]] | None = None,
 ) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]]]:
     """Phase B + poll, then the verdict.
 
@@ -520,6 +592,7 @@ def _phase_b_outcome(
         target_sha=target_sha,
         restart_only=restart_only,
         force_reap=force_reap,
+        host_outcomes=host_outcomes,
     )
     mid_transition = _up_mod._still_converging(polls)
     if unconverged is not None:
