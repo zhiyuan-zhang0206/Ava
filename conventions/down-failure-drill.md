@@ -53,8 +53,8 @@ Never run this drill against the production cluster. The restore command uses
    environment-specific; the observables below are the acceptance criteria.
 
 5. Capture the pre-update snapshot path printed by recovery. It must be under
-   `<home>/backups/db/` and use the managed `<db>-<ts>.dump.gz.enc` naming
-   convention.
+   `<home>/backups/db/` and use the managed `<db>-<ts>.dump.enc` naming
+   convention (legacy `.dump.gz.enc` names remain managed during transition).
 
 ## Expected observables
 
@@ -82,20 +82,21 @@ After the intentional start failure reaches recovery, verify all of these:
 ## Restore verification
 
 1. Work only in a private temporary directory. Managed artifacts are encrypted
-   gzip-compressed custom dumps; decrypt them using the same semantics as
+   custom-format dumps; decrypt them using the same semantics as
    [`services.backup.decrypt_artifact`](../services/backup.py): the key file
    contains the SHA-256 of the cluster secret, is mode `0600`, and is never put
    on the command line. The decrypt command shape is:
 
    ```bash
    openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile <sha256-cluster-secret-key-file> \
-     -in <snapshot.dump.gz.enc> -out <snapshot.dump.gz>
+     -in <snapshot.dump.enc> -out <snapshot.dump>
    ```
 
-2. Gunzip the decrypted custom dump:
+2. If the artifact predates the 2026-08-27 double-gzip removal (name
+   `.dump.gz.enc`), gunzip the decrypted custom dump:
 
    ```bash
-   gzip --decompress --stdout <snapshot.dump.gz> > <snapshot.dump>
+   gzip --decompress --stdout <snapshot.dump> > <snapshot.dump.raw> && mv <snapshot.dump.raw> <snapshot.dump>
    ```
 
 3. Restore only into the throwaway database created for this drill:
@@ -119,7 +120,7 @@ After the intentional start failure reaches recovery, verify all of these:
 1. Remove the drill migration and its broken down file from the branch.
 2. Drop `drill_t` only after the branch no longer references the migration.
 3. Drop the throwaway restore database.
-4. Remove the temporary decrypted and gzip files, plus the temporary key file.
+4. Remove the temporary decrypted dump and the temporary key file.
 5. Remove any temporary start-failure mechanism before the next update.
 6. Confirm the worktree cluster is back on its intended revision and `ava
    status` is healthy.

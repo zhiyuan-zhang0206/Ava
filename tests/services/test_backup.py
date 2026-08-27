@@ -166,8 +166,6 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
     def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
         if cmd[0].endswith("pg_dump"):
             Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
-        elif cmd[0] == "gzip":
-            cast(Any, _kw["stdout"]).write(b"compressed dump")
         else:
             Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
         return _Ok()
@@ -176,7 +174,7 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
     path = backup.run_backup(
         datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")), db_url="dbname=ava"
     )
-    assert path.name == "ava-20260609T190000Z.dump.gz.enc"
+    assert path.name == "ava-20260609T190000Z.dump.enc"
 
 
 def test_db_size_breakdown_real_db(db_conn: Any) -> None:
@@ -249,8 +247,6 @@ def test_run_backup_repairs_storage_permissions(
             partial = Path(cmd[cmd.index("--file") + 1])
             partial.write_bytes(b"dump")
             partial.chmod(0o644)
-        elif cmd[0].endswith("gzip"):
-            cast(Any, kw.get("stdout")).write(b"gzipped")
         elif cmd[0].endswith("openssl"):
             Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted")
         return _Ok()
@@ -366,8 +362,6 @@ def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.Mo
     def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
         if cmd[0].endswith("pg_dump"):
             Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
-        elif cmd[0] == "gzip":
-            cast(Any, _kw["stdout"]).write(b"compressed dump")
         else:
             Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
         return _Ok()
@@ -378,7 +372,7 @@ def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.Mo
         db_url="dbname=ava",
         pre_update=True,
     )
-    assert path.name == "ava-20260609T190000Z.pre-update.dump.gz.enc"
+    assert path.name == "ava-20260609T190000Z.pre-update.dump.enc"
     assert backup._is_pre_update(path)
     assert backup._is_pre_update(_touch(bdir, "ava-20260609T190000Z.dump.gz.enc")) is False
 
@@ -429,20 +423,14 @@ def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPa
     # BACKUP_KEEP pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
     assert len(backup._managed_dumps(bdir)) == backup.BACKUP_KEEP
     assert not (bdir / "test-20260601-030000.dump").exists()
-    # The fresh dump is restorable input: decrypt, gunzip, then list its TOC.
+    # The fresh dump is restorable input: decrypt, then list its TOC directly
+    # (current artifacts are raw custom dumps — no gzip layer).
     import subprocess
 
-    compressed = bdir / "listed.dump.gz"
     restored = bdir / "listed.dump"
-    cast(Any, backup).decrypt_artifact(path, compressed)
-    with restored.open("wb") as raw_dump:
-        uncompressed = subprocess.run(  # noqa: S603
-            ["gzip", "--decompress", "--stdout", str(compressed)],
-            stdout=raw_dump,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-    assert uncompressed.returncode == 0, uncompressed.stderr.decode()
+    cast(Any, backup).decrypt_artifact(path, restored)
+    backup.gunzip_if_needed(restored)  # no-op on the new format; proves the contract
+    assert restored.read_bytes().startswith(b"PGDMP"), "decrypted artifact is not a custom dump"
     listing = subprocess.run(  # noqa: S603
         [str(backup.pg_tool("pg_restore")), "--list", str(restored)],
         capture_output=True,
@@ -476,8 +464,6 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
         if cmd[0].endswith("pg_dump"):
             # The real pg_dump writes the plaintext partial.
             Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
-        elif cmd[0] == "gzip":
-            cast(Any, kwargs["stdout"]).write(b"compressed dump")
         else:
             # The encryption command would write its encrypted partial.
             Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
@@ -492,7 +478,7 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
 
     # The final artifact must be encrypted and private rather than the plaintext
     # custom dump whose contents are readable by every account with filesystem access.
-    assert path.name == "whatever-20260808T100000Z.dump.gz.enc"
+    assert path.name == "whatever-20260808T100000Z.dump.enc"
     assert path.stat().st_mode & 0o777 == 0o600
     assert bdir.stat().st_mode & 0o777 == 0o700
 
@@ -510,8 +496,10 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
     envs = cast(list[dict[str, str]], captured["envs"])
     assert envs[cmds.index(pg_dump_cmd)]["PGPASSWORD"] == password
 
-    gzip_cmd = next(cmd for cmd in cmds if cmd[0] == "gzip")
-    assert gzip_cmd[-2:] == ["--stdout", str(bdir / "whatever-20260808T100000Z.dump.partial")]
+    # The archive compresses in-dump (zstd); there is no second gzip pass.
+    assert all(cmd[0] != "gzip" for cmd in cmds)
+    assert "--compress=zstd:3" in pg_dump_cmd
+    assert "--format=custom" in pg_dump_cmd
     openssl_cmd = next(cmd for cmd in cmds if cmd[0].endswith("openssl"))
     assert {"enc", "-aes-256-cbc", "-pbkdf2", "-salt", "-kfile"}.issubset(openssl_cmd)
     assert captured["timeout"] == backup._DUMP_TIMEOUT_S
@@ -550,13 +538,14 @@ def test_run_backup_keeps_database_password_out_of_argv(
     assert env["PGPASSWORD"] == password
 
 
-def test_encrypted_artifact_decrypts_and_gunzips_to_original_dump(
+def test_encrypted_artifact_decrypts_to_original_dump(
     bdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The published artifact reverses exactly to pg_dump's custom-format bytes.
 
-    This fails if the key-file derivation, compression order, cipher invocation,
-    or artifact name changes incompatibly with the restore procedure.
+    This fails if the key-file derivation, cipher invocation, or artifact name
+    changes incompatibly with the restore procedure. The artifact carries no
+    gzip layer — `gunzip_if_needed` must leave it untouched.
     """
     original_dump = b"custom-format-pg-dump\x00contents"
     real_run = subprocess.run
@@ -575,13 +564,13 @@ def test_encrypted_artifact_decrypts_and_gunzips_to_original_dump(
     monkeypatch.setattr(backup, "find_writable_google_drive", lambda: None, raising=False)
     artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
 
-    assert artifact.name.endswith(".dump.gz.enc")
+    assert artifact.name.endswith(".dump.enc")
     key_file = bdir / "decrypt.key"
     key_file.write_text(
         hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest(), encoding="utf-8"
     )
     key_file.chmod(0o600)
-    compressed_dump = bdir / "restored.dump.gz"
+    custom_dump = bdir / "restored.dump"
     decrypted = real_run(
         [
             "openssl",
@@ -595,19 +584,33 @@ def test_encrypted_artifact_decrypts_and_gunzips_to_original_dump(
             "-in",
             str(artifact),
             "-out",
-            str(compressed_dump),
+            str(custom_dump),
         ],
         capture_output=True,
         check=False,
     )
     assert decrypted.returncode == 0, decrypted.stderr.decode()
-    uncompressed = real_run(
-        ["gzip", "--decompress", "--stdout", str(compressed_dump)],
-        capture_output=True,
-        check=False,
-    )
-    assert uncompressed.returncode == 0, uncompressed.stderr.decode()
-    assert uncompressed.stdout == original_dump
+    backup.gunzip_if_needed(custom_dump)
+    assert custom_dump.read_bytes() == original_dump
+
+
+def test_gunzip_if_needed_decompresses_legacy_artifact_layer(
+    bdir: Path,
+) -> None:
+    """A legacy `.dump.gz.enc` artifact decrypts to gzip bytes; the helper
+    strips that layer in place so the restore procedure stays uniform."""
+    import gzip
+
+    raw = b"custom-format-pg-dump\x00contents"
+    layered = bdir / "legacy.dump"
+    layered.write_bytes(gzip.compress(raw))
+    backup.gunzip_if_needed(layered)
+    assert layered.read_bytes() == raw
+    # A current-format dump (no gzip magic) passes through untouched.
+    plain = bdir / "current.dump"
+    plain.write_bytes(raw)
+    backup.gunzip_if_needed(plain)
+    assert plain.read_bytes() == raw
 
 
 def test_offsite_copy_prunes_old_managed_artifacts(
@@ -662,8 +665,6 @@ def test_run_backup_forwards_requested_timeout(bdir: Path, monkeypatch: pytest.M
         timeouts.append(cast(float, kwargs["timeout"]))
         if cmd[0].endswith("pg_dump"):
             Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
-        elif cmd[0] == "gzip":
-            cast(Any, kwargs["stdout"]).write(b"compressed dump")
         else:
             Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
         return _Ok()
@@ -672,7 +673,7 @@ def test_run_backup_forwards_requested_timeout(bdir: Path, monkeypatch: pytest.M
 
     backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", timeout_s=123.0)
 
-    assert timeouts == [123.0, 123.0, 123.0]
+    assert timeouts == [123.0, 123.0]  # pg_dump + encryption — the gzip stage is gone
 
 
 def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -733,7 +734,7 @@ def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def test_run_backup_serializes_dump_creation(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The public entry point holds the cross-process lock around its body."""
     events: list[str] = []
-    artifact = bdir / "verified.dump.gz.enc"
+    artifact = bdir / "verified.dump.enc"
 
     @contextmanager
     def _backup_lock(**_kwargs: object):
@@ -758,7 +759,7 @@ def test_run_backup_avoids_overwriting_a_same_second_dump(
     bdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A second managed writer publishes a new encrypted name, not a replacement."""
-    existing = _touch(bdir, "whatever-20260808T100000Z.dump.gz.enc")
+    existing = _touch(bdir, "whatever-20260808T100000Z.dump.enc")
 
     class _Ok:
         returncode = 0
@@ -767,8 +768,6 @@ def test_run_backup_avoids_overwriting_a_same_second_dump(
     def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
         if cmd[0].endswith("pg_dump"):
             Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
-        elif cmd[0] == "gzip":
-            cast(Any, kwargs["stdout"]).write(b"compressed dump")
         else:
             Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
         return _Ok()
@@ -777,6 +776,6 @@ def test_run_backup_avoids_overwriting_a_same_second_dump(
 
     created = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
 
-    assert created.name == "whatever-20260808T100001Z.dump.gz.enc"
+    assert created.name == "whatever-20260808T100001Z.dump.enc"
     assert existing.read_bytes() == b"x"
     assert created.read_bytes() == b"encrypted dump"

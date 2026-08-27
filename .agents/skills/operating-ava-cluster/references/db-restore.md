@@ -14,6 +14,16 @@ Never restore an artifact into the live database.
   path in 22.8 seconds. This is a command-path measurement, not a substitute
   for the operator's production-sized drill; record that elapsed value here
   after it runs.
+- **Measured dry run (2026-08-27, production size):** the new-format artifact
+  (677 MiB, custom+zstd dump of the 4.34 GiB DB) completed decrypt → scratch
+  restore → checkpoint-reader verification in **136.6 s** (`agents=3527
+  checkpoints=4345 checkpoint_blobs=10334 sample_agent=405 messages=14041`).
+- **Artifact format (2026-08-27 change):** artifacts are now
+  `<db>-<utc>.dump.enc` — a custom-format `pg_dump` (zstd-compressed in-dump)
+  encrypted with AES-CBC, with no separate gzip layer. The drill's gunzip step
+  is gone; a legacy `<db>-<utc>.dump.gz.enc` artifact is detected by its gzip
+  magic header and decompressed automatically, so old artifacts remain
+  restorable through the same procedure.
 
 ## Recommended automated drill
 
@@ -21,13 +31,13 @@ From the checkout that owns the backup cluster, run either command:
 
 ```bash
 .venv/bin/python scripts/restore_drill.py
-.venv/bin/python scripts/restore_drill.py /absolute/path/to/<db>-<utc>.dump.gz.enc
+.venv/bin/python scripts/restore_drill.py /absolute/path/to/<db>-<utc>.dump.enc
 ```
 
 The first command selects the newest managed local artifact. The script creates
-a native throwaway Postgres cluster, decrypts the artifact, unzips the custom
-dump, restores with `pg_restore --clean --if-exists`, and removes all scratch
-data and the cluster when it exits.
+a native throwaway Postgres cluster, decrypts the artifact (decompressing a
+legacy gzip layer when present), restores with `pg_restore --clean
+--if-exists`, and removes all scratch data and the cluster when it exits.
 
 A successful run prints this shape (counts vary by artifact):
 
@@ -55,10 +65,10 @@ chmod 700 "$scratch_dir"
 key_file="$scratch_dir/backup.key"
 .venv/bin/python -c 'import hashlib; from shared.config import settings; print(hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest())' > "$key_file"
 chmod 600 "$key_file"
-openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile "$key_file" -in /absolute/path/to/<db>-<utc>.dump.gz.enc -out "$scratch_dir/backup.dump.gz"
-chmod 600 "$scratch_dir/backup.dump.gz"
-gzip --decompress --stdout "$scratch_dir/backup.dump.gz" > "$scratch_dir/backup.dump"
+openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile "$key_file" -in /absolute/path/to/<db>-<utc>.dump.enc -out "$scratch_dir/backup.dump"
 chmod 600 "$scratch_dir/backup.dump"
+# Legacy artifacts (<db>-<utc>.dump.gz.enc) need one extra step:
+# gzip --decompress --stdout "$scratch_dir/backup.dump" > "$scratch_dir/backup.dump.raw" && mv "$scratch_dir/backup.dump.raw" "$scratch_dir/backup.dump"
 ```
 
 The key file is the SHA-256 hex digest of the cluster secret. It is private,
@@ -70,9 +80,9 @@ because the passphrase is derived from the cluster secret alone, not from any
 per-host value. Note: rotating the cluster secret makes artifacts encrypted
 under the previous value unrecoverable — after any rotation, keep the prior
 secret in escrow (or re-run a backup) until the old artifacts have been
-retired. The gzip CRC and `pg_restore` failure path detect corruption; the
-artifact is encrypted with AES-256-CBC and inherits the local artifact's 0600
-threat model.
+retired. The archive's compression CRC and `pg_restore` failure path detect
+corruption; the artifact is encrypted with AES-256-CBC and inherits the local
+artifact's 0600 threat model.
 
 To complete a manual investigation, use a scratch Postgres URL only:
 
@@ -91,7 +101,7 @@ checkpoint conversation must be proved.
 
 The gateway checks the existing Google Drive sync folder for a writable target.
 After local encryption succeeds and before local pruning, it copies the
-`.dump.gz.enc` artifact into `Ava Backups/<cluster-home-digest>/`, verifies its
+`.dump.enc` artifact into `Ava Backups/<cluster-home-digest>/`, verifies its
 byte count, and retains the newest seven daily artifacts plus the newest
 pre-update snapshot there. The Drive copy
 is optional: an unavailable sync folder emits a warning but never discards the

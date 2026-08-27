@@ -463,7 +463,7 @@ def _verify_snapshot_artifact(artifact: Path) -> None:
 
 
 def _verify_snapshot_artifact_inner(artifact: Path) -> None:
-    """Decrypt, unzip, and list a snapshot without exposing its connection URL."""
+    """Decrypt and list a snapshot without exposing its connection URL."""
     try:
         artifact_size = artifact.stat().st_size
     except OSError:
@@ -475,37 +475,33 @@ def _verify_snapshot_artifact_inner(artifact: Path) -> None:
             f"pre-update data snapshot {artifact} is not restorable: artifact is empty"
         )
 
-    from services.backup import decrypt_artifact
+    from services.backup import decrypt_artifact, gunzip_if_needed
 
     with tempfile.TemporaryDirectory(prefix="ava-pre-update-") as temporary_dir:
         temporary = Path(temporary_dir)
-        compressed_dump = temporary / "snapshot.dump.gz"
         dump = temporary / "snapshot.dump"
         try:
-            decrypt_artifact(artifact, compressed_dump)
+            decrypt_artifact(artifact, dump)
         except Exception as exc:
             raise RuntimeError(
                 f"pre-update data snapshot {artifact} is not restorable: decrypt failed "
                 f"({type(exc).__name__})"
             ) from None
         try:
-            compressed_size = compressed_dump.stat().st_size
+            dump_size = dump.stat().st_size
         except OSError:
             raise RuntimeError(
                 f"pre-update data snapshot {artifact} is not restorable: cannot read decrypted dump"
             ) from None
-        if compressed_size <= 0:
+        if dump_size <= 0:
             raise RuntimeError(
                 f"pre-update data snapshot {artifact} is not restorable: decrypted dump is empty"
             )
         try:
-            with dump.open("xb") as raw_dump:
-                uncompressed = run_bounded(
-                    ["gzip", "--decompress", "--stdout", str(compressed_dump)],
-                    timeout=_PRE_UPDATE_RESTORE_TIMEOUT_S,
-                    stdout=raw_dump,
-                    stderr=subprocess.PIPE,
-                )
+            # Fresh snapshots are raw custom dumps; a legacy artifact (written
+            # before the 2026-08-27 double-gzip removal) still needs its gzip
+            # layer removed before pg_restore can read it.
+            gunzip_if_needed(dump, timeout_s=_PRE_UPDATE_RESTORE_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 f"pre-update data snapshot {artifact} is not restorable: gunzip timed out after "
@@ -516,11 +512,6 @@ def _verify_snapshot_artifact_inner(artifact: Path) -> None:
                 f"pre-update data snapshot {artifact} is not restorable: gunzip failed "
                 f"({type(exc).__name__})"
             ) from None
-        if uncompressed.returncode != 0:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: gunzip exited "
-                f"{uncompressed.returncode}"
-            )
         try:
             dump_size = dump.stat().st_size
         except OSError:
@@ -569,7 +560,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
 
     The dump is a normal managed backup (`services.backup.run_backup`), so it
     lands in `<home>/backups/db/`; the `pre_update=True` marker names it
-    `<db>-<ts>.pre-update.dump.gz.enc`, and prune keeps the newest such snapshot
+    `<db>-<ts>.pre-update.dump.enc`, and prune keeps the newest such snapshot
     in its own retention slot rather than consuming a daily-dump slot. The
     returned path is threaded through the
     recovery context so a failed rollout names the exact restore point, and is

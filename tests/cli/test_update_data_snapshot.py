@@ -8,7 +8,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import BinaryIO, NoReturn, cast
+from typing import NoReturn
 
 import pytest
 
@@ -32,20 +32,19 @@ def _pg_restore_path(_tool: str) -> Path:
     return Path("/fake/pg_restore")
 
 
-def _patch_decrypt_and_listing(monkeypatch: pytest.MonkeyPatch, listing: SimpleNamespace) -> None:
-    real_run_bounded = _git.run_bounded
+def _patch_decrypt_and_listing(
+    monkeypatch: pytest.MonkeyPatch, listing: SimpleNamespace, *, legacy_gzip: bool = False
+) -> None:
+    """Fake decryption writing a current-format raw dump; with `legacy_gzip`,
+    a gzip-compressed one that the verify path's `gunzip_if_needed` strips
+    using the real gzip binary."""
 
-    def _decrypt(_artifact: Path, compressed_dump: Path) -> None:
-        compressed_dump.write_bytes(gzip.compress(b"custom pg dump"))
+    def _decrypt(_artifact: Path, custom_dump: Path) -> None:
+        payload = gzip.compress(b"custom pg dump") if legacy_gzip else b"custom pg dump"
+        custom_dump.write_bytes(payload)
 
     def _run_bounded(command: list[str], **kwargs: object) -> object:
-        if command[0] == "gzip":
-            return real_run_bounded(
-                command,
-                timeout=cast(float, kwargs["timeout"]),
-                stdout=cast(BinaryIO, kwargs["stdout"]),
-                stderr=cast(int, kwargs["stderr"]),
-            )
+        _ = command, kwargs
         return listing
 
     monkeypatch.setattr(backup, "decrypt_artifact", _decrypt)
@@ -168,6 +167,22 @@ def test_pre_update_data_snapshot_rejects_header_only_toc(
 
     with pytest.raises(RuntimeError, match="empty table of contents"):
         _git._verify_snapshot_artifact(artifact)
+
+
+def test_pre_update_data_snapshot_verifies_legacy_gzip_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-double-gzip-removal artifact (decrypted bytes are gzip) still
+    verifies: `gunzip_if_needed` strips the legacy layer before the TOC check."""
+    artifact = tmp_path / "pre-update.dump.gz.enc"
+    artifact.write_bytes(b"encrypted artifact")
+    _patch_decrypt_and_listing(
+        monkeypatch,
+        SimpleNamespace(returncode=0, stdout="1; TABLE data", stderr=""),
+        legacy_gzip=True,
+    )
+
+    _git._verify_snapshot_artifact(artifact)  # must not raise
 
 
 def test_pre_update_data_snapshot_rejects_empty_dump(
