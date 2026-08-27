@@ -204,3 +204,19 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 - Clean residual old-API mentions in code/docs when found.
 - Candidate next steps: list work options only — no "take a break" wrap-up suggestions.
 [Full guide →](conventions/communicating-with-user.md)
+
+## Memory
+
+Two stores, one positioning (user ruling 2026-08-28):
+
+- **Shared pool** (`ava.memory.PATH`) — restrained: reusable rules (each with a
+  Why and a How to apply), facts many agents repeatedly reach for, and user
+  rulings. Events stay out by default — git history already carries them. Judge
+  each note by one question: "would a new agent reading this in a year behave
+  differently?" If not, it does not belong in the pool.
+- **Personal memory** (`<workspace>/memory/`) — verbose is fine: process
+  details, half-formed understanding, notes of uncertain future value live here
+  until they earn a place in the pool.
+
+Unsure which store? Personal — the pool is for rules other agents will use, not
+your working details.
