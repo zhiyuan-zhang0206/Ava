@@ -182,10 +182,7 @@ _TIMEZONE_FRAMING = (
     "Current timezone: {name} (UTC{offset}). All timestamps you see are in "
     "this timezone — they carry no timezone suffix of their own. When you "
     "record a time anywhere outside this conversation (a file, a memory note, "
-    "a message to another machine), write ISO-8601 with an offset instead. "
-    "Messages persisted before the 2026-08-22 cluster update carry explicit PDT/PST "
-    "suffixes with US-Pacific wall-clock values (UTC-7 / UTC-8) — convert them "
-    "(Shanghai = PDT + 15h / PST + 16h) before comparing with current timestamps."
+    "a message to another machine), write ISO-8601 with an offset instead."
 )
 
 
