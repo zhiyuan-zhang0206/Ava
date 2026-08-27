@@ -847,8 +847,9 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """The bounded-disk pass (gzip / retention / cap) runs BEFORE the
-    watermark guard: an over-watermark disk still gets its relief pass — an
-    old segment is pruned even though recording is auto-degraded."""
+    watermark guard: an over-watermark disk still gets its relief pass — the
+    stale segment is pruned, the gzip and cap legs are invoked, and recording
+    itself is skipped (auto-degrade, watermark guard)."""
     from shared.trace import initialize_tracing
 
     monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
@@ -860,18 +861,36 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     monkeypatch.setattr("shared.trace._disk_usage", lambda: (0.99, 10 * 1024**3))
     old = tmp_path / "spans-20200101-1.jsonl"
     old.write_text("{}\n", encoding="utf-8")
-    calls: list[dict[str, object]] = []  # pyright: ignore[reportMissingTypeArgument]
+    # Spy on the gzip and cap legs (the prune leg is exercised for real): all
+    # three must be reached before the watermark guard returns. The cap spy
+    # records the setting it was invoked with.
+    gzip_calls: list[int] = []
+    cap_calls: list[int] = []
+
+    def _spy_gzip() -> int:
+        gzip_calls.append(1)
+        return 0
+
+    def _spy_cap(max_mb: int) -> int:
+        cap_calls.append(max_mb)
+        return 0
+
+    monkeypatch.setattr("shared.trace._gzip_old_mirror", _spy_gzip)
+    monkeypatch.setattr("shared.trace._enforce_dir_cap", _spy_cap)
+    init_calls: list[dict[str, object]] = []  # pyright: ignore[reportMissingTypeArgument]
     monkeypatch.setattr(
         "traceloop.sdk.Traceloop.init",
-        lambda **kw: calls.append(kw),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda **kw: init_calls.append(kw),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
     )
 
     initialize_tracing()
 
-    # ...but the relief pass still ran: the stale segment is gone, and
-    # recording itself was skipped (auto-degrade, watermark guard).
+    # ...but the relief pass still ran: the stale segment is pruned, the gzip
+    # and cap legs were invoked, and recording itself was skipped.
     assert not old.exists()
-    assert calls == []
+    assert gzip_calls == [1]
+    assert cap_calls == [2048]  # the cap leg ran, with the configured cap
+    assert init_calls == []
 
 
 def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
