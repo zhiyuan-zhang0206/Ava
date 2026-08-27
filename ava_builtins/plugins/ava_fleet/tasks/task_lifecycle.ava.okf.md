@@ -30,7 +30,7 @@ open ──→ in_progress ──→ done
 
 Create a task and return the full `Task`. `title` is a single line (unique among `open`/`in_progress`); `description` is the task description.
 
-- **`parent` is required** — the id of an existing task this task descends from. The system root task (**id 1**) is the parent of the cluster's top-level tasks **only**; a subtask must pass the id of an existing task as its parent (create the parent first). A missing parent id raises `ValueError`.
+- **`parent` is required** — the id of an existing task this task descends from. The system root task (**id 1**) is the parent of the cluster's top-level tasks **only**; a subtask must pass the id of an existing task as its parent (create the parent first). A missing parent id raises `ValueError`; `parent=1` is also rejected when task 1 is not the system root on that deployment (so the documented root id can never silently attach a task under a different parent). `create_and_assign` validates the parent before spawning, so a bad parent never leaves an orphaned agent behind.
 - **Creator defaults to owner** (`owner=None`); when explicitly passing another agent id, the task is directly assigned to that agent, and that agent receives a notification including title + description.
 - `priority`: `"P0"` (highest)..`"P3"` (lowest), default `"P2"`; illegal value raises `ValueError` (#663; board sorts within a status column by this).
 - `remind_interval_seconds`: no-update duration after which the owner is reminded. Default scales with priority — P0 30m / P1 1h / P2 2h / P3 4h. **Cannot be disabled**—`None` falls back to the priority default; an explicit value wins; cap 24h; out-of-range raises `ValueError`.
