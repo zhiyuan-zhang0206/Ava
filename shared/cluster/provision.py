@@ -549,6 +549,16 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                     pgsql.Identifier(table), pgsql.Identifier(RUNNER_ROLE)
                 )
             )
+        # A watcher that exits cleanly deletes its OWN registry row from the
+        # watcher child's finally (shared/watcher_registry.delete_watcher) —
+        # without DELETE the row survives and the boot reconcile later treats
+        # the gone session as a killed watcher to rebuild / mark missed
+        # (prod finding 2026-08-28: "permission denied for table
+        # agent_watchers"). agent_tasks stays INSERT+UPDATE-only: no SDK path
+        # deletes task rows from the runner process.
+        conn.execute(
+            pgsql.SQL("GRANT DELETE ON agent_watchers TO {}").format(pgsql.Identifier(RUNNER_ROLE))
+        )
         conn.execute(
             pgsql.SQL("GRANT UPDATE ON agent_pages TO {}").format(pgsql.Identifier(RUNNER_ROLE))
         )
