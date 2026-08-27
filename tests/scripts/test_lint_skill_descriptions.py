@@ -113,3 +113,51 @@ def test_dash_dir_and_dash_frontmatter_pass(repo: Path) -> None:
         "---\nname: ava-goal\ndescription: d\n---\n",
     )
     assert lint.main() == 0
+
+
+# ─── gate 4: description language (English primary) ────────────────────────
+
+
+def test_fully_chinese_description_rejected(repo: Path) -> None:
+    """The ava-corp shape that slipped through before this gate existed: a
+    description that is entirely Chinese passes the length ceiling (48 units
+    here, under 80) and is only caught by the language gate."""
+    _write(
+        repo,
+        "ava_builtins/skills/ava-corp/SKILL.md",
+        "---\nname: ava-corp\ndescription: ava-fleet 之上的组织层——项目负责人、CEO 直属共享基建、个人服务、优先级与开集群约定。调组织 / 开集群 / 安排公司或个人事务时加载。\n---\n",
+    )
+    assert lint.main() == 1
+
+
+def test_chinese_dominant_description_rejected(repo: Path) -> None:
+    """A mixed line whose CJK-script characters outnumber its English words is
+    not an English index line."""
+    _write(
+        repo,
+        "ava_builtins/skills/pkg/SKILL.md",
+        "---\nname: pkg\ndescription: 获取 rss 订阅并解析为文本，支持增量同步。\n---\n",
+    )
+    assert lint.main() == 1
+
+
+def test_japanese_description_rejected(repo: Path) -> None:
+    """The gate covers kana too — 'English primary' is about the script, not
+    only simplified Chinese."""
+    _write(
+        repo,
+        "ava_builtins/skills/pkg/SKILL.md",
+        "---\nname: pkg\ndescription: スキルを読み込み、指示に従います。\n---\n",
+    )
+    assert lint.main() == 1
+
+
+def test_english_description_with_cjk_proper_noun_passes(repo: Path) -> None:
+    """CJK proper nouns are allowed inside an otherwise-English sentence — the
+    user's real trigger phrases stay usable."""
+    _write(
+        repo,
+        "ava_builtins/skills/pkg/SKILL.md",
+        "---\nname: pkg\ndescription: Enumerate and fetch articles from 人民网 (People's Daily Online) sub-channels. Use when following People's Daily as an intel source.\n---\n",
+    )
+    assert lint.main() == 0
