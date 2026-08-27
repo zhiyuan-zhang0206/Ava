@@ -13,18 +13,24 @@ tags:
 ## What it is
 
 An Ava editable install is a path pointer stored in
-`<checkout>/.venv/.../site-packages/_editable_impl_ava.pth`. The prod pointer
-must name a stable source root; a disposable worktree is never a legal target.
+`<checkout>/.venv/.../site-packages/_editable_impl_ava.pth`, plus the editable
+source URL uv records in the matching `<dist-info>/direct_url.json`. Both must
+name a stable source root; a disposable worktree is never a legal target.
 `shared/editable_install.py` owns the platform-independent discovery, exact-root
-validation, repair, and temporary permission window used by lifecycle callers.
+validation, atomic repair, and temporary permission window used by lifecycle
+callers.
 
 ## Lifecycle flow
 
 - `_converge` registers the prod assertion as a host-global step. It resolves
   the installed prod checkout, accepts that source plus explicitly allowlisted
   stable dev-clone roots, and repairs every other exact target to prod source.
-  Repairs print a warning and emit the registered anomaly event
-  `editable_pth_repaired` with the pointer, poisoned target, and source root.
+  The same pass asserts the `direct_url.json` records: a URL naming anything
+  outside the allowlist (or a record that is unparsable or not marked
+  editable) is repaired too, so the pointer and the URL can never disagree.
+  Repairs print a warning and emit the registered anomaly events
+  `editable_pth_repaired` / `editable_direct_url_repaired` with the path,
+  poisoned target, and source root.
 - `converge_host` rejects host-global steps before execution in `.worktrees/`
   and `.claude/worktrees/` checkouts, so a worktree's own legal pointer is never
   inspected or rewritten. `ava start` inherits the same converge step.
@@ -41,8 +47,8 @@ validation, repair, and temporary permission window used by lifecycle callers.
 
 - Allowlisting is exact-root based. An allowlisted dev clone does not permit
   any `.worktrees/*` descendant.
-- Missing `.pth` files are a no-op; the guard does not change Ava's editable
-  installation mechanism.
+- Missing `.pth` or `direct_url.json` files are a no-op; the guard does not
+  change Ava's editable installation mechanism.
 - Repair changes pointer content only. The write window restores the mode that
   existed before lifecycle code entered it.
 
