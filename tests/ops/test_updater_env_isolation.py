@@ -201,7 +201,7 @@ _DEPLOY_TRIGGERS: tuple[tuple[str, Callable[[pytest.MonkeyPatch], None]], ...] =
 @pytest.mark.parametrize(
     ("label", "drive"),
     _DEPLOY_TRIGGERS,
-    ids=["update", "rollout", "restart"],
+    ids=["update", "rollout", "restart", "unpause"],
 )
 def test_deploy_triggers_refuse_the_production_home_from_this_checkout(
     label: str,
