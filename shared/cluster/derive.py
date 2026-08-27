@@ -346,10 +346,15 @@ def derive_env(
 
 
 def per_cluster_base_urls(rec: cluster.ClusterRecord) -> tuple[str, str]:
-    """The base `(db_url, redis_url)` for a cluster's own instance — loopback at the
-    cluster's allocated pg/redis ports. `derive_env` swaps in the db name,
-    data-plane identity, and independently scoped passwords on top."""
+    """The base `(db_url, redis_url)` for a cluster's own instance — loopback at
+    the cluster's allocated pg/redis ports by default, or the record's
+    `data_plane_host` when one is set (external data plane, Task #1752). The
+    host source is the registry record, never a hardcoded literal, so an
+    off-box data plane changes only the record/settings, not this derivation.
+    `derive_env` swaps in the db name, data-plane identity, and independently
+    scoped passwords on top."""
+    host = (rec.data_plane_host or "").strip() or "127.0.0.1"
     return (
-        f"postgresql://x@127.0.0.1:{rec.ports['postgres']}/postgres",
-        f"redis://127.0.0.1:{rec.ports['redis']}/0",
+        f"postgresql://x@{host}:{rec.ports['postgres']}/postgres",
+        f"redis://{host}:{rec.ports['redis']}/0",
     )

@@ -53,7 +53,14 @@ def _loopback_if_self(url: str) -> str:
     """Return `url` with its host swapped to `127.0.0.1` when it names this
     machine's own reachable address; any other host — and an already-loopback
     host — passes through verbatim. The unanchored sentinel is skipped
-    explicitly (the connect guard matches it byte-for-byte)."""
+    explicitly (the connect guard matches it byte-for-byte).
+
+    External-migration semantics (Task #1752): this rewrite is the SELF-DIAL
+    posture only. Once the data plane is hosted off-box (a foreign
+    `data_plane_host` at birth), its URLs name another machine and pass
+    through here untouched — the rewrite must never be extended to foreign
+    hosts, because its job is the opposite: keep this box's own traffic on
+    loopback, not route it to where the URL happens to point."""
     if url == UNANCHORED_DB_SENTINEL:
         return url
     host = urlsplit(url).hostname or ""
@@ -107,6 +114,30 @@ class DataPlaneSettings(EnvSettings):
         "pooler never starts. Normal processes see only AVA_DB_URL either way. "
         "The admin plane (migrations / pg_dump / provisioning) always bypasses "
         "the pooler, regardless of this toggle.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    data_plane_host: str = Field(
+        default="",
+        alias="AVA_DATA_PLANE_HOST",
+        description=(
+            "Host the per-cluster data-plane URLs are DERIVED with (install "
+            "birth / registry-record carry). Empty = loopback (127.0.0.1) — the "
+            "single-box posture every cluster uses today. Set it to a reachable "
+            "address when the data plane is hosted off-box (external-migration "
+            "step of Task #1752): the born AVA_DB_URL / AVA_REDIS_URL then carry "
+            "that host, and the self-dial loopback rewrite (`_loopback_if_self`) "
+            "passes a foreign host through untouched. The URLs, not this knob, "
+            "are what every process dials — this field only decides the host "
+            "they are born with; the registry record snapshots it at birth "
+            "(`cli.commands.cluster_lifecycle._ensure_record`)."
+        ),
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -294,6 +325,11 @@ class DataPlaneSettings(EnvSettings):
         the machine-registration address are all upstream of this rewrite.
         `AVA_DB_URL` is the one dial URL (pooler port when enabled), so the
         rewrite covers both pg and redis here.
+
+        After an external data-plane migration (Task #1752) the URLs name a
+        foreign host, which never equals `_self_machine_host()`, so no rewrite
+        happens and every dial goes off-box as the URL states — the rewrite
+        stays a self-dial optimization and is never extended to foreign hosts.
         """
         self.db_url = _loopback_if_self(self.db_url)
         self.redis_url = _loopback_if_self(self.redis_url)
