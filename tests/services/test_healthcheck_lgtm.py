@@ -18,11 +18,34 @@ from services.healthchecks import lgtm as hc
 
 
 def test_readiness_probes_exclude_remote_tempo() -> None:
-    """Only locally managed backends can trigger a local lifecycle repair."""
-    assert hc.READINESS_PROBES == (
+    """Only locally managed backends can trigger a local lifecycle repair —
+    and the default settings keep the historical loopback probe URLs exactly."""
+    assert hc.readiness_probes() == (
         ("loki", "http://127.0.0.1:3100/ready"),
         ("prometheus", "http://127.0.0.1:9090/-/ready"),
         ("grafana", "http://127.0.0.1:3003/api/health"),
+    )
+
+
+def test_readiness_probes_follow_configured_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probes derive from the observability settings base URLs, with a
+    trailing slash stripped so a configured ``http://host:port/`` cannot turn
+    the probe into ``//ready`` (an HTTP 404 would be counted as alive)."""
+    monkeypatch.setattr(
+        hc.settings.observability, "telemetry_loki_url", "http://loki.example:3100/loki/"
+    )
+    monkeypatch.setattr(
+        hc.settings.observability, "telemetry_prometheus_url", "http://prom.example:9090/"
+    )
+    monkeypatch.setattr(
+        hc.settings.observability, "telemetry_grafana_url", "http://grafana.example:3003"
+    )
+    assert hc.readiness_probes() == (
+        ("loki", "http://loki.example:3100/loki/ready"),
+        ("prometheus", "http://prom.example:9090/-/ready"),
+        ("grafana", "http://grafana.example:3003/api/health"),
     )
 
 
