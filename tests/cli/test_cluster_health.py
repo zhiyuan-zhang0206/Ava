@@ -168,6 +168,10 @@ def test_liveness_retry_recovers_before_the_counter_is_armed(
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
+    # Check 7 resolves the real prod venv through prod_source_dir() unless
+    # stubbed — on a dev box with a healthy prod install this passes by luck,
+    # not by hermeticity (same reasoning as the disk-usage stub above).
+    monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
 
     assert _cluster_health.run_health_probe(auto_rollback=True) == 0
     assert _read_count(_home).splitlines()[0] == "0"
