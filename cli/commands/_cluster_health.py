@@ -29,6 +29,11 @@ Checks (all must pass for exit 0):
 6. Data-volume usage — the data volume over the watermark (default 90%)
    fails the probe and alerts. Alert-only, same reasoning as check 5: a full
    disk is the 2026-08-08 outage class, but rollback frees no disk space.
+7. Editable-install records — the prod venv's `_editable_impl_ava.pth` pointer
+   and its `direct_url.json` record name only allowlisted source (read-only
+   detection; repair belongs to the converge guard). Alert-only, same reasoning
+   as checks 5 and 6: a poisoned pointer is the 2026-08-27 outage class, but
+   rollback does not fix a venv record.
 
 **A failure a running deploy explains does not advance the auto-rollback counter, and
 resets it** (`_deploy_suppression`). The same live lease is an expected transition
@@ -470,6 +475,66 @@ def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str 
     return f"data volume {fraction:.1%} used (watermark {watermark:.0%})"
 
 
+def _editable_install_failure() -> str | None:
+    """Alert text when the prod venv's editable-install records name source
+    outside the allowlist, else None.
+
+    Reported through check 7, which is **alert-only and never feeds the
+    auto-rollback counter** — the same placement logic as checks 5 and 6: a
+    poisoned pointer is the 2026-08-27 outage class (a worktree ``uv sync``
+    under a polluted ``VIRTUAL_ENV`` silently repointed the prod venv at
+    disposable source), but rolling the cluster back to a previous commit
+    does not fix a venv record — the converge guard repairs it on the next
+    ``ava start`` / ``ava cluster update`` (``_ensure_prod_editable_pth``).
+    The probe only detects and never writes, so it also covers the read-only
+    emergency mode where the guard's repair is skipped.
+
+    Discovery and validation reuse ``shared.editable_install`` — the same
+    exact-root allowlist the converge guard repairs against — so the detector
+    and the fixer can never disagree about what is poisoned. The allowlisted
+    dev clone ``~/Ava`` is legal for the prod venv too, mirroring the
+    converge step.
+    """
+    import shared.cluster_drift
+    import shared.editable_install as ei
+
+    source_root = shared.cluster_drift.prod_source_dir()
+    if source_root is None:
+        return None
+    resolved = source_root.expanduser().resolve(strict=False)
+    allowed_roots = (Path.home() / "Ava",)
+    normalized_allowed = frozenset(
+        {ei._normalized_exact_path(resolved)}
+        | {ei._normalized_exact_path(root) for root in allowed_roots}
+    )
+    allowed_urls = frozenset(
+        {resolved.as_uri()}
+        | {root.expanduser().resolve(strict=False).as_uri() for root in allowed_roots}
+    )
+    violations: list[str] = []
+    for pth in ei.editable_ava_pth_paths(resolved):
+        try:
+            target = pth.read_text().strip()
+        except OSError:
+            violations.append(f"{pth} unreadable")
+            continue
+        if not ei._target_is_allowed(target, normalized_allowed):
+            violations.append(f"{pth} names {target or '(empty)'!r}")
+    for record in ei.editable_direct_url_paths(resolved):
+        try:
+            raw = record.read_text()
+        except OSError:
+            violations.append(f"{record} unreadable")
+            continue
+        if not ei._direct_url_is_allowed(raw, allowed_urls):
+            violations.append(f"{record} records {raw.strip() or '(empty)'!r}")
+    if not violations:
+        return None
+    return "prod venv editable install names non-allowlisted source: " + "; ".join(
+        sorted(violations)
+    )
+
+
 def run_health_probe(
     *,
     agent_min: int | None = None,
@@ -597,6 +662,19 @@ def run_health_probe(
         _alert_failure(home, message, deploy_explains=False)
         return 1
     print("  ✓ disk usage")
+
+    # 7. Editable-install records — alert-only, same class as checks 5 and 6:
+    # the 2026-08-27 outage class (a worktree uv sync under a polluted
+    # VIRTUAL_ENV repointed the prod venv at disposable source), but rolling
+    # back code does not fix a venv record — the converge guard repairs it on
+    # the next start/update. The probe detects and alerts; it never writes.
+    editable_failure = _editable_install_failure()
+    if editable_failure is not None:
+        message = f"FAIL: editable install — {editable_failure}"
+        print(message, file=sys.stderr)
+        _alert_failure(home, message, deploy_explains=_deploy_suppression() is not None)
+        return 1
+    print("  ✓ editable install records")
 
     # All checks passed (the counter was already reset once checks 1-4 passed,
     # above the alert-only check 5) — clear the alert edge state.
