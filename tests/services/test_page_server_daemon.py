@@ -343,6 +343,98 @@ def test_closed_row_kills_its_page_session(
     assert managed == {}
 
 
+def test_stale_snapshot_never_creates_session_for_closed_row(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The pass snapshot can be seconds stale (process scans, session spawns
+    happen after the row read). A row closed after the snapshot must not get a
+    session created for it — the next pass would reap the fresh session as an
+    orphan, the user-visible serve 502 race (rows 1643/1667 incidents)."""
+    agent_id = spawn_agent()
+    key = (agent_id, "stale-race")
+    _insert_page_row(db_conn, agent_id, key[1], 12020, tmp_path)
+    stale = psd._open_rows(sync_pool, _HOST)[0]
+    _close_row(db_conn, agent_id, key[1])
+    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+
+    _reconcile(sync_pool, managed, {}, {})
+
+    assert backend.new_calls == []
+    assert backend.killed == []
+    assert managed == {}
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT session_name FROM agent_pages WHERE agent_id = %s AND name = %s",
+            (agent_id, key[1]),
+        )
+        row = cur.fetchone()
+        assert row is not None and row[0] is None
+
+
+def test_stale_snapshot_skips_row_re_registered_mid_pass(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A row re-registered (port/serve_dir changed) after the snapshot must
+    not be created from the obsolete state either — the new registration is
+    adopted on the next pass instead."""
+    agent_id = spawn_agent()
+    key = (agent_id, "re-registered")
+    _insert_page_row(db_conn, agent_id, key[1], 12021, tmp_path)
+    stale = psd._open_rows(sync_pool, _HOST)[0]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET port = 12022 WHERE agent_id = %s AND name = %s",
+            (agent_id, key[1]),
+        )
+    db_conn.commit()
+    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+
+    _reconcile(sync_pool, managed, {}, {})
+
+    assert backend.new_calls == []
+    assert managed == {}
+
+
+def test_session_created_for_row_closed_during_create_is_rolled_back(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The row can still close in the narrow window between the liveness
+    re-check and the session_name write. The just-created session is rolled
+    back (killed) instead of lingering as a recordless ghost the next pass
+    would reap as an orphan."""
+    agent_id = spawn_agent()
+    key = (agent_id, "mid-create-close")
+    _insert_page_row(db_conn, agent_id, key[1], 12023, tmp_path)
+    stale = psd._open_rows(sync_pool, _HOST)[0]
+    _close_row(db_conn, agent_id, key[1])
+    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    # The liveness re-check passed a moment ago; the close lands after it.
+    monkeypatch.setattr(psd, "_row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    backoff: dict[tuple[int, str], float] = {}
+
+    _reconcile(sync_pool, managed, backoff, {})
+
+    assert len(backend.new_calls) == 1
+    assert backend.killed == [backend.new_calls[0][0]]
+    assert managed == {}
+    assert backoff[key] > time.monotonic()
+
+
 def test_terminated_agent_keeps_daemon_page_session(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,

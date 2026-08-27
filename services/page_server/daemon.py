@@ -205,6 +205,18 @@ def _create_page_session(
             "UPDATE agent_pages SET session_name = %s WHERE id = %s AND closed_at IS NULL",
             (page_session, row.id),
         )
+        if cur.rowcount == 0:
+            # The row closed between this function's start and the write (the
+            # caller's snapshot can be seconds stale). A session without a row
+            # is a recordless ghost the next pass would reap as an orphan —
+            # roll the just-created session back instead.
+            _log.warning(
+                "[page-server] page row %s closed while creating its session; rolling back %s",
+                row.id,
+                page_session,
+            )
+            backend.kill_session(page_session)
+            raise RuntimeError(f"page row {row.id} closed while creating its session")
         conn.commit()
     return page_session
 
@@ -403,6 +415,28 @@ def _drop_stale_handles(
             del managed[key]
 
 
+def _row_matches_snapshot(pool: ConnectionPool, row: _PageRow) -> bool:
+    """Whether the row this pass snapshotted is still the live supervised truth.
+
+    ``_reconcile_once`` reads open rows once and then does slow work (process
+    scans, session spawns — a pass can take tens of seconds under load). A
+    page can be closed or re-registered (new port / serve_dir) during that
+    window; creating a session from the stale snapshot would make the next
+    pass reap the fresh session as an orphan — row gone / port not wanted —
+    the user-visible serve 502 race. Freshly re-read the row and require it
+    to still be open and unchanged before a session is created for it.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT port, serve_dir FROM agent_pages "
+            "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL "
+            "AND serve_dir IS NOT NULL AND host = %s",
+            (row.id, row.host),
+        )
+        fresh = cur.fetchone()
+    return fresh is not None and (fresh[0], fresh[1]) == (row.port, row.serve_dir)
+
+
 def _ensure_handle(
     pool: ConnectionPool,
     backend: SessionBackend,
@@ -433,6 +467,11 @@ def _ensure_handle(
         )
         managed[key] = handle
         return handle, False
+    if not _row_matches_snapshot(pool, row):
+        # The row closed or was re-registered while this pass reconciled —
+        # never create a session from stale snapshot state. The next pass
+        # (poll interval away) adopts the current row truth.
+        return None, False
     try:
         page_session = _create_page_session(pool, backend, row, token)
     except RuntimeError as exc:
