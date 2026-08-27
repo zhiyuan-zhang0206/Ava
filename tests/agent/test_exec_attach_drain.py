@@ -99,9 +99,13 @@ async def test_exec_drains_attachment_right_after_output(
     # the attach message carries the caption + the native image block
     content = msgs[1].content  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(content, list)
+    # Interleaved pack: [text(notice), text(caption line), image_url, ...] —
+    # the file's own caption line sits directly before its media block.
     assert content[0]["type"] == "text"
-    assert "render.png" in content[0]["text"]  # pyright: ignore[reportUnknownIndexType]
-    assert content[1]["type"] == "image_url"
+    assert "Files attached during this turn" in content[0]["text"]  # pyright: ignore[reportUnknownIndexType]
+    assert content[1]["type"] == "text"
+    assert "render.png" in content[1]["text"]  # pyright: ignore[reportUnknownIndexType]
+    assert content[2]["type"] == "image_url"
 
 
 async def test_exec_without_attachments_appends_no_attach_message(

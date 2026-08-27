@@ -7017,6 +7017,8 @@ export interface components {
             show_timestamp: boolean;
             /** Images */
             images?: string[] | null;
+            /** Image Captions */
+            image_captions?: string[] | null;
             /** Sdk Calls */
             sdk_calls?: components["schemas"]["SdkCall"][] | null;
             /** Code Elapsed Ms */

@@ -38,10 +38,37 @@ def test_deepseek_image_uses_a_data_uri_block(tmp_path: Path) -> None:
 
     assert pack is not None
     assert pack.delivered == [str(image_path.resolve())]
-    assert pack.blocks[1] == {
+    assert pack.blocks[2] == {
         "type": "image_url",
         "image_url": {"url": f"data:image/png;base64,{base64.b64encode(image_bytes).decode()}"},
     }
+
+
+def test_blocks_interleave_each_caption_line_with_its_media(tmp_path: Path) -> None:
+    # One delivered image, one skipped file: the content blocks must read
+    # [text(notice), text(line1), image1, text(line2)] — every media block
+    # immediately preceded by its own caption line (frontend pairing contract),
+    # the skipped entry's line present without a media block.
+    image_path = tmp_path / "example.png"
+    image_bytes = _png(image_path)
+    unknown = tmp_path / "notes.txt"
+    unknown.write_text("not media")
+
+    pack = pack_attachments(
+        "gemini-3.7-flash", [_entry(image_path, "shot"), _entry(unknown, "notes")]
+    )
+
+    assert pack is not None
+    assert [b.get("type") for b in pack.blocks] == ["text", "text", "image_url", "text"]
+    line1 = pack.blocks[1]["text"]
+    assert isinstance(line1, str) and line1.startswith("- [1] example.png (image/png,")
+    assert isinstance(line1, str) and '— "shot"' in line1
+    assert pack.blocks[2] == {
+        "type": "image_url",
+        "image_url": {"url": f"data:image/png;base64,{base64.b64encode(image_bytes).decode()}"},
+    }
+    line3 = pack.blocks[3]["text"]
+    assert isinstance(line3, str) and "not delivered: unknown media suffix" in line3
 
 
 def test_gemini_video_uses_the_media_block_shape(tmp_path: Path) -> None:
@@ -52,7 +79,7 @@ def test_gemini_video_uses_the_media_block_shape(tmp_path: Path) -> None:
     pack = pack_attachments("gemini-3.7-flash", [_entry(video_path)])
 
     assert pack is not None
-    assert pack.blocks[1] == {"type": "media", "mime_type": "video/mp4", "data": video_bytes}
+    assert pack.blocks[2] == {"type": "media", "mime_type": "video/mp4", "data": video_bytes}
 
 
 def test_claude_pdf_uses_an_anthropic_document_block(tmp_path: Path) -> None:
@@ -63,7 +90,7 @@ def test_claude_pdf_uses_an_anthropic_document_block(tmp_path: Path) -> None:
     pack = pack_attachments("claude-sonnet-5", [_entry(pdf_path)])
 
     assert pack is not None
-    assert pack.blocks[1] == {
+    assert pack.blocks[2] == {
         "type": "document",
         "source": {
             "type": "base64",
@@ -85,7 +112,9 @@ def test_bad_files_are_skipped_without_aborting_the_pack(tmp_path: Path) -> None
     )
 
     assert pack is not None
-    assert len(pack.blocks) == 1
+    # Skipped entries carry their caption line as a text block but never a
+    # media block — the pack stays text-only.
+    assert [b.get("type") for b in pack.blocks] == ["text", "text", "text", "text"]
     assert [reason for _, reason in pack.skipped] == [
         "file does not exist",
         "not a regular file",
@@ -187,7 +216,8 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(tmp_path: Path) 
     pack = pack_attachments("deepseek-v4-pro", [_entry(image_path)])
 
     assert pack is not None
-    assert len(pack.blocks) == 1
+    # The skipped entry's caption line is a text block; no media block.
+    assert [b.get("type") for b in pack.blocks] == ["text", "text"]
     assert pack.delivered == []
     assert pack.skipped == [(str(image_path.resolve()), "your model cannot receive image")]
     assert "not delivered: your model cannot receive image" in pack.text

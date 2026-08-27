@@ -107,6 +107,13 @@ class TimelineItem(BaseModel):
     # elsewhere): inbound_chat = gateway-relative urls from ava_image_urls
     # (via assetUrl); attach = data URIs from content blocks (rendered raw).
     images: list[str] | None = None
+    # Per-image caption lines on an `attach` item, aligned 1:1 with `images`:
+    # the backend-generated "- [N] name (mime, size) — \"label\"" line that
+    # precedes each image block in the message content, so the frontend can
+    # interleave every thumbnail with its own label. None on other kinds and on
+    # legacy attach messages whose caption was a single text block (no pairing
+    # information survives there).
+    image_captions: list[str] | None = None
     # SDK calls extracted from agent_code payload via AST parsing (None on
     # other kinds). Drives the collapsed-code chip ("files.read x3" etc.)
     # with zero false positives from string literals or comments.
@@ -408,6 +415,42 @@ def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | Non
     return urls or None
 
 
+def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[str] | None:
+    """Per-image caption lines of an attach message, aligned with ``_attach_images``.
+
+    The modern pack (``shared/lm/attach.py``) interleaves content blocks —
+    ``[text(notice), text(line1), image1, text(line2), image2, ...]`` — so each
+    ``image_url`` block is immediately preceded by its own caption line: read
+    the preceding text block and the pairing is structural, no text parsing.
+
+    Legacy attach messages carried ONE caption text block followed by all image
+    blocks; there the per-image lines cannot be recovered (skipped entries are
+    indistinguishable), so this returns None and the frontend falls back to the
+    legacy all-text-then-all-images layout.
+    """
+    if not isinstance(content, list):
+        return None
+    text_blocks = [
+        block
+        for block in content_blocks(content)
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
+    if len(text_blocks) <= 1:
+        return None
+    captions: list[str] = []
+    last_text: str | None = None
+    for block in content_blocks(content):
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            text = block.get("text")
+            if isinstance(text, str):
+                last_text = text
+        elif block.get("type") == "image_url":
+            captions.append(last_text or "")
+    return captions or None
+
+
 def _attach_item(
     msg_idx: int, raw_content: str | list[str | dict[str, Any]], created_at: str
 ) -> TimelineItem:
@@ -420,6 +463,7 @@ def _attach_item(
         created_at=created_at,
         inbound_id=None,
         images=_attach_images(raw_content),
+        image_captions=_attach_image_captions(raw_content),
     )
 
 

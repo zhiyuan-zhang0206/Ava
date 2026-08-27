@@ -141,6 +141,7 @@ function makeItem(overrides: Partial<BackendTimelineItem> & Pick<BackendTimeline
     execStartedAt: overrides.execStartedAt,
     exec_ms: overrides.exec_ms,
     images: overrides.images ?? null,
+    image_captions: overrides.image_captions ?? null,
   };
 }
 
@@ -2779,6 +2780,115 @@ describe("ItemView: inbound_chat images", () => {
     );
     expect(screen.getByAltText("attached image")).toBeTruthy();
     expect(screen.queryByText("[image]")).toBeNull();
+  });
+});
+
+describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
+  const NOTICE = "[system] Files attached during this turn (available for this turn only; re-attach if you need them again later):";
+  const LINE1 = '- [1] screen.png (image/png, 12.3 KiB) — "shot A"';
+  const LINE2 = '- [2] chart.png (image/png, 45.6 KiB) — "chart B"';
+  const IMG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+  const IMG2 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAAB";
+  const payload = `${NOTICE}\n${LINE1}\n${LINE2}`;
+
+  const imgs = () => screen.getAllByAltText("attached image");
+  const orderOf = (el: Element) => {
+    // The timeline renders the whole tree into one container; find the
+    // document-order position of each node among all timeline descendants.
+    const all = Array.from(document.body.querySelectorAll("*"));
+    return all.indexOf(el);
+  };
+
+  it("interleaves label line → thumbnail → label line → thumbnail", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload,
+            images: [IMG1, IMG2],
+            image_captions: [LINE1, LINE2],
+          }),
+        ]}
+      />,
+    );
+    const line1 = screen.getByText(LINE1);
+    const line2 = screen.getByText(LINE2);
+    const [img1, img2] = imgs();
+    expect(orderOf(line1)).toBeLessThan(orderOf(img1));
+    expect(orderOf(img1)).toBeLessThan(orderOf(line2));
+    expect(orderOf(line2)).toBeLessThan(orderOf(img2));
+    // No navigation wrapper around the thumbnails anymore.
+    expect(document.body.querySelector('a[href^="data:image"]')).toBeNull();
+  });
+
+  it("renders a skipped (no-image) line in place without shifting alignment", () => {
+    const skipped = "- [2] notes.pdf (application/pdf, 2.0 KiB) — not delivered: your model cannot receive pdf";
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload: `${NOTICE}\n${LINE1}\n${skipped}\n${LINE2}`,
+            images: [IMG1, IMG2],
+            image_captions: [LINE1, LINE2],
+          }),
+        ]}
+      />,
+    );
+    const line1 = screen.getByText(LINE1);
+    const sk = screen.getByText(skipped);
+    const line2 = screen.getByText(LINE2);
+    const [img1, img2] = imgs();
+    expect(orderOf(line1)).toBeLessThan(orderOf(img1));
+    expect(orderOf(img1)).toBeLessThan(orderOf(sk));
+    expect(orderOf(sk)).toBeLessThan(orderOf(line2));
+    expect(orderOf(line2)).toBeLessThan(orderOf(img2));
+  });
+
+  it("clicking a thumbnail opens the lightbox; backdrop click and Escape close it", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload,
+            images: [IMG1, IMG2],
+            image_captions: [LINE1, LINE2],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.queryByTestId("attach-lightbox")).toBeNull();
+    fireEvent.click(screen.getAllByTestId("attach-thumbnail")[0]);
+    const lightbox = screen.getByTestId("attach-lightbox");
+    // The enlarged image is the lightbox content.
+    expect(lightbox.querySelector("img")?.getAttribute("src")).toBe(IMG1);
+    // Click anywhere on the backdrop closes.
+    fireEvent.click(lightbox);
+    expect(screen.queryByTestId("attach-lightbox")).toBeNull();
+    // Escape closes too.
+    fireEvent.click(screen.getAllByTestId("attach-thumbnail")[1]);
+    expect(screen.getByTestId("attach-lightbox")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("attach-lightbox")).toBeNull();
+  });
+
+  it("legacy attach (images without image_captions) still renders thumbnails without navigation", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload,
+            images: [IMG1, IMG2],
+            image_captions: null,
+          }),
+        ]}
+      />,
+    );
+    expect(imgs()).toHaveLength(2);
+    expect(document.body.querySelector('a[href^="data:image"]')).toBeNull();
   });
 });
 

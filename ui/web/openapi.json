@@ -13073,6 +13073,20 @@
             ],
             "title": "Images"
           },
+          "image_captions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Captions"
+          },
           "sdk_calls": {
             "anyOf": [
               {
