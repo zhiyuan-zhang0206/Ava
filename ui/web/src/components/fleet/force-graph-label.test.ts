@@ -63,4 +63,33 @@ describe("wrapLabel", () => {
     // 24px budget (r=16); one more Latin char would overflow it.
     expect(wrapLabel("abc中文def", 16)).toEqual(["abc中文", "def"]);
   });
+
+  it("breaks before an embedded Latin word instead of splitting it (QA #651 follow-up)", () => {
+    // "资源监控（" = 5 × 6 = 30px leaves only 6px on the 36px line (r=22) —
+    // just "C" of "Cluster" would fit, so the word must move to its own line
+    // whole instead of rendering "资源监控（C" / "luster Ops".
+    expect(wrapLabel("资源监控（Cluster Ops 域）", 22)).toEqual([
+      "资源监控（",
+      "Cluster",
+      "Ops 域）",
+    ]);
+    expect(wrapLabel("影分身（Think like a master）", 22)).toEqual([
+      "影分身（",
+      "Think like",
+      "a master）",
+    ]);
+  });
+
+  it("still splits a Latin word when it is wider than the line", () => {
+    // QA rule: char-break only when the word itself exceeds the line width.
+    // An over-wide word after a CJK prefix moves to its own line whole, then
+    // is hard-cut by the budget; a pure-Latin label keeps the same behavior.
+    expect(wrapLabel("资源监控（Supercalifragilistic 域）", 22)).toEqual([
+      "资源监控（",
+      "Supercalif",
+      "ragilistic",
+      "域）",
+    ]);
+    expect(wrapLabel("supercalifragilistic", 22)).toEqual(["supercalif", "ragilistic"]);
+  });
 });
