@@ -78,7 +78,9 @@ All unauthenticated backend APIs remain loopback-only: Loki 3100, Prometheus
 9090, Tempo 3200 and 14318. Grafana 3003 is the intended wider,
 anonymous-but-read-only surface; its listen host is the
 `AVA_LGTM_GRAFANA_LISTEN_HOST` knob, whose `0.0.0.0` default is the historical
-all-interfaces form.
+all-interfaces form. Widening a listen host past loopback requires the
+matching `AVA_TELEMETRY_*_URL` read URL — the healthcheck probes and the
+Prometheus scrape targets derive from it — and converge warns on a mismatch.
 
 ## Start, stop, and rollback
 
@@ -148,8 +150,8 @@ Copy `.env.example` to `.env` only when an override is needed.
 | `GRAFANA_PROVISIONING_PATH` | checkout provisioning directory | Rendered by converge for native Grafana; do not set it in `.env` |
 | `AVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
 | `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
-| `AVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form |
-| `AVA_LGTM_GRAFANA_LISTEN_HOST` | `0.0.0.0` | Listen host for native Grafana's HTTP listener (the historical all-interfaces form); narrow it to `127.0.0.1` or a tailnet IP to restrict the anonymous read-only UI |
+| `AVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form — the matching `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` must follow (converge warns otherwise) |
+| `AVA_LGTM_GRAFANA_LISTEN_HOST` | `0.0.0.0` | Listen host for native Grafana's HTTP listener (the historical all-interfaces form); narrow it to `127.0.0.1` or a tailnet IP to restrict the anonymous read-only UI — a specific non-loopback address requires `AVA_TELEMETRY_GRAFANA_URL` to follow (converge warns otherwise) |
 
 `.env` holds live secrets and is gitignored; never commit it. Converge renders
 the native Grafana provisioning path and runtime configuration; `.env` supplies

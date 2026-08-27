@@ -327,6 +327,70 @@ def _has_loopback_host(url: str) -> bool:
         return False
 
 
+def _url_host_port(url: str) -> str:
+    """`host:port` of a base URL — scheme and trailing slash stripped, the
+    Prometheus scrape-target form (the tempo target substitution's shape)."""
+    return url.rstrip("/").removeprefix("http://").removeprefix("https://")
+
+
+def _is_specific_non_loopback_listen(host: str) -> bool:
+    """Whether a listen host binds one specific address that loopback dials miss.
+
+    A wildcard bind (0.0.0.0 / ::) or a loopback bind still answers on
+    loopback, so neither breaks the default loopback read URLs. Only a specific
+    non-loopback IP does. Hostnames are not judged (resolution is out of scope
+    here); the external-migration form uses literal tailnet IPs.
+    """
+    h = host.strip().lower().removeprefix("[").removesuffix("]")
+    if h in ("0.0.0.0", "::", "localhost", "::1") or h.startswith("127."):  # noqa: S104 — wildcard classification, not a bind
+        return False
+    try:
+        return not ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _warn_listen_read_mismatches() -> None:
+    """Warn when a native backend binds a specific non-loopback address while
+    its telemetry read URL still resolves to loopback.
+
+    The healthcheck probes and the Prometheus scrape targets derive from the
+    telemetry URLs, so a widened listen host with loopback read URLs silently
+    breaks every read path (QA nit on PR #727, Task #1795)."""
+    from shared.config import settings
+
+    observability = settings.observability
+    backends = (
+        (
+            "loki",
+            "AVA_TELEMETRY_LOKI_URL",
+            observability.lgtm_listen_host,
+            observability.telemetry_loki_url,
+        ),
+        (
+            "prometheus",
+            "AVA_TELEMETRY_PROMETHEUS_URL",
+            observability.lgtm_listen_host,
+            observability.telemetry_prometheus_url,
+        ),
+        (
+            "grafana",
+            "AVA_TELEMETRY_GRAFANA_URL",
+            observability.lgtm_grafana_listen_host,
+            observability.telemetry_grafana_url,
+        ),
+    )
+    for backend, env_var, listen_host, read_url in backends:
+        if not _is_specific_non_loopback_listen(listen_host) or not _has_loopback_host(read_url):
+            continue
+        print(
+            "lgtm native: "
+            f"{env_var} resolves to {read_url} but {backend} listens on {listen_host} "
+            f"— set {env_var} to the listen address or keep the listen host loopback",
+            file=sys.stderr,
+        )
+
+
 def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     """Render native templates from this checkout and host configuration."""
     from shared.config import settings
@@ -343,6 +407,7 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
             "— set AVA_TELEMETRY_TEMPO_QUERY_URL to the remote cluster's query URL",
             file=sys.stderr,
         )
+    _warn_listen_read_mismatches()
     substitutions = {
         "AVA_HOME": str(ava_home),
         "AVA_PROVISIONING_PATH": str(provisioning_dir),
@@ -357,8 +422,13 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         if name == "prometheus.yml":
             template_substitutions = {
                 **substitutions,
-                "AVA_TEMPO_QUERY_URL": tempo_query_url.removeprefix("http://").removeprefix(
-                    "https://"
+                "AVA_TEMPO_QUERY_URL": _url_host_port(tempo_query_url),
+                "AVA_PROMETHEUS_SCRAPE_TARGET": _url_host_port(
+                    settings.observability.telemetry_prometheus_url
+                ),
+                "AVA_LOKI_SCRAPE_TARGET": _url_host_port(settings.observability.telemetry_loki_url),
+                "AVA_GRAFANA_SCRAPE_TARGET": _url_host_port(
+                    settings.observability.telemetry_grafana_url
                 ),
             }
         content = template
