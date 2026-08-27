@@ -298,7 +298,7 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
     status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 5})
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 5}
-    assert result == {"mode": "killed", "interrupted": False}
+    assert result == {"mode": "killed", "interrupted": False, "name": None}
 
 
 @pytest.mark.asyncio
@@ -316,7 +316,7 @@ async def test_dispatch_shell_kill_reports_absent(
     )
     status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 999})
     assert status == "completed"
-    assert result == {"mode": "absent", "interrupted": False}
+    assert result == {"mode": "absent", "interrupted": False, "name": None}
 
 
 @pytest.mark.asyncio

@@ -164,7 +164,7 @@ async def test_reap_expired_shells_deletes_on_killed(
         assert machine == "macmini"
         assert kind == "shell_kill"
         assert payload == {"agent_id": aid, "session_id": 3}
-        return ShellKillResult(mode="killed", interrupted=True).model_dump()
+        return ShellKillResult(mode="killed", interrupted=True, name="build").model_dump()
 
     monkeypatch.setattr(
         ttl_reaper.cluster_rpc,
@@ -179,7 +179,9 @@ async def test_reap_expired_shells_deletes_on_killed(
         row = cur.fetchone()
         assert row is not None and row[0] == 0
     msgs = _system_inbounds(db_conn, aid)
-    assert len(msgs) == 1 and "Shell session 3" in msgs[0]
+    assert len(msgs) == 1
+    assert "Shell session 'build' (id 3, agent" in msgs[0]
+    assert "interrupting a running task" in msgs[0]
 
 
 async def test_reap_expired_shells_keeps_row_on_unreachable(

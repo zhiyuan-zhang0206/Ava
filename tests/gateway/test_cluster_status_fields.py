@@ -212,18 +212,12 @@ def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
     from shared.cluster import session_name
 
     killed: list[str] = []
-    probed: list[str] = []
 
     class _Backend:
         @staticmethod
-        def session_has_active_processes(name: str) -> bool:
-            probed.append(name)
-            return True
-
-        @staticmethod
-        def kill_session(name: str) -> tuple[bool, str]:
+        def kill_session_with_verdict(name: str) -> tuple[bool, str, bool]:
             killed.append(name)
-            return True, "forced"
+            return True, "forced", True
 
     monkeypatch.setattr(
         cluster_status,
@@ -232,23 +226,22 @@ def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
 
-    # busy probe runs before the kill and rides the result as `interrupted`
-    assert cluster_status.kill_shell(7, 3) == ("killed", True)
+    # the verdict rides the kill itself (one call, no separate probe)
+    assert cluster_status.kill_shell(7, 3) == ("killed", True, "build")
     assert killed == [session_name("agent-7-shell-3-build")]
-    assert probed == [session_name("agent-7-shell-3-build")]
 
 
 def test_kill_shell_uninspectable_backend_reports_interrupted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A backend that cannot inspect a session's processes is treated as
-    busy (fail-open): the reap may interrupt work it cannot see, so the
-    notice must not be dropped."""
+    """A backend without a kill verdict is treated as interrupted (fail-open):
+    the reap may interrupt work it cannot see, so the notice must not be
+    dropped."""
     from ops.rpc_schemas import ShellInfo
 
     class _Backend:
         @staticmethod
-        def session_has_active_processes(_name: str) -> bool:
+        def kill_session_with_verdict(_name: str) -> tuple[bool, str, bool]:
             raise NotImplementedError
 
         @staticmethod
@@ -262,7 +255,7 @@ def test_kill_shell_uninspectable_backend_reports_interrupted(
     )
     monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
 
-    assert cluster_status.kill_shell(7, 3) == ("killed", True)
+    assert cluster_status.kill_shell(7, 3) == ("killed", True, None)
 
 
 def test_kill_shell_idle_session_reports_not_interrupted(
@@ -274,12 +267,8 @@ def test_kill_shell_idle_session_reports_not_interrupted(
 
     class _Backend:
         @staticmethod
-        def session_has_active_processes(_name: str) -> bool:
-            return False
-
-        @staticmethod
-        def kill_session(_name: str) -> tuple[bool, str]:
-            return True, "forced"
+        def kill_session_with_verdict(_name: str) -> tuple[bool, str, bool]:
+            return True, "forced", False
 
     monkeypatch.setattr(
         cluster_status,
@@ -288,12 +277,12 @@ def test_kill_shell_idle_session_reports_not_interrupted(
     )
     monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
 
-    assert cluster_status.kill_shell(7, 3) == ("killed", False)
+    assert cluster_status.kill_shell(7, 3) == ("killed", False, None)
 
 
 def test_kill_shell_missing_session_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluster_status, "agent_shell_sessions", lambda _agent_id: [])  # pyright: ignore[reportUnknownArgumentType]
-    assert cluster_status.kill_shell(7, 99) == ("absent", False)
+    assert cluster_status.kill_shell(7, 99) == ("absent", False, None)
 
 
 def test_capture_shell_capture_failure_raises(monkeypatch: pytest.MonkeyPatch):
