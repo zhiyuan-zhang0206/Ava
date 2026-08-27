@@ -843,6 +843,37 @@ def test_disk_watermark_exceeded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert _disk_watermark_exceeded(2.0) is False
 
 
+def test_initialize_relief_pass_runs_when_disk_over_watermark(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """The bounded-disk pass (gzip / retention / cap) runs BEFORE the
+    watermark guard: an over-watermark disk still gets its relief pass — an
+    old segment is pruned even though recording is auto-degraded."""
+    from shared.trace import initialize_tracing
+
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.config.settings.observability.trace_strip_content", True)
+    monkeypatch.setattr("shared.config.settings.observability.trace_retention_days", 14)
+    monkeypatch.setattr("shared.config.settings.observability.trace_max_dir_mb", 2048)
+    # Disk OVER the watermark: recording must be skipped...
+    monkeypatch.setattr("shared.trace._disk_usage", lambda: (0.99, 10 * 1024**3))
+    old = tmp_path / "spans-20200101-1.jsonl"
+    old.write_text("{}\n", encoding="utf-8")
+    calls: list[dict[str, object]] = []  # pyright: ignore[reportMissingTypeArgument]
+    monkeypatch.setattr(
+        "traceloop.sdk.Traceloop.init",
+        lambda **kw: calls.append(kw),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    )
+
+    initialize_tracing()
+
+    # ...but the relief pass still ran: the stale segment is gone, and
+    # recording itself was skipped (auto-degrade, watermark guard).
+    assert not old.exists()
+    assert calls == []
+
+
 def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """initialize_tracing forces TRACELOOP_TRACE_CONTENT=false before
     Traceloop.init when strip_content is on."""

@@ -587,14 +587,15 @@ def initialize_tracing() -> None:
     once and one daemon loop re-checks every five minutes until init succeeds.
 
     Guards (each independently configurable):
-    - disk watermark (`trace_disk_watermark`): data disk over the fraction ->
-      recording skipped, warning event emitted (auto-degrade).
     - compression (`_gzip_old_mirror`): rotated (non-active) mirror segments
       gzipped first, so retention and the cap see the compressed footprint.
     - retention (`trace_retention_days`): day-stamped mirror files older than
       N days pruned first (the collector's rotation also bounds them).
     - directory cap (`trace_max_dir_mb`): oldest mirror files deleted until
-      the directory fits under the cap.
+      the directory fits under the cap. These three run BEFORE the watermark
+      guard, so an over-watermark disk still gets its relief pass.
+    - disk watermark (`trace_disk_watermark`): data disk over the fraction ->
+      recording skipped, warning event emitted (auto-degrade).
     - content stripping (`trace_strip_content`): TRACELOOP_TRACE_CONTENT=false
       + exporter-side re-strip, so the mirror holds metadata only.
     """
@@ -605,10 +606,20 @@ def initialize_tracing() -> None:
     if not _observability_export_allowed():
         return
 
-    # Disk-watermark guard first: if the data disk is over its watermark,
-    # skip recording entirely (auto-degrade) instead of letting the mirror
-    # grow the disk toward full. Logged as a warning event so the degradation
-    # is visible; a later agent start re-checks.
+    # Bounded disk FIRST — before the watermark guard, so the relief valves
+    # still run when recording is auto-degraded: compress old segments (so
+    # the cap and the day retention see the post-compression footprint),
+    # then retention (days), then the hard directory cap. When the disk is
+    # already over the watermark this is exactly the pass that frees space —
+    # skipping it there would let an over-watermark disk stay full.
+    _gzip_old_mirror()
+    _prune_old_mirror(settings.observability.trace_retention_days)
+    _enforce_dir_cap(settings.observability.trace_max_dir_mb)
+
+    # Disk-watermark guard: if the data disk is over its watermark, skip
+    # recording entirely (auto-degrade) instead of letting the mirror grow
+    # the disk toward full. Logged as a warning event so the degradation is
+    # visible; a later agent start re-checks.
     usage = _disk_usage()
     if usage is not None and usage[0] > settings.observability.trace_disk_watermark:
         # Auto-degrade: skip recording so the mirror can never fill the disk.
@@ -625,13 +636,6 @@ def initialize_tracing() -> None:
             free_gb=round(usage[1] / (1024**3), 1),
         )
         return
-
-    # Bounded disk: compress old segments first (so the cap and the day
-    # retention see the post-compression footprint), then retention (days),
-    # then the hard directory cap.
-    _gzip_old_mirror()
-    _prune_old_mirror(settings.observability.trace_retention_days)
-    _enforce_dir_cap(settings.observability.trace_max_dir_mb)
 
     # Local-collector preflight: recording IS an OTLP export now, so a missing
     # sidecar means no recording (and no mirror — the mirror is written by the
