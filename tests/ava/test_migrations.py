@@ -1103,3 +1103,163 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
     finally:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (SYN_ORPHAN,))
+
+
+# ─── root-task-ongoing migration: legacy-schema execution ────────────────────
+
+
+_ROOT_ONGOING_UP = (
+    Path(__file__).resolve().parents[2] / "migrations" / "20260827T021440_root-task-ongoing.sql"
+)
+_ROOT_ONGOING_DOWN = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260827T021440_root-task-ongoing.down.sql"
+)
+
+# The pre-ruling agent_tasks shape: 4-value status CHECK (auto-named
+# agent_tasks_status_check) and the root seeded as 'in_progress'. Minimal but
+# faithful — the migration only touches agent_tasks, so the scratch DB needs no
+# other tables (owner FK references agents, created inline).
+_LEGACY_AGENT_TASKS = """
+CREATE TABLE agents (id BIGSERIAL PRIMARY KEY, label TEXT);
+CREATE TABLE agent_tasks (
+    id          BIGSERIAL PRIMARY KEY,
+    parent_id   BIGINT REFERENCES agent_tasks(id),
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL,
+    results     TEXT,
+    status      TEXT NOT NULL DEFAULT 'open'
+                CHECK (status IN ('open', 'in_progress', 'done', 'cancelled')),
+    priority    TEXT NOT NULL DEFAULT 'P2'
+                CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),
+    owner       BIGINT REFERENCES agents(id),
+    created_by  TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    is_root     BOOLEAN NOT NULL DEFAULT FALSE,
+    remind_interval_seconds INTEGER DEFAULT 1800,
+    last_reminded_at TIMESTAMPTZ,
+    reminder_count INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO agents (id, label) VALUES (1, 'agent');
+INSERT INTO agent_tasks (id, title, description, status, created_by, is_root, owner)
+VALUES (1, 'Root', 'root', 'in_progress', 'system', TRUE, NULL),
+       (2, 'regular', 'regular task', 'in_progress', '1', FALSE, 1);
+"""
+
+
+def _run_sql(url: str, sql_body: str) -> None:
+    """Execute a multi-statement SQL body (a migration file) in one transaction."""
+    with psycopg.connect(url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL(cast(LiteralString, sql_body)), prepare=False)
+        conn.commit()
+
+
+def _agent_tasks_shape(url: str) -> tuple[str, str, str | None]:
+    """Return (root_status, status_constraint_sql, root_pin_sql) from the scratch DB."""
+    with psycopg.connect(url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status FROM agent_tasks WHERE is_root")
+        root_row = cur.fetchone()
+        assert root_row is not None
+        cur.execute(
+            """SELECT pg_get_constraintdef(oid) FROM pg_constraint
+               WHERE conrelid = 'agent_tasks'::regclass
+                 AND conname = 'agent_tasks_status_check'"""
+        )
+        status_row = cur.fetchone()
+        assert status_row is not None
+        cur.execute(
+            """SELECT pg_get_constraintdef(oid) FROM pg_constraint
+               WHERE conrelid = 'agent_tasks'::regclass
+                 AND conname = 'agent_tasks_root_status_ongoing'"""
+        )
+        root_pin = cur.fetchone()
+    return root_row[0], status_row[0], root_pin[0] if root_pin else None
+
+
+def test_root_task_ongoing_migration_upgrades_legacy_schema() -> None:
+    """The migration runs on a PRE-ruling cluster: old 4-value CHECK + root
+    'in_progress'. Regression for the adversarial-review finding (PR #746) that
+    the original body UPDATE'd the root before dropping the old CHECK, aborting
+    `ava cluster update` on every existing cluster (migration smoke only
+    replays on a fresh schema.sql, so CI could not see it).
+
+    Asserts the full legacy -> new shape transition, including the
+    bidirectional root pin (a direct UPDATE on a non-root row is rejected by
+    the DB, not only by API guards)."""
+    with _throwaway_database("root-ongoing-up") as url:
+        _run_sql(url, _LEGACY_AGENT_TASKS)
+        # Precondition: legacy shape.
+        root_status, status_check, root_pin = _agent_tasks_shape(url)
+        assert root_status == "in_progress"
+        assert "cancelled" in status_check and "ongoing" not in status_check
+        assert root_pin is None
+
+        # Apply the UP migration — must succeed on the legacy shape.
+        _run_sql(url, _ROOT_ONGOING_UP.read_text())
+
+        # Root moved to 'ongoing'; CHECK widened; bidirectional pin in place.
+        root_status, status_check, root_pin = _agent_tasks_shape(url)
+        assert root_status == "ongoing"
+        assert "ongoing" in status_check
+        # Bidirectional pin: root must be ongoing AND non-root must not be.
+        assert root_pin is not None
+        assert "is_root" in root_pin and "status = 'ongoing'" in root_pin
+        assert "NOT is_root" in root_pin and "status <> 'ongoing'" in root_pin
+
+        # Bidirectional pin: a non-root row cannot be direct-UPDATE'd to
+        # 'ongoing' (DB-level, no API involved).
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute(
+                """UPDATE agent_tasks SET status = 'ongoing'
+                       WHERE id = 2"""
+            )
+
+        # The root itself cannot be moved off 'ongoing' either.
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute(
+                """UPDATE agent_tasks SET status = 'done'
+                       WHERE id = 1"""
+            )
+
+
+def test_root_task_ongoing_migration_down_restores_legacy_schema() -> None:
+    """The DOWN migration restores the pre-ruling shape on a cluster that ran
+    the UP: root back to 'in_progress', 4-value CHECK back, root pin gone.
+    Regression for the finding that the original down ADD'd the 4-value CHECK
+    while the root was still 'ongoing' — ADD CONSTRAINT validates existing rows
+    and aborted the rollback."""
+    with _throwaway_database("root-ongoing-down") as url:
+        _run_sql(url, _LEGACY_AGENT_TASKS)
+        _run_sql(url, _ROOT_ONGOING_UP.read_text())
+        # Sanity: we are on the new shape before rolling back.
+        root_status, _, _ = _agent_tasks_shape(url)
+        assert root_status == "ongoing"
+
+        _run_sql(url, _ROOT_ONGOING_DOWN.read_text())
+
+        root_status, status_check, root_pin = _agent_tasks_shape(url)
+        assert root_status == "in_progress"
+        assert "cancelled" in status_check and "ongoing" not in status_check
+        assert root_pin is None
+
+        # 'ongoing' is no longer a legal value at all.
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute(
+                """UPDATE agent_tasks SET status = 'ongoing'
+                       WHERE id = 2"""
+            )
