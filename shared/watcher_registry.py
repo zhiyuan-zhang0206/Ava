@@ -44,6 +44,121 @@ _KIND_PAYLOAD = {
 }
 
 
+_REGISTER_SQL = """
+    INSERT INTO agent_watchers (
+        session_id, agent_id, kind, name, message, fires_at,
+        cron_expr, cron_timezone, cron_end_at, timeout_secs,
+        template_version
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (agent_id, session_id) DO NOTHING
+"""
+
+
+def cron_advisory_key(
+    agent_id: int,
+    cron_expr: str,
+    cron_timezone: str,
+    cron_end_at: Any,
+) -> int:
+    """The pg_advisory_xact_lock key serializing one (agent, cron schedule) pair.
+
+    ONE 64-bit int: the agent id in the high 32 bits, a stable CRC32 of the
+    schedule (expr, timezone, normalized end time) in the low 32 bits. A
+    single int8 keeps the call an unambiguous `pg_advisory_xact_lock(int8)`
+    — two ints would arrive as (int2|int4, int8) and match no overload (the
+    CRC32 is unsigned and exceeds int4). Collisions only over-serialize (two
+    schedules sharing a key wait on each other briefly) — never
+    under-serialize. The normalized end time is UTC-aware, so the key is
+    stable across processes and machines (Task #1825 N2).
+    """
+    import zlib
+
+    end = cron_end_at.isoformat() if cron_end_at is not None else ""
+    schedule = zlib.crc32(f"{cron_expr}\x00{cron_timezone}\x00{end}".encode()) & 0xFFFFFFFF
+    return (agent_id << 32) | schedule
+
+
+def register_cron_atomic(
+    agent_id: int,
+    session_id: int,
+    *,
+    name: str,
+    message: str | None,
+    cron_expr: str,
+    cron_timezone: str,
+    cron_end_at: Any,
+    alive: set[int] | None,
+    exclude_session: int | None = None,
+    template_version: int | None = None,
+) -> int | None:
+    """Register one cron watcher row atomically — reuse a live duplicate or insert.
+
+    ONE transaction on ONE connection: `pg_advisory_xact_lock` on the
+    (agent, schedule) key, then a re-check for a live row with the same
+    schedule, then the INSERT when none exists. Returns the REUSED session id
+    when a live duplicate exists (the new row is NOT inserted and the
+    transaction rolls back); returns None when the new row was inserted and
+    committed. Two concurrent registrations of the same schedule serialize on
+    the lock: the loser's re-check sees the winner's committed row and reuses
+    it — the Task #1825 dedupe becomes atomic (N2).
+
+    The lock is TRANSACTION-scoped, deliberately not session-level: normal
+    processes dial the cluster's PgBouncer (`pool_mode = transaction`,
+    `server_reset_query = DISCARD ALL`), which silently drops session-level
+    advisory locks when the pooled backend returns to the pool — the #794
+    BLOCK. One transaction pins one pooled backend, so lock + check + insert
+    execute on the same backend and the lock lives exactly as long as the
+    serialization needs it; on a direct connection the semantics are
+    identical.
+
+    `alive` is the caller's fresh session-id set: a same-schedule `running`
+    row counts as a duplicate only when its session is in it (a dead row is
+    exactly what the boot reconcile is about to rebuild — it must not block
+    a fresh registration). `alive=None` (session list unavailable) finds no
+    duplicate — a duplicate is recoverable, a reused dead session would
+    silently lose the schedule. `exclude_session` skips one row — the
+    stale-template rebuild must not dedupe against the live session it is
+    replacing.
+    """
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (cron_advisory_key(agent_id, cron_expr, cron_timezone, cron_end_at),),
+        )
+        cur.execute(
+            """
+            SELECT session_id FROM agent_watchers
+            WHERE agent_id = %s AND kind = 'cron' AND status = 'running'
+              AND cron_expr = %s AND cron_timezone = %s
+              AND cron_end_at IS NOT DISTINCT FROM %s
+              AND session_id != %s
+            ORDER BY created_at DESC, session_id DESC
+            LIMIT 1
+            """,
+            (agent_id, cron_expr, cron_timezone, cron_end_at, exclude_session or -1),
+        )
+        row = cur.fetchone()
+        if row is not None and alive is not None and row[0] in alive:
+            return int(row[0])
+        cur.execute(
+            _REGISTER_SQL,
+            (
+                session_id,
+                agent_id,
+                "cron",
+                name,
+                message,
+                None,
+                cron_expr,
+                cron_timezone,
+                cron_end_at,
+                None,
+                template_version,
+            ),
+        )
+    return None
+
+
 def register_watcher(
     agent_id: int,
     session_id: int,
@@ -67,19 +182,15 @@ def register_watcher(
     template fix reaches sessions that were already running when it landed
     (issue #1330). Fail-soft at the call site: a registry write must never
     break the watcher it is only observing.
+
+    Cron registrations go through `register_cron_atomic` instead — the
+    Task #1825 dedupe lives in the registration itself.
     """
     if kind not in _KIND_PAYLOAD:
         raise ValueError(f"unknown watcher kind {kind!r}")
     with connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
-            """
-            INSERT INTO agent_watchers (
-                session_id, agent_id, kind, name, message, fires_at,
-                cron_expr, cron_timezone, cron_end_at, timeout_secs,
-                template_version
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (agent_id, session_id) DO NOTHING
-            """,
+            _REGISTER_SQL,
             (
                 session_id,
                 agent_id,

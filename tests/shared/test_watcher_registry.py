@@ -153,3 +153,148 @@ def test_mark_status_scoped_to_agent() -> None:
     wr.mark_status(1, 6, "rebuilt")
     rows = {r["agent_id"]: r["status"] for r in wr.watcher_rows()}
     assert rows == {1: "rebuilt", 2: "running"}
+
+
+# ─── atomic cron registration (Task #1825 N2) ────────────────────────────────
+
+
+def test_register_cron_atomic_inserts_when_no_live_duplicate() -> None:
+    """No same-schedule live row → the new row is inserted and committed."""
+    reused = wr.register_cron_atomic(
+        42,
+        2001,
+        name="daily",
+        message="stand-up",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=None,
+        alive=set(),
+    )
+    assert reused is None
+    rows = wr.watcher_rows(agent_id=42)
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == 2001
+    assert rows[0]["status"] == "running"
+
+
+def test_register_cron_atomic_reuses_live_duplicate() -> None:
+    """A same-schedule row whose session is LIVE is reused: no new row is
+    inserted, the existing session id is returned."""
+    wr.register_watcher(
+        42,
+        2002,
+        kind="cron",
+        name="daily",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+    reused = wr.register_cron_atomic(
+        42,
+        2003,
+        name="daily-dup",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=None,
+        alive={2002},
+    )
+    assert reused == 2002
+    rows = wr.watcher_rows(agent_id=42)
+    assert [r["session_id"] for r in rows] == [2002]  # 2003 never inserted
+
+
+def test_register_cron_atomic_ignores_dead_duplicate() -> None:
+    """A same-schedule row whose session is DEAD does not block the insert —
+    that dead row is exactly what the boot reconcile is about to rebuild."""
+    wr.register_watcher(
+        42,
+        2004,
+        kind="cron",
+        name="daily",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+    reused = wr.register_cron_atomic(
+        42,
+        2005,
+        name="daily",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=None,
+        alive=set(),  # 2004's session is gone
+    )
+    assert reused is None
+    rows = {r["session_id"] for r in wr.watcher_rows(agent_id=42)}
+    assert rows == {2004, 2005}
+
+
+def test_register_cron_atomic_schedule_scoped() -> None:
+    """The dedupe key is the full schedule: a different timezone or end time
+    is a different watcher and does not block; a standing cron (NULL end) and
+    an ended one do not collide."""
+    wr.register_watcher(
+        42,
+        2006,
+        kind="cron",
+        name="utc",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+    # same expr, different timezone — separate watcher
+    reused = wr.register_cron_atomic(
+        42,
+        2007,
+        name="sh",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="Asia/Shanghai",
+        cron_end_at=None,
+        alive={2006},
+    )
+    assert reused is None
+    # same timezone, different end time — separate watcher
+    reused = wr.register_cron_atomic(
+        42,
+        2008,
+        name="ended",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=_FUTURE,
+        alive={2006},
+    )
+    assert reused is None
+    rows = {r["session_id"] for r in wr.watcher_rows(agent_id=42)}
+    assert rows == {2006, 2007, 2008}
+
+
+def test_register_cron_atomic_exclude_session() -> None:
+    """exclude_session skips one live row — the stale-template rebuild must
+    replace (not dedupe against) the very session it is upgrading."""
+    wr.register_watcher(
+        42,
+        2009,
+        kind="cron",
+        name="stale",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+    reused = wr.register_cron_atomic(
+        42,
+        2010,
+        name="stale",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=None,
+        alive={2009},
+        exclude_session=2009,
+    )
+    assert reused is None  # the live 2009 was excluded — 2010 inserted
+    rows = {r["session_id"] for r in wr.watcher_rows(agent_id=42)}
+    assert rows == {2009, 2010}
