@@ -78,7 +78,15 @@ def in_low_traffic_window(now: datetime | None = None) -> bool:
 
 @dataclass(frozen=True)
 class CheckpointTableSizes:
-    """One checkpoint-table state sample: physical sizes + live row counts."""
+    """One checkpoint-table state sample: physical sizes + live row counts.
+
+    Both are statistics, not instantaneous measurements: `pg_total_relation_size`
+    reflects `pg_class.relpages`, refreshed by VACUUM/ANALYZE/autovacuum, and
+    `pg_stat_get_live_tuples` the commit-time stats — so a series of hourly
+    samples inside one day mostly repeats the values as of the last vacuum.
+    Sizes and live counts lag together, so the live-vs-bloat decomposition of
+    the physical-size curve stays valid.
+    """
 
     blobs_bytes: int
     checkpoints_bytes: int
