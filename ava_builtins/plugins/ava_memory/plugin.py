@@ -70,7 +70,10 @@ from __future__ import annotations
 
 __description__ = "Shared memory pool: ava.memory SDK surface (PATH + search + write) + passive recall hook (auto-surfaces relevant notes) + daily consolidation skill (commit, push, re-index)"
 
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows ships no fcntl module; the index lock degrades (see _locked_update)
+    fcntl = None  # type: ignore[assignment]
 import os
 import re
 import tempfile
@@ -236,10 +239,18 @@ def _pointer_line(title: str, relative_path: str, description: str) -> str:
 
 
 def _locked_update(index_path: Path, update: Callable[[str], str]) -> None:
-    """Apply one index update while holding its advisory per-file lock."""
+    """Apply one index update while holding its advisory per-file lock.
+
+    POSIX: fcntl.flock, unchanged. Windows has no fcntl module, so the lock
+    degrades to a no-op there — the update itself still runs, unguarded. The
+    lock is advisory and each upsert rewrites a single pointer line in place,
+    so an unlocked Windows update can at worst drop one line under a
+    concurrent writer; on a single-user box that beats crashing every agent at
+    plugin load (unguarded import introduced by 6e96b1554)."""
     index_path.parent.mkdir(parents=True, exist_ok=True)
     with index_path.open("a+", encoding="utf-8") as index_file:
-        fcntl.flock(index_file.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(index_file.fileno(), fcntl.LOCK_EX)
         try:
             index_file.seek(0)
             text = update(index_file.read())
@@ -248,7 +259,8 @@ def _locked_update(index_path: Path, update: Callable[[str], str]) -> None:
             index_file.write(text)
             index_file.flush()
         finally:
-            fcntl.flock(index_file.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(index_file.fileno(), fcntl.LOCK_UN)
 
 
 def _upsert_index(
