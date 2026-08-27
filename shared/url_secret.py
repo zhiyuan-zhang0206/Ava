@@ -101,3 +101,16 @@ def url_with_query_param(url: str, key: str, value: str) -> str:
     params = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != key]
     params.append((key, value))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+
+
+def url_host(url: str, fallback: str = "127.0.0.1") -> str:
+    """The host a URL names — `urlsplit(...).hostname` (lowercased, an IPv6
+    literal unbracketed) or `fallback` when the URL carries no host.
+
+    The data-plane URLs this codebase generates always carry a host (the boot
+    sentinels name loopback), so the fallback is a defensive floor for a
+    hand-written URL without one — never a route for an empty host to reach
+    something unintended: 127.0.0.1 is unreachable off-box, and the connect
+    guard still matches the unanchored sentinel byte-for-byte.
+    """
+    return urlsplit(url).hostname or fallback

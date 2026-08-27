@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from shared.cluster import ClusterPorts
+from shared.config import settings
 
 
 def _repo_root() -> Path:
@@ -136,6 +137,13 @@ def _ensure_record(home: Path) -> tuple[Any, bool]:
             ports=ports,
             gateway_home=str(Path(home).expanduser()),
             created_at=datetime.now(UTC).isoformat(),
+            # The derived-URL host for this cluster's data plane (empty =
+            # loopback, the single-box posture). Read from the settings knob
+            # AVA_DATA_PLANE_HOST at birth — a host-scope input that survives
+            # the env-authority pass on a not-yet-born home — and snapshotted
+            # on the record because derive_env runs at birth, before the
+            # home's .env exists (external data plane: Task #1752).
+            data_plane_host=(settings.data_plane.data_plane_host or "").strip(),
         )
         cl.save_record_locked(rec)  # lock already held — see ensure_registered
         return rec, True

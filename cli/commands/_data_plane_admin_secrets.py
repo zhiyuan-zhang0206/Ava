@@ -34,7 +34,7 @@ from shared.paths import ava_home
 from shared.platform import file_lock
 from shared.private_storage import write_private_bytes
 from shared.rollout_handoff import update_process_env
-from shared.url_secret import url_with_password
+from shared.url_secret import url_host, url_with_password
 
 _TOKEN_BYTES = 32
 _TRANSITION_FILE = "data-plane-credential-split.json"
@@ -132,14 +132,16 @@ def _mint_or_existing(values: dict[str, str | None], key: str) -> str:
     return (values.get(key) or "").strip() or secrets.token_urlsafe(_TOKEN_BYTES)
 
 
-def _working_redis_admin_password(redis_port: int, candidates: tuple[str, ...]) -> str:
+def _working_redis_admin_password(
+    redis_host: str, redis_port: int, candidates: tuple[str, ...]
+) -> str:
     """Return the first known password Redis currently accepts for ``default``."""
     import redis
 
     def _works(password: str) -> bool:
         try:
             with redis.Redis(
-                host="127.0.0.1",
+                host=redis_host,
                 port=redis_port,
                 username="default",
                 password=password,
@@ -188,6 +190,11 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
     identity = identity_from_url(settings.data_plane.db_url)
     pg_port = record_postgres_port(record)
     redis_port = record_redis_port(record)
+    # The admin dials go to the host THIS cluster's redis_url names — the URL
+    # is the single dial source (self-host URLs are loopback-rewritten by
+    # DataPlaneSettings; an externally-hosted data plane is dialed at its own
+    # address, Task #1752). Loopback fallback for a URL without a host.
+    redis_host = url_host(settings.data_plane.redis_url)
 
     if transition is None:
         db_admin_password = _mint_or_existing(values, "AVA_DB_ADMIN_PASSWORD")
@@ -219,6 +226,7 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
     import redis
 
     current_redis_admin = _working_redis_admin_password(
+        redis_host,
         redis_port,
         (
             (values.get("AVA_REDIS_ADMIN_PASSWORD") or "").strip(),
@@ -228,7 +236,7 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
         ),
     )
     with redis.Redis(
-        host="127.0.0.1",
+        host=redis_host,
         port=redis_port,
         username="default",
         password=current_redis_admin,
@@ -242,7 +250,7 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
 
     ensure_cluster_redis_acl(
         identity,
-        redis_admin_url=f"redis://default:{redis_admin_password}@127.0.0.1:{redis_port}",
+        redis_admin_url=f"redis://default:{redis_admin_password}@{redis_host}:{redis_port}",
         runtime_password=redis_password,
         channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
     )

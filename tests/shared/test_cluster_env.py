@@ -136,10 +136,83 @@ def test_derive_env_pgbouncer_enabled_writes_pooler_port(tmp_path: Path):
 
 def test_per_cluster_base_urls_point_at_own_instance_ports(tmp_path: Path):
     """Every cluster's base URLs are loopback at its own allocated pg/redis ports —
-    derive_env then swaps in the db name + `ava_<cluster>` identity + secret."""
+    derive_env then swaps in the db name + `ava_<cluster>` identity + secret.
+    The default (no `data_plane_host` on the record) MUST render exactly this
+    local form — the A5 de-hardcoding contract: parameterizing the host source
+    is not a behavior change."""
     db, redis = cluster.per_cluster_base_urls(_rec(tmp_path))
     assert db == "postgresql://x@127.0.0.1:18011/postgres"
     assert redis == "redis://127.0.0.1:18012/0"
+
+
+def test_per_cluster_base_urls_use_record_data_plane_host(tmp_path: Path):
+    """A record carrying `data_plane_host` renders its URLs at that host — the
+    replaceable source the de-hardcoding exists for (external data plane,
+    Task #1752). Ports and everything else stay the record's own."""
+    from dataclasses import replace
+
+    rec = replace(_rec(tmp_path), data_plane_host="10.0.0.7")
+    db, redis = cluster.per_cluster_base_urls(rec)
+    assert db == "postgresql://x@10.0.0.7:18011/postgres"
+    assert redis == "redis://10.0.0.7:18012/0"
+
+
+def test_per_cluster_base_urls_blank_host_falls_back_to_loopback(tmp_path: Path):
+    """An explicitly blank `data_plane_host` is the same as absent: loopback.
+    The record is born with "" (or an old record loads without the field at
+    all), so the fallback IS the default-behavior contract."""
+    from dataclasses import replace
+
+    rec = replace(_rec(tmp_path), data_plane_host="  ")
+    db, redis = cluster.per_cluster_base_urls(rec)
+    assert db == "postgresql://x@127.0.0.1:18011/postgres"
+    assert redis == "redis://127.0.0.1:18012/0"
+
+
+def test_registry_round_trip_preserves_data_plane_host(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """`data_plane_host` is a durable registry fact: save → load returns it, and
+    an old-shape record (no field on disk) loads with the loopback default — the
+    compat rule every existing cluster depends on."""
+    import json
+    from dataclasses import replace
+
+    from shared import cluster as cl
+
+    reg = tmp_path / "clusters.json"
+    monkeypatch.setattr(cl, "registry_path", lambda: reg)
+    rec = replace(_rec(tmp_path), data_plane_host="10.0.0.7")
+    cl.save_record(rec)
+    assert cl.get_record(tmp_path / ".ava-t1") == rec
+    # Old-shape on-disk record without the field loads with the "" default.
+    reg.write_text(
+        json.dumps(
+            {
+                ".ava-t1": {
+                    "name": ".ava-t1",
+                    "ports": dict(rec.ports),
+                    "gateway_home": str(tmp_path / ".ava-t1"),
+                    "created_at": "x",
+                }
+            }
+        )
+    )
+    loaded = cl.get_record(tmp_path / ".ava-t1")
+    assert loaded is not None
+    assert loaded.data_plane_host == ""
+
+
+def test_url_host_reads_host_with_loopback_fallback():
+    """`url_host` — the one host-from-URL read the A5 dial sites share: hostname
+    when present, 127.0.0.1 when the URL carries none (a defensive floor for a
+    hand-written URL; every generated data-plane URL always names a host)."""
+    from shared.url_secret import url_host
+
+    assert url_host("postgresql://x@127.0.0.1:5433/postgres") == "127.0.0.1"
+    assert url_host("redis://ava:p@10.0.0.7:6380/0") == "10.0.0.7"
+    assert url_host("postgresql://x@/postgres") == "127.0.0.1"
+    assert url_host("redis://:6380/0") == "127.0.0.1"
 
 
 def test_wsl_default_health_port_base_cannot_collide_with_a_birthed_cluster():
