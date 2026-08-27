@@ -20,6 +20,13 @@ import type { SystemEvent } from "../types";
 import type { ConnectionEvent } from "../useEventStream";
 
 const INVALIDATE_DEBOUNCE_MS = 2_000;
+// The notices families use a SHORT window instead of the 2s one (Task #1814):
+// a resolve must reflect promptly, but a batch resolve publishes N
+// notice_resolved events — immediate invalidation would fan out into up to N
+// refetches of the open queue + history. 300ms collapses the burst to one
+// refetch per window; the Inbox's optimistic cache drop keeps the click-to-
+// row-gone latency at response time regardless.
+const NOTICES_INVALIDATE_DEBOUNCE_MS = 300;
 
 // Throttle window for the central reconnect reconcile (the invalidate-all
 // below). "open" fires on the initial connect AND on every reconnect — and
@@ -51,22 +58,21 @@ export function useFoldOwner(): FoldOwner {
     [],
   );
 
-  // The notices families are EXEMPT from the debounce (Task #1814): the open
+  // The notices families use the SHORT debounce window (Task #1814): the open
   // queue and its resolved history are the actively-viewed list — a resolve
-  // must reflect promptly, and the refetch is a cheap keyset query. The
-  // debounce exists for the heavy server-computed families (fleet-graph,
-  // tasks), whose bursts would otherwise fan out; TanStack itself coalesces
-  // a burst of immediate invalidations that land within one tick anyway.
+  // must reflect promptly, and the refetch is a cheap keyset query. The 2s
+  // window remains for the heavy server-computed families (fleet-graph,
+  // tasks), whose bursts would otherwise fan out.
   const ctx: FoldContext = useMemo(
     () => ({
       getQueryData: (key) => queryClient.getQueryData(key),
       setQueryData: (key, value) => queryClient.setQueryData(key, value),
       invalidateQueries: (key) => {
         const family = String(key[0]);
-        if (family === "notices" || family === "notices-resolved") {
-          void queryClient.invalidateQueries({ queryKey: key });
-          return;
-        }
+        const debounceMs =
+          family === "notices" || family === "notices-resolved"
+            ? NOTICES_INVALIDATE_DEBOUNCE_MS
+            : INVALIDATE_DEBOUNCE_MS;
         const existing = timersRef.current.get(family);
         if (existing !== undefined) clearTimeout(existing);
         timersRef.current.set(
@@ -74,7 +80,7 @@ export function useFoldOwner(): FoldOwner {
           setTimeout(() => {
             timersRef.current.delete(family);
             void queryClient.invalidateQueries({ queryKey: key });
-          }, INVALIDATE_DEBOUNCE_MS),
+          }, debounceMs),
         );
       },
     }),
