@@ -231,7 +231,7 @@ MODELS: dict[str, ModelSpec] = {
             llm_stream_ttft_timeout_seconds=600.0,
             # Compact thresholds pinned 2026-08-27 (user decision, superseding
             # task #581's 374k/512k): soft 600k / hard 700k. Fleet evidence:
-            # natural history growth (incl. model outputs) tops out ~700k, and
+            # observed max per-call input 513,831 (nothing above 600k), and
             # DeepSeek cached-read pricing (~$0.022/M) makes the larger prefix
             # cheap to re-read; see
             # decisions/2026-08-27-deepseek-compact-thresholds-600k-700k.md.

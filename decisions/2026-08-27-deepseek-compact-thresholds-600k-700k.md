@@ -8,14 +8,17 @@ were measured against the flat 30/40 rule and DeepSeek's published trigger, not
 against Ava's own production traffic. A 2026-08-27 fleet analysis (200 recently
 active workers, per-call `llm_usage` accounting) closed that gap:
 
-- Natural context growth — system prompt + tools + new input + **model outputs**
-  (outputs live in the cached prefix too) — tops out at ~698k tokens in the
-  sample; no worker naturally grows past it.
+- Observed per-call input tops out at **513,831** tokens in the sample: one
+  worker ever exceeded 512k, none exceeded 600k.
+- Compactions are real but mostly voluntary: 19 compact events across 14 of the
+  199 workers in the 17h window (25 events / 16 workers in 24h; 150 events
+  fleet-wide over 7 days) — several times what the threshold alone predicts, so
+  the soft threshold is not today's binding constraint.
 - DeepSeek cached-read pricing (~$0.022/M, a 30× read discount) makes a larger
-  prefix nearly free to re-read: raising the soft limit from 374k to 748k costs
-  ~$2.1 per 17h across the 200-worker fleet (+152M re-read tokens, +51min of
-  prefill at the measured ~50k tok/s cached-read throughput), and saves only a
-  handful of summary passes (~$0.04).
+  prefix nearly free to re-read: letting the four workers whose prefix passed
+  374k keep it instead of compacting costs ~$1.1 per 17h (+77.8M re-read tokens,
+  ~26min of prefill at the measured ~50k tok/s cached-read throughput), and the
+  saved summary passes are worth ~$0.04.
 - The real cost of compacting is context loss: a ~1.3k-token summary replaces
   the full history, and any detail the summary missed is re-derivation work.
   Measured post-compact behavior: cache ratio drops 99.9% → 92.7% on the first
@@ -39,10 +42,10 @@ The ceiling knob stays unused roster-wide.
 
 ## Alternatives rejected
 
-- **748k soft / 840–880k hard** (the analysis' upper recommendation): covers the
-  observed ~698k natural maximum with no forced compactions at all. Rejected as
-  the first step in favor of the more conservative 600k/700k — it still removes
-  the forced-compact pressure for everything below 700k while keeping a
+- **748k soft / 840–880k hard** (the analysis' upper recommendation): covers
+  every observed input (max 513,831) with no forced compactions at all. Rejected
+  as the first step in favor of the more conservative 600k/700k — it still
+  removes the forced-compact pressure for everything below 700k while keeping a
   reminder→compaction gap before the 1M window, and the user preferred an
   incremental move.
 - **970k soft / hard above it**: zero incremental effect in the sample (nothing
@@ -59,8 +62,8 @@ The ceiling knob stays unused roster-wide.
 ## Consequences
 
 - DeepSeek agents compact less often and lose less context; the fleet pays a
-  measured ~$2/17h (~$3/day) extra in re-reads at current traffic — the accepted
-  price of fewer summary-induced rework passes.
+  measured ~$1.1/17h (~$1.6/day) extra in re-reads at current traffic — the
+  accepted price of fewer summary-induced rework passes.
 - The 1M-window headroom above the 700k hard limit is ~300k — enough for the
   observed per-turn growth (p99 7.3k, max 159k) without force-compacting
   mid-turn.
