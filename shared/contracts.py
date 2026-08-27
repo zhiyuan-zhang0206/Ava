@@ -311,6 +311,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
         note="CAS resolve — repeats are harmless"
     ),
+    ("POST", "/api/notices/resolve-batch"): RouteContract(
+        note="batch mark-read of FYI notices — idempotent, already-resolved rows are skipped"
+    ),
     ("POST", "/api/agents/{agent_id}/notices"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="create notice — supersedes the previous open one; a retry supersedes twice (harmless but pointless), duplicate row",

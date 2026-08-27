@@ -21,6 +21,7 @@ require_response, carries the whole agent->user queue. Covers:
 """
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
@@ -807,6 +808,106 @@ def test_resolve_cross_agent_path_409(db_conn: psycopg.Connection) -> None:
     snap = select_one(db_conn, a)
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
+
+
+# ── POST /api/notices/resolve-batch ("Mark all read", Task #1814) ───────
+
+
+def test_resolve_batch_marks_all_fyi_read_in_one_call(db_conn: psycopg.Connection) -> None:
+    """The batch path resolves every listed open FYI notice in one transaction —
+    the Inbox's "Mark all read". require_response rows are skipped, never
+    resolved; already-resolved rows are skipped (idempotent)."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    fyi1 = _insert_notice(db_conn, a, "fyi one")
+    fyi2 = _insert_notice(db_conn, a, "fyi two")
+    fyi3 = _insert_notice(db_conn, b, "fyi three")
+    decision = _insert_notice(db_conn, b, "needs you", require_response=True)
+    already = _insert_notice(
+        db_conn, a, "old", resolved_at="2026-06-14T01:00:00Z", resolution="read"
+    )
+    missing = 999_999  # never inserted
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/notices/resolve-batch",
+            json={"notice_ids": [fyi1, fyi2, fyi3, decision, already, missing]},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"resolved": 3, "skipped": 3}
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, resolved_at, resolution FROM agent_notices WHERE id = ANY(%s) ORDER BY id",
+            ([fyi1, fyi2, fyi3, decision, already],),
+        )
+        rows = cur.fetchall()
+    resolved = {r[0]: (r[1], r[2]) for r in rows}
+    for nid in (fyi1, fyi2, fyi3):
+        at, res = resolved[nid]
+        assert at is not None and res == "read", f"notice {nid} not resolved"
+    # the decision notice keeps its worklist slot; the already-resolved row
+    # keeps its original resolution timestamp (untouched, not re-stamped)
+    assert resolved[decision][0] is None
+    already_at, already_res = resolved[already]
+    assert already_res == "read"
+    assert already_at == datetime(2026, 6, 14, 1, 0, tzinfo=UTC)
+
+
+def test_resolve_batch_empty_and_oversized_422(db_conn: psycopg.Connection) -> None:
+    a = _seed_agent(db_conn)
+    nid = _insert_notice(db_conn, a, "fyi")
+    with TestClient(app) as client:
+        empty = client.post("/api/notices/resolve-batch", json={"notice_ids": []})
+        dupes = client.post("/api/notices/resolve-batch", json={"notice_ids": [nid, nid, nid]})
+        too_big = client.post("/api/notices/resolve-batch", json={"notice_ids": list(range(501))})
+    assert empty.status_code == 422
+    assert dupes.status_code == 200, dupes.text
+    assert dupes.json() == {"resolved": 1, "skipped": 0}  # deduped, not tripled
+    assert too_big.status_code == 422
+
+
+def test_resolve_batch_publishes_each_resolved_notice(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every resolved row announces a NoticeResolved event (GLOBAL id) so the
+    frontend fold drops each from the open queue; skipped rows announce nothing."""
+    from gateway.routers import notices as notices_router
+
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    fyi1 = _insert_notice(db_conn, a, "one")
+    fyi2 = _insert_notice(db_conn, b, "two")
+    decision = _insert_notice(db_conn, a, "needs you", require_response=True)
+
+    published: list[int] = []
+
+    async def _capture(agent_id: int, notice_id: int) -> None:
+        published.append(notice_id)
+
+    monkeypatch.setattr(notices_router._ops, "publish_notice_resolved", _capture)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/notices/resolve-batch",
+            json={"notice_ids": [fyi1, decision, fyi2]},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"resolved": 2, "skipped": 1}
+    assert published == [fyi1, fyi2]
+
+
+def test_resolve_batch_reads_wake_no_agent(db_conn: psycopg.Connection) -> None:
+    """Bare batch reads deliver no chat inbound — same contract as the
+    single-notice read-without-reply path."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    n1 = _insert_notice(db_conn, a, "one")
+    n2 = _insert_notice(db_conn, b, "two")
+    with TestClient(app) as client:
+        resp = client.post("/api/notices/resolve-batch", json={"notice_ids": [n1, n2]})
+    assert resp.status_code == 200
+    assert _pending_rows(db_conn, a) == []
+    assert _pending_rows(db_conn, b) == []
 
 
 # --- GET /api/notices/resolved (history) ------------------------------------

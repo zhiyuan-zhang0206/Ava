@@ -43,6 +43,7 @@ from gateway.schemas import (
     NoticeItem,
     NoticesCursor,
     NoticesFeed,
+    ResolveBatchIn,
     ResolveNoticeIn,
 )
 from ops import ops_lifecycle as _ops
@@ -409,6 +410,68 @@ async def post_notice_resolve(
     # which lives on the snapshot, not the feed).
     await _ops.publish_notice_resolved(agent_id, notice_id)
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
+
+
+@router.post("/api/notices/resolve-batch")
+async def post_notices_resolve_batch(body: ResolveBatchIn, request: Request) -> dict:
+    """Mark many open FYI notices 'read' in one transaction (the Inbox's
+    "Mark all read" — Task #1814).
+
+    The single-notice resolve path (POST /api/agents/{id}/notices/{notice_id}/resolve)
+    costs one HTTP round trip + one publish per notice, and each published
+    notice_resolved refetches the whole open queue — clearing a pile of FYI
+    notices one by one is N requests and N queue refetches. This endpoint does
+    the whole pile in ONE transaction and returns before the UI reconciles.
+
+    Batch semantics are deliberately permissive (idempotent): a row that is
+    already resolved, or that needs a response, is skipped — counted in
+    `skipped`, never an error — so a race with another resolver cannot fail
+    the whole request. The batch action is always 'read' (an FYI close); a
+    require_response notice can only be answered or dismissed one at a time.
+    No replies are possible here (bare reads wake no agent).
+
+    Returns {"resolved": n, "skipped": m}. 422 on an empty or oversized list.
+    """
+
+    ids = list(dict.fromkeys(body.notice_ids))  # dedupe, keep order
+    if not ids:
+        raise HTTPException(status_code=422, detail="notice_ids must be non-empty")
+    if len(ids) > 500:
+        raise HTTPException(status_code=422, detail="notice_ids must be at most 500")
+
+    def _resolve_many(pool: ConnectionPool) -> list[tuple[int, int]]:
+        """Resolve every listed FYI notice that is still open; return the
+        (agent_id, notice_id) pairs to announce. One transaction, row locks
+        held — the per-row UPDATE is a plain guard, never a re-check."""
+        resolved_pairs: list[tuple[int, int]] = []
+        with pool.connection() as conn, conn.cursor() as cur:
+            for notice_id in ids:
+                cur.execute(
+                    "SELECT agent_id, require_response, resolved_at FROM agent_notices "
+                    "WHERE id = %s FOR UPDATE",
+                    (notice_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    continue  # gone entirely — nothing to resolve
+                agent_id, require_response, resolved_at = row
+                if resolved_at is not None or require_response:
+                    continue  # already resolved, or not an FYI — skip, not error
+                cur.execute(
+                    "UPDATE agent_notices SET resolved_at = now(), resolution = 'read' "
+                    "WHERE id = %s",
+                    (notice_id,),
+                )
+                resolved_pairs.append((int(agent_id), int(notice_id)))
+        return resolved_pairs
+
+    pool = request.app.state.db_pool
+    resolved_pairs = await asyncio.to_thread(_resolve_many, pool)
+    # Announce after the commit, one event per resolved row — the frontend fold
+    # drops them from the open queue (and its burst collapses into one refetch).
+    for agent_id, notice_id in resolved_pairs:
+        await _ops.publish_notice_resolved(agent_id, notice_id)
+    return {"resolved": len(resolved_pairs), "skipped": len(ids) - len(resolved_pairs)}
 
 
 # ── unified notice write API (R3 door ④) ─────────────────────────────────
