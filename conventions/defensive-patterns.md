@@ -56,8 +56,8 @@ Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-
 An editable install writes its source path into the **active virtualenv**; the
 working directory does not constrain which environment a polluted
 `VIRTUAL_ENV` selects. Clear that variable for every worktree `uv` command,
-assert long-lived `.pth` targets during lifecycle convergence, and inspect those
-targets before deleting a checkout. A read-only emergency guard also needs a
+assert long-lived `.pth` targets and their `direct_url.json` records during
+lifecycle convergence, and inspect those targets before deleting a checkout. A read-only emergency guard also needs a
 bounded write window in the legitimate update path, with exact-mode restoration.
 Evidence: [`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
 

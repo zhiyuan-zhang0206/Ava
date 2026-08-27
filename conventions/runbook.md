@@ -174,13 +174,16 @@ find "$HOME/Ava/.venv" "$HOME/.ava/source/.venv" \
 ```
 
 Each printed target must be its stable checkout root (`~/Ava` for the dev clone,
-the installed prod source for prod), never the worktree being removed. If one is
-wrong, do **not** delete the worktree: run `env -u VIRTUAL_ENV uv sync` from the
-affected stable checkout and recheck. `ava converge` / `ava start` independently
-assert and auto-repair the prod pointer, with an `editable_pth_repaired` warning
-event; the dev-clone pointer remains part of this mandatory deletion check. This
-is the operating half of the Task #1572 editable-`.pth` guard specification; the
-incident and escape analysis are in
+the installed prod source for prod), never the worktree being removed. The same
+check applies to the editable URL uv records beside the pointer — in each venv,
+`cat` the `ava-*.dist-info/direct_url.json` and confirm `url` is the stable
+checkout's `file://` URL. If either record is wrong, do **not** delete the
+worktree: run `env -u VIRTUAL_ENV uv sync` from the affected stable checkout
+and recheck. `ava converge` / `ava start` independently assert and auto-repair
+both prod records, with `editable_pth_repaired` / `editable_direct_url_repaired`
+warning events; the dev-clone pointer remains part of this mandatory deletion
+check. This is the operating half of the Task #1572 editable-`.pth` guard
+specification; the incident and escape analysis are in
 [`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
 
 A typical small deployment runs the **gateway as a single-box unit** on an

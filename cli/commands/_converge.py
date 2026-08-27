@@ -109,20 +109,20 @@ def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
 
 
 def _ensure_prod_editable_pth(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    """Keep the prod virtualenv anchored to stable, allowlisted source."""
+    """Keep the prod virtualenv anchored to stable, allowlisted source (pth + direct_url)."""
     import shared.cluster_drift
     import shared.editable_install
 
-    source_root = shared.cluster_drift._prod_source_dir()
+    source_root = shared.cluster_drift.prod_source_dir()
     if source_root is None:
         return
-    repairs = shared.editable_install.repair_editable_ava_pth(
+    repairs = shared.editable_install.repair_editable_install(
         source_root,
         allowed_roots=(Path.home() / "Ava",),
     )
     for repair in repairs:
         print(
-            f"  ! poisoned editable install: {repair.pth_path} pointed at "
+            f"  ! poisoned editable install: {repair.path} pointed at "
             f"{repair.poisoned_target!r}; repaired to {repair.source_root}",
             file=sys.stderr,
         )

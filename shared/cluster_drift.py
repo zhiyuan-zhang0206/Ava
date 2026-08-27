@@ -35,7 +35,7 @@ from shared.proc import run_bounded
 _GIT_TIMEOUT_S = 5.0
 
 
-def _prod_source_dir() -> Path | None:
+def prod_source_dir() -> Path | None:
     """The installed prod source checkout, layout-independent.
 
     Resolved from `$AVA_HOME/source` first, with the host `ava` symlink
@@ -61,6 +61,10 @@ def _prod_source_dir() -> Path | None:
             # <source>/.venv/bin/ava → parents: [bin, .venv, <source>]
             return link.resolve().parents[2]
     return home_source
+
+
+# Legacy private spelling — kept so existing monkeypatches keep resolving.
+_prod_source_dir = prod_source_dir
 
 
 def _git_ro(*args: str, repo: Path | None = None) -> str | None:
