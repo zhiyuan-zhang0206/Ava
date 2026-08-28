@@ -177,7 +177,7 @@ def test_dashboard_does_not_hold_db_connection_during_loki_queries(
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=pool)))
     result = status.get_stats_dashboard(request, StatsWindowHours.H24)  # type: ignore[arg-type]
     assert result.live_count == 2
-    assert result.total_events == 10
+    assert result.total_events == status.ARCHIVE_TOTAL_ROWS
     assert clusters
     assert set(clusters) == {home_label(ava_home())}
 
@@ -490,7 +490,8 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
     assert body["avg_turn_seconds"] is None
     assert body["warnings"] == 0
     assert body["errors"] == 0
-    assert body["total_events"] == 0
+    # total_events is the frozen archive's historical constant, not a live count.
+    assert body["total_events"] == status.ARCHIVE_TOTAL_ROWS
 
 
 def test_dashboard_warn_error_folds_critical(
@@ -687,19 +688,12 @@ def test_dashboard_default_24h_window_filters_old_rows(
         ts_offset_hours=1,
     )
     db_conn.commit()
-    # total_events reads pg_class.reltuples (planner estimate), not a windowed
-    # COUNT — it only refreshes on ANALYZE/autovacuum, so force ANALYZE to make
-    # the estimate deterministic (= 2 on a freshly-truncated 2-row table).
-    with db_conn.cursor() as cur:
-        cur.execute("ANALYZE events")
-    db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["tokens"]["input"] == 10
     assert body["tokens"]["output"] == 5
-    # reltuples estimate counts all rows regardless of the 24h window; both rows
-    # contribute, so post-ANALYZE total_events == 2.
-    assert body["total_events"] == 2
+    # total_events is the frozen archive's historical constant, not a live count.
+    assert body["total_events"] == status.ARCHIVE_TOTAL_ROWS
 
 
 def test_dashboard_warn_err_counts_by_level(

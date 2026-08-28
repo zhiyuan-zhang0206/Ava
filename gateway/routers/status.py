@@ -199,23 +199,11 @@ def get_stats_dashboard(
         cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
         live_count = int(cur.fetchone()[0])
 
-        # total_events is the frozen archive's approximate row count, not a live
-        # growth gauge — sum planner estimates instead of a full-table COUNT(*).
-        # events is partitioned, and a partitioned parent's own reltuples is
-        # not maintained by autovacuum, so the count must come from the leaf
-        # partitions. pg_partition_tree returns the whole tree (isleaf filters to the
-        # data-holding leaves) and, for a non-partitioned table, a single leaf row
-        # for the table itself — so this is correct whether or not events is
-        # partitioned. GREATEST clamps the -1 "never analyzed" sentinel (Postgres
-        # 14+); the value is approximate, refreshed by autovacuum/ANALYZE.
-        # It intentionally rides the whole-response cache: a 60-second-old
-        # growth gauge is useful, and cache misses keep this DB work cheap.
-        cur.execute(
-            "SELECT COALESCE(SUM(GREATEST(c.reltuples, 0)), 0)::bigint "
-            "FROM pg_partition_tree('events'::regclass) t "
-            "JOIN pg_class c ON c.oid = t.relid WHERE t.isleaf"
-        )
-        total_events = int(cur.fetchone()[0])
+        # total_events is a historical constant — the frozen pre-cutover archive's
+        # parity row count (task #1281), not a live gauge: the PG events table was
+        # dropped with the #1823 cleanup and the dashboard's "total events" card
+        # shows the archive's size. See ARCHIVE_TOTAL_ROWS.
+        total_events = ARCHIVE_TOTAL_ROWS
 
     response = StatsDashboard(
         live_count=live_count,
