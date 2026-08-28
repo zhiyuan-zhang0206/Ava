@@ -157,6 +157,21 @@ describe("RunTimelineChart", () => {
     expect(screen.getByText("Idle 3m")).toBeTruthy();
   });
 
+
+  it("suppresses idle labels entirely in dense views", () => {
+    const denseRows: RunTimelineResponse["rows"] = Array.from({ length: 41 }, (_, index) => ({
+      ...timeline.rows[0],
+      turn: index + 1,
+      start: `2026-08-29T08:00:${String(index).padStart(2, "0")}Z`,
+      end: `2026-08-29T08:00:${String(index).padStart(2, "0")}Z`,
+      tags: ["idle_before_121s"],
+    }));
+    render(<RunTimelineChart timeline={{ ...timeline, rows: denseRows }} labels={labels} />);
+
+    expect(screen.queryByText("Idle 2m")).toBeNull();
+    expect(screen.queryByText(/^Idle/)).toBeNull();
+  });
+
   it("caps the event rail at 120 colored chips", () => {
     const events: RunTimelineResponse["events"] = [
       { ts: "2026-08-29T08:00:00Z", kind: "compact", trace_id: null, label: "compact" },
