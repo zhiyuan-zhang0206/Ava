@@ -22,6 +22,7 @@ def _h_start(args: argparse.Namespace) -> int:
         machine_name=args.machine_name,
         serve_gateway=args.serve_gateway,
         serve_agent_runner=args.serve_agent_runner,
+        serve_observability_station=args.serve_observability_station,
         machine_description=args.machine_description,
         memory_remote=args.memory_remote,
         gateway_url=args.gateway_url,
@@ -116,6 +117,15 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="usually first-run only: serve the agent-runner capability (runner/restarter/watchdog + agent "
         "processes); unset falls back to the $AVA_HOME/machine_serve_agent_runner file. "
         "env: AVA_MACHINE_SERVE_AGENT_RUNNER",
+    )
+    start_p.add_argument(
+        "--serve-observability-station",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="usually first-run only: serve the observability-station capability (own the native LGTM "
+        "observability backends — the declarative form of the $AVA_HOME/lgtm-host marker); unset falls "
+        "back to the $AVA_HOME/machine_serve_observability_station file. env: "
+        "AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
     )
     start_p.add_argument(
         "--machine-description",

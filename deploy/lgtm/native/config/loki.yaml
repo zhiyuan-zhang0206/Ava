@@ -38,11 +38,11 @@ querier:
   max_concurrent: 4
 
 common:
-  path_prefix: "{{AVA_HOME}}/lgtm/native/data/loki"
+  path_prefix: "{{LGTM_STORAGE_DIR}}/loki"
   storage:
     filesystem:
-      chunks_directory: "{{AVA_HOME}}/lgtm/native/data/loki/chunks"
-      rules_directory: "{{AVA_HOME}}/lgtm/native/data/loki/rules"
+      chunks_directory: "{{LGTM_STORAGE_DIR}}/loki/chunks"
+      rules_directory: "{{LGTM_STORAGE_DIR}}/loki/rules"
   replication_factor: 1
   ring:
     kvstore:
@@ -161,7 +161,7 @@ limits_config:
   tsdb_max_query_parallelism: 4
 
 compactor:
-  working_directory: "{{AVA_HOME}}/lgtm/native/data/loki/compactor"
+  working_directory: "{{LGTM_STORAGE_DIR}}/loki/compactor"
   retention_enabled: true
   delete_request_store: filesystem
 

@@ -19,6 +19,7 @@ from services.healthchecks.lgtm import (
     lgtm_host_marker,
     probe_statuses,
 )
+from shared.machine import MachineRoles
 
 __all__ = [
     "cmd_lgtm_off",
@@ -26,20 +27,41 @@ __all__ = [
     "cmd_lgtm_status",
     "ensure_lgtm_stack_step",
     "is_lgtm_host",
+    "is_station_ctx",
     "print_lgtm_status",
+    "roles_declare_station",
 ]
 
 
-def ensure_lgtm_stack_step(ctx: ConvergeCtx) -> None:
-    """Converge step: bring up the LGTM stack on the designated LGTM host.
+def is_station_ctx(ctx: ConvergeCtx) -> bool:
+    """Whether this converge context owns the host's local LGTM backends.
 
-    Marker absent = no-op (this home does not own the host's local backends).
-    Marker present: run the idempotent native deploy/lgtm/start.sh. A failing
-    start.sh propagates — the marker is the operator's statement that this host
-    owns the gateway's observability backend, and a silent skip would hide its
-    loss.
+    Provider identity is either form: the legacy `$AVA_HOME/lgtm-host` marker
+    (operator designation, `ava lgtm on`) or the declarative
+    `observability-station` unit capability. A role-declared station renders and
+    brings up the stack with no marker; the marker path stays byte-for-byte
+    intact (zero regression for the existing LGTM host).
     """
-    if not (ctx.ava_home / "lgtm-host").exists():
+    return (ctx.ava_home / "lgtm-host").exists() or (
+        ctx.roles is not None and "observability-station" in ctx.roles
+    )
+
+
+def roles_declare_station(roles: MachineRoles | None) -> bool:
+    """Whether a capability set carries the observability-station token."""
+    return roles is not None and "observability-station" in roles
+
+
+def ensure_lgtm_stack_step(ctx: ConvergeCtx) -> None:
+    """Converge step: bring up the LGTM stack on the observability station.
+
+    Neither marker nor capability = no-op (this home does not own the host's
+    local backends). Otherwise run the idempotent native deploy/lgtm/start.sh.
+    A failing start.sh propagates — the station identity is the operator's
+    statement that this host owns the gateway's observability backend, and a
+    silent skip would hide its loss.
+    """
+    if not is_station_ctx(ctx):
         return
     result = subprocess.run(
         ["bash", "start.sh"],

@@ -57,7 +57,11 @@ def lgtm_host_marker() -> Path:
 
 
 def is_lgtm_host() -> bool:
-    return lgtm_host_marker().exists()
+    """Whether this host is the observability station: the `lgtm-host` marker
+    OR the declarative `observability-station` unit capability."""
+    from shared.observability import home_is_observability_station
+
+    return home_is_observability_station(ava_home())
 
 
 def lgtm_deploy_dir(repo: Path) -> Path:

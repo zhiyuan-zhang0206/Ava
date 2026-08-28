@@ -95,6 +95,13 @@ _CAPABILITIES: tuple[_Capability, ...] = (
         env_var="AVA_MACHINE_SERVE_AGENT_RUNNER",
         settings_attr="machine_serve_agent_runner",
     ),
+    _Capability(
+        capability="observability-station",
+        file="machine_serve_observability_station",
+        cli_flag="--serve-observability-station",
+        env_var="AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
+        settings_attr="machine_serve_observability_station",
+    ),
 )
 
 
@@ -199,10 +206,10 @@ def _collect_setup_values(
     given) — the caller builds the full dict, so a missing key is a programming
     error and is indexed with `[]` to fail loud rather than silently read None.
 
-    Phase 1: resolve the two serve-capabilities first — they gate which other
-    fields are required. If a host serves neither gateway nor agent-runner, only
-    the two `--serve-*` flags are reported as missing (no point asking for fields
-    that may or may not apply).
+    Phase 1: resolve the serve-capabilities first — they gate which other
+    fields are required. If a host serves no capability, only the `--serve-*`
+    flags are reported as missing (no point asking for fields that may or may
+    not apply).
 
     Phase 2: filter the rest of `_SETUP_FIELDS` by `roles`, then resolve and
     collect missing. Missing optional fields do not enter the missing list —
