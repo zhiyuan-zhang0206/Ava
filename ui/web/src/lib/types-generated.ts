@@ -3068,8 +3068,9 @@ export interface paths {
          *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
          *     - average turn duration: Loki's unified event stream in 12-hour shards
          *     - warning/error counts: one grouped Loki query per 12-hour shard
-         *     - `total_events`: archived event row count (frozen at the LGTM cutover;
-         *       not a live gauge)
+         *     - `total_events`: archived event row count — a historical constant from
+         *       the task #1281 parity run (the PG events table was dropped; not a
+         *       live gauge)
          *
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
          *     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
