@@ -225,6 +225,14 @@ processors:
         statements:
           - set(attributes["host"], resource.attributes["host.name"])
           - set(attributes["machine_name"], $MACHINE_NAME)
+          # Interim fix (2026-08-28, #1818): postgresqlreceiver keys its rows by
+          # resource attributes; Prometheus 3.x's OTLP receiver keeps resource
+          # attrs out of series labels (they land in target_info), so all index
+          # rows collapse into one series -> "duplicate sample" 400 -> whole
+          # infra batch dropped. Copy the distinguishing dims to datapoints.
+          - set(attributes["postgresql.database.name"], resource.attributes["postgresql.database.name"]) where resource.attributes["postgresql.database.name"] != nil
+          - set(attributes["postgresql.table.name"], resource.attributes["postgresql.table.name"]) where resource.attributes["postgresql.table.name"] != nil
+          - set(attributes["postgresql.index.name"], resource.attributes["postgresql.index.name"]) where resource.attributes["postgresql.index.name"] != nil
   # Loki can promote OTLP resource attributes, not log attributes. Copy the
   # bounded event dimensions before the logs exporter; service rows keep no
   # agent_id label instead of minting an empty stream dimension.
