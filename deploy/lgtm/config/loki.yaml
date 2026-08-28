@@ -82,9 +82,12 @@ distributor:
 # write-side JSONL mirror retention.
 #
 # Task #1281 (PG events archive import): the archived events (8.7M rows,
-# 05-23 -> 08-12) land under the stream label stream="archive" and get a
-# 365d retention via retention_streams (compactor-driven, applied on top of
-# the 168h period). The completed import needed old samples temporarily; the
+# 05-23 -> 08-13 03:54 UTC, parity-verified) land under the stream label
+# stream="archive" and get a 365d retention via retention_streams
+# (compactor-driven, applied on top of the 168h period). The 365d is
+# WALL-CLOCK from the import (Loki retention is not per-row): the archive
+# expires ~2027-08, after which the cold pg_dump archive (task #1823) is the
+# only copy. The completed import needed old samples temporarily; the
 # default `reject_old_samples: true` is now restored as the clock-drift guard.
 # Keep reject_old_samples_max_age as that guard's age bound.
 limits_config:

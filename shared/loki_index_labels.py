@@ -29,8 +29,12 @@ INDEX_LABEL_CUTOVER_AT = datetime(2026, 8, 23, 11, 0, tzinfo=UTC)
 # stream for rows before ARCHIVE_FREEZE_AT, the live event stream after it.
 # ARCHIVE_FLOOR_AT is a round constant before the archive's first row (the
 # query bounds keep the Loki max_query_length 90d limit satisfied).
+# ARCHIVE_FREEZE_AT is the archive's newest row with FULL microsecond
+# precision (max(events.ts) = 2026-08-13 03:54:10.626517 UTC): truncating to
+# seconds would drop the archive rows within that trailing second from every
+# archive read (they are not in the live stream either).
 ARCHIVE_FLOOR_AT = datetime(2026, 5, 20, 0, 0, tzinfo=UTC)
-ARCHIVE_FREEZE_AT = datetime(2026, 8, 13, 3, 54, 10, tzinfo=UTC)
+ARCHIVE_FREEZE_AT = datetime(2026, 8, 13, 3, 54, 10, 626517, tzinfo=UTC)
 EVENT_STREAM_RETENTION = timedelta(hours=168)
 # Must match deployed Loki `querier.max_concurrent`; render validation catches
 # drift before it ships (the 2026-08-18 incident).

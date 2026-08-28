@@ -50,6 +50,12 @@ from shared.observability import cluster_label
 from shared.resource_sample import ResourceSample
 
 router = APIRouter()
+
+# The frozen pre-cutover events archive's row count (Loki archive stream,
+# task #1281 parity run 2026-08-20). The PG `events` table was dropped with
+# the #1823 cleanup; this historical constant serves the dashboard's
+# "total events" gauge.
+ARCHIVE_TOTAL_ROWS = 8_699_522
 _log = logging.getLogger(__name__)
 _STATUS_CACHE_TTL_S = 15.0
 _status_cache: tuple[float, SystemStatus] | None = None
@@ -76,8 +82,9 @@ def get_stats_dashboard(
     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
     - average turn duration: Loki's unified event stream in 12-hour shards
     - warning/error counts: one grouped Loki query per 12-hour shard
-    - `total_events`: archived event row count (frozen at the LGTM cutover;
-      not a live gauge)
+    - `total_events`: archived event row count — a historical constant from
+      the task #1281 parity run (the PG events table was dropped; not a
+      live gauge)
 
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
