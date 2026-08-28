@@ -316,8 +316,9 @@ export const api = {
   // Resolve one open notice. `action` is the explicit close verb: 'answer' /
   // 'dismiss' on a require_response notice ('answer' needs a reply), 'read' on an
   // FYI notice. A non-empty reply (and a dismissed require_response notice) wakes
-  // the agent with a chat inbound. 409 if the notice is no longer open or the
-  // action does not match its kind.
+  // the agent with a chat inbound. A 'read' on an already-resolved notice is an
+  // idempotent success (user ruling 2026-08-28 — no "already read" error); 409
+  // only when the notice does not exist or the action does not match its kind.
   resolveNotice: (
     agentId: number,
     noticeId: number,
