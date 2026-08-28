@@ -1548,9 +1548,15 @@ export interface paths {
          *     speech, so no user-role message is consumed and nothing is shaped like a
          *     reply request.
          *
-         *     409 when the notice is not open, or `action` does not match the notice's kind
-         *     (dismiss on an FYI notice, or read on one needing a response). 422 when
-         *     `action` is `answer` without a reply.
+         *     409 when the notice does not exist, or `action` does not match the notice's
+         *     kind (dismiss on an FYI notice, or read on one needing a response). A bare
+         *     `read` on an already-resolved notice is an idempotent success (user ruling
+         *     2026-08-28: "Mark read" means "I have read it", so the already-read state
+         *     ends silently, like the normal path — the same skip-not-error semantics as
+         *     the batch endpoint); a note attached to that read still reaches the agent,
+         *     and `answer` / `dismiss` on an already-resolved notice keep the 409 so a
+         *     reply or a dismissal is never silently dropped. 422 when `action` is
+         *     `answer` without a reply.
          */
         post: operations["post_notice_resolve_api_agents__agent_id__notices__notice_id__resolve_post"];
         delete?: never;

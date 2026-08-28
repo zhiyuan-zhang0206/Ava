@@ -344,9 +344,15 @@ async def post_notice_resolve(
     speech, so no user-role message is consumed and nothing is shaped like a
     reply request.
 
-    409 when the notice is not open, or `action` does not match the notice's kind
-    (dismiss on an FYI notice, or read on one needing a response). 422 when
-    `action` is `answer` without a reply.
+    409 when the notice does not exist, or `action` does not match the notice's
+    kind (dismiss on an FYI notice, or read on one needing a response). A bare
+    `read` on an already-resolved notice is an idempotent success (user ruling
+    2026-08-28: "Mark read" means "I have read it", so the already-read state
+    ends silently, like the normal path — the same skip-not-error semantics as
+    the batch endpoint); a note attached to that read still reaches the agent,
+    and `answer` / `dismiss` on an already-resolved notice keep the 409 so a
+    reply or a dismissal is never silently dropped. 422 when `action` is
+    `answer` without a reply.
     """
     action = body.action
     reply = body.reply
@@ -354,18 +360,31 @@ async def post_notice_resolve(
     def _resolve(conn: psycopg.Connection) -> str | None:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT title, require_response FROM agent_notices "
-                "WHERE id = %s AND agent_id = %s AND resolved_at IS NULL FOR UPDATE",
+                "SELECT title, require_response, resolved_at FROM agent_notices "
+                "WHERE id = %s AND agent_id = %s FOR UPDATE",
                 (notice_id, agent_id),
             )
             row = cur.fetchone()
             if row is None:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"notice {notice_id} is not open for agent {agent_id} "
-                    "(already resolved or does not exist)",
+                    detail=f"notice {notice_id} does not exist for agent {agent_id}",
                 )
-            title, require_response = row
+            title, require_response, resolved_at = row
+            if resolved_at is not None:
+                # Idempotent close: a bare 'read' on an already-resolved notice
+                # silently succeeds (user ruling 2026-08-28) — the already-read
+                # state ends like the normal path, matching the batch endpoint's
+                # skip-not-error semantics. A note attached to that read still
+                # reaches the agent (the close itself is a no-op); 'answer' and
+                # 'dismiss' keep the 409 so a reply or a dismissal is never
+                # silently dropped.
+                if action == "read":
+                    return f'Re: "{title}"\n\n{reply}' if reply is not None else None
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"notice {notice_id} is already resolved for agent {agent_id}",
+                )
             if action == "dismiss" and not require_response:
                 raise HTTPException(
                     status_code=409,
