@@ -24,7 +24,11 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import Any, cast
 
+import os
+import time
+
 import psycopg
+from psycopg import sql
 import pytest
 from psycopg_pool import ConnectionPool
 
@@ -35,6 +39,7 @@ from services.events_maintenance.checkpoint_reaper import (
     trim_overgrown_threads,
 )
 from shared.checkpoint_cleanup import TrimCounts, trim_checkpoints_sync
+from shared.config import settings
 
 _SCHEMA = """
 CREATE TABLE checkpoints (
@@ -76,13 +81,32 @@ CREATE TABLE agents_meta (
 """
 
 
+def _throwaway_db(db_conn: psycopg.Connection) -> Iterator[str]:
+    """Create a throwaway DB, yield its URL, drop it on teardown (the deleted
+    test_events_maintenance_ttl helper this file used to import)."""
+    _ = db_conn  # dependency: the session cluster is up
+    base_url, _name = settings.data_plane.db_url.rsplit("/", 1)
+    admin_url = f"{base_url}/postgres"
+    name = f"ava_test_reaper_{os.getpid()}_{int(time.time() * 1_000_000)}"
+    url = f"{base_url}/{name}"
+    with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
+        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    try:
+        yield url
+    finally:
+        with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (name,),
+            )
+            cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+
+
 @pytest.fixture
 def pool(db_conn: psycopg.Connection) -> Iterator[ConnectionPool[Any]]:
     """A pool to a throwaway DB carrying the checkpoint + agents_meta tables."""
-    _ = db_conn
-    from tests.services.test_events_maintenance_ttl import _throwaway_db
-
-    gen = cast(Any, _throwaway_db())
+    gen = cast(Any, _throwaway_db(db_conn))
     url = next(gen)  # keep the generator alive — GC would run its finally (DROP DATABASE)
     try:
         with psycopg.connect(url, autocommit=True) as setup:

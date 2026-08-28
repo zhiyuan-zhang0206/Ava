@@ -19,8 +19,8 @@ def _module_docstring(path: Path) -> str:
 
 
 def test_conversation_recovery_sources_are_checkpoint_tables_not_events_archive() -> None:
-    """Checkpoint tables are the backed-up write and recovery source; the
-    Postgres events table is a frozen archive and Loki owns the live stream."""
+    """Checkpoint tables are the backed-up write and recovery source; the PG
+    events archive was dropped (task #1823) and Loki owns the live stream."""
     backup_path = _ROOT / "services" / "backup.py"
     checkpoint_path = _ROOT / "shared" / "checkpoint.py"
     schema_path = _ROOT / "db" / "schema.sql"
@@ -38,5 +38,7 @@ def test_conversation_recovery_sources_are_checkpoint_tables_not_events_archive(
     assert "rebuildable from events" not in backup_source.lower()
     assert "full message history" in checkpoint_docstring
     assert "lives in the stored checkpoint" in checkpoint_docstring
-    assert "frozen archive since the lgtm cutover" in schema
-    assert "live event stream ships to loki" in schema
+    # The PG events archive was dropped with the #1823 cleanup — the baseline
+    # documents the drop and the Loki archive stream as the archive's home.
+    assert "events archive (dropped" in schema
+    assert "loki archive stream" in schema
