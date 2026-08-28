@@ -25,15 +25,25 @@ UPDATE agents_meta
  WHERE fork_source_agent_id IS NOT NULL
    AND spawner IS DISTINCT FROM 'agent:' || fork_source_agent_id::text;
 
-CREATE TABLE IF NOT EXISTS fork_lineage_fix_backfill_events AS
-SELECT id, target_agent_id
-FROM events
-WHERE event_name = 'fork'
-  AND attributes->>'fork_from' IS NOT NULL
-  AND target_agent_id IS DISTINCT FROM (attributes->>'fork_from')::bigint;
+-- The events-archive correction is guarded: the frozen PG `events` archive
+-- was dropped by migration 20260829T030000_drop-events-archive (task #1823),
+-- so a fresh-DB replay (baseline without the table) must skip it — the live
+-- Loki stream's misrecorded rows are corrected by
+-- scripts/fix_fork_lineage_loki.py at deploy.
+DO $$
+BEGIN
+    IF to_regclass('public.events') IS NOT NULL THEN
+        CREATE TABLE IF NOT EXISTS fork_lineage_fix_backfill_events AS
+        SELECT id, target_agent_id
+        FROM events
+        WHERE event_name = 'fork'
+          AND attributes->>'fork_from' IS NOT NULL
+          AND target_agent_id IS DISTINCT FROM (attributes->>'fork_from')::bigint;
 
-UPDATE events
-   SET target_agent_id = (attributes->>'fork_from')::bigint
- WHERE event_name = 'fork'
-   AND attributes->>'fork_from' IS NOT NULL
-   AND target_agent_id IS DISTINCT FROM (attributes->>'fork_from')::bigint;
+        UPDATE events
+           SET target_agent_id = (attributes->>'fork_from')::bigint
+         WHERE event_name = 'fork'
+           AND attributes->>'fork_from' IS NOT NULL
+           AND target_agent_id IS DISTINCT FROM (attributes->>'fork_from')::bigint;
+    END IF;
+END $$;

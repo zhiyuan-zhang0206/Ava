@@ -241,23 +241,6 @@ class TestMarkAgentHibernatedOp:
             )
             assert cur.fetchone()[0] is None  # type: ignore[index]
 
-    async def test_writes_no_exit_event(
-        self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
-    ) -> None:
-        """The agent is not dying — no kind='exit' audit row (which /exited writes)."""
-        aid = _park(db_conn, status="idling", pid=_DEAD_PID)
-        await mark_agent_hibernating_op(aid, sync_pool)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT count(*) FROM events WHERE agent_id = %s "
-                "AND event_name = 'exit' AND category = 'audit'",
-                (aid,),
-            )
-            assert cur.fetchone()[0] == 0  # type: ignore[index]
-
-
-# ── HibernateController scans ────────────────────────────────────────────────
-
 
 class TestSwapOutSelection:
     def test_idle_past_threshold_no_pending_is_selected(
