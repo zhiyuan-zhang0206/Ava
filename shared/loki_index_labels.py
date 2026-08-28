@@ -21,6 +21,16 @@ EVENT_STREAM_SERVICE_NAME = "unknown_service"
 # Operator-set deployment boundary. Keep this value in the future until the
 # collector transform and Loki mapping are live cluster-wide.
 INDEX_LABEL_CUTOVER_AT = datetime(2026, 8, 23, 11, 0, tzinfo=UTC)
+
+# The PG `events` archive's time span (task #1281): the archive stream in Loki
+# carries every pre-cutover event row, 2026-05-23 -> 2026-08-13 03:54 UTC (the
+# LGTM cutover, task #1197). Readers that used to split the timeline at the
+# live freeze boundary now query the two Loki streams directly: the archive
+# stream for rows before ARCHIVE_FREEZE_AT, the live event stream after it.
+# ARCHIVE_FLOOR_AT is a round constant before the archive's first row (the
+# query bounds keep the Loki max_query_length 90d limit satisfied).
+ARCHIVE_FLOOR_AT = datetime(2026, 5, 20, 0, 0, tzinfo=UTC)
+ARCHIVE_FREEZE_AT = datetime(2026, 8, 13, 3, 54, 10, tzinfo=UTC)
 EVENT_STREAM_RETENTION = timedelta(hours=168)
 # Must match deployed Loki `querier.max_concurrent`; render validation catches
 # drift before it ships (the 2026-08-18 incident).
@@ -179,6 +189,15 @@ def split_index_label_window(
         LokiReadSlice(LokiReadEra.LEGACY, start, INDEX_LABEL_CUTOVER_AT),
         LokiReadSlice(LokiReadEra.INDEXED, INDEX_LABEL_CUTOVER_AT, end),
     )
+
+
+def archive_stream_selector() -> str:
+    """The archive stream selector: every pre-cutover event row imported by
+    task #1281 lives under `stream="archive"` (with the emitter's
+    `service_name` label). The archive stream has NO event_name/agent_id index
+    labels — `| json` extracts those fields plain (no `_extracted` suffix),
+    which the archive-aware query paths must account for."""
+    return f'{{service_name="{EVENT_STREAM_SERVICE_NAME}", stream="archive"}}'
 
 
 def event_stream_selector(

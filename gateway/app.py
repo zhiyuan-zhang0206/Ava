@@ -72,7 +72,6 @@ from gateway import (
     _latency,
     _pause_policy,
     alert_reconciliation,
-    events_archive,
     loki_events,
     loki_query_budget,
     prom_metrics,
@@ -233,20 +232,6 @@ from shared.os_cron import register_os_cron
 _log = logging.getLogger(__name__)
 
 
-def _preload_archive_boundary(app: FastAPI) -> None:
-    """Load the frozen events-archive boundary once; failure leaves the cache unset.
-
-    The first archive reader retries the one-time scan rather than preventing
-    the gateway from starting (the events table is frozen, so the value is a
-    process-lifetime constant — see gateway/events_archive.py).
-    """
-    try:
-        with app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            events_archive.load_frozen_boundary(cur)
-    except Exception:
-        _log.debug("frozen events archive boundary preload failed", exc_info=True)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """App-level resources: data-plane and control-plane DB pools.
@@ -285,8 +270,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
     # recovery reads need their own short, small reservation.
     app.state.control_db_pool = shared.db.pool(min_size=1, max_size=2, timeout=2.0)
-
-    await asyncio.to_thread(_preload_archive_boundary, app)
 
     # Shared upstream client for the Grafana reverse proxy — one connection
     # pool across proxied requests instead of an AsyncClient per request.

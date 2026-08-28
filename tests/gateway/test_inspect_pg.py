@@ -11,34 +11,19 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from gateway import events_archive
+from gateway import loki_events
 from gateway.routers import _inspect_pg, _inspect_stats
 from shared.config import settings
+from tests.gateway.loki_fake import FakeLoki
 
 
-class _BoundaryCursor:
-    def __init__(self, boundary: datetime | None) -> None:
-        self.boundary = boundary
-        self.executions = 0
-
-    def execute(self, query: str) -> None:
-        assert query == "SELECT max(ts) FROM events"
-        self.executions += 1
-
-    def fetchone(self) -> tuple[datetime | None] | None:
-        return (self.boundary,)
-
-
-def test_frozen_archive_boundary_is_loaded_once_per_process() -> None:
-    boundary = datetime(2026, 8, 13, tzinfo=UTC)
-    first_cursor = _BoundaryCursor(boundary)
-    second_cursor = _BoundaryCursor(None)
-
-    assert events_archive.frozen_boundary() is None
-    assert events_archive.load_frozen_boundary(first_cursor) == boundary
-    assert events_archive.load_frozen_boundary(second_cursor) == boundary
-    assert first_cursor.executions == 1
-    assert second_cursor.executions == 0
+@pytest.fixture(autouse=True)
+def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
+    """Route archive + live queries through the in-memory Loki fake."""
+    fake = FakeLoki()
+    monkeypatch.setattr(loki_events, "query_events", fake.query_events)
+    monkeypatch.setattr(loki_events, "query_projected_lines", fake.query_projected_lines)
+    return fake
 
 
 def _insert_agent(db: psycopg.Connection) -> int:
@@ -70,115 +55,108 @@ def _insert_event(
         )
 
 
-def test_archive_queries_match_loki_filter_and_freeze_contract(
-    db_conn: psycopg.Connection,
+def _archive_row(
+    fake: FakeLoki,
+    *,
+    agent_id: int,
+    event_name: str,
+    ts_offset_minutes: float,
+    payload: dict[str, object] | None = None,
 ) -> None:
+    """Add one ARCHIVE-era row to the Loki fake (the task #1281 stream),
+    `ts_offset_minutes` before the ARCHIVE_FREEZE_AT constant."""
+    fake.add(
+        event=event_name,
+        agent_id=agent_id,
+        category="telemetry",
+        payload=payload or {},
+        ts=_inspect_pg.FREEZE_AT - timedelta(minutes=ts_offset_minutes),
+        archive=True,
+    )
+
+
+def test_archive_projection_matches_the_loki_filter_and_freeze_contract(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """The raw archive fallback reads the Loki archive stream with the
+    inspect path's filters and reduces client-side: turn_end durations feed
+    the exact distribution, node_exit rows feed active/exec seconds, and the
+    requested window bounds the read."""
     agent_id = _insert_agent(db_conn)
-    now = datetime.now(tz=UTC)
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="turn_end",
-        ts=now - timedelta(minutes=4),
-        attributes={"duration_seconds": 4.25, "ok": True},
+        ts_offset_minutes=4,
+        payload={"duration_seconds": 4.25, "ok": True},
     )
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="node_exit",
-        ts=now - timedelta(minutes=3),
-        attributes={"duration_seconds": 3.5, "node": "exec"},
+        ts_offset_minutes=3,
+        payload={"duration_seconds": 3.5, "node": "exec"},
     )
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="node_exit",
-        ts=now - timedelta(minutes=2),
-        attributes={"duration_seconds": 2.5},
+        ts_offset_minutes=2,
+        payload={"duration_seconds": 2.5},
     )
-    # The archive cutoff is exclusive: this row establishes the freeze point
-    # without being part of any requested event-name pattern.
-    _insert_event(
-        db_conn,
-        agent_id=agent_id,
-        event_name="freeze_marker",
-        ts=now - timedelta(minutes=1),
-        attributes={},
-    )
-    db_conn.commit()
 
-    assert (
-        _inspect_pg.archive_count(
-            db_conn,
-            agent_id=agent_id,
-            event_names=["^turn_end$"],
-            categories=["telemetry", "log"],
-            attribute_filters={"ok": "true"},
-            from_=now - timedelta(hours=1),
-            to=None,
-        )
-        == 1
-    )
-    assert _inspect_pg.archive_aggregate(
-        db_conn,
-        field="duration_seconds",
-        agg="sum",
+    projection = _inspect_pg.archive_projected_values(agent_id=agent_id, from_=None, to=None)
+    assert projection.turn_distribution == [(4.25, 1)]
+    assert projection.active_seconds == pytest.approx(6.0)  # pyright: ignore[reportUnknownMemberType]
+    assert projection.exec_seconds == pytest.approx(3.5)  # pyright: ignore[reportUnknownMemberType]
+
+    # Windowed read: a from_ bound after the freeze excludes the whole
+    # archive (the freeze is the archive's upper bound), so the windowed
+    # projection is empty — matching the live-side clip.
+    windowed = _inspect_pg.archive_projected_values(
         agent_id=agent_id,
-        event_names=["^node_exit$"],
-        categories=None,
-        attribute_filters={"node": "!=claim"},
-        from_=now - timedelta(hours=1),
+        from_=datetime.now(tz=UTC) - timedelta(minutes=3),
         to=None,
-    ) == pytest.approx(6.0)  # pyright: ignore[reportUnknownMemberType]
-    assert _inspect_pg.archive_distribution(
-        db_conn,
-        field="duration_seconds",
-        agent_id=agent_id,
-        event_names=["^turn_end$"],
-        categories=["telemetry", "log"],
-        attribute_filters=None,
-        from_=now - timedelta(hours=1),
-        to=None,
-    ) == [(4.25, 1)]
+    )
+    assert windowed.active_seconds == 0.0
 
 
-def test_archive_node_exit_seconds_reads_legacy_and_aggregated_rows(
-    db_conn: psycopg.Connection,
+def test_archive_projection_reads_legacy_and_aggregated_node_exit_rows(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
     """The archive reader must not NULL out on either retained node_exit shape:
     legacy per-node rows (top-level node/duration_seconds) and aggregated
     per-turn rows (attributes.nodes list, shape since PR #654) — review #654-2."""
     agent_id = _insert_agent(db_conn)
-    now = datetime.now(tz=UTC)
     # Legacy per-node rows (pre-aggregation shape).
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="node_exit",
-        ts=now - timedelta(minutes=4),
-        attributes={"node": "llm", "duration_seconds": 10.0, "outcome": "ok"},
+        ts_offset_minutes=4,
+        payload={"node": "llm", "duration_seconds": 10.0, "outcome": "ok"},
     )
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="node_exit",
-        ts=now - timedelta(minutes=4),
-        attributes={"node": "exec", "duration_seconds": 20.0, "outcome": "ok"},
+        ts_offset_minutes=4,
+        payload={"node": "exec", "duration_seconds": 20.0, "outcome": "ok"},
     )
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="node_exit",
-        ts=now - timedelta(minutes=4),
-        attributes={"node": "claim", "duration_seconds": 3000.0, "outcome": "ok"},
+        ts_offset_minutes=4,
+        payload={"node": "claim", "duration_seconds": 3000.0, "outcome": "ok"},
     )
     # Aggregated per-turn row (one event, per-node entries inside `nodes`).
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="node_exit",
-        ts=now - timedelta(minutes=2),
-        attributes={
+        ts_offset_minutes=2,
+        payload={
             "count": 3,
             "nodes": [
                 {"node": "llm", "outcome": "ok", "duration_seconds": 5.0},
@@ -187,32 +165,10 @@ def test_archive_node_exit_seconds_reads_legacy_and_aggregated_rows(
             ],
         },
     )
-    # Exclusive freeze boundary: this row establishes the cutoff without
-    # participating in the sums.
-    _insert_event(
-        db_conn,
-        agent_id=agent_id,
-        event_name="freeze_marker",
-        ts=now - timedelta(minutes=1),
-        attributes={},
-    )
-    db_conn.commit()
 
-    assert _inspect_pg.archive_node_exit_seconds(
-        db_conn, agent_id=agent_id, node="exclude_claim", from_=None, to=None
-    ) == pytest.approx(10.0 + 20.0 + 5.0 + 6.0)  # pyright: ignore[reportUnknownMemberType]
-    # claim rows excluded on both shapes
-    assert _inspect_pg.archive_node_exit_seconds(
-        db_conn, agent_id=agent_id, node="exec", from_=None, to=None
-    ) == pytest.approx(20.0 + 6.0)  # pyright: ignore[reportUnknownMemberType]
-    # Windowed read behaves the same (from_/to bound both shapes).
-    assert _inspect_pg.archive_node_exit_seconds(
-        db_conn,
-        agent_id=agent_id,
-        node="exclude_claim",
-        from_=now - timedelta(minutes=3),
-        to=None,
-    ) == pytest.approx(5.0 + 6.0)  # pyright: ignore[reportUnknownMemberType]
+    projection = _inspect_pg.archive_projected_values(agent_id=agent_id, from_=None, to=None)
+    assert projection.active_seconds == pytest.approx(10.0 + 20.0 + 5.0 + 6.0)  # pyright: ignore[reportUnknownMemberType]
+    assert projection.exec_seconds == pytest.approx(20.0 + 6.0)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_ledger_reads_are_day_scoped_and_return_exclusive_watermarks(
@@ -349,41 +305,28 @@ def test_ledger_distribution_ignores_zero_turn_days_and_requires_histograms_for_
 
 
 def test_archive_lifecycle_is_chronological_for_one_replay_pass(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
     agent_id = _insert_agent(db_conn)
-    now = datetime.now(tz=UTC)
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="agent_spawned",
-        ts=now - timedelta(minutes=4),
-        attributes={},
+        ts_offset_minutes=4,
     )
-    _insert_event(
-        db_conn,
+    _archive_row(
+        fake_loki,
         agent_id=agent_id,
         event_name="agent_terminated",
-        ts=now - timedelta(minutes=3),
-        attributes={},
+        ts_offset_minutes=3,
     )
-    _insert_event(
-        db_conn,
-        agent_id=agent_id,
-        event_name="freeze_marker",
-        ts=now - timedelta(minutes=2),
-        attributes={},
-    )
-    db_conn.commit()
 
-    lifecycle = _inspect_pg.archive_lifecycle(
-        db_conn,
-        agent_id=agent_id,
-        from_=now - timedelta(hours=1),
-        to=None,
-    )
-    assert [event_name for _, event_name in lifecycle] == ["agent_spawned", "agent_terminated"]
-    assert lifecycle == sorted(lifecycle)
+    projection = _inspect_pg.archive_projected_values(agent_id=agent_id, from_=None, to=None)
+    assert [event_name for _, event_name in projection.lifecycle] == [
+        "agent_spawned",
+        "agent_terminated",
+    ]
+    assert projection.lifecycle == sorted(projection.lifecycle)
 
 
 def test_archive_stats_rollup_matches_raw_reads(db_conn: psycopg.Connection) -> None:
@@ -527,39 +470,13 @@ def test_archive_stats_rollup_matches_raw_reads(db_conn: psycopg.Connection) -> 
     db_conn.commit()
 
     assert _inspect_pg.archive_stats(db_conn, agent_id=agent_id) == _inspect_pg.ArchiveStats(
-        turn_distribution=_inspect_pg.archive_distribution(
-            db_conn,
-            field="duration_seconds",
-            agent_id=agent_id,
-            event_names=["^turn_end$"],
-            categories=["telemetry", "log"],
-            attribute_filters=None,
-            from_=None,
-            to=None,
-        ),
-        active_seconds=_inspect_pg.archive_aggregate(
-            db_conn,
-            field="duration_seconds",
-            agg="sum",
-            agent_id=agent_id,
-            event_names=["^node_exit$"],
-            categories=None,
-            attribute_filters={"node": "!=claim"},
-            from_=None,
-            to=None,
-        ),
-        exec_seconds=_inspect_pg.archive_aggregate(
-            db_conn,
-            field="duration_seconds",
-            agg="sum",
-            agent_id=agent_id,
-            event_names=["^node_exit$"],
-            categories=None,
-            attribute_filters={"node": "exec"},
-            from_=None,
-            to=None,
-        ),
-        lifecycle=_inspect_pg.archive_lifecycle(db_conn, agent_id=agent_id, from_=None, to=None),
+        turn_distribution=[(1.5, 1), (2.5, 2)],
+        active_seconds=12.0,  # 3.0 (claim) excluded + 5.0 + 7.0
+        exec_seconds=5.0,
+        lifecycle=[
+            (now - timedelta(minutes=1, seconds=15), "agent_spawned"),
+            (now - timedelta(minutes=1), "agent_terminated"),
+        ],
     )
     assert _inspect_pg.archive_stats(db_conn, agent_id=no_archive_agent_id) is None
 
@@ -600,9 +517,7 @@ def test_inspect_values_whole_life_prefers_rollup_over_raw_scan(
     def raw_archive_read_must_not_run(*_args: Any, **_kwargs: Any) -> Never:
         raise AssertionError("whole-life inspect must use the archive rollup")
 
-    monkeypatch.setattr(_inspect_pg, "archive_distribution", raw_archive_read_must_not_run)
-    monkeypatch.setattr(_inspect_pg, "archive_aggregate", raw_archive_read_must_not_run)
-    monkeypatch.setattr(_inspect_pg, "archive_lifecycle", raw_archive_read_must_not_run)
+    monkeypatch.setattr(_inspect_pg, "archive_projected_values", raw_archive_read_must_not_run)
 
     def no_projected_lines(**_kwargs: Any) -> list[tuple[int, int | None, str]]:
         return []
@@ -619,30 +534,15 @@ def test_inspect_values_whole_life_prefers_rollup_over_raw_scan(
 
 
 def test_inspect_values_windowed_uses_rollup_lifecycle(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent_id = _insert_agent(db_conn)
     now = datetime.now(tz=UTC)
-    _insert_event(
-        db_conn,
+    fake_loki.add(
+        event="turn_end",
         agent_id=agent_id,
-        event_name="agent_spawned",
-        ts=now - timedelta(hours=3),
-        attributes={},
-    )
-    _insert_event(
-        db_conn,
-        agent_id=agent_id,
-        event_name="turn_end",
-        ts=now - timedelta(minutes=45),
-        attributes={"duration_seconds": 4.5},
-    )
-    _insert_event(
-        db_conn,
-        agent_id=agent_id,
-        event_name="freeze_marker",
-        ts=now - timedelta(minutes=30),
-        attributes={},
+        payload={"duration_seconds": 4.5},
+        ts_offset_hours=45 / 60.0,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -656,10 +556,6 @@ def test_inspect_values_windowed_uses_rollup_lifecycle(
         )
     db_conn.commit()
 
-    def no_projected_lines(**_kwargs: Any) -> list[tuple[int, int | None, str]]:
-        return []
-
-    monkeypatch.setattr(_inspect_stats.loki_events, "query_projected_lines", no_projected_lines)
     with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1) as pool:
         values = _inspect_stats.inspect_values(pool, agent_id, now - timedelta(hours=1), None)
 

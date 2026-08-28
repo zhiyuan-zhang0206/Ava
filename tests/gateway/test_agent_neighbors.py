@@ -3,8 +3,8 @@
 FastAPI TestClient + real ava_test DB + FakeLoki. Task #180 (LGTM cutover):
 the retired `agent_neighbors` SQL function read the frozen `events` table
 and silently returned no peers; the walk now runs in Python over the event
-stream (gateway/neighbors.py) — audit edge rows stitch the frozen PG archive
-(ts below the freeze boundary) with the Loki live tail. Covered here end to
+stream (gateway/neighbors.py) — audit edge rows stitch the Loki archive stream
+(task #1281, all pre-cutover events) with the live tail. Covered here end to
 end: undirected ties, permanent lineage weights (spawn/fork/resurrect, no
 time decay) vs decaying message weights (send_message, EXP(-k*days)),
 per-hop gamma decay, terminated inclusion, limit, self/root exclusions, and
@@ -12,6 +12,7 @@ the archive+Loki merge on the same pair.
 """
 
 import math
+from datetime import timedelta
 
 import psycopg
 import pytest
@@ -19,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from gateway import loki_events
 from gateway.app import app
+from shared.loki_index_labels import ARCHIVE_FREEZE_AT
 from tests.gateway.loki_fake import FakeLoki
 
 
@@ -70,39 +72,24 @@ def _event(
 
 
 def _archive_event(
-    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
     *,
     event_type: str,
     agent_id: int,
     target: int | None,
     age_hours: float = 1.0,
 ) -> None:
-    """Insert one ARCHIVE-era audit event into the frozen PG `events`
-    archive (aged into the past)."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, event_name, source, target_agent_id, machine, process, category, level) "
-            "VALUES (now() - %s * interval '1 hour', %s, %s, 'test', %s, "
-            "'test', 'test', 'audit', 'info')",
-            (age_hours, agent_id, event_type, target),
-        )
-    db_conn.commit()
-
-
-def _archive_boundary_anchor(db_conn: psycopg.Connection) -> None:
-    """Pin the archive's freeze point to ~now: the read partitions the
-    timeline at max(events.ts), so a test mixing archive-era rows (old ts)
-    with Loki rows (ts≈now) must insert a boundary anchor — otherwise the
-    oldest archive row would BE the boundary and sit outside its own window
-    (`ts < boundary`). A telemetry row serves as the freeze marker."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, event_name, source, machine, process, category, level) "
-            "VALUES (now(), NULL, 'turn_end', 'test', 'test', 'test', 'telemetry', 'info')"
-        )
-    db_conn.commit()
+    """Add one ARCHIVE-era audit event to the Loki fake's archive stream
+    (ts `age_hours` before the ARCHIVE_FREEZE_AT constant — the task #1281
+    archive stream holds only pre-cutover rows)."""
+    fake_loki.add(
+        event=event_type,
+        agent_id=agent_id,
+        target_agent_id=target,
+        category="audit",
+        ts=ARCHIVE_FREEZE_AT - timedelta(hours=age_hours),
+        archive=True,
+    )
 
 
 def _neighbors(client: TestClient, agent_id: int, **params: int) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
@@ -291,8 +278,7 @@ def test_archive_and_loki_merge_on_the_same_pair(
     + one live message weigh LN(1+2) — not 2 * LN(2)."""
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
-    _archive_boundary_anchor(db_conn)
-    _archive_event(db_conn, event_type="send_message", agent_id=b, target=a, age_hours=1.0)
+    _archive_event(fake_loki, event_type="send_message", agent_id=b, target=a, age_hours=1.0)
     _event(fake_loki, event_type="send_message", agent_id=b, target=a, days_ago=0.0)
 
     with TestClient(app) as client:
@@ -310,8 +296,7 @@ def test_archive_lineage_alone_forms_a_tie(
     must still reach it (the archive read is deliberate, not dropped)."""
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
-    _archive_boundary_anchor(db_conn)
-    _archive_event(db_conn, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
+    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
 
     with TestClient(app) as client:
         rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
@@ -429,8 +414,7 @@ def test_ancestors_archive_lineage_read_directionally(
     neighbor merge's LEAST/GREATEST grouping deliberately discards that."""
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
-    _archive_boundary_anchor(db_conn)
-    _archive_event(db_conn, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
+    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
 
     with TestClient(app) as client:
         rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
@@ -446,8 +430,7 @@ def test_ancestors_archive_and_loki_merge_counts(
     LN(1+2), exactly like the neighbor merge (counts add before the LN)."""
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
-    _archive_boundary_anchor(db_conn)
-    _archive_event(db_conn, event_type="spawn", agent_id=b, target=a, age_hours=1.0)
+    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=1.0)
     _event(fake_loki, event_type="spawn", agent_id=b, target=a, days_ago=0.0)
 
     with TestClient(app) as client:
