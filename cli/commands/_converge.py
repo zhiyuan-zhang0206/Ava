@@ -28,6 +28,7 @@ from cli.commands._converge_os_jobs import (
     ensure_watchdog_probe,
     reap_stale_schtasks,
 )
+from cli.commands._converge_source_tree import ensure_source_tree_integrity
 
 # The step contract lives in _converge_spec so step implementations can span
 # modules without an import cycle; re-exported here because every caller and
@@ -491,6 +492,10 @@ def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
+    # Reset the prod checkout before any other step reads the tree: a tampered
+    # tree would make every later step misbehave, and resetting first means the
+    # rest of converge runs against the installed commit.
+    ConvergeStep("source tree reset + clean", ensure_source_tree_integrity, host_global=True),
     ConvergeStep("prod editable .pth target", _ensure_prod_editable_pth, host_global=True),
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
