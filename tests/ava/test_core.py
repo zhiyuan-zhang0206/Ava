@@ -320,62 +320,6 @@ class TestPauseHeartbeat:
         with pytest.raises(ValueError, match=r"at most"):
             ava.self.pause_heartbeat(172800)
 
-    def test_pause_heartbeat_repeat_window_buffers_reminder(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The backoff reminder (user ruling 2026-08-29): every pause writes a
-        heartbeat_pause_log row; a repeat or shorter window (Y <= X) buffers a
-        reminder note (delivered by the exec node via the result envelope), a
-        longer window and a first pause do not."""
-        ava._boot._agent_id = spawn_agent()
-        ava.state = object()  # record_pause_note requires an exec turn
-        try:
-            ava.self.pause_heartbeat(1800)  # first pause: history only
-            ava.self.pause_heartbeat(1800)  # repeat window: reminder
-            ava.self.pause_heartbeat(7200)  # longer window: no reminder
-            ava.self.pause_heartbeat(3600)  # shorter than 7200: reminder
-        finally:
-            ava.state = None
-        from ava._pause_notes import take_pause_notes
-
-        notes = take_pause_notes()
-        assert len(notes) == 2
-        assert "Previous heartbeat pause window: 30m; this pause: 30m." in notes[0].content
-        assert "Previous heartbeat pause window: 2h; this pause: 1h." in notes[1].content
-        assert "backoff rule" in notes[0].content
-        db_conn.rollback()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT duration_s FROM heartbeat_pause_log WHERE agent_id = %s ORDER BY id ASC",
-                (ava.self.AGENT_ID,),
-            )
-            rows = cur.fetchall()
-        assert [float(r[0]) for r in rows] == [1800.0, 1800.0, 7200.0, 3600.0]
-
-    def test_pause_heartbeat_first_pause_no_reminder(self) -> None:
-        """A first-ever pause has no previous window to compare — no reminder."""
-        ava._boot._agent_id = spawn_agent()
-        ava.state = object()
-        try:
-            ava.self.pause_heartbeat(1800)
-        finally:
-            ava.state = None
-        from ava._pause_notes import take_pause_notes
-
-        assert take_pause_notes() == []
-
-    def test_pause_heartbeat_docstring_locks_backoff_rule(self) -> None:
-        """The SDK docstring states the backoff sequence as a rule, not a
-        suggestion — a regression to advisory wording fails here (user ruling
-        2026-08-29)."""
-        import inspect
-
-        doc = inspect.getdoc(ava.self.pause_heartbeat)
-        assert doc is not None
-        assert "must strictly" in doc
-        assert "30m, then 2h, then 4h, then 8h, then 16h, then 24h" in doc
-        assert "backoff violation" in doc
-
 
 class TestRestartCompletedMarker:
     """`_render_restart_completed_marker` payload rendering — PR-E adds `with config {…}` suffix."""

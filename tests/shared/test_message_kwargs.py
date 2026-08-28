@@ -46,7 +46,6 @@ def test_note_tag_value_set() -> None:
         "lifecycle_resurrect",
         "lifecycle_fork",
         "heartbeat",
-        "heartbeat_pause",
         "security",
         "context",
         "agent_id",

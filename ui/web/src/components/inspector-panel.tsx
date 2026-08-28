@@ -2,6 +2,7 @@
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   Bell,
   ChevronLeft,
   ChevronRight,
@@ -205,6 +206,14 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
           Inspector
         </span>
         {hasStaleError ? <StaleDot /> : null}
+        <Link
+          href={`/insights/run/${agentId}`}
+          aria-label="Open run timeline"
+          title="Open run timeline"
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+        >
+          <Activity className="size-3.5" />
+        </Link>
         <button
           type="button"
           onClick={refresh}

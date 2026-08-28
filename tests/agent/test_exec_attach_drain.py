@@ -70,12 +70,11 @@ async def test_exec_drains_attachment_right_after_output(
 
     async def _fake_run_agent_code(
         *args: object, **kwargs: object
-    ) -> tuple[_ExecDone, dict[str, Any], int, list[Any], list[Any], list[dict[str, str]] | None]:
+    ) -> tuple[_ExecDone, dict[str, Any], int, list[Any], list[dict[str, str]] | None]:
         return (
             _ExecDone(output="exec output text", stream_cap=None),
             {},
             12,
-            [],
             [],
             [{"path": str(image), "label": "brand"}],
         )
@@ -114,8 +113,8 @@ async def test_exec_without_attachments_appends_no_attach_message(
 ) -> None:
     async def _fake_run_agent_code(
         *args: object, **kwargs: object
-    ) -> tuple[_ExecDone, dict[str, Any], int, list[Any], list[Any], list[dict[str, str]] | None]:
-        return (_ExecDone(output="exec output text", stream_cap=None), {}, 12, [], [], None)
+    ) -> tuple[_ExecDone, dict[str, Any], int, list[Any], list[dict[str, str]] | None]:
+        return (_ExecDone(output="exec output text", stream_cap=None), {}, 12, [], None)
 
     monkeypatch.setattr("agent.graph._exec._run_agent_code", _fake_run_agent_code)
 

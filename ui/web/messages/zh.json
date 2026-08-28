@@ -483,7 +483,8 @@
       "status-services": "服务",
       "status-gateway": "网关",
       "ops-metrics": "指标 (Grafana)",
-      "alerts": "告警"
+      "alerts": "告警",
+      "run-timeline": "运行时间线"
     },
     "title": "控制台",
     "backToAgents": "返回对话",

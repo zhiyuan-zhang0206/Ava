@@ -15,8 +15,7 @@ files + signals:
   (`init_subprocess_logger` adds no stderr handler), and stdout/stderr are
   reconfigured to line buffering so `print(..., end="")` still streams.
 - Result envelope: `AVA_EXEC_RESULT_FILE` — outcome kind, plugin state-update
-  delta, security findings, heartbeat-pause backoff reminders, and (for a
-  crash) the full traceback text. Written
+  delta, security findings, and (for a crash) the full traceback text. Written
   on every exit path except `os._exit` (watchdog / the agent's own call) and
   SIGKILL — the parent classifies those from its own cancel/timeout flags.
 - POSIX signals: SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError, both raised
@@ -292,7 +291,6 @@ def _run(request_path: str, result_path: str) -> None:
     code, write the result envelope."""
     from ava._attach import media_gated_members, take_attachments
     from ava._exports.discovery import _hidden_surface_members
-    from ava._pause_notes import take_pause_notes
     from ava.security import take_findings
 
     _line_buffered_output()
@@ -348,7 +346,6 @@ def _run(request_path: str, result_path: str) -> None:
     finally:
         _take_result_state_update(payload, state_injected=request.state is not None)
         payload.findings = [f.model_dump() for f in take_findings()]
-        payload.pause_notes = [n.model_dump() for n in take_pause_notes()]
         payload.attachments = take_attachments()
         try:
             write_result(Path(result_path), payload)

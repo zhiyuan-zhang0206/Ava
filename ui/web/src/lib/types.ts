@@ -78,6 +78,12 @@ export type PendingInbound = Schemas["PendingInbound"];
 
 
 export type StatsDashboard = Schemas["StatsDashboard"];
+export type RunTimelineResponse = Schemas["RunTimelineResponse"];
+export type RunTimelineRow = Schemas["RunTimelineRow"];
+export type RunTimelineLlm = Schemas["RunTimelineLlm"];
+export type RunTimelineExec = Schemas["RunTimelineExec"];
+export type RunTimelineMeta = Schemas["RunTimelineMeta"];
+export type RunTimelineBoundaries = Schemas["RunTimelineBoundaries"];
 export type StatsTokens = Schemas["StatsTokens"];
 
 // --- Metrics (settings Metrics tab) ---

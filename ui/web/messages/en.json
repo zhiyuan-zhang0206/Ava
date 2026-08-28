@@ -483,7 +483,8 @@
       "status-services": "Services",
       "status-gateway": "Gateway",
       "ops-metrics": "Metrics (Grafana)",
-      "alerts": "Alerts"
+      "alerts": "Alerts",
+      "run-timeline": "Run timeline"
     },
     "title": "Control",
     "backToAgents": "Back to agents",

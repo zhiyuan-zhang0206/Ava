@@ -18,6 +18,7 @@ import type { NoticesFeed,
   AgentRow,
   WireAgentRow,
   ContextBreakdownResponse,
+  RunTimelineResponse,
   DefaultModelView,
   AlertsResponse,
   AlertsWindow,
@@ -216,6 +217,24 @@ export const api = {
 
   getContextBreakdown: (agentId: number): Promise<ContextBreakdownResponse> => {
     return f(`/api/agents/${agentId}/context-breakdown`).then(ok<ContextBreakdownResponse>);
+  },
+
+  // Run→turn→call timeline for one agent. Default window = the session
+  // route from context initialization to the latest compact; pass from/to
+  // (ISO-8601 with offset) to override. limit/offset page the turn rows.
+  getRunTimeline: (
+    agentId: number,
+    opts?: { from?: string; to?: string; limit?: number; offset?: number },
+  ): Promise<RunTimelineResponse> => {
+    const params = new URLSearchParams();
+    if (opts?.from != null) params.set("from", opts.from);
+    if (opts?.to != null) params.set("to", opts.to);
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.offset != null) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return f(`/api/agents/${agentId}/run-timeline${qs ? `?${qs}` : ""}`).then(
+      ok<RunTimelineResponse>,
+    );
   },
 
   // Per-agent windowed inspector aggregates. Single-agent counterpart to

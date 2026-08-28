@@ -29,6 +29,7 @@ import {
 import { ControlSection } from "@/app/control/_section";
 import OpsPage from "@/app/insights/ops/page";
 import AlertsSection from "@/components/ops/alerts-section";
+import RunTimelineEntry from "@/components/ops/run-timeline-entry";
 import StatusPage from "@/app/insights/status/page";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -106,6 +107,14 @@ export default function InsightsPage() {
               description="System alerts — separate from notices. Unresolved-first history, live via SSE."
             >
               <AlertsSection />
+            </ControlSection>
+
+            <ControlSection
+              id="run-timeline"
+              label="Run timeline"
+              description="Per-agent run→turn→call timeline — session route from context initialization to compact, independent time/token axes."
+            >
+              <RunTimelineEntry />
             </ControlSection>
 
           </div>

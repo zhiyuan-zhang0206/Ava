@@ -101,6 +101,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT, note="spawn — pure INSERT; a retry twins the agent (#698)"
     ),
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
+        note="run→turn→call timeline — read-only event aggregation; idempotent"
+    ),
     # ── gateway/routers/alerts.py ───────────────────────────────────
     ("GET", "/api/alerts"): RouteContract(),
     ("GET", "/api/alerts/stream"): RouteContract(

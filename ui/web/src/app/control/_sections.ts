@@ -134,6 +134,11 @@ export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
     label: "Alerts",
     labelKey: "alerts",
   },
+  {
+    id: "run-timeline",
+    label: "Run timeline",
+    labelKey: "run-timeline",
+  },
 ];
 
 // Anchor ids of the retired Metrics section (2026-08-04). Old

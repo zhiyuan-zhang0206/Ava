@@ -2617,6 +2617,32 @@ export interface paths {
         patch: operations["update_preset_api_presets__preset_id__patch"];
         trace?: never;
     };
+    "/api/agents/{agent_id}/run-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Timeline
+         * @description Run→turn→call timeline for one agent.
+         *
+         *     Default window = the complete session route from context initialization
+         *     to the latest compact (user ruling); pass `from`/`to` (ISO-8601 with
+         *     timezone offset) to override. Rows are turn-level, ascending; `limit` /
+         *     `offset` page them. The call level (LLM call + execs) is embedded per
+         *     row — no second query.
+         */
+        get: operations["get_run_timeline_api_agents__agent_id__run_timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/guide/draft": {
         parameters: {
             query?: never;
@@ -6376,6 +6402,150 @@ export interface components {
              * @enum {string}
              */
             status: "spawned" | "already_alive";
+        };
+        /**
+         * RunTimelineBoundaries
+         * @description The session route the window resolved to. `initialize_at` is the
+         *     context-initialization instant (the first turn's start inside the
+         *     window); `compact_at` is the latest compact event inside the window
+         *     (None when the session has not compacted yet). Default window =
+         *     `[initialize_at, compact_at]` (or now when `compact_at` is None).
+         */
+        RunTimelineBoundaries: {
+            /** Initialize At */
+            initialize_at: string | null;
+            /** Compact At */
+            compact_at: string | null;
+        };
+        /**
+         * RunTimelineExec
+         * @description One exec inside a turn — a call-level leaf.
+         */
+        RunTimelineExec: {
+            /** Tool */
+            tool: string;
+            /** Dur S */
+            dur_s: number;
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * RunTimelineLlm
+         * @description One turn's LLM call (events side; spans carry the same numbers).
+         *
+         *     `in_total` is the absolute input-token count of the call — the token-axis
+         *     value the visualization shows (user ruling: token itself, absolute
+         *     quantity; no cache/input/output split on the axis — input vs output may
+         *     be color-differentiated instead). `cost_usd` is the usage-time price
+         *     snapshot; `model` the model in force at the call.
+         */
+        RunTimelineLlm: {
+            /** Calls */
+            calls: number;
+            /** In Total */
+            in_total: number;
+            /** Cache Read */
+            cache_read: number;
+            /** Out Total */
+            out_total: number;
+            /** Reasoning */
+            reasoning: number;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /** Model */
+            model: string;
+        };
+        /**
+         * RunTimelineMeta
+         * @description Window aggregates — the run-level header stats. `truncated` is true
+         *     when the turn fetch hit the row cap (a very long window); the caller can
+         *     narrow the window for the full picture.
+         */
+        RunTimelineMeta: {
+            /** N Turns */
+            n_turns: number;
+            /** Wall Span S */
+            wall_span_s: number;
+            /** Active S */
+            active_s: number;
+            /** Tokens In */
+            tokens_in: number;
+            /** Tokens Out */
+            tokens_out: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** N Exec Failed */
+            n_exec_failed: number;
+            /** N Compact */
+            n_compact: number;
+            /** N Restart */
+            n_restart: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * RunTimelineResponse
+         * @description GET /api/agents/{id}/run-timeline response.
+         */
+        RunTimelineResponse: {
+            /** Agent Id */
+            agent_id: number;
+            /**
+             * Window From
+             * Format: date-time
+             */
+            window_from: string;
+            /**
+             * Window To
+             * Format: date-time
+             */
+            window_to: string;
+            boundaries: components["schemas"]["RunTimelineBoundaries"];
+            meta: components["schemas"]["RunTimelineMeta"];
+            /** Rows */
+            rows: components["schemas"]["RunTimelineRow"][];
+        };
+        /**
+         * RunTimelineRow
+         * @description One turn row. `start`/`end` are wall clock; `active_s` is the turn's
+         *     own duration (`turn_end.duration_seconds`). `anomalies` lists
+         *     human-readable markers (exec_failed / exec_timeout / llm_turn_aborted …)
+         *     for the red-highlight pass; `tags` carries lifecycle markers
+         *     (compact / restart / long-idle) for the event rail.
+         */
+        RunTimelineRow: {
+            /** Turn */
+            turn: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Active S */
+            active_s: number;
+            /** Ok */
+            ok: boolean;
+            /** Trace Id */
+            trace_id: string;
+            llm: components["schemas"]["RunTimelineLlm"] | null;
+            /** Execs */
+            execs: components["schemas"]["RunTimelineExec"][];
+            /** Anomalies */
+            anomalies: string[];
+            /** Tags */
+            tags: string[];
         };
         /** ScheduleCreate */
         ScheduleCreate: {
@@ -10335,6 +10505,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PresetView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_timeline_api_agents__agent_id__run_timeline_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTimelineResponse"];
                 };
             };
             /** @description Validation Error */
