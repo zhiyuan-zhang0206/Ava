@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import os
 import signal
 import subprocess
+import sys
 import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -22,6 +25,7 @@ from agent.graph._exec_process import (
     TeardownFailure,
     annotate_original_failure,
     finish_teardown_despite_cancellation,
+    settle_cancelled_owners,
     settle_resources,
     signal_child,
     start_reader_join,
@@ -372,6 +376,74 @@ async def test_repeated_cancellation_cannot_interrupt_resource_barrier() -> None
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(operation, timeout=5.0)
     assert events == ["close", "reap", "reader"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_runner_cancelled_owners_leave_no_exec_process_group(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Runner-wide cancellation must not strand the exec child or an observer
+    thread that makes ``shutdown_default_executor`` wait for that child."""
+    descendant_pid_path = tmp_path / "descendant.pid"
+    code = (
+        "import subprocess, sys, time; "
+        f"p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        f"open({str(descendant_pid_path)!r}, 'w').write(str(p.pid)); "
+        "time.sleep(60)"
+    )
+    proc = subprocess.Popen(  # noqa: S603 — fixed test-only interpreter command
+        [sys.executable, "-c", code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    assert proc.stdout is not None
+    domain = ExecProcessDomain(proc=proc, windows_job=None)
+    root_exit_task = start_root_exit_observer(proc)
+    domain_close = DomainCloseOwner(domain, root_exit_task)
+    reap_task = start_reap(proc, domain_close)
+    reader = threading.Thread(target=proc.stdout.read, daemon=True)
+    reader.start()
+    reader_join_task = start_reader_join(reap_task, reader, proc.pid)
+    try:
+        deadline = time.monotonic() + 5.0
+        while not descendant_pid_path.exists() and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        descendant_pid = int(descendant_pid_path.read_text())
+
+        for task in (domain_close.task, root_exit_task, reap_task, reader_join_task):
+            task.cancel()
+        await asyncio.gather(
+            domain_close.task,
+            root_exit_task,
+            reap_task,
+            reader_join_task,
+            return_exceptions=True,
+        )
+        assert domain_close.task.cancelled()
+
+        # The emergency path must not enqueue new default-executor work: that
+        # executor is exactly what Runner is trying to shut down in production.
+        monkeypatch.setattr(
+            "agent.graph._exec_process.asyncio.to_thread",
+            MagicMock(side_effect=AssertionError("default executor re-entered")),
+        )
+        started = time.monotonic()
+        assert not settle_cancelled_owners(domain_close, reader)
+        assert time.monotonic() - started < 6.0
+
+        assert proc.poll() is not None
+        assert not psutil.pid_exists(descendant_pid) or psutil.Process(descendant_pid).status() in {
+            psutil.STATUS_DEAD,
+            psutil.STATUS_ZOMBIE,
+        }
+        with pytest.raises(ProcessLookupError):
+            os.killpg(proc.pid, 0)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5.0)
 
 
 async def test_windows_stop_closes_the_owned_job_once(
