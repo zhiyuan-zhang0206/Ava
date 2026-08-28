@@ -84,8 +84,8 @@ def _delete_row(row: dict[str, Any]) -> None:
     ts = row["ts"]
     if not isinstance(ts, datetime):
         ts = datetime.fromisoformat(str(ts))
-    start = int((ts - timedelta(seconds=1)).timestamp() * 1e9)
-    end = int((ts + timedelta(seconds=1)).timestamp() * 1e9)
+    start = int((ts - timedelta(seconds=1)).timestamp())
+    end = int((ts + timedelta(seconds=1)).timestamp())
     selector = (
         f'{{event_name="fork", agent_id="{row["agent_id"]}", '
         f'target_agent_id="{row["target_agent_id"]}"}}'
