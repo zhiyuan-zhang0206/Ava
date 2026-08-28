@@ -221,13 +221,20 @@ export const api = {
 
   getRunTimeline: (
     agentId: number,
-    options?: { from?: string; to?: string; level?: "turn" | "bucket"; bucket?: string },
+    options?: {
+      from?: string;
+      to?: string;
+      level?: "turn" | "bucket";
+      bucket?: string;
+      session?: "compact" | "current";
+    },
   ): Promise<RunTimelineResponse> => {
     const params = new URLSearchParams();
     if (options?.from != null) params.set("from", options.from);
     if (options?.to != null) params.set("to", options.to);
     if (options?.level != null) params.set("level", options.level);
     if (options?.bucket != null) params.set("bucket", options.bucket);
+    if (options?.session != null) params.set("session", options.session);
     const query = params.toString();
     return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
       ok<RunTimelineResponse>,

@@ -34,3 +34,18 @@ The route is read-only, has no new collection dependency, and works for both
 trace root shapes. Long runs can request server-side time buckets; the page
 switches to one-hour buckets when the initial view exceeds 400 turns. Tempo
 call-level and checkpoint-content drill-down remain follow-up work.
+
+## Update — resilient event association and bounded run views
+
+Execution events are associated exactly once by their completed-turn time
+window, never by `trace_id`: a session-root trace can span many turns. Usage
+keeps the exact `span_id` join when present, then associates unjoined historical
+usage once by the same bounded time-window rule. The response distinguishes
+turns recovered by that fallback from turns with no usage at all, so the UI can
+make incomplete tracing visible instead of presenting a silent zero-token view.
+
+The compact-ended session remains the default required session route. The
+`session=current` selector exposes the latest lifecycle start through now, and
+the compact view reports post-boundary activity with a direct switch. The page
+requests one-hour buckets up front for server-selected or six-hour-and-larger
+windows, while preserving turn detail for narrower explicit windows.

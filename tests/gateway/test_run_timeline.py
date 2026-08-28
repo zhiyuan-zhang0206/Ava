@@ -156,3 +156,105 @@ def test_aggregate_turn_timeline_preserves_legacy_exec_failure_events() -> None:
     assert timeline.meta.n_exec_failed == 1
     assert timeline.rows[0].execs[0].ok is False
     assert "exec(timeout)" in timeline.rows[0].anomalies
+
+
+def test_aggregate_turn_timeline_assigns_each_exec_to_its_time_window() -> None:
+    """Session-level trace ids must not fan one exec out to every turn."""
+    start = datetime(2026, 8, 29, 8, tzinfo=UTC)
+    timeline = aggregate_turn_timeline(
+        [
+            _event(
+                "turn_end",
+                start + timedelta(seconds=4),
+                trace_id="session-trace",
+                span_id="turn-one",
+                attributes={"duration_seconds": 4},
+            ),
+            _event("exec", start + timedelta(seconds=3), trace_id="session-trace"),
+            _event(
+                "turn_end",
+                start + timedelta(seconds=9),
+                trace_id="session-trace",
+                span_id="turn-two",
+                attributes={"duration_seconds": 4},
+            ),
+        ],
+        start,
+        start + timedelta(seconds=10),
+    )
+
+    assert [len(row.execs) for row in timeline.rows] == [1, 0]
+    assert timeline.rows[1].active_s == 0
+
+
+def test_aggregate_turn_timeline_keeps_a_trailing_exec_on_the_last_completed_turn() -> None:
+    """A just-emitted exec must not vanish while its next turn is unfinished."""
+    start = datetime(2026, 8, 29, 8, tzinfo=UTC)
+    timeline = aggregate_turn_timeline(
+        [
+            _event(
+                "turn_end",
+                start + timedelta(seconds=4),
+                trace_id="session-trace",
+                attributes={"duration_seconds": 4},
+            ),
+            _event("exec", start + timedelta(seconds=5), trace_id="session-trace"),
+        ],
+        start,
+        start + timedelta(seconds=6),
+    )
+
+    assert [len(row.execs) for row in timeline.rows] == [1]
+
+
+def test_aggregate_turn_timeline_falls_back_to_time_for_spanless_usage() -> None:
+    """A span-less event pair still reports its token usage exactly once."""
+    start = datetime(2026, 8, 29, 8, tzinfo=UTC)
+    timeline = aggregate_turn_timeline(
+        [
+            _event(
+                "llm_usage",
+                start + timedelta(seconds=1),
+                attributes={"in_total": 120, "out_total": 12, "latency_ms": 500},
+            ),
+            _event(
+                "turn_end",
+                start + timedelta(seconds=4),
+                attributes={"duration_seconds": 4},
+            ),
+            _event(
+                "llm_usage",
+                start + timedelta(seconds=6),
+                attributes={"in_total": 240, "out_total": 24, "latency_ms": 700},
+            ),
+            _event(
+                "turn_end",
+                start + timedelta(seconds=8),
+                attributes={"duration_seconds": 4},
+            ),
+        ],
+        start,
+        start + timedelta(seconds=9),
+    )
+
+    assert [row.llm.in_total for row in timeline.rows] == [120, 240]
+    assert timeline.meta.tokens_in == 360
+    assert timeline.meta.fallback_turns == 2
+    assert timeline.meta.unmatched_turns == 0
+
+
+def test_aggregate_turn_timeline_counts_one_audit_event_per_restart_family() -> None:
+    """Telemetry twins must not double the user-visible restart count."""
+    start = datetime(2026, 8, 29, 8, tzinfo=UTC)
+    timeline = aggregate_turn_timeline(
+        [
+            _event("resurrect", start),
+            _event("agent_resurrected", start + timedelta(milliseconds=20)),
+            _event("agent_restarted", start + timedelta(seconds=1)),
+            _event("restart_completed", start + timedelta(seconds=1, milliseconds=20)),
+        ],
+        start,
+        start + timedelta(seconds=2),
+    )
+
+    assert timeline.meta.n_restart == 2

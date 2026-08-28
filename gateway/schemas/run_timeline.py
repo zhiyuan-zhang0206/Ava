@@ -30,6 +30,8 @@ class RunTimelineMeta(BaseModel):
     n_exec_failed: int
     n_compact: int
     n_restart: int
+    fallback_turns: int
+    unmatched_turns: int
 
 
 class RunTimelineLlm(BaseModel):
@@ -94,6 +96,8 @@ class RunTimelineBoundaries(BaseModel):
 
     initialize_turn: int | None
     last_before_compact_turn: int | None
+    post_window_turns: int
+    has_activity_after_window: bool
 
 
 class RunTimelineResponse(BaseModel):

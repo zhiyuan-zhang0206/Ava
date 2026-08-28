@@ -134,6 +134,12 @@ describe("lifecycle endpoints", () => {
     expect(calls[0].init?.method).toBeUndefined();
   });
 
+  it("getRunTimeline requests the current session explicitly", async () => {
+    await api.getRunTimeline(405, { session: "current" });
+
+    expect(calls[0].url).toMatch(/\/api\/agents\/405\/run-timeline\?session=current$/);
+  });
+
   it("listAgents defaults to the SQL-bounded live roster", async () => {
     await api.listAgents();
     expect(calls).toHaveLength(1);
