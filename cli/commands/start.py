@@ -382,6 +382,16 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         print(f"\u2717 {err}", file=sys.stderr)
         return 1
 
+    # 0a) reset the prod tree to the installed commit BEFORE the source-integrity
+    #     guard: drift must be reverted, not adopted by the guard's auto-heal
+    #     (Task #1905 — the periodic reset must bite on the regular start
+    #     path). Skipped while a cluster update is in flight (deploy verbs own
+    #     the tree; the guard's auto-heal then syncs it) and for dev worktree
+    #     starts (their tree is a development context).
+    from cli.commands._converge_source_tree import reset_prod_source_tree
+
+    reset_prod_source_tree(repo)
+
     # 0a) source-integrity guard — detect manual git pull / reset / checkout
     #      in the source tree that bypass `ava cluster update` and auto-heal by running
     #      `uv sync` before the stale venv can crash the cluster.

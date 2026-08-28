@@ -34,6 +34,12 @@ Checks (all must pass for exit 0):
    detection; repair belongs to the converge guard). Alert-only, same reasoning
    as checks 5 and 6: a poisoned pointer is the 2026-08-27 outage class, but
    rollback does not fix a venv record.
+8. Source-tree integrity — the prod source checkout reports tamper findings
+   (tracked files changed, untracked files outside the runtime-artifact
+   whitelist, HEAD moved off the installed commit). Alert-only, same class as
+   checks 5-7: an edited tree is the 2026-08-28 outage class (it broke
+   `import ava` for every agent), but rollback does not undo an on-disk edit —
+   the converge guard resets the tree on the next start/update.
 
 **A failure a running deploy explains does not advance the auto-rollback counter, and
 resets it** (`_deploy_suppression`). The same live lease is an expected transition
@@ -507,6 +513,48 @@ def _editable_install_failure() -> str | None:
     return "prod venv editable install names non-allowlisted source: " + "; ".join(violations)
 
 
+def _source_tree_failure() -> str | None:
+    """Alert text when the prod source checkout is tampered with, else None.
+
+    Reported through check 8, which is **alert-only and never feeds the
+    auto-rollback counter** — the same placement logic as checks 5-7: a
+    tampered tree is the 2026-08-28 outage class (edited source broke
+    ``import ava`` for every agent on the box), but rolling the cluster back
+    does not undo an on-disk edit — the converge guard resets the tree on the
+    next ``ava start`` / ``ava cluster update`` ("source tree reset + clean").
+    The probe only detects and never writes, so it also covers the read-only
+    emergency mode where the guard's repair is skipped.
+
+    Delegates to ``shared.source_tree_guard.source_tree_violations`` — the
+    public read-only twin of the converge guard's repair primitive — with the
+    same whitelist, so the detector and the fixer can never disagree about
+    what is legal.
+    """
+    import shared.cluster_drift
+    import shared.source_tree_guard as stg
+
+    source_root = shared.cluster_drift.prod_source_dir()
+    if source_root is None:
+        return None
+    violations = stg.source_tree_violations(source_root)
+    if not violations:
+        return None
+    return "prod source tree tampered: " + "; ".join(violations)
+
+
+def _run_source_tree_check(home: Path) -> int | None:
+    """Run check 8 — alert-only, so it bypasses ``_unhealthy`` (a tampered
+    tree is the 2026-08-28 outage class, but rollback does not undo an on-disk
+    edit). Returns None when the check passes, 1 when it alerts."""
+    failure = _source_tree_failure()
+    if failure is None:
+        return None
+    message = f"FAIL: source tree — {failure}"
+    print(message, file=sys.stderr)
+    _alert_failure(home, message, deploy_explains=_deploy_suppression() is not None)
+    return 1
+
+
 def run_health_probe(
     *,
     agent_min: int | None = None,
@@ -647,6 +695,16 @@ def run_health_probe(
         _alert_failure(home, message, deploy_explains=_deploy_suppression() is not None)
         return 1
     print("  ✓ editable install records")
+
+    # 8. Source-tree integrity — alert-only, same class as checks 5-7: a
+    # tampered prod checkout is the 2026-08-28 outage class (edited source
+    # broke `import ava` for every agent on the box), but rolling back code
+    # does not undo an on-disk edit — the converge guard resets the tree on
+    # the next start/update. The probe detects and alerts; it never writes.
+    source_check = _run_source_tree_check(home)
+    if source_check is not None:
+        return source_check
+    print("  ✓ source tree integrity")
 
     # All checks passed (the counter was already reset once checks 1-4 passed,
     # above the alert-only check 5) — clear the alert edge state.
