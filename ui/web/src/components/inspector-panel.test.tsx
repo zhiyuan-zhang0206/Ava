@@ -873,6 +873,21 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
+  it("shows 'due' when the projected check-in is in the past", async () => {
+    // A restarting agent's idle clock runs on while the daemon skips it, so a
+    // projected next_at can land in the past — the cell must render "due",
+    // never "4m ago" for a *next* heartbeat (the "one hour ago" bug family).
+    const nextAt = new Date(Date.now() - 240_000).toISOString(); // 4m overdue
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        heartbeat: { interval_s: 300, next_at: nextAt, paused_until: null, heartbeat_pending: false, last_pause: null },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    expect(screen.getByText("due")).toBeTruthy();
+  });
+
   it("shows an em dash for a running agent plus the last pause from history", async () => {
     const at = new Date(Date.now() - 330_000).toISOString(); // ~5.5m ago → "5m ago"
     getAgentInspectLive.mockResolvedValue(

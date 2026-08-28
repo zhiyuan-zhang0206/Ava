@@ -694,10 +694,14 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 // The "next heartbeat" cell — mirrors the backend's mutually-exclusive states:
-// an active pause renders a clock time; an idle agent with a check-in already
-// queued (the daemon won't send another while an inbound is pending) renders
-// "pending"; an idle agent with nothing queued renders its projected next
-// check-in; a running agent an em dash (never checked in on).
+// an active pause renders a clock time; an idle-family agent (idling /
+// hibernating / restarting — the statuses the fleet view projects to Idle)
+// with a check-in already queued (the daemon won't send another while an
+// inbound is pending) renders "pending"; one with nothing queued renders its
+// projected next check-in, or "due" when the projection has passed (a
+// restarting agent's idle clock runs on while the daemon skips it — a past
+// "next" time must never render as "Xm ago"); a running or terminated agent
+// an em dash (never checked in on).
 function nextHeartbeatCell(hb: HeartbeatInfo): { value: string } {
   if (hb.paused_until) {
     return {
@@ -708,7 +712,10 @@ function nextHeartbeatCell(hb: HeartbeatInfo): { value: string } {
     return { value: "pending" };
   }
   if (hb.next_at) {
-    return { value: formatRelative(hb.next_at) };
+    const next = new Date(hb.next_at).getTime();
+    return {
+      value: next <= Date.now() ? "due" : formatRelative(hb.next_at),
+    };
   }
   return { value: "—" };
 }

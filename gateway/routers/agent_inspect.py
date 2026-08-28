@@ -243,12 +243,11 @@ def _heartbeat(
     *future* value (a NULL / past pause arrives here as None = not paused). The
     display states are mutually exclusive:
 
-    - idle, paused → `paused_until` (the active suppression end).
-    - idle, not paused, a wake already queued → `heartbeat_pending` (see below).
-    - idle, not paused, nothing queued → `next_at`, the daemon's next check-in
-      time `last_active_at + heartbeat_idle_threshold_seconds`, matching the
-      daemon's due-time projection off the real-activity clock.
-    - any non-idle agent → none of them (it never gets a check-in while active).
+    - idle-family (idling / hibernating / restarting), paused → `paused_until`.
+    - idle-family, not paused, a wake already queued → `heartbeat_pending`.
+    - idle-family, not paused, nothing queued → `next_at` (the daemon's next
+      check-in; the frontend renders an overdue one as "due").
+    - running or terminated → all off (never checked in on).
 
     `heartbeat_pending` mirrors the daemon's `NOT EXISTS (pending inbound)` guard:
     the daemon checks in on an idle agent only when it has no inbound already
@@ -277,7 +276,7 @@ def _heartbeat(
     next_at: datetime | None = None
     active_pause: datetime | None = None
     heartbeat_pending = False
-    if status == AgentStatus.IDLING:
+    if status in (AgentStatus.IDLING, AgentStatus.HIBERNATING, AgentStatus.RESTARTING):
         if paused_until is not None:
             active_pause = paused_until
         # Mirror the daemon's `NOT EXISTS (pending inbound)` guard: with a
@@ -288,6 +287,7 @@ def _heartbeat(
         elif pending_inbound:
             heartbeat_pending = True
         else:
+            # Overdue (daemon skips restarting agents) → frontend shows "due".
             next_at = last_active_at + timedelta(seconds=idle_threshold_s)
     return HeartbeatInfo(
         interval_s=interval_s,

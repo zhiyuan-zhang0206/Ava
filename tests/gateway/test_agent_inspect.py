@@ -2188,6 +2188,64 @@ def test_inspect_heartbeat_stuck_after_expired_pause_no_past_next_at(
     assert hb["heartbeat_pending"] is True
 
 
+@pytest.mark.parametrize("status", ["hibernating", "restarting"])
+def test_inspect_heartbeat_idle_family_projects_next_at(
+    db_conn: psycopg.Connection, status: str
+) -> None:
+    """The fleet view projects hibernating/restarting rows to "Idle", so their
+    page must show a computable next check-in like a plain idle agent (user
+    report 2026-08-28: a restarting agent rendered an empty cell). Parked 120s
+    ago → next_at ≈ now + (idle_threshold - 120)s, exactly like idling."""
+    aid = _insert_agent(db_conn, status=status, status_changed_s_ago=120)
+    db_conn.commit()
+    with TestClient(app) as client:
+        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+    assert hb["paused_until"] is None
+    assert hb["heartbeat_pending"] is False
+    assert hb["next_at"] is not None
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+
+
+@pytest.mark.parametrize("status", ["hibernating", "restarting"])
+def test_inspect_heartbeat_idle_family_pending_inbound_marks_heartbeat_pending(
+    db_conn: psycopg.Connection, status: str
+) -> None:
+    """Idle-family agents obey the same `NOT EXISTS (pending inbound)` guard as
+    idling: a queued wake (e.g. the restart_completed marker a restarting agent
+    is about to claim) means the daemon schedules nothing, so `heartbeat_pending`
+    shows instead of a projected time."""
+    aid = _insert_agent(db_conn, status=status, status_changed_s_ago=120)
+    _insert_pending_inbound(db_conn, agent_id=aid)
+    db_conn.commit()
+    with TestClient(app) as client:
+        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+    assert hb["heartbeat_pending"] is True
+    assert hb["next_at"] is None
+
+
+def test_inspect_heartbeat_restarting_overdue_still_projects_raw_next_at(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A restarting agent's idle clock can run past its due time (the daemon
+    does not check in while the process is down): the projection stays raw
+    `last_active_at + idle_threshold` (a past instant), and the frontend
+    renders a past next_at as "due" — never "4m ago" for a *next* heartbeat."""
+    aid = _insert_agent(
+        db_conn,
+        status="restarting",
+        status_changed_s_ago=7200,  # last_active_at 2h ago — far past due
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+    assert hb["heartbeat_pending"] is False
+    assert hb["next_at"] is not None
+    # Raw projection: 2h ago + idle_threshold — clearly in the past.
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 7200
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+
+
 def test_inspect_heartbeat_last_pause_newest_wins(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
