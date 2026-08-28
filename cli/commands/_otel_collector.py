@@ -702,9 +702,10 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
     ):
         print(
             "  ! otel-collector: collector skipped — this gateway home is not "
-            f"the LGTM host ({ctx.ava_home / 'lgtm-host'} is absent); telemetry "
-            "export is unavailable; set AVA_TELEMETRY_OTLP_ENDPOINT to use an "
-            "explicit collector",
+            "the observability station ("
+            f"{ctx.ava_home / 'lgtm-host'} is absent and the observability-station "
+            "capability is not declared); telemetry export is unavailable; set "
+            "AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
             file=sys.stderr,
         )
         residual = ctx.ava_home / "otel-collector/config.yaml"

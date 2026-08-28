@@ -212,9 +212,10 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
     if role == "gateway":
         # lgtm: the observability-backend compose stack (deploy/lgtm) — no
         # ServiceSpec (docker containers, not a session). The check gates itself
-        # on the $AVA_HOME/lgtm-host marker, so on every unmarked host it is a
-        # no-op. The stack needs no Postgres: `requires_db=False` — the
-        # observability read path must not be held hostage by a DB outage.
+        # on the $AVA_HOME/lgtm-host marker OR the observability-station
+        # capability, so on every non-station host it is a no-op. The stack
+        # needs no Postgres: `requires_db=False` — the observability read path
+        # must not be held hostage by a DB outage.
         checks.append(_Check("lgtm", lgtm_healthcheck, requires_db=False))
 
     # Honor an operator's durable `ava start --disable-service X`: `_gate_reason`

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from shared.machine import MachineRole, MachineRoles
 
-ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner"})
+ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
 
 # The same capabilities in a deterministic order, for steps that fan out over
 # whichever ones a unit carries. A frozenset has no order, and `sorted()` over

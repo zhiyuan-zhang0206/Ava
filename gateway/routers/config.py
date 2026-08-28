@@ -68,8 +68,9 @@ def _assert_machine_known(target: str) -> None:
 
 
 def _target_capabilities(target: str) -> list[MachineRole]:
-    """The target machine's capability set (`gateway` / `agent-runner`) — what the
-    panel uses to pick which capability sections a remote view renders.
+    """The target machine's capability set (`gateway` / `agent-runner` /
+    `observability-station`) — what the panel uses to pick which capability
+    sections a remote view renders.
 
     For this gateway itself (`target == machine_name()`) the local `machine_role()`
     is authoritative — it is always available, even before the host's own startup

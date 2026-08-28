@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 import yaml
 
 from cli.commands._converge_spec import ConvergeCtx
+from cli.commands._lgtm import is_station_ctx, roles_declare_station
 from cli.commands._observatory_urls import (
     _alerts_webhook_url,
     _atomic_write,
@@ -149,6 +150,22 @@ def _binary_path(name: str, native_dir: Path) -> Path:
     return native_dir / _NATIVE_CONSTANTS[name].binary_path
 
 
+def _storage_dir(ava_home: Path) -> Path:
+    """The observation-data root for the native backends, per machine.
+
+    `AVA_LGTM_STORAGE_DIR` (empty = default) selects where Loki's filesystem
+    store and Prometheus' TSDB live; the default resolves to
+    `$AVA_HOME/lgtm/native/data`, byte-identical to the historical layout. The
+    knob is host-scope — it names a machine's data volume, not a cluster's.
+    """
+    from shared.config import settings
+
+    configured = settings.observability.lgtm_storage_dir.strip()
+    if not configured:
+        return (ava_home / "lgtm" / "native" / "data").resolve()
+    return Path(configured).expanduser().resolve()
+
+
 def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
     """Render one owner-scoped launchd plist with absolute program paths."""
     from shared.config import settings
@@ -158,7 +175,7 @@ def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
     resolved_home = ava_home.resolve()
     substitutions = {
         "config": str(resolved_native / "config"),
-        "data": str(resolved_native / "data"),
+        "data": str(_storage_dir(ava_home)),
         "homepath": str(resolved_native / "grafana-home"),
         "lgtm_listen_host": settings.observability.lgtm_listen_host,
     }
@@ -421,6 +438,7 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     loki_url, prometheus_url, pg_url = _observability_datasource_urls()
     substitutions = {
         "AVA_HOME": str(ava_home),
+        "LGTM_STORAGE_DIR": str(_storage_dir(ava_home)),
         "AVA_PROVISIONING_PATH": str(rendered_provisioning),
         "GRAFANA_PROVISIONING_PATH": str(rendered_provisioning / "dashboards"),
         "AVA_TEMPO_QUERY_URL": tempo_query_url,
@@ -618,8 +636,13 @@ def bootout_native_jobs(ava_home: Path) -> None:
         _plist_path(label).unlink(missing_ok=True)
 
 
-def ensure_lgtm_native(repo: Path, ava_home: Path) -> None:
-    """Install current backend binaries and always converge configs and plists."""
+def ensure_lgtm_native(repo: Path, ava_home: Path, *, station: bool = False) -> None:
+    """Install current backend binaries and always converge configs and plists.
+
+    `station` is the declarative provider identity (the `observability-station`
+    capability); the legacy `$AVA_HOME/lgtm-host` marker is still honored on its
+    own, so the existing marked host behaves exactly as before.
+    """
     tag = platform_tag()
     if tag not in SUPPORTED_TAGS:
         print(
@@ -628,8 +651,11 @@ def ensure_lgtm_native(repo: Path, ava_home: Path) -> None:
         )
         return
     native_dir = ava_home / "lgtm/native"
-    for directory in ("bin", "config", "data", "logs"):
+    for directory in ("bin", "config", "logs"):
         (native_dir / directory).mkdir(parents=True, exist_ok=True)
+    storage = _storage_dir(ava_home)
+    for sub in ("", "loki", "prom"):
+        (storage / sub).mkdir(parents=True, exist_ok=True)
     for name, asset in _load_versions(repo).items():
         marker = native_dir / f"version-{name}"
         if marker.exists() and marker.read_text(encoding="utf-8").strip() == asset["version"]:
@@ -643,7 +669,7 @@ def ensure_lgtm_native(repo: Path, ava_home: Path) -> None:
     for name in _NATIVE_CONSTANTS:
         label = native_label(name, ava_home)
         _write_if_changed(_plist_path(label), _render_plist(name, native_dir, ava_home))
-    if (ava_home / "lgtm-host").exists():
+    if station or (ava_home / "lgtm-host").exists():
         _retire_other_native_jobs(ava_home)
     _restart_grafana_if_config_changed(native_dir, ava_home, grafana_config_before)
 
@@ -696,10 +722,15 @@ def _restart_grafana_if_config_changed(
 
 
 def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
-    """Converge the native backends only on the marked LGTM host home."""
-    if not (ctx.ava_home / "lgtm-host").exists():
+    """Converge the native backends on the observability station.
+
+    Provider identity is the legacy `lgtm-host` marker OR the declarative
+    `observability-station` capability; both render the full native set
+    (configs + launchd plists + storage dirs) and install pinned binaries.
+    """
+    if not is_station_ctx(ctx):
         return
-    ensure_lgtm_native(ctx.repo, ctx.ava_home)
+    ensure_lgtm_native(ctx.repo, ctx.ava_home, station=roles_declare_station(ctx.roles))
 
 
 def backend_pids(native_dir: Path) -> dict[str, str | None]:

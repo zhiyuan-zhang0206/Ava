@@ -261,6 +261,28 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    lgtm_storage_dir: str = Field(
+        default="",
+        alias="AVA_LGTM_STORAGE_DIR",
+        description=(
+            "Base directory for the native LGTM observation data on the "
+            "observability-station host (Loki filesystem store + Prometheus TSDB). "
+            "Empty (default) = `$AVA_HOME/lgtm/native/data`, byte-identical to the "
+            "historical layout. A non-empty value moves the data volume to a "
+            "per-machine path (e.g. a dedicated data volume), rendered into the "
+            "native configs and the launchd plist at converge; applies on the next "
+            "LGTM restart. Grafana's own data and the native logs stay under "
+            "$AVA_HOME/lgtm/native regardless."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     observability_url: str = Field(
         default="",
         alias="AVA_OBSERVABILITY_URL",

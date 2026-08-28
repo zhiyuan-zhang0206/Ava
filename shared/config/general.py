@@ -204,6 +204,19 @@ class GeneralSettings(EnvSettings):
         },
     )
 
+    machine_serve_observability_station: bool | None = Field(
+        default=None,
+        alias="AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
+        description="Whether this host serves the observability-station capability (owns the native LGTM observability backends — the declarative form of the `$AVA_HOME/lgtm-host` marker). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_observability_station` file.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     machine_description: str = Field(
         default="",
         alias="AVA_MACHINE_DESCRIPTION",

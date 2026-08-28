@@ -8,24 +8,32 @@ cluster health` audits Loki event history.
 
 ## Lifecycle ownership
 
-This is a host singleton with fixed ports, owned by the one home carrying
-`$AVA_HOME/lgtm-host`. A home without the marker never installs, starts, or
-stops these backends.
+This is a host singleton with fixed ports, owned by one home per host — the
+observability station. Provider identity has two equivalent forms:
 
-```bash
-ava lgtm on
-```
+- **`$AVA_HOME/lgtm-host` marker** (legacy): `ava lgtm on` writes the marker,
+  installs missing pinned native binaries, and runs the idempotent launcher.
+  A home without the marker never installs, starts, or stops these backends.
+- **`observability-station` unit capability** (declarative): a machine that
+  declares the capability (`ava start --serve-observability-station`, or
+  `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` / the
+  `$AVA_HOME/machine_serve_observability_station` file) converges the full
+  native set — configs, launchd plists, storage dirs — with no marker, and its
+  watchdog keepalive, producer OTLP export, collector lifecycle, and Loki read
+  gates all treat it as the station. The capability is orthogonal to
+  `AVA_OBSERVABILITY_URL`: the role decides who PROVIDES the stack, the switch
+  decides where CONSUMERS point.
 
-`ava lgtm on` writes the marker, installs missing pinned native binaries, and
-runs the idempotent launcher. With the marker present, every converge runs the
-same launcher and the gateway watchdog re-runs it after a connection-level
-readiness failure. The launcher resolves the single home-scoped launchd plist
-for each backend and skips only when that job is loaded and its endpoint is
-reachable. `ava lgtm status` and `ava status` show native job PIDs, the compose
-services, and the readiness probes.
+With either form present, every converge runs the same launcher and the gateway
+watchdog re-runs it after a connection-level readiness failure. The launcher
+resolves the single home-scoped launchd plist for each backend and skips only
+when that job is loaded and its endpoint is reachable. `ava lgtm status` and
+`ava status` show native job PIDs, the compose services, and the readiness
+probes.
 
-The marker gate also protects dev worktrees: their converge and watchdog paths
-are no-ops unless that worktree home is explicitly marked.
+The identity gate also protects dev worktrees: their converge and watchdog
+paths are no-ops unless that worktree home is explicitly marked or declares the
+capability.
 
 ## What it runs
 
@@ -50,6 +58,12 @@ configuration and must remain aligned. Native backend listen hosts are config
 knobs (`AVA_LGTM_LISTEN_HOST`, `AVA_LGTM_GRAFANA_LISTEN_HOST`): Loki and
 Prometheus default to loopback, Grafana defaults to all interfaces, and native
 Grafana dials Loki, Prometheus, and Postgres on the host loopback.
+
+The observation data volume is a per-machine knob: `AVA_LGTM_STORAGE_DIR`
+(empty default = `$AVA_HOME/lgtm/native/data`, byte-identical to the historical
+layout) moves the Loki filesystem store and the Prometheus TSDB to a configured
+path — e.g. a dedicated data volume on a station host. Grafana's own data and
+the native logs stay under `$AVA_HOME/lgtm/native` regardless.
 
 ## Why this stack
 

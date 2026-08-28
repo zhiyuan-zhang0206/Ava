@@ -4497,7 +4497,8 @@ export interface components {
          *     against this and returns the result via PUT.
          *
          *     machine_capabilities is the target machine's capability set (`gateway` and/or
-         *     `agent-runner`) — the gateway's own for the Cluster (self) view, the `?machine=`
+         *     `agent-runner` and/or `observability-station`) — the gateway's own for the
+         *     Cluster (self) view, the `?machine=`
          *     host's for a remote view. The panel uses it to pick which capability sections to
          *     render on a remote view: a pure agent-runner shows only its agent-runner + common
          *     sections, while a co-located gateway,agent-runner box shows the gateway section too
@@ -4512,7 +4513,7 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Machine Capabilities */
-            machine_capabilities: ("gateway" | "agent-runner")[];
+            machine_capabilities: ("gateway" | "agent-runner" | "observability-station")[];
         };
         /**
          * ConfigWriteResult

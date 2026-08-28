@@ -809,7 +809,7 @@ def test_native_step_runs_only_for_the_marker_home(
     (ctx.ava_home / "lgtm-host").touch()
     calls: list[tuple[Path, Path]] = []
 
-    def record_ensure(repo: Path, home: Path) -> None:
+    def record_ensure(repo: Path, home: Path, *, station: bool = False) -> None:
         calls.append((repo, home))
 
     monkeypatch.setattr(
@@ -821,6 +821,158 @@ def test_native_step_runs_only_for_the_marker_home(
     _lgtm_native.ensure_lgtm_native_step(ctx)
 
     assert calls == [(ctx.repo, ctx.ava_home)]
+
+
+def _station_ctx(tmp_path: Path) -> ConvergeCtx:
+    """A converge context for a second machine declaring observability-station
+    (no lgtm-host marker) — the WP1 deployment-unit form."""
+    repo = tmp_path / "repo"
+    (repo / "deploy" / "lgtm").mkdir(parents=True)
+    return ConvergeCtx(
+        repo=repo,
+        ava_home=tmp_path / "station-home",
+        roles=frozenset({"observability-station"}),
+    )
+
+
+def test_native_step_runs_for_station_role_without_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A home declaring the observability-station capability converges the
+    native backends with no lgtm-host marker — the marker mechanism is no
+    longer required for a role-declared station."""
+    ctx = _station_ctx(tmp_path)
+    ctx.ava_home.mkdir(parents=True)
+    calls: list[tuple[Path, Path, bool]] = []
+
+    def record_ensure(repo: Path, home: Path, *, station: bool = False) -> None:
+        calls.append((repo, home, station))
+
+    monkeypatch.setattr(_lgtm_native, "ensure_lgtm_native", record_ensure)
+
+    _lgtm_native.ensure_lgtm_native_step(ctx)
+
+    assert calls == [(ctx.repo, ctx.ava_home, True)]
+
+
+def test_stack_step_runs_for_station_role_without_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The observability-station capability also gates the stack bring-up
+    (start.sh), marker-free."""
+    ctx = _station_ctx(tmp_path)
+    ctx.ava_home.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    class _Result:
+        returncode = 0
+
+    def fake_run(cmd: list[str], **_kw: object) -> _Result:
+        calls.append(cmd)
+        return _Result()
+
+    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
+
+    _lgtm.ensure_lgtm_stack_step(ctx)
+
+    assert calls == [["bash", "start.sh"]]
+
+
+def test_station_role_renders_full_native_set_without_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Dry-run: a second machine declaring the station role renders the FULL
+    native set — configs, launchd plists, and storage dirs — with no marker
+    and no version downloads (the WP1 acceptance render)."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "station-home"
+    agents_dir = tmp_path / "LaunchAgents"
+    agents_dir.mkdir()
+    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+
+    _lgtm_native.ensure_lgtm_native(repo, home, station=True)
+
+    native_dir = home / "lgtm/native"
+    for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
+        assert (native_dir / "config" / name).is_file()
+    assert (native_dir / "grafana" / "run.sh").is_file()
+    for name in ("loki", "prometheus", "grafana"):
+        label = _lgtm_native.native_label(name, home)
+        assert (agents_dir / f"{label}.plist").is_file()
+    assert (native_dir / "data" / "loki").is_dir()
+    assert (native_dir / "data" / "prom").is_dir()
+    rendered_loki = (native_dir / "config" / "loki.yaml").read_text(encoding="utf-8")
+    assert "{{" not in rendered_loki
+
+
+def test_native_storage_dir_default_matches_historical_layout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Empty AVA_LGTM_STORAGE_DIR renders the historical
+    $AVA_HOME/lgtm/native/data paths byte-for-byte — the macmini re-render
+    diff stays empty (the storage-parameterization zero-regression contract)."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", "")
+    _lgtm_native._render_configs(repo, native_dir, home)
+    rendered_loki = yaml.safe_load((native_dir / "config/loki.yaml").read_text(encoding="utf-8"))
+    assert rendered_loki["common"]["path_prefix"] == str((home / "lgtm/native/data/loki").resolve())
+    assert rendered_loki["compactor"]["working_directory"] == str(
+        (home / "lgtm/native/data/loki/compactor").resolve()
+    )
+    prometheus_plist = plistlib.loads(
+        _lgtm_native._render_plist("prometheus", native_dir, home).encode()
+    )
+    assert (
+        "--storage.tsdb.path=" + str((home / "lgtm/native/data/prom").resolve())
+        in (prometheus_plist["ProgramArguments"])
+    )
+
+
+def test_native_storage_dir_parameterized(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A per-machine AVA_LGTM_STORAGE_DIR moves the Loki filesystem store and
+    the Prometheus TSDB onto the configured data volume."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", "/data/obs")
+    _lgtm_native._render_configs(repo, native_dir, home)
+    rendered_loki = yaml.safe_load((native_dir / "config/loki.yaml").read_text(encoding="utf-8"))
+    assert rendered_loki["common"]["path_prefix"] == "/data/obs/loki"
+    assert (
+        rendered_loki["common"]["storage"]["filesystem"]["chunks_directory"]
+        == "/data/obs/loki/chunks"
+    )
+    assert rendered_loki["compactor"]["working_directory"] == "/data/obs/loki/compactor"
+    prometheus_plist = plistlib.loads(
+        _lgtm_native._render_plist("prometheus", native_dir, home).encode()
+    )
+    assert "--storage.tsdb.path=/data/obs/prom" in prometheus_plist["ProgramArguments"]
+
+
+def test_station_role_creates_configured_storage_dirs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The converge render creates the configured storage root plus the loki
+    and prom subdirs (start.sh parity for a custom data volume)."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "station-home"
+    agents_dir = tmp_path / "LaunchAgents"
+    agents_dir.mkdir()
+    storage = tmp_path / "obs-data"
+    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", str(storage))
+
+    _lgtm_native.ensure_lgtm_native(repo, home, station=True)
+
+    assert (storage / "loki").is_dir()
+    assert (storage / "prom").is_dir()
+    assert (home / "lgtm/native/data").exists() is False
 
 
 def test_native_label_and_plist_are_scoped_to_the_cluster_home(tmp_path: Path) -> None:

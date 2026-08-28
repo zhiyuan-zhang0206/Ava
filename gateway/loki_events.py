@@ -73,11 +73,13 @@ class ObservabilityReadUnavailable(RuntimeError):  # noqa: N818
 
 
 def _read_gate() -> None:
-    """Refuse the default loopback Loki URL outside the designated LGTM home."""
+    """Refuse the default loopback Loki URL outside the observability station."""
     home = gateway_observability_home()
     if home is None:
         return
-    if not (home / "lgtm-host").exists() and not endpoint_override_is_explicit(
+    from shared.observability import home_is_observability_station
+
+    if not home_is_observability_station(home) and not endpoint_override_is_explicit(
         "AVA_TELEMETRY_LOKI_URL"
     ):
         raise ObservabilityReadUnavailable(
