@@ -420,6 +420,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(note="task update — repeats are harmless"),
     # ── gateway/routers/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
+    # ── gateway/routers/run_timeline.py ───────────────────────────────
+    ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
+        note="read-only event-driven run waterfall (Loki-backed)",
+    ),
     # ── gateway/routers/ui_contributions.py ───────────────────────────────────
     ("GET", "/api/ui/contributions"): RouteContract(),
     # ── gateway/routers/uploads.py ───────────────────────────────────
