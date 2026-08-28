@@ -509,9 +509,7 @@ def inspect_values(
             archive_distribution = projection.turn_distribution
             archive_active_seconds = projection.active_seconds
             archive_exec_seconds = projection.exec_seconds
-            archive_lifecycle = (
-                rollup.lifecycle if rollup is not None else projection.lifecycle
-            )
+            archive_lifecycle = rollup.lifecycle if rollup is not None else projection.lifecycle
 
     turn_total, turn_ok, turn_sum, turn_min, turn_max, exec_ok, exec_failed, watermark = ledger
     stats_spans = live_edge_spans(plan, watermark, from_, to)
