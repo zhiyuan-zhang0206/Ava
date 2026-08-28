@@ -43,6 +43,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
                               Continuous polling usage (Status 15s; update-check only on entry/manual re-check); cluster Restart/Update buttons are right in Status header, "observe health → act in place"
                               Ops links to Grafana; Alerts is live via SSE. Retired Metrics bookmarks transition through insights/metrics/page.tsx to Ops when Grafana is reachable.
                               Section components are also bare routes: insights/{status,ops}/page.tsx; insights/alerts/page.tsx redirects to the Alerts anchor
+/insights/run/[agentId]       Run-level tracing view — a direct, shareable event-driven time/token waterfall for one agent. It reads the gateway's bounded run session, offers explicit start/end and zoom windows, and switches to one-hour buckets above 400 turns. Insights and the active inspector link here.
 /control#skills               Installed skills read-only table: name/layer origin (core=repo|plugin|machine=user|untracked)/enabled/local drift (GET /api/skills, single-machine gateway local read)
 /settings, /settings/*        Redirect to /control, /control/* (next.config.ts redirects, preserves old bookmarks/links)
 ```

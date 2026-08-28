@@ -74,6 +74,18 @@ describe("InsightsPage shell", () => {
     expect(status).toBeLessThan(ops);
   });
 
+  it("requires an agent id before exposing the run timeline link", () => {
+    wrap(<InsightsPage />);
+
+    expect(screen.getByRole("button", { name: "Open run timeline" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Agent ID" }), {
+      target: { value: "405" },
+    });
+    expect(screen.getByRole("link", { name: "Open run timeline" }).getAttribute("href")).toBe(
+      "/insights/run/405",
+    );
+  });
+
   it("does NOT render the Control-only sections (they live on /control)", () => {
     wrap(<InsightsPage />);
     for (const label of ["Guide", "Config", "Presets", "Display", "Plugins", "MCP", "Skills", "Schedules"]) {

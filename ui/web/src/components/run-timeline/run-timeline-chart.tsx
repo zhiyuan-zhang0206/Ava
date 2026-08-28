@@ -1,0 +1,215 @@
+"use client";
+
+import { useState } from "react";
+
+import { formatTokensCompact } from "@/lib/item-summary";
+import { FLEX } from "@/lib/layout";
+import type { RunTimelineResponse } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+import { timeCoordinate, tokenBarWidth } from "./scales";
+
+const SVG_WIDTH = 1000;
+const PLOT_LEFT = 44;
+const PLOT_WIDTH = 930;
+const TIME_Y = 54;
+const TOKEN_Y = 208;
+const TOKEN_PANEL_HEIGHT = 52;
+const BAR_HEIGHT = 28;
+
+export interface RunTimelineChartLabels {
+  time: string;
+  tokens: string;
+  eventRail: string;
+  input: string;
+  output: string;
+  idle: string;
+  turn: string;
+  bucket: string;
+  cost: string;
+  model: string;
+}
+
+function rowLabel(row: RunTimelineResponse["rows"][number], labels: RunTimelineChartLabels): string {
+  return row.turn === null ? `${labels.bucket} (${row.n_turns})` : `${labels.turn} ${row.turn}`;
+}
+
+function idleLabel(tags: readonly string[], labels: RunTimelineChartLabels): string | null {
+  const tag = tags.find((candidate) => candidate.startsWith("idle_before_"));
+  if (!tag) return null;
+  const seconds = Number(tag.slice("idle_before_".length, -1));
+  if (!Number.isFinite(seconds)) return labels.idle;
+  if (seconds < 60) return `${labels.idle} ${seconds}s`;
+  if (seconds < 3600) return `${labels.idle} ${Math.round(seconds / 60)}m`;
+  return `${labels.idle} ${(seconds / 3600).toFixed(1)}h`;
+}
+
+function currency(amount: number): string {
+  return `$${amount.toFixed(amount < 0.01 ? 4 : 2)}`;
+}
+
+/**
+ * Two independent horizontal scales share ordinal correspondence markers.  The
+ * dashed vertical lines connect those markers rather than implying that time
+ * and token x-coordinates are interchangeable measurements.
+ */
+export function RunTimelineChart({
+  timeline,
+  labels,
+}: {
+  timeline: RunTimelineResponse;
+  labels: RunTimelineChartLabels;
+}) {
+  const [hovered, setHovered] = useState<RunTimelineResponse["rows"][number] | null>(null);
+  const rows = timeline.rows;
+  const maximumTokens = Math.max(1, ...rows.map((row) => row.llm.in_total));
+  const tokenRowHeight = TOKEN_PANEL_HEIGHT / Math.max(rows.length, 1);
+  const correspondenceX = (index: number) =>
+    PLOT_LEFT + ((index + 0.5) / Math.max(rows.length, 1)) * PLOT_WIDTH;
+
+  return (
+    <section className="space-y-2 rounded border border-border bg-card p-3" aria-label="Run timeline chart">
+      <svg
+        viewBox={`0 0 ${SVG_WIDTH} 286`}
+        className="h-auto w-full min-w-[640px] font-mono text-[11px]"
+        role="img"
+        aria-label="Run timeline waterfall"
+      >
+        <g aria-label={`${labels.time} panel`}>
+          <text x={PLOT_LEFT} y="20" className="fill-muted-foreground font-sans text-xs font-semibold">
+            {labels.time}
+          </text>
+          <line x1={PLOT_LEFT} x2={PLOT_LEFT + PLOT_WIDTH} y1="88" y2="88" className="stroke-border" />
+          {rows.map((row, index) => {
+            const x = PLOT_LEFT + timeCoordinate(row.start, timeline.window.from, timeline.window.to, PLOT_WIDTH);
+            const end = PLOT_LEFT + timeCoordinate(row.end, timeline.window.from, timeline.window.to, PLOT_WIDTH);
+            const width = Math.max(3, end - x);
+            const duration = Math.max(0.001, Date.parse(row.end) - Date.parse(row.start));
+            const activeWidth = Math.min(width, Math.max(2, width * ((row.active_s * 1000) / duration)));
+            const idle = idleLabel(row.tags, labels);
+            return (
+              <g key={`${row.turn ?? "bucket"}-${index}`}>
+                <rect
+                  x={x}
+                  y={TIME_Y}
+                  width={width}
+                  height={BAR_HEIGHT}
+                  rx="3"
+                  className="fill-muted/70"
+                  stroke={row.anomalies.length > 0 ? "hsl(var(--destructive))" : "hsl(var(--border))"}
+                />
+                <rect
+                  x={x}
+                  y={TIME_Y}
+                  width={activeWidth}
+                  height={BAR_HEIGHT}
+                  rx="3"
+                  className="fill-foreground/75"
+                >
+                  <title>{`${rowLabel(row, labels)} · ${row.active_s.toFixed(1)}s active`}</title>
+                </rect>
+                {idle ? (
+                  <text x={x} y="104" className="fill-muted-foreground">
+                    {idle}
+                  </text>
+                ) : null}
+                <circle cx={correspondenceX(index)} cy="98" r="2.5" className="fill-primary" />
+              </g>
+            );
+          })}
+        </g>
+
+        {rows.map((row, index) => (
+          <line
+            key={`${row.turn ?? "bucket"}-${index}`}
+            data-testid="run-connector"
+            x1={correspondenceX(index)}
+            x2={correspondenceX(index)}
+            y1="100"
+            y2="197"
+            stroke="hsl(var(--muted-foreground))"
+            strokeDasharray="4 4"
+            strokeOpacity="0.75"
+          />
+        ))}
+
+        <g aria-label={`${labels.tokens} panel`}>
+          <text x={PLOT_LEFT} y="170" className="fill-muted-foreground font-sans text-xs font-semibold">
+            {labels.tokens}
+          </text>
+          <text x={PLOT_LEFT + PLOT_WIDTH} y="170" textAnchor="end" className="fill-muted-foreground">
+            {labels.input}: 0 – {formatTokensCompact(maximumTokens)}
+          </text>
+          <line
+            x1={PLOT_LEFT}
+            x2={PLOT_LEFT + PLOT_WIDTH}
+            y1={TOKEN_Y + TOKEN_PANEL_HEIGHT + 4}
+            y2={TOKEN_Y + TOKEN_PANEL_HEIGHT + 4}
+            className="stroke-border"
+          />
+          {rows.map((row, index) => {
+            const inputWidth = tokenBarWidth(row.llm.in_total, maximumTokens, PLOT_WIDTH);
+            const outputWidth = tokenBarWidth(row.llm.out_total, maximumTokens, PLOT_WIDTH);
+            const label = rowLabel(row, labels);
+            const y = TOKEN_Y + index * tokenRowHeight;
+            const height = Math.max(1, tokenRowHeight - 1);
+            return (
+              <g key={`${row.turn ?? "bucket"}-${index}`}>
+                <rect
+                  aria-label={`${label} token bar`}
+                  x={PLOT_LEFT}
+                  y={y}
+                  width={inputWidth}
+                  height={height}
+                  rx="3"
+                  className="fill-violet-500/75"
+                  onMouseEnter={() => setHovered(row)}
+                  onMouseLeave={() => setHovered(null)}
+                >
+                  <title>{`${label} · ${row.llm.in_total.toLocaleString()} ${labels.input}`}</title>
+                </rect>
+                <rect
+                  x={PLOT_LEFT}
+                  y={y}
+                  width={outputWidth}
+                  height={Math.min(5, height)}
+                  rx="2"
+                  className="fill-cyan-400"
+                  pointerEvents="none"
+                />
+                {height >= 14 ? (
+                  <text x={PLOT_LEFT + 4} y={y + Math.min(height - 5, 19)} className="fill-primary-foreground">
+                    {formatTokensCompact(row.llm.in_total)}
+                  </text>
+                ) : null}
+                <circle cx={correspondenceX(index)} cy="197" r="2.5" className="fill-primary" />
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+
+      <div aria-label={labels.eventRail} className={cn(FLEX, "flex-wrap items-center gap-2 border-t border-border pt-2 font-mono text-[11px]")}>
+        <span className="text-muted-foreground">{labels.eventRail}</span>
+        {timeline.events.length === 0 ? <span className="text-muted-foreground">—</span> : null}
+        {timeline.events.map((event, index) => (
+          <span
+            key={`${event.kind}-${event.ts}-${index}`}
+            className={event.kind.includes("failed") || event.kind.includes("timeout") ? "text-destructive" : "text-muted-foreground"}
+            title={event.label ?? event.ts}
+          >
+            {event.kind}
+          </span>
+        ))}
+      </div>
+
+      {hovered ? (
+        <div role="tooltip" className="rounded bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
+          {rowLabel(hovered, labels)} · {labels.input} {hovered.llm.in_total.toLocaleString()} · {labels.output}{" "}
+          {hovered.llm.out_total.toLocaleString()} · {labels.cost} {currency(hovered.llm.cost_usd)} · {labels.model}{" "}
+          {hovered.llm.model ?? "—"}
+        </div>
+      ) : null}
+    </section>
+  );
+}
