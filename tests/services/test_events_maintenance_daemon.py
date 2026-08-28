@@ -5,10 +5,10 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
   - blocking passes beat only after completion and permanently wedge on timeout;
   - a failed pass still waits a full interval before retrying, so a transient
     DB error does not become a tight hot-loop against Postgres;
-  - the events/checkpoint split (task #1257): the hourly pass skips the
-    events-archive slices when `AVA_EVENTS_MAINTENANCE_ENABLED` is off but
-    ALWAYS runs the Rule B reaper + blob vacuum, and Rule A rides its own fast
-    loop again (both were collateral of the #1197 cutover).
+  - the hourly pass ALWAYS runs the rollup + Rule B reaper + blob vacuum
+    (the PG events-archive slices were removed with the task #1281/#1823
+    cleanup), and Rule A rides its own fast loop again (both were collateral
+    of the #1197 cutover).
 
 All driven directly (no DB): `_run_maintenance` / `_maintenance_with_liveness` are
 monkeypatched, so these are pure asyncio-loop tests.
@@ -194,47 +194,33 @@ def _instrument_maintenance_slices(
     nothing logs)."""
     from types import SimpleNamespace
 
-    empty = SimpleNamespace(dropped=(), pruned=(), deleted=(), summary=lambda: "")
     rec = {
-        "partitions": _CallRecorder([]),
-        "retention": _CallRecorder(empty),
-        "table_retention": _CallRecorder(empty),
         "rollup": _CallRecorder(
             SimpleNamespace(start_day=None, end_day=None, metrics_rows=0, tokens_rows=0)
         ),
         "replay": _CallRecorder(
             SimpleNamespace(days_replayed=[], days_failed=[], metrics_rows=0, tokens_rows=0)
         ),
-        "reindex": _CallRecorder(empty),
         "reap": _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0)),
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
         "emit_sizes": _CallRecorder(None),
     }
-    monkeypatch.setattr(daemon, "ensure_month_partitions", rec["partitions"])
-    monkeypatch.setattr(daemon, "apply_retention", rec["retention"])
-    monkeypatch.setattr(daemon, "apply_table_retention", rec["table_retention"])
     monkeypatch.setattr(daemon, "compute_rollup", rec["rollup"])
     monkeypatch.setattr(daemon, "replay_gap_days", rec["replay"])
-    monkeypatch.setattr(daemon, "run_governance_pass", rec["reindex"])
     monkeypatch.setattr(daemon, "reap_stale_checkpoints", rec["reap"])
     monkeypatch.setattr(daemon, "run_blob_vacuum", rec["vacuum"])
     monkeypatch.setattr(daemon, "emit_checkpoint_table_sizes", rec["emit_sizes"])
     return rec
 
 
-_EVENTS_SLICES = ("partitions", "retention", "table_retention", "reindex")
-
-
-def test_maintenance_pass_reaps_when_events_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The design-regression lock (task #1257): with
-    `events_maintenance_enabled=False` — the default since the LGTM cutover —
-    the hourly pass skips every events-archive slice but still runs the
-    cost-ledger rollup, the Rule B checkpoint reaper and the blob vacuum. The
-    rollup must not sit behind the archive flag: Loki only retains 168h, so a
-    cluster without the flag would silently stop writing the durable cost
+def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hourly pass always runs the cost-ledger rollup, the JSONL replay,
+    the Rule B checkpoint reaper, the size telemetry sample and the blob
+    vacuum — the events-archive slices were removed with the dropped table
+    (task #1281/#1823), and nothing may sit behind a flag: Loki only retains
+    168h, so a skipped rollup would silently stop writing the durable cost
     ledger (and the reaper regression before it grew checkpoint_blobs
-    ~150MB/h unbounded)."""
-    monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_enabled", False)
+    ~150MB/h unbounded, 2026-08-12)."""
     rec = _instrument_maintenance_slices(monkeypatch)
     progress = LoopProgress("dispatch", timeout_s=60.0)
     beats = 0
@@ -249,42 +235,9 @@ def test_maintenance_pass_reaps_when_events_disabled(monkeypatch: pytest.MonkeyP
 
     daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
 
-    assert rec["rollup"].calls == 1
-    assert set(rec["rollup"].kwargs[0]) == {"now_utc"}
-    assert rec["replay"].calls == 1
-    assert rec["reap"].calls == 1
-    assert rec["vacuum"].calls == 1
-    assert rec["emit_sizes"].calls == 1  # hourly size gauge runs unconditionally
-    assert beats == 4
-    assert progress.snapshot()["last_success_at"] is not None
-    for name in _EVENTS_SLICES:
-        assert rec[name].calls == 0, f"events slice {name} ran with the flag off"
-
-
-def test_maintenance_pass_runs_events_slices_when_enabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The flag on (clusters that still maintain the archive) restores the full
-    pass — every events slice plus the unconditional rollup, reaper and
-    vacuum."""
-    monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_enabled", True)
-    rec = _instrument_maintenance_slices(monkeypatch)
-    progress = LoopProgress("dispatch", timeout_s=60.0)
-    beats = 0
-    original_beat = progress.beat
-
-    def counting_beat() -> None:
-        nonlocal beats
-        beats += 1
-        original_beat()
-
-    monkeypatch.setattr(progress, "beat", counting_beat)
-
-    daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
-
-    for name in (*_EVENTS_SLICES, "rollup", "replay", "reap", "vacuum", "emit_sizes"):
+    for name in ("rollup", "replay", "reap", "vacuum", "emit_sizes"):
         assert rec[name].calls == 1, name
-    assert beats == 8
+    assert beats == 4
     assert progress.snapshot()["last_success_at"] is not None
 
 

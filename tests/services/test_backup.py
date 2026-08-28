@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
+import psycopg
 import pytest
+from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
 from services import backup
@@ -178,31 +180,37 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_db_size_breakdown_real_db(db_conn: Any) -> None:
-    """The composition query itself is pinned against a real throwaway DB with
-    the partitioned `events` schema: the pg_inherits sum covers the month
-    partitions and a fresh DB without the checkpoint tables reads 0 instead
-    of failing (to_regclass path)."""
-    from tests.services.test_events_maintenance_ttl import _throwaway_db
-
+    """The composition query itself is pinned against a real throwaway DB: a
+    fresh DB with no checkpoint tables reads 0 instead of failing (the
+    to_regclass path). The frozen `events` archive is gone since the task
+    #1281/#1823 cleanup, so it is no longer part of the composition."""
     _ = db_conn  # dependency: the session cluster is up
-    gen = cast(Any, _throwaway_db())  # keep the generator alive — GC would run its finally
-    url = next(gen)
+    base_url, _name = settings.data_plane.db_url.rsplit("/", 1)
+    admin_url = f"{base_url}/postgres"
+    name = f"ava_test_backup_{os.getpid()}_{int(time.time() * 1_000_000)}"
+    url = f"{base_url}/{name}"
+    with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
+        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
         line = backup._db_size_breakdown(url)
     finally:
-        gen.close()
-    assert line.startswith("db=") and "events=" in line and "rest=" in line
+        with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (name,),
+            )
+            cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+    assert line.startswith("db=") and "checkpoint=" in line and "rest=" in line
     assert line != "unavailable"
-    # A fresh schema.sql DB has the events partitions but no checkpoint tables.
+    # A fresh DB has no checkpoint tables.
     assert "checkpoint=0MiB" in line
-    assert "events=0MiB" in line  # empty partitions — the sum is still well-formed
 
 
 def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch) -> None:
     """The backup log line reports the DB composition that dominates dump
-    time: total, the frozen events archive, the checkpoint tables, and the
-    rest. Best-effort: a failed sample degrades to "unavailable", never
-    fails the backup."""
+    time: total, the checkpoint tables, and the rest. Best-effort: a failed
+    sample degrades to "unavailable", never fails the backup."""
 
     class _FakeConn:
         def __enter__(self) -> _FakeConn:
@@ -215,15 +223,15 @@ def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch) -> None:
             return self
 
         def fetchone(self) -> tuple[int, ...]:
-            # db, events, blobs, checkpoints, writes
-            return (4_240_000_000, 2_800_000_000, 1_240_000_000, 130_000_000, 30_000_000)
+            # db, blobs, checkpoints, writes
+            return (4_240_000_000, 1_240_000_000, 130_000_000, 30_000_000)
 
     def _fake_connect(**_: object) -> _FakeConn:
         return _FakeConn()
 
     monkeypatch.setattr(backup, "connect", _fake_connect)  # pyright: ignore[reportUnknownArgumentType]
     line = backup._db_size_breakdown()
-    assert line == "db=4044MiB events=2670MiB checkpoint=1335MiB rest=38MiB"
+    assert line == "db=4044MiB checkpoint=1335MiB rest=2708MiB"
 
     def _boom(**_: object) -> object:
         raise RuntimeError("db down")
