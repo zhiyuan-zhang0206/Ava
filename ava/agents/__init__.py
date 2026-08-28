@@ -228,6 +228,30 @@ def _coerce_prompt(prompt: object) -> str | None:
     raise TypeError(f"prompt must be a string or a list/tuple of strings, got {prompt_type}")
 
 
+def _coerce_message_content(content: object) -> str | list[dict[str, object]]:
+    """Normalize LLM-generated tuple/list-wrapped message content.
+
+    The same trailing-comma hazard as prompts (issue #1343): a parenthesized
+    adjacent-string group written as `("line1" "line2",)` evaluates to a
+    1-tuple, which JSON-serializes as an array — but the gateway's
+    `AgentMessageIn.content` accepts a string or a list of content-block
+    dicts, never an array of strings, so the POST 422s and the message
+    silently never arrives (observed 2026-08-28, agents 2697/2986). Join
+    all-string tuples/lists into one string; a list/tuple of block dicts
+    passes through unchanged for the multimodal path.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (list, tuple)):
+        parts = list(content)
+        if all(isinstance(part, str) for part in parts):
+            return "".join(cast(list[str], parts))
+        if all(isinstance(part, dict) for part in parts):
+            return cast(list[dict[str, object]], parts)
+    content_type = type(content).__name__
+    raise TypeError(f"content must be a string or a list/tuple of strings, got {content_type}")
+
+
 def spawn(
     prompt: str | None = None,
     fork_from: int | None = None,
@@ -332,7 +356,7 @@ def send_message(agent_id: int, content: str) -> None:
     A terminated target is auto-resurrected to handle the message.
     """  # lint-docstring: ok "auto-resurrected" is public behaviour, not impl detail
     source = ava._boot.require_actor()
-    _client.send_message(agent_id, content=content, source=source)
+    _client.send_message(agent_id, content=_coerce_message_content(content), source=source)
 
 
 def send_system_note(
@@ -355,9 +379,14 @@ def send_system_note(
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
     source = ava._boot.require_actor()
+    normalized = _coerce_message_content(content)
+    if not isinstance(normalized, str):
+        raise TypeError(
+            f"system-note content must be a plain string, got {type(normalized).__name__}"
+        )
     return _client.send_system_note(
         agent_id,
-        content=content,
+        content=normalized,
         note_tag=tag,
         source=source,
         resurrect=resurrect,
