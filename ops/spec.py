@@ -301,10 +301,9 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # events-maintenance: gateway-owned maintenance daemon. ALWAYS runs (no
         # roster gate): its checkpoint reaper (Rule A fast loop + Rule B hourly)
         # and blob vacuum are unconditional — checkpoint_blobs grows ~150MB/h
-        # without them (2026-08-12 regression). The events-archive slices
-        # (partition rolling / retention / rollup) are gated INSIDE the daemon
-        # by AVA_EVENTS_MAINTENANCE_ENABLED, off by default since the LGTM
-        # cutover (#1197): the PG events copy is a read-only archive.
+        # without them (2026-08-12 regression). The PG events-archive slices
+        # were removed with the task #1281/#1823 cleanup (table dropped; rows
+        # live in the Loki archive stream).
         ServiceSpec(
             session="events-maintenance",
             cmd=".venv/bin/python -m services.events_maintenance.daemon",

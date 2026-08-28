@@ -1,15 +1,15 @@
-"""Events-maintenance daemon — gateway-owned unified event-stream upkeep.
+"""Events-maintenance daemon — gateway-owned event-stream upkeep.
 
-Each pass keeps the event tables' structure current: it ensures the
-current/next month partitions exist (`services.events_maintenance.partitions`),
-applies the unified `events` retention policy (`services.events_maintenance.retention`
-— drop/prune expired categories), and upserts the Since-Birth
-rollups (agent_metrics_daily / agent_model_tokens_daily — the durable
-token+cost ledger, aggregated from Loki since the LGTM cutover;
-`services.events_maintenance.rollup`), then repairs pre-retention gaps from the
-90-day filtered JSONL replay source (`services.events_maintenance.jsonl_replay`).
-A separate five-minute resolution slice
-reads immutable Loki event classes, combines them with `event_dismissals`, and
-publishes unresolved warning/error gauges (`services.events_maintenance.resolution`).
+The hourly pass upserts the Since-Birth rollups (agent_metrics_daily /
+agent_model_tokens_daily — the durable token+cost ledger, aggregated from Loki
+since the LGTM cutover; `services.events_maintenance.rollup`), repairs
+pre-retention gaps from the 90-day filtered JSONL replay source
+(`services.events_maintenance.jsonl_replay`), runs the checkpoint reaper /
+blob vacuum (checkpoint retention), and samples checkpoint table sizes. A
+separate five-minute resolution slice reads immutable Loki event classes,
+combines them with `event_dismissals`, and publishes unresolved warning/error
+gauges (`services.events_maintenance.resolution`). The PG `events` archive
+maintenance slices (partitions / retention / table retention / reindex) were
+removed with the task #1281/#1823 cleanup — the table was dropped.
 See `services.events_maintenance.daemon` for the poll loops.
 """
