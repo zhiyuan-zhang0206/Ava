@@ -402,3 +402,14 @@ def test_scan_and_load_enabled_skips_names_not_in_set(tmp_path: Path):
     _make_plugin(tmp_path, "foo")
     _make_plugin(tmp_path, "ghost")
     assert scan_and_load(tmp_path, enabled={"foo"}) == ["foo"]
+
+
+def test_scan_and_load_skips_dot_prefixed_dirs(tmp_path: Path):
+    """Atomic-install residue (.name.staging / .name.backup-<pid>) must not be
+    exec'd by the agent-host boot loader — the same ghost-plugin guard as
+    _discover_plugins (QA nit, PR #880 review)."""
+    _make_plugin(tmp_path, "real")
+    ghost = tmp_path / ".real.backup-1234"
+    ghost.mkdir()
+    (ghost / "plugin.py").write_text('raise RuntimeError("ghost must not load")\n')
+    assert scan_and_load(tmp_path) == ["real"]

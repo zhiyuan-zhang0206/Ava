@@ -345,6 +345,11 @@ def scan_and_load(
 
     loaded: list[str] = []
     for plugin_subdir in sorted(root.iterdir()):
+        # Dot-prefixed dirs are atomic-install residue (.name.staging /
+        # .name.backup-<pid>, 2026-08-28 ava_ledger defense line) — never a
+        # real plugin, even when a hard kill left plugin.py inside.
+        if plugin_subdir.name.startswith("."):
+            continue
         if not plugin_subdir.is_dir():
             continue
         plugin_py = plugin_subdir / "plugin.py"
