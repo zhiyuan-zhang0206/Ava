@@ -304,6 +304,10 @@ class TestAiMessageItems:
             NoteTag.AGENT_REPLY,
             NoteTag.SILENT_IDLE_CONTINUE,
             NoteTag.SECURITY,
+            # In-exec backoff guidance, same one-time-nudge family as the
+            # security notes beside it — the ts would only say when the pause
+            # was made, not when the rule applies.
+            NoteTag.HEARTBEAT_PAUSE,
             NoteTag.CONTEXT,
             NoteTag.AGENT_ID,
             NoteTag.PROJECT_SKILLS,

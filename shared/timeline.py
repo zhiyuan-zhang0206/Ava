@@ -145,6 +145,10 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
         NoteTag.AGENT_REPLY,
         NoteTag.SILENT_IDLE_CONTINUE,
         NoteTag.SECURITY,
+        # The in-exec backoff reminder is one-time guidance, same family as
+        # the security note beside it — the ts would only say when the pause
+        # was made, not when the rule applies.
+        NoteTag.HEARTBEAT_PAUSE,
         NoteTag.CONTEXT,
         NoteTag.PROJECT_SKILLS,
         NoteTag.PRELOADED_SKILLS,
