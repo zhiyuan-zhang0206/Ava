@@ -15,6 +15,7 @@ import {
   Timer,
   X,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, type ReactNode, useEffect } from "react";
 
@@ -100,6 +101,7 @@ function matchesInspectWindow(
 }
 
 export function InspectorPanel({ agentId }: { agentId: number }) {
+  const t = useTranslations("runTimeline");
   const { open, toggle } = useInspectorOpen();
   const { inspectorHours: hours, setInspectorHours: setHours } = useInspectorHours();
   const { isLarge } = useBreakpoint();
@@ -270,6 +272,13 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             ) : (
               <WindowedSectionsSkeleton />
             )}
+            <Link
+              href={`/insights/run/${agentId}`}
+              className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              {t("open")}
+              <ExternalLink className="size-3" aria-hidden />
+            </Link>
             {liveData ? (
               <NoticeReplySection agentId={agentId} notice={liveData.notice ?? null} />
             ) : liveQuery.isPending ? (

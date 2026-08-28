@@ -189,6 +189,9 @@ from gateway.routers import (
     presets as presets_router,
 )
 from gateway.routers import (
+    run_timeline as run_timeline_router,
+)
+from gateway.routers import (
     schedules as schedules_router,
 )
 from gateway.routers import (
@@ -747,6 +750,7 @@ app.include_router(skills_router.router)
 app.include_router(packages_router.router)
 app.include_router(metrics_router.router)
 app.include_router(events_router.router)
+app.include_router(run_timeline_router.router)
 app.include_router(event_resolutions_router.router)
 app.include_router(ops_monitor_router.router)
 app.include_router(alerts_router.router)

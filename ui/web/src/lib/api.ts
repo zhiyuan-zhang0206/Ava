@@ -49,6 +49,7 @@ import type { NoticesFeed,
   ResolvedConfigView,
   RestartAgentResponse,
   ResurrectAgentResponse,
+  RunTimelineResponse,
   ShellCapture,
   SpawnAgentRequest,
   SpawnedAgent,
@@ -216,6 +217,28 @@ export const api = {
 
   getContextBreakdown: (agentId: number): Promise<ContextBreakdownResponse> => {
     return f(`/api/agents/${agentId}/context-breakdown`).then(ok<ContextBreakdownResponse>);
+  },
+
+  getRunTimeline: (
+    agentId: number,
+    options?: {
+      from?: string;
+      to?: string;
+      level?: "turn" | "bucket";
+      bucket?: string;
+      session?: "compact" | "current";
+    },
+  ): Promise<RunTimelineResponse> => {
+    const params = new URLSearchParams();
+    if (options?.from != null) params.set("from", options.from);
+    if (options?.to != null) params.set("to", options.to);
+    if (options?.level != null) params.set("level", options.level);
+    if (options?.bucket != null) params.set("bucket", options.bucket);
+    if (options?.session != null) params.set("session", options.session);
+    const query = params.toString();
+    return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
+      ok<RunTimelineResponse>,
+    );
   },
 
   // Per-agent windowed inspector aggregates. Single-agent counterpart to

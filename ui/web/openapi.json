@@ -4971,6 +4971,124 @@
         }
       }
     },
+    "/api/agents/{agent_id}/run-timeline": {
+      "get": {
+        "summary": "Get Run Timeline",
+        "description": "Return an event-driven session waterfall with turn or bucket rows.",
+        "operationId": "get_run_timeline_api_agents__agent_id__run_timeline_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "turn",
+                "bucket"
+              ],
+              "type": "string",
+              "default": "turn",
+              "title": "Level"
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bucket"
+            }
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "compact",
+                "current"
+              ],
+              "type": "string",
+              "default": "compact",
+              "title": "Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTimelineResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/event-resolutions": {
       "post": {
         "summary": "Create Event Resolution",
@@ -11685,6 +11803,407 @@
         ],
         "title": "ResurrectAgentResponse",
         "description": "Resurrect agent response — returned by `POST /api/agents/{id}/resurrect`\n(the frontend resurrect button) and the internal auto-resurrect op.\n\n`spawned`: agent was dead; UPDATEd 'terminated' -> 'idling' +\n    started a fresh process attached to the same agent_id\n    (LangGraph state preserved; agent wakes up from where it left\n    off).\n`already_alive`: agent is still alive\n    (running/idling/restarting); resurrect does\n    not apply."
+      },
+      "RunTimelineBoundaries": {
+        "properties": {
+          "initialize_turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initialize Turn"
+          },
+          "last_before_compact_turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Before Compact Turn"
+          },
+          "post_window_turns": {
+            "type": "integer",
+            "title": "Post Window Turns"
+          },
+          "has_activity_after_window": {
+            "type": "boolean",
+            "title": "Has Activity After Window"
+          }
+        },
+        "type": "object",
+        "required": [
+          "initialize_turn",
+          "last_before_compact_turn",
+          "post_window_turns",
+          "has_activity_after_window"
+        ],
+        "title": "RunTimelineBoundaries",
+        "description": "Turn rows that anchor the initialized-context-to-compact session."
+      },
+      "RunTimelineEvent": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "kind",
+          "trace_id",
+          "label"
+        ],
+        "title": "RunTimelineEvent",
+        "description": "An event-rail marker relevant to the selected session window."
+      },
+      "RunTimelineExec": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "dur_s": {
+            "type": "number",
+            "title": "Dur S"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool",
+          "dur_s",
+          "ok"
+        ],
+        "title": "RunTimelineExec",
+        "description": "One execution event attached to the containing turn."
+      },
+      "RunTimelineLlm": {
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "in_total": {
+            "type": "integer",
+            "title": "In Total"
+          },
+          "cache_read": {
+            "type": "integer",
+            "title": "Cache Read"
+          },
+          "out_total": {
+            "type": "integer",
+            "title": "Out Total"
+          },
+          "reasoning": {
+            "type": "integer",
+            "title": "Reasoning"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "in_total",
+          "cache_read",
+          "out_total",
+          "reasoning",
+          "latency_ms",
+          "cost_usd",
+          "model"
+        ],
+        "title": "RunTimelineLlm",
+        "description": "Absolute LLM usage for a turn or an aggregated time bucket."
+      },
+      "RunTimelineMeta": {
+        "properties": {
+          "n_turns": {
+            "type": "integer",
+            "title": "N Turns"
+          },
+          "wall_span_s": {
+            "type": "number",
+            "title": "Wall Span S"
+          },
+          "active_s": {
+            "type": "number",
+            "title": "Active S"
+          },
+          "tokens_in": {
+            "type": "integer",
+            "title": "Tokens In"
+          },
+          "tokens_out": {
+            "type": "integer",
+            "title": "Tokens Out"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "n_exec_failed": {
+            "type": "integer",
+            "title": "N Exec Failed"
+          },
+          "n_compact": {
+            "type": "integer",
+            "title": "N Compact"
+          },
+          "n_restart": {
+            "type": "integer",
+            "title": "N Restart"
+          },
+          "fallback_turns": {
+            "type": "integer",
+            "title": "Fallback Turns"
+          },
+          "unmatched_turns": {
+            "type": "integer",
+            "title": "Unmatched Turns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n_turns",
+          "wall_span_s",
+          "active_s",
+          "tokens_in",
+          "tokens_out",
+          "cost_usd",
+          "n_exec_failed",
+          "n_compact",
+          "n_restart",
+          "fallback_turns",
+          "unmatched_turns"
+        ],
+        "title": "RunTimelineMeta",
+        "description": "Run-level totals derived from the rows in a timeline window."
+      },
+      "RunTimelineResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "window": {
+            "$ref": "#/components/schemas/RunTimelineWindow"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/RunTimelineMeta"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/RunTimelineRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RunTimelineEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "boundaries": {
+            "$ref": "#/components/schemas/RunTimelineBoundaries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "window",
+          "meta",
+          "rows",
+          "events",
+          "boundaries"
+        ],
+        "title": "RunTimelineResponse",
+        "description": "GET /api/agents/{agent_id}/run-timeline response."
+      },
+      "RunTimelineRow": {
+        "properties": {
+          "turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn"
+          },
+          "n_turns": {
+            "type": "integer",
+            "title": "N Turns"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "active_s": {
+            "type": "number",
+            "title": "Active S"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Id"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          },
+          "llm": {
+            "$ref": "#/components/schemas/RunTimelineLlm"
+          },
+          "execs": {
+            "items": {
+              "$ref": "#/components/schemas/RunTimelineExec"
+            },
+            "type": "array",
+            "title": "Execs"
+          },
+          "anomalies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Anomalies"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "turn",
+          "n_turns",
+          "start",
+          "end",
+          "active_s",
+          "trace_id",
+          "checkpoint_id",
+          "ok",
+          "llm",
+          "execs",
+          "anomalies",
+          "tags"
+        ],
+        "title": "RunTimelineRow",
+        "description": "A completed turn, or a bucket made from contiguous completed turns."
+      },
+      "RunTimelineWindow": {
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time",
+            "title": "To"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "RunTimelineWindow",
+        "description": "The inclusive Loki window used to derive one timeline."
       },
       "ScheduleCreate": {
         "properties": {

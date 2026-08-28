@@ -2858,6 +2858,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/run-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Timeline
+         * @description Return an event-driven session waterfall with turn or bucket rows.
+         */
+        get: operations["get_run_timeline_api_agents__agent_id__run_timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/event-resolutions": {
         parameters: {
             query?: never;
@@ -6376,6 +6396,165 @@ export interface components {
              * @enum {string}
              */
             status: "spawned" | "already_alive";
+        };
+        /**
+         * RunTimelineBoundaries
+         * @description Turn rows that anchor the initialized-context-to-compact session.
+         */
+        RunTimelineBoundaries: {
+            /** Initialize Turn */
+            initialize_turn: number | null;
+            /** Last Before Compact Turn */
+            last_before_compact_turn: number | null;
+            /** Post Window Turns */
+            post_window_turns: number;
+            /** Has Activity After Window */
+            has_activity_after_window: boolean;
+        };
+        /**
+         * RunTimelineEvent
+         * @description An event-rail marker relevant to the selected session window.
+         */
+        RunTimelineEvent: {
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Kind */
+            kind: string;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Label */
+            label: string | null;
+        };
+        /**
+         * RunTimelineExec
+         * @description One execution event attached to the containing turn.
+         */
+        RunTimelineExec: {
+            /** Tool */
+            tool: string;
+            /** Dur S */
+            dur_s: number;
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * RunTimelineLlm
+         * @description Absolute LLM usage for a turn or an aggregated time bucket.
+         */
+        RunTimelineLlm: {
+            /** Calls */
+            calls: number;
+            /** In Total */
+            in_total: number;
+            /** Cache Read */
+            cache_read: number;
+            /** Out Total */
+            out_total: number;
+            /** Reasoning */
+            reasoning: number;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Model */
+            model: string | null;
+        };
+        /**
+         * RunTimelineMeta
+         * @description Run-level totals derived from the rows in a timeline window.
+         */
+        RunTimelineMeta: {
+            /** N Turns */
+            n_turns: number;
+            /** Wall Span S */
+            wall_span_s: number;
+            /** Active S */
+            active_s: number;
+            /** Tokens In */
+            tokens_in: number;
+            /** Tokens Out */
+            tokens_out: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** N Exec Failed */
+            n_exec_failed: number;
+            /** N Compact */
+            n_compact: number;
+            /** N Restart */
+            n_restart: number;
+            /** Fallback Turns */
+            fallback_turns: number;
+            /** Unmatched Turns */
+            unmatched_turns: number;
+        };
+        /**
+         * RunTimelineResponse
+         * @description GET /api/agents/{agent_id}/run-timeline response.
+         */
+        RunTimelineResponse: {
+            /** Agent Id */
+            agent_id: number;
+            window: components["schemas"]["RunTimelineWindow"];
+            meta: components["schemas"]["RunTimelineMeta"];
+            /** Rows */
+            rows: components["schemas"]["RunTimelineRow"][];
+            /** Events */
+            events: components["schemas"]["RunTimelineEvent"][];
+            boundaries: components["schemas"]["RunTimelineBoundaries"];
+        };
+        /**
+         * RunTimelineRow
+         * @description A completed turn, or a bucket made from contiguous completed turns.
+         */
+        RunTimelineRow: {
+            /** Turn */
+            turn: number | null;
+            /** N Turns */
+            n_turns: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Active S */
+            active_s: number;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Checkpoint Id */
+            checkpoint_id: string | null;
+            /** Ok */
+            ok: boolean | null;
+            llm: components["schemas"]["RunTimelineLlm"];
+            /** Execs */
+            execs: components["schemas"]["RunTimelineExec"][];
+            /** Anomalies */
+            anomalies: string[];
+            /** Tags */
+            tags: string[];
+        };
+        /**
+         * RunTimelineWindow
+         * @description The inclusive Loki window used to derive one timeline.
+         */
+        RunTimelineWindow: {
+            /**
+             * From
+             * Format: date-time
+             */
+            from: string;
+            /**
+             * To
+             * Format: date-time
+             */
+            to: string;
         };
         /** ScheduleCreate */
         ScheduleCreate: {
@@ -10629,6 +10808,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_timeline_api_agents__agent_id__run_timeline_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                level?: "turn" | "bucket";
+                bucket?: string | null;
+                session?: "compact" | "current";
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTimelineResponse"];
                 };
             };
             /** @description Validation Error */
