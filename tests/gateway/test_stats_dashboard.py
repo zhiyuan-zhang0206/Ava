@@ -11,7 +11,6 @@ populated via INSERT of real rows.
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
