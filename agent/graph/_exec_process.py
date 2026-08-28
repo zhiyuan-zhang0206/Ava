@@ -24,6 +24,7 @@ from shared.platform import IS_WINDOWS
 from shared.winjob import WindowsJob
 
 _READER_JOIN_TIMEOUT_S = 5.0
+_EMERGENCY_SETTLE_TIMEOUT_S = 5.0
 _ROOT_EXIT_POLL_S = 0.05
 
 
@@ -113,6 +114,8 @@ class DomainCloseOwner:
 
     def __init__(self, domain: ExecProcessDomain, root_exit_task: asyncio.Task[None]) -> None:
         self._domain = domain
+        self._close_lock = threading.Lock()
+        self._closed = False
         self._requested = asyncio.Event()
         self.task = asyncio.create_task(
             self._close_after_exit_or_request(root_exit_task),
@@ -125,6 +128,23 @@ class DomainCloseOwner:
     @property
     def pid(self) -> int:
         return self._domain.proc.pid
+
+    @property
+    def interrupted(self) -> bool:
+        """Whether Runner cancellation has reached this ownership task."""
+        return self.task.cancelled() or self.task.cancelling() > 0
+
+    def close_now(self) -> None:
+        """Close the domain exactly once without requiring a live event loop."""
+        with self._close_lock:
+            if self._closed:
+                return
+            self._domain.close()
+            self._closed = True
+
+    def reap_now(self, timeout: float) -> int:
+        """Bounded direct-child reap for the Runner-cancellation barrier."""
+        return self._domain.proc.wait(timeout=timeout)
 
     async def wait(self) -> None:
         await asyncio.shield(self.task)
@@ -142,7 +162,7 @@ class DomainCloseOwner:
                     await request_task
         # POSIX close includes a process-table scan before killpg; Windows
         # enters the kernel Job API. Neither belongs on the agent event loop.
-        await asyncio.to_thread(self._domain.close)
+        await asyncio.to_thread(self.close_now)
 
 
 def signal_child(proc: subprocess.Popen[bytes], sig: int, domain_close: DomainCloseOwner) -> None:
@@ -306,6 +326,54 @@ async def finish_teardown_despite_cancellation(
     return await cleanup
 
 
+def settle_cancelled_owners(
+    domain_close: DomainCloseOwner,
+    reader: threading.Thread | None,
+) -> tuple[TeardownFailure, ...]:
+    """Synchronously settle resources whose async owners Runner cancelled.
+
+    ``asyncio.Runner`` cancels every task when a signal handler raises
+    ``SystemExit``.  At that point another coroutine or ``to_thread`` call
+    cannot own teardown: the new task is cancelled too, while its executor
+    worker can keep Runner shutdown blocked.  This emergency barrier therefore
+    uses only bounded synchronous operations.  It is valid only after the
+    domain-close owner itself is already cancelled.
+    """
+    if not domain_close.interrupted:
+        raise RuntimeError("cancelled-owner settlement requires a cancelled domain owner")
+
+    failures: list[TeardownFailure] = []
+    deadline = time.monotonic() + _EMERGENCY_SETTLE_TIMEOUT_S
+    try:
+        domain_close.close_now()
+    except BaseException as exc:
+        failures.append(TeardownFailure("domain_close", exc))
+
+    try:
+        domain_close.reap_now(max(0.0, deadline - time.monotonic()))
+    except BaseException as exc:
+        failures.append(TeardownFailure("reap", exc))
+
+    if reader is not None:
+        try:
+            reader.join(max(0.0, deadline - time.monotonic()))
+        except BaseException as exc:
+            failures.append(TeardownFailure("reader_join", exc))
+        else:
+            if reader.is_alive():
+                failures.append(
+                    TeardownFailure(
+                        "reader_join",
+                        RuntimeError(
+                            f"exec reader for pid {domain_close.pid} remained alive after "
+                            f"its process domain closed and the "
+                            f"{_EMERGENCY_SETTLE_TIMEOUT_S}s emergency deadline elapsed"
+                        ),
+                    )
+                )
+    return tuple(failures)
+
+
 __all__ = [
     "_READER_JOIN_TIMEOUT_S",
     "DomainCloseOwner",
@@ -314,6 +382,7 @@ __all__ = [
     "TeardownFailure",
     "annotate_original_failure",
     "finish_teardown_despite_cancellation",
+    "settle_cancelled_owners",
     "settle_resources",
     "signal_child",
     "start_reader_join",

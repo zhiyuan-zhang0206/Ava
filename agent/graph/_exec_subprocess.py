@@ -251,13 +251,17 @@ async def _finish_failed_run(
     reap_task: asyncio.Task[int] | None,
     domain_close: _exec_process.DomainCloseOwner | None,
     reader_join_task: asyncio.Task[None] | None,
+    reader: threading.Thread | None,
 ) -> None:
     """Settle an interrupted run without replacing its primary failure."""
     if root_exit_task is None or reap_task is None or domain_close is None:
         return
-    failures = await _exec_process.finish_teardown_despite_cancellation(
-        root_exit_task, reap_task, domain_close, reader_join_task
-    )
+    if domain_close.interrupted:
+        failures = _exec_process.settle_cancelled_owners(domain_close, reader)
+    else:
+        failures = await _exec_process.finish_teardown_despite_cancellation(
+            root_exit_task, reap_task, domain_close, reader_join_task
+        )
     _exec_process.annotate_original_failure(original, failures)
 
 
@@ -381,7 +385,7 @@ async def _run_in_subprocess(
         # node timeout. Cancellation is not complete until every owned resource
         # is settled; otherwise the next exec inherits a zombie/thread leak.
         await _finish_failed_run(
-            original, root_exit_task, reap_task, domain_close, reader_join_task
+            original, root_exit_task, reap_task, domain_close, reader_join_task, reader
         )
         raise
     except _exec_process.ExecTeardownError as exc:
@@ -400,7 +404,7 @@ async def _run_in_subprocess(
         )
     except Exception as original:
         await _finish_failed_run(
-            original, root_exit_task, reap_task, domain_close, reader_join_task
+            original, root_exit_task, reap_task, domain_close, reader_join_task, reader
         )
         raise
     finally:
