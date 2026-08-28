@@ -109,7 +109,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # checkpoint_table_sizes and Task #1572's repair audit raise it to 114;
     # agent_boot_failed raises it to 115; gate_auth_probe_failed (Task #1736)
     # raises it to 116.
-    assert len(_TELEMETRY_KINDS) == 117
+    assert len(_TELEMETRY_KINDS) == 118
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

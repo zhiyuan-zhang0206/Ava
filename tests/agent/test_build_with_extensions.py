@@ -264,3 +264,147 @@ def test_clear_plugin_registrations_keeps_framework_sections():
         assert _plugin_section not in _SYSTEM_PROMPT_SECTIONS
     finally:
         _SYSTEM_PROMPT_SECTIONS[:] = saved
+
+
+# --- fail-soft loading (2026-08-28 ava_ledger incident) --------------------
+
+
+def _make_external_plugin_with(name: str, body: str) -> None:
+    """External plugin with an explicit plugin.py body (the default helper
+    writes only `__description__`)."""
+    plugin_dir = paths.plugins_dir() / name
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "plugin.py").write_text(body, encoding="utf-8")
+
+
+def _capture_plugin_load_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, dict[str, object]]]:
+    """Route shared.telemetry.emit into a list of (event_name, attributes)."""
+    import shared.telemetry
+
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def fake_emit(
+        category: str,
+        event_name: str,
+        *,
+        level: str = "info",
+        attributes: dict[str, object] | None = None,
+        **kw: object,
+    ) -> None:
+        events.append((event_name, attributes or {}))
+
+    monkeypatch.setattr(shared.telemetry, "emit", fake_emit)
+    return events
+
+
+def test_broken_external_plugin_skipped_and_others_load(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict]
+) -> None:
+    """Fail-soft contract: a plugin whose plugin.py raises at import is skipped
+    with a loud warning; the load proceeds; other plugins load.
+
+    The 2026-08-28 ava_ledger incident shape: plugin.py present, a sibling
+    module it imports missing — `from . import _ledger` raised
+    ModuleNotFoundError and took `import ava` down with it.
+    """
+    _make_external_plugin_with("ava_ledger", "from . import _missing\n__description__ = 'x'\n")
+    _make_external_plugin("audit")
+    write_local({"plugins": {"ava_ledger": {"enabled": True}, "audit": {"enabled": True}}})
+
+    from agent.graph import _build
+
+    events = _capture_plugin_load_events(monkeypatch)
+
+    _build._load_extensions()  # must not raise
+
+    # the healthy plugin loaded
+    assert "plugins.audit.plugin" in sys.modules
+    # the broken one left no half-executed module behind
+    assert "plugins.ava_ledger.plugin" not in sys.modules
+    # loud: a loguru error naming the plugin
+    assert any(
+        "ava_ledger" in r["message"] and "failed to load" in r["message"] for r in loguru_records
+    )
+    # loud: a plugin_load_failed event carrying the plugin + the exception
+    attrs = [a for n, a in events if n == "plugin_load_failed"]
+    assert [a["plugin"] for a in attrs] == ["ava_ledger"]
+    # the missing sibling surfaces as an ImportError-family exception
+    error = str(attrs[0]["error"])
+    assert "ImportError" in error and "_missing" in error
+
+
+def test_broken_builtin_plugin_skipped_and_others_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same fail-soft contract applies to repo-shipped plugins."""
+    _make_plugin("syntax_fix", "raise RuntimeError('boom')\n")
+    _make_plugin("compact")
+    write_local({"plugins": {"syntax_fix": {"enabled": True}, "compact": {"enabled": True}}})
+
+    from agent.graph import _build
+
+    _build._load_extensions()  # must not raise
+
+    assert "ava_builtins.plugins.compact.plugin" in sys.modules
+    assert "ava_builtins.plugins.syntax_fix.plugin" not in sys.modules
+
+
+def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sys.path fix: `from . import _helper` inside plugin.py resolves against
+    the plugin's own directory even when the top-level `plugins` package
+    resolves somewhere else entirely.
+
+    The exec child boots with cwd=$AVA_HOME/source, so `plugins` resolves to
+    the checkout's legacy `plugins/` dir (or to nothing) — never to
+    $AVA_HOME/plugins. The loader registers the `plugins.<name>` parent
+    package itself, so the relative import works regardless of where the
+    plain `plugins` name points.
+    """
+    import types
+
+    # simulate the prod shadow: `plugins` already resolves to a decoy dir
+    decoy = types.ModuleType("plugins")
+    decoy.__path__ = ["/nonexistent/decoy"]  # pyright: ignore[reportAttributeAccessIssue]
+    monkeypatch.setitem(sys.modules, "plugins", decoy)
+
+    pdir = paths.plugins_dir() / "ava_ledger"
+    pdir.mkdir(parents=True)
+    (pdir / "plugin.py").write_text(
+        "from . import _helper\n__description__ = 'x'\nMARK = _helper.VALUE\n",
+        encoding="utf-8",
+    )
+    (pdir / "_helper.py").write_text("VALUE = 7\n", encoding="utf-8")
+    write_local({"plugins": {"ava_ledger": {"enabled": True}}})
+
+    from agent.graph import _build
+
+    _build._load_extensions()  # must not raise
+
+    assert sys.modules["plugins.ava_ledger.plugin"].MARK == 7
+    assert sys.modules["plugins.ava_ledger"].__path__ == [str(pdir)]
+
+
+def test_dangling_config_entry_skipped_with_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config entry whose plugin directory is gone (interrupted upgrade,
+    manual rm) must not block the plugin load: reported loudly, treated as
+    disabled, the rest of the config intact.
+    """
+    _make_external_plugin("audit")
+    write_local({"plugins": {"audit": {"enabled": True}, "vanished": {"enabled": True}}})
+
+    from agent.graph import _build
+
+    events = _capture_plugin_load_events(monkeypatch)
+
+    config = _build._load_extensions()  # must not raise
+
+    assert "plugins.audit.plugin" in sys.modules
+    assert "vanished" not in config.plugins
+    attrs = [a for n, a in events if n == "plugin_load_failed"]
+    assert [a["plugin"] for a in attrs] == ["vanished"]

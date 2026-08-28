@@ -16,6 +16,10 @@ at its own boot, so agent code there sees the wrapped version too. Config
 decides what is imported; not imported = not registered.
 """
 
+import contextlib
+import sys
+from pathlib import Path
+
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, StateGraph
@@ -232,6 +236,59 @@ def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
     return CLAIM
 
 
+def _register_plugin_parent_packages(pkg: str, name: str, plugin_dir: Path) -> None:
+    """Make `pkg.<name>` importable as a namespace-package chain, so relative
+    imports inside plugin.py resolve regardless of sys.path / cwd.
+
+    External plugins load under the dotted prefix ``plugins.<name>``, and
+    resolving that prefix through the normal import machinery requires
+    ``$AVA_HOME`` to be on sys.path. It is not in the exec child (``python -I
+    -m agent.exec_child`` boots with cwd=$AVA_HOME/source): ``import plugins``
+    there resolves to the checkout's own legacy ``plugins/`` directory when one
+    exists, or to nothing — either way ``from . import _sibling`` inside
+    plugin.py raises ModuleNotFoundError and took ``import ava`` down with it
+    (2026-08-28 ava_ledger incident). The framework owns the dotted prefix, so
+    it registers the parent packages itself: ``pkg`` as a namespace package
+    over the external plugins root and ``pkg.<name>`` over this plugin's
+    directory. Existing sys.modules entries are left untouched — the
+    ``pkg.<name>`` registration is what resolves relative imports, the
+    top-level one covers a fresh ``import plugins.X`` elsewhere.
+    """
+    import types
+
+    if sys.modules.get(pkg) is None:
+        parent = types.ModuleType(pkg)
+        parent.__path__ = [str(plugin_dir.parent)]  # pyright: ignore[reportAttributeAccessIssue]
+        sys.modules[pkg] = parent
+    child_name = f"{pkg}.{name}"
+    if sys.modules.get(child_name) is None:
+        child = types.ModuleType(child_name)
+        child.__path__ = [str(plugin_dir)]  # pyright: ignore[reportAttributeAccessIssue]
+        sys.modules[child_name] = child
+
+
+def _report_plugin_load_failure(name: str, exc: BaseException) -> None:
+    """The loud half of the fail-soft contract: a loguru ERROR carrying the
+    traceback plus one ``plugin_load_failed`` telemetry event, so ops sees
+    which plugin broke and why. Never raises — the failure already happened."""
+    from shared.log import logger
+    from shared.telemetry import emit
+
+    logger.error(
+        "[plugins] plugin {} failed to load — skipped (fail-soft); "
+        "the remaining plugins still load",
+        name,
+        exc_info=exc,
+    )
+    with contextlib.suppress(Exception):
+        emit(
+            "telemetry",
+            "plugin_load_failed",
+            level="error",
+            attributes={"plugin": name, "error": f"{type(exc).__name__}: {exc}"},
+        )
+
+
 def _load_extensions() -> plugins_cfg.PluginsConfig:
     """Read plugins.json, trigger import side-effects for enabled plugins (hook
     registration + Layer A wrap + system prompt contribution).
@@ -263,7 +320,16 @@ def _load_extensions() -> plugins_cfg.PluginsConfig:
     known_plugins = set(discovered.keys())
 
     # 2. Read config
-    config = plugins_cfg.load(known_plugins)
+    try:
+        config = plugins_cfg.load(known_plugins)
+    except plugins_cfg.DanglingPlugin as exc:
+        # Same fail-soft contract as a broken plugin.py: a config entry whose
+        # plugin directory is gone (an interrupted upgrade, a manual rm) must
+        # not block import ava. Report each dangling name, then reload with
+        # the entries dropped (treated as disabled).
+        for name in sorted(exc.names):
+            _report_plugin_load_failure(name, exc)
+        config = plugins_cfg.load(known_plugins, allow_dangling=True)
 
     # 3. Import enabled plugin (with PluginContext for state key prefixing)
     import importlib.util
@@ -324,7 +390,31 @@ def _load_extensions() -> plugins_cfg.PluginsConfig:
             # raises NameError. After registering, globals are reachable, fields
             # resolve directly into real types.
             sys.modules[spec.name] = module
-            spec.loader.exec_module(module)
+            try:
+                # External plugins only: builtins resolve through the real
+                # `ava_builtins.plugins` package (source is on sys.path), and
+                # shadowing it with a synthetic module would hide whatever its
+                # __init__.py defines from later `importlib.import_module`
+                # callers (e.g. gateway/routers/_plugin_metrics.py).
+                if pkg == "plugins":
+                    _register_plugin_parent_packages(pkg, name, plugin_dir)
+                spec.loader.exec_module(module)
+            except KeyboardInterrupt:
+                sys.modules.pop(spec.name, None)
+                raise
+            except SystemExit:
+                sys.modules.pop(spec.name, None)
+                raise
+            except BaseException as exc:
+                # Fail-soft contract (2026-08-28 ava_ledger incident): a broken
+                # plugin — a missing sibling module, a syntax error, a top-level
+                # exception — degrades to a skip with a loud warning, never a
+                # blocked `import ava` / graph build for the whole cluster. The
+                # remaining enabled plugins keep loading below. The half-executed
+                # module is dropped from sys.modules so a later reload retries
+                # from a clean slate.
+                sys.modules.pop(spec.name, None)
+                _report_plugin_load_failure(name, exc)
 
     # 4. Bind plugin config from disk — only batch bind after all plugin imports complete,
     # so that when hook callbacks actually fire, `ava._settings.plugins.<n>` is ready.
