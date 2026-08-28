@@ -17,6 +17,7 @@ The suite covers ① single-element tuple normalization at every entry point,
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from typing import Any
 
@@ -543,20 +544,21 @@ class TestWebEntries:
 
 class TestUnderstandEntries:
     def test_effort_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava._understand import understand
+        from ava.understand import understand
 
         async def fake_batch(
             targets: list[Any], fn: Any, max_concurrent: int | None, *, after: Any = None
         ) -> list[Any]:
             return [fn(t) for t in targets]
 
-        monkeypatch.setattr("ava._understand.run_batch", fake_batch)
-        monkeypatch.setattr("ava._understand._understand_one", lambda **kw: kw["effort"])  # pyright: ignore[reportUnknownArgumentType]
+        understand_module = importlib.import_module("ava.understand")
+        monkeypatch.setattr(understand_module, "run_batch", fake_batch)
+        monkeypatch.setattr(understand_module, "_understand_one", lambda **kw: kw["effort"])  # pyright: ignore[reportUnknownArgumentType]
         out = understand([{"prompt": "p", "text": "t"}], effort=("low",))  # pyright: ignore[reportArgumentType, reportCallIssue]
         assert out == ["low"]
 
     def test_effort_multi_element_type_errors(self) -> None:
-        from ava._understand import understand
+        from ava.understand import understand
 
         with pytest.raises(TypeError, match="effort must be a string"):
             understand([{"prompt": "p", "text": "t"}], effort=("low", "high"))  # pyright: ignore[reportArgumentType, reportCallIssue]
@@ -568,7 +570,7 @@ class TestUnderstandEntries:
 class TestMemoryEntries:
     def test_search_query_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava import _gateway_client
-        from ava_builtins.plugins.ava_memory import plugin as memory_plugin
+        from ava_builtins.plugins.ava_memory import sdk as memory_plugin
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
@@ -582,7 +584,7 @@ class TestMemoryEntries:
 
     def test_search_query_multi_element_type_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava import _gateway_client
-        from ava_builtins.plugins.ava_memory import plugin as memory_plugin
+        from ava_builtins.plugins.ava_memory import sdk as memory_plugin
 
         monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k: [])  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="query must be a string"):
@@ -590,7 +592,7 @@ class TestMemoryEntries:
 
     def test_write_slug_unwraps(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Slug tuple unwraps; the entry lands under the unwrapped name."""
-        from ava_builtins.plugins.ava_memory import plugin as memory_plugin
+        from ava_builtins.plugins.ava_memory import sdk as memory_plugin
         from shared.paths import workspace_dir
 
         root = workspace_dir(900001) / "memory"
@@ -609,7 +611,7 @@ class TestMemoryEntries:
     def test_write_multi_element_slug_type_errors(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        from ava_builtins.plugins.ava_memory import plugin as memory_plugin
+        from ava_builtins.plugins.ava_memory import sdk as memory_plugin
 
         monkeypatch.setattr(
             memory_plugin,

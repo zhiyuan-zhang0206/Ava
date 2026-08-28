@@ -12,12 +12,16 @@ Coverage matrix (after 5 reviewer review-fix additions):
 - Name collision (framework built-in / top-level attr served by __getattr__ like DB_URL / another plugin)
 - clear + reload scenario (clean up, leave framework untouched, linked with clear_plugin_registrations)
 - sys.modules['ava'] consistency
+- `import ava.<name>` / `from ava import <name>` resolve through sys.modules
+  (ModuleType and SimpleNamespace equivalent; clear drops the entry again)
 """
 
 import io
 import sys
 from contextlib import redirect_stdout
+from importlib import import_module
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -308,3 +312,94 @@ def test_register_member_conflict_with_existing():
     """A name already on the namespace (e.g. self.terminate) is not overridable."""
     with pytest.raises(ava.MemberConflictError):
         ava.register_namespace_member("self", "terminate", _noop)
+
+
+# ── importable submodule (import ava.<name>) ─────────────────────────────
+
+
+def test_import_statement_resolves_registered_namespace():
+    """`import ava.code` succeeds once the namespace is registered — the LLM
+    habit the import fix targets (agent bug: `import ava.memory` raised
+    ModuleNotFoundError while `ava.memory.write` attribute access worked)."""
+    ava.register_namespace("code", _make_module("code"))
+
+    namespace: dict[str, Any] = {}
+    exec("import ava.code", namespace)
+
+    assert namespace["ava"].code is ava.code
+    assert ava.code.greet() == "hello from code"
+
+
+def test_from_import_resolves_registered_namespace():
+    """`from ava import code` returns the registered namespace object."""
+    ava.register_namespace("code", _make_module("code"))
+
+    namespace: dict[str, Any] = {}
+    exec("from ava import code", namespace)
+
+    assert namespace["code"] is ava.code
+
+
+def test_importlib_import_matches_package_attribute():
+    """importlib.import_module exercises the same import machinery and serves
+    the same object the package attribute holds."""
+    mod = _make_module("code")
+    ava.register_namespace("code", mod)
+
+    assert import_module("ava.code") is mod
+    assert sys.modules["ava.code"] is mod
+
+
+def test_simple_namespace_registration_is_importable_module():
+    """A SimpleNamespace namespace is materialized as a real module: importable
+    via `import ava.<name>`, and the import returns the same object the
+    package attribute serves."""
+    ava.register_namespace("probe", SimpleNamespace(ping=lambda: "pong", __doc__="ns plugin"))
+
+    assert isinstance(ava.probe, ModuleType)
+    assert sys.modules["ava.probe"] is ava.probe
+
+    namespace: dict[str, Any] = {}
+    exec("import ava.probe as probe", namespace)
+
+    assert namespace["probe"] is ava.probe
+    assert ava.probe.ping() == "pong"
+
+
+def test_materialized_namespace_help_renders_members():
+    """Materializing a SimpleNamespace must not change what help(ava.<name>)
+    renders — members stay discoverable through the synthesized
+    __all_for_ava__ surface (same names the namespace's vars() exposed)."""
+    ava.register_namespace("code", SimpleNamespace(greet=lambda: "hello", __doc__="ns plugin"))
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        ava.help(ava.code)
+
+    assert "def greet" in buf.getvalue()
+
+
+def test_clear_removes_sys_modules_entry():
+    """Teardown drops the importable alias: after clear, `import ava.code`
+    fails again instead of serving a stale module."""
+    ava.register_namespace("code", _make_module("code"))
+    ava.clear_registered_namespaces()
+
+    assert "ava.code" not in sys.modules
+    with pytest.raises(ModuleNotFoundError):
+        import_module("ava.code")
+
+
+def test_register_clear_register_import_returns_fresh_module():
+    """The reload round-trip stays consistent: after re-registration the import
+    serves the new object, never the stale one cleared earlier."""
+    ava.register_namespace("code", _make_module("code-v1"))
+    first = sys.modules["ava.code"]
+    ava.clear_registered_namespaces()
+
+    ava.register_namespace("code", _make_module("code-v2"))
+    second = sys.modules["ava.code"]
+
+    assert first is not second
+    assert import_module("ava.code") is second
+    assert ava.code.greet() == "hello from code-v2"

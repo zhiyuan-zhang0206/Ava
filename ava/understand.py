@@ -9,16 +9,15 @@ The call is batch-shaped: you pass `targets` (a list of dicts, each with
 concurrently, answers coming back in input order. A single question is a
 one-element list. Same batch shape as `ava.web.fetch` / `ava.web.search`.
 
-Implementation module. The public surface is the top-level `ava.understand`
-function (re-exported from `ava/__init__.py`); `UnderstandError` is reachable
-as `ava.understand.UnderstandError` for catching.
+The module is also the importable home of the SDK entry point — the import
+statement resolves without changing the attribute surface.
 
 Provider split by modality: text (literal strings and text files) runs on the
 text model (`settings.lm.understand_text_model`, default DeepSeek V4 Flash); binary
 media (image / video / audio / PDF) runs on the media model
 (`settings.lm.understand_media_model`, default Gemini 3.5 Flash, which natively
 decodes those bytes). `effort` (default `max`) controls the answering model's
-reasoning depth; see `understand()` for the per-modality mapping."""
+reasoning depth; the per-modality mapping is on the entry point below."""
 
 from __future__ import annotations
 
