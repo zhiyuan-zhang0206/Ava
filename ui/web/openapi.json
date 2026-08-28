@@ -7911,7 +7911,8 @@
               "type": "string",
               "enum": [
                 "gateway",
-                "agent-runner"
+                "agent-runner",
+                "observability-station"
               ]
             },
             "type": "array",
@@ -7925,7 +7926,7 @@
           "machine_capabilities"
         ],
         "title": "ConfigView",
-        "description": "GET /api/config response — grouped field list + raw_overrides (PUT body source).\n\nraw_overrides is config.json's current content — the frontend deltas\nagainst this and returns the result via PUT.\n\nmachine_capabilities is the target machine's capability set (`gateway` and/or\n`agent-runner`) — the gateway's own for the Cluster (self) view, the `?machine=`\nhost's for a remote view. The panel uses it to pick which capability sections to\nrender on a remote view: a pure agent-runner shows only its agent-runner + common\nsections, while a co-located gateway,agent-runner box shows the gateway section too\n(so its gateway-daemon toggles stay editable). The Cluster view always shows all\nsections regardless (it edits every capability's cluster fields)."
+        "description": "GET /api/config response — grouped field list + raw_overrides (PUT body source).\n\nraw_overrides is config.json's current content — the frontend deltas\nagainst this and returns the result via PUT.\n\nmachine_capabilities is the target machine's capability set (`gateway` and/or\n`agent-runner` and/or `observability-station`) — the gateway's own for the\nCluster (self) view, the `?machine=`\nhost's for a remote view. The panel uses it to pick which capability sections to\nrender on a remote view: a pure agent-runner shows only its agent-runner + common\nsections, while a co-located gateway,agent-runner box shows the gateway section too\n(so its gateway-daemon toggles stay editable). The Cluster view always shows all\nsections regardless (it edits every capability's cluster fields)."
       },
       "ConfigWriteResult": {
         "properties": {

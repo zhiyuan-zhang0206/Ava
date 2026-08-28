@@ -51,7 +51,7 @@ import os
 import sys
 from pathlib import Path
 
-_VALID_CAPS = frozenset({"gateway", "agent-runner"})
+_VALID_CAPS = frozenset({"gateway", "agent-runner", "observability-station"})
 _CLUSTER_BIRTH_SECRET_KEY = "AVA_INSTALL_CLUSTER_SECRET"  # noqa: S105 — key, not credential
 
 

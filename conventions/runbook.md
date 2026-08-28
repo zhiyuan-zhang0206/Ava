@@ -1173,12 +1173,18 @@ service lifecycle depends on a container backend. The backend is required while 
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
 ops alerting via Grafana's embedded Alertmanager → the gateway webhook, the
 events-maintenance Loki rollup, `ava cluster health`). It is a **host
-singleton** owned by the lifecycle on exactly one home — the one carrying the
-operator-created `$AVA_HOME/lgtm-host` marker file (in practice prod
-`~/.ava`; `touch ~/.ava/lgtm-host` once). On that host, converge installs pins
-from `deploy/lgtm/native/versions.yml`, renders native configs and plists, and
-runs the idempotent `deploy/lgtm/start.sh` on every `ava start` / `ava cluster
-update`. The gateway watchdog re-runs it when Loki/Prometheus/Grafana readiness
+singleton** owned by the lifecycle on exactly one home per host — the
+observability station. Provider identity is either the operator-created
+`$AVA_HOME/lgtm-host` marker file (in practice prod `~/.ava`;
+`touch ~/.ava/lgtm-host` once, or `ava lgtm on`) or the declarative
+`observability-station` unit capability (`ava start
+--serve-observability-station` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` /
+`$AVA_HOME/machine_serve_observability_station`). On the station home, converge
+installs pins from `deploy/lgtm/native/versions.yml`, renders native configs
+and plists, and runs the idempotent `deploy/lgtm/start.sh` on every `ava start`
+/ `ava cluster update`. The observation data volume is a per-machine knob:
+`AVA_LGTM_STORAGE_DIR` (empty default = `$AVA_HOME/lgtm/native/data`) moves the
+Loki filesystem store and Prometheus TSDB to a configured path. The gateway watchdog re-runs it when Loki/Prometheus/Grafana readiness
 probes hit connection failures; its probe-first path skips only a reachable
 backend whose matching launchd job is still loaded. `ava status` shows native
 jobs and readiness probes.

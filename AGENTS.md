@@ -42,8 +42,10 @@ with no escape hell.
 A **cluster** = one logical deployment; **its identity IS its home path** — no
 cluster name (display label = home basename). A **unit** = one install under its
 own `$AVA_HOME`, carrying a capability set: `gateway` (owns Postgres/Redis + the
-HTTP gateway) and/or `agent-runner` (agents + the ops server); a single box
-carries both (home `~/.ava`). Every cluster owns its OWN Postgres + Redis
+HTTP gateway) and/or `agent-runner` (agents + the ops server) and/or
+`observability-station` (owns the native LGTM observability backends — the
+declarative form of the `$AVA_HOME/lgtm-host` marker); a single box carries
+both gateway and agent-runner (home `~/.ava`). Every cluster owns its OWN Postgres + Redis
 instance under `$AVA_HOME` (per-cluster ports in its host-port block) **plus a
 PgBouncer pooler** (default on — `AVA_DB_URL` points at it; migrations/pg_dump
 dial the direct URL); isolation is home-directory isolation, so co-located

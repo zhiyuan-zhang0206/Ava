@@ -21,6 +21,7 @@
 #     ./scripts/install.sh --role gateway,agent-runner   # single box (most installs)
 #     ./scripts/install.sh --role gateway                # gateway-only host (pg/redis + gateway)
 #     ./scripts/install.sh --role agent-runner           # runner-only host (no local pg/redis)
+#     ./scripts/install.sh --role observability-station  # LGTM observability backends host
 #     ./scripts/install.sh --role gateway,agent-runner --mirror cn # route pip/npm/brew through CN mirrors
 #     ./scripts/install.sh --worktree [--path P] [--no-seed]       # dev worktree cluster (see below)
 #     # For auth on: read/export AVA_INSTALL_CLUSTER_SECRET without echo first, then run:

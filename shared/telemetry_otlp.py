@@ -191,15 +191,17 @@ def _observability_export_allowed() -> bool:
     home = gateway_observability_home()
     if home is None:
         return True
-    marker = home / "lgtm-host"
-    allowed = marker.exists()
+    from shared.observability import home_is_observability_station
+
+    allowed = home_is_observability_station(home)
     if not allowed:
         from shared.log import logger
 
         logger.bind(**{_NO_EMITTER: True}).warning(
-            "[otlp-exporter] OTLP export disabled: gateway home has no LGTM "
-            "marker {}; set AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
-            marker,
+            "[otlp-exporter] OTLP export disabled: gateway home is not the "
+            "observability station (no {} marker and no observability-station "
+            "capability); set AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
+            home / "lgtm-host",
         )
     return allowed
 

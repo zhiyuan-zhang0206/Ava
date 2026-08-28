@@ -666,6 +666,7 @@ def test_start_missing_capability_reports_serve_flags_only(
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", None)
+    monkeypatch.setattr(settings.general, "machine_serve_observability_station", None)
     monkeypatch.setattr(settings.general, "memory_remote", "")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     from shared import paths
@@ -714,6 +715,7 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", True)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", None)
+    monkeypatch.setattr(settings.general, "machine_serve_observability_station", None)
     monkeypatch.setattr(settings.general, "memory_remote", "")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     from shared import paths
@@ -738,6 +740,7 @@ def test_start_arg_writes_to_file_for_persistence(
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", None)
+    monkeypatch.setattr(settings.general, "machine_serve_observability_station", None)
     monkeypatch.setattr(settings.general, "memory_remote", "")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
 
@@ -746,6 +749,7 @@ def test_start_arg_writes_to_file_for_persistence(
             "machine_name": "test-host",
             "machine_serve_gateway": True,
             "machine_serve_agent_runner": None,
+            "machine_serve_observability_station": None,
             "machine_description": None,
             "memory_remote": "git@github.com:test/AvaMemory.git",
             "gateway_url": "https://ava.example.com",
