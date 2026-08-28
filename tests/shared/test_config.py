@@ -413,7 +413,6 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "computer_use_queue_timeout_s",
         "computer_use_session_idle_s",
         "delivery_watchdog_enabled",
-        "events_maintenance_enabled",
         "heartbeat_enabled",
         "hibernate_enabled",
         "hibernate_min_active",
