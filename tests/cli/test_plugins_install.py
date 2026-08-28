@@ -451,3 +451,62 @@ def test_dot_prefixed_plugin_dirs_are_not_mcp_sources(unit_home: Path) -> None:
         encoding="utf-8",
     )
     assert "ghost-server" not in load_mcp_config()
+
+
+def test_install_refuses_dot_prefixed_plugin_name(
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A manifest name starting with '.' is reserved for atomic-install
+    staging/backup dirs — installing under it would be silently invisible to
+    every scanner (QA N3, #880 review)."""
+    repo = tmp_path / "claude-code-src"
+    pkg = repo / "plugins" / "pr-toolkit"
+    (pkg / ".claude-plugin").mkdir(parents=True)
+    (pkg / ".claude-plugin" / "plugin.json").write_text(
+        '{"name": ".hidden", "description": "x"}', encoding="utf-8"
+    )
+    (pkg / "agents").mkdir()
+    (pkg / "agents" / "a.md").write_text("# a\n", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+
+    assert cmd_plugins_install(f"file://{repo}", None, "plugins/pr-toolkit") == 1
+    assert "starts with" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert reg.load().packages == []
+
+
+def test_install_sweeps_stale_backup_residue(unit_home: Path, tmp_path: Path) -> None:
+    """QA N4: install sweeps .name.backup-* / .name.staging left by an
+    earlier hard-killed upgrade — filtering hides residue, this removes it."""
+    plugins_root = unit_home / "plugins"
+    plugins_root.mkdir(parents=True)
+    (plugins_root / ".pr-toolkit.backup-999").mkdir()
+    (plugins_root / ".pr-toolkit.backup-999" / "plugin.py").write_text("x = 1\n")
+    (plugins_root / ".pr-toolkit.staging").mkdir()
+    (plugins_root / ".pr-toolkit.staging" / "plugin.py").write_text("x = 1\n")
+
+    url = _make_claude_code_plugin_repo(tmp_path)
+    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+
+    assert not (plugins_root / ".pr-toolkit.backup-999").exists()
+    assert not (plugins_root / ".pr-toolkit.staging").exists()
+    assert (plugins_root / "pr-toolkit" / "skills" / "pr-toolkit" / "SKILL.md").is_file()
+
+
+def test_uninstall_sweeps_stale_backup_residue(unit_home: Path, tmp_path: Path) -> None:
+    """QA N4: uninstall removes dot-prefixed residue for the plugin too."""
+    url = _make_claude_code_plugin_repo(tmp_path)
+    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+
+    plugins_root = unit_home / "plugins"
+    stale = plugins_root / ".pr-toolkit.backup-999"
+    stale.mkdir()
+    (stale / "plugin.py").write_text("x = 1\n")
+
+    assert cmd_plugins_uninstall("pr-toolkit") == 0
+
+    assert not (plugins_root / "pr-toolkit").exists()
+    assert not (plugins_root / ".pr-toolkit.backup-999").exists()

@@ -82,7 +82,7 @@ def ensure_provider_plugins_loaded() -> None:
 
         discovered = plugins_config._discover_plugins()
         known = set(discovered)
-        config = plugins_config.load(known)
+        config = plugins_config.load_for_runtime(known)
         repo_dir = str(paths.repo_plugins_dir())
         for name in sorted(config.plugins):
             if not config.plugins[name].enabled:

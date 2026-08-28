@@ -39,7 +39,7 @@ router = APIRouter()
 def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
     """`(plugin, contributions.ui)` for every enabled plugin that declares one."""
     installed = plugins_config.installed_plugin_dirs()
-    config = plugins_config.load(set(installed))
+    config = plugins_config.load_for_runtime(set(installed))
     declarations: list[tuple[str, dict[str, Any]]] = []
     for name in sorted(installed):
         entry = config.plugins.get(name)

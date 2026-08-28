@@ -208,6 +208,11 @@ def iter_sources(repo: Path) -> tuple[list[_Source], list[str]]:
         if not plugins_root.is_dir():
             continue
         for p in sorted(plugins_root.iterdir()):
+            # Dot-prefixed dirs are atomic-install residue (.name.staging /
+            # .name.backup-<pid>) — never a plugin, so their skills must not
+            # be converged into the load dir (2026-08-28 ava_ledger defense).
+            if p.name.startswith("."):
+                continue
             skills_sub = p / "skills"
             if p.is_dir() and skills_sub.is_dir() and contains_skill_md(skills_sub):
                 add(p.name, skills_sub, "plugin", trust, bootstrap_only=bootstrap_only)
