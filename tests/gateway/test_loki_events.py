@@ -993,6 +993,37 @@ class TestQueryEvents:
 
         assert '| __error__=""' in client.calls[0][1]["query"]
 
+    def test_metric_range_parses_matrix_values_as_seconds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Matrix range-vector values come back in unix SECONDS; the bucketed
+        series must not divide them by 1e9 (regression: every bucket folded
+        to 1970)."""
+        payload: dict[str, Any] = {
+            "data": {
+                "result": [
+                    {
+                        "metric": {},
+                        "values": [
+                            ["1723300000", "1.5"],
+                            ["1723300300", "2.5"],
+                        ],
+                    }
+                ]
+            }
+        }
+        _install(monkeypatch, payload)
+        rows = loki_events.metric_range(
+            'max(max_over_time(({service_name=~".+"}[300s])))',
+            from_=datetime(2026, 8, 10, tzinfo=UTC),
+            to=datetime(2026, 8, 10, 1, tzinfo=UTC),
+            step_s=300,
+        )
+        assert rows == [
+            (datetime.fromtimestamp(1_723_300_000, UTC).isoformat(), 1.5),
+            (datetime.fromtimestamp(1_723_300_300, UTC).isoformat(), 2.5),
+        ]
+
     def test_explicit_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, _loki_payload([]))
         from_ = datetime(2026, 8, 1, tzinfo=UTC)
