@@ -604,65 +604,6 @@ def test_rollup_settings_defaults_aliases_and_lookback_bound() -> None:
         DaemonSettings.model_validate({"AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS": 0})
 
 
-def test_migration_backfills_cost_columns_from_events(db: psycopg.Connection) -> None:
-    """The llm-cost-rollup-columns migration derives per-(agent, day, model)
-    rows — including the cost ledger columns — from the frozen events
-    archive, inserting missing rows and overwriting existing ones."""
-    aid = _agent(db)
-    ts = datetime(2026, 5, 2, 10, 0, tzinfo=UTC)
-    rows: list[tuple[datetime, dict[str, object]]] = [
-        (
-            ts,
-            {
-                "model": "m1",
-                "in_total": 10,
-                "out_total": 5,
-                "cache_read": 1,
-                "reasoning": 0,
-                "cost_usd": 0.5,
-            },
-        ),
-        (
-            ts + timedelta(hours=1),
-            {"model": "m1", "in_total": 20, "out_total": 5, "cache_read": 0, "reasoning": 2},
-        ),
-        (
-            ts + timedelta(hours=2),
-            {
-                "model": "m2",
-                "in_total": 1,
-                "out_total": 1,
-                "cache_read": 0,
-                "reasoning": 0,
-                "cost_usd": 0.25,
-            },
-        ),
-    ]
-    with db.cursor() as cur:
-        for row_ts, payload in rows:
-            cur.execute(
-                "INSERT INTO events (ts, agent_id, level, event_name, attributes, "
-                "machine, process, category, source) VALUES (%s, %s, 'info', "
-                "'llm_usage', %s::jsonb, 'test', 'test', 'telemetry', 'test')",
-                (row_ts, aid, json.dumps(payload)),
-            )
-    migration = (
-        Path(__file__).resolve().parents[2]
-        / "migrations"
-        / "20260818T142518_llm-cost-rollup-columns.sql"
-    )
-    migration_sql = cast(LiteralString, migration.read_text())
-    with db.cursor() as cur:
-        cur.execute(migration_sql)  # idempotent by contract
-        cur.execute(migration_sql)
-    tokens = _fetch_tokens(db)
-    assert tokens[(aid, "2026-05-02", "m1")] == (2, 30, 10, 1, 2, 0.5, 1, 1)
-    assert tokens[(aid, "2026-05-02", "m2")] == (1, 1, 1, 0, 0, 0.25, 1, 0)
-
-
-# ── LogQL shape locks ────────────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("era", "indexed_labeled"),
     [(LokiReadEra.LEGACY, False), (LokiReadEra.INDEXED, True)],

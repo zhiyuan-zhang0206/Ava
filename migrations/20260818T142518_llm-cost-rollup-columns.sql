@@ -22,30 +22,39 @@ ALTER TABLE agent_model_tokens_daily
     ADD COLUMN IF NOT EXISTS costed_calls BIGINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS unpriced_calls BIGINT NOT NULL DEFAULT 0;
 
-INSERT INTO agent_model_tokens_daily
-    (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached,
-     tokens_reasoning, cost_usd, costed_calls, unpriced_calls)
-SELECT agent_id,
-       (ts AT TIME ZONE 'UTC')::date AS day,
-       COALESCE(attributes->>'model', '') AS model,
-       COUNT(*),
-       COALESCE(SUM((attributes->>'in_total')::bigint), 0),
-       COALESCE(SUM((attributes->>'out_total')::bigint), 0),
-       COALESCE(SUM((attributes->>'cache_read')::bigint), 0),
-       COALESCE(SUM((attributes->>'reasoning')::bigint), 0),
-       COALESCE(SUM((attributes->>'cost_usd')::float8), 0),
-       COUNT(attributes->>'cost_usd'),
-       COUNT(*) - COUNT(attributes->>'cost_usd')
-FROM events
-WHERE event_name = 'llm_usage'
-  AND agent_id IS NOT NULL
-GROUP BY agent_id, (ts AT TIME ZONE 'UTC')::date, COALESCE(attributes->>'model', '')
-ON CONFLICT (agent_id, day, model) DO UPDATE SET
-    llm_calls        = EXCLUDED.llm_calls,
-    tokens_in        = EXCLUDED.tokens_in,
-    tokens_out       = EXCLUDED.tokens_out,
-    tokens_cached    = EXCLUDED.tokens_cached,
-    tokens_reasoning = EXCLUDED.tokens_reasoning,
-    cost_usd         = EXCLUDED.cost_usd,
-    costed_calls     = EXCLUDED.costed_calls,
-    unpriced_calls   = EXCLUDED.unpriced_calls;
+-- The events read is guarded: the frozen PG `events` archive was dropped by
+-- migration 20260829T030000_drop-events-archive (task #1823), so a fresh-DB
+-- replay (baseline without the table) must skip the backfill — the archive
+-- data lives in the Loki archive stream + cold pg_dump instead.
+DO $$
+BEGIN
+    IF to_regclass('public.events') IS NOT NULL THEN
+        INSERT INTO agent_model_tokens_daily
+            (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached,
+             tokens_reasoning, cost_usd, costed_calls, unpriced_calls)
+        SELECT agent_id,
+               (ts AT TIME ZONE 'UTC')::date AS day,
+               COALESCE(attributes->>'model', '') AS model,
+               COUNT(*),
+               COALESCE(SUM((attributes->>'in_total')::bigint), 0),
+               COALESCE(SUM((attributes->>'out_total')::bigint), 0),
+               COALESCE(SUM((attributes->>'cache_read')::bigint), 0),
+               COALESCE(SUM((attributes->>'reasoning')::bigint), 0),
+               COALESCE(SUM((attributes->>'cost_usd')::float8), 0),
+               COUNT(attributes->>'cost_usd'),
+               COUNT(*) - COUNT(attributes->>'cost_usd')
+        FROM events
+        WHERE event_name = 'llm_usage'
+          AND agent_id IS NOT NULL
+        GROUP BY agent_id, (ts AT TIME ZONE 'UTC')::date, COALESCE(attributes->>'model', '')
+        ON CONFLICT (agent_id, day, model) DO UPDATE SET
+            llm_calls        = EXCLUDED.llm_calls,
+            tokens_in        = EXCLUDED.tokens_in,
+            tokens_out       = EXCLUDED.tokens_out,
+            tokens_cached    = EXCLUDED.tokens_cached,
+            tokens_reasoning = EXCLUDED.tokens_reasoning,
+            cost_usd         = EXCLUDED.cost_usd,
+            costed_calls     = EXCLUDED.costed_calls,
+            unpriced_calls   = EXCLUDED.unpriced_calls;
+    END IF;
+END $$;

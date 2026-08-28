@@ -10,3 +10,7 @@
 -- CASCADE drops the month partitions, their indexes, and the owned
 -- events_id_seq with the parent.
 DROP TABLE IF EXISTS events CASCADE;
+-- Explicit (the CASCADE above already drops it): the truncate-isolation lint
+-- derives the table set from SQL text, and `events_default` is a baseline
+-- declaration that must read as dropped.
+DROP TABLE IF EXISTS events_default;

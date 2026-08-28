@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS agent_archive_stats (
 );
 
 COMMENT ON TABLE agent_archive_stats IS
-    'Materialized inspector reads from the frozen events archive. Valid only while events remains frozen; live history belongs in Loki.';
+    'Materialized whole-life inspector values from the pre-cutover events archive (task #1281: the raw archive lives in the Loki archive stream).';
 COMMENT ON COLUMN agent_archive_stats.turn_distribution IS
     'Ascending JSON pairs [duration_seconds, count] for archived turn_end events.';
 COMMENT ON COLUMN agent_archive_stats.active_seconds IS
@@ -24,7 +24,14 @@ COMMENT ON COLUMN agent_archive_stats.exec_seconds IS
 COMMENT ON COLUMN agent_archive_stats.lifecycle IS
     'Ascending JSON pairs [UTC timestamp, event name] for archived lifecycle replay.';
 COMMENT ON COLUMN agent_archive_stats.computed_at IS
-    'Backfill time; this materialization is valid only while the events archive is frozen.';
+    'Backfill time; this materialization is valid only while the events archive was frozen.';
+-- The archive read is guarded: the frozen PG `events` archive was dropped by
+-- migration 20260829T030000_drop-events-archive (task #1823), so a fresh-DB
+-- replay (baseline without the table) must skip the backfill — the table's
+-- CREATE/COMMENT above stay unconditional.
+DO $$
+BEGIN
+    IF to_regclass('public.events') IS NOT NULL THEN
 
 WITH archive_agents AS (
     SELECT DISTINCT agent_id
@@ -95,3 +102,6 @@ ON CONFLICT (agent_id) DO UPDATE SET
     exec_seconds = EXCLUDED.exec_seconds,
     lifecycle = EXCLUDED.lifecycle,
     computed_at = EXCLUDED.computed_at;
+
+    END IF;
+END $$;

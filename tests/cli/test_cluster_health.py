@@ -1074,18 +1074,6 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
 # ── crash-loop detection: category=audit only (W9 fix) ──────────────────────
 
 
-def _insert_resurrect(db_conn, *, agent_id: int, category: str, seconds_ago: float) -> None:
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
-            "INSERT INTO events "
-            "(ts, agent_id, event_name, source, machine, process, category, level) "
-            "VALUES (now() - make_interval(secs => %s), %s, 'resurrect', 'test', "
-            "'test', 'test', %s, 'info')",
-            (seconds_ago, agent_id, category),
-        )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-
-
 def test_crash_loop_counts_audit_resurrect_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_crash_loop_detection` must count category='audit' resurrect rows only
     (W9 A.25): a telemetry/log resurrect row must not trigger a crash-loop
