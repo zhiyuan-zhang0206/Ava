@@ -532,7 +532,8 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
         # preserves the per-worker PID offset without re-applying it, so
         # cross-worker session names stay disjoint.
         cur.execute(
-            "TRUNCATE inbound_messages, agents_meta, events, agents, "
+            # `events` was dropped with the task #1281/#1823 cleanup.
+            "TRUNCATE inbound_messages, agents_meta, agents, "
             "checkpoint_blobs, checkpoint_writes, checkpoints, checkpoint_migrations "
             "CASCADE"
         )
