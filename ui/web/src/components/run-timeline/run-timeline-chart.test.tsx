@@ -102,6 +102,68 @@ describe("RunTimelineChart", () => {
     expect(screen.getByText("compact")).toBeTruthy();
   });
 
+  it("uses theme-aware SVG stroke classes for connectors and anomalous turn bars", () => {
+    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
+
+    const connector = container.querySelector('[data-testid="run-connector"]');
+    const firstTimeBar = container.querySelector('[aria-label="Time panel"] rect');
+
+    expect(connector?.getAttribute("stroke")).toBeNull();
+    expect(connector?.getAttribute("class")).toContain("stroke-muted-foreground");
+    expect(firstTimeBar?.getAttribute("stroke")).toBeNull();
+    expect(firstTimeBar?.getAttribute("class")).toContain("stroke-destructive");
+  });
+
+  it("skips idle labels that would collide with the next turn label", () => {
+    const crowdedTimeline: RunTimelineResponse = {
+      ...timeline,
+      rows: [
+        { ...timeline.rows[0], tags: ["idle_before_61s"] },
+        {
+          ...timeline.rows[1],
+          turn: 2,
+          start: "2026-08-29T08:01:00Z",
+          end: "2026-08-29T08:01:04Z",
+          tags: ["idle_before_121s"],
+        },
+        {
+          ...timeline.rows[1],
+          turn: 3,
+          start: "2026-08-29T08:02:00Z",
+          end: "2026-08-29T08:02:04Z",
+          tags: ["idle_before_181s"],
+        },
+      ],
+    };
+
+    render(<RunTimelineChart timeline={crowdedTimeline} labels={labels} />);
+
+    expect(screen.queryByText("Idle 1m")).toBeNull();
+    expect(screen.queryByText("Idle 2m")).toBeNull();
+    expect(screen.getByText("Idle 3m")).toBeTruthy();
+  });
+
+  it("caps the event rail at 120 colored chips", () => {
+    const events: RunTimelineResponse["events"] = [
+      { ts: "2026-08-29T08:00:00Z", kind: "compact", trace_id: null, label: "compact" },
+      { ts: "2026-08-29T08:00:01Z", kind: "restart_completed", trace_id: null, label: "restart" },
+      { ts: "2026-08-29T08:00:02Z", kind: "exec_failed", trace_id: null, label: "failed" },
+      ...Array.from({ length: 119 }, (_, index) => ({
+        ts: `2026-08-29T08:${String(index).padStart(2, "0")}:00Z`,
+        kind: "exec",
+        trace_id: null,
+        label: null,
+      })),
+    ];
+    const { container } = render(<RunTimelineChart timeline={{ ...timeline, events }} labels={labels} />);
+
+    expect(container.querySelectorAll('[data-testid="event-chip"]')).toHaveLength(120);
+    expect(screen.getByText("+2 more")).toBeTruthy();
+    expect(screen.getByText("compact").getAttribute("class")).toContain("border-violet-500/50");
+    expect(screen.getByText("restart_completed").getAttribute("class")).toContain("border-blue-500/50");
+    expect(screen.getByText("exec_failed").getAttribute("class")).toContain("border-destructive/50");
+  });
+
   it("shows the absolute token and cost detail on hover", () => {
     render(<RunTimelineChart timeline={timeline} labels={labels} />);
 
