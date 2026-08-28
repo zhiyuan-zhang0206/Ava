@@ -319,6 +319,8 @@ def _plugin_config_paths() -> list[Path]:
         if not root.is_dir():
             continue
         for plugin_dir in sorted(root.iterdir()):
+            if plugin_dir.name.startswith("."):
+                continue  # staging/backup residue — never a real plugin
             mcp_json = plugin_dir / ".mcp.json"
             if mcp_json.is_file():
                 paths.append(mcp_json)

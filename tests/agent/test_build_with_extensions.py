@@ -408,3 +408,21 @@ def test_dangling_config_entry_skipped_with_warning(
     assert "vanished" not in config.plugins
     attrs = [a for n, a in events if n == "plugin_load_failed"]
     assert [a["plugin"] for a in attrs] == ["vanished"]
+
+
+def test_dot_prefixed_dirs_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Atomic-install residue (.name.staging / .name.backup-<pid>) must never
+    surface as ghost plugins — a hard kill between rename steps would
+    otherwise have the loader import a half-installed tree as a plugin."""
+    from shared.plugins_config import _discover_plugins
+
+    _make_plugin("real")
+    _make_external_plugin("ext")
+    # same ghost name in BOTH roots: without the dot-prefix filter this would
+    # raise DuplicatePlugin, not just mis-discover
+    for root in (paths.repo_plugins_dir(), paths.plugins_dir()):
+        ghost = root / ".ghost.staging"
+        ghost.mkdir()
+        (ghost / "plugin.py").write_text("__description__ = 'ghost'\n", encoding="utf-8")
+
+    assert set(_discover_plugins()) == {"real", "ext"}

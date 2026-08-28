@@ -74,6 +74,11 @@ def _discover_plugins() -> dict[str, Path]:
 
     Builtin is scanned first; external plugin matching a builtin name
     -> DuplicatePlugin.
+
+    Dot-prefixed directories (`.name.staging`, `.name.backup-<pid>` — the
+    atomic-install residue a hard kill can leave behind, 2026-08-28
+    ava_ledger defense line) are skipped: they are transient by name and must
+    never surface as ghost plugins.
     """
     discovered: dict[str, Path] = {}
 
@@ -81,6 +86,8 @@ def _discover_plugins() -> dict[str, Path]:
     repo_dir = paths.repo_plugins_dir()
     if repo_dir.exists():
         for p in sorted(repo_dir.iterdir()):
+            if p.name.startswith("."):
+                continue
             if p.is_dir() and (p / "plugin.py").exists():
                 discovered[p.name] = p
 
@@ -88,6 +95,8 @@ def _discover_plugins() -> dict[str, Path]:
     user_dir = paths.plugins_dir()
     if user_dir.exists():
         for p in sorted(user_dir.iterdir()):
+            if p.name.startswith("."):
+                continue
             if p.is_dir() and (p / "plugin.py").exists():
                 if p.name in discovered:
                     raise DuplicatePlugin(
