@@ -40,7 +40,7 @@ The agent stream is connected while authenticated and visible; `activeId` re-key
 | `useAgentPages` | single agent opened pages (InspectorPanel, SSE folds page_opened/closed into cache, replaces deleted PageDock/use-fleet-pages) |
 | `useAllPages` (#655) | fleet-wide opened pages fetched once + SSE incremental fold (Inbox attaches associated page links to notices, avoids N+1 per-agent requests) |
 | `usePendingMessages` | pending inbound messages count |
-| Run timeline page | one on-demand React Query read of `GET /api/agents/{id}/run-timeline` per agent/window/level; it does not subscribe or poll, and requests a one-hour bucket projection when the turn response exceeds 400 rows |
+| Run timeline page | one on-demand React Query read of `GET /api/agents/{id}/run-timeline` per agent/window/session/level; it does not subscribe or poll, requests one-hour buckets up front for a server-selected or six-hour-and-larger view, and falls back to buckets before rendering a narrow turn response above 400 rows |
 
 Message POSTs are bounded across both headers and body consumption. A timeout,
 transport loss, 429, or 5xx is an ambiguous outcome: the client looks up the

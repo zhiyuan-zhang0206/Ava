@@ -36,6 +36,7 @@ router = APIRouter()
 
 _RETENTION = timedelta(days=7)
 _FALLBACK_WINDOW = timedelta(hours=24)
+_ASSOCIATION_TOLERANCE = timedelta(seconds=2)
 _PAGE_SIZE = 1_000
 _BUCKET_PATTERN = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[smhd])$")
 
@@ -61,6 +62,7 @@ _TURN_EVENTS = (
     "agent_terminated",
     "terminate",
     "restart",
+    "agent_restarted",
     "restart_completed",
     "idle_wake",
     "heartbeat_paused",
@@ -70,10 +72,19 @@ _TURN_EVENTS = (
     "llm_turn_aborted",
 )
 _SESSION_START_EVENTS = frozenset(
-    {"agent_spawned", "spawn", "agent_resurrected", "resurrect", "restart_completed"}
+    {
+        "agent_spawned",
+        "spawn",
+        "agent_resurrected",
+        "resurrect",
+        "agent_restarted",
+        "restart_completed",
+    }
 )
 _COMPACT_EVENTS = frozenset({"compact", "auto_compact"})
-_RESTART_EVENTS = frozenset({"restart", "restart_completed", "agent_resurrected", "resurrect"})
+# The audit family gives one event per user-visible restart/resurrection.  The
+# matching telemetry events are deliberately not rail markers or meta counts.
+_RESTART_EVENTS = frozenset({"restart_completed", "resurrect"})
 _EXEC_EVENTS = frozenset(
     {
         "exec",
@@ -116,6 +127,16 @@ class TurnTimelineAggregate:
     rows: list[RunTimelineRow]
     events: list[RunTimelineEvent]
     boundaries: RunTimelineBoundaries
+
+
+@dataclass(frozen=True)
+class _TurnWindow:
+    """A completed turn's time window for associating unkeyed child events."""
+
+    turn: int
+    event: dict[str, object]
+    start: datetime
+    end: datetime
 
 
 def _number(value: object) -> float:
@@ -196,11 +217,83 @@ def _execution_events(events: list[dict[str, object]]) -> list[RunTimelineExec]:
     return executions
 
 
+def _turn_window(turn: int, turn_end: dict[str, object]) -> _TurnWindow:
+    attrs = _attrs(turn_end)
+    end = _event_ts(turn_end)
+    duration_s = max(0.0, _number(attrs.get("duration_seconds")))
+    return _TurnWindow(
+        turn=turn,
+        event=turn_end,
+        start=end - timedelta(seconds=duration_s),
+        end=end,
+    )
+
+
+def _assign_events_by_time(
+    turns: list[_TurnWindow], events: list[dict[str, object]]
+) -> list[list[dict[str, object]]]:
+    """Attach ordered events once, preferring their containing turn window.
+
+    A session-root trace id is shared by sibling turns, so it cannot join child
+    events to a turn.  The event stream is chronological: after an event falls
+    between turn windows, the next completed turn is the only stable fallback.
+    """
+    assignments: list[list[dict[str, object]]] = [[] for _ in turns]
+    turn_index = 0
+    for event in sorted(events, key=_event_ts):
+        event_ts = _event_ts(event)
+        while turn_index < len(turns) and turns[turn_index].end < event_ts:
+            turn_index += 1
+        if turn_index == len(turns):
+            if turns:
+                # The event belongs to an in-flight next turn whose turn_end is
+                # not visible yet. Keep it once on the final completed row so
+                # the selected window does not silently drop execution evidence.
+                assignments[-1].append(event)
+            continue
+
+        candidate = turns[turn_index]
+        if candidate.start - _ASSOCIATION_TOLERANCE <= event_ts <= candidate.end:
+            assignments[turn_index].append(event)
+            continue
+
+        # The event is in a gap (or predates the first visible turn).  Associate
+        # it with the smallest later turn_end rather than leaking it across rows.
+        assignments[turn_index].append(event)
+    return assignments
+
+
+def _associate_llm_usage(
+    turns: list[_TurnWindow], usages: list[dict[str, object]]
+) -> tuple[list[list[dict[str, object]]], list[bool]]:
+    """Prefer the exact span join, then recover span-less telemetry by time."""
+    assignments: list[list[dict[str, object]]] = [[] for _ in turns]
+    turns_by_span: dict[str, int] = {}
+    for index, turn in enumerate(turns):
+        span_id = _event_string(turn.event, "span_id")
+        if span_id is not None:
+            turns_by_span.setdefault(span_id, index)
+
+    unjoined: list[dict[str, object]] = []
+    for usage in sorted(usages, key=_event_ts):
+        span_id = _event_string(usage, "span_id")
+        turn_index = turns_by_span.get(span_id) if span_id is not None else None
+        if turn_index is None:
+            unjoined.append(usage)
+        else:
+            assignments[turn_index].append(usage)
+
+    fallback_usage_by_turn = _assign_events_by_time(turns, unjoined)
+    for turn_index, fallback_usages in enumerate(fallback_usage_by_turn):
+        assignments[turn_index].extend(fallback_usages)
+    return assignments, [bool(usages) for usages in fallback_usage_by_turn]
+
+
 def _row_for_turn(
     turn: int,
     turn_end: dict[str, object],
     usages: list[dict[str, object]],
-    trace_events: list[dict[str, object]],
+    associated_events: list[dict[str, object]],
 ) -> RunTimelineRow:
     attrs = _attrs(turn_end)
     end = _event_ts(turn_end)
@@ -210,10 +303,10 @@ def _row_for_turn(
         start = min(_event_ts(event) for event in usages)
 
     llm = _llm_usage(usages)
-    execs = _execution_events(trace_events)
+    execs = _execution_events(associated_events)
     active_s = min(duration_s, llm.latency_ms / 1000 + sum(exec_.dur_s for exec_ in execs))
     anomalies = [
-        _event_name(event) for event in trace_events if _event_name(event) in _ANOMALY_EVENTS
+        _event_name(event) for event in associated_events if _event_name(event) in _ANOMALY_EVENTS
     ]
     ok = attrs.get("ok")
     if ok is False:
@@ -327,28 +420,32 @@ def aggregate_turn_timeline(
 ) -> TurnTimelineAggregate:
     """Build ordered turn rows from an event slice, optionally time-bucketed."""
     ordered = sorted(events, key=_event_ts)
-    usages_by_span: dict[str, list[dict[str, object]]] = {}
-    events_by_trace: dict[str, list[dict[str, object]]] = {}
-    for event in ordered:
-        span_id = _event_string(event, "span_id")
-        trace_id = _event_string(event, "trace_id")
-        if _event_name(event) == "llm_usage" and span_id is not None:
-            usages_by_span.setdefault(span_id, []).append(event)
-        if trace_id is not None:
-            events_by_trace.setdefault(trace_id, []).append(event)
+    turns = [
+        _turn_window(turn, turn_end)
+        for turn, turn_end in enumerate(
+            (event for event in ordered if _event_name(event) == "turn_end"), start=1
+        )
+    ]
+    usages_by_turn, used_usage_fallback = _associate_llm_usage(
+        turns, [event for event in ordered if _event_name(event) == "llm_usage"]
+    )
+    associated_events_by_turn = _assign_events_by_time(
+        turns,
+        [
+            event
+            for event in ordered
+            if _event_name(event) in _EXEC_EVENTS | (_ANOMALY_EVENTS - _EXEC_EVENTS)
+        ],
+    )
 
     rows: list[RunTimelineRow] = []
-    for turn, turn_end in enumerate(
-        (event for event in ordered if _event_name(event) == "turn_end"), start=1
-    ):
-        span_id = _event_string(turn_end, "span_id")
-        trace_id = _event_string(turn_end, "trace_id")
+    for index, turn in enumerate(turns):
         rows.append(
             _row_for_turn(
-                turn,
-                turn_end,
-                usages_by_span.get(span_id, []) if span_id is not None else [],
-                events_by_trace.get(trace_id, []) if trace_id is not None else [],
+                turn.turn,
+                turn.event,
+                usages_by_turn[index],
+                associated_events_by_turn[index],
             )
         )
 
@@ -374,6 +471,8 @@ def aggregate_turn_timeline(
         n_exec_failed=sum(1 for event in ordered if _event_name(event) in _EXEC_EVENTS - {"exec"}),
         n_compact=len(compact_events),
         n_restart=sum(1 for event in ordered if _event_name(event) in _RESTART_EVENTS),
+        fallback_turns=sum(used_usage_fallback),
+        unmatched_turns=sum(1 for row in turn_rows if row.llm.calls == 0),
     )
     return TurnTimelineAggregate(
         meta=meta,
@@ -382,6 +481,8 @@ def aggregate_turn_timeline(
         boundaries=RunTimelineBoundaries(
             initialize_turn=turn_rows[0].turn if turn_rows else None,
             last_before_compact_turn=last_before_compact,
+            post_window_turns=0,
+            has_activity_after_window=False,
         ),
     )
 
@@ -412,12 +513,15 @@ def _query_all_events(
         offset += _PAGE_SIZE
 
 
-def _default_window(agent_id: int, now: datetime) -> tuple[datetime, datetime]:
-    """Choose the latest observable initialize-context-to-compact session.
+def _default_window(
+    agent_id: int, now: datetime, *, session: Literal["compact", "current"]
+) -> tuple[datetime, datetime]:
+    """Choose the latest compact-ended or current observable session.
 
-    Loki retains seven days.  A compact ends the selected session; without one
-    the latest lifecycle start runs to ``now``.  Agents whose lifecycle predates
-    retention use a bounded last-24-hours view instead of an unbounded scan.
+    Loki retains seven days. ``compact`` ends at the latest compact, while
+    ``current`` runs from the latest lifecycle start to ``now``. Agents whose
+    lifecycle predates retention use a bounded last-24-hours view instead of an
+    unbounded scan.
     """
     retention_start = now - _RETENTION
     lifecycle_events = _query_all_events(
@@ -427,6 +531,10 @@ def _default_window(agent_id: int, now: datetime) -> tuple[datetime, datetime]:
         event_names=tuple(_SESSION_START_EVENTS | _COMPACT_EVENTS),
     )
     ordered = sorted(lifecycle_events, key=_event_ts)
+    starts = [_event_ts(event) for event in ordered if _event_name(event) in _SESSION_START_EVENTS]
+    if session == "current":
+        return (starts[-1], now) if starts else (now - _FALLBACK_WINDOW, now)
+
     compacts = [event for event in ordered if _event_name(event) in _COMPACT_EVENTS]
     if compacts:
         end = _event_ts(compacts[-1])
@@ -437,7 +545,6 @@ def _default_window(agent_id: int, now: datetime) -> tuple[datetime, datetime]:
         ]
         return (starts[-1] if starts else max(retention_start, end - _FALLBACK_WINDOW), end)
 
-    starts = [_event_ts(event) for event in ordered if _event_name(event) in _SESSION_START_EVENTS]
     if starts:
         return starts[-1], now
     return now - _FALLBACK_WINDOW, now
@@ -456,13 +563,18 @@ def _parse_bucket_seconds(bucket: str | None) -> int:
 
 
 def _effective_window(
-    agent_id: int, from_: datetime | None, to: datetime | None, now: datetime
+    agent_id: int,
+    from_: datetime | None,
+    to: datetime | None,
+    now: datetime,
+    *,
+    session: Literal["compact", "current"],
 ) -> tuple[datetime, datetime]:
     for name, value in (("from", from_), ("to", to)):
         if value is not None and value.tzinfo is None:
             raise HTTPException(status_code=422, detail=f"{name} must include a timezone offset")
     if from_ is None and to is None:
-        return _default_window(agent_id, now)
+        return _default_window(agent_id, now, session=session)
     end = to or now
     start = from_ or end - _FALLBACK_WINDOW
     if start >= end:
@@ -480,12 +592,23 @@ def get_run_timeline(
     to: Annotated[datetime | None, Query()] = None,
     level: Annotated[Literal["turn", "bucket"], Query()] = "turn",
     bucket: Annotated[str | None, Query()] = None,
+    session: Annotated[Literal["compact", "current"], Query()] = "compact",
 ) -> RunTimelineResponse:
     """Return an event-driven session waterfall with turn or bucket rows."""
     now = datetime.now(UTC)
-    window_start, window_end = _effective_window(agent_id, from_, to, now)
+    window_start, window_end = _effective_window(agent_id, from_, to, now, session=session)
     try:
         events = _query_all_events(agent_id, window_start, window_end)
+        post_window_events = (
+            _query_all_events(
+                agent_id,
+                window_end,
+                now,
+                event_names=tuple(_SESSION_START_EVENTS | {"turn_end"}),
+            )
+            if session == "compact" and from_ is None and to is None and window_end < now
+            else []
+        )
     except httpx.HTTPError as exc:
         raise_backend_unavailable(exc)
 
@@ -495,11 +618,25 @@ def get_run_timeline(
         window_end,
         bucket_seconds=_parse_bucket_seconds(bucket) if level == "bucket" else None,
     )
+    post_window_turns = sum(
+        1
+        for event in post_window_events
+        if _event_name(event) == "turn_end" and _event_ts(event) > window_end
+    )
+    has_activity_after_window = post_window_turns > 0 or any(
+        _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) > window_end
+        for event in post_window_events
+    )
     return RunTimelineResponse(
         agent_id=agent_id,
         window=RunTimelineWindow(from_=window_start, to=window_end),
         meta=aggregate.meta,
         rows=aggregate.rows,
         events=aggregate.events,
-        boundaries=aggregate.boundaries,
+        boundaries=RunTimelineBoundaries(
+            initialize_turn=aggregate.boundaries.initialize_turn,
+            last_before_compact_turn=aggregate.boundaries.last_before_compact_turn,
+            post_window_turns=post_window_turns,
+            has_activity_after_window=has_activity_after_window,
+        ),
     )

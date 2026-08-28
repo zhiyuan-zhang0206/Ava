@@ -21,6 +21,8 @@ const timeline: RunTimelineResponse = {
     n_exec_failed: 1,
     n_compact: 1,
     n_restart: 0,
+    fallback_turns: 0,
+    unmatched_turns: 0,
   },
   rows: [
     {
@@ -74,10 +76,17 @@ const timeline: RunTimelineResponse = {
     { ts: "2026-08-29T08:00:06Z", kind: "compact", trace_id: null, label: null },
     { ts: "2026-08-29T08:00:03Z", kind: "exec_failed", trace_id: "trace-1", label: "ValueError" },
   ],
-  boundaries: { initialize_turn: 1, last_before_compact_turn: 1 },
+  boundaries: {
+    initialize_turn: 1,
+    last_before_compact_turn: 1,
+    post_window_turns: 0,
+    has_activity_after_window: false,
+  },
 };
 
 const labels = {
+  chart: "Timeline chart",
+  waterfall: "Timeline waterfall",
   time: "Time",
   tokens: "Tokens",
   eventRail: "Event rail",
@@ -88,12 +97,17 @@ const labels = {
   bucket: "Bucket",
   cost: "Cost",
   model: "Model",
+  empty: "No activity in this window.",
+  noTokenData: "No token data is available for this window.",
+  moreEvents: (count: number, summary: string) => `+${count} more (${summary})`,
 };
 
 describe("RunTimelineChart", () => {
   it("renders independent panels with dashed correspondence connectors and event rail", () => {
     const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
 
+    expect(screen.getByLabelText("Timeline chart")).toBeTruthy();
+    expect(screen.getByLabelText("Timeline waterfall")).toBeTruthy();
     expect(screen.getByLabelText("Time panel")).toBeTruthy();
     expect(screen.getByLabelText("Tokens panel")).toBeTruthy();
     expect(screen.getByLabelText("Event rail")).toBeTruthy();
@@ -158,10 +172,73 @@ describe("RunTimelineChart", () => {
     const { container } = render(<RunTimelineChart timeline={{ ...timeline, events }} labels={labels} />);
 
     expect(container.querySelectorAll('[data-testid="event-chip"]')).toHaveLength(120);
-    expect(screen.getByText("+2 more")).toBeTruthy();
+    expect(screen.getByText("+2 more (exec×2)")).toBeTruthy();
     expect(screen.getByText("compact").getAttribute("class")).toContain("border-violet-500/50");
     expect(screen.getByText("restart_completed").getAttribute("class")).toContain("border-blue-500/50");
     expect(screen.getByText("exec_failed").getAttribute("class")).toContain("border-destructive/50");
+  });
+
+  it("prioritizes rare rail events before ordinary exec chips and summarizes skipped kinds", () => {
+    const events: RunTimelineResponse["events"] = [
+      ...Array.from({ length: 121 }, (_, index) => ({
+        ts: `2026-08-29T08:${String(index % 60).padStart(2, "0")}:00Z`,
+        kind: "exec",
+        trace_id: null,
+        label: null,
+      })),
+      { ts: "2026-08-29T09:00:00Z", kind: "compact", trace_id: null, label: null },
+    ];
+    const { container } = render(<RunTimelineChart timeline={{ ...timeline, events }} labels={labels} />);
+
+    expect(container.querySelectorAll('[data-testid="event-chip"]')).toHaveLength(120);
+    expect(screen.getByText("compact")).toBeTruthy();
+    expect(screen.getByText("+2 more (exec×2)")).toBeTruthy();
+  });
+
+  it("keeps a dense token panel within a readable capped height", () => {
+    const denseTimeline: RunTimelineResponse = {
+      ...timeline,
+      rows: Array.from({ length: 157 }, (_, index) => ({
+        ...timeline.rows[0],
+        turn: index + 1,
+        start: `2026-08-29T08:${String(index % 60).padStart(2, "0")}:00Z`,
+        end: `2026-08-29T08:${String(index % 60).padStart(2, "0")}:01Z`,
+      })),
+    };
+    const { container } = render(<RunTimelineChart timeline={denseTimeline} labels={labels} />);
+    const svg = container.querySelector("svg");
+
+    expect(Number(svg?.getAttribute("viewBox")?.split(" ").at(-1))).toBeGreaterThan(286);
+  });
+
+  it("scrolls the wide SVG inside the chart instead of overflowing the page", () => {
+    render(<RunTimelineChart timeline={timeline} labels={labels} />);
+
+    expect(screen.getByTestId("run-timeline-scroll").className).toContain("overflow-x-auto");
+  });
+
+  it("replaces empty axes with an activity hint", () => {
+    render(<RunTimelineChart timeline={{ ...timeline, rows: [] }} labels={labels} />);
+
+    expect(screen.getByText("No activity in this window.")).toBeTruthy();
+  });
+
+  it("explains when every displayed turn lacks token data", () => {
+    render(
+      <RunTimelineChart
+        timeline={{
+          ...timeline,
+          meta: { ...timeline.meta, n_turns: 2, tokens_in: 0, tokens_out: 0, unmatched_turns: 2 },
+          rows: timeline.rows.map((row) => ({
+            ...row,
+            llm: { ...row.llm, calls: 0, in_total: 0, out_total: 0 },
+          })),
+        }}
+        labels={labels}
+      />,
+    );
+
+    expect(screen.getByText("No token data is available for this window.")).toBeTruthy();
   });
 
   it("shows the absolute token and cost detail on hover", () => {

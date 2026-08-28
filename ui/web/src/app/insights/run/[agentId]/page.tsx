@@ -6,16 +6,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { RunTimelineChart, type RunTimelineChartLabels } from "@/components/run-timeline/run-timeline-chart";
+import { usesTimelineBuckets, type TimelineWindowOverride } from "@/components/run-timeline/request-level";
 import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { formatTokensCompact } from "@/lib/item-summary";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
-
-interface WindowOverride {
-  from: string;
-  to: string;
-}
 
 const ZOOM_WINDOWS = [24, 12, 6, 1, 0.5] as const;
 
@@ -27,6 +23,8 @@ function dateTimeInputValue(iso: string): string {
 
 function chartLabels(t: ReturnType<typeof useTranslations<"runTimeline">>): RunTimelineChartLabels {
   return {
+    chart: t("chartAriaLabel"),
+    waterfall: t("waterfallAriaLabel"),
     time: t("time"),
     tokens: t("tokens"),
     eventRail: t("eventRail"),
@@ -37,6 +35,9 @@ function chartLabels(t: ReturnType<typeof useTranslations<"runTimeline">>): RunT
     bucket: t("bucket"),
     cost: t("cost"),
     model: t("model"),
+    empty: t("empty"),
+    noTokenData: t("noTokenData"),
+    moreEvents: (count, summary) => t("moreEvents", { count, summary }),
   };
 }
 
@@ -49,7 +50,8 @@ export default function RunTimelinePage({
   const t = useTranslations("runTimeline");
   const [agentId, setAgentId] = useState<number | null>(null);
   const [paramsResolved, setParamsResolved] = useState(false);
-  const [windowOverride, setWindowOverride] = useState<WindowOverride | null>(null);
+  const [session, setSession] = useState<"compact" | "current">("compact");
+  const [windowOverride, setWindowOverride] = useState<TimelineWindowOverride | null>(null);
   const [fromInput, setFromInput] = useState("");
   const [toInput, setToInput] = useState("");
 
@@ -72,33 +74,36 @@ export default function RunTimelinePage({
   }, [params]);
 
   const safeAgentId = agentId ?? 0;
+  const requestsBucketsUpfront = usesTimelineBuckets(windowOverride);
   const turnQuery = useQuery({
-    queryKey: ["run-timeline", agentId, windowOverride?.from ?? null, windowOverride?.to ?? null, "turn"],
-    queryFn: () => api.getRunTimeline(safeAgentId, windowOverride ?? undefined),
-    enabled: agentId !== null,
+    queryKey: ["run-timeline", agentId, windowOverride?.from ?? null, windowOverride?.to ?? null, session, "turn"],
+    queryFn: () => api.getRunTimeline(safeAgentId, { ...(windowOverride ?? {}), session }),
+    enabled: agentId !== null && !requestsBucketsUpfront,
     placeholderData: keepPreviousData,
   });
-  const shouldBucket = (turnQuery.data?.meta.n_turns ?? 0) > 400;
-  const bucket = shouldBucket ? "1h" : undefined;
+  const shouldBucket = requestsBucketsUpfront || (turnQuery.data?.meta.n_turns ?? 0) > 400;
   const bucketQuery = useQuery({
     queryKey: [
       "run-timeline",
       agentId,
       windowOverride?.from ?? null,
       windowOverride?.to ?? null,
-      shouldBucket ? "bucket" : "turn",
-      bucket ?? null,
+      session,
+      "bucket",
+      "1h",
     ],
     queryFn: () =>
       api.getRunTimeline(safeAgentId, {
         ...(windowOverride ?? {}),
         level: "bucket",
         bucket: "1h",
+        session,
       }),
     enabled: agentId !== null && shouldBucket,
     placeholderData: keepPreviousData,
   });
-  const timeline = shouldBucket ? bucketQuery.data ?? turnQuery.data : turnQuery.data;
+  const timeline = shouldBucket ? bucketQuery.data : turnQuery.data;
+  const timelinePending = shouldBucket ? bucketQuery.isPending : turnQuery.isPending;
   const defaultFromInput = timeline ? dateTimeInputValue(timeline.window.from) : "";
   const defaultToInput = timeline ? dateTimeInputValue(timeline.window.to) : "";
   const selectedFromInput = fromInput || defaultFromInput;
@@ -118,6 +123,13 @@ export default function RunTimelinePage({
     const to = new Date(selectedToInput);
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to) return;
     setWindowOverride({ from: from.toISOString(), to: to.toISOString() });
+  };
+
+  const selectSession = (nextSession: "compact" | "current") => {
+    setSession(nextSession);
+    setWindowOverride(null);
+    setFromInput("");
+    setToInput("");
   };
 
   if (paramsResolved && agentId === null) {
@@ -141,7 +153,33 @@ export default function RunTimelinePage({
             <div className={cn(FLEX, "flex-wrap items-center justify-between gap-3")}>
               <div>
                 <h2 className="text-sm font-semibold">{t("session")}</h2>
-                <p className="text-xs text-muted-foreground">{t("description")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {session === "compact" ? t("compactDescription") : t("currentDescription")}
+                </p>
+                <div className={cn(FLEX, "mt-2 gap-1")} role="group" aria-label={t("session")}>
+                  <button
+                    type="button"
+                    aria-pressed={session === "compact"}
+                    onClick={() => selectSession("compact")}
+                    className={cn(
+                      "rounded border px-2 py-1 font-mono text-xs",
+                      session === "compact" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                    )}
+                  >
+                    {t("compactSession")}
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={session === "current"}
+                    onClick={() => selectSession("current")}
+                    className={cn(
+                      "rounded border px-2 py-1 font-mono text-xs",
+                      session === "current" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                    )}
+                  >
+                    {t("currentSession")}
+                  </button>
+                </div>
               </div>
               <div className={cn(FLEX, "flex-wrap gap-1")} aria-label={t("zoom")}>
                 {ZOOM_WINDOWS.map((hours) => (
@@ -187,6 +225,21 @@ export default function RunTimelinePage({
                 {t("apply")}
               </button>
             </form>
+            {timeline && timeline.meta.unmatched_turns + timeline.meta.fallback_turns > 0 ? (
+              <p className="rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200" role="alert">
+                {t("unmatchedWarning", {
+                  count: timeline.meta.unmatched_turns + timeline.meta.fallback_turns,
+                })}
+              </p>
+            ) : null}
+            {session === "compact" && timeline?.boundaries.has_activity_after_window ? (
+              <p className="text-xs text-muted-foreground">
+                {t("stillActiveAfterCompact", { count: timeline.boundaries.post_window_turns })}{" "}
+                <button type="button" className="text-primary underline underline-offset-2" onClick={() => selectSession("current")}>
+                  {t("viewCurrentSession")}
+                </button>
+              </p>
+            ) : null}
           </section>
 
           {timeline ? (
@@ -209,12 +262,16 @@ export default function RunTimelinePage({
               </section>
               <RunTimelineChart timeline={timeline} labels={chartLabels(t)} />
             </>
-          ) : turnQuery.isPending || bucketQuery.isPending ? (
+          ) : timelinePending ? (
             <p className="font-mono text-sm text-muted-foreground">{t("loading")}</p>
           ) : (
             <div className="space-y-2 font-mono text-sm text-destructive" role="alert">
               <p>{t("loadFailed")}</p>
-              <button type="button" className={buttonVariants({ size: "sm" })} onClick={() => void turnQuery.refetch()}>
+              <button
+                type="button"
+                className={buttonVariants({ size: "sm" })}
+                onClick={() => void (shouldBucket ? bucketQuery : turnQuery).refetch()}
+              >
                 {t("retry")}
               </button>
             </div>

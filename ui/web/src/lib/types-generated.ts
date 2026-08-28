@@ -6406,6 +6406,10 @@ export interface components {
             initialize_turn: number | null;
             /** Last Before Compact Turn */
             last_before_compact_turn: number | null;
+            /** Post Window Turns */
+            post_window_turns: number;
+            /** Has Activity After Window */
+            has_activity_after_window: boolean;
         };
         /**
          * RunTimelineEvent
@@ -6481,6 +6485,10 @@ export interface components {
             n_compact: number;
             /** N Restart */
             n_restart: number;
+            /** Fallback Turns */
+            fallback_turns: number;
+            /** Unmatched Turns */
+            unmatched_turns: number;
         };
         /**
          * RunTimelineResponse
@@ -10820,6 +10828,7 @@ export interface operations {
                 to?: string | null;
                 level?: "turn" | "bucket";
                 bucket?: string | null;
+                session?: "compact" | "current";
             };
             header?: never;
             path: {

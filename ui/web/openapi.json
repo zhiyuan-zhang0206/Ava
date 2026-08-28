@@ -5049,6 +5049,20 @@
               ],
               "title": "Bucket"
             }
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "compact",
+                "current"
+              ],
+              "type": "string",
+              "default": "compact",
+              "title": "Session"
+            }
           }
         ],
         "responses": {
@@ -11813,12 +11827,22 @@
               }
             ],
             "title": "Last Before Compact Turn"
+          },
+          "post_window_turns": {
+            "type": "integer",
+            "title": "Post Window Turns"
+          },
+          "has_activity_after_window": {
+            "type": "boolean",
+            "title": "Has Activity After Window"
           }
         },
         "type": "object",
         "required": [
           "initialize_turn",
-          "last_before_compact_turn"
+          "last_before_compact_turn",
+          "post_window_turns",
+          "has_activity_after_window"
         ],
         "title": "RunTimelineBoundaries",
         "description": "Turn rows that anchor the initialized-context-to-compact session."
@@ -11984,6 +12008,14 @@
           "n_restart": {
             "type": "integer",
             "title": "N Restart"
+          },
+          "fallback_turns": {
+            "type": "integer",
+            "title": "Fallback Turns"
+          },
+          "unmatched_turns": {
+            "type": "integer",
+            "title": "Unmatched Turns"
           }
         },
         "type": "object",
@@ -11996,7 +12028,9 @@
           "cost_usd",
           "n_exec_failed",
           "n_compact",
-          "n_restart"
+          "n_restart",
+          "fallback_turns",
+          "unmatched_turns"
         ],
         "title": "RunTimelineMeta",
         "description": "Run-level totals derived from the rows in a timeline window."

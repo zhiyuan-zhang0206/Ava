@@ -14,12 +14,29 @@ const PLOT_LEFT = 44;
 const PLOT_WIDTH = 930;
 const TIME_Y = 54;
 const TOKEN_Y = 208;
-const TOKEN_PANEL_HEIGHT = 52;
+const TOKEN_PANEL_MIN_HEIGHT = 52;
+const TOKEN_PANEL_MAX_HEIGHT = 600;
 const BAR_HEIGHT = 28;
 const IDLE_LABEL_MIN_WIDTH = 55;
 const EVENT_RAIL_LIMIT = 120;
+const EVENT_RAIL_PRIORITY = new Set([
+  "exec_failed",
+  "exec(failed)",
+  "exec_timeout",
+  "exec(timeout)",
+  "llm_provider_error",
+  "stream_stalled_retry",
+  "llm_turn_aborted",
+  "compact",
+  "auto_compact",
+  "restart_completed",
+  "resurrect",
+  "agent_terminated",
+]);
 
 export interface RunTimelineChartLabels {
+  chart: string;
+  waterfall: string;
   time: string;
   tokens: string;
   eventRail: string;
@@ -30,6 +47,9 @@ export interface RunTimelineChartLabels {
   bucket: string;
   cost: string;
   model: string;
+  empty: string;
+  noTokenData: string;
+  moreEvents: (count: number, summary: string) => string;
 }
 
 function rowLabel(row: RunTimelineResponse["rows"][number], labels: RunTimelineChartLabels): string {
@@ -66,6 +86,28 @@ function eventChipClass(kind: string): string {
   return "rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground";
 }
 
+function prioritizedRailEvents(events: RunTimelineResponse["events"]) {
+  const indexed = events.map((event, index) => ({ event, index }));
+  const selected = [...indexed.filter(({ event }) => EVENT_RAIL_PRIORITY.has(event.kind)), ...indexed.filter(({ event }) => !EVENT_RAIL_PRIORITY.has(event.kind))].slice(
+    0,
+    EVENT_RAIL_LIMIT,
+  );
+  const selectedIndexes = new Set(selected.map(({ index }) => index));
+  const skippedByKind = new Map<string, number>();
+  for (const { event, index } of indexed) {
+    if (!selectedIndexes.has(index)) {
+      skippedByKind.set(event.kind, (skippedByKind.get(event.kind) ?? 0) + 1);
+    }
+  }
+  return {
+    events: selected.map(({ event }) => event),
+    skippedCount: events.length - selected.length,
+    skippedSummary: [...skippedByKind.entries()]
+      .map(([kind, count]) => `${kind}×${count}`)
+      .join(", "),
+  };
+}
+
 /**
  * Two independent horizontal scales share ordinal correspondence markers.  The
  * dashed vertical lines connect those markers rather than implying that time
@@ -80,21 +122,39 @@ export function RunTimelineChart({
 }) {
   const [hovered, setHovered] = useState<RunTimelineResponse["rows"][number] | null>(null);
   const rows = timeline.rows;
+  if (rows.length === 0) {
+    return (
+      <section className="rounded border border-border bg-card p-3" aria-label={labels.chart}>
+        <p className="font-mono text-sm text-muted-foreground">{labels.empty}</p>
+      </section>
+    );
+  }
+
   const maximumTokens = Math.max(1, ...rows.map((row) => row.llm.in_total));
-  const tokenRowHeight = TOKEN_PANEL_HEIGHT / Math.max(rows.length, 1);
-  const displayedEvents = timeline.events.slice(0, EVENT_RAIL_LIMIT);
-  const hiddenEventCount = timeline.events.length - displayedEvents.length;
+  const tokenRowHeight = Math.max(2, Math.min(28, TOKEN_PANEL_MAX_HEIGHT / rows.length));
+  const tokenPanelHeight = Math.max(
+    TOKEN_PANEL_MIN_HEIGHT,
+    Math.min(TOKEN_PANEL_MAX_HEIGHT, tokenRowHeight * rows.length),
+  );
+  const chartHeight = TOKEN_Y + tokenPanelHeight + 26;
+  const rail = prioritizedRailEvents(timeline.events);
+  const allTokenDataUnmatched =
+    timeline.meta.n_turns > 0 &&
+    timeline.meta.unmatched_turns >= timeline.meta.n_turns &&
+    timeline.meta.tokens_in === 0 &&
+    timeline.meta.tokens_out === 0;
   const correspondenceX = (index: number) =>
-    PLOT_LEFT + ((index + 0.5) / Math.max(rows.length, 1)) * PLOT_WIDTH;
+    PLOT_LEFT + ((index + 0.5) / rows.length) * PLOT_WIDTH;
 
   return (
-    <section className="space-y-2 rounded border border-border bg-card p-3" aria-label="Run timeline chart">
-      <svg
-        viewBox={`0 0 ${SVG_WIDTH} 286`}
-        className="h-auto w-full min-w-[640px] font-mono text-[11px]"
-        role="img"
-        aria-label="Run timeline waterfall"
-      >
+    <section className="space-y-2 rounded border border-border bg-card p-3" aria-label={labels.chart}>
+      <div data-testid="run-timeline-scroll" className="overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${SVG_WIDTH} ${chartHeight}`}
+          className="h-auto min-w-[640px] w-full font-mono text-[11px]"
+          role="img"
+          aria-label={labels.waterfall}
+        >
         <g aria-label={`${labels.time} panel`}>
           <text x={PLOT_LEFT} y="20" className="fill-muted-foreground font-sans text-xs font-semibold">
             {labels.time}
@@ -166,8 +226,8 @@ export function RunTimelineChart({
           <line
             x1={PLOT_LEFT}
             x2={PLOT_LEFT + PLOT_WIDTH}
-            y1={TOKEN_Y + TOKEN_PANEL_HEIGHT + 4}
-            y2={TOKEN_Y + TOKEN_PANEL_HEIGHT + 4}
+            y1={TOKEN_Y + tokenPanelHeight + 4}
+            y2={TOKEN_Y + tokenPanelHeight + 4}
             className="stroke-border"
           />
           {rows.map((row, index) => {
@@ -210,12 +270,18 @@ export function RunTimelineChart({
             );
           })}
         </g>
-      </svg>
+          {allTokenDataUnmatched ? (
+            <text x={PLOT_LEFT} y={TOKEN_Y + tokenPanelHeight + 20} className="fill-amber-600 dark:fill-amber-400">
+              {labels.noTokenData}
+            </text>
+          ) : null}
+        </svg>
+      </div>
 
       <div aria-label={labels.eventRail} className={cn(FLEX, "flex-wrap items-center gap-2 border-t border-border pt-2 font-mono text-[11px]")}>
         <span className="text-muted-foreground">{labels.eventRail}</span>
         {timeline.events.length === 0 ? <span className="text-muted-foreground">—</span> : null}
-        {displayedEvents.map((event, index) => (
+        {rail.events.map((event, index) => (
           <span
             key={`${event.kind}-${event.ts}-${index}`}
             data-testid="event-chip"
@@ -225,7 +291,9 @@ export function RunTimelineChart({
             {event.kind}
           </span>
         ))}
-        {hiddenEventCount > 0 ? <span className="text-muted-foreground">+{hiddenEventCount} more</span> : null}
+        {rail.skippedCount > 0 ? (
+          <span className="text-muted-foreground">{labels.moreEvents(rail.skippedCount, rail.skippedSummary)}</span>
+        ) : null}
       </div>
 
       {hovered ? (
