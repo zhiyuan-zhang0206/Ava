@@ -209,6 +209,11 @@ def _atomic_plugin_replace(dest: Path, materialize: Callable[[], object]) -> Non
     always either the previous complete version or the new complete version,
     never a half-installed tree (2026-08-28 ava_ledger incident).
     """
+    # Sweep residue from earlier hard-killed runs first — at this point every
+    # dot-prefixed sibling is stale (the live backup is created below).
+    from . import _claude_code_plugin
+
+    _claude_code_plugin.sweep_plugin_residue(dest.parent)
     backup = dest.parent / f".{dest.name}.backup-{os.getpid()}"
     if dest.exists():
         dest.replace(backup)
@@ -270,6 +275,7 @@ def cmd_plugins_install(
                 )
             except _skill_package.SkillScanRefused as e:
                 return _report_refusal(e.report)
+            _claude_code_plugin.sweep_plugin_residue(paths.plugins_dir())
             try:
                 result = _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir())
             except _claude_code_plugin.ClaudeCodePluginError as e:
@@ -356,6 +362,11 @@ def cmd_plugins_uninstall(name: str) -> int:
         converged = paths.skills_dir() / name
         if converged.exists():
             shutil.rmtree(converged)
+        # Sweep atomic-install residue so nothing ghost-like survives an
+        # uninstall (QA N4, #880 review).
+        from . import _claude_code_plugin
+
+        _claude_code_plugin.sweep_plugin_residue(dest.parent)
     install_registry.deregister(name)
     print(f"[ava plugins uninstall] removed '{name}'.")
     return 0

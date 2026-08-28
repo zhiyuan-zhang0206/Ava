@@ -81,6 +81,11 @@ def _read_manifest(pkg_dir: Path) -> tuple[str, str]:
     name = data.get("name")
     if not isinstance(name, str) or not name:
         raise ClaudeCodePluginError("plugin.json missing a 'name' field")
+    if name.startswith("."):
+        raise ClaudeCodePluginError(
+            f"plugin name {name!r} starts with '.' — reserved for atomic-install "
+            "staging/backup directories; use a normal name"
+        )
     description = data.get("description")
     return name, description if isinstance(description, str) else ""
 
@@ -247,6 +252,22 @@ def _shipped_skills(skills_dir: Path) -> list[tuple[Path, str]]:
             raise ClaudeCodePluginError(f"bad skills/{entry.name}/SKILL.md: {e}") from e
         found.append((entry, fields["name"]))
     return found
+
+
+def sweep_plugin_residue(root: Path) -> None:
+    """Remove atomic-install residue under a plugins root.
+
+    Every dot-prefixed directory there is by construction a staging dir or a
+    backup from an interrupted install/upgrade — never a live plugin (QA N4,
+    #880 review). The dot-prefix filters hide it; this removes it. Called at
+    the start of every plugin-write path (install / upgrade / uninstall),
+    never while a live backup exists.
+    """
+    if not root.is_dir():
+        return
+    for d in root.iterdir():
+        if d.is_dir() and d.name.startswith("."):
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def materialize(pkg_dir: Path, dest_root: Path) -> Materialized:
