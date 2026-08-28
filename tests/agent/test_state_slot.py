@@ -46,6 +46,7 @@ import ava
 from agent import _config_carrier as agent_config_carrier
 from agent.graph._context import AvaContext
 from agent.graph._exec import _exec_node_impl
+from agent.messages import NoteTag
 from agent.messages_guard import MessagesMutationError
 from agent.state import (
     AttachEntry,
@@ -55,6 +56,7 @@ from agent.state import (
     clear_plugin_registrations,
     register_plugin_state,
 )
+from shared.message_kwargs import AvaMsgType
 from shared.plugin_context import PluginContext
 
 assert (
@@ -317,6 +319,34 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
     assert msgs[0].tool_call_id == "call_1"
     assert msgs[1].id == "p1"
     assert msgs[1].content == "plugin note"
+
+
+async def test_exec_node_injects_heartbeat_pause_note_after_toolmessage(
+    fake_cancel_event,
+):
+    """A heartbeat-pause backoff reminder buffered inside the exec (the
+    pause_heartbeat violation path) rides the result envelope and merges into
+    the same exec's delta as a HEARTBEAT_PAUSE system note AFTER the
+    ToolMessage — the tool_use -> tool_result adjacency invariant (user
+    ruling 2026-08-29)."""
+    code = (
+        "import ava\n"
+        "from ava._pause_notes import record_pause_note\n"
+        "record_pause_note('Previous heartbeat pause window: 30m; this pause: 30m.')\n"
+    )
+    state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
+    runtime, config = _make_runtime_and_config(AsyncMock())
+
+    cmd = await _exec_node_impl(state, runtime, config)
+
+    update = cast(dict[str, Any], cmd.update)
+    msgs = update["messages"]
+    assert len(msgs) == 2, f"expected ToolMessage + pause note, got {msgs!r}"
+    assert msgs[0].type == "tool", f"exec ToolMessage must be kept and FIRST: {msgs[0]!r}"
+    note = msgs[1]
+    assert note.additional_kwargs["ava_msg_type"] == AvaMsgType.SYSTEM_NOTE.value
+    assert note.additional_kwargs["ava_note_tag"] == NoteTag.HEARTBEAT_PAUSE.value
+    assert "Previous heartbeat pause window: 30m" in note.content
 
 
 # ── Unit: state.<plugin> namespace view ───────────────────────────────────

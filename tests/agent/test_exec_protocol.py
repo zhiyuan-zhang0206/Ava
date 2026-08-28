@@ -187,6 +187,17 @@ def test_result_envelope_round_trip(tmp_path: Path) -> None:
         full_traceback="Traceback...",
         state_update={"messages": [HumanMessage(content="note")]},
         findings=[{"type": "security", "source": "file.read:x", "triggers": ["[system]"]}],
+        pause_notes=[
+            {
+                "content": (
+                    "Previous heartbeat pause window: 30m; this pause: 30m. "
+                    "If the waited-for event has not changed, pausing for the "
+                    "same or a shorter window than the previous pause violates "
+                    "the backoff rule: pause windows must increase "
+                    "(30m -> 2h -> 4h -> 8h -> 16h -> 24h)."
+                )
+            }
+        ],
         attachments=[{"path": "/example/result.png", "label": "render"}],
     )
     path = make_result_path(tmp_path, agent_id=7)
@@ -198,6 +209,7 @@ def test_result_envelope_round_trip(tmp_path: Path) -> None:
     assert back.full_traceback == "Traceback..."
     assert back.state_update == payload.state_update  # messages back as instances
     assert back.findings == payload.findings
+    assert back.pause_notes == payload.pause_notes
     assert back.attachments == payload.attachments
 
 
@@ -208,6 +220,7 @@ def test_result_envelope_minimal(tmp_path: Path) -> None:
     assert back.kind == "done"
     assert back.state_update is None
     assert back.findings is None
+    assert back.pause_notes is None
     assert back.attachments is None
 
 

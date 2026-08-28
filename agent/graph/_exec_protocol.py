@@ -9,7 +9,8 @@ logs it shares the home with):
 - request `<uuid>.json`: the code, the agent id, the timeout, and the typed
   state snapshot.
 - result  `<uuid>.json`: the outcome kind, the plugin state-update delta, the
-  security findings, and — for a crash — the child-formatted traceback text.
+  security findings, the heartbeat-pause backoff reminders, and — for a
+  crash — the child-formatted traceback text.
 
 On Windows the parent also creates a short-lived `<uuid>.job-ready.json` gate
 after attaching the child to its Job Object. The child cannot enter user code
@@ -24,8 +25,8 @@ and `set` deltas round-trip exactly. Verified in tests (AIMessage
 `usage_metadata` included; `convert_to_messages` would lose it — do not use
 that here).
 
-Security findings travel as plain JSON dicts (`SecurityFindingEntry` is two
-fields; the parent re-validates them into the pydantic model).
+Security findings and heartbeat-pause reminders travel as plain JSON
+dicts (the parent re-validates them into the pydantic models).
 """
 
 from __future__ import annotations
@@ -104,8 +105,8 @@ class ResultPayload:
     `state_update` carries the raw `ava.state_update` delta (typed-blob
     decoded); `state_update_error` is set when the agent tampered with the
     slot (left it a non-dict) — the parent then raises the same TypeError the
-    old in-process path raised. `findings` and `attachments` are plain JSON
-    dicts drained from child-local buffers."""
+    old in-process path raised. `findings`, `pause_notes`, and `attachments`
+    are plain JSON dicts drained from child-local buffers."""
 
     kind: ResultKind
     lifecycle_type: str | None = None
@@ -115,6 +116,7 @@ class ResultPayload:
     state_update: dict[str, Any] | None = None
     state_update_error: str | None = None
     findings: list[dict[str, Any]] | None = None
+    pause_notes: list[dict[str, Any]] | None = None
     attachments: list[dict[str, Any]] | None = None
 
 
@@ -211,6 +213,7 @@ def write_result(path: Path, payload: ResultPayload) -> None:
         "full_traceback": payload.full_traceback,
         "state_update_error": payload.state_update_error,
         "findings": payload.findings,
+        "pause_notes": payload.pause_notes,
         "attachments": payload.attachments,
     }
     if payload.state_update is not None:
@@ -250,6 +253,7 @@ def read_result(path: Path) -> ResultPayload:
         state_update=cast("dict[str, Any] | None", state_update),
         state_update_error=envelope.get("state_update_error"),
         findings=envelope.get("findings"),
+        pause_notes=envelope.get("pause_notes"),
         attachments=cast("list[dict[str, Any]] | None", envelope.get("attachments")),
     )
     _log_envelope_transfer("result", "read", path, started_at)

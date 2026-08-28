@@ -15,8 +15,8 @@ Core mechanisms:
     cannot strand an ordinary descendant holding stdout. Cancellation returns
     only after the direct child is reaped and the pipe reader gets its bounded
     join. The child rebuilds the state snapshot from the request envelope; the plugin
-    state-update delta and the drained security findings ride the result
-    envelope back and are validated here.
+    state-update delta and the drained security findings + heartbeat-pause
+    backoff reminders ride the result envelope back and are validated here.
   - Halt signal uses exception type rather than exit code: agent code raising
     `_LifecycleExit` (AgentTermination / AgentRestart / _SystemHalt) → captured
     in result_holder["lifecycle"] → exec_node decides halted + writes marker
@@ -74,6 +74,7 @@ from agent.graph._attach_merge import merge_attachments
 from agent.graph._exec_notes import merge_exec_notes
 from agent.messages import exec_output_message
 from agent.state import AttachState, _validate_plugin_state_keys
+from ava._pause_notes import PauseNote
 from ava.security import SecurityFindingEntry, take_findings
 from shared.config import settings
 from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
@@ -247,17 +248,22 @@ async def _run_agent_code(
     code: str,
     chunk_publisher: ExecOutputChunkPublisher,
 ) -> tuple[
-    _ExecResult, dict[str, Any], int, list[SecurityFindingEntry], list[dict[str, Any]] | None
+    _ExecResult,
+    dict[str, Any],
+    int,
+    list[SecurityFindingEntry],
+    list[PauseNote],
+    list[dict[str, Any]] | None,
 ]:
     """Run the agent's code in one disposable child process.
 
     The parent does not touch the ava.state slot — the child rebuilds the
     snapshot from the request envelope (`agent/exec_child.py`), and the
-    plugin's state-update delta + drained security findings ride the result
-    envelope back. Validation is fail-fast on a tampered slot, and the child
-    re-receives the agent's popped per-agent config maps so its SDK calls
-    resolve the same settings. Returns
-    (result, plugin_state_update, exec_ms, findings, attachments)."""
+    plugin's state-update delta + drained security findings + heartbeat-pause
+    backoff reminders ride the result envelope back. Validation is fail-fast
+    on a tampered slot, and the child re-receives the agent's popped per-agent
+    config maps so its SDK calls resolve the same settings. Returns
+    (result, plugin_state_update, exec_ms, findings, pause_notes, attachments)."""
     config_overlay, birth_config = get_config_maps()
     exec_started = time.monotonic()
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
@@ -289,8 +295,13 @@ async def _run_agent_code(
         if payload is not None and payload.findings
         else []
     )
+    pause_notes = (
+        [PauseNote.model_validate(n) for n in payload.pause_notes]
+        if payload is not None and payload.pause_notes
+        else []
+    )
     attachments = payload.attachments if payload is not None else None
-    return result, plugin_state_update, exec_ms, findings, attachments
+    return result, plugin_state_update, exec_ms, findings, pause_notes, attachments
 
 
 def _dispatch_exec_result(
@@ -441,6 +452,7 @@ async def _exec_node_impl(
         plugin_state_update,
         exec_ms,
         envelope_findings,
+        envelope_pause_notes,
         envelope_attachments,
     ) = await _run_agent_code(state, ctx, agent_id, resolved.code, chunk_publisher)
     halted, result_text, exit_code_for_msg = _dispatch_exec_result(result, ctx, agent_id)
@@ -454,6 +466,10 @@ async def _exec_node_impl(
     # turn — inbound injection checks — run in the parent) first, then the
     # child-drained ones from the result envelope.
     findings = take_findings() + envelope_findings
+    # Heartbeat-pause backoff reminders ride the result envelope from the
+    # child (pause_heartbeat runs inside the exec); merged below with the
+    # findings into the same messages delta.
+    pause_notes = envelope_pause_notes
 
     # Compact path (_SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
@@ -481,9 +497,12 @@ async def _exec_node_impl(
         state_messages_update.append(msg)
 
         # In-memory system-note injection (user ruling 2026-08-11): security
-        # findings + plugin context notes merge into this exec's delta, after
-        # the ToolMessage (ordering rationale: _exec_notes.py).
-        state_messages_update = merge_exec_notes(state_messages_update, plugin_messages, findings)
+        # findings + heartbeat-pause reminders + plugin context notes merge
+        # into this exec's delta, after the ToolMessage (ordering rationale:
+        # _exec_notes.py).
+        state_messages_update = merge_exec_notes(
+            state_messages_update, plugin_messages, findings, pause_notes
+        )
     update: dict[str, Any] = {
         "messages": state_messages_update,
         "halted": halted,
