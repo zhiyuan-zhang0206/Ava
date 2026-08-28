@@ -878,7 +878,7 @@ def test_stack_step_runs_for_station_role_without_marker(
     assert calls == [["bash", "start.sh"]]
 
 
-def _no_launchctl() -> subprocess.CompletedProcess[str]:
+def _no_launchctl(*_args: str) -> subprocess.CompletedProcess[str]:
     """A launchctl that reports nothing loaded (non-macOS CI has no binary)."""
     return subprocess.CompletedProcess(["launchctl"], 1, "", "")
 
@@ -910,7 +910,10 @@ def test_station_role_renders_full_native_set_without_marker(
     assert (native_dir / "data" / "loki").is_dir()
     assert (native_dir / "data" / "prom").is_dir()
     rendered_loki = (native_dir / "config" / "loki.yaml").read_text(encoding="utf-8")
-    assert "{{" not in rendered_loki
+    # No unsubstituted render token survives (the template's {{...}} comment
+    # prose is the only legit brace text).
+    assert "{{AVA_HOME}}" not in rendered_loki
+    assert "{{LGTM_STORAGE_DIR}}" not in rendered_loki
 
 
 def test_native_storage_dir_default_matches_historical_layout(
