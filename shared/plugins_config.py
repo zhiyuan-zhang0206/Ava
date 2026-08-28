@@ -260,6 +260,31 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
     return cfg
 
 
+def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
+    """Runtime-load wrapper around `load()`: dangling config entries are dropped
+    (treated as disabled) with a warning instead of raising DanglingPlugin.
+
+    For long-lived / start-critical consumers — converge (`ava start`), the
+    model-provider factory, gateway request paths, ops inventory — a config
+    entry whose plugin directory is gone (interrupted upgrade, manual rm)
+    must not block a service from starting or answering. This is the same
+    fail-soft contract `_load_extensions` follows (2026-08-28 ava_ledger
+    incident); interactive CLI paths (`set_local_enabled`) keep the strict
+    `load()` and its DanglingPlugin error.
+    """
+    try:
+        return load(known_plugins)
+    except DanglingPlugin as exc:
+        from shared.log import logger
+
+        logger.warning(
+            "plugins config references non-existent plugin(s) {} — skipped "
+            "(fail-soft); `ava plugins update` prunes them",
+            sorted(exc.names),
+        )
+        return load(known_plugins, allow_dangling=True)
+
+
 def installed_plugin_dirs() -> dict[str, Path]:
     """{name: plugin_dir} for every plugin PRESENT on this machine (builtin +
     external), regardless of enable-state.

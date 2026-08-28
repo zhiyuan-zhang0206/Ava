@@ -74,7 +74,7 @@ def inventory_read_op() -> InventoryReadResult:
     """
     _assert_agent_runner()
     discovered = plugins_config._discover_plugins()
-    cfg = plugins_config.load(set(discovered))
+    cfg = plugins_config.load_for_runtime(set(discovered))
     plugins: dict[str, InventoryReadItem] = {}
     for name, plugin_dir in discovered.items():
         try:
