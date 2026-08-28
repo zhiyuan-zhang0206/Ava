@@ -692,7 +692,9 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 _PER_TEST_TRUNCATE_TABLES = (
     "inbound_messages",
     "agents_meta",
-    "events",
+    # "events" was dropped with the task #1281/#1823 cleanup (migration
+    # 20260829T030000_drop-events-archive) — the unified event stream lives in
+    # Loki, and tests read it through the FakeLoki / live-stream fakes.
     "event_dismissals",
     "rollup_day_state",
     "agents",
