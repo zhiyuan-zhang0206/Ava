@@ -1284,8 +1284,8 @@ def metric_range(
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
     params = {
         "query": logql,
-        "start": int(from_.timestamp() * 1e9),
-        "end": int(to.timestamp() * 1e9),
+        "start": from_.timestamp(),
+        "end": to.timestamp(),
         "step": str(step_s),
         "limit": "2000",
     }
@@ -1294,8 +1294,8 @@ def metric_range(
     if not result:
         return []
     return [
-        (datetime.fromtimestamp(int(ts_ns) / 1e9, UTC).isoformat(), float(v))
-        for ts_ns, v in result[0].get("values", [])
+        (datetime.fromtimestamp(int(float(ts_s)), UTC).isoformat(), float(v))
+        for ts_s, v in result[0].get("values", [])
     ]
 
 
