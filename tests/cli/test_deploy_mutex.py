@@ -348,7 +348,10 @@ def test_the_phase_b_poll_renews_the_lease_it_runs_under(monkeypatch: pytest.Mon
     monkeypatch.setattr("shared.cluster_lock.renew_update_lock", lambda h, **_k: renewals.append(h))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.deploy_timing.LEASE_RENEW_INTERVAL_S", 0.01)
 
-    async def _paused_forever(*, target_machine, kind, payload, timeout_s, ops_url=None):  # type: ignore[no-untyped-def]
+    async def _paused_forever(
+        *, target_machine, kind, payload, timeout_s, ops_url=None, retries=None
+    ):  # type: ignore[no-untyped-def]
+        assert retries == 0
         return {}
 
     def _fake_read(machine=None, **_kw):

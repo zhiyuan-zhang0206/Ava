@@ -84,6 +84,7 @@ class _FakeSessionBackend:
         self.new_ok = True
         self.graceful_result: tuple[bool, str] = (True, "graceful")
         self.force_result: tuple[bool, str] = (True, "forced")
+        self.signalled: list[str] = []
 
     def has_session(self, name: str) -> bool:
         return name in self.alive
@@ -119,6 +120,10 @@ class _FakeSessionBackend:
         if ok:
             self.alive.discard(name)
         return ok, mode
+
+    def graceful_signal(self, name: str) -> bool:
+        self.signalled.append(name)
+        return name in self.alive
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         return sorted(n for n in self.alive if n.startswith(prefix))
@@ -892,6 +897,13 @@ def test_do_stop_keep_infra_skips_infra_teardown(
     monkeypatch.setattr(_cli, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
 
+    def _exit_on_signal(name: str) -> bool:
+        service.signalled.append(name)
+        service.alive.discard(name)
+        return True
+
+    monkeypatch.setattr(service, "graceful_signal", _exit_on_signal)
+
     infra_stops: list[int] = []
     monkeypatch.setattr(
         "cli.commands._cluster_instance.stop_cluster_instance",
@@ -900,10 +912,70 @@ def test_do_stop_keep_infra_skips_infra_teardown(
 
     rc = _cli._do_stop(tmp_path, graceful=True, require_confirmation=False, keep_infra=True)
     assert rc == 0
-    # the graceful stop reached the service backend (SIGTERM path)
-    assert (gateway_sess, True) in service.killed
+    # the graceful stop reached the service backend (SIGTERM path): the session
+    # was signalled and exited; the shared-deadline force-kill fallback still
+    # visits it once (noop for an exited session, recorded with graceful=False)
+    assert gateway_sess in service.signalled
+    assert (gateway_sess, False) in service.killed
     # this cluster's pg/redis **not** stopped (keep_infra keeps DB alive before migrate)
     assert infra_stops == []
+
+
+def test_update_stop_threads_one_absolute_deadline_through_agent_and_service_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Force-update agent cleanup joins the service batch under the one deadline
+    created by the stop orchestrator; neither child layer receives a fresh budget."""
+    from cli.commands import stop as _stop_mod
+
+    def _scope(**_kw: object) -> tuple[list[str], bool, bool]:
+        return ["ava-gateway"], False, True
+
+    monkeypatch.setattr(
+        _stop_mod,
+        "_compute_stop_scope",
+        _scope,
+    )
+    monkeypatch.setattr(_stop_mod, "_print_stop_plan", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_mod.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(_stop_mod, "_stop_data_plane", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_mod, "_reap_orphan_step", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    agent_reap: list[bool] = []
+    stop_calls: list[dict[str, object]] = []
+
+    def _record_stop(sessions: list[str], **kwargs: object) -> None:
+        stop_calls.append({"sessions": sessions, **kwargs})
+
+    monkeypatch.setattr(
+        _cli,
+        "_force_reap_local_agents",
+        lambda *, defer_process_stop=False: agent_reap.append(defer_process_stop),
+    )
+    monkeypatch.setattr(
+        _stop_mod,
+        "_stop_sessions",
+        _record_stop,
+    )
+
+    rc = _stop_mod._do_stop(
+        tmp_path,
+        graceful=True,
+        require_confirmation=False,
+        keep_infra=True,
+        force_reap_agents=True,
+    )
+
+    assert rc == 0
+    assert agent_reap == [True]
+    assert stop_calls == [
+        {
+            "sessions": ["ava-gateway"],
+            "graceful": True,
+            "include_agent_processes": True,
+            "deadline": 100.0 + _stop_mod.stop_timing.REAP_KILL_WINDOW_S,
+        }
+    ]
 
 
 def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1041,29 +1113,109 @@ def test_graceful_kill_session_forced_fallback_is_reported(
 # ─── _stop_sessions: the printed marker must carry the confirmation ──────
 
 
-def test_stop_sessions_marks_unconfirmed_forced_kill_as_failure(monkeypatch, capsys) -> None:
+def test_stop_sessions_marks_unconfirmed_forced_kill_as_failure(
+    capsys: pytest.CaptureFixture[str],
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
     """`_graceful_kill_session` returning (False, 'forced') — the session outlived
     the force kill — must print ✗, not the ⚠ that used to be printed either way
     (issue #1015)."""
     from cli.commands.stop import _stop_sessions
 
-    monkeypatch.setattr(_cli, "_graceful_kill_session", lambda _s, **_kw: (False, "forced"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    service, _ = _fake_session_backends
+    service.alive.add("ava-gateway")
+    service.force_result = (False, "forced")
 
-    _stop_sessions(["ava-gateway"], graceful=True)
+    _stop_sessions(["ava-gateway"], graceful=True, deadline=0.0)
 
     assert "✗ ava-gateway (forced)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_stop_sessions_keeps_warning_for_successful_force(monkeypatch, capsys) -> None:
+def test_stop_sessions_reports_graceful_exit_before_deadline(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
+    """A daemon that exits on SIGTERM (graceful_signal drops it from `alive`)
+    reads ✓ (graceful), never ⚠ (forced) — the exit-before-deadline path must
+    be locked too, not just the forced fallback (QA #863 nit 3)."""
+    from cli.commands.stop import _stop_sessions
+
+    service, _ = _fake_session_backends
+    service.alive.add("ava-gateway")
+
+    def _exit_on_signal(name: str) -> bool:
+        service.signalled.append(name)
+        service.alive.discard(name)
+        return True
+
+    monkeypatch.setattr(service, "graceful_signal", _exit_on_signal)
+
+    _stop_sessions(["ava-gateway"], graceful=True, deadline=0.0)
+
+    out = capsys.readouterr().out
+    assert "✓ ava-gateway (graceful)" in out  # pyright: ignore[reportUnknownMemberType]
+    assert "⚠" not in out
+
+
+def test_stop_sessions_keeps_warning_for_successful_force(
+    capsys: pytest.CaptureFixture[str],
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
     """A CONFIRMED force kill still reads ⚠ — the daemon did not exit gracefully,
     which is worth a warning; only an unconfirmed one becomes ✗."""
     from cli.commands.stop import _stop_sessions
 
-    monkeypatch.setattr(_cli, "_graceful_kill_session", lambda _s, **_kw: (True, "forced"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    service, _ = _fake_session_backends
+    service.alive.add("ava-gateway")
 
-    _stop_sessions(["ava-gateway"], graceful=True)
+    _stop_sessions(["ava-gateway"], graceful=True, deadline=0.0)
 
     assert "⚠ ava-gateway (forced)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_graceful_stop_signals_controllers_then_all_dependents_before_one_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
+    """A graceful stop is bounded by one roster deadline, never 15s per service.
+
+    Respawn owners receive their signal first, but no target is waited on until
+    every service and force-update agent process has received its signal.
+    """
+    from cli.commands.stop import _stop_sessions
+
+    service, _ = _fake_session_backends
+    targets = {
+        "ava-gateway-watchdog",
+        "ava-restarter",
+        "ava-gateway",
+        "ava-ops",
+        "ava-agent-7",
+    }
+    service.alive.update(targets)
+    clock = {"now": 10.0}
+    sleeps: list[float] = []
+
+    monkeypatch.setattr("cli.commands._session_lifecycle.time.monotonic", lambda: clock["now"])
+
+    def _sleep(seconds: float) -> None:
+        assert set(service.signalled) == targets, "every TERM precedes the first wait"
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr("cli.commands._session_lifecycle.time.sleep", _sleep)
+
+    _stop_sessions(
+        ["ava-gateway", "ava-restarter", "ava-gateway-watchdog", "ava-ops"],
+        graceful=True,
+        include_agent_processes=True,
+        deadline=11.0,
+    )
+
+    assert service.signalled[:2] == ["ava-restarter", "ava-gateway-watchdog"]
+    assert abs(sum(sleeps) - 1.0) < 1e-9, "all targets share one absolute deadline"
+    assert {name for name, graceful in service.killed if not graceful} == targets
 
 
 def test_stop_sessions_force_path_reports_failure(monkeypatch, capsys) -> None:
@@ -2357,9 +2509,10 @@ def test_poll_until_unpaused_returns_ok_when_agent_runner_unpauses(
 
     calls = {"wsl": 0}
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         assert kind == "status_probe"
         assert payload == {}
+        assert retries == 0  # the outer Phase-B loop is the only retry policy
         # the poll threads the pre-resolved ops URL so it never re-queries Postgres
         assert ops_url == "http://unused"
         calls[target_machine] += 1
@@ -2395,7 +2548,7 @@ def test_poll_until_unpaused_marks_converging_after_deadline(
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         return {}
 
     def _fake_read(machine=None, **_kw):
@@ -2434,7 +2587,7 @@ def test_poll_gives_up_at_once_on_a_host_that_provably_stopped(
 
     probes = {"n": 0}
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         probes["n"] += 1
         return {}
 
@@ -2476,7 +2629,7 @@ def test_a_previous_updates_uncleared_lease_is_not_this_ones_stall(
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import UPDATER_LEASE_TTL_S, HostDeployState
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         return {}
 
     now = datetime.now(UTC)
@@ -2518,7 +2671,7 @@ def test_poll_gives_up_on_a_written_verdict_the_stale_lease_contradicts(
 
     probes = {"n": 0}
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         probes["n"] += 1
         return {
             "last_updater_outcome": {
@@ -2563,7 +2716,7 @@ def test_a_live_lease_with_no_written_ending_still_keeps_polling(
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         return {"last_updater_outcome": {"kind": "unknown", "rc": None, "log": "x.log"}}
 
     def _fake_read(machine=None, **_kw):
@@ -2592,7 +2745,7 @@ def test_db_read_failure_keeps_polling_never_reports_converged(
     mid-transition. The poll must keep going to its deadline instead."""
     from ops import cluster_rpc as cr
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         return {}
 
     def _broken_read(machine=None, **_kw):
@@ -2633,7 +2786,7 @@ def test_a_stalled_host_carries_its_own_updater_outcome_off_the_box(
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
-    async def _declined(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _declined(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         return {
             "last_updater_outcome": {
                 "kind": "declined",
@@ -2674,7 +2827,9 @@ def test_a_runner_that_never_sent_an_outcome_reports_no_record_not_a_clean_exit(
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
-    async def _older_commit(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _older_commit(
+        *, target_machine, kind, payload, timeout_s, ops_url=None, retries=None
+    ):
         return {}
 
     def _fake_read(machine=None, **_kw):
@@ -2787,7 +2942,7 @@ def test_poll_stall_verdict_needs_consecutive_confirmations(
     readings = ["stuck", "live", "stuck", "live"]
     seen = {"n": 0}
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         return {}
 
     def _fake_read(machine=None, **_kw):
@@ -2828,7 +2983,7 @@ def test_poll_paused_before_the_first_lease_touch_is_never_a_stall(
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
-    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _reachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         return {}
 
     def _fake_read(machine=None, **_kw):
@@ -2854,7 +3009,7 @@ def test_poll_unreachable_host_is_never_a_stall(monkeypatch: pytest.MonkeyPatch)
     Windows host. It must never become a verdict."""
     from ops import cluster_rpc as cr
 
-    async def _unreachable(*, target_machine, kind, payload, timeout_s, ops_url=None):
+    async def _unreachable(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
         raise cr.ClusterOpUnreachable("ops down mid-restart")
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _unreachable)  # pyright: ignore[reportUnknownArgumentType]

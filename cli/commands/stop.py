@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -269,7 +270,8 @@ def _print_stop_plan(
         print("  infra (pg/redis): this cluster's own instance stopped (data preserved on disk)")
     if graceful:
         print(
-            f"  mode: graceful (SIGTERM + {stop_timing.REAP_KILL_WINDOW_S:g}s timeout, fallback force-kill)"
+            f"  mode: graceful (batch SIGTERM + one shared "
+            f"{stop_timing.REAP_KILL_WINDOW_S:g}s deadline, fallback force-kill)"
         )
     print()
 
@@ -313,6 +315,7 @@ def _do_stop(
     preserve_sessions: frozenset[str] = frozenset(),
     keep_browser: bool = True,
     reap_agents: bool = False,
+    force_reap_agents: bool = False,
     announce: bool = False,
     teardown_extras: bool = False,
 ) -> int:
@@ -325,8 +328,9 @@ def _do_stop(
         and nothing clears the stamp until the next `ava start`.
 
     graceful=False (cmd_stop default): session kill (SIGHUP force-kill), fast.
-    graceful=True (used by cmd_update): `_graceful_kill_session` SIGTERM + timeout
-        fallback; daemon runs cleanup path (close pool / remove pidfile / flush log).
+    graceful=True (used by cmd_update): signal controllers first, then batch
+        SIGTERM every dependent; all targets share one absolute timeout before
+        fallback force-kill, so daemon cleanup is O(slowest), never O(roster).
 
     require_confirmation=False: skip stdin "y/N" prompt (used by `cmd_update` streaming runs).
 
@@ -354,6 +358,12 @@ def _do_stop(
         agent lifecycle is the rollout's (quiesce + respawn on new code), not a
         teardown; orthogonal to keep_infra (data plane, not agents), so `ava cluster
         destroy` reaps its cluster's agents too.
+
+    force_reap_agents=True (update only, graceful path only): CAS-mark local
+        live agents restarting and include their native process sessions in
+        the graceful service batch. A non-graceful stop ignores the flag.
+        Their persistent PTY sessions remain live, and the agents and services
+        consume the same absolute stop deadline.
 
     teardown_extras=True (cmd_stop): also tear down what converge registered
         OUTSIDE the service session roster — the fleet UI gate (`stop_gate_service`: launchd job on
@@ -394,8 +404,28 @@ def _do_stop(
     if announce:
         _announce_stopping()
 
-    # 1) stop service sessions
-    _stop_sessions(service_sessions, graceful=graceful)
+    # One force-update budget covers both agent stragglers and services. Mark
+    # the agents before signalling anything so the paused restarter will bring
+    # them back on new code; their persistent PTY sessions remain out of scope.
+    stop_deadline = time.monotonic() + stop_timing.REAP_KILL_WINDOW_S if graceful else None
+    # force_reap_agents is an update-only knob: the non-graceful stop path kills
+    # service sessions outright and never enters the include_agent_processes
+    # branch, so honouring the flag there would CAS-mark agents without any
+    # process kill to follow (QA nit 2). The force_reap stage keeps its
+    # telemetry marker for the update path (QA nit 1, #777 contract).
+    if force_reap_agents and graceful:
+        with updater_stage("force_reap"):
+            _ns._force_reap_local_agents(defer_process_stop=True)
+
+    # 1) stop service sessions (and force-update agent processes when asked).
+    # Controllers are signalled first, every target shares stop_deadline, and
+    # the data plane remains a later step exactly as before.
+    _stop_sessions(
+        service_sessions,
+        graceful=graceful,
+        include_agent_processes=force_reap_agents and graceful,
+        deadline=stop_deadline,
+    )
 
     # 1.4) a teardown that asked for the browser down finishes the job: kill any
     # Chrome still running on THIS cluster's profile. The session kill above

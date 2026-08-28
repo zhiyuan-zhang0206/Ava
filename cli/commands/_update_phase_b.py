@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import sys
 import time
 from typing import Any, NamedTuple, cast
@@ -44,6 +45,8 @@ from cli.commands._update_fanout import (
 from cli.commands._update_recover import RolloutOutcome
 from shared.deploy_timing import HARVEST_GRACE_S, NO_PROGRESS_TIMEOUT_S
 from shared.host_deploy_state import POSTURE_IDLE, POSTURE_PAUSED, read
+
+_log = logging.getLogger(__name__)
 
 # How long Phase B waits for one agent-runner to come back. The family's single
 # no-progress definition (`shared.deploy_timing`), not a number of its own: the
@@ -241,11 +244,16 @@ async def _probe_one_until_unpaused(
     from ops import cluster_rpc as cr
 
     stalls = 0
+    started = time.monotonic()
+    attempt = 0
     while time.monotonic() < deadline:
         slice_timeout = min(_ns._POLL_INTERVAL_S, deadline - time.monotonic())
         if slice_timeout <= 0:
             break
+        attempt += 1
+        attempt_started = time.monotonic()
         result: object | None = None
+        outcome = "completed"
         try:
             result = await cr.dispatch_to_machine(
                 target_machine=name,
@@ -253,16 +261,29 @@ async def _probe_one_until_unpaused(
                 payload={},
                 timeout_s=slice_timeout,
                 ops_url=ops_url,
+                # This loop is the retry policy. Letting cluster_rpc apply its
+                # default four-attempt policy turns one two-second poll into an
+                # opaque ~12-second nested retry and can enqueue several full
+                # status snapshots on a runner that has only just restarted.
+                retries=0,
             )
         except cr.ClusterOpUnreachable:
             # An unreachable ops server IS the expected mid-restart reading — `ops` is
             # a service its own self-update stops — so it is deliberately neither a
             # verdict nor evidence. `result` stays None and the loop retries.
-            pass  # fail-fast-ok: silence is the expected mid-restart reading, not a fault
+            outcome = "unreachable"
         except cr.ClusterOpFailed:
             # The op ran but could not resolve status (also mid-restart). Same reading
             # as unreachable, and for the same reason.
-            pass  # fail-fast-ok: same mid-restart reading as unreachable
+            outcome = "failed"
+        _log.info(
+            "phase_b_probe machine=%s attempt=%d outcome=%s rpc_ms=%.1f elapsed_s=%.1f",
+            name,
+            attempt,
+            outcome,
+            (time.monotonic() - attempt_started) * 1000,
+            time.monotonic() - started,
+        )
         _capture_host_stages(host_outcomes, name, result)
         verdict, stalls = _probe_verdict(result, stalls, name)
         if verdict is not None:
@@ -286,10 +307,16 @@ async def _probe_one_until_unpaused(
                         payload={},
                         timeout_s=1.0,
                         ops_url=ops_url,
+                        retries=0,
                     )
                 except (cr.ClusterOpUnreachable, cr.ClusterOpFailed):
                     harvest = None
                 _capture_host_stages(host_outcomes, name, harvest)
+            print(
+                f"  · {name}: Phase B {verdict.status} after {attempt} probe(s) "
+                f"in {time.monotonic() - started:.1f}s",
+                file=sys.stderr,
+            )
             return name, verdict
         # Pace the loop explicitly. `slice_timeout` bounds one *dial*, not one pass:
         # a host that answers instantly (which a paused-but-reachable one does) would
@@ -297,6 +324,11 @@ async def _probe_one_until_unpaused(
         # bound — a hot loop against a host that is mid-restart, and one that starves
         # the lease-renewal task sharing this event loop of its turn.
         await asyncio.sleep(min(_ns._POLL_INTERVAL_S, max(0.0, deadline - time.monotonic())))
+    print(
+        f"  · {name}: Phase B {POLL_CONVERGING} after {attempt} probe(s) "
+        f"in {time.monotonic() - started:.1f}s",
+        file=sys.stderr,
+    )
     return name, PollVerdict(POLL_CONVERGING)
 
 

@@ -28,6 +28,7 @@ winproc on Windows).
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -163,7 +164,18 @@ def _graceful_kill_session(
     return ok, mode
 
 
-def _stop_sessions(sessions: list[str], *, graceful: bool) -> None:
+def _is_stop_controller(session: str) -> bool:
+    """Controllers that can respawn another service while stop is in flight."""
+    return session.endswith(("restarter", "watchdog"))
+
+
+def _stop_sessions(
+    sessions: list[str],
+    *,
+    graceful: bool,
+    include_agent_processes: bool = False,
+    deadline: float | None = None,
+) -> None:
     """Step 1: stop every session in the plan — graceful SIGTERM + timeout
     fallback (cmd_update) or the fast force-kill (cmd_stop).
 
@@ -177,20 +189,55 @@ def _stop_sessions(sessions: list[str], *, graceful: bool) -> None:
 
     label = "graceful stop" if graceful else "kill sessions"
     print(f"\n→ {label}")
-    for session in sessions:
-        if graceful:
-            ok, mode = _ns._graceful_kill_session(session, expected=True)
-            # `ok` is now the kill's CONFIRMATION (the backend re-checks the
-            # process after the kill), so the marker can finally distinguish the two things
-            # `(forced)` used to cover: a daemon that had to be killed but died
-            # (⚠ — worth a warning, the stop worked) from a session that outlived
-            # the kill (✗ — the stop did not happen, and the start that follows
-            # must not be told otherwise; issue #1015).
-            marker = "✗" if not ok else ("✓" if mode in ("graceful", "noop") else "⚠")
-            print(f"  {marker} {session} ({mode})")
-        else:
+    if not graceful:
+        for session in sessions:
             ok = _ns._kill_session(session, expected=True)
             print(f"  {'✓' if ok else '✗'} {session}")
+        return
+
+    from shared import stop_timing
+    from shared.session_backend import get_backend
+
+    backend = get_backend()
+    targets = list(sessions)
+    if include_agent_processes:
+        import re
+
+        from cli.commands._repo import session_name
+
+        prefix = session_name("agent-")
+        current = re.compile(rf"^{re.escape(prefix)}\d+$")
+        legacy = re.compile(r"^ava-.+-agent-\d+$")
+        targets.extend(
+            name
+            for name in backend.list_sessions(prefix="ava-")
+            if (current.match(name) or legacy.match(name)) and name not in targets
+        )
+
+    # Stop respawn owners first, then signal every dependent without waiting.
+    # One absolute deadline bounds the whole roster, including force-mode agent
+    # stragglers; no layer gets to recreate another per-session 15-second wait.
+    ordered = [s for s in targets if _is_stop_controller(s)] + [
+        s for s in targets if not _is_stop_controller(s)
+    ]
+    was_live = {session: backend.has_session(session) for session in ordered}
+    for session in ordered:
+        if was_live[session]:
+            backend.graceful_signal(session)
+
+    if deadline is None:
+        deadline = time.monotonic() + stop_timing.REAP_KILL_WINDOW_S
+    while time.monotonic() < deadline and any(
+        backend.has_session(session) for session in ordered if was_live[session]
+    ):
+        time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+
+    for session in ordered:
+        survived = was_live[session] and backend.has_session(session)
+        ok, _ = backend.kill_session(session, graceful=False, expected=True)
+        mode = "forced" if survived else ("graceful" if was_live[session] else "noop")
+        marker = "✗" if not ok else ("✓" if mode in ("graceful", "noop") else "⚠")
+        print(f"  {marker} {session} ({mode})")
 
 
 def _launch_roster(roles: MachineRoles, skip: set[str]) -> tuple[ServiceSpec, ...]:

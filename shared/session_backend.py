@@ -131,6 +131,14 @@ class SessionBackend(abc.ABC):
         """
         ...
 
+    def graceful_signal(self, name: str) -> bool:
+        """Send the backend's graceful-stop signal without waiting.
+
+        Service backends override this for batch stop. Terminal-oriented
+        backends intentionally have no such lifecycle contract.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support graceful_signal")
+
     @abc.abstractmethod
     def list_sessions(self, prefix: str = "") -> list[str]:
         """Names of all live sessions, optionally filtered by ``prefix`` (backend list)."""
@@ -289,6 +297,11 @@ class PosixProcSessionBackend(SessionBackend):
         from shared import posixproc
 
         return posixproc.kill_session(name, graceful=graceful, timeout=timeout)
+
+    def graceful_signal(self, name: str) -> bool:
+        from shared import posixproc
+
+        return posixproc.graceful_signal(name)
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         from shared import posixproc
@@ -524,6 +537,11 @@ class WinprocSessionBackend(SessionBackend):
         from shared import winproc
 
         return winproc.kill_session(name, graceful=graceful, timeout=timeout)
+
+    def graceful_signal(self, name: str) -> bool:
+        from shared import winproc
+
+        return winproc.graceful_signal(name)
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         from shared import winproc
