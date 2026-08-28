@@ -339,6 +339,85 @@ class TestSendMessage:
         peer_id = ava.agents.spawn()
         ava.agents.send_message(peer_id, "hi")
 
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            # Runtime value of `("ab",)`: implicit concatenation plus trailing comma.
+            pytest.param(("ab",), "ab", id="implicit-concatenation-tuple"),
+            pytest.param(("a", "b"), "ab", id="multi-string-tuple"),
+            pytest.param(["a", "b"], "ab", id="string-list"),
+            pytest.param("ok", "ok", id="plain-string"),
+        ],
+    )
+    def test_send_message_normalizes_tuple_content_before_gateway_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        content: object,
+        expected: str,
+    ) -> None:
+        """A trailing-comma string tuple must reach the client as one joined
+        string — an all-string array on the wire 422s the gateway's
+        `AgentMessageIn.content` (2026-08-28 agents 2697/2986)."""
+        from ava import agents
+
+        seen: dict[str, Any] = {}
+        monkeypatch.setattr(
+            agents._client,
+            "send_message",
+            lambda _agent_id, **kw: seen.update(kw) or None,  # pyright: ignore[reportUnknownArgumentType]
+        )
+
+        agents.send_message(7, content)  # pyright: ignore[reportArgumentType]
+        assert seen["content"] == expected
+        assert seen["source"] == f"agent:{ava.self.AGENT_ID}"
+
+    def test_send_message_content_blocks_pass_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A list of content-block dicts (multimodal path) is not string-joined."""
+        from ava import agents
+
+        seen: dict[str, Any] = {}
+        monkeypatch.setattr(
+            agents._client,
+            "send_message",
+            lambda _agent_id, **kw: seen.update(kw) or None,  # pyright: ignore[reportUnknownArgumentType]
+        )
+        blocks: list[dict[str, object]] = [
+            {"type": "text", "text": "hi"},
+            {"type": "image_url", "image_url": {"url": "u"}},
+        ]
+        agents.send_message(7, blocks)  # pyright: ignore[reportArgumentType]
+        assert seen["content"] == blocks
+
+    def test_send_message_rejects_non_string_content(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ava import agents
+
+        monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        with pytest.raises(
+            TypeError,
+            match="content must be a string or a list/tuple of strings, got int",
+        ):
+            agents.send_message(7, 42)  # pyright: ignore[reportArgumentType]
+
+    def test_send_message_tuple_content_inserts_joined_inbound(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """End-to-end: the trailing-comma tuple lands as one joined chat inbound,
+        never as a JSON array (which the gateway would reject 422)."""
+        ava._boot._agent_id = _spawn_agent()
+        peer_id = ava.agents.spawn()
+
+        content: object = (
+            "you got ",
+            "mail",
+        )
+        ava.agents.send_message(peer_id, content)  # pyright: ignore[reportArgumentType]
+
+        assert _inbound_rows(db_conn, peer_id) == [
+            ("you got mail", "chat", f"agent:{ava.self.AGENT_ID}"),
+        ]
+
 
 class TestSendSystemNote:
     def test_send_system_note_inserts_system_note_inbound_with_task_tag(
@@ -383,6 +462,21 @@ class TestSendSystemNote:
             cur.execute("SELECT kind FROM inbound_messages WHERE agent_id = %s", (peer_id,))
             kinds = [row[0] for row in cur.fetchall()]
         assert "system_note" in kinds
+
+    def test_send_system_note_normalizes_tuple_content(self, db_conn: psycopg.Connection) -> None:
+        """Same trailing-comma class as send_message — a tuple joins to one note
+        instead of 422ing the gateway."""
+        ava._boot._agent_id = _spawn_agent()
+        peer_id = ava.agents.spawn()
+
+        content: object = ("Task #1 is now ", "assigned to you.")
+        inbound_id = ava.agents.send_system_note(peer_id, content)  # pyright: ignore[reportArgumentType]
+        assert isinstance(inbound_id, int)
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (peer_id,))
+            rows = cur.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "Task #1 is now assigned to you."
 
     def test_send_system_note_to_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         ava._boot._agent_id = _spawn_agent()
