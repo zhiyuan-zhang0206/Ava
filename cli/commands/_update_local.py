@@ -373,7 +373,7 @@ def _recover_interrupted_update(
     return _recover_rc(repo, pull_recover, preserve_frontend)
 
 
-def _run_gateway_local_update(  # noqa: PLR0915 — the local leg's stop -> checkout -> sync -> start sequence; each step is one statement
+def _run_gateway_local_update(
     repo: Path,
     *,
     target_sha: str | None = None,
@@ -422,14 +422,6 @@ def _run_gateway_local_update(  # noqa: PLR0915 — the local leg's stop -> chec
         with contextlib.suppress(OSError):
             _record_telemetry_bytes("snapshot", pull_recover[2].stat().st_size)
 
-    # 0.5) force-reap straggler agents BEFORE the service stop (quiesce-timeout
-    #    backstop): mark this host's still-live agents 'restarting' and kill their
-    #    processes, so no agent rides the migration on old code. The restarter is
-    #    already paused (Phase A) and respawns them on new code after `ava start`.
-    if force_reap_agents:
-        with _stage_telemetry("force_reap"):
-            _up_mod._force_reap_local_agents()
-
     # 1) graceful stop gateway daemons (old schema still in place; this ensures the
     # subsequent migrate is not hit by local daemons running old code).
     # **keep_infra=True** — the next step (apply migrations) still needs DB;
@@ -445,6 +437,7 @@ def _run_gateway_local_update(  # noqa: PLR0915 — the local leg's stop -> chec
             require_confirmation=False,
             keep_infra=True,
             preserve_sessions=preserve_frontend,
+            force_reap_agents=force_reap_agents,
         )
 
     # The stop above took the gateway down too, so ANY failure below leaves the

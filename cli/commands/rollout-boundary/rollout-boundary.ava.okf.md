@@ -44,6 +44,12 @@ tags:
   the probe that proves the host stopped is the probe that says why — and
   changes no deploy behaviour. A refusal is told to re-run rather than to wait:
   its own watchdog cannot clear it.
+- Phase B owns its retry loop: every outer poll performs exactly one
+  `status_probe` RPC (`retries=0` at the cluster-RPC layer). Per-attempt logs
+  carry only machine, ordinal, outcome and duration; each host also prints one
+  terminal elapsed/probe-count line. This keeps a two-second probe from nesting
+  four transport attempts and makes the slow host identifiable without logging
+  the full status payload.
 - `_gateway_ready` is a **precondition**, not a phase: the rollout's Phase B
   makes every agent-runner depend on the gateway (each runner's preflight
   refuses to stop services it cannot then restart), and the local leg's start
@@ -77,6 +83,13 @@ tags:
   half of the same fix. A lone single box therefore runs an empty Phase B and
   reports CLEAN, but is still put through the readiness gate: nothing else asks
   whether its gateway came back.
+- A force-mode local update marks live agents `restarting`, then the graceful
+  stop signals restarter/watchdogs first and batch-signals all dependent
+  services plus native agent processes. They share one monotonic absolute
+  deadline before survivors are force-killed; persistent PTY sessions stay out
+  of scope and Postgres/Redis still stop (or remain up for migration) only after
+  the service batch. One stubborn agent may still consume the whole shared
+  budget, but multiple targets cannot multiply it.
 
 ## Key dependencies
 
