@@ -139,9 +139,11 @@ def test_is_lgtm_host_accepts_station_capability(
 
     home = tmp_path / "station"
     home.mkdir()
-    # is_lgtm_host() resolves the process home through the name bound in this
-    # module (from shared.paths import ava_home), so patch hc.ava_home itself.
+    # is_lgtm_host() dials the home twice: the name bound in this module
+    # (from shared.paths import ava_home) AND the fresh lookup inside
+    # home_is_observability_station — patch both.
     monkeypatch.setattr(hc, "ava_home", lambda: home)
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
 
     # No marker, no capability -> not the station.
     assert hc.is_lgtm_host() is False
