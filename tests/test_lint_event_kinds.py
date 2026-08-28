@@ -54,6 +54,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # module constant, like sdk_call), so the literal scan cannot see it.
         "plugin_activation",
         "gateway_latency",  # gateway/_latency.py:emit_bucket telemetry.emit("telemetry", ...)
+        "plugin_load_failed",  # agent/graph/_build.py:_report_plugin_load_failure telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit
         "telemetry_read_recovered",  # gateway/telemetry_staleness.py:_emit
