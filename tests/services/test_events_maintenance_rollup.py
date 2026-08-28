@@ -15,7 +15,6 @@ clock; the retention floor derives from it the same way.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta

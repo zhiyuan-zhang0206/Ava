@@ -19,17 +19,16 @@ async one's counts.
 
 from __future__ import annotations
 
+import os
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import Any, cast
 
-import os
-import time
-
 import psycopg
-from psycopg import sql
 import pytest
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 import services.events_maintenance.checkpoint_reaper as reaper

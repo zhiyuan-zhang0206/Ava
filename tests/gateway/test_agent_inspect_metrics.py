@@ -17,7 +17,6 @@ per-agent filtering, stat vs series payloads, macro translation).
 from __future__ import annotations
 
 import importlib
-import json
 import sys
 from contextlib import contextmanager
 from typing import Any, Literal
