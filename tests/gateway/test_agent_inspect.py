@@ -502,24 +502,6 @@ def _metrics_ledger_row(
         )
 
 
-def _archive_event(
-    db: psycopg.Connection,
-    *,
-    agent_id: int,
-    event: str,
-    attributes: dict[str, Any],
-    ts: datetime,
-) -> None:
-    """Insert one frozen event row; the later marker establishes its cutoff."""
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, machine, process, category, event_name, level, source, attributes) "
-            "VALUES (%s, %s, 'test', 'test', 'telemetry', %s, 'info', 'test', %s::jsonb)",
-            (ts, agent_id, event, json.dumps(attributes)),
-        )
-
-
 def _insert_pending_inbound(
     db: psycopg.Connection, *, agent_id: int, kind: str = "heartbeat"
 ) -> None:
@@ -1493,23 +1475,10 @@ def test_inspect_archive_and_live_durations_keep_exact_percentiles(
 def test_whole_life_inspect_uses_archive_rollup(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """The all-history response takes its frozen archive distribution from the rollup."""
+    """The all-history response takes its frozen archive distribution from the rollup
+    (the PG events archive is gone since the #1823 cleanup — the rollup and the
+    Loki archive stream are the whole-life sources)."""
     aid = _insert_agent(db_conn)
-    now = datetime.now(UTC)
-    _archive_event(
-        db_conn,
-        agent_id=aid,
-        event="turn_end",
-        attributes={"duration_seconds": 1.25, "ok": True},
-        ts=now - timedelta(minutes=2),
-    )
-    _archive_event(
-        db_conn,
-        agent_id=aid,
-        event="freeze_marker",
-        attributes={},
-        ts=now - timedelta(minutes=1),
-    )
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_archive_stats (agent_id, turn_distribution) VALUES (%s, %s::jsonb)",

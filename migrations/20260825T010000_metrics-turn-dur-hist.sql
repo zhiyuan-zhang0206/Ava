@@ -6,6 +6,12 @@ ALTER TABLE agent_metrics_daily
 
 COMMENT ON COLUMN agent_metrics_daily.turn_dur_hist IS
     'Integer-second floor(duration_seconds) bucket-to-count map; mergeable across days and backfilled for archive-era ledger rows.';
+-- The archive read is guarded: the frozen PG `events` archive was dropped by
+-- migration 20260829T030000_drop-events-archive (task #1823), so a fresh-DB
+-- replay (baseline without the table) must skip the backfill.
+DO $$
+BEGIN
+    IF to_regclass('public.events') IS NOT NULL THEN
 
 WITH frozen AS (
     SELECT max(ts) AS ts FROM events
@@ -30,3 +36,6 @@ UPDATE agent_metrics_daily AS metrics
 SET turn_dur_hist = hist.turn_dur_hist
 FROM hist
 WHERE metrics.agent_id = hist.agent_id AND metrics.day = hist.day;
+
+    END IF;
+END $$;
