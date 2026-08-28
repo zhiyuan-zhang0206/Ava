@@ -18,6 +18,7 @@ const TOKEN_PANEL_MIN_HEIGHT = 52;
 const TOKEN_PANEL_MAX_HEIGHT = 600;
 const BAR_HEIGHT = 28;
 const IDLE_LABEL_MIN_WIDTH = 55;
+const DENSE_ROW_THRESHOLD = 40;
 const EVENT_RAIL_LIMIT = 120;
 const EVENT_RAIL_PRIORITY = new Set([
   "exec_failed",
@@ -191,8 +192,12 @@ export function RunTimelineChart({
                 >
                   <title>{`${rowLabel(row, labels)} · ${row.active_s.toFixed(1)}s active`}</title>
                 </rect>
-                {idle && nextX - x >= IDLE_LABEL_MIN_WIDTH ? (
-                  <text x={x} y="104" className="fill-muted-foreground">
+                {idle && rows.length <= DENSE_ROW_THRESHOLD && nextX - x >= IDLE_LABEL_MIN_WIDTH ? (
+                  <text
+                    x={x}
+                    y="104"
+                    className="fill-muted-foreground [paint-order:stroke] stroke-background stroke-[3px]"
+                  >
                     {idle}
                   </text>
                 ) : null}
