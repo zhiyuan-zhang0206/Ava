@@ -668,6 +668,28 @@ def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
     assert "AVA_PGBOUNCER_PORT" not in env
 
 
+def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A remote-managed data plane has no local pooler: converge must neither
+    rewrite the provider's URL port nor preflight the local binary (Task
+    #1752)."""
+    remote_url = "postgresql://ava:sek@10.9.8.7:5432/ava"
+    ctx = _pgbouncer_ctx(
+        tmp_path,
+        monkeypatch,
+        db_url=remote_url,
+        enabled=True,  # the pooler toggle is meaningless for a remote plane
+    )
+    monkeypatch.setattr(_converge.settings.data_plane, "db_url", remote_url)
+    monkeypatch.setattr(_converge.settings.data_plane, "redis_url", "rediss://10.9.8.7:6380/0")
+    _converge._ensure_pgbouncer_step(ctx)
+    env = (tmp_path / ".env").read_text()
+    assert "AVA_DB_URL=" + remote_url in env, "the remote URL must pass through byte-identical"
+    # The pooler port normalization (and the retired-key cleanup) is skipped
+    # wholesale on the remote branch — the URL's port is the provider's.
+
+
 def test_ensure_pgbouncer_step_rewrites_pooler_url_back_to_direct_when_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

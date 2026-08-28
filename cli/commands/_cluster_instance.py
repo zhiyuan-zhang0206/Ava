@@ -674,9 +674,21 @@ def print_data_plane_status() -> None:
     is direct anyway."""
     import shared.db
 
+    if settings.data_plane.is_remote:
+        # A remote-managed plane has no local instance to manage — probe the
+        # URLs themselves (the switch) and skip the local pooler line.
+        from cli.commands._data_plane import remote_pg_reachable, remote_redis_reachable
+
+        print("  · data plane remote-managed — probing the URLs (no local instance)")
+        pg_ok, pg_line = remote_pg_reachable()
+        print(f"  {'✓' if pg_ok else '✗'} {pg_line}")
+        redis_ok, redis_line = remote_redis_reachable()
+        print(f"  {'✓' if redis_ok else '✗'} {redis_line}")
+        return
+
     # Both probes dial the host their own URL names (self-host URLs are
-    # loopback-rewritten by DataPlaneSettings; an external data plane is probed
-    # at its own address — Task #1752).
+    # loopback-rewritten by DataPlaneSettings). The remote branch above returns
+    # before this local probe runs.
     pg_host = _pg_dial_host()
     redis_host = _redis_dial_host()
     pg_port = urlsplit(settings.data_plane.db_url).port or 5432
@@ -740,6 +752,16 @@ def stop_cluster_instance() -> int:
     counterpart of ensure_cluster_instance for `ava stop` / `ava cluster down` of a
     cluster running its own instance. Best-effort: a not-running instance is a
     no-op success."""
+    if settings.data_plane.is_remote:
+        # A remote-managed plane has no local instance to stop — nothing on this
+        # box to tear down, and the provider owns the service lifecycle. But a
+        # cluster that SWITCHED local→remote may still have its old local
+        # instance running; warn so it is torn down deliberately.
+        from cli.commands._data_plane import remote_plane_host, warn_orphaned_local_instance
+
+        print(f"\n→ data plane remote-managed ({remote_plane_host()}) — nothing to stop locally")
+        warn_orphaned_local_instance()
+        return 0
     data = _pg_data_dir()
     print("\n→ stopping per-cluster data plane")
     # Stop the pooler first (best-effort, no-op if it was never enabled) so clients

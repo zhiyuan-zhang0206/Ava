@@ -261,6 +261,13 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
 
     runner_password = aliases.get(RUNNER_DB_PASSWORD_ENV) or ""
     if not runner_password:
+        if _is_remote_data_plane(out):
+            raise ValueError(
+                "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — on a "
+                "remote-managed data plane the runner role is provisioned at the "
+                "provider and its password must be written into the gateway .env "
+                "directly (`ava cluster ensure-db-role` refuses remote planes)."
+            )
         raise ValueError(
             "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
             "`ava cluster ensure-db-role` on the gateway first, then retry."
@@ -272,3 +279,18 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
         )
     out["AVA_DB_URL"] = url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
     return out
+
+
+def _is_remote_data_plane(env: dict[str, str]) -> bool:
+    """Whether the served env's data-plane URLs name a foreign host — the
+    bootstrap payload is the raw `.env` text, so the remote predicate is read
+    from it directly (mirrors `settings.data_plane.is_remote` on the serving
+    side)."""
+    from shared.netutil import is_loopback_host
+    from shared.url_secret import url_host
+
+    for key in ("AVA_DB_URL", "AVA_REDIS_URL"):
+        url = (env.get(key) or "").strip()
+        if url and url_host(url) and not is_loopback_host(url_host(url)):
+            return True
+    return False

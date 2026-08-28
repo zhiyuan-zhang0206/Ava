@@ -112,33 +112,36 @@ def _settings_with(
 
 class TestSettingsAppliesDataPlanePasswords:
     def test_main_url_uses_the_database_admin_password(self) -> None:
-        # Names-as-data: the stale PASSWORD is overwritten with the DB owner password; the
-        # username and database stay exactly what the URL says (here the
-        # historical prod identifiers), so an existing cluster keeps dialing its
-        # own db across the rename window.
+        # Names-as-data: on a LOCAL instance the stale PASSWORD is overwritten
+        # with the DB owner password; the username and database stay exactly
+        # what the URL says (here the historical prod identifiers), so an
+        # existing cluster keeps dialing its own db across the rename window.
+        # A foreign host would keep its own password (Task #1752) — see
+        # test_foreign_url_password_survives_a_nonempty_cluster_secret.
         db_admin = "-".join(("db", "admin", "v2"))
         redis_admin = "-".join(("redis", "admin", "v2"))
         s = _settings_with(
-            db_url=_pg("STALE", host="gw.host:5432", user="ava_main", db="ava_main"),
-            redis_url=_redis("STALE", host="gw.host:6379", user="ava_main"),
+            db_url=_pg("STALE", host="localhost:5432", user="ava_main", db="ava_main"),
+            redis_url=_redis("STALE", host="localhost:6379", user="ava_main"),
             secret=_SECRET,
             db_admin_password=db_admin,
             redis_admin_password=redis_admin,
         )
-        assert s.db_url == _pg(db_admin, host="gw.host:5432", user="ava_main", db="ava_main")
-        assert s.redis_url == _redis("STALE", host="gw.host:6379", user="ava_main")
+        assert s.db_url == _pg(db_admin, host="localhost:5432", user="ava_main", db="ava_main")
+        assert s.redis_url == _redis("STALE", host="localhost:6379", user="ava_main")
         assert s.db_admin_password == db_admin
         assert s.redis_admin_password == redis_admin
 
     def test_fresh_cluster_fixed_identity_passes_through(self) -> None:
-        # A path-only birth writes the fixed `ava` identifiers; Settings keeps them.
+        # A path-only birth writes the fixed `ava` identifiers; Settings keeps
+        # them (on a loopback URL, which is the local-instance posture).
         s = _settings_with(
-            db_url=_pg("STALE", host="gw.host:5432", user="ava", db="ava"),
-            redis_url=_redis("STALE", host="gw.host:6379", user="ava"),
+            db_url=_pg("STALE", host="localhost:5432", user="ava", db="ava"),
+            redis_url=_redis("STALE", host="localhost:6379", user="ava"),
             secret=_SECRET,
         )
-        assert s.db_url == _pg(_SECRET, host="gw.host:5432", user="ava", db="ava")
-        assert s.redis_url == _redis("STALE", host="gw.host:6379", user="ava")
+        assert s.db_url == _pg(_SECRET, host="localhost:5432", user="ava", db="ava")
+        assert s.redis_url == _redis("STALE", host="localhost:6379", user="ava")
 
     def test_redis_url_stays_verbatim(self) -> None:
         # The Redis URL carries the ACL runtime password, independent from both
@@ -320,12 +323,14 @@ class TestPinIpv4Hostaddr:
     (shared.redis_client._PinnedIPv4Connection)."""
 
     def test_ipv4_literal_host_gets_hostaddr(self) -> None:
+        # A foreign IPv4 host: hostaddr is appended, and (Task #1752) the
+        # provider password is preserved rather than replaced by the secret.
         s = _settings_with(
             db_url=_pg("OLD", host="198.51.100.7:5433"),
             redis_url=_redis("OLD", host="198.51.100.7:6380"),
             secret=_SECRET,
         )
-        assert s.db_url == _pg(_SECRET, host="198.51.100.7:5433") + "?hostaddr=198.51.100.7"
+        assert s.db_url == _pg("OLD", host="198.51.100.7:5433") + "?hostaddr=198.51.100.7"
         # redis has no hostaddr mechanism -- untouched.
         assert s.redis_url == _redis("OLD", host="198.51.100.7:6380")
 
@@ -335,7 +340,7 @@ class TestPinIpv4Hostaddr:
             redis_url=_redis("OLD", host="gw.host:6380"),
             secret=_SECRET,
         )
-        assert s.db_url == _pg(_SECRET, host="gw.host:5433")
+        assert s.db_url == _pg("OLD", host="gw.host:5433")
         assert "hostaddr" not in s.db_url
 
     def test_unanchored_sentinel_untouched(self) -> None:

@@ -61,6 +61,22 @@ def _restore_data_plane(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     settings.data_plane = old
 
 
+@pytest.fixture(autouse=True)
+def _restore_env_after_refresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Restore os.environ after every refresh test.
+
+    `refresh_data_plane_settings` re-runs the boot env load, which writes the
+    fake unit's keys (AVA_DB_ADMIN_PASSWORD etc.) into os.environ for the rest
+    of the process. A later test that builds a fresh DataPlaneSettings from env
+    (tests/shared/test_url_secret.py) would otherwise inherit the rotated admin
+    password and fail on its re-derived URL (observed when the two files share
+    a pytest worker)."""
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
+
+
 def _point_env_at(monkeypatch: pytest.MonkeyPatch, env_text: str, tmp_path: Path) -> None:
     env_file = tmp_path / "unit.env"
     env_file.write_text(env_text)

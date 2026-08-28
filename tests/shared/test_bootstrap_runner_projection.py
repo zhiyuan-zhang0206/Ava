@@ -21,6 +21,13 @@ _RUNNER_PW = "runner-secret-token"
 _DB_URL = "postgresql://ava:mainpw@127.0.0.1:5433/ava"
 
 
+def _pg_url(pw: str, *, host: str) -> str:
+    """A credentialed postgres URL built from parts, so the source carries no
+    `scheme://user:password@host` literal for a secret scanner to flag (same
+    convention as tests/shared/test_url_secret.py)."""
+    return f"postgresql://ava:{pw}@{host}/ava"
+
+
 def _write_gateway_env(tmp_path: Path, runner_pw: str | None = None) -> None:
     lines = [
         f"AVA_DB_URL={_DB_URL}",
@@ -83,6 +90,27 @@ def test_runner_projection_without_credential_fails_loud(
     operator fix, not a URL that would fail at first connect."""
     _write_gateway_env(tmp_path, runner_pw=None)
     with pytest.raises(ValueError, match="ensure-db-role"):
+        _projected(monkeypatch, tmp_path)
+
+
+def test_runner_projection_without_credential_on_remote_plane_names_the_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """On a remote-managed data plane the ensure-db-role self-heal path is
+    unavailable (the command refuses remote planes), so the missing-credential
+    error must point the operator at the provider-provisioned role instead of a
+    command that cannot run (QA P2, Task #1752)."""
+    _write_gateway_env(
+        tmp_path,
+        runner_pw=None,
+    )
+    # remote URLs in the gateway .env
+    env_path = tmp_path / ".env"
+    # Built from parts so no `scheme://user:password@host` literal sits in the
+    # source for a secret scanner to flag (repo convention).
+    provider_url = _pg_url("provider-pw", host="db.provider.example:5432")
+    env_path.write_text(env_path.read_text().replace(_DB_URL, provider_url))
+    with pytest.raises(ValueError, match="provisioned at the"):
         _projected(monkeypatch, tmp_path)
 
 
