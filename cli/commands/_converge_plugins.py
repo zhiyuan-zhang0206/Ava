@@ -37,7 +37,7 @@ def run_plugin_scaffolds() -> ScaffoldResult:
     from shared import plugins_config as plugins_cfg
 
     discovered = plugins_cfg._discover_plugins()
-    config = plugins_cfg.load(set(discovered))
+    config = plugins_cfg.load_for_runtime(set(discovered))
 
     ran: list[str] = []
     for name, entry in config.plugins.items():

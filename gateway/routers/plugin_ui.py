@@ -64,7 +64,7 @@ def _enabled_plugin_dir(plugin: str) -> Path:
     directory = installed.get(resolved)
     if directory is None:
         raise HTTPException(status_code=404, detail=f"no plugin page mount for {plugin!r}")
-    config = plugins_config.load(set(installed))
+    config = plugins_config.load_for_runtime(set(installed))
     entry = config.plugins.get(resolved)
     if entry is None or not entry.enabled:
         raise HTTPException(status_code=404, detail=f"no plugin page mount for {plugin!r}")
