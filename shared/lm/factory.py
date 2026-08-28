@@ -173,6 +173,25 @@ def model_supports_vision(model: str) -> bool:
     return "image" in media_types_for_model(model)
 
 
+def attach_modalities_for_model(model: str) -> frozenset[str]:
+    """The media types `ava.self.attach` accepts for `model`.
+
+    `ModelSpec.attach_modalities` when the entry declares an attach-specific
+    opinion; otherwise the model's native `media_types` — attach registers
+    files into the same message pipeline, so the native matrix is the default
+    contract (user ruling 2026-08-28). Empty result = text-only for attach:
+    no files can be registered, the SDK docs drop the member, and the call
+    raises. Unregistered ids fall through the same provider tiers as
+    `media_types_for_model`."""
+    ensure_provider_plugins_loaded()
+    spec = MODELS.get(model)
+    if spec is not None:
+        if spec.attach_modalities is not None:
+            return spec.attach_modalities
+        return spec.media_types
+    return media_types_for_model(model)
+
+
 def vision_capable_provider_names() -> list[str]:
     """Display names of every vision-capable binding — core + plugin.
 

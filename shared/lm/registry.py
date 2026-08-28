@@ -198,6 +198,15 @@ class ModelSpec:
     "image" / "pdf" / "audio" / "video". Empty (default) = text-only. Supersedes
     the per-model `vision` bool (Task #1342): one field carries the whole capability
     matrix, and `model_supports_vision` derives from it."""
+    attach_modalities: frozenset[str] | None = None
+    """The media types `ava.self.attach` accepts for this model, when attach is
+    more restrictive than the model's native `media_types` (user ruling
+    2026-08-28). Attach registers local files into the same message pipeline,
+    so the native matrix is the default contract — None means "no attach-specific
+    opinion; follow `media_types`". Empty frozenset = attach is unavailable even
+    though the endpoint could receive media. A declared set must be a subset of
+    `media_types` (enforced by `_validate_spec`): a model cannot attach a
+    modality its endpoint cannot receive."""
     tuning: ModelTuning = field(default_factory=ModelTuning)
 
 
@@ -806,6 +815,13 @@ def _validate_spec(model_id: str, spec: ModelSpec, *, anthropic_protocol: bool) 
     written instead. Shared by the import-time core validation and the
     registration-time plugin validation.
     """
+    if spec.attach_modalities is not None and not spec.attach_modalities <= spec.media_types:
+        raise RuntimeError(
+            f"model {model_id!r} declares attach_modalities "
+            f"{sorted(spec.attach_modalities)} that are not in its media_types "
+            f"{sorted(spec.media_types)} — attach rides the same message "
+            f"pipeline, so it cannot accept a modality the endpoint cannot receive"
+        )
     if not spec.spawnable:
         return
     from shared.lm.pricing import rates_at

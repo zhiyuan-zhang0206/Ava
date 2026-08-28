@@ -489,3 +489,38 @@ def test_resolve_setting_still_reads_explicit_value_in_full_profile() -> None:
         "auto_compact_fraction", model="deepseek-v4-flash", explicit=explicit
     ).value
     assert value == expected
+
+
+# ---------------------------------------------------------------------------
+# attach modalities
+# ---------------------------------------------------------------------------
+
+
+def test_attach_modalities_default_to_the_declared_media_matrix() -> None:
+    """attach_modalities is an override, not a second matrix: a model with no
+    attach-specific opinion attaches exactly its registry media_types, and a
+    text-only model attaches nothing (user ruling 2026-08-28)."""
+    from shared.lm.factory import attach_modalities_for_model
+
+    assert attach_modalities_for_model("gemini-2.5-flash") == frozenset(
+        {"image", "pdf", "audio", "video"}
+    )
+    assert attach_modalities_for_model("claude-sonnet-4-6") == frozenset({"image", "pdf"})
+    assert attach_modalities_for_model("deepseek-v4-flash-vision-exp") == frozenset({"image"})
+    assert attach_modalities_for_model("deepseek-v4-pro") == frozenset()
+
+
+def test_attach_modalities_declaration_must_stay_within_media_types() -> None:
+    """An attach_modalities declaration outside the model's media_types is a
+    registry error — attach rides the same message pipeline (user ruling
+    2026-08-28)."""
+    from dataclasses import replace
+
+    from shared.lm import registry as reg
+
+    bad = replace(MODELS["glm-5.3-flash"], attach_modalities=frozenset({"video"}))
+    with pytest.raises(RuntimeError, match="attach_modalities"):
+        reg._validate_spec("glm-5.3-flash", bad, anthropic_protocol=False)
+    # A strict subset (attach narrower than the endpoint) is legal.
+    narrower = replace(MODELS["gemini-2.5-flash"], attach_modalities=frozenset({"image"}))
+    reg._validate_spec("gemini-2.5-flash", narrower, anthropic_protocol=False)

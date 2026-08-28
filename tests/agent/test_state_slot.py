@@ -31,6 +31,7 @@ Test coverage:
 import asyncio
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -42,6 +43,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
 import ava
+from agent import _config_carrier as agent_config_carrier
 from agent.graph._context import AvaContext
 from agent.graph._exec import _exec_node_impl
 from agent.messages_guard import MessagesMutationError
@@ -817,7 +819,9 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
     assert msgs[2].content == "project note"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
-async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_path: Path):
+async def test_exec_node_checkpoints_child_attachment(
+    fake_cancel_event, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """A normal child registration drains into a media message in the exec update.
 
     User ruling 2026-08-26: the attach message lands right after the exec
@@ -827,6 +831,18 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     """
     from shared.message_kwargs import AvaMsgType
 
+    # The real exec child rejects attach for a text-only model (user ruling
+    # 2026-08-28) — boot it with a media-capable model via the per-agent
+    # config map the exec path re-emits into the child env (a bare home's
+    # env-authority pass drops an inherited AVA_MODEL).
+    monkeypatch.setattr(
+        agent_config_carrier,
+        "_store",
+        SimpleNamespace(
+            config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
+            birth_config=None,
+        ),
+    )
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = f"import ava\nava.self.attach({str(image)!r}, label='render result')"
@@ -855,7 +871,7 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
 
 
 async def test_exec_node_compact_path_drops_notes_and_clears_findings(
-    fake_cancel_event, tmp_path: Path
+    fake_cancel_event, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """The compact path (_SystemHalt) writes nothing back — claim REMOVE_ALLs
     the whole history — so notes must not leak into the update, and the
@@ -864,6 +880,18 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
 
     _register_messages_plugin()
     _seed_security_findings("shell.run")
+    # The real exec child rejects attach for a text-only model (user ruling
+    # 2026-08-28) — boot it with a media-capable model via the per-agent
+    # config map the exec path re-emits into the child env (a bare home's
+    # env-authority pass drops an inherited AVA_MODEL).
+    monkeypatch.setattr(
+        agent_config_carrier,
+        "_store",
+        SimpleNamespace(
+            config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
+            birth_config=None,
+        ),
+    )
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = (

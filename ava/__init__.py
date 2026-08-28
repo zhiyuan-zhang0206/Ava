@@ -17,6 +17,7 @@ from typing import Any
 from ._exports.const import const as const
 from ._exports.discovery import _classify_dir_entry as _classify_dir_entry
 from ._exports.discovery import _Constant as _Constant
+from ._exports.discovery import _hidden_surface_members as _hidden_surface_members
 from ._exports.discovery import _module_attribute_annotations as _module_attribute_annotations
 from ._exports.discovery import _module_attribute_docs as _module_attribute_docs
 from ._exports.discovery import _module_children as _module_children
@@ -205,6 +206,7 @@ def __getattr__(name: str) -> Any:
 # framework module, should not appear in the `help()` view the agent sees. Its
 # curated author surface is assembled as `ava.extend` further down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection
+from . import _attach as _attach
 from . import _extend as _extend
 from . import agents as agents
 from . import files as files

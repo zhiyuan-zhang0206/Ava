@@ -244,3 +244,27 @@ def test_env_comma_string_with_wildcard_parses() -> None:
     own entry and combines with an explicit nested path."""
     s = AgentSettings(AVA_SDK_EXPAND="*,shell.sessions")  # pyright: ignore[reportArgumentType]  # env-form str; validator splits to list
     assert s.sdk_expand_in_system_prompt == ["*", "shell.sessions"]
+
+
+def test_section_hides_attach_for_text_only_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A text-only model's expanded SDK reference carries no attach contract —
+    the member is unavailable to it (user ruling 2026-08-28)."""
+    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
+    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+    text = _sdk_expand_section()
+    assert "## ava.self" in text
+    assert "def attach(" not in text
+
+
+def test_section_keeps_attach_for_media_capable_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A media-capable model's expanded SDK reference keeps the attach
+    contract unchanged (user ruling 2026-08-28)."""
+    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
+    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-flash-vision-exp")
+    text = _sdk_expand_section()
+    assert "## ava.self" in text
+    assert "def attach(" in text

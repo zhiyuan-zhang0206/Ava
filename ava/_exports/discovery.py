@@ -9,6 +9,7 @@ entry re-exports the names tests and framework code reach as `ava.<name>`.
 """
 
 import ast as _ast
+import contextvars
 import inspect
 from dataclasses import dataclass
 from functools import cache
@@ -16,6 +17,15 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from .const import _DOCUMENTED_TYPE_CACHE
+
+# Render-time member hiding for help() — see `_module_children`. A caller that
+# knows a member is unavailable for the current agent (e.g. `ava.self.attach`
+# on a text-only model, user ruling 2026-08-28) sets this for the render
+# scope; scoped by contextvar so concurrent renders (hosted mode) never see
+# another agent's filter.
+_hidden_surface_members: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
+    "ava_hidden_surface_members", default=None
+)
 
 # ── Kind predicates ────────────────────────────────────────────────────────
 
@@ -152,6 +162,13 @@ def _module_children(mod: Any) -> list[tuple[str, Any]]:
     docs = _module_attribute_docs(mod)
     surface = _static_agent_surface(mod)
     if surface is not None:
+        hidden = _hidden_surface_members.get()
+        if hidden:
+            # Dotted member paths (``ava.self.attach``) set by the render
+            # caller — the member stays in the surface list (plugin members,
+            # SDK-disable, doc linting all keep working) but never renders.
+            prefix = f"{mod.__name__}."
+            surface = [name for name in surface if f"{prefix}{name}" not in hidden]
         return [
             (name, child)
             for name in surface

@@ -11,7 +11,7 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from shared.lm.factory import media_types_for_model
+from shared.lm.factory import attach_modalities_for_model
 
 # Moved from ava._understand so both paths classify binary media identically.
 ATTACH_MEDIA_MIME: dict[str, str] = {
@@ -162,7 +162,10 @@ def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack |
     if not entries:
         return None
 
-    supported_media_types = media_types_for_model(model)
+    # The attach contract, not the raw endpoint matrix: a model with an
+    # attach-specific `attach_modalities` declaration packs exactly that set,
+    # so a file attach() already rejected never slips through as a caption.
+    supported_media_types = attach_modalities_for_model(model)
     state = _PackingState()
 
     for index, entry in enumerate(entries, start=1):
