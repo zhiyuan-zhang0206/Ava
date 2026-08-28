@@ -437,3 +437,17 @@ def test_upgrade_failure_keeps_previous_version(
     # the registry entry still points at the previous install
     pkg = reg.get("pr-toolkit")
     assert pkg is not None and pkg.enabled
+
+
+def test_dot_prefixed_plugin_dirs_are_not_mcp_sources(unit_home: Path) -> None:
+    """Atomic-install residue (.name.staging / .name.backup-<pid>) must not
+    register ghost MCP servers from a bundled .mcp.json."""
+    from ava._mcp_config import load_mcp_config
+
+    ghost = unit_home / "plugins" / ".pr-toolkit.backup-999"
+    ghost.mkdir(parents=True)
+    (ghost / ".mcp.json").write_text(
+        '{"mcpServers": {"ghost-server": {"command": "echo", "args": ["hi"]}}}',
+        encoding="utf-8",
+    )
+    assert "ghost-server" not in load_mcp_config()
