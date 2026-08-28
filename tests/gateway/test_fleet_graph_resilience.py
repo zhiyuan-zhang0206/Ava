@@ -9,12 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from gateway import events_archive, loki_events, prom_metrics, telemetry_staleness
+from gateway import loki_events, prom_metrics, telemetry_staleness
 from gateway.app import app
 from gateway.schemas import FleetGraphNode, FleetGraphResponse
 from shared import telemetry
 from shared.agents import AgentStatus
-from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
+from tests.gateway.loki_fake import FakeLoki
 
 
 def _fresh_heartbeat_age(*, timeout_s: float | None = None) -> float:
@@ -59,6 +60,14 @@ def _response_cache_writes(redis: _FakeRedis) -> list[tuple[str, str, int | None
 
 
 @pytest.fixture(autouse=True)
+def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
+    """The archive-stream rows for the frozen-source cache tests."""
+    fake = FakeLoki()
+    monkeypatch.setattr(loki_events, "query_events", fake.query_events)
+    return fake
+
+
+@pytest.fixture(autouse=True)
 def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing resilience cases isolate their named upstream failure."""
     monkeypatch.setattr(
@@ -75,29 +84,13 @@ def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
 
 
-def test_fleet_archive_boundary_reuses_the_process_cache() -> None:
-    """Fleet's local helper cannot re-run the frozen archive max(ts) scan."""
+def test_fleet_archive_boundary_is_the_frozen_constant() -> None:
+    """The archive/live timeline partition is the task #1281 freeze constant,
+    no longer a runtime DB scan of the frozen events table."""
 
-    class Cursor:
-        def __init__(self) -> None:
-            self.executions = 0
+    from gateway.routers.fleet_graph import ARCHIVE_FREEZE_AT
 
-        def execute(self, query: str) -> None:
-            assert query == "SELECT max(ts) FROM events"
-            self.executions += 1
-
-        def fetchone(self) -> tuple[datetime]:
-            return (datetime(2026, 8, 13, tzinfo=UTC),)
-
-    import gateway.routers.fleet_graph as fg
-
-    events_archive.reset_for_tests()
-    first = Cursor()
-    second = Cursor()
-    assert fg._archive_boundary(first) == datetime(2026, 8, 13, tzinfo=UTC)
-    assert fg._archive_boundary(second) == datetime(2026, 8, 13, tzinfo=UTC)
-    assert first.executions == 1
-    assert second.executions == 0
+    assert datetime(2026, 8, 13, 3, 54, 10, 626517, tzinfo=UTC) == ARCHIVE_FREEZE_AT
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:
@@ -114,81 +107,70 @@ def _seed_agent(db_conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def _seed_archive_edge(
-    db_conn: psycopg.Connection, *, source_agent: int, target_agent: int
-) -> tuple[datetime, datetime]:
+def _seed_archive_edge(fake_loki: FakeLoki, *, source_agent: int, target_agent: int) -> datetime:
+    """One archive-era spawn edge in the Loki fake, ~1 day before the freeze."""
     edge_ts = datetime(2026, 8, 12, 10, tzinfo=UTC)
-    boundary = datetime(2026, 8, 13, 10, tzinfo=UTC)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, event_name, source, target_agent_id, machine, process, category, level) "
-            "VALUES (%s, %s, 'spawn', 'test', %s, 'test', 'test', 'audit', 'info')",
-            (edge_ts, source_agent, target_agent),
-        )
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, event_name, source, machine, process, category, level) "
-            "VALUES (%s, NULL, 'turn_end', 'test', 'test', 'test', 'telemetry', 'info')",
-            (boundary,),
-        )
-    db_conn.commit()
-    return edge_ts, boundary
+    fake_loki.add(
+        event="spawn",
+        agent_id=source_agent,
+        target_agent_id=target_agent,
+        category="audit",
+        ts=edge_ts,
+        archive=True,
+    )
+    return edge_ts
 
 
-def test_pg_frozen_archive_cache_miss_populates_and_hit_skips_queries(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+def test_frozen_archive_cache_miss_populates_and_hit_skips_queries(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _seed_agent(db_conn)
     target = _seed_agent(db_conn)
-    edge_ts, boundary = _seed_archive_edge(db_conn, source_agent=source, target_agent=target)
+    edge_ts = _seed_archive_edge(fake_loki, source_agent=source, target_agent=target)
     redis = _FakeRedis()
 
     import gateway.routers.fleet_graph as fg
 
     monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
-    with TestClient(app):
-        first = fg._fetch_pg_graph(app.state.db_pool, not_terminated="")
+    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom)
+    with TestClient(app) as client:
+        first = client.get("/api/fleet/graph")
+        assert first.status_code == 200
 
         payload = json.loads(redis.values["fleet_graph:frozen:archive:v1"])
-        assert payload == {
-            "boundary": boundary.isoformat(),
-            "rows": [[target, source, "spawn", edge_ts.isoformat()]],
-        }
-        assert redis.writes == [
-            (
-                "fleet_graph:frozen:archive:v1",
-                redis.values["fleet_graph:frozen:archive:v1"],
-                86_400,
-            )
-        ]
+        assert payload == {"rows": [[target, source, "spawn", edge_ts.isoformat()]]}
+        # The live legacy slice also caches (empty here); the archive write is
+        # the one under test.
+        assert (
+            "fleet_graph:frozen:archive:v1",
+            redis.values["fleet_graph:frozen:archive:v1"],
+            86_400,
+        ) in redis.writes
 
         def unexpected_source_read(*_args: object, **_kwargs: object) -> object:
             raise AssertionError("frozen archive source queried on cache hit")
 
-        monkeypatch.setattr(fg, "_archive_boundary", unexpected_source_read)
         monkeypatch.setattr(fg, "_fetch_archive_edges", unexpected_source_read)
-        second = fg._fetch_pg_graph(app.state.db_pool, not_terminated="")
-
-    expected_row = {
-        "agent_id": source,
-        "target_agent_id": target,
-        "event_name": "spawn",
-        "ts": edge_ts,
-    }
-    assert first.boundary == boundary
-    assert first.archive_rows == [expected_row]
-    assert second.boundary == boundary
-    assert second.archive_rows == [expected_row]
+        # Drop the poll cache (not the frozen archive cache) so the second
+        # request re-reads the archive from its 24h cache.
+        for key in [k for k in redis.values if not k.startswith("fleet_graph:frozen:")]:
+            redis.values.pop(key)
+        second = client.get("/api/fleet/graph")
+        assert second.status_code == 200
+        second_body = second.json()
+        first_body = first.json()
+        # snapshot_at is the response timestamp; everything else must match.
+        assert second_body.pop("snapshot_at") >= first_body["snapshot_at"]
+        first_body.pop("snapshot_at")
+        assert second_body == first_body
 
 
 def test_loki_legacy_cache_miss_populates_and_hit_skips_legacy_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     redis = _FakeRedis()
-    boundary = INDEX_LABEL_CUTOVER_AT - timedelta(days=2)
     now = INDEX_LABEL_CUTOVER_AT + timedelta(days=1)
-    legacy_ts = boundary + timedelta(hours=1)
+    legacy_ts = ARCHIVE_FREEZE_AT + timedelta(hours=1)
     indexed_ts = INDEX_LABEL_CUTOVER_AT + timedelta(hours=1)
     calls: list[dict[str, object]] = []
 
@@ -196,7 +178,7 @@ def test_loki_legacy_cache_miss_populates_and_hit_skips_legacy_query(
 
     def query_events(**kwargs: object) -> tuple[list[dict[str, object]], bool]:
         calls.append(kwargs)
-        if kwargs["from_"] == boundary:
+        if kwargs["from_"] == ARCHIVE_FREEZE_AT:
             return [
                 {
                     "agent_id": 1,
@@ -218,9 +200,9 @@ def test_loki_legacy_cache_miss_populates_and_hit_skips_legacy_query(
     monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
     monkeypatch.setattr(loki_events, "query_events", query_events)
 
-    first_rows, first_truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+    first_rows, first_truncated = fg._fetch_loki_edges(now=now)
     assert len(calls) == 2
-    assert calls[0]["from_"] == boundary
+    assert calls[0]["from_"] == ARCHIVE_FREEZE_AT
     assert calls[0]["to"] == INDEX_LABEL_CUTOVER_AT
     assert calls[1]["from_"] == INDEX_LABEL_CUTOVER_AT
     assert calls[1]["to"] == now
@@ -242,7 +224,7 @@ def test_loki_legacy_cache_miss_populates_and_hit_skips_legacy_query(
     ]
 
     calls.clear()
-    second_rows, second_truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+    second_rows, second_truncated = fg._fetch_loki_edges(now=now)
 
     assert len(calls) == 1
     assert calls[0]["from_"] == INDEX_LABEL_CUTOVER_AT
@@ -255,7 +237,6 @@ def test_loki_split_counts_an_exact_cutover_row_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     redis = _FakeRedis()
-    boundary = INDEX_LABEL_CUTOVER_AT - timedelta(days=2)
     now = INDEX_LABEL_CUTOVER_AT + timedelta(days=1)
     cutover_row: dict[str, object] = {
         "agent_id": 1,
@@ -274,7 +255,7 @@ def test_loki_split_counts_an_exact_cutover_row_once(
     monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
     monkeypatch.setattr(loki_events, "query_events", query_events)
 
-    rows, truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+    rows, truncated = fg._fetch_loki_edges(now=now)
 
     assert rows == [cutover_row]
     assert truncated is False
@@ -283,7 +264,6 @@ def test_loki_split_counts_an_exact_cutover_row_once(
 def test_loki_legacy_cache_failure_queries_sources_and_returns_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    boundary = INDEX_LABEL_CUTOVER_AT - timedelta(days=2)
     now = INDEX_LABEL_CUTOVER_AT + timedelta(days=1)
     calls: list[tuple[datetime, datetime]] = []
 
@@ -310,10 +290,10 @@ def test_loki_legacy_cache_failure_queries_sources_and_returns_rows(
     monkeypatch.setattr(fg, "sync_redis", redis_down)
     monkeypatch.setattr(loki_events, "query_events", query_events)
 
-    rows, truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+    rows, truncated = fg._fetch_loki_edges(now=now)
 
     assert calls == [
-        (boundary, INDEX_LABEL_CUTOVER_AT),
+        (ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT),
         (INDEX_LABEL_CUTOVER_AT, now),
     ]
     assert [row["agent_id"] for row in rows] == [1, 2]
@@ -325,19 +305,18 @@ def test_loki_split_reports_truncation_from_either_slice(
     truncated_slice: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     redis = _FakeRedis()
-    boundary = INDEX_LABEL_CUTOVER_AT - timedelta(days=2)
     now = INDEX_LABEL_CUTOVER_AT + timedelta(days=1)
 
     import gateway.routers.fleet_graph as fg
 
     def query_events(**kwargs: object) -> tuple[list[dict[str, object]], bool]:
-        era = "legacy" if kwargs["from_"] == boundary else "indexed"
+        era = "legacy" if kwargs["from_"] == ARCHIVE_FREEZE_AT else "indexed"
         return [], era == truncated_slice
 
     monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
     monkeypatch.setattr(loki_events, "query_events", query_events)
 
-    _rows, truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+    _rows, truncated = fg._fetch_loki_edges(now=now)
 
     assert truncated is True
 
@@ -471,6 +450,10 @@ def test_loki_failure_serves_last_good_graph_without_writing_short_cache(
 
     def boom(**kwargs: object) -> object:
         query_args.update(kwargs)
+        if kwargs.get("archive"):
+            # The frozen archive fetch succeeds (cached separately); the
+            # LIVE tail is the failing upstream under test.
+            return [], False
         raise httpx.ConnectError("loki unreachable")
 
     monkeypatch.setattr(loki_events, "query_events", boom)

@@ -26,7 +26,12 @@ be a static single SELECT over ``events`` (the frozen archive) or
 functions, operators and literals — no DML/DDL, no information/``pg_*``
 functions, no comments, no multi-statement, no Grafana macros, no
 ``{event_name}`` / ``{category}`` / ``{{agent_id}}`` placeholders (the live
-event stream is read through LogQL, task #1280). LogQL templates
+event stream is read through LogQL, task #1280).
+
+**SQL metrics retired (task #1823)**: the frozen ``events`` table was
+dropped, so SQL templates (whose FROM clauses are restricted to that table)
+fail at runtime; no in-repo registration uses them — external plugins must
+migrate to ``query_type="logql"`` / ``"promql"``. LogQL templates
 (``query_type="logql"``) follow the lighter contract in
 ``shared/metrics_logql.py``. PromQL templates (``query_type="promql"``)
 are static Prometheus expressions.

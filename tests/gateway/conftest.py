@@ -22,13 +22,11 @@ over the same attribute, which runs after these autouse fixtures and wins.
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from typing import Any, cast
 
 import pytest
 from pydantic import SecretStr
 
-from gateway import events_archive
 from gateway.app import app
 from gateway.routers import agents as _agents_router
 from gateway.routers import agents_forward as _agents_forward_router
@@ -37,14 +35,6 @@ from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
 from shared import machines as _machines
 from shared.config import settings as _settings
 from shared.machine import machine_name
-
-
-@pytest.fixture(autouse=True)
-def _reset_frozen_events_archive() -> Generator[None, None, None]:
-    """Keep the process-lifetime archive cache isolated across test databases."""
-    events_archive.reset_for_tests()
-    yield
-    events_archive.reset_for_tests()
 
 
 @pytest.fixture(autouse=True)

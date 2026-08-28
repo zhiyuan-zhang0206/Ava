@@ -31,11 +31,13 @@ class FakeLoki:
         level: str = "info",
         payload: dict[str, Any] | None = None,
         ts_offset_hours: float = 0,
+        ts: datetime | None = None,
         category: str = "telemetry",
+        archive: bool = False,
     ) -> None:
         row = {
             "id": len(self.rows) + 1,
-            "ts": datetime.now(UTC) - timedelta(hours=ts_offset_hours),
+            "ts": ts if ts is not None else datetime.now(UTC) - timedelta(hours=ts_offset_hours),
             "agent_id": agent_id,
             "machine": "test",
             "process": "test",
@@ -45,6 +47,7 @@ class FakeLoki:
             "source": "test",
             "target_agent_id": target_agent_id,
             "attributes": payload or {},
+            "archive": archive,
         }
         self.rows.append(row)
 
@@ -60,6 +63,12 @@ class FakeLoki:
         to: Any = kwargs.get("to")
         grep: Any = kwargs.get("grep")
         for r in self.rows:
+            # The archive stream is a physically separate Loki stream: an
+            # archive query serves only archive rows and a live query only
+            # live rows (the real streams partition the timeline at the
+            # freeze point, which the callers' from_/to bounds encode).
+            if bool(kwargs.get("archive")) != bool(r.get("archive")):
+                continue
             if agent_id is not None and r["agent_id"] != agent_id:
                 continue
             if excluded and r["agent_id"] in excluded:
@@ -221,6 +230,8 @@ class FakeLoki:
             return re.sub(r"\{\{\s*(.*?)\s*\}\}", repl, template)
 
         def _value(r: dict[str, Any], name: str) -> Any:
+            if name == "__line__":
+                return json.dumps(r, default=str)
             if name in fields:
                 return r["attributes"].get(name, "")
             if name == "event_name":

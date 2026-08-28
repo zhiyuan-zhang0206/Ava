@@ -50,6 +50,7 @@ from shared.observability import cluster_label
 from shared.resource_sample import ResourceSample
 
 router = APIRouter()
+ARCHIVE_TOTAL_ROWS = 8_699_522  # frozen #1281 parity count (PG events dropped in #1823)
 _log = logging.getLogger(__name__)
 _STATUS_CACHE_TTL_S = 15.0
 _status_cache: tuple[float, SystemStatus] | None = None
@@ -76,8 +77,8 @@ def get_stats_dashboard(
     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
     - average turn duration: Loki's unified event stream in 12-hour shards
     - warning/error counts: one grouped Loki query per 12-hour shard
-    - `total_events`: archived event row count (frozen at the LGTM cutover;
-      not a live gauge)
+    - `total_events`: archived event row count — frozen historical constant
+      (task #1281 parity run; PG events dropped; not a live gauge)
 
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
@@ -198,23 +199,11 @@ def get_stats_dashboard(
         cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
         live_count = int(cur.fetchone()[0])
 
-        # total_events is the frozen archive's approximate row count, not a live
-        # growth gauge — sum planner estimates instead of a full-table COUNT(*).
-        # events is partitioned, and a partitioned parent's own reltuples is
-        # not maintained by autovacuum, so the count must come from the leaf
-        # partitions. pg_partition_tree returns the whole tree (isleaf filters to the
-        # data-holding leaves) and, for a non-partitioned table, a single leaf row
-        # for the table itself — so this is correct whether or not events is
-        # partitioned. GREATEST clamps the -1 "never analyzed" sentinel (Postgres
-        # 14+); the value is approximate, refreshed by autovacuum/ANALYZE.
-        # It intentionally rides the whole-response cache: a 60-second-old
-        # growth gauge is useful, and cache misses keep this DB work cheap.
-        cur.execute(
-            "SELECT COALESCE(SUM(GREATEST(c.reltuples, 0)), 0)::bigint "
-            "FROM pg_partition_tree('events'::regclass) t "
-            "JOIN pg_class c ON c.oid = t.relid WHERE t.isleaf"
-        )
-        total_events = int(cur.fetchone()[0])
+        # total_events is a historical constant — the frozen pre-cutover archive's
+        # parity row count (task #1281), not a live gauge: the PG events table was
+        # dropped with the #1823 cleanup and the dashboard's "total events" card
+        # shows the archive's size. See ARCHIVE_TOTAL_ROWS.
+        total_events = ARCHIVE_TOTAL_ROWS
 
     response = StatsDashboard(
         live_count=live_count,

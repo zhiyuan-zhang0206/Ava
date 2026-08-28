@@ -16,6 +16,7 @@ httpx client redirected to in-process FastAPI app via autouse fixture.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -554,13 +555,25 @@ class TestGetNeighbors:
         return aid
 
     @staticmethod
-    def _tie(fake: FakeLoki, agent_id: int, target: int, *, days_ago: float) -> None:
+    def _tie(
+        fake: FakeLoki,
+        agent_id: int,
+        target: int,
+        *,
+        days_ago: float | None = None,
+        ts: datetime | None = None,
+        archive: bool = False,
+    ) -> None:
+        if ts is None:
+            assert days_ago is not None
+            ts = datetime.now(UTC) - timedelta(hours=days_ago * 24.0)
         fake.add(
             event="send_message",
             agent_id=agent_id,
             target_agent_id=target,
             category="audit",
-            ts_offset_hours=days_ago * 24.0,
+            ts=ts,
+            archive=archive,
         )
 
     def test_returns_ranked_neighbor_dataclasses(
@@ -572,7 +585,10 @@ class TestGetNeighbors:
         fresh = self._seed(db_conn)
         stale = self._seed(db_conn, status="terminated")
         self._tie(fake, fresh, a, days_ago=0.0)
-        self._tie(fake, stale, a, days_ago=20.0)
+        # The stale tie sits inside the archive span (before ARCHIVE_FREEZE_AT)
+        # and must be seeded as an archive-stream row: the live-stream query is
+        # clamped at the freeze point, so a live row there would fall in the gap.
+        self._tie(fake, stale, a, ts=datetime(2026, 8, 10, tzinfo=UTC), archive=True)
 
         rows = ava.agents.get_neighbors(a)
 
