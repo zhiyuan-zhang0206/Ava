@@ -341,6 +341,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     machine_name: str | None = None,
     serve_gateway: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
     serve_agent_runner: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
+    serve_observability_station: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
     machine_description: str | None = None,
     memory_remote: str | None = None,
     gateway_url: str | None = None,
@@ -403,6 +404,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         "machine_name": machine_name,
         "machine_serve_gateway": serve_gateway,
         "machine_serve_agent_runner": serve_agent_runner,
+        "machine_serve_observability_station": serve_observability_station,
         "machine_description": machine_description,
         "memory_remote": memory_remote,
         "gateway_url": gateway_url,
@@ -719,6 +721,7 @@ def cmd_start(
     machine_name: str | None = None,
     serve_gateway: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
     serve_agent_runner: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
+    serve_observability_station: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
     machine_description: str | None = None,
     memory_remote: str | None = None,
     gateway_url: str | None = None,
@@ -730,11 +733,11 @@ def cmd_start(
     """Start the cluster.
 
     Multi-machine setup fields (machine_name / serve_gateway / serve_agent_runner
-    / memory_remote / gateway_url) precedence: env > `$AVA_HOME/<field>`
-    file > this function's arg. serve_gateway / serve_agent_runner are two
-    independent booleans declaring this host's capability set; the required
-    string fields are filtered by that set (both gateway and agent-runner
-    require gateway_url).
+    / serve_observability_station / memory_remote / gateway_url) precedence: env >
+    `$AVA_HOME/<field>` file > this function's arg. serve_gateway /
+    serve_agent_runner / serve_observability_station are independent booleans
+    declaring this host's capability set; the required string fields are filtered
+    by that set (both gateway and agent-runner require gateway_url).
     If any required field is missing -> print actionable error and exit 1
     (no TTY prompt — agent-first design). On first arg pass, the CLI writes values to
     `$AVA_HOME/<field>` files; subsequent `ava start` calls do not need the args.
@@ -754,6 +757,7 @@ def cmd_start(
         machine_name=machine_name,
         serve_gateway=serve_gateway,
         serve_agent_runner=serve_agent_runner,
+        serve_observability_station=serve_observability_station,
         machine_description=machine_description,
         memory_remote=memory_remote,
         gateway_url=gateway_url,

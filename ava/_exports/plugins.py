@@ -7,6 +7,7 @@ are applied to the `ava` package module itself (via `ava_module()`), so plugin
 registrations land exactly where they did before the split.
 """
 
+import sys as _sys
 from types import ModuleType, SimpleNamespace
 from typing import Any, Literal
 
@@ -17,7 +18,8 @@ from . import ava_module
 # Plugin author API (not in __all_for_ava__ — this is for plugin authors,
 # should not appear in the help(ava) view the agent sees). After `import ava` in
 # a plugin's plugin.py, calling `ava.register_namespace("foo", module)`
-# adds a submodule at the ava top level; the agent hits the plugin
+# adds an importable submodule at the ava top level (registered in
+# sys.modules as `ava.<name>`, so `import ava.<name>` works); the agent hits the plugin
 # implementation via `ava.foo.bar()`; help(ava) also includes the `foo/`
 # submodule line. `_REGISTERED_NAMESPACES` tracks plugin-owned names;
 # `agent.state.clear_plugin_registrations()` calls
@@ -138,6 +140,27 @@ def _record(
     plugin_contributions.record(surface, identifier, detail=detail)
 
 
+def _materialize_namespace(name: str, ns: SimpleNamespace) -> ModuleType:
+    """Turn a SimpleNamespace plugin namespace into a real module.
+
+    `import ava.<name>` resolves through `sys.modules`, which must hold a
+    ModuleType: a bare SimpleNamespace there breaks module semantics
+    (importlib.reload, `dir()`-based discovery, getattr_static probes). The
+    namespace is materialized as a real module named `ava.<name>` with its
+    members copied into the module dict, so every discovery path
+    (`agent_visible_names`, help rendering) reads the same members — and the
+    same `__all_for_ava__` surface, synthesized from the public members when
+    the namespace did not declare one — it reads today.
+    """
+    module = ModuleType(f"ava.{name}")
+    module.__dict__.update(vars(ns))
+    surface = getattr(ns, "__all_for_ava__", None)
+    if not isinstance(surface, list):
+        surface = [member for member in vars(ns) if not member.startswith("_")]
+    module.__all_for_ava__ = surface  # type: ignore[attr-defined]
+    return module
+
+
 def register_namespace(name: str, module: Any) -> None:
     """Plugin actively adds a submodule to the ava top level; agent accesses via `ava.{name}.foo()`.
 
@@ -181,6 +204,18 @@ def register_namespace(name: str, module: Any) -> None:
         raise FrameworkNamespaceConflictError(
             f"ava.{name} already exists (framework-builtin submodule / top-level attribute); plugin cannot override."
         )
+
+    if isinstance(module, SimpleNamespace):
+        module = _materialize_namespace(name, module)
+    # Register under `ava.<name>` in sys.modules so the namespace is a real
+    # importable submodule: `import ava.<name>` / `from ava import <name>`
+    # resolve through sys.modules (LLM agents write `import ava.memory` out
+    # of Python habit; without the entry the import machinery raises
+    # ModuleNotFoundError even though attribute access works). The same
+    # object is set on the package, so `ava.<name>` and `import ava.<name>`
+    # always agree. Kept in lockstep with `clear_registered_namespaces`,
+    # which pops the entry on teardown.
+    _sys.modules[f"ava.{name}"] = module
 
     setattr(pkg, name, module)
     # For `help()` rendering — module's real `__name__` is the plugin's
@@ -309,6 +344,11 @@ def clear_registered_namespaces() -> None:
     for name in list(_REGISTERED_NAMESPACES):
         _remove_attr(pkg, name)
         _remove_from_surface(pkg.__all_for_ava__, name)
+        # Drop the importable alias — otherwise `import ava.<name>` keeps
+        # returning the stale module after the namespace is torn down, and a
+        # later re-registration would swap the package attribute to a fresh
+        # object while sys.modules still serves the old one.
+        _sys.modules.pop(f"ava.{name}", None)
     _REGISTERED_NAMESPACES.clear()
 
     # Members live on an existing namespace module (e.g. ava.self), so undo

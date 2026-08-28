@@ -4497,7 +4497,8 @@ export interface components {
          *     against this and returns the result via PUT.
          *
          *     machine_capabilities is the target machine's capability set (`gateway` and/or
-         *     `agent-runner`) — the gateway's own for the Cluster (self) view, the `?machine=`
+         *     `agent-runner` and/or `observability-station`) — the gateway's own for the
+         *     Cluster (self) view, the `?machine=`
          *     host's for a remote view. The panel uses it to pick which capability sections to
          *     render on a remote view: a pure agent-runner shows only its agent-runner + common
          *     sections, while a co-located gateway,agent-runner box shows the gateway section too
@@ -4512,7 +4513,7 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Machine Capabilities */
-            machine_capabilities: ("gateway" | "agent-runner")[];
+            machine_capabilities: ("gateway" | "agent-runner" | "observability-station")[];
         };
         /**
          * ConfigWriteResult
@@ -4945,18 +4946,20 @@ export interface components {
          * @description Idle check-in heartbeat state for one agent — mutually-exclusive display
          *     states the panel renders:
          *
-         *     - idle & not paused & nothing queued: `next_at` is set (the projected next
-         *       check-in, `last_active_at + idle_threshold` — off the real-activity clock,
-         *       so an ops restart does not push it out); everything else off.
-         *     - idle & not paused & a wake already queued: `heartbeat_pending` is True — the
-         *       daemon suppresses check-ins while any inbound is pending (its `NOT EXISTS`
-         *       guard), so no future check-in is projected. This is the state a stuck agent
-         *       sits in (a heartbeat check-in it never woke to process); rendering it
-         *       honestly is what stops the panel from projecting a nonsensical past
-         *       `next_at`.
+         *     - idle-family (idling / hibernating / restarting — the statuses the fleet
+         *       view projects to "Idle") & not paused & nothing queued: `next_at` is set
+         *       (the projected next check-in, `last_active_at + idle_threshold`; an
+         *       overdue projection renders as "due" in the frontend, never as a past
+         *       time); everything else off.
+         *     - idle-family & not paused & a wake already queued: `heartbeat_pending` is
+         *       True — the daemon suppresses check-ins while any inbound is pending (its
+         *       `NOT EXISTS` guard), so no future check-in is projected. This is the state
+         *       a stuck agent sits in (a heartbeat check-in it never woke to process);
+         *       rendering it honestly is what stops the panel from projecting a
+         *       nonsensical past `next_at`.
          *     - paused: `paused_until` is set (the active suppression end); `next_at` None.
-         *     - running (or any non-idle state): all off — an active agent never gets a
-         *       check-in.
+         *     - running or terminated: all off — an active agent never gets a check-in,
+         *       and a dead one never will.
          *
          *     `interval_s` is the cluster heartbeat interval in seconds (context for the
          *     `next_at` projection). `last_pause` is the most recent pause from history,

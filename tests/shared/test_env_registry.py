@@ -124,6 +124,7 @@ class TestConsumptionMatrixDeclarations:
         expected = _aliases_with(scope=("host",)) & {
             "AVA_MACHINE_SERVE_GATEWAY",
             "AVA_MACHINE_SERVE_AGENT_RUNNER",
+            "AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
             "AVA_MACHINE_HOST",
             "AVA_MACHINE_NAME",
             "AVA_MACHINE_DESCRIPTION",

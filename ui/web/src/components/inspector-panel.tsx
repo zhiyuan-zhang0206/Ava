@@ -19,7 +19,6 @@ import Link from "next/link";
 import { useCallback, type ReactNode, useEffect } from "react";
 
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
-import { formatItemTime } from "@/components/timeline/timestamp";
 import { api } from "@/lib/api";
 import { useNow } from "@/lib/use-now";
 import { useBreakpoint } from "@/lib/breakpoint";
@@ -507,14 +506,13 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 // A shell row links to its full-screen monitor page (live terminal tail).
-// Each row shows the runtime value (launch → now, ticking live; falls back to
-// the probe-time uptime snapshot when created_at is missing) and the launch
-// time in the timeline's bracket format (`[YYYY-MM-DD HH:MM:SS TZ]`). TTL and
-// the full runtime live on the shell monitor page's title bar instead (user
-// correction 2026-08-28) — the panel row stays minimal. Guards against NaN /
-// missing ids from a partial API response — if either agentId or shell.id is
-// not a valid finite integer, renders as plain text (no link) to avoid
-// navigating to /shell/NaN/NaN.
+// Each row shows only the runtime value (launch → now, ticking live; falls
+// back to the probe-time uptime snapshot when created_at is missing) — the
+// user can infer the creation time from it, and the created/TTL detail lives
+// on the monitor page's title bar (user corrections 2026-08-28). Guards
+// against NaN / missing ids from a partial API response — if either agentId
+// or shell.id is not a valid finite integer, renders as plain text (no link)
+// to avoid navigating to /shell/NaN/NaN.
 function ShellRow({
   agentId,
   shell,
@@ -532,18 +530,13 @@ function ShellRow({
       ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))
       : shell.uptime_seconds;
   const rowClass =
-    "block rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px]";
+    "flex items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]";
   const content = (
     <>
-      <span className={cn("items-center gap-2", FLEX)}>
-        <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
-        <span className="truncate text-foreground">{shell.name ?? "(unnamed)"}</span>
-        <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-          {formatUptime(runtimeSeconds)}
-        </span>
-      </span>
-      <span className={cn("mt-0.5 truncate text-[10px] text-muted-foreground/80", FLEX)}>
-        {shell.created_at != null ? formatItemTime(shell.created_at) || "—" : "—"}
+      <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
+      <span className="truncate text-foreground">{shell.name ?? "(unnamed)"}</span>
+      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
+        {formatUptime(runtimeSeconds)}
       </span>
     </>
   );
@@ -701,10 +694,14 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 // The "next heartbeat" cell — mirrors the backend's mutually-exclusive states:
-// an active pause renders a clock time; an idle agent with a check-in already
-// queued (the daemon won't send another while an inbound is pending) renders
-// "pending"; an idle agent with nothing queued renders its projected next
-// check-in; a running agent an em dash (never checked in on).
+// an active pause renders a clock time; an idle-family agent (idling /
+// hibernating / restarting — the statuses the fleet view projects to Idle)
+// with a check-in already queued (the daemon won't send another while an
+// inbound is pending) renders "pending"; one with nothing queued renders its
+// projected next check-in, or "due" when the projection has passed (a
+// restarting agent's idle clock runs on while the daemon skips it — a past
+// "next" time must never render as "Xm ago"); a running or terminated agent
+// an em dash (never checked in on).
 function nextHeartbeatCell(hb: HeartbeatInfo): { value: string } {
   if (hb.paused_until) {
     return {
@@ -715,7 +712,10 @@ function nextHeartbeatCell(hb: HeartbeatInfo): { value: string } {
     return { value: "pending" };
   }
   if (hb.next_at) {
-    return { value: formatRelative(hb.next_at) };
+    const next = new Date(hb.next_at).getTime();
+    return {
+      value: next <= Date.now() ? "due" : formatRelative(hb.next_at),
+    };
   }
   return { value: "—" };
 }

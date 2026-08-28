@@ -92,6 +92,10 @@ limits_config:
   # 1365 drops in one day); prod runs at 32/64 since 2026-08-24 (disk file synced post-deploy).
   ingestion_rate_mb: 32
   ingestion_burst_size_mb: 64
+  # 2026-08-28: oversized single lines (codex batch shells) exceeded the
+  # 256KB per-line limit and Loki 400'd whole push batches -> collector drops.
+  # Truncate instead of reject (identifier marks the cut).
+  max_line_size_truncate: true
   retention_period: 168h
   retention_stream:
     - selector: '{stream="archive"}'

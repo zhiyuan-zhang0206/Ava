@@ -600,6 +600,22 @@ class GateAuthProbeFailed(TypedDict):
     latency_ms: int
 
 
+class PluginLoadFailed(TypedDict):
+    """`plugin_load_failed` payload — agent/graph/_build.py.
+
+    One row per plugin that could not be loaded during `_load_extensions`
+    (its `plugin.py` raised at import, or the config referenced a plugin
+    whose directory is gone). The plugin is skipped — fail-soft contract
+    (2026-08-28 ava_ledger incident): a broken plugin must never block
+    `import ava` / graph build for the whole cluster. This event is the loud
+    half of that contract; `error` carries the exception type + message so
+    ops sees which plugin broke and why.
+    """
+
+    plugin: str
+    error: str
+
+
 class LogPayload(TypedDict):
     """`log` payload — bare-log fallback; `msg` rides every loguru-sourced row."""
 
@@ -755,6 +771,12 @@ EVENTS: dict[str, EventSpec] = {
     "exec": _telemetry("exec", "execute_code succeeded", payload=ExecPayload),
     "exec_failed": _telemetry(
         "exec_failed", "execute_code failed", payload=ExecFailed, tier="anomaly"
+    ),
+    "plugin_load_failed": _telemetry(
+        "plugin_load_failed",
+        "enabled plugin skipped because it failed to load (fail-soft)",
+        payload=PluginLoadFailed,
+        tier="anomaly",
     ),
     "exec_envelope": _telemetry(
         "exec_envelope",

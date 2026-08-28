@@ -32,6 +32,7 @@ def _machine_setup(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, Non
 
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", None)
+    monkeypatch.setattr(settings.general, "machine_serve_observability_station", None)
     reset_identity()
     yield
     reset_identity()
@@ -62,6 +63,33 @@ def test_machine_role_both_files_single_box(
     (tmp_path / "machine_serve_gateway").write_text("true")
     (tmp_path / "machine_serve_agent_runner").write_text("true")
     assert machine_role() == frozenset({"gateway", "agent-runner"})
+
+
+def test_machine_role_observability_station_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The observability-station capability resolves from its own flag file —
+    a second machine can declare the station without gateway or agent-runner."""
+    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
+    (tmp_path / "machine_serve_observability_station").write_text("true\n")
+    assert machine_role() == frozenset({"observability-station"})
+
+
+def test_is_observability_station_helper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """is_observability_station() mirrors is_gateway()/is_agent_runner()."""
+    from shared.machine import reset_identity
+
+    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
+    (tmp_path / "machine_serve_observability_station").write_text("true")
+    assert _machine.is_observability_station() is True
+    assert _machine.is_gateway() is False
+    # machine_role() is process-cached — the identity holder must be reset for
+    # the re-resolve after the capability files change.
+    reset_identity()
+    (tmp_path / "machine_serve_observability_station").unlink()
+    (tmp_path / "machine_serve_gateway").write_text("true")
+    assert _machine.is_observability_station() is False
+    assert _machine.is_gateway() is True
 
 
 def test_machine_role_raises_when_neither(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -136,6 +164,14 @@ def test_parse_roles_empty_after_split_raises() -> None:
 def test_parse_roles_one_bad_token_rejects_whole_set() -> None:
     with pytest.raises(MachineRoleInvalid):
         _machine._parse_roles("gateway,bogus")
+
+
+def test_parse_roles_accepts_observability_station() -> None:
+    """The station token parses alongside the classic capabilities."""
+    assert _machine._parse_roles("gateway,observability-station") == frozenset(
+        {"gateway", "observability-station"}
+    )
+    assert _machine._parse_roles("observability-station") == frozenset({"observability-station"})
 
 
 def test_machine_description_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

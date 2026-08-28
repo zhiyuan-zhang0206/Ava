@@ -366,3 +366,88 @@ def test_upgrade_claude_code_plugin_rematerializes(unit_home: Path, tmp_path: Pa
     assert cmd_plugins_upgrade("pr-toolkit") == 0
     refs = unit_home / "plugins" / "pr-toolkit" / "skills" / "pr-toolkit" / "references"
     assert (refs / "type-design-analyzer.md").is_file()
+
+
+# --- atomic install (2026-08-28 ava_ledger incident) ------------------------
+
+
+def test_install_failure_mid_materialize_leaves_nothing(
+    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure while the plugin tree is being written must not leave a
+    half-installed plugin behind: neither the final dir nor the staging dir
+    survives, and no registry entry is recorded."""
+    import shutil
+
+    url = _make_claude_code_plugin_repo(tmp_path, skills=True)
+
+    def boom(src: object, dst: object, **kw: object) -> None:
+        raise OSError("injected copy failure")
+
+    monkeypatch.setattr(shutil, "copytree", boom)
+
+    with pytest.raises(OSError, match="injected"):
+        cmd_plugins_install(url, None, "plugins/pr-toolkit")
+
+    plugins_root = unit_home / "plugins"
+    assert not (plugins_root / "pr-toolkit").exists()
+    assert not (plugins_root / ".pr-toolkit.staging").exists()
+    assert reg.get("pr-toolkit") is None
+
+
+def test_upgrade_failure_keeps_previous_version(
+    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An upgrade whose new materialization fails must leave the previous
+    complete version in place — never a missing or half-installed plugin —
+    and no staging/backup residue."""
+    import shutil
+
+    url = _make_claude_code_plugin_repo(tmp_path, skills=True)
+    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    v1_skill = unit_home / "plugins" / "pr-toolkit" / "skills" / "brainstorming" / "SKILL.md"
+    assert v1_skill.is_file()
+
+    # commit a v2 (extra skill) so the upgrade has something new to land
+    repo = tmp_path / "claude-code-src"
+    new_skill = repo / "plugins" / "pr-toolkit" / "skills" / "debugging"
+    new_skill.mkdir(parents=True)
+    (new_skill / "SKILL.md").write_text(
+        "---\nname: debugging\ndescription: A debugging skill.\n---\n\n# debugging\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "add skill")
+
+    def boom(src: object, dst: object, **kw: object) -> None:
+        raise OSError("injected copy failure")
+
+    monkeypatch.setattr(shutil, "copytree", boom)
+
+    with pytest.raises(OSError, match="injected"):
+        cmd_plugins_upgrade("pr-toolkit")
+
+    # the previous version is still fully there
+    assert v1_skill.is_file()
+    assert not (unit_home / "plugins" / "pr-toolkit" / "skills" / "debugging").exists()
+    # no staging / backup residue
+    plugins_root = unit_home / "plugins"
+    assert not (plugins_root / ".pr-toolkit.staging").exists()
+    assert not list(plugins_root.glob(".pr-toolkit.backup-*"))
+    # the registry entry still points at the previous install
+    pkg = reg.get("pr-toolkit")
+    assert pkg is not None and pkg.enabled
+
+
+def test_dot_prefixed_plugin_dirs_are_not_mcp_sources(unit_home: Path) -> None:
+    """Atomic-install residue (.name.staging / .name.backup-<pid>) must not
+    register ghost MCP servers from a bundled .mcp.json."""
+    from ava._mcp_config import load_mcp_config
+
+    ghost = unit_home / "plugins" / ".pr-toolkit.backup-999"
+    ghost.mkdir(parents=True)
+    (ghost / ".mcp.json").write_text(
+        '{"mcpServers": {"ghost-server": {"command": "echo", "args": ["hi"]}}}',
+        encoding="utf-8",
+    )
+    assert "ghost-server" not in load_mcp_config()

@@ -12,10 +12,12 @@ wifi).
 - `machine_role()`: this host's capability SET (frozenset). `gateway` =
   owns PG/Redis + the HTTP gateway + all gateway daemons; `agent-runner` =
   runs runner+restarter+watchdog + agent processes (its DB/Redis/Milvus URLs
-  point at a gateway node). A host carries one or both; a single-box
-  deployment is `gateway,agent-runner`. `ava start` brings up the union of
-  the services each capability needs. Prefer `is_gateway()` /
-  `is_agent_runner()` over comparing the set directly.
+  point at a gateway node); `observability-station` = owns the native LGTM
+  observability backends (the declarative form of the `$AVA_HOME/lgtm-host`
+  marker). A host carries any combination; a single-box deployment is
+  `gateway,agent-runner`. `ava start` brings up the union of the services
+  each capability needs. Prefer `is_gateway()` / `is_agent_runner()` /
+  `is_observability_station()` over comparing the set directly.
 
 Precedence:
 - machine_name: env `AVA_MACHINE_NAME` > `$AVA_HOME/machine_name` file >
@@ -39,20 +41,23 @@ from shared.config import settings
 from shared.paths import ava_home
 
 # A machine carries a SET of capabilities, not a single role. `gateway` owns
-# Postgres/Redis + the HTTP gateway; `agent-runner` runs agent processes. A
-# single-box deployment carries both. Each capability is declared independently
-# by its own boolean flag (env `AVA_MACHINE_SERVE_GATEWAY` /
-# `AVA_MACHINE_SERVE_AGENT_RUNNER` > the matching `$AVA_HOME/machine_serve_*`
-# file > False); `_resolve_role` collapses the two booleans into the frozenset.
+# Postgres/Redis + the HTTP gateway; `agent-runner` runs agent processes;
+# `observability-station` owns the native LGTM observability backends. A
+# single-box deployment carries gateway+agent-runner. Each capability is
+# declared independently by its own boolean flag (env `AVA_MACHINE_SERVE_*` >
+# the matching `$AVA_HOME/machine_serve_*` file > False); `_resolve_role`
+# collapses the booleans into the frozenset.
 # The DB still encodes the set as a TEXT[] of capability tokens. `MachineRole`
 # is one capability; `MachineRoles` is the set machine_role() returns.
-MachineRole = Literal["gateway", "agent-runner"]
+MachineRole = Literal["gateway", "agent-runner", "observability-station"]
 # The set type is frozenset[str] (not frozenset[MachineRole]): values flow in
 # from the DB (TEXT[]) and a comma-separated env string, and frozenset is
 # invariant, so a literal `frozenset({"gateway"})` would not be assignable to a
 # frozenset[Literal]. Membership is validated at runtime by _parse_roles.
 MachineRoles = frozenset[str]
-_VALID_CAPABILITIES: frozenset[str] = frozenset(("gateway", "agent-runner"))
+_VALID_CAPABILITIES: frozenset[str] = frozenset(
+    ("gateway", "agent-runner", "observability-station")
+)
 
 
 class MachineNameMissing(RuntimeError):  # noqa: N818 — "state description" naming, same as AgentNotFound / IndexerUnavailable
@@ -176,6 +181,14 @@ def is_agent_runner() -> bool:
     """True when this host carries the `agent-runner` capability (runs agent
     processes). Raises MachineRoleMissing/Invalid like machine_role()."""
     return "agent-runner" in machine_role()
+
+
+def is_observability_station() -> bool:
+    """True when this host carries the `observability-station` capability (owns
+    the native LGTM observability backends — the declarative form of the
+    `$AVA_HOME/lgtm-host` marker). Raises MachineRoleMissing/Invalid like
+    machine_role()."""
+    return "observability-station" in machine_role()
 
 
 def format_capabilities(serve_gateway: bool, serve_agent_runner: bool) -> str:  # noqa: FBT001 — capability flags, mirror is_gateway/is_agent_runner
@@ -305,14 +318,26 @@ def _resolve_role() -> MachineRoles:
     serve_agent_runner = _resolve_serve(
         settings.general.machine_serve_agent_runner, "machine_serve_agent_runner"
     )
+    serve_observability_station = _resolve_serve(
+        settings.general.machine_serve_observability_station,
+        "machine_serve_observability_station",
+    )
     caps = {
-        cap for cap, on in (("gateway", serve_gateway), ("agent-runner", serve_agent_runner)) if on
+        cap
+        for cap, on in (
+            ("gateway", serve_gateway),
+            ("agent-runner", serve_agent_runner),
+            ("observability-station", serve_observability_station),
+        )
+        if on
     }
     if not caps:
         raise MachineRoleMissing(
-            "this host serves neither gateway nor agent-runner — set "
-            "AVA_MACHINE_SERVE_GATEWAY and/or AVA_MACHINE_SERVE_AGENT_RUNNER (or run "
-            "`ava start --serve-gateway` / `--serve-agent-runner`; a single box serves both)."
+            "this host serves neither gateway, agent-runner, nor observability-station — set "
+            "AVA_MACHINE_SERVE_GATEWAY and/or AVA_MACHINE_SERVE_AGENT_RUNNER and/or "
+            "AVA_MACHINE_SERVE_OBSERVABILITY_STATION (or run `ava start --serve-gateway` / "
+            "`--serve-agent-runner` / `--serve-observability-station`; a single box serves both "
+            "gateway and agent-runner)."
         )
     return frozenset(caps)
 
@@ -421,10 +446,10 @@ def _parse_roles(value: str) -> MachineRoles:
     if unknown or not tokens:
         raise MachineRoleInvalid(
             f"machine_role={value!r} invalid; comma-separated tokens, each "
-            f"'gateway' or 'agent-runner' (got unknown {sorted(unknown)!r})."
+            f"'gateway', 'agent-runner', or 'observability-station' (got unknown {sorted(unknown)!r})."
             if unknown
             else f"machine_role={value!r} invalid; needs at least one of "
-            "'gateway' / 'agent-runner'."
+            "'gateway' / 'agent-runner' / 'observability-station'."
         )
     return tokens
 

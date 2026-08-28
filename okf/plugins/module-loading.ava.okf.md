@@ -29,6 +29,30 @@ and no topological sort**. Configs are bound uniformly by `bind_from_disk()`
 only after every import has completed, so a hook firing later always finds
 `ava._settings.plugins.<n>` populated.
 
+## The external `plugins` prefix is registered, not resolved from sys.path
+The dotted prefix `plugins.<name>` is the framework's own namespace for
+external plugins, so `_load_extensions` registers the parent packages itself
+(`plugins` over `$AVA_HOME/plugins`, `plugins.<name>` over the plugin's
+directory) before executing `plugin.py`. It does not rely on `$AVA_HOME` being
+on `sys.path`: the exec child boots with `cwd=$AVA_HOME/source` under
+`python -I`, where `import plugins` resolves to the checkout's own legacy
+`plugins/` directory when one exists — or to nothing — so `from . import
+_sibling` inside `plugin.py` used to raise `ModuleNotFoundError` and take
+`import ava` down with it (2026-08-28 ava_ledger incident). Existing
+`sys.modules` entries are left untouched, and built-ins are excluded: they
+resolve through the real `ava_builtins.plugins` package.
+
+## Fail-soft: a broken plugin is skipped, never fatal
+A plugin whose `plugin.py` raises at import (missing sibling module, syntax
+error, top-level exception) degrades to a **skip with a loud warning**, never
+a blocked `import ava` / graph build: the half-executed module is dropped from
+`sys.modules`, a `plugin_load_failed` telemetry event (anomaly tier) plus a
+loguru ERROR carry the plugin name and the exception, and the remaining
+enabled plugins keep loading. The same contract covers a config entry whose
+plugin directory is gone (`DanglingPlugin`, e.g. after an interrupted
+upgrade): it is reported and treated as disabled. `KeyboardInterrupt` /
+`SystemExit` still propagate — cancellation is not a plugin failure.
+
 ## Registration precedes execution
 The module object is placed in `sys.modules` **before** `exec_module` runs, not
 after. A `BaseModel` defined inside a plugin triggers Pydantic's

@@ -112,6 +112,7 @@ consumers: see the comments at each emit point.
 | `llm_cancelled` | LLM call cancelled | anomaly | — | — | 90d | events |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | 90d | events |
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | 90d | events |
+| `plugin_load_failed` | enabled plugin skipped because it failed to load (fail-soft) | anomaly | plugin, error | — | 90d | events |
 | `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | 90d | events |
 | `exec_cancelled` | execute_code cancelled | anomaly | — | — | 90d | events |
 | `exec(timeout)` | historical parenthesized name (migration target) | anomaly | — | — | 90d | events |

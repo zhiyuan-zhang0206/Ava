@@ -27,9 +27,11 @@ pieces land.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from ._manifest_gate import gate_refuses
@@ -164,6 +166,63 @@ def _install_bare_skill(
     return 0
 
 
+def _register_plugin_install(
+    name: str,
+    url: str | None,
+    path: str | None,
+    ref: str | None,
+    *,
+    accepted: list[str],
+    dest: Path,
+) -> None:
+    """Record a freshly materialized plugin in the install registry.
+
+    Install-failure cleanup (2026-08-28 ava_ledger discipline): if the
+    registry write fails, the landed dir is removed again, so a retry does
+    not hit "already installed" against an untracked copy.
+    """
+    from shared.install_registry import tree_hash
+
+    from . import _skill_package
+
+    try:
+        _skill_package.register_installed(
+            name,
+            "plugin",
+            url,
+            path,
+            ref,
+            accepted_findings=accepted,
+            content_hash=tree_hash(dest),
+        )
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+
+
+def _atomic_plugin_replace(dest: Path, materialize: Callable[[], object]) -> None:
+    """Replace the plugin at `dest` with a freshly materialized copy, atomically.
+
+    The previous version is renamed aside, the new one is materialized into a
+    staging dir and renamed into place, and only then is the backup deleted.
+    On any failure the previous version is restored — the plugin on disk is
+    always either the previous complete version or the new complete version,
+    never a half-installed tree (2026-08-28 ava_ledger incident).
+    """
+    backup = dest.parent / f".{dest.name}.backup-{os.getpid()}"
+    if dest.exists():
+        dest.replace(backup)
+    try:
+        materialize()
+    except BaseException:
+        if backup.exists():
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            backup.replace(dest)
+        raise
+    shutil.rmtree(backup, ignore_errors=True)
+
+
 def cmd_plugins_install(
     url: str, ref: str | None, path: str | None, *, accept_risk: bool = False
 ) -> int:
@@ -216,16 +275,13 @@ def cmd_plugins_install(
             except _claude_code_plugin.ClaudeCodePluginError as e:
                 print(f"[ava plugins install] {e}", file=sys.stderr)
                 return 1
-            from shared.install_registry import tree_hash
-
-            _skill_package.register_installed(
+            _register_plugin_install(
                 result.name,
-                "plugin",
                 url,
                 path,
                 ref,
-                accepted_findings=accepted,
-                content_hash=tree_hash(paths.plugins_dir() / result.name),
+                accepted=accepted,
+                dest=paths.plugins_dir() / result.name,
             )
             _sync_skills_load_dir()
             print(
@@ -368,10 +424,11 @@ def cmd_plugins_upgrade(name: str, *, force: bool = False) -> int:
             )
             return 1
         if pkg.type == "plugin":
-            if dest.exists():
-                shutil.rmtree(dest)
             try:
-                _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir())
+                _atomic_plugin_replace(
+                    dest,
+                    lambda: _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir()),
+                )
             except _claude_code_plugin.ClaudeCodePluginError as e:
                 print(f"[ava plugins upgrade] {e}", file=sys.stderr)
                 return 1

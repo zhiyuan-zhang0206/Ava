@@ -38,11 +38,11 @@ querier:
   max_concurrent: 4
 
 common:
-  path_prefix: "{{AVA_HOME}}/lgtm/native/data/loki"
+  path_prefix: "{{LGTM_STORAGE_DIR}}/loki"
   storage:
     filesystem:
-      chunks_directory: "{{AVA_HOME}}/lgtm/native/data/loki/chunks"
-      rules_directory: "{{AVA_HOME}}/lgtm/native/data/loki/rules"
+      chunks_directory: "{{LGTM_STORAGE_DIR}}/loki/chunks"
+      rules_directory: "{{LGTM_STORAGE_DIR}}/loki/rules"
   replication_factor: 1
   ring:
     kvstore:
@@ -107,6 +107,10 @@ limits_config:
   # 1365 drops in one day); prod runs at 32/64 since 2026-08-24 (disk file synced post-deploy).
   ingestion_rate_mb: 32
   ingestion_burst_size_mb: 64
+  # 2026-08-28: oversized single lines (codex batch shells) exceeded the
+  # 256KB per-line limit and Loki 400'd whole push batches -> collector drops.
+  # Truncate instead of reject (identifier marks the cut).
+  max_line_size_truncate: true
   retention_period: 168h
   retention_stream:
     - selector: '{stream="archive"}'
@@ -157,7 +161,7 @@ limits_config:
   tsdb_max_query_parallelism: 4
 
 compactor:
-  working_directory: "{{AVA_HOME}}/lgtm/native/data/loki/compactor"
+  working_directory: "{{LGTM_STORAGE_DIR}}/loki/compactor"
   retention_enabled: true
   delete_request_store: filesystem
 

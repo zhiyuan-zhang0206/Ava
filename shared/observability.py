@@ -76,16 +76,50 @@ def gateway_observability_home() -> Path | None:
     return ava_home() if "gateway" in roles else None
 
 
+def home_is_observability_station(home: Path) -> bool:
+    """Whether this home is the observability station — the provider identity
+    of the host's native LGTM backends.
+
+    Two equivalent forms: the legacy ``$AVA_HOME/lgtm-host`` marker (operator
+    designation via ``ava lgtm on``) and the declarative ``observability-station``
+    unit capability. The capability form resolves through the process's own
+    machine identity and only counts when the resolved home IS this ``home`` —
+    a dev worktree home never inherits the prod station's capability. Role
+    resolution failure (unconfigured unit, bootstrap process) falls back to
+    marker-only so every pre-existing call site keeps historical behavior.
+
+    The single decision behind the converge bring-up/rendering steps, the
+    gateway watchdog's lgtm keepalive, the producer OTLP export gate, the
+    collector-lifecycle gates, and the Loki read gate — they cannot drift apart
+    again (issue #622).
+    """
+    if (home / "lgtm-host").exists():
+        return True
+    from shared.machine import MachineRoleInvalid, MachineRoleMissing, is_observability_station
+    from shared.paths import ava_home
+
+    try:
+        if not is_observability_station():
+            return False
+    except (MachineRoleMissing, MachineRoleInvalid):
+        return False
+    try:
+        return home.resolve() == ava_home().resolve()
+    except Exception:
+        return False
+
+
 def collector_allowed_for_home(home: Path | None) -> bool:
     """Whether the gateway home at ``home`` may run the local otel-collector.
 
-    The designated LGTM host (``lgtm-host`` marker) always runs the sidecar. A
-    non-LGTM gateway runs it only when the operator explicitly overrode
-    ``AVA_TELEMETRY_OTLP_ENDPOINT`` — the same escape hatch the exporter side
-    honors (``shared.telemetry_otlp._observability_export_allowed``) — so an
-    explicit collector export is not silently starved of its local sidecar.
-    ``None`` (no gateway home: pure runner, unconfigured unit, bootstrap)
-    keeps historical behavior — relay collectors are not gated.
+    The observability station (``lgtm-host`` marker or ``observability-station``
+    capability) always runs the sidecar. A non-station gateway runs it only when
+    the operator explicitly overrode ``AVA_TELEMETRY_OTLP_ENDPOINT`` — the same
+    escape hatch the exporter side honors
+    (``shared.telemetry_otlp._observability_export_allowed``) — so an explicit
+    collector export is not silently starved of its local sidecar. ``None`` (no
+    gateway home: pure runner, unconfigured unit, bootstrap) keeps historical
+    behavior — relay collectors are not gated.
 
     One decision shared by the three collector-lifecycle paths — the roster
     gate (``ops.spec._otel_collector_gate_reason``), the converge step
@@ -96,6 +130,6 @@ def collector_allowed_for_home(home: Path | None) -> bool:
     """
     if home is None:
         return True
-    return (home / "lgtm-host").exists() or endpoint_override_is_explicit(
+    return home_is_observability_station(home) or endpoint_override_is_explicit(
         "AVA_TELEMETRY_OTLP_ENDPOINT"
     )

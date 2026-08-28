@@ -631,7 +631,7 @@ def _otel_collector_gate_reason() -> str | None:
     This is the roster sibling of ``ensure_otel_collector_step`` in
     ``cli/commands/_otel_collector.py`` and ``_collector_serves_this_home`` in
     ``services/healthchecks/otel_collector.py``. All three share
-    ``collector_allowed_for_home`` (``lgtm-host`` marker OR an explicit
+    ``collector_allowed_for_home`` (marker OR station capability OR explicit
     ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``ava start``,
     ``ava status``, watchdog, rollout readiness, and cluster health probe agree
     about which gateway owns the collector. Pure agent-runners retain their
@@ -639,9 +639,10 @@ def _otel_collector_gate_reason() -> str | None:
     """
     if not collector_allowed_for_home(gateway_observability_home()):
         return (
-            "this gateway home is not the LGTM host (lgtm-host marker absent); "
-            "telemetry export is unavailable; set AVA_TELEMETRY_OTLP_ENDPOINT "
-            "to use an explicit collector"
+            "this gateway home is not the observability station (lgtm-host "
+            "marker absent, no observability-station capability); telemetry "
+            "export is unavailable; set AVA_TELEMETRY_OTLP_ENDPOINT to use an "
+            "explicit collector"
         )
     return None
 

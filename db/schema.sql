@@ -809,9 +809,10 @@ CREATE TABLE user_settings (
 CREATE TABLE machines (
     name           TEXT PRIMARY KEY,
     gateway_url    TEXT,
-    -- capability SET: a host carries 'gateway', 'agent-runner', or both (single box)
+    -- capability SET: a host carries 'gateway', 'agent-runner', and/or
+    -- 'observability-station' (a single box carries gateway+agent-runner)
     role           TEXT[] NOT NULL DEFAULT '{agent-runner}'
-                       CHECK (role <@ ARRAY['gateway', 'agent-runner']::text[]
+                       CHECK (role <@ ARRAY['gateway', 'agent-runner', 'observability-station']::text[]
                               AND cardinality(role) >= 1),
     -- The last time a process owning one of this machine's units announced the
     -- unit was up (max over its live units) — a boot/announce stamp, NOT a

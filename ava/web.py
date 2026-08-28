@@ -255,7 +255,7 @@ def fetch(
     effort = coerce_effort(effort, example="ava.web.fetch(targets, effort='high')")
     validate_max_concurrent(max_concurrent, example="ava.web.fetch(targets, max_concurrent=4)")
     # The answer step's per-invoke bound lives in the provider client
-    # (build_chat_model timeout) — see ava/_understand.py for why a
+    # (build_chat_model timeout) — see ava/understand.py for why a
     # batch-layer wait_for would not actually return early. The page-read
     # step has its own AVA_WEB_FETCH_TIMEOUT_SECONDS bound.
     return asyncio.run(

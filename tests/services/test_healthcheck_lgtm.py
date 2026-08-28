@@ -129,6 +129,38 @@ def test_main_restarts_on_down_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     assert exc.value.code == 1
 
 
+def test_is_lgtm_host_accepts_station_capability(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The declarative observability-station capability designates the host
+    exactly like the marker — the watchdog keepalive and `ava status` gate on
+    either form."""
+    from shared.machine import reset_identity, set_identity
+
+    home = tmp_path / "station"
+    home.mkdir()
+    # is_lgtm_host() dials the home twice: the name bound in this module
+    # (from shared.paths import ava_home) AND the fresh lookup inside
+    # home_is_observability_station — patch both.
+    monkeypatch.setattr(hc, "ava_home", lambda: home)
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+
+    # No marker, no capability -> not the station.
+    assert hc.is_lgtm_host() is False
+
+    # Capability form.
+    set_identity(role="observability-station")
+    try:
+        assert hc.is_lgtm_host() is True
+    finally:
+        reset_identity()
+    assert hc.is_lgtm_host() is False
+
+    # Marker form.
+    (home / "lgtm-host").touch()
+    assert hc.is_lgtm_host() is True
+
+
 def test_restart_stack_failure_reports_stdout_and_stderr(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
