@@ -897,6 +897,13 @@ def test_do_stop_keep_infra_skips_infra_teardown(
     monkeypatch.setattr(_cli, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
 
+    def _exit_on_signal(name: str) -> bool:
+        service.signalled.append(name)
+        service.alive.discard(name)
+        return True
+
+    monkeypatch.setattr(service, "graceful_signal", _exit_on_signal)
+
     infra_stops: list[int] = []
     monkeypatch.setattr(
         "cli.commands._cluster_instance.stop_cluster_instance",
@@ -905,8 +912,11 @@ def test_do_stop_keep_infra_skips_infra_teardown(
 
     rc = _cli._do_stop(tmp_path, graceful=True, require_confirmation=False, keep_infra=True)
     assert rc == 0
-    # the graceful stop reached the service backend (SIGTERM path)
-    assert (gateway_sess, True) in service.killed
+    # the graceful stop reached the service backend (SIGTERM path): the session
+    # was signalled and exited; the shared-deadline force-kill fallback still
+    # visits it once (noop for an exited session, recorded with graceful=False)
+    assert gateway_sess in service.signalled
+    assert (gateway_sess, False) in service.killed
     # this cluster's pg/redis **not** stopped (keep_infra keeps DB alive before migrate)
     assert infra_stops == []
 
