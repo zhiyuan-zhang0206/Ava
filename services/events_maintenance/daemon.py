@@ -37,16 +37,11 @@ events pipeline, and the daemon must keep reaping (the 2026-08-12 design
 regression: gating the whole daemon off stopped the reaper and checkpoint_blobs
 grew ~150MB/h unbounded).
 
-The retention slices DO delete data — that is their job; they never touch the
-legacy `agent_events` / `event_log` tables (frozen since the migration window
-closed; their removal is a separate migration-cleanup task).
-
 The rollup only covers whole days up to yesterday (UTC); today is served live by
 the readers. The upsert is a full-day overwrite recompute keyed on the PK, so
 re-running is idempotent — a restart or a fast interval never double-counts.
 An indexed slice with zero aggregate rows is warned and skipped rather than
 treated as an empty day, leaving that day's existing ledger rows intact.
-Partition creation is likewise idempotent (an already-covered month is a no-op).
 
 Usage:
     .venv/bin/python -m services.events_maintenance.daemon
