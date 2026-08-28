@@ -41,8 +41,9 @@ is **no auto-rollout** — every N>1 deployment goes through this protocol.
    checkpoint write rate / `checkpoint_blobs` growth over one full day against
    the pre-canary baseline. Expect ~75% fewer checkpoints at N=4.
 4. **Forced kill → resurrect recovery check** (the thing that could regress):
-   for each canary, `ava agents terminate --force <id>` mid-turn (or kill the
-   process), then `ava agents resurrect <id>` / send it a message and confirm:
+   for each canary, `ava agents kill <id>` mid-turn (hard stop — `terminate` is
+   graceful and lets the agent finish its turn), then `ava agents resurrect
+   <id>` / send it a message and confirm:
    - the agent comes back with its conversation state intact;
    - up to N-1 super-steps replay and the final state is consistent
      (no stuck "in flight" node, no duplicate-visible inbound loss — the
