@@ -425,10 +425,7 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
     db, blobs, checkpoints, writes = (int(v) for v in row)
     checkpoint = blobs + checkpoints + writes
     rest = max(db - checkpoint, 0)
-    return (
-        f"db={_mb(db)}MiB "
-        f"checkpoint={_mb(checkpoint)}MiB rest={_mb(rest)}MiB"
-    )
+    return f"db={_mb(db)}MiB checkpoint={_mb(checkpoint)}MiB rest={_mb(rest)}MiB"
 
 
 def _mb(b: int) -> int:
