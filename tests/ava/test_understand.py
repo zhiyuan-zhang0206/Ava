@@ -6,16 +6,18 @@ Flash), config adjustability, and error paths.
 Text path mocks `shared.lm.factory.build_chat_model`; media path mocks LangChain
 `ChatGoogleGenerativeAI` constructor. Neither path hits a real API."""
 
+import importlib
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from pydantic import SecretStr
 
-import ava._understand as understand_mod
 from shared.config import settings
+
+understand_mod = cast(Any, importlib.import_module("ava.understand"))
 
 
 @pytest.fixture
@@ -566,7 +568,7 @@ def test_batch_text_concurrent(mock_deepseek: dict[str, Any]) -> None:
     ]
     results = understand_mod.understand(targets)
     assert isinstance(results, list)
-    assert len(results) == 3
+    assert len(results) == 3  # pyright: ignore[reportUnknownArgumentType] — dynamic module members
     assert results[0] == "answer to: first question"
     assert results[1] == "answer to: second question"
     assert results[2] == "answer to: third question"
