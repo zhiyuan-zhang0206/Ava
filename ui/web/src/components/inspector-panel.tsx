@@ -19,7 +19,6 @@ import Link from "next/link";
 import { useCallback, type ReactNode, useEffect } from "react";
 
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
-import { formatItemTime } from "@/components/timeline/timestamp";
 import { api } from "@/lib/api";
 import { useNow } from "@/lib/use-now";
 import { useBreakpoint } from "@/lib/breakpoint";
@@ -507,14 +506,13 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 // A shell row links to its full-screen monitor page (live terminal tail).
-// Each row shows the runtime value (launch → now, ticking live; falls back to
-// the probe-time uptime snapshot when created_at is missing) and the launch
-// time in the timeline's bracket format (`[YYYY-MM-DD HH:MM:SS TZ]`). TTL and
-// the full runtime live on the shell monitor page's title bar instead (user
-// correction 2026-08-28) — the panel row stays minimal. Guards against NaN /
-// missing ids from a partial API response — if either agentId or shell.id is
-// not a valid finite integer, renders as plain text (no link) to avoid
-// navigating to /shell/NaN/NaN.
+// Each row shows only the runtime value (launch → now, ticking live; falls
+// back to the probe-time uptime snapshot when created_at is missing) — the
+// user can infer the creation time from it, and the created/TTL detail lives
+// on the monitor page's title bar (user corrections 2026-08-28). Guards
+// against NaN / missing ids from a partial API response — if either agentId
+// or shell.id is not a valid finite integer, renders as plain text (no link)
+// to avoid navigating to /shell/NaN/NaN.
 function ShellRow({
   agentId,
   shell,
@@ -532,18 +530,13 @@ function ShellRow({
       ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))
       : shell.uptime_seconds;
   const rowClass =
-    "block rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px]";
+    "flex items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]";
   const content = (
     <>
-      <span className={cn("items-center gap-2", FLEX)}>
-        <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
-        <span className="truncate text-foreground">{shell.name ?? "(unnamed)"}</span>
-        <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-          {formatUptime(runtimeSeconds)}
-        </span>
-      </span>
-      <span className={cn("mt-0.5 truncate text-[10px] text-muted-foreground/80", FLEX)}>
-        {shell.created_at != null ? formatItemTime(shell.created_at) || "—" : "—"}
+      <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
+      <span className="truncate text-foreground">{shell.name ?? "(unnamed)"}</span>
+      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
+        {formatUptime(runtimeSeconds)}
       </span>
     </>
   );
