@@ -54,7 +54,15 @@ class SchemaInvalid(PluginsConfigError):  # noqa: N818
 
 
 class DanglingPlugin(PluginsConfigError):  # noqa: N818
-    """A plugin name referenced by config does not exist on the filesystem."""
+    """A plugin name referenced by config does not exist on the filesystem.
+
+    ``names`` carries the offending names (the message renders them too), so
+    a fail-soft caller can report each one without parsing the message.
+    """
+
+    def __init__(self, message: str, *, names: set[str] | None = None) -> None:
+        super().__init__(message)
+        self.names: set[str] = names or set()
 
 
 class DuplicatePlugin(PluginsConfigError):  # noqa: N818
@@ -183,7 +191,7 @@ def _read_raw() -> dict[str, Any]:
     return _read_local() or {}
 
 
-def load(known_plugins: set[str]) -> PluginsConfig:
+def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsConfig:
     """Read per-machine plugin config; auto-merge new plugins in memory, return config.
 
     Pure-read — no write-back. The only writer is `set_local_enabled`.
@@ -195,12 +203,17 @@ def load(known_plugins: set[str]) -> PluginsConfig:
        all-enabled fallback
     3. Pydantic validation failure -> fail-fast (SchemaInvalid)
     4. Validation: plugins referenced by config must exist on local
-       filesystem (DanglingPlugin)
+       filesystem (DanglingPlugin) — unless `allow_dangling=True`, which
+       drops the dangling entries instead (treated as disabled; the caller
+       is the runtime loader, whose fail-soft contract forbids a config
+       mismatch from blocking `import ava`)
     5. Auto-merge: known plugins not in config -> add enabled=true
        in memory (not persisted)
 
     Args:
         known_plugins: set of plugin names existing on the filesystem.
+        allow_dangling: drop config entries whose plugin is not on disk
+            instead of raising DanglingPlugin.
     """
     raw = _read_raw()
 
@@ -222,10 +235,13 @@ def load(known_plugins: set[str]) -> PluginsConfig:
     # Validate dangling
     dangling = set(cfg.plugins) - known_plugins
     if dangling:
-        raise DanglingPlugin(
-            f"plugins config references non-existent plugins: {sorted(dangling)} "
-            f"(known: {sorted(known_plugins) or '<none>'})"
-        )
+        if not allow_dangling:
+            raise DanglingPlugin(
+                f"plugins config references non-existent plugins: {sorted(dangling)} "
+                f"(known: {sorted(known_plugins) or '<none>'})",
+                names=dangling,
+            )
+        cfg.plugins = {name: entry for name, entry in cfg.plugins.items() if name not in dangling}
 
     # Auto-merge new plugins (in memory only)
     new_plugins = known_plugins - set(cfg.plugins)

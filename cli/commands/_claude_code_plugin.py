@@ -285,36 +285,50 @@ def materialize(pkg_dir: Path, dest_root: Path) -> Materialized:
         raise ClaudeCodePluginError(
             f"'{name}' already installed at {dest}; use `ava plugins upgrade {name}`."
         )
-    dest.mkdir(parents=True)
+    # Atomic landing: everything is written into a staging sibling first, then
+    # renamed into place in a single rename(2). A crash or exception mid-copy
+    # must never leave a half-materialized plugin behind — the 2026-08-28
+    # ava_ledger incident (plugin.py present, _ledger.py missing) took
+    # `import ava` down cluster-wide. Staging lives inside dest_root so the
+    # rename stays on one filesystem; any staging left by a hard kill is
+    # swept here before the new pass starts.
+    staging = dest_root / f".{name}.staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    try:
+        shipped_skills: list[str] = []
+        for skill_src, skill_name in shipped:
+            shutil.copytree(skill_src, staging / "skills" / skill_src.name)
+            shipped_skills.append(skill_name)
 
-    shipped_skills: list[str] = []
-    for skill_src, skill_name in shipped:
-        shutil.copytree(skill_src, dest / "skills" / skill_src.name)
-        shipped_skills.append(skill_name)
+        agents: list[str] = []
+        if agent_files:
+            skill_dir = staging / "skills" / name
+            refs_dir = skill_dir / "references"
+            refs_dir.mkdir(parents=True)
+            dimensions: list[tuple[str, str]] = []
+            for agent_md in agent_files:
+                stem = agent_md.stem
+                a_name, a_desc, ref_text = _reference_text(agent_md.read_text(encoding="utf-8"))
+                (refs_dir / f"{stem}.md").write_text(ref_text, encoding="utf-8")
+                dimensions.append((a_name or stem, _first_sentence(a_desc) or "review dimension"))
+                agents.append(a_name or stem)
+            (skill_dir / "SKILL.md").write_text(
+                _orchestrator_skill(name, description, dimensions), encoding="utf-8"
+            )
 
-    agents: list[str] = []
-    if agent_files:
-        skill_dir = dest / "skills" / name
-        refs_dir = skill_dir / "references"
-        refs_dir.mkdir(parents=True)
-        dimensions: list[tuple[str, str]] = []
-        for agent_md in agent_files:
-            stem = agent_md.stem
-            a_name, a_desc, ref_text = _reference_text(agent_md.read_text(encoding="utf-8"))
-            (refs_dir / f"{stem}.md").write_text(ref_text, encoding="utf-8")
-            dimensions.append((a_name or stem, _first_sentence(a_desc) or "review dimension"))
-            agents.append(a_name or stem)
-        (skill_dir / "SKILL.md").write_text(
-            _orchestrator_skill(name, description, dimensions), encoding="utf-8"
-        )
+        commands: list[str] = []
+        if command_files:
+            shutil.copytree(commands_dir, staging / "commands")
+            commands = [f.stem for f in command_files]
 
-    commands: list[str] = []
-    if command_files:
-        shutil.copytree(commands_dir, dest / "commands")
-        commands = [f.stem for f in command_files]
-
-    if mcp_servers:
-        shutil.copy(mcp_src, dest / ".mcp.json")
+        if mcp_servers:
+            shutil.copy(mcp_src, staging / ".mcp.json")
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    staging.replace(dest)
 
     return Materialized(
         name=name,
