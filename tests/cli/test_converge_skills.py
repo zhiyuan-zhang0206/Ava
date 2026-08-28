@@ -551,3 +551,16 @@ def test_unmarked_local_subtree_not_preserved(unit_home: Path, tmp_path: Path) -
     assert reg.tree_hash(unit_home / "skills" / "web-sources") != reg.tree_hash(
         repo / "ava_builtins" / "skills" / "web-sources"
     )
+
+
+def test_ghost_plugin_skills_not_converged(unit_home: Path, fake_repo: Path) -> None:
+    """Dot-prefixed plugin dirs (atomic-install residue) must not converge
+    their skills into the load dir (QA N2, #880 review)."""
+    ghost = unit_home / "plugins" / ".pr-toolkit.backup-999" / "skills"
+    _write_skill(ghost, "ghost-skill")
+
+    result = converge_skills(fake_repo, unit_home)
+
+    assert "ghost-skill" not in result.copied
+    assert "ghost-skill" not in _loaded_names(unit_home)
+    assert reg.get("ghost-skill") is None
