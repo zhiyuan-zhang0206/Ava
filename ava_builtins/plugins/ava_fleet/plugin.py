@@ -47,6 +47,7 @@ import ava
 import ava._boot
 import ava.agents
 from agent.graph._system_prompt import register_system_prompt_section
+from ava._sdk_validation import coerce_str, coerce_typed
 from shared.live_announce import publish_agent_updated_sync
 from shared.priority import validate_priority
 
@@ -59,6 +60,7 @@ _DB = cast(psycopg.Connection, ava.DB)
 
 
 def set_label(text: str) -> None:
+    text = coerce_str(text, "text", allow_none=True)
     with ava.DB.cursor() as cur:
         cur.execute(
             "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
@@ -186,6 +188,12 @@ def notify(
         The notice id (an int); its `.superseded` attribute lists the ids
         this call auto-resolved.
     """
+    title = coerce_str(title, "title")
+    content = coerce_str(content, "content", allow_none=True)
+    require_response = coerce_typed(require_response, "require_response", bool)
+    blocking = coerce_typed(blocking, "blocking", bool)
+    priority = coerce_str(priority, "priority")
+    task = coerce_typed(task, "task", int, allow_none=True)
     if not title.strip():
         raise ValueError("title must be non-empty")
     validate_priority(priority)
@@ -242,6 +250,14 @@ def edit_notice(
         content: pass None to clear.
         blocking: only valid on a notice that needs a response.
     """
+    if title is not _UNSET:
+        title = coerce_str(title, "title")
+    if content is not _UNSET:
+        content = coerce_str(content, "content", allow_none=True)
+    if priority is not _UNSET:
+        priority = coerce_str(priority, "priority")
+    if blocking is not _UNSET:
+        blocking = coerce_typed(blocking, "blocking", bool)
     if title is not _UNSET and not title.strip():
         raise ValueError("title must be non-empty")
     if priority is not _UNSET:

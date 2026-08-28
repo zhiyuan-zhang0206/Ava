@@ -3,11 +3,13 @@ and persistent sessions."""
 
 __all_for_ava__ = ["run", "run_background", "sessions"]
 
+import os
 import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
 from ava import _boot
+from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.paths import workspace_dir
 from shared.platform import CREATE_NO_WINDOW
@@ -105,6 +107,9 @@ def run(
 
     For commands expected to outlive the timeout, use `run_background`
     instead — it reports back when the command finishes."""
+    cmd = coerce_str(cmd, "cmd")
+    cwd = coerce_str(cwd, "cwd", allow_none=True, allow_types=(os.PathLike,))
+    timeout = coerce_typed(timeout, "timeout", (int, float))
     # stdout flows straight into the agent's context, which makes this an
     # ingestion surface like `files.read` and `web.fetch` — and the widest one,
     # since any fetcher a command happens to invoke lands here. The scan returns
@@ -177,6 +182,11 @@ def run_background(
             renewal. Pass a large value for a long-resident command;
             `keep=True` does not extend or disable it.
     """
+    cmd = coerce_str(cmd, "cmd")
+    name = coerce_str(name, "name")
+    cwd = coerce_str(cwd, "cwd", allow_none=True, allow_types=(os.PathLike,))
+    keep = coerce_typed(keep, "keep", bool)
+    ttl = coerce_typed(ttl, "ttl", (int, float))
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
     aid = _boot.agent_id()

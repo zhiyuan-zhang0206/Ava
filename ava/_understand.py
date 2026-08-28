@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 
 from ava import files as _files
 from ava._batch import run_batch, validate_max_concurrent
+from ava._sdk_validation import coerce_str
 from shared.config import settings
 from shared.lm._call import invoke_text
 from shared.lm._effort import (
@@ -217,6 +218,7 @@ def understand[TargetValue: str | list[str]](
                         f"targets[{i}]['paths'][{j}] must be a path string or Path, "
                         f"got {type(p).__name__}"
                     )
+    effort = coerce_str(effort, "effort")
     normalized = coerce_effort(effort, example="ava.understand(targets, effort='low')")
     assert normalized is not None  # noqa: S101 — understand's default is MAX, never None
     effort = normalized

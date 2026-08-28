@@ -14,6 +14,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from ava._batch import run_batch, validate_max_concurrent
+from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.config import settings
 from shared.lm._call import answer_text
@@ -138,6 +139,7 @@ def search(
     for i, q in enumerate(queries):
         if not isinstance(q, str):
             raise TypeError(f"queries[{i}] must be a str, got {type(q).__name__}")
+    count = coerce_typed(count, "count", int)
     validate_max_concurrent(max_concurrent, example="ava.web.search(queries, max_concurrent=4)")
     return asyncio.run(run_batch(queries, lambda q: _search_one(q, count), max_concurrent))
 
@@ -238,6 +240,8 @@ def fetch(
             f"Example: ava.web.fetch([('https://example.com', 'summarize this page')])"
         )
 
+    max_chars = coerce_typed(max_chars, "max_chars", int)
+    effort = coerce_str(effort, "effort", allow_none=True)
     for i, pair in enumerate(targets):
         if not isinstance(pair, tuple) or len(pair) != 2:
             raise TypeError(f"targets[{i}] must be a (url, prompt) pair, got {type(pair).__name__}")

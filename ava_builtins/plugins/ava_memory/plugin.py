@@ -101,6 +101,7 @@ from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
 from ava import _gateway_client as _client
+from ava._sdk_validation import coerce_str, coerce_typed
 from shared.agents import IndexerUnavailable as IndexerUnavailable
 from shared.config import settings
 from shared.config.turn_view import turn_settings
@@ -170,6 +171,8 @@ def _search(query: str, k: int = 5) -> list[tuple[Path, str, list[str]]]:
     """Semantic search; return the most relevant notes as (absolute path,
     description, tags) tuples. The description is "" when absent; tags carry
     the note's `type/<x>` tag."""
+    query = coerce_str(query, "query")
+    k = coerce_typed(k, "k", int)
     results = _client.memory_search(query, k)
     return [(_memory_ns.PATH / r.path, r.description, list(r.tags)) for r in results]
 
@@ -324,6 +327,12 @@ def write(
     Each index update holds an advisory lock on the store's `MEMORY.md`, so
     concurrent writers in this and other processes are serialized.
     """
+    slug = coerce_str(slug, "slug")
+    content = coerce_str(content, "content")
+    title = coerce_str(title, "title", allow_none=True)
+    description = coerce_str(description, "description", allow_none=True)
+    tags = coerce_typed(tags, "tags", (list, tuple), allow_none=True)
+    store = coerce_str(store, "store")
     from ava._boot import _agent_id
 
     agent_id = _agent_id

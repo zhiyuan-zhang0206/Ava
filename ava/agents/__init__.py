@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import cast
 
 import ava
 import ava._boot
 from ava import _gateway_client as _client
+from ava._sdk_validation import coerce_str, coerce_typed
 
 # Redundant-alias re-exports: importable from this module but deliberately not
 # in __all_for_ava__ — error types never render into the SDK docs every agent carries;
@@ -146,6 +146,9 @@ def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighb
     Ties form on spawn, fork, resurrect, or send_message and fade with time;
     `depth` is how many hops out to look.
     """
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    depth = coerce_typed(depth, "depth", int)
+    limit = coerce_typed(limit, "limit", int)
     return [
         Neighbor(
             agent_id=n["agent_id"],
@@ -164,6 +167,7 @@ def get_ancestors(agent_id: int) -> list[Neighbor]:
     Message ties never form ancestors, and an agent spawned by the user (or
     with no recorded spawn) returns [].
     """
+    agent_id = coerce_typed(agent_id, "agent_id", int)
     return [
         Neighbor(
             agent_id=n["agent_id"],
@@ -182,6 +186,7 @@ def list_agents(
         AgentStatus.IDLING,
     ),
 ) -> list[AgentRow]:
+    filter_by_status = coerce_typed(filter_by_status, "filter_by_status", tuple, allow_none=True)
     raw_rows = _client.list_agents(
         filter_by_status=filter_by_status,
     )
@@ -214,42 +219,6 @@ def _row_from_dict(data: dict) -> AgentRow:
             else None
         ),
     )
-
-
-def _coerce_prompt(prompt: object) -> str | None:
-    """Normalize LLM-generated tuple/list-wrapped prompts (issue #1343)."""
-    prompt_type = type(prompt).__name__
-    if prompt is None or isinstance(prompt, str):
-        return prompt
-    if isinstance(prompt, (list, tuple)):
-        parts = cast(list[object] | tuple[object, ...], prompt)
-        if all(isinstance(part, str) for part in parts):
-            return "".join(cast(list[str] | tuple[str, ...], parts))
-    raise TypeError(f"prompt must be a string or a list/tuple of strings, got {prompt_type}")
-
-
-def _coerce_message_content(content: object) -> str | list[dict[str, object]]:
-    """Normalize LLM-generated tuple/list-wrapped message content.
-
-    The same trailing-comma hazard as prompts (issue #1343): a parenthesized
-    adjacent-string group written as `("line1" "line2",)` evaluates to a
-    1-tuple, which JSON-serializes as an array — but the gateway's
-    `AgentMessageIn.content` accepts a string or a list of content-block
-    dicts, never an array of strings, so the POST 422s and the message
-    silently never arrives (observed 2026-08-28, agents 2697/2986). Join
-    all-string tuples/lists into one string; a list/tuple of block dicts
-    passes through unchanged for the multimodal path.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, (list, tuple)):
-        parts = list(content)
-        if all(isinstance(part, str) for part in parts):
-            return "".join(cast(list[str], parts))
-        if all(isinstance(part, dict) for part in parts):
-            return cast(list[dict[str, object]], parts)
-    content_type = type(content).__name__
-    raise TypeError(f"content must be a string or a list/tuple of strings, got {content_type}")
 
 
 def spawn(
@@ -300,6 +269,12 @@ def _spawn_impl(
     # the unwrapped core spawn always passes label=None. `preset` is resolved to
     # its config template on the gateway side; only the explicit `config` overlay
     # is validated locally (the preset's own values are validated at child boot).
+    prompt = coerce_str(prompt, "prompt", allow_none=True)
+    fork_from = coerce_typed(fork_from, "fork_from", int, allow_none=True)
+    machine = coerce_str(machine, "machine", allow_none=True)
+    config = coerce_typed(config, "config", dict, allow_none=True)
+    label = coerce_str(label, "label", allow_none=True)
+    preset = coerce_str(preset, "preset", allow_none=True)
     spawner = ava._boot.require_actor()
     if config:
         from shared.plugin_config_registry import validate_config_overlay
@@ -307,7 +282,7 @@ def _spawn_impl(
         validate_config_overlay(config)
     return _client.spawn(
         spawner=spawner,
-        prompt=_coerce_prompt(prompt),
+        prompt=prompt,
         fork_from=fork_from,
         prompt_source=spawner,
         machine=machine if machine is not None else ava.self.SELF_MACHINE_NAME,
@@ -320,21 +295,23 @@ def _spawn_impl(
 def terminate(agent_id: int, *, force: bool = False) -> TerminateResult:
     """The agent finishes its current turn, then exits; `force=True` kills
     its process immediately instead."""
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    force = coerce_typed(force, "force", bool)
     return TerminateResult(_client.terminate(agent_id, force=force))
 
 
 def restart(agent_id: int) -> RestartResult:
     """The agent finishes its current turn, then comes back up as a fresh
     process under the same id."""
+    agent_id = coerce_typed(agent_id, "agent_id", int)
     return RestartResult(_client.restart(agent_id))
 
 
 def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
     """Wake a terminated agent with its previous conversation state intact."""
-    normalized_prompt = _coerce_prompt(prompt)
-    if normalized_prompt is None:
-        raise TypeError("prompt must be a string or a list/tuple of strings, got NoneType")
-    return ResurrectResult(_client.resurrect(agent_id, prompt=normalized_prompt))
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    prompt = coerce_str(prompt, "prompt")
+    return ResurrectResult(_client.resurrect(agent_id, prompt=prompt))
 
 
 def commands() -> list[CommandInfo]:
@@ -355,8 +332,10 @@ def send_message(agent_id: int, content: str) -> None:
 
     A terminated target is auto-resurrected to handle the message.
     """  # lint-docstring: ok "auto-resurrected" is public behaviour, not impl detail
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    content = coerce_str(content, "content", allow_types=(list,))
     source = ava._boot.require_actor()
-    _client.send_message(agent_id, content=_coerce_message_content(content), source=source)
+    _client.send_message(agent_id, content=content, source=source)
 
 
 def send_system_note(
@@ -378,15 +357,14 @@ def send_system_note(
 
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    content = coerce_str(content, "content")
+    tag = coerce_str(tag, "tag")
+    resurrect = coerce_typed(resurrect, "resurrect", bool)
     source = ava._boot.require_actor()
-    normalized = _coerce_message_content(content)
-    if not isinstance(normalized, str):
-        raise TypeError(
-            f"system-note content must be a plain string, got {type(normalized).__name__}"
-        )
     return _client.send_system_note(
         agent_id,
-        content=normalized,
+        content=content,
         note_tag=tag,
         source=source,
         resurrect=resurrect,
@@ -400,6 +378,7 @@ def get_last_message(agent_id: int) -> str | None:
     prompt-injection scan as inbound chat messages."""
     from ava.security import scan_content
 
+    agent_id = coerce_typed(agent_id, "agent_id", int)
     caller = ava._boot.require_actor()
     message = _client.get_last_message(agent_id, caller)
     if message is not None:
@@ -408,6 +387,7 @@ def get_last_message(agent_id: int) -> str | None:
 
 
 def get_status(agent_id: int) -> AgentStatus:
+    agent_id = coerce_typed(agent_id, "agent_id", int)
     agents = _client.list_agents()
     for a in agents:
         if a["agent_id"] == agent_id:

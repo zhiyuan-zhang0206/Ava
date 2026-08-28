@@ -58,6 +58,7 @@ from agent.graph._system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
+from ava._sdk_validation import coerce_str
 from ava.security import scan_content
 from shared.config import settings
 from shared.config.turn_view import turn_settings
@@ -280,6 +281,11 @@ def _wrapped_read(
     # entry; the docstring above (kept by `ava.extend.wrap`) is the read
     # contract. `inner` is the wrapped `ava.files.read`.
 
+    # Normalize before path rewriting: a trailing-comma tuple must become
+    # the string it wraps, or the cwd resolution below would str() it into
+    # a garbage filename.
+    path = coerce_str(path, "path", allow_types=(Path,))
+
     # Fast-path: when called outside a turn (test / dev REPL), pass through
     # to the wrapped read — no path rewriting, no injection.
     if ava.state is None:
@@ -393,6 +399,7 @@ def _resolve_for_cwd(path: str | Path) -> Path:
 def _wrapped_edit(
     inner: Callable[..., None], path: str | Path, old: str, new: str, *, replace_all: bool = False
 ) -> None:
+    path = coerce_str(path, "path", allow_types=(Path,))
     p = _resolve_for_cwd(path)
     return inner(str(p), old, new, replace_all=replace_all)
 
@@ -402,6 +409,7 @@ ava.extend.wrap("files.edit", _wrapped_edit)
 
 # ── write ──
 def _wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
+    path = coerce_str(path, "path", allow_types=(Path,))
     p = _resolve_for_cwd(path)
     return inner(str(p), content)
 
@@ -411,6 +419,7 @@ ava.extend.wrap("files.write", _wrapped_write)
 
 # ── append ──
 def _wrapped_append(inner: Callable[..., None], path: str | Path, content: str) -> None:
+    path = coerce_str(path, "path", allow_types=(Path,))
     p = _resolve_for_cwd(path)
     return inner(str(p), content)
 
@@ -420,6 +429,7 @@ ava.extend.wrap("files.append", _wrapped_append)
 
 # ── delete ──
 def _wrapped_delete(inner: Callable[..., None], path: str | Path) -> None:
+    path = coerce_str(path, "path", allow_types=(Path,))
     p = _resolve_for_cwd(path)
     return inner(str(p))
 
@@ -429,6 +439,7 @@ ava.extend.wrap("files.delete", _wrapped_delete)
 
 # ── glob ──
 def _wrapped_glob(inner: Callable[..., list[Path]], pattern: str = "*") -> list[Path]:
+    pattern = coerce_str(pattern, "pattern")
     # glob is not a simple path — the pattern may contain ** / * wildcards.
     # Resolve cwd base first, concatenate the pattern (preserving wildcard
     # semantics), then call the wrapped glob with the normalized pattern.
@@ -508,6 +519,7 @@ def _wrapped_serve(
     *,
     ttl: float | None = None,
 ) -> Any:
+    dir = coerce_str(dir, "dir", allow_types=(Path,))
     p = _resolve_for_cwd(dir)
     return inner(str(p), name, port=port, title=title, ttl=ttl)
 
