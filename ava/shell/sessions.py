@@ -10,6 +10,7 @@ from pathlib import Path
 
 import ava
 import ava._boot
+from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.cluster import session_name
 from shared.paths import workspace_dir
@@ -188,6 +189,8 @@ def new(name: str, *, ttl: float) -> int:
         ttl: same semantics as `run_background` — required hard lifetime in
             seconds from creation; a deadline-bound task belongs in
             `ava.watcher` instead."""
+    name = coerce_str(name, "name")
+    ttl = coerce_typed(ttl, "ttl", (int, float))
     session_id, _ = _create_session(name, ttl=_validate_ttl(ttl))
     return session_id
 
@@ -198,6 +201,9 @@ def send(id: int, cmd: str, *, enter: bool = True) -> None:
     """Asynchronous — returns immediately without waiting for the command.
 
     Set `enter=False` to type the string without pressing Enter."""
+    id = coerce_typed(id, "id", int)
+    cmd = coerce_str(cmd, "cmd")
+    enter = coerce_typed(enter, "enter", bool)
     # Text and Enter go in separate writes: a combined write races TUI
     # programs (Claude Code, Codex) that are still processing the typed text
     # when Enter arrives.
@@ -212,6 +218,8 @@ def send_keys(id: int, *keys: str) -> None:
     """Send raw keys to a session without submitting a line. Each argument is
     one key: a single character, or a name like `C-c`, `Escape`, `Up`,
     `Enter`, `Space`, `PageUp`."""
+    id = coerce_typed(id, "id", int)
+    keys = tuple(coerce_str(key, "key") for key in keys)
     get_shell_backend().send_keys(_resolve(id), *keys)
 
 
@@ -220,6 +228,9 @@ def capture(id: int, lines: int = 200, *, scrollback: bool = True) -> str:
     has scrolled past. Pass `scrollback=False` to get only the current
     visible screen instead — needed for full-screen programs that redraw in
     place (`lines` is ignored then)."""
+    id = coerce_typed(id, "id", int)
+    lines = coerce_typed(lines, "lines", int)
+    scrollback = coerce_typed(scrollback, "scrollback", bool)
     # A session holds whatever ran in it — an interactive fetch, a coding agent
     # rendering a web page — so reading one ingests exactly as `shell.run` does.
     # Scanned for the same reason; the text comes back byte-for-byte.
@@ -229,6 +240,7 @@ def capture(id: int, lines: int = 200, *, scrollback: bool = True) -> str:
 
 
 def kill(id: int) -> None:
+    id = coerce_typed(id, "id", int)
     backend = get_shell_backend()
     ok, _mode = backend.kill_session(_resolve(id), graceful=False)
     if not ok:

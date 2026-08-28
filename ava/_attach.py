@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ava._sdk_validation import coerce_str
 from ava.files import _resolve
 from shared.lm.attach import (
     ATTACH_MAX_FILE_BYTES,
@@ -91,6 +92,8 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
         raise RuntimeError(
             f"ava.self.attach is unavailable: {reason}; switch to a vision-capable model"
         )
+    path = coerce_str(path, "path", allow_types=(Path,))
+    label = coerce_str(label, "label", allow_none=True)
     if not os.environ.get("AVA_EXEC_REQUEST_FILE"):
         raise RuntimeError(
             "ava.self.attach only works inside an agent turn (execute_code); "

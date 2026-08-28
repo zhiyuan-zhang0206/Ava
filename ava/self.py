@@ -5,6 +5,7 @@ from typing import NoReturn
 
 import ava
 from ava._attach import attach as attach
+from ava._sdk_validation import coerce_str, coerce_typed
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
@@ -165,6 +166,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     """`config_overlay`: a flat `{field_name: value}` dict merged into your
     persistent per-agent settings.
     """
+    config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
     from ava import _boot
 
     _boot.assert_self_action("restart")
@@ -229,6 +231,7 @@ def pause_heartbeat(duration: float) -> None:
             86400 = 24 hours; per-agent override via
             ava.self.restart(config_overlay=...)).
     """
+    duration = coerce_typed(duration, "duration", (int, float))
     from ava import _boot
 
     if not duration > 0:
@@ -277,6 +280,7 @@ def compact(summary: str) -> NoReturn:
     - Pitfalls
     - Verbatim tail (exclude the compaction request that triggered this)
     """
+    summary = coerce_str(summary, "summary")
     from ava import _boot
 
     _boot.assert_self_action("compact")

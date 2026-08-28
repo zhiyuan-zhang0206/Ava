@@ -17,6 +17,7 @@ __all_for_ava__ = ["Page", "close", "serve", "serve_markdown", "show"]
 
 import functools as _functools
 import math as _math
+import os as _os
 import re as _re
 import shutil as _shutil
 import time as _time
@@ -28,6 +29,7 @@ from typing import Any
 import ava
 import ava._boot
 from ava import _gateway_client
+from ava._sdk_validation import coerce_str, coerce_typed
 from shared.machine import reachable_host
 
 _NAME_RE = _re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -226,6 +228,10 @@ def show(
             process, so you must stop it yourself to release the port; the
             expiry notice reminds you.
     """
+    name = coerce_str(name, "name")
+    port = coerce_typed(port, "port", int, allow_none=True)
+    title = coerce_str(title, "title", allow_none=True)
+    ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
     return _register_page(name, port, title, serve_dir=None, ttl=_validate_ttl(ttl))
 
 
@@ -251,6 +257,11 @@ def serve(
         title: defaults to `name`.
         ttl: optional page lifetime in seconds; when omitted, the platform default applies.
     """
+    dir = coerce_str(dir, "dir", allow_types=(_os.PathLike,))
+    name = coerce_str(name, "name")
+    port = coerce_typed(port, "port", int, allow_none=True)
+    title = coerce_str(title, "title", allow_none=True)
+    ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
     ttl = _validate_ttl(ttl)
     _validate_name(name)
 
@@ -282,6 +293,11 @@ def serve_markdown(
     """Serve Markdown as a rendered HTML page (LaTeX math, code highlighting,
     GFM tables) — same behavior as `serve`, including the port rules.
     """
+    content = coerce_str(content, "content")
+    name = coerce_str(name, "name")
+    port = coerce_typed(port, "port", int, allow_none=True)
+    title = coerce_str(title, "title", allow_none=True)
+    ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
     ttl = _validate_ttl(ttl)
     _validate_name(name)
 
@@ -339,6 +355,7 @@ def _close_existing() -> None:
 
 def close(name: str) -> None:
     """Unregister the page (the platform stops its server)."""
+    name = coerce_str(name, "name")
     _validate_name(name)
 
     # Clean up any markdown temp dir created by serve_markdown()

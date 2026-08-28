@@ -11,9 +11,11 @@ __all_for_ava__ = [
 
 import difflib
 import glob as _glob
+import os
 from pathlib import Path
 
 from ava import _boot
+from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import is_flagged, scan_content
 from shared.paths import ava_home, workspace_dir
 
@@ -65,6 +67,11 @@ def read(
 
     `limit` (max lines from `start`) is mutually exclusive with `end`.
     """
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    start = coerce_typed(start, "start", int, allow_none=True)
+    end = coerce_typed(end, "end", int, allow_none=True)
+    limit = coerce_typed(limit, "limit", int, allow_none=True)
+    with_line_numbers = coerce_typed(with_line_numbers, "with_line_numbers", bool)
     if limit is not None:
         if end is not None:
             raise ValueError("pass either `end` or `limit`, not both")
@@ -126,6 +133,8 @@ def _flag_frontmatter(text: str) -> str:
 
 def write(path: str | Path, content: str) -> None:
     """Write, creating parent directories if needed."""
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    content = coerce_str(content, "content")
     p = _resolve(path)
     if _is_memory_note(p) and is_flagged(content):
         content = _flag_frontmatter(content)
@@ -135,6 +144,8 @@ def write(path: str | Path, content: str) -> None:
 
 def append(path: str | Path, content: str) -> None:
     """Append to a file, creating it (and parent directories) if absent."""
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    content = coerce_str(content, "content")
     p = _resolve(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     # Appending injection-flagged content to a memory note taints the whole
@@ -204,6 +215,10 @@ def edit(path: str | Path, old: str, new: str, *, replace_all: bool = False) -> 
     not found, the error includes a diff against the closest match in the
     file.
     """
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    old = coerce_str(old, "old")
+    new = coerce_str(new, "new")
+    replace_all = coerce_typed(replace_all, "replace_all", bool)
     p = _resolve(path)
     content = p.read_text(encoding="utf-8")
     count = content.count(old)
@@ -219,6 +234,7 @@ def edit(path: str | Path, old: str, new: str, *, replace_all: bool = False) -> 
 
 
 def glob(pattern: str = "*") -> list[Path]:
+    pattern = coerce_str(pattern, "pattern")
     p = _resolve(pattern)
     # Path.glob in Python 3.12 doesn't accept an absolute pattern, and
     # `**` spanning multiple levels is cleaner via stdlib
@@ -228,4 +244,5 @@ def glob(pattern: str = "*") -> list[Path]:
 
 def delete(path: str | Path) -> None:
     """Delete a file (not a directory)."""
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
     _resolve(path).unlink()
