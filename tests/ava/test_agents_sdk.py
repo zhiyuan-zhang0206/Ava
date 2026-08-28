@@ -564,12 +564,15 @@ class TestGetNeighbors:
         ts: datetime | None = None,
         archive: bool = False,
     ) -> None:
+        if ts is None:
+            assert days_ago is not None
+            ts = datetime.now(UTC) - timedelta(hours=days_ago * 24.0)
         fake.add(
             event="send_message",
             agent_id=agent_id,
             target_agent_id=target,
             category="audit",
-            ts=ts if ts is not None else datetime.now(UTC) - timedelta(hours=days_ago * 24.0),
+            ts=ts,
             archive=archive,
         )
 
