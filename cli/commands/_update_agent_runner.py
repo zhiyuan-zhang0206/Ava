@@ -332,9 +332,7 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     if mode != "none":
         with updater_stage("quiesce"):
             _ns._quiesce_local_agents(mode)
-    if force_reap or mode == "force":
-        with updater_stage("force_reap"):
-            _ns._force_reap_local_agents()
+    force_reap_agents = force_reap or mode == "force"
 
     # 4) graceful stop. keep_infra=True: an internal self-update bounces this
     #    host's service sessions, never the shared pg/redis — on a co-located
@@ -353,7 +351,13 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     #    imports are what make that true; `tests/cli/test_update_import_timing.py`
     #    fails if either end of the arrangement is broken.
     with updater_stage("stop"):
-        _ns._do_stop(repo, graceful=True, require_confirmation=False, keep_infra=True)
+        _ns._do_stop(
+            repo,
+            graceful=True,
+            require_confirmation=False,
+            keep_infra=True,
+            force_reap_agents=force_reap_agents,
+        )
 
     # 5) start in a FRESH process so it loads the just-synced new code. Calling
     #    cmd_start() in-process would mix already-imported old modules with the

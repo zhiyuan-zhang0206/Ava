@@ -35,8 +35,9 @@ def poll_seams(
     responses: list[dict[str, object]] = []
     idle_at: dict[str, int] = {"n": 0}
 
-    async def _dispatch(*, target_machine, kind, payload, timeout_s, ops_url=None):  # type: ignore[no-untyped-def]
+    async def _dispatch(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):  # type: ignore[no-untyped-def]
         assert kind == "status_probe"
+        assert retries == 0
         calls["n"] += 1
         return responses[min(calls["n"], len(responses)) - 1]
 

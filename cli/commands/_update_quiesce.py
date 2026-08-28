@@ -155,7 +155,7 @@ def _quiesce_all_agents(timeout_s: float) -> bool:
     return False
 
 
-def _force_reap_local_agents() -> list[int]:
+def _force_reap_local_agents(*, defer_process_stop: bool = False) -> list[int]:
     """Force-reap THIS host's live agents: CAS-mark them 'restarting' (so the
     restarter respawns them on new code once the host unpauses) and kill their
     PROCESSES (SIGTERM + bounded wait + SIGKILL). The quiesce-timeout / force-mode
@@ -173,6 +173,10 @@ def _force_reap_local_agents() -> list[int]:
     shells — that is the "fully stop this cluster" semantic
     (_reap_agent_sessions default).
 
+    `defer_process_stop=True` performs only the CAS marking; `_do_stop` then
+    includes those native agent processes in the same batch signal/deadline as
+    services. Persistent PTY sessions remain untouched in both forms.
+
     Returns the ids that were marked (an agent that exited cleanly meanwhile is
     left untouched and its dead process is a noop kill).
     """
@@ -189,7 +193,8 @@ def _force_reap_local_agents() -> list[int]:
             f"  · force-reaping {len(marked)} straggler agent(s): {sorted(marked)}",
             file=sys.stderr,
         )
-    _ns._reap_agent_sessions(kill_shells=False)
+    if not defer_process_stop:
+        _ns._reap_agent_sessions(kill_shells=False)
     return marked
 
 
