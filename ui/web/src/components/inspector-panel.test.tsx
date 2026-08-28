@@ -143,7 +143,8 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
       // created_at is offset from fixture-build time so the tick-computed
       // runtime lands on the same formatted span as uptime_seconds (8040s /
       // 660s) no matter when the test runs. The duration-asserting test
-      // freezes Date via vi.setSystemTime for exact determinism.
+      // freezes Date via vi.setSystemTime for exact determinism. (created_at
+      // itself is not rendered in the panel — runtime only.)
       {
         id: 0,
         name: "dev-server",
@@ -320,14 +321,10 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("2h 14m")).toBeTruthy(); // 8040s
     expect(screen.getByText("45s")).toBeTruthy();
     expect(screen.getByText("11m")).toBeTruthy(); // 660s
-    // created: the timeline bracket format `[YYYY-MM-DD HH:MM:SS TZ]` per
-    // row (timezone varies with the test host, so match the shape, not the
-    // zone); "—" when unknown
-    expect(screen.getAllByText(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /)).toHaveLength(2);
-    // unknown created time renders "—" in the unnamed shell's row
-    const shellsSection = screen.getByText("Persistent shells").closest("section");
-    expect(shellsSection).not.toBeNull();
-    expect(within(shellsSection!).getByText("—")).toBeTruthy();
+    // created time is deliberately not shown in the panel (user correction
+    // 2026-08-28) — runtime alone; the created/TTL detail lives on the
+    // monitor page title bar.
+    expect(screen.queryByText(/^\[\d{4}-\d{2}-\d{2} /)).toBeNull();
     // each shell row links to its monitor page /shell/{agentId}/{shellId}
     expect(screen.getByText("dev-server").closest("a")?.getAttribute("href")).toBe("/shell/1/0");
     expect(screen.getByText("watcher").closest("a")?.getAttribute("href")).toBe("/shell/1/2");
