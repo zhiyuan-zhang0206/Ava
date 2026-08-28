@@ -217,7 +217,7 @@ from . import skills as skills
 from . import ui as ui
 from . import watcher as watcher
 from . import web as web
-from ._understand import understand as understand
+from .understand import understand as understand
 
 # ── ava.extend — the plugin extension surface ──────────────────────────────
 # Curated view of `_extend` for plugin authors: the wrap registration primitive
@@ -263,7 +263,7 @@ _apply_sdk_disable(_sdk_disable_entries)
 # modules, so restore the package-level `__module__` on the re-exported entry
 # points that used to be defined here — keeps `help(ava.X)` headings
 # byte-identical to before the split. (`ava.understand` keeps its own
-# pre-existing `ava._understand` module path.)
+# pre-existing `ava.understand` module path.)
 for _entry in (
     help,
     const,

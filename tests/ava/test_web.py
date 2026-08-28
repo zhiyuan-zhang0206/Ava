@@ -4,7 +4,7 @@ Search tests: Brave Search API urllib thin wrapper — no real API calls,
 monkeypatch `urllib.request.urlopen`.
 
 Fetch tests: Jina Reader + ava.understand — no real API or LLM calls,
-monkeypatch `urllib.request.urlopen` and `ava._understand.understand`.
+monkeypatch `urllib.request.urlopen` and `ava.understand.understand`.
 
 Key contracts:
 - fetch() only accepts list[tuple[str, str]], raises TypeError otherwise
