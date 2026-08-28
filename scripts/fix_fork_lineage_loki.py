@@ -86,10 +86,11 @@ def _delete_row(row: dict[str, Any]) -> None:
         ts = datetime.fromisoformat(str(ts))
     start = int((ts - timedelta(seconds=1)).timestamp())
     end = int((ts + timedelta(seconds=1)).timestamp())
-    selector = (
-        f'{{event_name="fork", agent_id="{row["agent_id"]}", '
-        f'target_agent_id="{row["target_agent_id"]}"}}'
-    )
+    # target_agent_id is a JSON body field, NOT a stream label (the collector
+    # only promotes agent_id/event_name) — a selector on it matches nothing and
+    # the delete silently no-ops. Scope by real labels + the narrow time window
+    # instead: the window makes one fork event per agent unique.
+    selector = f'{{event_name="fork", agent_id="{row["agent_id"]}"}}'
     resp = httpx.post(
         base + "/loki/api/v1/delete",
         params={"query": selector, "start": start, "end": end},
