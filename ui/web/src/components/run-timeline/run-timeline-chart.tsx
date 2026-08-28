@@ -16,6 +16,8 @@ const TIME_Y = 54;
 const TOKEN_Y = 208;
 const TOKEN_PANEL_HEIGHT = 52;
 const BAR_HEIGHT = 28;
+const IDLE_LABEL_MIN_WIDTH = 55;
+const EVENT_RAIL_LIMIT = 120;
 
 export interface RunTimelineChartLabels {
   time: string;
@@ -48,6 +50,22 @@ function currency(amount: number): string {
   return `$${amount.toFixed(amount < 0.01 ? 4 : 2)}`;
 }
 
+function eventChipClass(kind: string): string {
+  if (kind.includes("failed") || kind.includes("timeout")) {
+    return "rounded border border-destructive/50 bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive";
+  }
+  if (kind === "compact" || kind === "auto_compact") {
+    return "rounded border border-violet-500/50 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-700 dark:text-violet-300";
+  }
+  if (kind.includes("restart") || kind.includes("resurrect")) {
+    return "rounded border border-blue-500/50 bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-700 dark:text-blue-300";
+  }
+  if (kind === "halt") {
+    return "rounded border border-muted-foreground/30 bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground";
+  }
+  return "rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground";
+}
+
 /**
  * Two independent horizontal scales share ordinal correspondence markers.  The
  * dashed vertical lines connect those markers rather than implying that time
@@ -64,6 +82,8 @@ export function RunTimelineChart({
   const rows = timeline.rows;
   const maximumTokens = Math.max(1, ...rows.map((row) => row.llm.in_total));
   const tokenRowHeight = TOKEN_PANEL_HEIGHT / Math.max(rows.length, 1);
+  const displayedEvents = timeline.events.slice(0, EVENT_RAIL_LIMIT);
+  const hiddenEventCount = timeline.events.length - displayedEvents.length;
   const correspondenceX = (index: number) =>
     PLOT_LEFT + ((index + 0.5) / Math.max(rows.length, 1)) * PLOT_WIDTH;
 
@@ -87,6 +107,10 @@ export function RunTimelineChart({
             const duration = Math.max(0.001, Date.parse(row.end) - Date.parse(row.start));
             const activeWidth = Math.min(width, Math.max(2, width * ((row.active_s * 1000) / duration)));
             const idle = idleLabel(row.tags, labels);
+            const nextX =
+              index + 1 < rows.length
+                ? PLOT_LEFT + timeCoordinate(rows[index + 1].start, timeline.window.from, timeline.window.to, PLOT_WIDTH)
+                : PLOT_LEFT + PLOT_WIDTH;
             return (
               <g key={`${row.turn ?? "bucket"}-${index}`}>
                 <rect
@@ -95,8 +119,7 @@ export function RunTimelineChart({
                   width={width}
                   height={BAR_HEIGHT}
                   rx="3"
-                  className="fill-muted/70"
-                  stroke={row.anomalies.length > 0 ? "hsl(var(--destructive))" : "hsl(var(--border))"}
+                  className={cn("fill-muted/70", row.anomalies.length > 0 ? "stroke-destructive" : "stroke-border")}
                 />
                 <rect
                   x={x}
@@ -108,7 +131,7 @@ export function RunTimelineChart({
                 >
                   <title>{`${rowLabel(row, labels)} · ${row.active_s.toFixed(1)}s active`}</title>
                 </rect>
-                {idle ? (
+                {idle && nextX - x >= IDLE_LABEL_MIN_WIDTH ? (
                   <text x={x} y="104" className="fill-muted-foreground">
                     {idle}
                   </text>
@@ -127,7 +150,7 @@ export function RunTimelineChart({
             x2={correspondenceX(index)}
             y1="100"
             y2="197"
-            stroke="hsl(var(--muted-foreground))"
+            className="stroke-muted-foreground"
             strokeDasharray="4 4"
             strokeOpacity="0.75"
           />
@@ -192,15 +215,17 @@ export function RunTimelineChart({
       <div aria-label={labels.eventRail} className={cn(FLEX, "flex-wrap items-center gap-2 border-t border-border pt-2 font-mono text-[11px]")}>
         <span className="text-muted-foreground">{labels.eventRail}</span>
         {timeline.events.length === 0 ? <span className="text-muted-foreground">—</span> : null}
-        {timeline.events.map((event, index) => (
+        {displayedEvents.map((event, index) => (
           <span
             key={`${event.kind}-${event.ts}-${index}`}
-            className={event.kind.includes("failed") || event.kind.includes("timeout") ? "text-destructive" : "text-muted-foreground"}
+            data-testid="event-chip"
+            className={eventChipClass(event.kind)}
             title={event.label ?? event.ts}
           >
             {event.kind}
           </span>
         ))}
+        {hiddenEventCount > 0 ? <span className="text-muted-foreground">+{hiddenEventCount} more</span> : null}
       </div>
 
       {hovered ? (
