@@ -429,9 +429,9 @@ def test_metrics_logql_timeseries_via_loki(
     fake = _FakeLokiClient(
         _loki_payload(
             [
-                ("1786726800000000000", "0.1"),
-                ("1786730400000000000", "0.2"),
-                ("1786734000000000000", "0.3"),
+                ("1786726800", "0.1"),
+                ("1786730400", "0.2"),
+                ("1786734000", "0.3"),
             ]
         )
     )
@@ -475,9 +475,7 @@ def test_metrics_logql_stat_via_loki(
         ),
     )
     db_conn.commit()
-    fake = _FakeLokiClient(
-        _loki_payload([("1786726800000000000", "0.1"), ("1786730400000000000", "0.2")])
-    )
+    fake = _FakeLokiClient(_loki_payload([("1786726800", "0.1"), ("1786730400", "0.2")]))
     monkeypatch.setattr(loki_events, "_client", _client_accessor(fake))
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
