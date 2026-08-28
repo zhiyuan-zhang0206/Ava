@@ -15,6 +15,7 @@ from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
 
+from ava._sdk_validation import coerce_str
 from ava.security import scan_content
 from shared.config import settings
 
@@ -82,6 +83,7 @@ def servers() -> list[str]:
 def description(server: str) -> str | None:
     """One-line summary of a configured server, or None when it declares
     none."""
+    server = coerce_str(server, "server")
     config = _load_config()
     if server not in config:
         raise MCPServerNotFound(f"ava.mcps has no server {server!r} (have: {sorted(config)})")

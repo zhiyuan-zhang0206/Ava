@@ -11,6 +11,7 @@ import re as _re
 import tempfile
 from typing import Any
 
+from ava._sdk_validation import coerce_str
 from ava.shell import _background
 from ava.shell import sessions as _sessions
 from shared.watcher import (
@@ -510,6 +511,9 @@ def launch(code: str, timeout: float | datetime.timedelta | str, *, name: str) -
         The watcher's session id — while it runs, the watcher is one of your
         shell sessions, managed like any other.
     """
+    code = coerce_str(code, "code")
+    timeout = coerce_str(timeout, "timeout", allow_types=(int, float, datetime.timedelta))
+    name = coerce_str(name, "name")
     return _spawn(
         code,
         _parse_timeout(timeout),
@@ -550,6 +554,13 @@ def cron(
     """
     from shared.config import cluster_tz_name, host_tz_name
 
+    expr = coerce_str(expr, "expr")
+    message = coerce_str(message, "message")
+    timezone = coerce_str(timezone, "timezone", allow_none=True)
+    end_time = coerce_str(
+        end_time, "end_time", allow_none=True, allow_types=(datetime.datetime, datetime.timedelta)
+    )
+    name = coerce_str(name, "name")
     _validate_message(message)
     validate_cron(expr)
     # Default to the cluster clock when authoritative; a settings-lite
@@ -601,6 +612,9 @@ def at(
     """
     from shared.config import cluster_tz_name
 
+    when = coerce_str(when, "when", allow_types=(datetime.datetime, datetime.timedelta))
+    message = coerce_str(message, "message")
+    name = coerce_str(name, "name")
     _validate_message(message)
     due_at = normalize_when(when)
     if due_at < datetime.datetime.now(datetime.UTC):

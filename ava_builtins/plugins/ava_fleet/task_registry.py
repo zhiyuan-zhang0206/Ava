@@ -13,6 +13,7 @@ import psycopg
 import ava
 import ava._boot
 import ava.agents
+from ava._sdk_validation import coerce_str, coerce_typed
 from shared.audit_events import insert_event_log
 from shared.live_announce import publish_task_created_sync, publish_task_updated_sync
 from shared.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority, validate_priority
@@ -248,6 +249,15 @@ def create(
         priority: "P0" (highest) through "P3" (lowest).
         brief: deprecated alias for description.
     """
+    title = coerce_str(title, "title")
+    description = coerce_str(description, "description", allow_none=True)
+    parent = coerce_typed(parent, "parent", int)
+    remind_interval_seconds = coerce_typed(
+        remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
+    )
+    owner = coerce_typed(owner, "owner", int, allow_none=True)
+    priority = coerce_str(priority, "priority")
+    brief = coerce_str(brief, "brief", allow_none=True)
     description, remind_interval_seconds, priority = _resolve_create_args(
         brief, description, remind_interval_seconds, priority
     )
@@ -306,6 +316,17 @@ def create_and_assign(
     Returns:
         (task, agent_id).
     """
+    title = coerce_str(title, "title")
+    description = coerce_str(description, "description")
+    preset = coerce_str(preset, "preset")
+    label = coerce_str(label, "label", allow_none=True)
+    config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
+    machine = coerce_str(machine, "machine", allow_none=True)
+    parent = coerce_typed(parent, "parent", int)
+    remind_interval_seconds = coerce_typed(
+        remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
+    )
+    priority = coerce_str(priority, "priority")
     # 0. Validate the parent before spawning: create() would reject a bad
     # parent after the agent exists, leaving an orphaned agent behind.
     with ava.DB.transaction(), ava.DB.cursor() as cur:
@@ -631,6 +652,22 @@ def update(
         parent_id: reparent (explicit None = system root; int = set parent).
         content: deprecated alias for results.
     """
+    task_id = coerce_typed(task_id, "task_id", int)
+    status = coerce_str(status, "status", allow_none=True)
+    title = coerce_str(title, "title", allow_none=True)
+    description = coerce_str(description, "description", allow_none=True)
+    results = coerce_str(results, "results", allow_none=True)
+    if owner is not _UNSET:
+        owner = coerce_typed(owner, "owner", int, allow_none=True)
+    if remind_interval_seconds is not _UNSET:
+        remind_interval_seconds = coerce_typed(
+            remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
+        )
+    priority = coerce_str(priority, "priority", allow_none=True)
+    if parent_id is not _UNSET:
+        parent_id = coerce_typed(parent_id, "parent_id", int, allow_none=True)
+    content = coerce_str(content, "content", allow_none=True)
+    note = coerce_str(note, "note", allow_none=True)
     status, results = _resolve_update_args(status, content, results)
 
     sets, params, payload, owner_changing, changes = _collect_update_fields(
@@ -821,11 +858,14 @@ def _is_terminated(agent_id: int) -> bool:
 
 def log(task_id: int, message: str) -> None:
     """Append a timestamped line to a task's result log."""
+    task_id = coerce_typed(task_id, "task_id", int)
+    message = coerce_str(message, "message")
     update(task_id, note=message)
 
 
 def get(task_id: int) -> Task:
     """Return the task with this id."""
+    task_id = coerce_typed(task_id, "task_id", int)
     with ava.DB.cursor() as cur:
         cur.execute(f"SELECT {_COLS} FROM agent_tasks WHERE id = %s", (task_id,))  # noqa: S608
         row = cur.fetchone()
@@ -888,6 +928,10 @@ def list(
         parent: keep only direct subtasks of this task; with recursive=True,
             its whole descendant subtree.
     """
+    parent = coerce_typed(parent, "parent", int, allow_none=True)
+    owner = coerce_typed(owner, "owner", int, allow_none=True)
+    status = coerce_str(status, "status", allow_none=True)
+    recursive = coerce_typed(recursive, "recursive", bool)
     if status is not None and status not in _STATUSES and status != "ongoing":
         raise ValueError(f"status must be one of {sorted(_STATUSES)} or 'ongoing', got {status!r}")
 

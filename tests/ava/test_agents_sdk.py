@@ -195,8 +195,7 @@ class TestSpawn:
         [
             # Runtime value of `("a" "b",)`: implicit concatenation plus trailing comma.
             pytest.param(("ab",), "ab", id="implicit-concatenation-tuple"),
-            pytest.param(("a", "b"), "ab", id="multi-string-tuple"),
-            pytest.param(["a", "b"], "ab", id="string-list"),
+            pytest.param(["ab"], "ab", id="single-string-list"),
             pytest.param("ok", "ok", id="plain-string"),
         ],
     )
@@ -221,9 +220,27 @@ class TestSpawn:
 
         with pytest.raises(
             TypeError,
-            match="prompt must be a string or a list/tuple of strings, got int",
+            match="prompt must be a string, got int",
         ):
             agents.spawn(prompt=42)  # pyright: ignore[reportArgumentType]
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            pytest.param(("a", "b"), id="multi-string-tuple"),
+            pytest.param(["a", "b"], id="multi-string-list"),
+        ],
+    )
+    def test_spawn_rejects_multi_element_prompt(
+        self, monkeypatch: pytest.MonkeyPatch, prompt: object
+    ) -> None:
+        """A multi-element prompt sequence is a coding mistake — TypeError, never
+        silently joined (user ruling 2026-08-28)."""
+        from ava import agents
+
+        monkeypatch.setattr(agents._client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        with pytest.raises(TypeError, match="prompt must be a string"):
+            agents.spawn(prompt=prompt)  # pyright: ignore[reportArgumentType]
 
 
 class TestSpawnFork:
@@ -344,8 +361,7 @@ class TestSendMessage:
         [
             # Runtime value of `("ab",)`: implicit concatenation plus trailing comma.
             pytest.param(("ab",), "ab", id="implicit-concatenation-tuple"),
-            pytest.param(("a", "b"), "ab", id="multi-string-tuple"),
-            pytest.param(["a", "b"], "ab", id="string-list"),
+            pytest.param(["ab"], "ab", id="single-string-list"),
             pytest.param("ok", "ok", id="plain-string"),
         ],
     )
@@ -355,8 +371,8 @@ class TestSendMessage:
         content: object,
         expected: str,
     ) -> None:
-        """A trailing-comma string tuple must reach the client as one joined
-        string — an all-string array on the wire 422s the gateway's
+        """A trailing-comma string tuple must reach the client as the string it
+        wraps — an all-string array on the wire 422s the gateway's
         `AgentMessageIn.content` (2026-08-28 agents 2697/2986)."""
         from ava import agents
 
@@ -370,6 +386,27 @@ class TestSendMessage:
         agents.send_message(7, content)  # pyright: ignore[reportArgumentType]
         assert seen["content"] == expected
         assert seen["source"] == f"agent:{ava.self.AGENT_ID}"
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            pytest.param(("a", "b"), id="multi-string-tuple"),
+            pytest.param(["a", "b"], id="multi-string-list"),
+            pytest.param((1,), id="non-string-element"),
+            pytest.param(42, id="int"),
+        ],
+    )
+    def test_send_message_rejects_ambiguous_content(
+        self, monkeypatch: pytest.MonkeyPatch, content: object
+    ) -> None:
+        """A multi-element string sequence is a coding mistake, not a message —
+        it fails loud with TypeError instead of being silently joined (user
+        ruling 2026-08-28: multi-element sequences raise TypeError)."""
+        from ava import agents
+
+        monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        with pytest.raises(TypeError, match="content must be a string"):
+            agents.send_message(7, content)  # pyright: ignore[reportArgumentType]
 
     def test_send_message_content_blocks_pass_through(
         self, monkeypatch: pytest.MonkeyPatch
@@ -396,22 +433,21 @@ class TestSendMessage:
         monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         with pytest.raises(
             TypeError,
-            match="content must be a string or a list/tuple of strings, got int",
+            match="content must be a string, got int",
         ):
             agents.send_message(7, 42)  # pyright: ignore[reportArgumentType]
 
-    def test_send_message_tuple_content_inserts_joined_inbound(
+    def test_send_message_tuple_content_inserts_unwrapped_inbound(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """End-to-end: the trailing-comma tuple lands as one joined chat inbound,
+        """End-to-end: the trailing-comma tuple lands as the string it wraps,
         never as a JSON array (which the gateway would reject 422)."""
         ava._boot._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
-        content: object = (
-            "you got ",
-            "mail",
-        )
+        # Runtime value of `("you got " "mail",)`: implicit concatenation plus
+        # trailing comma — the exact LLM shape that 422'd before (2026-08-28).
+        content: object = ("you got mail",)
         ava.agents.send_message(peer_id, content)  # pyright: ignore[reportArgumentType]
 
         assert _inbound_rows(db_conn, peer_id) == [
@@ -464,12 +500,14 @@ class TestSendSystemNote:
         assert "system_note" in kinds
 
     def test_send_system_note_normalizes_tuple_content(self, db_conn: psycopg.Connection) -> None:
-        """Same trailing-comma class as send_message — a tuple joins to one note
-        instead of 422ing the gateway."""
+        """Same trailing-comma class as send_message — a one-element tuple
+        unwraps to the note text instead of 422ing the gateway."""
         ava._boot._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
-        content: object = ("Task #1 is now ", "assigned to you.")
+        # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
+        # concatenation plus trailing comma.
+        content: object = ("Task #1 is now assigned to you.",)
         inbound_id = ava.agents.send_system_note(peer_id, content)  # pyright: ignore[reportArgumentType]
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
@@ -477,6 +515,17 @@ class TestSendSystemNote:
             rows = cur.fetchall()
         assert len(rows) == 1
         assert rows[0][0] == "Task #1 is now assigned to you."
+
+    def test_send_system_note_rejects_multi_element_content(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """A multi-element tuple is a coding mistake — TypeError, never joined."""
+        ava._boot._agent_id = _spawn_agent()
+        peer_id = ava.agents.spawn()
+
+        content: object = ("Task #1 is now ", "assigned to you.")
+        with pytest.raises(TypeError, match="content must be a string"):
+            ava.agents.send_system_note(peer_id, content)  # pyright: ignore[reportArgumentType]
 
     def test_send_system_note_to_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         ava._boot._agent_id = _spawn_agent()
