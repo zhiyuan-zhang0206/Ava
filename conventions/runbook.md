@@ -41,8 +41,6 @@ possibly replaying tool side effects); claimed/pending reconciliation re-deliver
 inbounds, and checkpoint parent chains span N steps. Canary one agent with a
 `{"checkpoint_interval": 4}` config overlay plus an agent restart, or set
 `AVA_CHECKPOINT_INTERVAL=4` in the cluster `.env`; there is no auto-rollout.
-The full subset-by-subset canary protocol (verification + rollback) lives in
-[`docs/conventions/checkpoint-interval-canary.md`](../docs/conventions/checkpoint-interval-canary.md).
 
 An upstream dependency bump that adds checkpoint migration version N must ship
 that DDL as a paired Ava timestamp migration and advance
