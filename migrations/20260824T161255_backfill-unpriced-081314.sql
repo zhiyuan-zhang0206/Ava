@@ -37,46 +37,54 @@ SELECT agent_id, day, model, llm_calls, costed_calls, unpriced_calls,
 FROM agent_model_tokens_daily
 WHERE day IN ('2026-08-13', '2026-08-14') AND unpriced_calls > 0;
 
-INSERT INTO agent_model_tokens_daily
-    (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached,
-     tokens_reasoning, cost_usd, costed_calls, unpriced_calls)
-SELECT e.agent_id,
-       (e.ts AT TIME ZONE 'UTC')::date AS day,
-       COALESCE(e.attributes->>'model', '') AS model,
-       COUNT(*),
-       COALESCE(SUM((e.attributes->>'in_total')::bigint), 0),
-       COALESCE(SUM((e.attributes->>'out_total')::bigint), 0),
-       COALESCE(SUM((e.attributes->>'cache_read')::bigint), 0),
-       COALESCE(SUM((e.attributes->>'reasoning')::bigint), 0),
-       COALESCE(SUM((e.attributes->>'cost_usd')::float8), 0),
-       COUNT(e.attributes->>'cost_usd'),
-       COUNT(*) - COUNT(e.attributes->>'cost_usd')
-FROM events e
-JOIN ledger_unpriced_backfill_20260824 s
-  ON s.agent_id = e.agent_id
- AND s.day = (e.ts AT TIME ZONE 'UTC')::date
- AND s.model = COALESCE(e.attributes->>'model', '')
- AND s.costed_calls = 0
-JOIN agent_model_tokens_daily d
-  ON d.agent_id = e.agent_id
- AND d.day = (e.ts AT TIME ZONE 'UTC')::date
- AND d.model = COALESCE(e.attributes->>'model', '')
- AND d.costed_calls = 0
-WHERE e.event_name = 'llm_usage'
-  AND e.agent_id IS NOT NULL
-  AND e.ts >= '2026-08-13T00:00:00Z'
-  AND e.ts < '2026-08-14T00:00:00Z'
-GROUP BY e.agent_id, (e.ts AT TIME ZONE 'UTC')::date,
-         COALESCE(e.attributes->>'model', '')
-ON CONFLICT (agent_id, day, model) DO UPDATE SET
-    llm_calls      = agent_model_tokens_daily.llm_calls + EXCLUDED.llm_calls,
-    tokens_in      = agent_model_tokens_daily.tokens_in + EXCLUDED.tokens_in,
-    tokens_out     = agent_model_tokens_daily.tokens_out + EXCLUDED.tokens_out,
-    tokens_cached  = agent_model_tokens_daily.tokens_cached + EXCLUDED.tokens_cached,
-    tokens_reasoning = agent_model_tokens_daily.tokens_reasoning + EXCLUDED.tokens_reasoning,
-    cost_usd       = agent_model_tokens_daily.cost_usd + EXCLUDED.cost_usd,
-    costed_calls   = agent_model_tokens_daily.costed_calls + EXCLUDED.costed_calls,
-    unpriced_calls = agent_model_tokens_daily.unpriced_calls + EXCLUDED.unpriced_calls;
+-- The events read is guarded: the frozen PG `events` archive was dropped by
+-- migration 20260829T030000_drop-events-archive (task #1823), so a fresh-DB
+-- replay (baseline without the table) must skip the archive merge.
+DO $$
+BEGIN
+    IF to_regclass('public.events') IS NOT NULL THEN
+        INSERT INTO agent_model_tokens_daily
+            (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached,
+             tokens_reasoning, cost_usd, costed_calls, unpriced_calls)
+        SELECT e.agent_id,
+               (e.ts AT TIME ZONE 'UTC')::date AS day,
+               COALESCE(e.attributes->>'model', '') AS model,
+               COUNT(*),
+               COALESCE(SUM((e.attributes->>'in_total')::bigint), 0),
+               COALESCE(SUM((e.attributes->>'out_total')::bigint), 0),
+               COALESCE(SUM((e.attributes->>'cache_read')::bigint), 0),
+               COALESCE(SUM((e.attributes->>'reasoning')::bigint), 0),
+               COALESCE(SUM((e.attributes->>'cost_usd')::float8), 0),
+               COUNT(e.attributes->>'cost_usd'),
+               COUNT(*) - COUNT(e.attributes->>'cost_usd')
+        FROM events e
+        JOIN ledger_unpriced_backfill_20260824 s
+          ON s.agent_id = e.agent_id
+         AND s.day = (e.ts AT TIME ZONE 'UTC')::date
+         AND s.model = COALESCE(e.attributes->>'model', '')
+         AND s.costed_calls = 0
+        JOIN agent_model_tokens_daily d
+          ON d.agent_id = e.agent_id
+         AND d.day = (e.ts AT TIME ZONE 'UTC')::date
+         AND d.model = COALESCE(e.attributes->>'model', '')
+         AND d.costed_calls = 0
+        WHERE e.event_name = 'llm_usage'
+          AND e.agent_id IS NOT NULL
+          AND e.ts >= '2026-08-13T00:00:00Z'
+          AND e.ts < '2026-08-14T00:00:00Z'
+        GROUP BY e.agent_id, (e.ts AT TIME ZONE 'UTC')::date,
+                 COALESCE(e.attributes->>'model', '')
+        ON CONFLICT (agent_id, day, model) DO UPDATE SET
+            llm_calls      = agent_model_tokens_daily.llm_calls + EXCLUDED.llm_calls,
+            tokens_in      = agent_model_tokens_daily.tokens_in + EXCLUDED.tokens_in,
+            tokens_out     = agent_model_tokens_daily.tokens_out + EXCLUDED.tokens_out,
+            tokens_cached  = agent_model_tokens_daily.tokens_cached + EXCLUDED.tokens_cached,
+            tokens_reasoning = agent_model_tokens_daily.tokens_reasoning + EXCLUDED.tokens_reasoning,
+            cost_usd       = agent_model_tokens_daily.cost_usd + EXCLUDED.cost_usd,
+            costed_calls   = agent_model_tokens_daily.costed_calls + EXCLUDED.costed_calls,
+            unpriced_calls = agent_model_tokens_daily.unpriced_calls + EXCLUDED.unpriced_calls;
+    END IF;
+END $$;
 
 UPDATE agent_model_tokens_daily d SET
     cost_usd = d.cost_usd + (

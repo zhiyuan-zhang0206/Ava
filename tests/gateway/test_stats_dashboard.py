@@ -11,7 +11,6 @@ populated via INSERT of real rows.
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
@@ -86,33 +85,6 @@ def _insert_token_ledger_row(
             "(agent_id, day, model, tokens_in, tokens_out, tokens_cached, cost_usd) "
             "VALUES (%s, (now() AT TIME ZONE 'UTC')::date - %s, %s, %s, %s, %s, %s)",
             (agent_id, days_ago, model, tokens_in, tokens_out, tokens_cached, cost_usd),
-        )
-
-
-def _insert_event(
-    db: psycopg.Connection,
-    *,
-    event: str,
-    level: str = "INFO",
-    agent_id: int | None = None,
-    payload: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    ts_offset_hours: float = 0,
-    category: str = "telemetry",
-) -> None:
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, level, event_name, attributes, machine, process, category, source) "
-            "VALUES (now() - %s * interval '1 hour', %s, %s, %s, %s::jsonb, "
-            "'test', 'test', %s, 'test')",
-            (
-                ts_offset_hours,
-                agent_id,
-                level.lower(),
-                event,
-                json.dumps(payload or {}),
-                category,
-            ),
         )
 
 
@@ -659,7 +631,8 @@ def test_dashboard_aggregates_turn_end_filters_ok(
 def test_dashboard_default_24h_window_filters_old_rows(
     db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """Loki aggregates include only recent usage; the old DB row is metadata only."""
+    """Loki aggregates include only recent usage (the PG events table is gone
+    since the #1823 cleanup — the stream lives in Loki)."""
     aid = _insert_agent(db_conn, status="running")
     fake_loki.add(
         event="llm_usage",
@@ -671,20 +644,6 @@ def test_dashboard_default_24h_window_filters_old_rows(
         event="llm_usage",
         agent_id=aid,
         payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 0.2},
-        ts_offset_hours=1,
-    )
-    _insert_event(
-        db_conn,
-        event="llm_usage",
-        agent_id=aid,
-        payload={"in_total": 999, "out_total": 999, "cache_read": 0},
-        ts_offset_hours=25,
-    )
-    _insert_event(
-        db_conn,
-        event="llm_usage",
-        agent_id=aid,
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0},
         ts_offset_hours=1,
     )
     db_conn.commit()

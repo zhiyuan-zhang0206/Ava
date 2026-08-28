@@ -3,22 +3,20 @@
 Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Three
 loops:
 
-- Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): the
-  events-archive slices — ensure the current + next UTC-month partitions exist
-  for the unified `events` stream (`services.events_maintenance.partitions`),
-  apply the retention DROP/prune of expired months
-  (`services.events_maintenance.retention`), run the table-retention pass for
-  the append-only fact tables (`services.events_maintenance.table_retention`),
-  recompute the day-grain rollup tables
-  (`services.events_maintenance.rollup`), run the index-bloat governance
-  (`services.events_maintenance.reindex`) — PLUS, unconditionally, the
-  Rule B checkpoint reaper
-  (`services.events_maintenance.checkpoint_reaper`, Task #1057): terminated /
-  inactive agents' checkpoints are trimmed to keep=1 (the PostgresSaver is
-  append-only, so terminated threads grow without bound — the 2026-08-08 disk
-  crisis: 21GB of blobs; the surviving latest checkpoint keeps a resurrect
-  fully restorable) and the incremental blob VACUUM
-  (`services.events_maintenance.blob_vacuum`).
+- Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): recompute
+  the day-grain rollup tables (`services.events_maintenance.rollup`), replay
+  ledger gaps from the retained JSONL mirror
+  (`services.events_maintenance.jsonl_replay`), run the Rule B checkpoint
+  reaper (`services.events_maintenance.checkpoint_reaper`, Task #1057):
+  terminated / inactive agents' checkpoints are trimmed to keep=1 (the
+  PostgresSaver is append-only, so terminated threads grow without bound — the
+  2026-08-08 disk crisis: 21GB of blobs; the surviving latest checkpoint keeps
+  a resurrect fully restorable), the incremental blob VACUUM
+  (`services.events_maintenance.blob_vacuum`), and the hourly checkpoint
+  size/row-count telemetry sample. The PG `events` archive slices
+  (partitions / retention / table retention / index governance) were removed
+  with the task #1281/#1823 cleanup — the table was dropped and its data lives
+  in the Loki archive stream.
 - Fast loop (60s): Rule A — trim overgrown LIVE threads
   (`services.events_maintenance.checkpoint_reaper.trim_overgrown_threads`,
   keep=2 past 20), replacing the removed agent-side idle trim.
@@ -31,12 +29,11 @@ healthz until the watchdog replaces the process and its orphaned worker thread.
 The same trackers are projected as unified envelope components, so the legacy
 per-loop snapshots and the component degradation reasons describe one state.
 
-The events-archive slices only run when `AVA_EVENTS_MAINTENANCE_ENABLED` is
-set. Since the LGTM cutover (task #1197) the PG `events` copy is a read-only
-archive — nothing writes or reads it — so the flag defaults off and those
-slices are no-ops on every cluster. The checkpoint slices are NOT gated:
-checkpoint_blobs growth is independent of the events pipeline, and the daemon
-must keep reaping even when the archive slices are off (the 2026-08-12 design
+The PG `events` archive slices (partitions / retention / table retention /
+index governance) were removed with the task #1281/#1823 cleanup — the frozen
+archive was dropped and its rows live in the Loki archive stream. The
+checkpoint slices are NOT gated: checkpoint_blobs growth is independent of the
+events pipeline, and the daemon must keep reaping (the 2026-08-12 design
 regression: gating the whole daemon off stopped the reaper and checkpoint_blobs
 grew ~150MB/h unbounded).
 
@@ -87,12 +84,8 @@ from services.events_maintenance.checkpoint_reaper import (
     trim_overgrown_threads,
 )
 from services.events_maintenance.jsonl_replay import replay_gap_days
-from services.events_maintenance.partitions import ensure_month_partitions
-from services.events_maintenance.reindex import run_governance_pass
 from services.events_maintenance.resolution import run_resolution_slice
-from services.events_maintenance.retention import apply_retention
 from services.events_maintenance.rollup import compute_rollup
-from services.events_maintenance.table_retention import apply_table_retention
 from shared.config import settings
 from shared.daemon_health import (
     LivenessGroup,
@@ -102,7 +95,6 @@ from shared.daemon_health import (
     stop_health_server,
 )
 from shared.daemon_shutdown import install_graceful_shutdown
-from shared.events.contract import EVENTS, RETENTION_BY_CATEGORY, retention_days
 from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 from shared.paths import legacy_pid_path
@@ -123,76 +115,17 @@ class WedgedPassError(RuntimeError):
     """A blocking pass exceeded its deadline and left a worker thread orphaned."""
 
 
-def _retention_policy() -> dict[str, int]:
-    """event_name -> retention days for the retention slice, derived from the
-    event registry (shared/events/contract.py) — the single source of truth:
-    each event's `EventSpec.retention_days` override, else its category floor
-    (audit 365d / telemetry 90d / log 30d). The settings knobs
-    (AVA_EVENTS_RETENTION_*_DAYS) are optional per-category overrides (None =
-    registry default), applied only to events without an explicit per-event
-    override, so changing the registry changes the docs and the daemon's
-    behavior together (R2: one fact, one declaration)."""
-    policy = {name: retention_days(name) for name in EVENTS}
-    for category in RETENTION_BY_CATEGORY:
-        override = getattr(settings.daemon, f"events_retention_{category}_days")
-        if override is None:
-            continue
-        for name, spec in EVENTS.items():
-            if spec.category == category and spec.retention_days is None:
-                policy[name] = override
-    return policy
-
-
 def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
-    """One hourly pass. The events-archive slices — partition rolling, events
-    retention (drop/prune expired months), table retention, index-bloat
-    governance (audit M2) — run only when
-    `AVA_EVENTS_MAINTENANCE_ENABLED` is set; since the LGTM cutover (task
-    #1197) the PG `events` copy is a read-only archive that nothing writes or
-    reads, so those slices are dead weight on every cluster. Three steps are
-    NOT gated: the cost-ledger rollup (Loki → `agent_model_tokens_daily` —
-    Loki only retains 168h, so skipping passes permanently loses days), the
-    Rule B checkpoint reaper (terminated / inactive agents to keep=1), and the
-    blob VACUUM — checkpoint_blobs growth is independent of the events
+    """One hourly pass: the cost-ledger rollup (Loki → `agent_model_tokens_daily`
+    — Loki only retains 168h, so skipping passes permanently loses days), the
+    JSONL gap replay, the Rule B checkpoint reaper (terminated / inactive
+    agents to keep=1), the hourly checkpoint size/row-count telemetry sample,
+    and the blob VACUUM — checkpoint_blobs growth is independent of the events
     pipeline, and the reaper is the only thing that bounds it (gating the
     daemon off, the 2026-08-12 design regression, let blobs grow ~150MB/h
     unbounded). One `now` drives the time-based steps.
-    Logs what each step did; a no-op pass logs nothing.
-
-    Each step runs on a SEPARATE pool connection so the partition DDL commits
-    (and releases its locks) before the potentially long rollup starts —
-    sharing one non-autocommit connection would hold the CREATE PARTITION /
-    DROP PARTITION locks through the whole rollup (blocking event-table
-    writes) and let a rollup failure roll back the just-created partitions. The
-    retention step runs AFTER partition creation so months stranded in DEFAULT
-    are first carved into their own partitions and then dropped/pruned like any
-    other month."""
+    Logs what each step did; a no-op pass logs nothing."""
     now = datetime.now(tz=UTC)
-    if settings.daemon.events_maintenance_enabled:
-        with pool.connection() as conn:
-            created = ensure_month_partitions(conn, now_utc=now)
-        progress.beat()
-        with pool.connection() as conn:
-            retention = apply_retention(conn, now_utc=now, retention_days=_retention_policy())
-        progress.beat()
-        with pool.connection() as conn:
-            table_retention = apply_table_retention(conn, now_utc=now)
-        progress.beat()
-        # Index-bloat governance (audit M2 / P1-2 ①): REINDEX CONCURRENTLY the hot
-        # events partition indexes past their bytes/row threshold. Runs LAST and on
-        # its own DIRECT autocommit connection — CONCURRENTLY cannot run in a
-        # transaction and must not ride the transaction-mode pooler. A no-op pass
-        # (healthy indexes) logs nothing.
-        reindex_result = run_governance_pass(now_utc=now)
-        progress.beat()
-        if created:
-            _log.info("[events-maintenance] created partitions: %s", ", ".join(created))
-        if retention.dropped or retention.pruned:
-            _log.info("[events-maintenance] retention: %s", retention.summary())
-        if table_retention.deleted:
-            _log.info("[events-maintenance] table retention: %s", table_retention.summary())
-        if reindex_result.summary():
-            _log.info("[events-maintenance] index governance: %s", reindex_result.summary())
     with pool.connection() as conn:
         result = compute_rollup(conn, now_utc=now)
         replay_result = replay_gap_days(conn, now_utc=now)
@@ -408,8 +341,7 @@ async def _dispatch_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
 
 async def _checkpoint_trim_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     """Rule A fast loop: trim overgrown live threads every
-    `_CHECKPOINT_TRIM_INTERVAL_S`. Runs unconditionally (independent of
-    `AVA_EVENTS_MAINTENANCE_ENABLED`) — the hourly pass only bounds stale
+    `_CHECKPOINT_TRIM_INTERVAL_S`. Runs unconditionally — the hourly pass only bounds stale
     threads, and a continuously working agent would grow without bound between
     hourly passes. Same failure posture as `_dispatch_loop`: a transient error
     waits a full interval (the trim is idempotent and self-catching-up), a

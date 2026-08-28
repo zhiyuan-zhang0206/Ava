@@ -644,78 +644,19 @@ CREATE TRIGGER agents_meta_status_changed_at
     WHEN (OLD.status IS DISTINCT FROM NEW.status)
     EXECUTE FUNCTION set_agents_meta_status_changed_at();
 
--- ─────────────── events (unified event stream — FROZEN ARCHIVE) ───────────────
--- FROZEN ARCHIVE since the LGTM cutover (task #1197, 2026-08-12): the live
--- event stream ships to Loki via the unified OTLP emitter, and reads over
--- recent windows go through LogQL (gateway/loki_events.py) — this table
--- stopped receiving rows at the cutover. It serves retention/rollup and
--- deliberate historical reads only (issue #180).
+-- ─────────────── events archive (DROPPED — Loki archive stream) ───────────────
+-- The frozen PG `events` archive was dropped with the task #1281/#1823 cleanup
+-- (migration 20260829T030000_drop-events-archive): every pre-cutover event row
+-- lives in the Loki archive stream (parity-verified import, 365d retention),
+-- and the cold pg_dump archive is the long-term copy. The baseline omits the
+-- table so `db/schema.sql` stays the net effect of all migrations (the
+-- migration smoke's convergence check); post-baseline migrations that read
+-- `events` guard their reads with `to_regclass('events')` so fresh-DB replay
+-- skips them.
 --
--- The single event stream — the unified model (design §1) that audit, telemetry
--- and log signals share. Write path was the unified emitter
--- (shared/telemetry.py), the ONLY event-write entry every process used; the
--- legacy `event_log` / `agent_events` mirrors were removed with the migration
--- window (2026-08-06), and those tables are frozen (see their sections above).
---
--- `trace_id`/`span_id` are the OTel correlation keys captured from the active
--- span (turn_span) at emit time — one turn = one trace, every event in it
--- carries the same trace_id. `machine` is the required multi-host dimension,
--- bound at process start. `category` drives retention and alerting: the
--- events-maintenance daemon prunes/drops `events` month partitions by
--- per-category expiry (audit 365d / telemetry 90d / log 30d, tunable — see
--- services/events_maintenance/retention.py).
---
--- Level vocabulary is the lowercase debug/info/warning/error/critical — the
--- legacy `agent_events` table kept its UPPERCASE INFO/WARNING/ERROR; the two
--- vocabularies coexist in the baseline (see the agent_events section).
---
--- Partitioned by month exactly like agent_events: PK (id, ts), DEFAULT
--- catch-all here, month partitions (events_YYYY_MM) created at runtime by the
--- events-maintenance daemon. See
--- migrations/20260804T190839_unified-events-table.sql.
-CREATE TABLE events (
-    id               BIGSERIAL,
-    ts               TIMESTAMPTZ NOT NULL DEFAULT now(),
-    trace_id         TEXT,            -- OTel trace id (32 hex), from the active span
-    span_id          TEXT,            -- OTel span id (16 hex), from the active span
-    agent_id         BIGINT REFERENCES agents(id),  -- nullable: service-level events
-    machine          TEXT NOT NULL,   -- host dimension — required
-    process          TEXT NOT NULL,   -- gateway / watchdog / agent-kernel / ops / ...
-    category         TEXT NOT NULL,   -- audit | telemetry | log
-    event_name       TEXT NOT NULL,   -- llm_usage / turn_end / spawn / send_message / log ... (OTel event.name)
-    level            TEXT NOT NULL,   -- debug | info | warning | error | critical
-    source           TEXT NOT NULL,   -- agent:123 / user / system / self
-    target_agent_id  BIGINT REFERENCES agents(id),  -- business events' object
-    attributes       JSONB NOT NULL DEFAULT '{}'::jsonb,
-    PRIMARY KEY (id, ts)
-) PARTITION BY RANGE (ts);
-
-COMMENT ON TABLE events IS
-    'Frozen archive since the LGTM cutover (task #1197): the live event stream ships to Loki via the unified OTLP emitter; reads over recent windows go through LogQL (gateway/loki_events.py). This copy serves retention/rollup and deliberate historical reads only.';
-
--- Query-pattern indexes (the reads the unified model must serve):
---   (agent_id, ts DESC)   per-agent windows (timeline / stats / inspect)
---   (event_name, ts DESC) event_name aggregation (llm_usage / turn_end / exec_*)
---   (category, ts DESC)   category scans (audit views / retention slicing)
---   (trace_id)            trace correlation: a log line jumps to its call chain
---   (machine, ts DESC)    cross-machine debugging
---   partial (ts DESC)     warning/error windows, kept small
-CREATE INDEX idx_events_agent_ts ON events (agent_id, ts DESC);
-CREATE INDEX idx_events_event_name_ts ON events (event_name, ts DESC);
-CREATE INDEX idx_events_category_ts ON events (category, ts DESC);
-CREATE INDEX idx_events_trace_id ON events (trace_id) WHERE trace_id IS NOT NULL;
-CREATE INDEX idx_events_machine_ts ON events (machine, ts DESC);
-CREATE INDEX idx_events_level_ts ON events (ts DESC) WHERE level IN ('warning', 'error', 'critical');
--- target_agent_id: FK-check support for DELETE FROM agents (RI trigger scans
--- per partition); agent_id is already covered by idx_events_agent_ts.
-CREATE INDEX idx_events_target_agent_id ON events (target_agent_id);
-
--- DEFAULT catch-all; month partitions created at runtime by the
--- events-maintenance daemon, same contract as agent_events.
-CREATE TABLE events_default PARTITION OF events DEFAULT;
-
--- Materialized inspector reads from the frozen events archive. This table is
--- valid only while `events` remains frozen; live history belongs in Loki.
+-- agent_archive_stats survives the drop: it materializes whole-life inspector
+-- values from the pre-cutover archive and is read directly, independent of the
+-- events table.
 CREATE TABLE agent_archive_stats (
     agent_id          BIGINT PRIMARY KEY REFERENCES agents(id),
     turn_distribution JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -726,7 +667,7 @@ CREATE TABLE agent_archive_stats (
 );
 
 COMMENT ON TABLE agent_archive_stats IS
-    'Materialized inspector reads from the frozen events archive. Valid only while events remains frozen; live history belongs in Loki.';
+    'Materialized whole-life inspector values from the pre-cutover events archive (task #1281: the raw archive lives in the Loki archive stream).';
 COMMENT ON COLUMN agent_archive_stats.turn_distribution IS
     'Ascending JSON pairs [duration_seconds, count] for archived turn_end events.';
 COMMENT ON COLUMN agent_archive_stats.active_seconds IS
@@ -736,7 +677,7 @@ COMMENT ON COLUMN agent_archive_stats.exec_seconds IS
 COMMENT ON COLUMN agent_archive_stats.lifecycle IS
     'Ascending JSON pairs [UTC timestamp, event name] for archived lifecycle replay.';
 COMMENT ON COLUMN agent_archive_stats.computed_at IS
-    'Backfill time; this materialization is valid only while the events archive is frozen.';
+    'Backfill time; this materialization is valid only while the events archive was frozen.';
 
 -- ─────────────── agent_tasks (the task registry) ───────────────
 -- Persistent, process-decoupled work items agents hand off to each other.

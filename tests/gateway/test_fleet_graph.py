@@ -731,20 +731,24 @@ def test_live_live_edge_still_returned_after_filter(
 # -- category negative samples: audit-only edges, telemetry must not form edges ---
 
 
-def test_telemetry_send_message_does_not_become_edge(db_conn: psycopg.Connection) -> None:
+def test_telemetry_send_message_does_not_become_edge(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
     """A send_message row with category='telemetry' must NOT become a graph
     edge — the edge query filters category='audit', so an accidental telemetry
-    write of a message-shaped event stays invisible to the graph."""
+    write of a message-shaped event stays invisible to the graph (the unified
+    stream lives in Loki since the #1823 cleanup)."""
     s = _seed_agent(db_conn)
     c = _seed_agent(db_conn)
     # category='telemetry' (the _llm_usage-style category), NOT audit.
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(agent_id, event_name, source, target_agent_id, machine, process, category, level) "
-            "VALUES (%s, 'send_message', 'test', %s, 'test', 'test', 'telemetry', 'info')",
-            (s, c),
-        )
+    fake_loki.add(
+        event="send_message",
+        agent_id=s,
+        target_agent_id=c,
+        category="telemetry",
+        ts=ARCHIVE_FREEZE_AT - timedelta(hours=1),
+        archive=True,
+    )
     db_conn.commit()
 
     with TestClient(app) as client:
@@ -754,21 +758,22 @@ def test_telemetry_send_message_does_not_become_edge(db_conn: psycopg.Connection
 
 
 def test_null_agent_id_audit_row_does_not_500_and_makes_no_edge(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
     """An audit row whose agent_id is NULL (service-level event — the W9
     telemetry change first allowed such rows to land) must not crash the
     graph endpoint: the edge query filters agent_id IS NOT NULL, so the
-    NULL to_agent never reaches the pydantic int field."""
+    NULL to_agent never reaches the pydantic int field (the unified stream
+    lives in Loki since the #1823 cleanup)."""
     t = _seed_agent(db_conn)  # target side is a real agent
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, event_name, source, target_agent_id, machine, process, category, level) "
-            "VALUES (now(), NULL, 'send_message', 'system', %s, "
-            "'test', 'test', 'audit', 'info')",
-            (t,),
-        )
+    fake_loki.add(
+        event="send_message",
+        agent_id=None,
+        target_agent_id=t,
+        category="audit",
+        ts=ARCHIVE_FREEZE_AT - timedelta(hours=1),
+        archive=True,
+    )
     db_conn.commit()
 
     with TestClient(app) as client:

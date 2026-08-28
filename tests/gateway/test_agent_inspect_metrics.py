@@ -17,7 +17,6 @@ per-agent filtering, stat vs series payloads, macro translation).
 from __future__ import annotations
 
 import importlib
-import json
 import sys
 from contextlib import contextmanager
 from typing import Any, Literal
@@ -40,20 +39,17 @@ from shared.plugin_metrics import MetricSpec
 # is over; the per-agent inspector idiom lives in the LogQL dialect. A
 # timeseries SQL metric is no longer expressible (bucketing was a macro
 # feature), so the SQL inspector surface is stat-shaped (core_live_agents).
+# Post-#1823 the SQL metric dialect reads live tables only (the frozen
+# `events` archive was dropped); `agents_meta` is the surviving live shape
+# (see core_live_agents). The demo/stat queries below are agents_meta-based.
 _DEMO_QUERY = (
-    "SELECT 100.0 * count(*) FILTER (WHERE attributes->>'status' = 'done') "
-    '/ NULLIF(count(*), 0) AS "done %" '
-    "FROM events "
-    "WHERE event_name = 'task_update' AND category = 'audit' "
-    "AND attributes ? 'status'"
+    "SELECT 100.0 * count(*) FILTER (WHERE status = 'running') "
+    '/ NULLIF(count(*), 0) AS "running %" '
+    "FROM agents_meta"
 )
 
 # A stat-shaped inspector query (one aggregate row).
-_STAT_QUERY = (
-    "SELECT count(*) AS fixes "
-    "FROM events "
-    "WHERE event_name = 'syntax_fix' AND category = 'telemetry'"
-)
+_STAT_QUERY = "SELECT count(*) AS live FROM agents_meta WHERE status IN ('running', 'idling')"
 
 
 def _metric(
@@ -103,24 +99,6 @@ def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
             (tid,),
         )
     return tid
-
-
-def _insert_event(
-    db: psycopg.Connection,
-    *,
-    agent_id: int,
-    event_name: str = "task_update",
-    category: str = "audit",
-    payload: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    ts_offset_hours: float = 0,
-) -> None:
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events (ts, agent_id, level, event_name, attributes, machine, process, category, source) "
-            "VALUES (now() - %s * interval '1 hour', %s, 'info', %s, %s::jsonb, "
-            "'test', 'test', %s, 'test')",
-            (ts_offset_hours, agent_id, event_name, json.dumps(payload or {}), category),
-        )
 
 
 # ── file absent / agent unknown ───────────────────────────────────────────────
@@ -181,13 +159,8 @@ def test_metrics_stat_scalar(db_conn: psycopg.Connection, monkeypatch: pytest.Mo
     inspector surface is static now (task #180 PR C — no macro windows), so
     the query counts exactly what its own predicates select."""
     aid = _insert_agent(db_conn)
+    _insert_agent(db_conn)
     _patch_loader(monkeypatch, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
-    _insert_event(
-        db_conn, agent_id=aid, event_name="syntax_fix", category="telemetry", payload={"fixes": 1}
-    )
-    _insert_event(
-        db_conn, agent_id=aid, event_name="syntax_fix", category="telemetry", payload={"fixes": 1}
-    )
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
@@ -291,14 +264,10 @@ def test_metrics_runtime_query_error_per_metric(
         monkeypatch,
         _metric(
             name="broken",
-            query=(
-                "SELECT (attributes->>'status')::bigint AS n FROM events "
-                "WHERE event_name = 'task_update' AND category = 'audit'"
-            ),
+            query=("SELECT status::bigint AS n FROM agents_meta WHERE id = %(agent_id)s"),
         ),
         _metric(name="healthy", panel="stat", query=_STAT_QUERY),
     )
-    _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
@@ -306,7 +275,7 @@ def test_metrics_runtime_query_error_per_metric(
     by_name = {m["name"]: m for m in resp.json()}
     assert "bigint" in by_name["broken"]["error"].lower()
     assert by_name["healthy"]["error"] is None
-    assert by_name["healthy"]["value"] == 0
+    assert by_name["healthy"]["value"] == 1.0  # the seeded agents_meta row
 
 
 def test_metrics_read_only_is_transaction_scoped(
@@ -322,9 +291,6 @@ def test_metrics_read_only_is_transaction_scoped(
     the gateway's own pool must still accept writes."""
     aid = _insert_agent(db_conn)
     _patch_loader(monkeypatch, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
-    _insert_event(
-        db_conn, agent_id=aid, event_name="syntax_fix", category="telemetry", payload={"fixes": 1}
-    )
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
@@ -333,11 +299,7 @@ def test_metrics_read_only_is_transaction_scoped(
         # Same pool the endpoint used — a write must succeed on a fresh borrow.
         with app.state.db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO events (ts, agent_id, level, event_name, attributes, "
-                "machine, process, category, source) "
-                "VALUES (now(), %s, 'info', 'task_update', '{}'::jsonb, "
-                "'test', 'test', 'audit', 'test')",
-                (aid,),
+                "INSERT INTO agents (label) VALUES ('post-metrics-write')",
             )
 
 

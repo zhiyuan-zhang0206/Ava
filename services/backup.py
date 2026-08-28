@@ -389,14 +389,16 @@ def run_backup(
 
 
 def _db_size_breakdown(db_url: str | None = None) -> str:
-    """One-line DB composition for the backup log: total, the frozen `events`
-    archive, the LangGraph checkpoint tables, and everything else.
+    """One-line DB composition for the backup log: total, the LangGraph
+    checkpoint tables, and everything else.
 
-    The events archive (summed over its month partitions) and the checkpoint
-    tables dominate DB size and dump time; logging them on every backup makes
-    each artifact carry its own baseline for growth tracking. Best-effort by
-    contract: a failure (e.g. a fresh cluster missing the tables) degrades to
-    "unavailable" and never fails the backup.
+    The checkpoint tables dominate DB size and dump time; logging them on
+    every backup makes each artifact carry its own baseline for growth
+    tracking. The frozen PG `events` archive is no longer part of the
+    composition — it was dropped with the task #1281/#1823 cleanup (its data
+    lives in the Loki archive stream and the cold pg_dump archive). Best-effort
+    by contract: a failure (e.g. a fresh cluster missing the tables) degrades
+    to "unavailable" and never fails the backup.
 
     `db_url` mirrors `_run_backup`'s override: the composition is measured on
     the SAME database the dump will read. `_run_backup` always passes the
@@ -412,12 +414,6 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
             row = conn.execute(
                 """
                 SELECT pg_database_size(current_database()),
-                       COALESCE((SELECT sum(pg_total_relation_size(c.oid))
-                                 FROM pg_inherits i
-                                 JOIN pg_class c ON c.oid = i.inhrelid
-                                 JOIN pg_class p ON p.oid = i.inhparent
-                                 JOIN pg_namespace n ON n.oid = p.relnamespace
-                                 WHERE p.relname = 'events' AND n.nspname = 'public'), 0),
                        COALESCE(pg_total_relation_size(to_regclass('public.checkpoint_blobs')), 0),
                        COALESCE(pg_total_relation_size(to_regclass('public.checkpoints')), 0),
                        COALESCE(pg_total_relation_size(to_regclass('public.checkpoint_writes')), 0)
@@ -426,13 +422,10 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
     except Exception:
         return "unavailable"
     assert row is not None  # noqa: S101 — aggregate over fixed tables always returns one row
-    db, events, blobs, checkpoints, writes = (int(v) for v in row)
+    db, blobs, checkpoints, writes = (int(v) for v in row)
     checkpoint = blobs + checkpoints + writes
-    rest = max(db - events - checkpoint, 0)
-    return (
-        f"db={_mb(db)}MiB events={_mb(events)}MiB "
-        f"checkpoint={_mb(checkpoint)}MiB rest={_mb(rest)}MiB"
-    )
+    rest = max(db - checkpoint, 0)
+    return f"db={_mb(db)}MiB checkpoint={_mb(checkpoint)}MiB rest={_mb(rest)}MiB"
 
 
 def _mb(b: int) -> int:

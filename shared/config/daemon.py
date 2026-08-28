@@ -424,19 +424,6 @@ class DaemonSettings(EnvSettings):
         },
     )
 
-    events_maintenance_enabled: bool = Field(
-        default=False,
-        alias="AVA_EVENTS_MAINTENANCE_ENABLED",
-        description="Run the events-archive maintenance slices (partition rolling + retention + index governance) inside the events-maintenance daemon. The daemon itself always runs on the gateway: the cost-ledger rollup (Loki -> agent_model_tokens_daily), the checkpoint reaper (Rule A/B) and the blob vacuum are unconditional — the rollup must outlive Loki's 168h retention, and gating the daemon off stopped the reaper and checkpoint_blobs grew ~150MB/h (2026-08-12 design regression). Off by default since the LGTM cutover (task #1197): the PG events copy is a read-only archive.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
     events_maintenance_interval_seconds: float = Field(
         default=3600.0,
         alias="AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",
@@ -571,48 +558,6 @@ class DaemonSettings(EnvSettings):
         ge=1,
         alias="AVA_EVENTS_AUTO_DISMISS_DAYS",
         description="Days of consecutive non-empty six-hour Loki slices required before the optional stable-class auto-dismiss creates a dismissal.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    events_retention_audit_days: int = Field(
-        default=365,
-        ge=0,
-        alias="AVA_EVENTS_RETENTION_AUDIT_DAYS",
-        description="Retention (days) for category=audit rows in the unified events table: the events-maintenance daemon drops a whole month partition once every category in it has outlived its retention. Audit is the compliance category, so this is the long pole — telemetry/log rows in a mixed partition are pruned early, the partition itself is dropped when audit expires too. 0 = expire immediately (all closed months dropped on the next pass).",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    events_retention_telemetry_days: int = Field(
-        default=90,
-        ge=0,
-        alias="AVA_EVENTS_RETENTION_TELEMETRY_DAYS",
-        description="Retention (days) for category=telemetry rows in the unified events table (llm_usage / turn_end / exec / ...): the performance/cost analysis window. Expired telemetry rows are pruned from still-live month partitions ahead of the audit-driven whole-partition drop. 0 = expire immediately.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    events_retention_log_days: int | None = Field(
-        default=None,
-        ge=0,
-        alias="AVA_EVENTS_RETENTION_LOG_DAYS",
-        description="Optional override (days) for category=log retention in the unified events table: log value decays fastest and the local JSONL mirror keeps the full text, so the registry default (30d) applies unless overridden. None (default) = the registry default from shared/events/contract.py — the single source of truth. Expired log rows are pruned from still-live month partitions ahead of the audit-driven whole-partition drop. 0 = expire immediately.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
