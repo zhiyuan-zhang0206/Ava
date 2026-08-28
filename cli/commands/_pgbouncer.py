@@ -746,6 +746,11 @@ def _ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     from shared.envfile import remove_env, upsert_env
     from shared.url_secret import url_with_port
 
+    if settings.data_plane.is_remote:
+        # The pooler is a local-instance component; a remote/SaaS plane's URL
+        # is the provider's (its port is not this cluster's), so converge must
+        # neither rewrite it nor preflight the local binary.
+        return
     rec = get_record(ctx.ava_home)
     if rec is None:
         return

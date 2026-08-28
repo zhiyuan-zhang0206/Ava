@@ -15,7 +15,7 @@ from pydantic import Field, field_validator, model_validator
 from shared.config._base import EnvSettings
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.netutil import is_ipv4_literal, is_loopback_host
-from shared.url_secret import url_with_host, url_with_password, url_with_query_param
+from shared.url_secret import url_host, url_with_host, url_with_password, url_with_query_param
 
 
 def _self_machine_host() -> str:
@@ -70,6 +70,59 @@ def _loopback_if_self(url: str) -> str:
     if host == machine:  # urlsplit lowercases + unbrackets hostname; match that form
         return url_with_host(url, "127.0.0.1")
     return url
+
+
+def sslmode_for_url(url: str, configured: str) -> str | None:
+    """The libpq `sslmode` kwarg for a dial of `url`, or None when the dial
+    should carry none.
+
+    None means "leave TLS to the URL and libpq": the URL already names an
+    sslmode query parameter (the URL is the switch — a SaaS connection string
+    carries its own `sslmode=require` / `verify-full` and must win), or
+    `configured` (AVA_DB_SSLMODE) is empty — libpq's own default, 'prefer',
+    applies, so a local loopback dial against a non-TLS PgBouncer/Postgres
+    stays plaintext exactly as today.
+
+    A configured AVA_DB_SSLMODE is injected only when the URL is silent, so
+    the config field is a fallback default, never an override. psycopg merges
+    kwargs over the URL's conninfo params, so injecting here when the URL
+    already names a mode would silently downgrade a stricter URL mode.
+    """
+    from urllib.parse import parse_qs
+
+    if "sslmode" in parse_qs(urlsplit(url).query):
+        return None
+    return configured.strip() or None
+
+
+def resolved_pool_size(
+    min_size: int | None, max_size: int | None, default_min: int, default_max: int
+) -> tuple[int, int]:
+    """Resolve explicit pool sizes against the config defaults
+    (AVA_DB_POOL_MIN_SIZE / AVA_DB_POOL_MAX_SIZE): an explicit caller value
+    wins, None falls back to the defaults. A remote/SaaS data plane tunes its
+    pool footprint from config without code changes (Task #1752)."""
+    return (
+        min_size if min_size is not None else default_min,
+        max_size if max_size is not None else default_max,
+    )
+
+
+def gateway_url_host() -> str:
+    """The host this process dials as its gateway (`AVA_GATEWAY_URL`), lowercased
+    and unbracketed; "" when the gateway domain is not constructed in this
+    process's profile (or unset). Used by `shared.db.direct_db_url` to tell a
+    split agent-runner's URL — which names the GATEWAY's pooler, a foreign host
+    whose direct-exemption warning is meaningful — apart from a remote/SaaS
+    plane URL, which is direct by definition and must dial silently
+    (Task #1752)."""
+    from shared.config import settings
+
+    try:
+        url = settings.gateway.gateway_url
+    except AttributeError:
+        return ""
+    return (urlsplit(url).hostname or "").lower().removeprefix("[").removesuffix("]")
 
 
 class DataPlaneSettings(EnvSettings):
@@ -215,6 +268,61 @@ class DataPlaneSettings(EnvSettings):
         },
     )
 
+    db_sslmode: str = Field(
+        default="",
+        alias="AVA_DB_SSLMODE",
+        description=(
+            "libpq sslmode for every Postgres dial through the sanctioned entry "
+            "points (shared.db.connect / pool). Empty (the default) leaves TLS to "
+            "the URL and libpq's own default ('prefer'): a local cluster keeps its "
+            "current behavior, and a SaaS URL that already names sslmode (Neon / "
+            "Supabase / Cloud SQL all carry it) is respected as-is — the URL is "
+            "the switch, this field is the fallback. Set it (e.g. 'require' / "
+            "'verify-full') to force TLS on a remote or SaaS data plane whose URL "
+            "does not name a mode; 'disable' is the deliberate plaintext escape "
+            "hatch for a trusted private network. Applied only when the URL does "
+            "not already carry an sslmode query parameter."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    db_pool_min_size: int = Field(
+        default=1,
+        alias="AVA_DB_POOL_MIN_SIZE",
+        description=(
+            "Default min_size for shared.db.pool() when a caller does not pass an "
+            "explicit size. A remote/SaaS data plane with tight connection limits "
+            "(e.g. a managed Postgres that caps concurrent connections) tunes its "
+            "pool footprint from config instead of code."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    db_pool_max_size: int = Field(
+        default=2,
+        alias="AVA_DB_POOL_MAX_SIZE",
+        description=(
+            "Default max_size for shared.db.pool() when a caller does not pass an "
+            "explicit size. See AVA_DB_POOL_MIN_SIZE."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     transport_encryption: str = Field(
         default="",
         alias="AVA_TRANSPORT_ENCRYPTION",
@@ -270,43 +378,6 @@ class DataPlaneSettings(EnvSettings):
         return v
 
     @model_validator(mode="after")
-    def _apply_data_plane_passwords(self) -> DataPlaneSettings:
-        """Re-apply the main Postgres owner password on every load,
-        keeping the URL's username and database untouched.
-
-        Names-as-data (path-only identity): the db/role/ACL identifier a cluster
-        uses is whatever its `.env` URLs carry — an existing cluster on the
-        historical `ava_main`, a fresh one on the fixed `ava` — and nothing
-        re-derives it from a name. Only the owner password is re-derived, so an
-        out-of-date DB URL self-heals after owner-password rotation while a
-        data-plane rename stays a pure ops edit of the URLs. Redis is left
-        verbatim because its URL carries the independent runtime ACL password.
-
-        One identity is exempt: the least-privilege `ava_runner` db role (Task
-        #1236). Its URL is projected by the gateway's /api/bootstrap?role=runner
-        with the runner's OWN password (AVA_RUNNER_DB_PASSWORD), freshly read
-        from the gateway .env at every fetch — never stale, and deliberately NOT
-        the owner password. Overwriting it with the owner password would make
-        every runner SASL-fail: the role's stored
-        verifier is its own password, not the secret. The runner is identified by
-        its URL username (names-as-data — the same read the rest of the system
-        uses), so an ops rename of the main identity cannot mis-classify it.
-
-        No-op when cluster_secret is empty (a no-auth cluster's URLs already carry
-        the identity username with no password; tests / an unprovisioned checkout
-        leave the URLs verbatim) or, for db_url, when it is the unanchored sentinel
-        (it carries no userinfo and must stay byte-identical for the connect guard)."""
-        if (
-            self.cluster_secret
-            and self.db_url != UNANCHORED_DB_SENTINEL
-            and not _is_runner_db_url(self.db_url)
-        ):
-            self.db_url = url_with_password(
-                self.db_url, self.db_admin_password or self.cluster_secret
-            )
-        return self
-
-    @model_validator(mode="after")
     def _dial_self_host_via_loopback(self) -> DataPlaneSettings:
         """Self-dial goes loopback: when a data-plane URL's host IS this machine's
         own reachable address (`AVA_MACHINE_HOST`), the dial host is rewritten to
@@ -333,6 +404,54 @@ class DataPlaneSettings(EnvSettings):
         """
         self.db_url = _loopback_if_self(self.db_url)
         self.redis_url = _loopback_if_self(self.redis_url)
+        return self
+
+    @model_validator(mode="after")
+    def _apply_data_plane_passwords(self) -> DataPlaneSettings:
+        """Re-apply the main Postgres owner password on every load,
+        keeping the URL's username and database untouched.
+
+        Names-as-data (path-only identity): the db/role/ACL identifier a cluster
+        uses is whatever its `.env` URLs carry — an existing cluster on the
+        historical `ava_main`, a fresh one on the fixed `ava` — and nothing
+        re-derives it from a name. Only the owner password is re-derived, so an
+        out-of-date DB URL self-heals after owner-password rotation while a
+        data-plane rename stays a pure ops edit of the URLs. Redis is left
+        verbatim because its URL carries the independent runtime ACL password.
+
+        One identity is exempt: the least-privilege `ava_runner` db role (Task
+        #1236). Its URL is projected by the gateway's /api/bootstrap?role=runner
+        with the runner's OWN password (AVA_RUNNER_DB_PASSWORD), freshly read
+        from the gateway .env at every fetch — never stale, and deliberately NOT
+        the owner password. Overwriting it with the owner password would make
+        every runner SASL-fail: the role's stored
+        verifier is its own password, not the secret. The runner is identified by
+        its URL username (names-as-data — the same read the rest of the system
+        uses), so an ops rename of the main identity cannot mis-classify it.
+
+        No-op when cluster_secret is empty (a no-auth cluster's URLs already carry
+        the identity username with no password; tests / an unprovisioned checkout
+        leave the URLs verbatim), for db_url when it is the unanchored sentinel
+        (it carries no userinfo and must stay byte-identical for the connect
+        guard), or when the URL names a FOREIGN host — a remote/SaaS plane's
+        credential is the provider's, so the URL is authoritative and must never
+        be replaced by the local owner password (Task #1752). The self-dial
+        loopback rewrite runs before this validator, so a URL naming this
+        machine's own reachable address is already loopback here and keeps the
+        local password self-heal; only a genuinely foreign host is exempt.
+
+        Runs after `_dial_self_host_via_loopback` (declared above it), so the
+        local/foreign decision sees the dial host the cluster will actually use.
+        """
+        if (
+            self.cluster_secret
+            and self.db_url != UNANCHORED_DB_SENTINEL
+            and not _is_runner_db_url(self.db_url)
+            and is_loopback_host(urlsplit(self.db_url).hostname or "")
+        ):
+            self.db_url = url_with_password(
+                self.db_url, self.db_admin_password or self.cluster_secret
+            )
         return self
 
     @model_validator(mode="after")
@@ -370,3 +489,31 @@ class DataPlaneSettings(EnvSettings):
             if is_ipv4_literal(host):
                 self.db_url = url_with_query_param(self.db_url, "hostaddr", host)
         return self
+
+    @property
+    def is_remote(self) -> bool:
+        """Whether this cluster's data plane is hosted off-box (Task #1752).
+
+        True when either URL's dial host — after the self-dial loopback rewrite
+        (`_dial_self_host_via_loopback`) — is a foreign (non-loopback) host. The
+        URL is the switch: a local self-built instance keeps loopback URLs (and a
+        self-named host is rewritten to loopback), while an external host on the
+        private network (the `data_plane_host` birth knob) or a SaaS provider's
+        URL names another machine and passes through untouched. The unanchored
+        boot sentinel and a host-less (unix-socket) URL read as local, so this
+        predicate can never misfire on the pre-install or admin-socket paths.
+
+        The management plane keys off this one fact: a remote data plane has no
+        local instance to bring up / stop / repair, no local PgBouncer, and no
+        local roles/ACL to provision — those operations degrade to a reachability
+        probe or a clear skip instead of mis-managing a foreign service.
+
+        A mixed plane (one URL loopback, one foreign) also reads as remote: the
+        local instance is then only half the story, so local management is skipped
+        wholesale rather than half-applied.
+        """
+        for url in (self.db_url, self.redis_url):
+            host = url_host(url)
+            if host and not is_loopback_host(host):
+                return True
+        return False

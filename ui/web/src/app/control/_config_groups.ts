@@ -141,6 +141,9 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
   "config-dataplane": [
     "AVA_PGBOUNCER_ENABLED",
     "AVA_EVENTS_CHANNEL",
+    "AVA_DB_SSLMODE",
+    "AVA_DB_POOL_MIN_SIZE",
+    "AVA_DB_POOL_MAX_SIZE",
   ],
   "config-security": [
     "AVA_DB_URL",

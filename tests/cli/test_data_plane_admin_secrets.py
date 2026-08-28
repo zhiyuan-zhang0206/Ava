@@ -195,13 +195,13 @@ def test_missing_values_are_minted_activated_and_persisted(
     assert not split._transition_path().exists()
 
 
-def test_admin_dials_use_the_redis_url_host(
+def test_credential_split_refuses_a_foreign_redis_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The credential-split admin dials (password probe, CONFIG SET, ACL
-    provisioning URL) must go to the host the cluster's redis_url names —
-    asserted against a foreign host, so a re-hardcoded loopback literal fails
-    (the test env's own loopback URL would make the assertion vacuous)."""
+    """The credential split is local-instance provisioning: a URL naming a
+    foreign host makes the whole data plane remote-managed (Task #1752), so
+    the split must no-op — never dial or provision a foreign service — even
+    when only ONE of the two URLs is foreign."""
     _patch_gateway(monkeypatch, tmp_path)
     foreign_redis_url = f"redis://ava_main:{_LEGACY}@10.0.0.7:16380/0"
     monkeypatch.setattr(settings.data_plane, "redis_url", foreign_redis_url)
@@ -209,60 +209,17 @@ def test_admin_dials_use_the_redis_url_host(
         f"AVA_DB_URL=postgresql://ava_main:{_LEGACY}@127.0.0.1:16433/ava_main\n"
         f"AVA_REDIS_URL={foreign_redis_url}\n"
     )
-    minted = iter((_NEW_DB, _NEW_REDIS_ADMIN, _NEW_REDIS_RUNTIME))
-    hosts: list[str] = []
-    acl_urls: list[str] = []
-    redis_commands: list[tuple[str, ...]] = []
 
-    class _Redis:
-        def __init__(self, **kwargs: object) -> None:
-            hosts.append(str(kwargs["host"]))
+    def _must_not_run(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("no local provisioning may run against a remote data plane")
 
-        def __enter__(self) -> _Redis:
-            return self
+    monkeypatch.setattr(split.secrets, "token_urlsafe", _must_not_run)
+    monkeypatch.setattr(split, "ensure_cluster_role", _must_not_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(split, "ensure_cluster_redis_acl", _must_not_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(split, "upsert_env", _must_not_run)
 
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def ping(self) -> bool:
-            return True
-
-        def execute_command(self, *args: str) -> None:
-            redis_commands.append(args)
-
-    def _token_urlsafe(_bytes: int) -> str:
-        return next(minted)
-
-    def _pg_admin_url(_port: int) -> str:
-        return "postgresql://admin"
-
-    def _ensure_cluster_role(*_args: object, **kwargs: object) -> None:
-        return None
-
-    def _ensure_cluster_redis_acl(*_args: object, **kwargs: object) -> None:
-        acl_urls.append(str(kwargs["redis_admin_url"]))
-
-    def _upsert_env(_path: Path, values: dict[str, str]) -> None:
-        return None
-
-    monkeypatch.setattr(split.secrets, "token_urlsafe", _token_urlsafe)
-    monkeypatch.setattr(split, "pg_admin_url", _pg_admin_url)
-    monkeypatch.setattr(split, "ensure_cluster_role", _ensure_cluster_role)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(split, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("redis.Redis", _Redis)
-    monkeypatch.setattr(split, "upsert_env", _upsert_env)
-
-    assert split.ensure_data_plane_admin_secrets() is True
-
-    # Every redis client the split creates (the admin-password probe and the
-    # CONFIG SET dial) is pointed at the URL's host, and the ACL-provisioning
-    # admin URL carries it too.
-    assert hosts and all(h == "10.0.0.7" for h in hosts)
-    assert acl_urls == [f"redis://default:{_NEW_REDIS_ADMIN}@10.0.0.7:16380"]
-    assert redis_commands == [
-        ("CONFIG", "SET", "requirepass", _NEW_REDIS_ADMIN),
-        ("CONFIG", "REWRITE"),
-    ]
+    assert split.ensure_data_plane_admin_secrets() is False
+    assert not split._transition_path().exists()
 
 
 def test_interrupted_split_journals_one_secret_set_and_replays_it(

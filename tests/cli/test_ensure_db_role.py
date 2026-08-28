@@ -117,3 +117,18 @@ def test_cmd_ensure_db_role_refuses_home_without_db_url(
     (home / ".env").write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
     monkeypatch.setattr(paths, "ava_home", lambda: home)
     assert cmd_ensure_db_role() == 1
+
+
+def test_cmd_ensure_db_role_refuses_remote_managed_data_plane(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The runner role is provisioned at the provider on a remote/SaaS plane —
+    the command must fail fast instead of dialing a local socket that does not
+    exist (Task #1752)."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:pw@10.9.8.7:5432/ava")
+    rc = cmd_ensure_db_role()
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "remote-managed" in err

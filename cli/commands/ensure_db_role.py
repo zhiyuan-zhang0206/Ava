@@ -30,8 +30,18 @@ def cmd_ensure_db_role() -> int:
     from cli.commands._cluster_instance import _pg_running, pg_admin_url
     from cli.commands._pgbouncer import _running_pid, ensure_pgbouncer
     from shared import cluster as cl
+    from shared.config import settings
     from shared.envfile import upsert_env
     from shared.paths import ava_home
+
+    if settings.data_plane.is_remote:
+        print(
+            "✗ this cluster's data plane is remote-managed — the runner role is "
+            "provisioned at the provider (SaaS) or on the host that owns the "
+            "instance; nothing to provision here.",
+            file=sys.stderr,
+        )
+        return 1
 
     home = ava_home()
     env_path = home / ".env"
@@ -139,8 +149,14 @@ def refresh_runner_grants_after_migration() -> None:
 
     from cli.commands._cluster_instance import pg_admin_url
     from shared import cluster as cl
+    from shared.config import settings
     from shared.paths import ava_home
 
+    if settings.data_plane.is_remote:
+        # A remote/SaaS plane provisions its own roles — there is no local
+        # runner-role grant to refresh (Task #1752).
+        print("  · runner-role grant refresh skipped (remote-managed data plane)")
+        return
     env = dotenv_values(ava_home() / ".env")
     db_url = (env.get("AVA_DB_URL") or "").strip()
     runner_password = (env.get(cl.RUNNER_DB_PASSWORD_ENV) or "").strip()

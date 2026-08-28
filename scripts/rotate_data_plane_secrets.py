@@ -429,6 +429,15 @@ def print_plan(state: RotationState, *, dry_run: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if settings.data_plane.is_remote:
+        print(
+            "✗ this cluster's data plane is remote-managed — rotation is a "
+            "local-instance operation (ALTER ROLE / ACL / pooler userlist). A "
+            "remote/SaaS plane rotates credentials at the provider; update "
+            "AVA_DB_URL / AVA_REDIS_URL here.",
+            file=sys.stderr,
+        )
+        return 1
     parser = argparse.ArgumentParser(description="Rotate independent data-plane credentials.")
     parser.add_argument("--scope", choices=sorted(_SCOPES), default="both")
     parser.add_argument("--execute", action="store_true", help="perform the rotation")

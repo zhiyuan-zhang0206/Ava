@@ -136,10 +136,14 @@ def test_direct_db_url_remote_host_ignores_local_registry(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
 ) -> None:
-    """A URL naming a REMOTE host (a split runner dialing the gateway) must not
-    be resolved against local records even when a local record's port happens to
-    collide — the swap would mis-route to this box's own Postgres."""
+    """A URL naming a REMOTE host (a split runner dialing the gateway, or a
+    remote/SaaS plane — Task #1752) must not be resolved against local records
+    even when a local record's port happens to collide — the swap would
+    mis-route to this box's own Postgres. The URL passes through SILENTLY: a
+    foreign host has no local pooler, so the "routes through PgBouncer"
+    warning would be factually wrong noise on every admin-plane dial."""
     monkeypatch.setattr(config.settings.data_plane, "pgbouncer_enabled", True)
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://127.0.0.1:18000")
     _set(
         monkeypatch,
         db_url="postgresql://ava_main:sek@10.0.0.9:6433/ava_main",
@@ -147,7 +151,7 @@ def test_direct_db_url_remote_host_ignores_local_registry(
     )
     got = db_module.direct_db_url()
     assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
-    assert any("direct_db_url" in r["message"] for r in loguru_records)  # pyright: ignore[reportUnknownVariableType]
+    assert not any("direct_db_url" in r["message"] for r in loguru_records)  # pyright: ignore[reportUnknownVariableType]
 
 
 def test_direct_db_url_split_runner_falls_back_loudly(
@@ -157,8 +161,11 @@ def test_direct_db_url_split_runner_falls_back_loudly(
     """The split-runner case: no local record explains the URL's port (the
     gateway's pooler port is a fact of the GATEWAY box's registry). The URL is
     returned as-is — runner boot must not break — but the degraded dial is
-    logged, never silent."""
+    logged, never silent. The runner's URL names its own gateway
+    (AVA_GATEWAY_URL), which keeps this distinct from a remote/SaaS plane —
+    foreign but pooler-less, dialed silently (Task #1752)."""
     monkeypatch.setattr(config.settings.data_plane, "pgbouncer_enabled", True)
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://10.0.0.9:18000")
     _set(
         monkeypatch,
         db_url="postgresql://ava_main:sek@10.0.0.9:6433/ava_main",

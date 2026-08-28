@@ -287,7 +287,15 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
 
 
 def ensure_data_plane_admin_secrets(*, allow_legacy_upgrade: bool = True) -> bool:
-    """Mint, activate, and persist split credentials as one replayable transition."""
+    """Mint, activate, and persist split credentials as one replayable transition.
+
+    No-op on a remote-managed data plane (Task #1752): the split is a
+    local-instance concept (provisioning the owner role / Redis ACL against the
+    per-cluster instance); a remote/SaaS plane authenticates through whatever
+    the URLs carry and rotates credentials at the provider.
+    """
+    if settings.data_plane.is_remote:
+        return False
     with file_lock(_transition_lock_path(), timeout_s=_TRANSITION_LOCK_TIMEOUT_S):
         return _ensure_data_plane_admin_secrets_unlocked(allow_legacy_upgrade=allow_legacy_upgrade)
 

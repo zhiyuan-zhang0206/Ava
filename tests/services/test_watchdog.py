@@ -18,6 +18,7 @@ import pytest
 
 from ops.controllers.base import BlockScope
 from services.watchdog import daemon as wd
+from shared.config import settings
 
 
 @pytest.fixture
@@ -338,3 +339,20 @@ def test_checks_for_capability_no_skip_keeps_all(monkeypatch: pytest.MonkeyPatch
 
     names = {c.name for c in wd._checks_for_capability("gateway")}
     assert {"gateway", "labeler", "memory-indexer", "frontend"} <= names
+
+
+# ─── remote-managed data plane drops the local-instance repairs ──────────────
+
+
+def test_checks_for_capability_gateway_skips_local_repairs_when_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remote-managed data plane has no local Redis ACL user or PgBouncer to
+    repair — both watchdog repairs target the per-cluster local instance, so
+    the gateway roster must drop them (Task #1752)."""
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:pw@10.9.8.7:5432/ava")
+    monkeypatch.setattr(settings.data_plane, "redis_url", "rediss://ava:pw@10.9.8.7:6380/0")
+    names = [c.name for c in wd._checks_for_capability("gateway")]
+    assert "redis-acl" not in names
+    assert "pgbouncer" not in names
+    assert "brew-pin" in names, "host-local checks stay regardless of the data plane"

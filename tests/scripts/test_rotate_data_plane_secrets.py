@@ -366,3 +366,17 @@ def test_recovery_state_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert rotate.RotationState.load(path) == state
+
+
+def test_main_refuses_remote_managed_data_plane(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rotation is a local-instance operation; a remote/SaaS plane rotates at
+    the provider and the script must refuse to touch it (Task #1752)."""
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:pw@10.9.8.7:5432/ava")
+    monkeypatch.setattr(settings.data_plane, "redis_url", "rediss://ava:pw@10.9.8.7:6380/0")
+    rc = rotate.main(["--scope", "admin"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "remote-managed" in err
+    assert "rotates credentials at the provider" in err

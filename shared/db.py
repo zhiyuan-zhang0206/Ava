@@ -22,6 +22,7 @@ from psycopg_pool import ConnectionPool
 
 from shared.agents import AgentStatus
 from shared.config import settings
+from shared.config.data_plane import gateway_url_host, resolved_pool_size, sslmode_for_url
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.log import logger
 from shared.url_secret import url_with_port
@@ -207,10 +208,12 @@ def direct_db_url() -> str:
                 # URL already names Postgres (pooling off / a stand-in on a
                 # cluster port) -> already direct.
                 return url
-    # No local record explains this URL's port: an operator stand-in URL on a
-    # local box, or (the case that matters) a split agent-runner whose URL names
-    # the gateway's pooler, which only the gateway box's registry can resolve.
-    if settings.data_plane.pgbouncer_enabled:
+    # No local record explains this URL's port: a local operator stand-in, or a
+    # split runner naming the gateway's pooler. A remote/SaaS plane (Task #1752)
+    # is direct by definition — no local pooler exists — so it dials silently.
+    if settings.data_plane.pgbouncer_enabled and (
+        is_loopback_host(host) or host == reachable_host().lower() or host == gateway_url_host()
+    ):
         logger.warning(
             "direct_db_url: AVA_DB_URL names {host}:{port}, which no local registry "
             "record's PgBouncer or Postgres port matches (a split agent-runner's "
@@ -272,10 +275,13 @@ def connect(
     """
     dp = settings.data_plane
     url = dp.db_url if not direct else direct_db_url()
+    sslmode = sslmode_for_url(url, dp.db_sslmode)
     conn = psycopg.connect(
         _guard_db_url(url),
         autocommit=autocommit,
         prepare_threshold=None,
+        # sslmode only when the URL is silent (config is the fallback, never an override).
+        **({"sslmode": sslmode} if sslmode else {}),
         **({} if unbounded else PG_STATEMENT_TIMEOUT_KWARGS),
     )
     if not direct and not unbounded:
@@ -288,8 +294,8 @@ def connect(
 
 def pool(
     *,
-    min_size: int = 1,
-    max_size: int = 2,
+    min_size: int | None = None,
+    max_size: int | None = None,
     direct: bool = False,
     timeout: float = DEFAULT_POOL_TIMEOUT_S,
     check_connections: bool = False,
@@ -300,6 +306,10 @@ def pool(
     the identical `ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2,
     open=True)`. Dials `settings.data_plane.db_url` (the one access URL — PgBouncer
     when enabled) unless `direct=True`. The caller owns the pool and must `close()` it.
+
+    `min_size` / `max_size` default to the config fields (themselves the
+    historical 1 / 2), so a remote/SaaS plane tunes its pool from config; an
+    explicit caller value always wins.
 
     **This function is the only sanctioned way to build a sync pool**, because the
     two things a pool must carry are decided here rather than restated per site:
@@ -332,13 +342,21 @@ def pool(
     """
     dp = settings.data_plane
     url = dp.db_url if not direct else direct_db_url()
+    min_size, max_size = resolved_pool_size(
+        min_size, max_size, dp.db_pool_min_size, dp.db_pool_max_size
+    )
+    sslmode = sslmode_for_url(url, dp.db_sslmode)
     return ConnectionPool(
         _guard_db_url(url),
         min_size=min_size,
         max_size=max_size,
         open=True,
         timeout=timeout,
-        kwargs={"prepare_threshold": None, **PG_STATEMENT_TIMEOUT_KWARGS},
+        kwargs={
+            "prepare_threshold": None,
+            **({"sslmode": sslmode} if sslmode else {}),
+            **PG_STATEMENT_TIMEOUT_KWARGS,
+        },
         # Direct pools already carry the ceiling via `options` (parsed by
         # Postgres itself); pooled backends need the explicit SET, and the hook
         # must leave the connection idle (see _apply_statement_timeout).

@@ -182,8 +182,17 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
 
     checks: list[_Check] = []
     if role == "gateway":
-        checks.append(_Check("redis-acl", redis_acl_healthcheck, requires_db=False))
-        checks.append(_Check("pgbouncer", pgbouncer_healthcheck, requires_db=False))
+        if settings.data_plane.is_remote:
+            # Remote-managed data plane: there is no local Redis ACL user or
+            # PgBouncer to repair — both repairs target the per-cluster local
+            # instance and would mis-aim at a foreign service.
+            _log.debug(
+                "[watchdog] remote-managed data plane — skipping the local "
+                "redis-acl and pgbouncer checks"
+            )
+        else:
+            checks.append(_Check("redis-acl", redis_acl_healthcheck, requires_db=False))
+            checks.append(_Check("pgbouncer", pgbouncer_healthcheck, requires_db=False))
     checks.append(_Check("brew-pin", brew_pin_healthcheck, requires_db=False))
     for spec, gate_reason in services_for_capabilities_annotated(frozenset({role})):
         if spec.healthcheck_module is None:

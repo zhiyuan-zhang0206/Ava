@@ -9,7 +9,12 @@ home-directory isolation, not a database name / redis logical-DB index / channel
 prefix kept correct inside one shared instance. A cluster also owns one outward
 gateway and a contiguous host-port block. (The rationale — and the remaining slice 3,
 bundling the pg/redis binaries — is in
-`future/infra/embedded-per-cluster-data-plane.md`.)
+`future/infra/embedded-per-cluster-data-plane.md`.) A data plane is **swappable**:
+URLs naming a foreign host (another machine or a SaaS provider) make the cluster
+treat it as remote-managed — `ava start` / `ava stop` / `ava status` / the watchdog
+skip local instance management and degrade to reachability probes, and the
+connection-layer knobs (TLS, pool sizing) live in config
+(`docs/history/2026-08-28/connection-layer-swappable.md`).
 **One DB URL.** Every normal process configures exactly one database URL
 (`AVA_DB_URL`) and dials it as-is — its port is chosen at URL generation
 (install birth / converge, by `AVA_PGBOUNCER_ENABLED`): the cluster's PgBouncer

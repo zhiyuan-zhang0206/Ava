@@ -73,61 +73,14 @@ def _consume_rollout_parent_handoff() -> bool:
 
 
 def _ensure_gateway_data_plane() -> int:
-    """Bring up this cluster's own Postgres+Redis instance (+ PgBouncer when enabled)
-    on a gateway-capable host (skip-if-running, so a (re)start never disrupts the data
-    plane a running cluster is using). Every cluster owns its instance; the pg/redis
-    ports come from its registry record (allocated at birth). The pgbouncer port is
-    derived for records saved before the slot existed (record_pgbouncer_port)."""
-    from cli.commands._cluster_instance import ensure_cluster_instance
-    from shared.cluster import (
-        db_identity,
-        get_record,
-        record_pgbouncer_port,
-        redis_password_from_env,
-    )
-    from shared.config import settings
-    from shared.paths import ava_home
+    """Bring up this cluster's data plane — local instance or remote probe.
 
-    rec = get_record(ava_home())
-    if rec is None:
-        print(
-            f"  ✗ no registry record for home {ava_home()} — cannot bring up its "
-            "data plane. Install births it; run `scripts/install.sh` for this checkout.",
-            file=sys.stderr,
-        )
-        return 1
+    The implementation lives in `cli/commands/_data_plane.py` (this module's
+    line budget); the wrapper keeps the name tests and callers patch.
+    """
+    from cli.commands._data_plane import ensure_gateway_data_plane
 
-    def _ensure(credentials: tuple[str, str, str]) -> int:
-        db_admin_password, redis_admin_password, redis_password = credentials
-        return ensure_cluster_instance(
-            pg_port=rec.ports["postgres"],
-            redis_port=rec.ports["redis"],
-            cluster_secret=settings.data_plane.cluster_secret,
-            db_admin_password=db_admin_password,
-            redis_admin_password=redis_admin_password,
-            redis_password=redis_password,
-            pgbouncer_port=record_pgbouncer_port(rec),
-            identity=db_identity(),
-        )
-
-    current = (
-        settings.data_plane.db_admin_password or settings.data_plane.cluster_secret,
-        settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret,
-        redis_password_from_env() or settings.data_plane.cluster_secret,
-    )
-    rc = _ensure(current)
-    if rc == 0:
-        return 0
-
-    from cli.commands._data_plane_admin_secrets import (
-        pending_data_plane_bootstrap_credentials,
-    )
-
-    pending = pending_data_plane_bootstrap_credentials()
-    if pending is None:
-        return rc
-    print("  · retrying data-plane bring-up with journaled transition credentials")
-    return _ensure(pending)
+    return ensure_gateway_data_plane()
 
 
 def _rollout_child_window(
