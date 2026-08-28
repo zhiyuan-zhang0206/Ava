@@ -9,7 +9,8 @@ live, so it is exercised against a real DB here. Covers:
 - `node_score` — windowed SUM(in)*0.1 + SUM(out)*1.0 (drives node size).
 - edge weight — lineage (spawn/fork/resurrect) permanent count*2.0 (no decay,
   always shown); message (send_message) recency-decayed, dropped below 0.01.
-  Edges stitch raw frozen-PG archive rows with the Loki fake.
+  Edges stitch the Loki archive stream (task #1281) with the live-stream
+  fake, mirroring the production two-stream read.
 - category negative samples — telemetry message rows never become edges; a
   NULL agent_id audit row never 500s the endpoint.
 """
@@ -27,6 +28,7 @@ from gateway import loki_events, prom_metrics, telemetry_staleness
 from gateway.app import app
 from gateway.routers import fleet_graph
 from shared.cluster import home_label
+from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from shared.paths import ava_home
 from tests.gateway.loki_fake import FakeLoki
 
@@ -120,43 +122,25 @@ def _install_prom(
 
 
 def _event(
-    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
     *,
     source_agent: int,
     target_agent: int,
     event_type: str,
     age_hours: float = 0.0,
 ) -> None:
-    """Insert one ARCHIVE-era audit event (a directed inter-agent operation)
-    into the frozen PG `events` archive, optionally aged `age_hours` into the
-    past. Rows must sit below the boundary anchor (max(events.ts) — see
-    `_archive_boundary_anchor`) to be served by the archive side."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, event_name, source, target_agent_id, machine, process, category, level) "
-            "VALUES (now() - %s * interval '1 hour', %s, %s, 'test', %s, "
-            "'test', 'test', 'audit', 'info')",
-            (age_hours, source_agent, event_type, target_agent),
-        )
-    db_conn.commit()
-
-
-def _archive_boundary_anchor(db_conn: psycopg.Connection) -> None:
-    """Pin the archive's freeze point to ~now: the graph partitions the
-    timeline at max(events.ts), so a test mixing archive-era rows (old ts)
-    with Loki rows (ts≈now) must insert a boundary anchor — otherwise the
-    oldest archive row would BE the boundary and sit outside its own window
-    (`ts < boundary`). A telemetry turn_end row serves as the freeze marker
-    (non-audit: it never forms an edge)."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events "
-            "(ts, agent_id, event_name, source, machine, process, category, level) "
-            "VALUES (now() - interval '6 minutes', NULL, 'turn_end', 'test', "
-            "'test', 'test', 'telemetry', 'info')"
-        )
-    db_conn.commit()
+    """Add one ARCHIVE-era audit event (a directed inter-agent operation) to
+    the Loki fake's archive stream. The archive froze at ARCHIVE_FREEZE_AT
+    (task #1197/#1281), so an archive row's ts sits `age_hours` before the
+    freeze — its real age at request time is thus ~16 days plus `age_hours`."""
+    fake_loki.add(
+        event=event_type,
+        agent_id=source_agent,
+        target_agent_id=target_agent,
+        ts=ARCHIVE_FREEZE_AT - timedelta(hours=age_hours),
+        category="audit",
+        archive=True,
+    )
 
 
 def _event_loki(
@@ -191,15 +175,16 @@ def test_loki_edge_tail_is_scoped_to_this_cluster(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(loki_events, "query_events", query_events)
     monkeypatch.setattr(fleet_graph, "sync_redis", unexpected_cache_read)
 
-    fleet_graph._fetch_loki_edges(
-        boundary=None,
-        now=now,
-    )
+    fleet_graph._fetch_loki_edges(now=now)
 
-    assert len(calls) == 1
-    assert calls[0]["cluster"] == home_label(ava_home())
-    assert calls[0]["from_"] == now - timedelta(days=30)
-    assert calls[0]["to"] == now
+    # The live tail splits at the index-label cutover: the legacy interval
+    # runs from the archive freeze to the cutover, the indexed tail after it.
+    assert len(calls) == 2
+    assert all(call["cluster"] == home_label(ava_home()) for call in calls)
+    assert calls[0]["from_"] == ARCHIVE_FREEZE_AT
+    assert calls[0]["to"] == INDEX_LABEL_CUTOVER_AT
+    assert calls[1]["from_"] == INDEX_LABEL_CUTOVER_AT
+    assert calls[1]["to"] == now
 
 
 def test_loki_edge_tail_keeps_unlabeled_history_and_excludes_other_cluster(
@@ -208,7 +193,6 @@ def test_loki_edge_tail_keeps_unlabeled_history_and_excludes_other_cluster(
     """A pre-labeling edge is local history; a labeled foreign edge is not."""
     source = _seed_agent(db_conn)
     target = _seed_agent(db_conn)
-    _archive_boundary_anchor(db_conn)
     _event_loki(fake_loki, source_agent=source, target_agent=target, event_type="spawn")
     _event_loki(fake_loki, source_agent=source, target_agent=target, event_type="spawn")
     fake_loki.rows[-1]["cluster"] = "other-cluster"
@@ -429,14 +413,15 @@ def test_edge_weight_type_multiplier_fresh(
     assert edges["spawn"]["event_count"] == 1
 
 
-def test_lineage_edge_permanent_no_decay_always_shown(db_conn: psycopg.Connection) -> None:
+def test_lineage_edge_permanent_no_decay_always_shown(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
     s = _seed_agent(db_conn)
     c = _seed_agent(db_conn)
     # A spawn from ~83 days ago (archive era). Under recency-decay weighting this
     # would decay far below the 0.01 threshold and vanish; lineage is permanent —
     # weight = COUNT(*) * 2.0, no time decay, and never filtered by the HAVING.
-    _event(db_conn, source_agent=s, target_agent=c, event_type="spawn", age_hours=2000)
-    _archive_boundary_anchor(db_conn)
+    _event(fake_loki, source_agent=s, target_agent=c, event_type="spawn", age_hours=2000)
 
     with TestClient(app) as client:
         edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
@@ -462,7 +447,9 @@ def test_resurrect_edge_included_as_permanent_lineage(
     assert edges["resurrect"]["event_count"] == 2
 
 
-def test_lineage_edge_not_excluded_by_time_window(db_conn: psycopg.Connection) -> None:
+def test_lineage_edge_not_excluded_by_time_window(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
     """Lineage (spawn/fork/resurrect) edges survive the time-window filter.
 
     The `?hours=` window only gates send_message events; lineage edges
@@ -472,8 +459,7 @@ def test_lineage_edge_not_excluded_by_time_window(db_conn: psycopg.Connection) -
     c = _seed_agent(db_conn)
     # A spawn from 100 hours ago — well beyond a 24h window. A send_message
     # at the same age is filtered, but the lineage edge must still appear.
-    _event(db_conn, source_agent=s, target_agent=c, event_type="spawn", age_hours=100)
-    _archive_boundary_anchor(db_conn)
+    _event(fake_loki, source_agent=s, target_agent=c, event_type="spawn", age_hours=100)
 
     with TestClient(app) as client:
         edges = _edges_by_type(client, "?hours=24")  # pyright: ignore[reportUnknownVariableType]
@@ -484,13 +470,14 @@ def test_lineage_edge_not_excluded_by_time_window(db_conn: psycopg.Connection) -
     assert edges["spawn"]["event_count"] == 1
 
 
-def test_message_edge_below_threshold_filtered(db_conn: psycopg.Connection) -> None:
+def test_message_edge_below_threshold_filtered(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
     s = _seed_agent(db_conn)
     c = _seed_agent(db_conn)
     # A single ~83-day-old message decays below 0.01 -> dropped. (A lineage edge at
     # the same age still shows; only messages are thresholded.)
-    _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=2000)
-    _archive_boundary_anchor(db_conn)
+    _event(fake_loki, source_agent=s, target_agent=c, event_type="send_message", age_hours=2000)
 
     with TestClient(app) as client:
         edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
@@ -504,16 +491,19 @@ def test_edge_weight_sums_per_event_with_decay(
     s = _seed_agent(db_conn)
     c = _seed_agent(db_conn)
     # Two send_message events straddling the cutover: one fresh (Loki side),
-    # one 48h (2 days) old (archive side). The merged weight sums both;
-    # weight = (EXP(0) + EXP(-0.5*2)) * 1.0.
+    # one 48h before the freeze (archive side). The merged weight sums both
+    # per-row decays; the archive row's age is measured from its pre-freeze
+    # ts to now (~16 days), so it contributes almost nothing.
     _event_loki(fake_loki, source_agent=s, target_agent=c, event_type="send_message")
-    _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
-    _archive_boundary_anchor(db_conn)
+    _event(fake_loki, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
 
     with TestClient(app) as client:
         edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
 
-    expected = 1.0 + math.exp(-0.5 * 2.0)
+    archive_age_days = (
+        datetime.now(UTC) - (ARCHIVE_FREEZE_AT - timedelta(hours=48))
+    ).total_seconds() / 86400.0
+    expected = 1.0 + math.exp(-0.5 * archive_age_days)
     assert edges["send_message"]["weight"] == pytest.approx(expected, abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
     assert edges["send_message"]["event_count"] == 2
 
@@ -575,11 +565,13 @@ def test_merge_applies_identical_semantics_to_archive_and_loki_rows() -> None:
     assert "fork" not in by_type
 
 
-def test_edge_window_excludes_old_events(db_conn: psycopg.Connection) -> None:
+def test_edge_window_excludes_old_events(db_conn: psycopg.Connection, fake_loki: FakeLoki) -> None:
     s = _seed_agent(db_conn)
     c = _seed_agent(db_conn)
-    _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=100)
-    _archive_boundary_anchor(db_conn)
+    # A 100h-old LIVE message (the live stream carries any post-freeze age).
+    _event_loki(
+        fake_loki, source_agent=s, target_agent=c, event_type="send_message", ts_offset_hours=100
+    )
 
     with TestClient(app) as client:
         # 24h window excludes the 100h-old event -> no edges.
@@ -588,11 +580,14 @@ def test_edge_window_excludes_old_events(db_conn: psycopg.Connection) -> None:
         assert "send_message" in _edges_by_type(client)
 
 
-def test_decay_lambda_param_steepens_decay(db_conn: psycopg.Connection) -> None:
+def test_decay_lambda_param_steepens_decay(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
     s = _seed_agent(db_conn)
     c = _seed_agent(db_conn)
-    _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
-    _archive_boundary_anchor(db_conn)
+    _event_loki(
+        fake_loki, source_agent=s, target_agent=c, event_type="send_message", ts_offset_hours=48
+    )
 
     with TestClient(app) as client:
         gentle = _edges_by_type(client, "?decay_lambda=0.1")["send_message"]["weight"]  # pyright: ignore[reportUnknownVariableType]
@@ -604,11 +599,13 @@ def test_decay_lambda_param_steepens_decay(db_conn: psycopg.Connection) -> None:
 
 def test_decay_lambda_is_quantized_for_edge_computation(
     db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
 ) -> None:
     s = _seed_agent(db_conn)
     c = _seed_agent(db_conn)
-    _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
-    _archive_boundary_anchor(db_conn)
+    _event_loki(
+        fake_loki, source_agent=s, target_agent=c, event_type="send_message", ts_offset_hours=48
+    )
 
     with TestClient(app) as client:
         weight = _edges_by_type(client, "?decay_lambda=0.551")["send_message"]["weight"]  # pyright: ignore[reportUnknownVariableType]
@@ -838,8 +835,7 @@ def test_cache_fail_open_when_redis_down(
     never a 500."""
     source = _seed_agent(db_conn)
     target = _seed_agent(db_conn)
-    _event(db_conn, source_agent=source, target_agent=target, event_type="spawn", age_hours=48)
-    _archive_boundary_anchor(db_conn)
+    _event(fake_loki, source_agent=source, target_agent=target, event_type="spawn", age_hours=48)
     _event_loki(
         fake_loki,
         source_agent=source,

@@ -42,7 +42,7 @@ from gateway.loki_events import _weighted_quantile
 from gateway.routers import _agent_cost, _inspect_stats, agent_inspect
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from shared.config import settings
-from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -127,6 +127,7 @@ class _FakeLoki:
         ts_offset_hours: float = 0,
         ts: datetime | None = None,
         category: str = "telemetry",
+        archive: bool = False,
     ) -> None:
         self.rows.append(
             {
@@ -143,17 +144,26 @@ class _FakeLoki:
                 "source": "test",
                 "target_agent_id": None,
                 "attributes": payload or {},
+                "archive": archive,
             }
         )
 
     def _match(self, **kwargs: Any) -> list[dict[str, Any]]:
         from_ = kwargs.get("from_")
-        if from_ is not None and datetime.now(UTC) - from_ > _FakeLoki._LOKI_MAX_QUERY_AGE:
+        # The cluster overrides max_query_length to 90d for the archive span;
+        # archive reads are bounded to it and skip the default 30d1h guard.
+        if (
+            not kwargs.get("archive")
+            and from_ is not None
+            and datetime.now(UTC) - from_ > _FakeLoki._LOKI_MAX_QUERY_AGE
+        ):
             raise AssertionError(
                 f"Loki rejects this window (max_query_length=30d1h): from_={from_.isoformat()}"
             )
         out: list[dict[str, Any]] = []
         for r in self.rows:
+            if bool(kwargs.get("archive")) != bool(r.get("archive")):
+                continue
             if kwargs.get("agent_id") is not None and r["agent_id"] != kwargs["agent_id"]:
                 continue
             categories = kwargs.get("categories")
@@ -415,31 +425,6 @@ def test_inspect_pre_cutover_agent_uses_indexed_lifecycle_window(
     assert lifecycle_calls[0]["from_"] == INDEX_LABEL_CUTOVER_AT
     alive_seconds = response.json()["activity"]["alive_seconds"]
     assert alive_seconds == pytest.approx(24 * 60 * 60, abs=30)  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_inspect_lifecycle_window_is_clipped_by_archive_freeze(
-    db_conn: psycopg.Connection,
-    fake_loki: _FakeLoki,
-) -> None:
-    """A post-cutover archive boundary remains the live lifecycle lower bound."""
-    aid = _insert_agent(db_conn)
-    freeze = datetime.now(UTC) - timedelta(minutes=30)
-    _archive_event(
-        db_conn,
-        agent_id=aid,
-        event="freeze_marker",
-        attributes={},
-        ts=freeze,
-    )
-    db_conn.commit()
-
-    with TestClient(app) as client:
-        response = client.get(f"/api/agents/{aid}/inspect")
-
-    assert response.status_code == 200
-    lifecycle_calls = _lifecycle_projected_calls(fake_loki)
-    assert len(lifecycle_calls) == 1
-    assert lifecycle_calls[0]["from_"] == freeze
 
 
 def _ledger_row(
@@ -1483,21 +1468,12 @@ def test_inspect_archive_and_live_durations_keep_exact_percentiles(
     """The archive/live seam preserves fractions instead of second buckets."""
     aid = _insert_agent(db_conn)
     now = datetime.now(UTC)
-    _archive_event(
-        db_conn,
-        agent_id=aid,
+    fake_loki.add(
         event="turn_end",
-        attributes={"duration_seconds": 1.25, "ok": True},
-        ts=now - timedelta(hours=2),
-    )
-    # The archive cutoff is exclusive, so this marker leaves the turn archived
-    # and starts the live window before the FakeLoki row below.
-    _archive_event(
-        db_conn,
         agent_id=aid,
-        event="freeze_marker",
-        attributes={},
-        ts=now - timedelta(hours=1),
+        payload={"duration_seconds": 1.25, "ok": True},
+        ts=ARCHIVE_FREEZE_AT - timedelta(hours=2),
+        archive=True,
     )
     fake_loki.add(
         event="turn_end",
@@ -1584,10 +1560,12 @@ def test_whole_life_histogram_replaces_archive_rollup_for_percentiles(
 
 
 def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
-    """The cold panel keeps cost/heartbeat and collapses every other live read."""
-    assert sum(fake_loki.wire_calls.values()) <= 12
+    """The cold panel keeps cost/heartbeat and collapses every other live read.
+    The raw archive fallback (task #1281) adds exactly one archive-stream
+    query_events pass for the windowed archive values."""
+    assert sum(fake_loki.wire_calls.values()) <= 13
     assert fake_loki.wire_calls["attribute_aggregate"] == 7
-    assert fake_loki.wire_calls["query_events"] == 1
+    assert fake_loki.wire_calls["query_events"] == 2
     # Requested stats and the retained per-agent lifecycle leg are separate:
     # the latter is cached for thirty minutes across inspector windows.
     assert fake_loki.wire_calls["query_projected_lines"] == 2

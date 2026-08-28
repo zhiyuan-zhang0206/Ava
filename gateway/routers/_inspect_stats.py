@@ -459,8 +459,8 @@ def inspect_values(
     plan = full_day_plan(from_, to)
     ledger_distribution: list[tuple[float, int]] = []
     histogram_complete = False
-    with pool.connection() as conn, conn.cursor() as cur:
-        freeze = _inspect_pg.freeze_point(cur)
+    with pool.connection() as conn:
+        freeze = _inspect_pg.FREEZE_AT
         rollup = _inspect_pg.archive_stats(conn, agent_id=agent_id)
         if plan.has_full_days:
             max_day = _inspect_pg.newest_ledger_day(
@@ -490,40 +490,28 @@ def inspect_values(
             ledger = (0, 0, 0.0, None, None, 0, 0, None)
             ledger_tokens = 0
             token_watermark = None
+        # The frozen-archive rollup (one row per agent, whole-life) serves
+        # every whole-life read; the raw Loki archive-stream fallback covers
+        # windowed reads and agents without a rollup row. Lifecycle comes
+        # from the rollup whenever it exists (it is the same frozen data).
         if rollup is not None and from_ is None:
             archive_distribution = rollup.turn_distribution
             archive_active_seconds = rollup.active_seconds
             archive_exec_seconds = rollup.exec_seconds
+            archive_lifecycle = rollup.lifecycle
         else:
-            archive_distribution = _inspect_pg.archive_distribution(
-                conn,
-                field="duration_seconds",
+            projection = _inspect_pg.archive_projected_values(
                 agent_id=agent_id,
-                event_names=["^turn_end$"],
-                categories=["telemetry", "log"],
-                attribute_filters=None,
                 from_=from_,
                 to=to,
+                timeout_s=_query_timeout(deadline),
             )
-            archive_active_seconds = _inspect_pg.archive_node_exit_seconds(
-                conn,
-                agent_id=agent_id,
-                node="exclude_claim",
-                from_=from_,
-                to=to,
+            archive_distribution = projection.turn_distribution
+            archive_active_seconds = projection.active_seconds
+            archive_exec_seconds = projection.exec_seconds
+            archive_lifecycle = (
+                rollup.lifecycle if rollup is not None else projection.lifecycle
             )
-            archive_exec_seconds = _inspect_pg.archive_node_exit_seconds(
-                conn,
-                agent_id=agent_id,
-                node="exec",
-                from_=from_,
-                to=to,
-            )
-        archive_lifecycle = (
-            rollup.lifecycle
-            if rollup is not None
-            else _inspect_pg.archive_lifecycle(conn, agent_id=agent_id, from_=None, to=None)
-        )
 
     turn_total, turn_ok, turn_sum, turn_min, turn_max, exec_ok, exec_failed, watermark = ledger
     stats_spans = live_edge_spans(plan, watermark, from_, to)

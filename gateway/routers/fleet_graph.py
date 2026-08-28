@@ -10,8 +10,9 @@ Data sources (task #1197 LGTM cutover):
   counters `ava_llm_usage_in_total` / `ava_llm_usage_out_total`. The retained
   total uses `increase()` so exporter restarts do not reset the reported value.
 - Edge events (audit category, spawn/send_message/fork/resurrect): cached raw
-  rows from the frozen PG `events` archive stitched with Loki. Loki's frozen
-  pre-index-label interval is cached separately from its live indexed tail.
+  rows from the Loki archive stream (task #1281 — all pre-cutover events)
+  stitched with the live stream. The live stream's frozen pre-index-label
+  interval is cached separately from its indexed tail.
 
 Successful Prometheus/Loki reads also pass through the gateway-latency
 heartbeat guard. Old or missing heartbeat samples retain and cache the fetched
@@ -33,7 +34,6 @@ from fastapi import APIRouter, Query, Request
 from psycopg import errors as pg_errors
 
 from gateway import (
-    events_archive,
     loki_events,
     loki_query_budget,
     prom_metrics,
@@ -47,7 +47,7 @@ from gateway.schemas import (
     window_delta,
 )
 from shared.log import logger
-from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from shared.observability import cluster_label
 from shared.redis_client import sync_redis
 
@@ -242,43 +242,39 @@ def _query_loki_edge_slice(*, from_: datetime, to: datetime) -> tuple[list[dict[
     )
 
 
-def _fetch_loki_edges(
-    *, boundary: datetime | None, now: datetime
-) -> tuple[list[dict[str, Any]], bool]:
+def _fetch_loki_edges(*, now: datetime) -> tuple[list[dict[str, Any]], bool]:
     """Audit rows from cached legacy Loki history plus the live indexed tail.
 
-    Lineage events are all-time (fetch from the boundary); message events
-    additionally respect the `hours` window, applied per row by the caller —
-    the lineage tail must not be clipped by the message window. The per-request
-    timeout bounds the expensive tail read before the route degrades."""
-    if boundary is None:
-        rows, has_more = _query_loki_edge_slice(from_=now - timedelta(days=30), to=now)
-    else:
-        legacy_end = min(INDEX_LABEL_CUTOVER_AT, now)
-        legacy_rows: list[dict[str, Any]] = []
-        legacy_has_more = False
-        if boundary < legacy_end:
-            cached_legacy = _read_legacy_loki_cache()
-            if cached_legacy is None:
-                cached_legacy, legacy_has_more = _query_loki_edge_slice(
-                    from_=boundary, to=legacy_end
-                )
-                _write_legacy_loki_cache(cached_legacy)
-            else:
-                # The versioned payload contains rows only, so a full cached page
-                # conservatively preserves the possibility of truncation.
-                legacy_has_more = len(cached_legacy) >= _LOKI_EDGE_LIMIT
-            # Loki range endpoints are inclusive. Keep the legacy interval
-            # half-open so the separately queried indexed slice owns cutover.
-            legacy_rows = [row for row in cached_legacy if row["ts"] < legacy_end]
+    Lineage events are all-time (fetch from the archive freeze); message
+    events additionally respect the `hours` window, applied per row by the
+    caller — the lineage tail must not be clipped by the message window. The
+    per-request timeout bounds the expensive tail read before the route
+    degrades."""
+    legacy_end = min(INDEX_LABEL_CUTOVER_AT, now)
+    legacy_rows: list[dict[str, Any]] = []
+    legacy_has_more = False
+    if legacy_end > ARCHIVE_FREEZE_AT:
+        cached_legacy = _read_legacy_loki_cache()
+        if cached_legacy is None:
+            cached_legacy, legacy_has_more = _query_loki_edge_slice(
+                from_=ARCHIVE_FREEZE_AT, to=legacy_end
+            )
+            _write_legacy_loki_cache(cached_legacy)
+        else:
+            # The versioned payload contains rows only, so a full cached page
+            # conservatively preserves the possibility of truncation.
+            legacy_has_more = len(cached_legacy) >= _LOKI_EDGE_LIMIT
+        # Loki range endpoints are inclusive. Keep the legacy interval
+        # half-open so the separately queried indexed slice owns cutover.
+        legacy_rows = [row for row in cached_legacy if row["ts"] < legacy_end]
 
-        indexed_rows: list[dict[str, Any]] = []
-        indexed_has_more = False
-        indexed_start = max(INDEX_LABEL_CUTOVER_AT, boundary)
-        if indexed_start < now:
-            indexed_rows, indexed_has_more = _query_loki_edge_slice(from_=indexed_start, to=now)
-        rows = [*legacy_rows, *indexed_rows]
-        has_more = legacy_has_more or indexed_has_more
+    indexed_rows: list[dict[str, Any]] = []
+    indexed_has_more = False
+    indexed_start = max(INDEX_LABEL_CUTOVER_AT, ARCHIVE_FREEZE_AT)
+    if indexed_start < now:
+        indexed_rows, indexed_has_more = _query_loki_edge_slice(from_=indexed_start, to=now)
+    rows = [*legacy_rows, *indexed_rows]
+    has_more = legacy_has_more or indexed_has_more
     if has_more:
         logger.warning(
             "fleet_graph Loki edge stream exceeded the {}-row fetch cap — edges truncated",
@@ -345,67 +341,58 @@ def _merge_edge_rows(
     return edges
 
 
-def _archive_boundary(cur: Any) -> datetime | None:
-    """The frozen PG `events` archive's freeze point — its newest row's ts.
+def _fetch_archive_edges() -> tuple[list[dict[str, Any]], bool]:
+    """Pre-cutover edge rows from the Loki archive stream (task #1281).
 
-    Rows older than the boundary come from the archive, rows at/after it from
-    Loki (task #1280 interim; task #1281 imports the archive into Loki, after
-    which the archive read collapses to Loki-only)."""
-    return events_archive.load_frozen_boundary(cur)
-
-
-def _fetch_archive_edges(
-    cur: Any,
-    *,
-    boundary: datetime | None,
-) -> list[dict[str, Any]]:
-    """Return raw pre-cutover edge rows from the frozen PG archive."""
-    cur.execute(
-        "SELECT target_agent_id, agent_id, event_name, ts "
-        "FROM events "
-        "WHERE category = 'audit' "
-        "  AND event_name IN ('send_message', 'spawn', 'fork', 'resurrect') "
-        "  AND target_agent_id IS NOT NULL "
-        "  AND agent_id IS NOT NULL "
-        "  AND ts < %s",
-        (boundary,),
+    The archive stream holds every pre-cutover audit row; the query is
+    bounded to the archive's own span (within Loki's 90d max_query_length)
+    and the caller caches the result, so the multi-second whole-archive scan
+    runs at most once a day."""
+    rows, has_more = loki_events.query_events(
+        event_names=list(_EDGE_EVENT_NAMES),
+        categories=["audit"],
+        from_=ARCHIVE_FLOOR_AT,
+        to=ARCHIVE_FREEZE_AT,
+        limit=_LOKI_EDGE_LIMIT,
+        direction="forward",
+        archive=True,
+        timeout_s=_TELEMETRY_READ_TIMEOUT_S,
     )
-    return [_edge_row(row[1], row[0], row[2], row[3]) for row in cur.fetchall()]
+    if has_more:
+        logger.warning(
+            "fleet_graph Loki archive edge stream exceeded the %d-row fetch cap — edges truncated",
+            _LOKI_EDGE_LIMIT,
+        )
+    return rows, has_more
 
 
-def _read_archive_cache() -> tuple[datetime | None, list[dict[str, Any]]] | None:
-    raw = _read_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, cache_name="PG archive")
+def _read_archive_cache() -> list[dict[str, Any]] | None:
+    raw = _read_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, cache_name="Loki archive")
     if raw is None:
         return None
     try:
-        boundary_raw = raw["boundary"]
-        boundary = datetime.fromisoformat(boundary_raw) if boundary_raw is not None else None
-        rows = [
+        return [
             _edge_row(row[1], row[0], row[2], datetime.fromisoformat(row[3])) for row in raw["rows"]
         ]
-        return boundary, rows
     except Exception as exc:
-        logger.debug("fleet_graph frozen PG archive cache decode failed: {}", exc)
+        logger.debug("fleet_graph frozen Loki archive cache decode failed: {}", exc)
         return None
 
 
-def _write_archive_cache(boundary: datetime | None, rows: list[dict[str, Any]]) -> None:
+def _write_archive_cache(rows: list[dict[str, Any]]) -> None:
     payload = {
-        "boundary": boundary.isoformat() if boundary is not None else None,
         "rows": [
             [row["target_agent_id"], row["agent_id"], row["event_name"], row["ts"].isoformat()]
             for row in rows
         ],
     }
-    _write_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, payload, cache_name="PG archive")
+    _write_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, payload, cache_name="Loki archive")
 
 
 class _PgGraphData(NamedTuple):
     """The DB-bound graph phase, kept separate from upstream telemetry work."""
 
     node_rows: list[tuple[Any, ...]]
-    boundary: datetime | None
-    archive_rows: list[dict[str, Any]]
 
 
 def _fetch_pg_graph(
@@ -413,12 +400,10 @@ def _fetch_pg_graph(
     *,
     not_terminated: LiteralString,
 ) -> _PgGraphData:
-    """Fetch nodes and frozen archive edges under the route's PG budget."""
-    cached_archive = _read_archive_cache()
+    """Fetch nodes under the route's PG budget."""
     with pool.connection() as conn, conn.cursor() as cur:
-        # The graph's archive read can scan a large frozen table. Bound the PG
-        # phase below the route deadline so a sync route worker can degrade
-        # rather than wait for the pool's normal 60-second limit.
+        # Bound the PG phase below the route deadline so a sync route worker
+        # can degrade rather than wait for the pool's normal 60-second limit.
         cur.execute("SET LOCAL statement_timeout = '8000'")
         cur.execute(
             # S608: the terminated filter is the only spliced fragment and it
@@ -434,13 +419,7 @@ def _fetch_pg_graph(
             "JOIN agents t ON t.id = a.id " + not_terminated + " ORDER BY a.id"
         )
         node_rows = cur.fetchall()
-        if cached_archive is None:
-            boundary = _archive_boundary(cur)
-            archive_rows = _fetch_archive_edges(cur, boundary=boundary)
-            _write_archive_cache(boundary, archive_rows)
-        else:
-            boundary, archive_rows = cached_archive
-    return _PgGraphData(node_rows, boundary, archive_rows)
+    return _PgGraphData(node_rows)
 
 
 def _fetch_prom_tokens(
@@ -589,14 +568,24 @@ def get_fleet_graph(
         return _stale_graph(key, [])
 
     node_rows = pg_data.node_rows
-    boundary = pg_data.boundary
-    archive_rows = pg_data.archive_rows
 
     # A phase that crosses the TTFB deadline has missed its budget. Do not
     # reject a merely late successful final assembly: only a completed phase
     # triggers degradation, and degraded results never replace last-good data.
     if _monotonic() > deadline:
         logger.warning("fleet_graph PG phase exceeded route budget — serving stale graph")
+        return _stale_graph(key, _build_nodes(node_rows))
+
+    # --- Pre-cutover edges from the Loki archive stream (task #1281) ---
+    # The whole-archive scan is slow but served once per day from the 24h
+    # Redis cache; a failure degrades with the node set it did have.
+    try:
+        archive_rows = _read_archive_cache()
+        if archive_rows is None:
+            archive_rows, _ = _fetch_archive_edges()
+            _write_archive_cache(archive_rows)
+    except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
+        logger.warning("fleet_graph archive query failed — serving stale graph: {}", exc)
         return _stale_graph(key, _build_nodes(node_rows))
 
     # --- Token aggregates from Prometheus (the llm_usage counters) ---
@@ -627,7 +616,7 @@ def get_fleet_graph(
 
     # --- Loki side: cached legacy history + live indexed tail ---
     try:
-        loki_rows, truncated = _fetch_loki_edges(boundary=boundary, now=now)
+        loki_rows, truncated = _fetch_loki_edges(now=now)
     except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
         logger.warning("fleet_graph Loki query failed — serving stale graph: {}", exc)
         return _stale_graph(key, nodes)

@@ -799,7 +799,9 @@ class TestBuildLogql:
 
     def test_service_only_matches_null_agent_id(self) -> None:
         # json turns a JSON null into an absent field; empty-string matches it.
-        assert '| agent_id=""' in loki_events._build_logql(service_only=True)
+        # The live stream's extracted field carries the `_extracted` suffix
+        # (the index label collides); service rows match the empty extraction.
+        assert '| agent_id_extracted=""' in loki_events._build_logql(service_only=True)
 
     def test_grep_is_a_line_filter_before_json(self) -> None:
         q = loki_events._build_logql(grep="boom")
@@ -813,6 +815,32 @@ class TestBuildLogql:
         q = loki_events._build_logql(event_names=["spawn", "terminate"])
         assert '| event_name_extracted=~"spawn|terminate"' in q
         assert '| event_name=~"spawn|terminate"' not in q
+
+    def test_archive_selector_and_plain_fields(self) -> None:
+        """The archive stream (task #1281) has no event_name/agent_id index
+        labels: the selector targets stream=archive and the filters match the
+        plain json-extracted fields (no `_extracted` suffix)."""
+        q = loki_events._build_logql(archive=True, agent_id=42, event_names=["spawn"])
+        assert q.startswith('{service_name="unknown_service", stream="archive"} | json')
+        assert '| agent_id="42"' in q
+        assert '| event_name=~"spawn"' in q
+        assert "agent_id_extracted" not in q
+        assert "event_name_extracted" not in q
+        assert 'stream!="archive"' not in q
+
+    def test_archive_query_events_bounds_one_slice(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """archive=True must not split the read at the live stream's index-label
+        cutover — the archive is one era, queried as a single slice."""
+        client = _install(monkeypatch, {"data": {"result": []}})
+        loki_events.query_events(
+            archive=True,
+            event_names=["spawn"],
+            from_=datetime(2026, 5, 24, tzinfo=UTC),
+            to=datetime(2026, 8, 13, tzinfo=UTC),
+        )
+        assert len(client.calls) == 1
+        query = client.calls[0][1]["query"]
+        assert query.startswith('{service_name="unknown_service", stream="archive"} | json')
 
     def test_level_min_is_a_threshold_regex(self) -> None:
         q = loki_events._build_logql(level_min="warning")

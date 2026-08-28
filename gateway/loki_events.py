@@ -44,6 +44,7 @@ from shared.log import logger
 from shared.loki_index_labels import (
     LokiReadEra,
     LokiReadSlice,
+    archive_stream_selector,
     escape_logql_label,
     event_stream_selector,
     split_index_label_window,
@@ -283,6 +284,7 @@ def _tier_predicate(tiers: list[EventTier]) -> str:
 def _build_logql(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
+    archive: bool = False,
     indexed_labeled: bool = False,
     agent_id: int | None = None,
     exclude_agent_ids: list[int] | None = None,
@@ -321,15 +323,31 @@ def _build_logql(
     `| __error__=""`, dropping lines that failed to parse — the exact-total
     count path needs it so `count_over_time` and the row-parse path agree
     (both exclude unparseable lines).
+
+    With ``archive=True`` the query targets the task #1281 archive stream
+    (all pre-cutover events) instead of the live event stream: the archive
+    has no event_name/agent_id index labels, so those filters match the
+    plain json-extracted fields; ``era``/``indexed_labeled`` are ignored.
     """
-    parts = [
-        event_stream_selector(
+    if archive:
+        # The archive stream carries no event_name/agent_id index labels, so
+        # `| json` extracts those fields plain (no `_extracted` suffix — the
+        # live stream's labels collide and suffix them). Everything else in
+        # the pipeline (category/level/cluster/attribute filters) is identical
+        # between the two streams.
+        selector = archive_stream_selector()
+        event_name_field = "event_name"
+        agent_id_field = "agent_id"
+    else:
+        selector = event_stream_selector(
             era=era,
             agent_id=agent_id,
             event_names=event_names,
             indexed_labeled=indexed_labeled,
         )
-    ]
+        event_name_field = "event_name_extracted"
+        agent_id_field = "agent_id_extracted"
+    parts = [selector]
     if grep:
         parts.append(f'|= "{_escape_label(grep)}"')
     parts.append("| json")
@@ -345,21 +363,21 @@ def _build_logql(
             else:
                 parts.append(f'| {_escape_label(key)}="{_escape_label(value)}"')
     if agent_id is not None:
-        parts.append(f'| agent_id_extracted="{agent_id}"')
+        parts.append(f'| {agent_id_field}="{agent_id}"')
     elif exclude_agent_ids:
         # since_compact partitioning: drop a closed set of agents, keep the
         # rest including service rows (no agent_id).
         joined = "|".join(str(a) for a in exclude_agent_ids)
-        parts.append(f'| agent_id_extracted!~"{joined}"')
+        parts.append(f'| {agent_id_field}!~"{joined}"')
     elif service_only:
         # json turns a JSON null into an absent/empty field — empty matches.
-        parts.append('| agent_id=""')
+        parts.append(f'| {agent_id_field}=""')
     if categories:
         joined = "|".join(_escape_label(x) for x in categories)
         parts.append(f'| category=~"{joined}"')
     if event_names:
         joined = "|".join(_escape_label(e) for e in event_names)
-        parts.append(f'| event_name_extracted=~"{joined}"')
+        parts.append(f'| {event_name_field}=~"{joined}"')
     if level_min is not None:
         idx = _LEVELS.index(level_min)
         joined = "|".join(_LEVELS[idx:])
@@ -390,6 +408,7 @@ def query_events(
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
+    archive: bool = False,
     from_: datetime | None = None,
     to: datetime | None = None,
     limit: int = 100,
@@ -406,6 +425,12 @@ def query_events(
     is ``"backward"`` (newest first) or ``"forward"`` (oldest first — the
     aggregate path uses it for per-agent first-event timestamps). ``timeout_s``
     overrides the shared client's default for this request only.
+
+    With ``archive=True`` the rows come from the task #1281 archive stream
+    (all pre-cutover events, one era — the live stream's index-label slices
+    do not apply). Callers bound ``from_``/``to`` to the archive's span
+    (ARCHIVE_FLOOR_AT..ARCHIVE_FREEZE_AT) to stay under Loki's 90d
+    max_query_length.
     """
     _read_gate()
     window = _window(from_, to)
@@ -413,12 +438,17 @@ def query_events(
         return [], False
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
 
-    slices = _read_slices(window)
+    if archive:
+        # The archive stream is one era (no index-label cutover inside it).
+        slices = (LokiReadSlice(LokiReadEra.LEGACY, window[0], window[1]),)
+    else:
+        slices = _read_slices(window)
     raw: list[tuple[int, str]] = []
     for slice_ in slices:
         logql = _build_logql(
             era=slice_.era,
-            indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
+            archive=archive,
+            indexed_labeled=not archive and len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
             agent_id=agent_id,
             exclude_agent_ids=exclude_agent_ids,
             service_only=service_only,
