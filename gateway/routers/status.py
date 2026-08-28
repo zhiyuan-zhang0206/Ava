@@ -50,7 +50,7 @@ from shared.observability import cluster_label
 from shared.resource_sample import ResourceSample
 
 router = APIRouter()
-ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive row count at the #1823 drop (cold pg_dump verified 2026-08-29)
+ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive rows at the #1823 drop (pg_dump-verified)
 _log = logging.getLogger(__name__)
 _STATUS_CACHE_TTL_S = 15.0
 _status_cache: tuple[float, SystemStatus] | None = None
