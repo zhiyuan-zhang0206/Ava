@@ -8,6 +8,14 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ## [Unreleased]
 
 ### Fixed
+- Plugin loading is fail-soft: a plugin whose `plugin.py` raises at import (or
+  a config entry whose plugin directory is gone) is skipped with a loud
+  `plugin_load_failed` event + log instead of crashing `import ava` cluster-wide
+  (2026-08-28 ava_ledger incident). External plugins' `from . import x` relative
+  imports now resolve via a framework-registered `plugins.<name>` namespace
+  regardless of sys.path/cwd, and `ava plugins install`/`upgrade` land the
+  plugin tree atomically (staging + rename, previous version restored on
+  failure) so a half-installed plugin can no longer exist.
 - Session-revoke suffix fallback could revoke the request's own session when
   called with its masked suffix (the logout-only guard was bypassed) and
   accepted any id shape of 8+ characters as a suffix. The fallback now only
