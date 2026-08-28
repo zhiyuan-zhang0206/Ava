@@ -24,7 +24,7 @@ The four hook container nodes (after_init / before_llm / before_exec / after_exe
 `register_system_prompt_section(fn)` — register a `() -> str` contributor function as a **decorator**; `build_system_prompt()` calls them in registration order at boot time to compose the system prompt. Returning an empty string means no contribution.
 
 ### 4. SDK Namespace Registration
-`ava.register_namespace(name, module)` — registers a new namespace under `ava.*` (e.g., `ava.cwd` from the ava_code plugin). `ava.register_sdk_expand(name)` promotes that namespace into the system prompt's expanded SDK reference. `ava.register_namespace_member(namespace, name, fn)` — attaches a callable member to an already-registered namespace (used by ava_fleet to inject task helpers); all three are exported from `ava/__init__.py`.
+`ava.register_namespace(name, module)` — registers a new namespace under `ava.*` (e.g., `ava.cwd` from the ava_code plugin). The registered object is also placed in `sys.modules` as `ava.<name>`, so `import ava.<name>` resolves to the same object as attribute access; SimpleNamespace namespaces are materialized as real modules. `ava.register_sdk_expand(name)` promotes that namespace into the system prompt's expanded SDK reference. `ava.register_namespace_member(namespace, name, fn)` — attaches a callable member to an already-registered namespace (used by ava_fleet to inject task helpers); all three are exported from `ava/__init__.py`.
 
 ### 5. Plugin Config (`shared/plugin_config_registry.py`)
 Two-phase design:

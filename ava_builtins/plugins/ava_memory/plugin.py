@@ -70,24 +70,11 @@ from __future__ import annotations
 
 __description__ = "Shared memory pool: ava.memory SDK surface (PATH + search + write) + passive recall hook (auto-surfaces relevant notes) + daily consolidation skill (commit, push, re-index)"
 
-try:
-    import fcntl
-except ImportError:  # Windows ships no fcntl module; the index lock degrades (see _locked_update)
-    fcntl = None  # type: ignore[assignment]
-import os
-import re
-import tempfile
-from collections.abc import Callable
-from datetime import UTC, datetime
-from pathlib import Path
-from types import SimpleNamespace as _SimpleNamespace
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 import ava as _ava
-import shared.machine
-import shared.paths
 from agent.graph._context import AvaContext
 from agent.graph._context_notes import (
     RANK_CLUSTER_MEMORY,
@@ -100,14 +87,11 @@ from agent.hooks import Hook, register_before_llm
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
-from ava import _gateway_client as _client
-from ava._sdk_validation import coerce_str, coerce_typed
-from shared.agents import IndexerUnavailable as IndexerUnavailable
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.log import logger
-from shared.paths import ava_home as _ava_home
 
+from . import sdk as _memory_sdk
 from .notes import memory_index_note, per_agent_memory_note
 
 # The two memory indexes join the framework's ordered context-note registry, so
@@ -130,250 +114,6 @@ from .notes import memory_index_note, per_agent_memory_note
 register_context_note(rank=RANK_CLUSTER_MEMORY)(memory_index_note)
 register_context_note(on_fork=True, rank=RANK_PER_AGENT_MEMORY)(per_agent_memory_note)
 
-_MEMORY_DOC = """Long-term notes as markdown files, with semantic search to find them.
-
-Two stores:
-
-- Shared pool (`ava.memory.PATH`): notes visible to every agent. Restrained:
-  reusable rules, repeatedly-referenced facts, and user rulings only; events
-  stay out by default (git history already carries them).
-- Per-agent memory (`<workspace>/memory/`): your own durable state.
-  `MEMORY.md` there is the index — one line per memory, injected into your
-  context at cold start and after each compact; each memory is one file
-  beside it, read on demand. `write(slug, content, ..., store="personal")`
-  writes the entry and maintains its index.
-
-Use `write(slug, content, ..., store="personal")` to write either store; it
-resolves an absolute store-owned path, so it is immune to `ava.cwd` changes.
-"""
-
-_PATH_DOC = """When the pool spans machines, notes sync within about a day — a path `search`
-returns may not have arrived here yet; retry later.
-
-Start each note with YAML frontmatter, then the attribution header:
-
-    ---
-    type: Memory
-    ava_agent: <your id>
-    ---
-    <!-- agent-<your id> @ <your machine>, YYYY-MM-DD HH:MM -->
-
-Use `write(slug, content, ..., store="shared")` as the canonical writer:
-an absolute pool path, immune to `ava.cwd` changes."""
-
-_memory_ns = _SimpleNamespace()
-_memory_ns.__doc__ = _MEMORY_DOC
-_memory_ns.PATH = _ava.const(_ava_home() / "memory", doc=_PATH_DOC)
-_memory_ns.IndexerUnavailable = IndexerUnavailable
-
-
-def _search(query: str, k: int = 5) -> list[tuple[Path, str, list[str]]]:
-    """Semantic search; return the most relevant notes as (absolute path,
-    description, tags) tuples. The description is "" when absent; tags carry
-    the note's `type/<x>` tag."""
-    query = coerce_str(query, "query")
-    k = coerce_typed(k, "k", int)
-    results = _client.memory_search(query, k)
-    return [(_memory_ns.PATH / r.path, r.description, list(r.tags)) for r in results]
-
-
-_memory_ns.search = _search
-
-_PERSONAL_SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-
-
-def _entry_path(slug: str, store: str, agent_id: int) -> tuple[Path, bool]:
-    """Resolve a memory entry to its store-owned absolute path.
-
-    Shared entries may use topic directories, but neither store accepts a path
-    that can escape its root. Personal names are intentionally narrower because
-    that index is the agent's stable, flat namespace.
-    """
-    if not slug or slug.endswith(".md"):
-        raise ValueError("memory slug must be a non-empty filename without .md")
-    relative = Path(slug)
-    if (
-        relative.is_absolute()
-        or "\\" in slug
-        or any(part in {".", ".."} for part in relative.parts)
-    ):
-        raise ValueError("memory slug must be a relative path inside its store")
-    if store == "personal":
-        if not _PERSONAL_SLUG_RE.fullmatch(slug):
-            raise ValueError("personal memory slug must be one kebab-case name without slashes")
-        return shared.paths.workspace_dir(agent_id) / "memory" / f"{slug}.md", False
-    if store == "shared":
-        if relative == Path("MEMORY"):
-            raise ValueError("shared memory slug cannot replace MEMORY.md")
-        return shared.paths.memory_dir() / relative.with_suffix(".md"), True
-    raise ValueError("memory store must be 'personal' or 'shared'")
-
-
-def _validated_tags(tags: list[str] | None) -> list[str]:
-    """Return tags after enforcing the one-type-tag memory invariant."""
-    values = ["type/reference"] if tags is None else list(tags)
-    if sum(tag.startswith("type/") and len(tag) > len("type/") for tag in values) != 1:
-        raise ValueError("memory tags must contain exactly one type/<x> tag")
-    return values
-
-
-def _write_atomically(path: Path, content: str) -> None:
-    """Replace one memory entry without exposing a partially written note."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as file:
-            file.write(content)
-        os.replace(temporary, path)  # noqa: PTH105 — atomic publication required by the memory contract
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-
-
-_INDEX_DESCRIPTION_MAX = 120
-"""Cap on the description text rendered into a MEMORY.md pointer line.
-
-The index is injected into agent context at cold start and after each compact,
-so an unbounded description would leak into every agent's context budget — the
-one unbounded input on this path. The note itself keeps the full text; only
-the index line is truncated."""
-
-
-def _pointer_line(title: str, relative_path: str, description: str) -> str:
-    """Render the one-line index entry for a durable memory note."""
-    if len(description) > _INDEX_DESCRIPTION_MAX:
-        description = description[:_INDEX_DESCRIPTION_MAX].rstrip() + "..."
-    return f"- [{title}]({relative_path}) — {description or title}"
-
-
-def _locked_update(index_path: Path, update: Callable[[str], str]) -> None:
-    """Apply one index update while holding its advisory per-file lock.
-
-    POSIX: fcntl.flock, unchanged. Windows has no fcntl module, so the lock
-    degrades to a no-op there — the update itself still runs, unguarded. The
-    lock is advisory and each upsert rewrites a single pointer line in place,
-    so an unlocked Windows update can at worst drop one line under a
-    concurrent writer; on a single-user box that beats crashing every agent at
-    plugin load (unguarded import introduced by 6e96b1554)."""
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    with index_path.open("a+", encoding="utf-8") as index_file:
-        if fcntl is not None:
-            fcntl.flock(index_file.fileno(), fcntl.LOCK_EX)
-        try:
-            index_file.seek(0)
-            text = update(index_file.read())
-            index_file.seek(0)
-            index_file.truncate()
-            index_file.write(text)
-            index_file.flush()
-        finally:
-            if fcntl is not None:
-                fcntl.flock(index_file.fileno(), fcntl.LOCK_UN)
-
-
-def _upsert_index(
-    root: Path, relative_path: str, title: str, description: str, *, shared: bool
-) -> None:
-    """Replace or append one index pointer without disturbing other entries."""
-    index_path = root / "MEMORY.md"
-    pointer = _pointer_line(title, relative_path, description)
-    target = re.compile(rf"^- \[[^]]+\]\({re.escape(relative_path)}\) — .*$")
-
-    def update(text: str) -> str:
-        lines = text.splitlines()
-        matches = [index for index, line in enumerate(lines) if target.fullmatch(line)]
-        if matches:
-            lines[matches[0]] = pointer
-            for index in reversed(matches[1:]):
-                del lines[index]
-        elif shared and "## Pointers" in lines:
-            section_start = lines.index("## Pointers")
-            section_end = next(
-                (
-                    index
-                    for index in range(section_start + 1, len(lines))
-                    if lines[index].startswith("## ")
-                ),
-                len(lines),
-            )
-            pointer_lines = [
-                index
-                for index in range(section_start + 1, section_end)
-                if lines[index].startswith("- [")
-            ]
-            lines.insert(pointer_lines[-1] + 1 if pointer_lines else section_start + 1, pointer)
-        else:
-            lines.append(pointer)
-        return "\n".join(lines) + "\n"
-
-    _locked_update(index_path, update)
-
-
-def write(
-    slug: str,
-    content: str,
-    *,
-    title: str | None = None,
-    description: str | None = None,
-    tags: list[str] | None = None,
-    store: str = "personal",
-) -> Path:
-    """Upsert the store's MEMORY.md pointer.
-
-    Personal entries use a flat kebab-case name in the calling agent's
-    workspace; shared entries may use topic directories in the memory pool.
-    Both targets are absolute store paths.
-
-    Each index update holds an advisory lock on the store's `MEMORY.md`, so
-    concurrent writers in this and other processes are serialized.
-    """
-    slug = coerce_str(slug, "slug")
-    content = coerce_str(content, "content")
-    title = coerce_str(title, "title", allow_none=True)
-    description = coerce_str(description, "description", allow_none=True)
-    tags = coerce_typed(tags, "tags", (list, tuple), allow_none=True)
-    store = coerce_str(store, "store")
-    from ava._boot import _agent_id
-
-    agent_id = _agent_id
-    if agent_id is None:
-        raise RuntimeError("ava.memory.write requires an established agent id")
-    entry, is_shared = _entry_path(slug, store, agent_id)
-    values = _validated_tags(tags)
-    note_title = title or slug
-    note_description = description or ""
-    if is_shared:
-        now = datetime.now(UTC)
-        machine = shared.machine.machine_name()
-        frontmatter = (
-            f"---\ntype: Memory\nava_agent: {agent_id}\ntitle: {note_title}\n"
-            f"description: {note_description}\ntags: [{', '.join(values)}]\n"
-            f"timestamp: '{now.isoformat()}'\nava_machine: {machine}\n---\n"
-            f"<!-- agent-{agent_id} @ {machine}, {now:%Y-%m-%d %H:%M} -->\n\n"
-        )
-    else:
-        frontmatter = (
-            f"---\nname: {slug}\ndescription: {note_description}\n"
-            f"tags: [{', '.join(values)}]\n---\n\n"
-        )
-    _write_atomically(entry, frontmatter + content)
-    root = (
-        shared.paths.memory_dir() if is_shared else shared.paths.workspace_dir(agent_id) / "memory"
-    )
-    _upsert_index(
-        root, entry.relative_to(root).as_posix(), note_title, note_description, shared=is_shared
-    )
-    return entry.resolve()
-
-
-_memory_ns.write = write
-
-# __all_for_ava__: the curated agent-facing surface. IndexerUnavailable is
-# intentionally excluded — it is reachable (ava.memory.IndexerUnavailable)
-# but does not appear in help(ava.memory).
-_memory_ns.__all_for_ava__ = ["PATH", "search", "write"]
-
-_ava.register_namespace("memory", _memory_ns)
 
 # ── Memory discipline (system prompt section) ──────────────────────────
 
@@ -553,3 +293,10 @@ class _PassiveMemoryRecallHook(Hook):
 
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 register_before_llm(passive_memory_recall_before_llm)
+
+# ── ava.memory namespace registration ──────────────────────────────────
+# The SDK surface (PATH / search / write) lives in `sdk.py` — a real module
+# that IS the `ava.memory` namespace. register_namespace puts the same object
+# on the package (attribute access) and in sys.modules under `ava.memory`
+# (`import ava.memory`), so both spellings resolve identically.
+_ava.register_namespace("memory", _memory_sdk)

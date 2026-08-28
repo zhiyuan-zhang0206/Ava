@@ -103,7 +103,7 @@ def test_write_truncates_long_description_in_index_pointer(
     """The index is injected into agent context, so an unbounded description
     would leak into the context budget: the MEMORY.md pointer truncates the
     description while the note keeps the full text (QA nit, #844)."""
-    from ava_builtins.plugins.ava_memory.plugin import _INDEX_DESCRIPTION_MAX
+    from ava_builtins.plugins.ava_memory.sdk import _INDEX_DESCRIPTION_MAX
 
     long_description = "d" * (_INDEX_DESCRIPTION_MAX + 50)
     ava.memory.write(
@@ -278,8 +278,9 @@ def test_plugin_loads_and_writes_without_fcntl(
     try:
         with PluginContext("ava_memory"):
             from ava_builtins.plugins.ava_memory import plugin as plugin
+            from ava_builtins.plugins.ava_memory import sdk as memory_sdk
 
-        assert plugin.fcntl is None  # the guard fired: fcntl unavailable
+        assert memory_sdk.fcntl is None  # the guard fired: fcntl unavailable
 
         entry = ava.memory.write(
             "no-fcntl",
@@ -297,3 +298,22 @@ def test_plugin_loads_and_writes_without_fcntl(
         for name in list(sys.modules):
             if name.startswith("ava_builtins.plugins.ava_memory"):
                 del sys.modules[name]
+
+
+def test_memory_namespace_importable_as_submodule(memory_plugin: Any) -> None:
+    """`import ava.memory` resolves once the plugin registers the namespace —
+    the LLM habit the import fix targets (agent bug: a bare `import ava.memory`
+    raised ModuleNotFoundError while `ava.memory.write` attribute access
+    worked). The import must serve the same object the package attribute
+    holds, with the members reachable either way."""
+    import types
+    from importlib import import_module
+
+    mod = import_module("ava.memory")
+
+    assert isinstance(mod, types.ModuleType)
+    assert mod is ava.memory
+    assert mod.PATH is ava.memory.PATH
+    assert mod.IndexerUnavailable is ava.memory.IndexerUnavailable
+    assert callable(mod.write)
+    assert callable(mod.search)
