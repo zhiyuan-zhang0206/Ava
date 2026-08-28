@@ -60,6 +60,8 @@ class NoteTag(StrEnum):
     guidance notes surfaced before the agent's next turn. `task` marks a
     task-system notification (assign / update / reminder) delivered through
     the inbound queue and claimed into a note, like `heartbeat`.
+    `heartbeat_pause` marks an in-exec backoff reminder injected by the exec
+    node when pause_heartbeat repeats or shortens the previous pause window.
     """
 
     SDK_HINT = "sdk_hint"
@@ -74,6 +76,7 @@ class NoteTag(StrEnum):
     LIFECYCLE_RESURRECT = "lifecycle_resurrect"
     LIFECYCLE_FORK = "lifecycle_fork"
     HEARTBEAT = "heartbeat"
+    HEARTBEAT_PAUSE = "heartbeat_pause"
     SECURITY = "security"
     CONTEXT = "context"
     AGENT_ID = "agent_id"

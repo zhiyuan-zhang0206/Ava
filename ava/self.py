@@ -216,12 +216,23 @@ def terminate() -> NoReturn:
     raise AgentTermination
 
 
+def _format_pause_duration(seconds: float) -> str:
+    """Human-readable pause window for the backoff reminder (1800 -> '30m')."""
+    if seconds >= 3600 and seconds % 3600 == 0:
+        return f"{seconds / 3600:.0f}h"
+    if seconds >= 60 and seconds % 60 == 0:
+        return f"{seconds / 60:.0f}m"
+    return f"{seconds:.0f}s"
+
+
 def pause_heartbeat(duration: float) -> None:
     """Suppress idle heartbeat check-ins for the next `duration` seconds.
 
-    Each check-in wakes you and spends tokens, so back off exponentially
-    instead of re-pausing the same short window -- 30 minutes first, 2 hours
-    next, longer after that.
+    Rule — successive pause windows for the same wait must strictly
+    increase: 30m, then 2h, then 4h, then 8h, then 16h, then 24h (the cap).
+    Repeating the same window or going shorter is a backoff violation unless
+    the waited-for event changed; each check-in wakes you and spends tokens,
+    so the longest window that fits the wait is the cheapest.
 
     Only the heartbeat is suppressed; real wake-ups still reach you. A later
     call replaces the window.
@@ -246,12 +257,38 @@ def pause_heartbeat(duration: float) -> None:
             f"got {duration!r}"
         )
     with ava.DB.cursor() as cur:
+        # Backoff reminder (user ruling 2026-08-29): the pause history lives
+        # in heartbeat_pause_log; when the new window repeats or shortens the
+        # previous one, buffer a system note the exec node injects into this
+        # turn's messages delta. Same transaction as the window UPDATE.
+        cur.execute(
+            "SELECT duration_s FROM heartbeat_pause_log "
+            "WHERE agent_id = %s ORDER BY created_at DESC, id DESC LIMIT 1",
+            (_boot.agent_id(),),
+        )
+        row = cur.fetchone()
+        prev_duration_s = float(row[0]) if row is not None else None
+        cur.execute(
+            "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, %s)",
+            (_boot.agent_id(), float(duration)),
+        )
         cur.execute(
             "UPDATE agents_meta "
             "SET heartbeat_paused_until = now() + make_interval(secs => %s) "
             "WHERE id = %s",
             (float(duration), _boot.agent_id()),
         )
+        if prev_duration_s is not None and float(duration) <= prev_duration_s:
+            from ava._pause_notes import record_pause_note
+
+            record_pause_note(
+                "Previous heartbeat pause window: "
+                f"{_format_pause_duration(prev_duration_s)}; this pause: "
+                f"{_format_pause_duration(float(duration))}. If the waited-for "
+                "event has not changed, pausing for the same or a shorter window "
+                "than the previous pause violates the backoff rule: pause windows "
+                "must increase (30m -> 2h -> 4h -> 8h -> 16h -> 24h)."
+            )
         from shared import telemetry
 
         telemetry.emit(
