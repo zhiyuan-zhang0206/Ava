@@ -129,6 +129,28 @@ describe("OpenNoticeDetail — FYI", () => {
     await waitFor(() => expect(onResolved).toHaveBeenCalled());
   });
 
+  it("mark read on an already-read notice is silent — no error, queue advances", async () => {
+    // User ruling 2026-08-28: the gateway returns 201 for a read on an
+    // already-resolved notice (idempotent close), so the UI must advance
+    // without surfacing the stale "This notice was already read." error.
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    const onResolved = vi.fn();
+    render(
+      <OpenNoticeDetail
+        agentId={7}
+        notice={ntc({ id: 22, require_response: false })}
+        onResolved={onResolved}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Mark read"));
+
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read" }));
+    await waitFor(() => expect(onResolved).toHaveBeenCalled());
+    expect(screen.queryByText("This notice was already read.")).toBeNull();
+    expect(screen.queryByText(/failed/i)).toBeNull();
+  });
+
   it("mark read carries an optional note as reply", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     render(<OpenNoticeDetail agentId={7} notice={ntc({ id: 22, require_response: false })} />);

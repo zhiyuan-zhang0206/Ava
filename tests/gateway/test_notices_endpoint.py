@@ -752,6 +752,58 @@ def test_read_without_reply_marks_no_inbound(db_conn: psycopg.Connection) -> Non
     assert _pending_rows(db_conn, a) == []
 
 
+def test_read_twice_second_is_silent_201(db_conn: psycopg.Connection) -> None:
+    """Mark read on an already-read FYI notice silently succeeds (user ruling
+    2026-08-28): the second read is a 201 no-op — no error, no new inbound,
+    the row keeps its original resolution."""
+    a = _seed_agent(db_conn)
+    nid = _insert_notice(db_conn, a, "fyi")
+    with TestClient(app) as client:
+        first = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
+        second = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
+    assert first.status_code == 201
+    assert second.status_code == 201
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT resolved_at, resolution, reply FROM agent_notices WHERE id = %s", (nid,)
+        )
+        row = cur.fetchone()
+    assert row is not None and row[0] is not None and row[1] == "read" and row[2] is None
+    # bare reads deliver nothing, the second one included
+    assert _pending_rows(db_conn, a) == []
+
+
+def test_read_with_reply_on_already_resolved_delivers_note(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A note attached to a read on an already-resolved notice still reaches
+    the agent (the close itself is a no-op) — user input is never silently
+    dropped, matching the normal read-with-note path."""
+    a = _seed_agent(db_conn)
+    nid = _insert_notice(db_conn, a, "migration done")
+    with TestClient(app) as client:
+        first = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
+        second = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "read", "reply": "noted"},
+        )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    # exactly one inbound — from the note, system:notice-reply, carrying title + note
+    rows = _pending_rows(db_conn, a)
+    assert len(rows) == 1
+    kind, _status, inbound_text, source = rows[0]
+    assert kind == "chat"
+    assert source == "system:notice-reply"
+    assert "migration done" in inbound_text
+    assert "noted" in inbound_text
+    # the row's original resolution is untouched (no clobbered reply cache)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT resolution, reply FROM agent_notices WHERE id = %s", (nid,))
+        row = cur.fetchone()
+    assert row is not None and row[0] == "read" and row[1] is None
+
+
 def test_read_on_require_response_is_409(db_conn: psycopg.Connection) -> None:
     """read applies to an FYI; on a needs-response notice it is a kind mismatch
     -> 409 (use answer/dismiss)."""
@@ -939,9 +991,11 @@ def test_resolve_batch_concurrent_same_ids_serialize(db_conn: psycopg.Connection
 
 
 def test_resolve_batch_interleaved_with_single_resolve(db_conn: psycopg.Connection) -> None:
-    """Batch and single resolve racing on the SAME notice: exactly one wins.
-    If the batch commits first the single 409s (not open); if the single wins
-    the batch skips it (already resolved). Never double-resolved, never 500."""
+    """Batch and single resolve racing on the SAME notice: exactly one wins
+    the state change, the loser is a silent no-op. If the batch commits first
+    the single read 201s idempotently (already resolved — skip, not error,
+    user ruling 2026-08-28); if the single wins the batch skips it. Never
+    double-resolved, never 500, and a bare read never fabricates an inbound."""
     import threading
 
     a = _seed_agent(db_conn)
@@ -974,18 +1028,18 @@ def test_resolve_batch_interleaved_with_single_resolve(db_conn: psycopg.Connecti
     batch_status, batch_body = batch_out[0]
     single_status = single_out[0]
     assert batch_status == 200
-    legal = (
-        # batch won the race -> single sees it closed and 409s
-        (batch_body == {"resolved": 1, "skipped": 0} and single_status == 409)
-        # single won -> batch skips it
-        or (batch_body == {"resolved": 0, "skipped": 1} and single_status == 201)
-    )
-    assert legal, f"unexpected interleave: batch={batch_body} single={single_status}"
+    # whichever won the state change, the single read is a silent 201: the
+    # batch resolves-then-skips, the single read on an already-resolved notice
+    # is an idempotent close (skip, not error)
+    assert single_status == 201, f"single read should be idempotent: {single_status}"
+    assert batch_body in ({"resolved": 1, "skipped": 0}, {"resolved": 0, "skipped": 1}), batch_body
     # either way the notice is resolved exactly once
     with db_conn.cursor() as cur:
         cur.execute("SELECT resolved_at, resolution FROM agent_notices WHERE id = %s", (nid,))
         row = cur.fetchone()
     assert row is not None and row[0] is not None and row[1] == "read"
+    # and the bare read delivered no chat inbound
+    assert _pending_rows(db_conn, a) == []
 
 
 def test_resolve_batch_reads_wake_no_agent(db_conn: psycopg.Connection) -> None:
