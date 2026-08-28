@@ -21,8 +21,17 @@ core or plugin model's `ModelSpec.media_types`; an unregistered plugin's
 fallback (image-only). No match is text-only. `model_supports_vision()` is the
 message-endpoint image gate derived from that result.
 
+`factory.attach_modalities_for_model()` is the attach gate: `ModelSpec.attach_modalities`
+when the entry declares an attach-specific opinion (must be a subset of `media_types`,
+enforced by the registry), else the native `media_types` — attach registers files into
+the same message pipeline, so the native matrix is the default contract (ruling
+2026-08-28). An empty result means attach is unavailable: `ava.self.attach` is hidden
+from the SDK docs and raises on call.
+
 `attach.py` is a pure turn-boundary packer. It re-stats registered files,
 reports rejected files in a leading text caption, and emits native image,
 document, or media blocks after applying capability, count, size, and image
 dimension limits. `ATTACH_MEDIA_MIME` is its shared suffix-to-MIME table for
-both packing and `ava._understand`.
+both packing and `ava._understand`. Modality rejection happens at registration
+(`attach()`), so the packer's caption-skip is only the safety net for entries
+registered before a model change.
