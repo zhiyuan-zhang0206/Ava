@@ -1,6 +1,6 @@
 [package]
 name = "ava-app"
-version = "0.4.0"
+version = "0.4.2"
 description = "Ava desktop and mobile app"
 authors = ["Ava"]
 edition = "2021"
