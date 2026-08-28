@@ -130,6 +130,11 @@ export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
     ],
   },
   {
+    id: "run-timeline",
+    label: "Run timeline",
+    labelKey: "run-timeline",
+  },
+  {
     id: "alerts",
     label: "Alerts",
     labelKey: "alerts",

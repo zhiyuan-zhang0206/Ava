@@ -363,6 +363,15 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
+  it("links the active agent to its run timeline", async () => {
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    expect(screen.getByRole("link", { name: "Open run timeline" }).getAttribute("href")).toBe(
+      "/insights/run/1",
+    );
+  });
+
   it("renders the open page title and URL without a redundant Open badge", async () => {
     const page = {
       id: 7,

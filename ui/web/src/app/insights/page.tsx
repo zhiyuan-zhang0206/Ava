@@ -16,6 +16,7 @@
 // glance.
 
 import { MessageSquare } from "lucide-react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -42,6 +43,7 @@ const RETIRED_STATUS_ANCHOR_TARGETS: Record<string, string> = {
 };
 
 export default function InsightsPage() {
+  const t = useTranslations("runTimeline");
   // Honor a #anchor on first load / direct link (including forwards from old
   // /control#status deep links): resolve the target once, from the URL hash
   // at mount (later hash changes come from nav clicks, which scroll
@@ -101,6 +103,14 @@ export default function InsightsPage() {
             </ControlSection>
 
             <ControlSection
+              id="run-timeline"
+              label={t("insightsEntry")}
+              description={t("insightsEntryDescription")}
+            >
+              <RunTimelineEntry />
+            </ControlSection>
+
+            <ControlSection
               id="alerts"
               label="Alerts"
               description="System alerts — separate from notices. Unresolved-first history, live via SSE."
@@ -112,5 +122,37 @@ export default function InsightsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function RunTimelineEntry() {
+  const t = useTranslations("runTimeline");
+  const [agentId, setAgentId] = useState("");
+  const parsed = Number(agentId);
+  const validAgent = agentId.trim() !== "" && Number.isInteger(parsed) && parsed >= 0;
+
+  return (
+    <form className={cn(FLEX, "flex-wrap items-end gap-2")} action={`/insights/run/${validAgent ? parsed : ""}`}>
+      <label className="grid gap-1 text-xs text-muted-foreground">
+        {t("agentId")}
+        <input
+          aria-label={t("agentId")}
+          type="number"
+          min="0"
+          value={agentId}
+          onChange={(event) => setAgentId(event.target.value)}
+          className="w-28 rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+        />
+      </label>
+      {validAgent ? (
+        <Link href={`/insights/run/${parsed}`} className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90">
+          {t("open")}
+        </Link>
+      ) : (
+        <button type="submit" disabled className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+          {t("open")}
+        </button>
+      )}
+    </form>
   );
 }

@@ -135,6 +135,10 @@ export type ContextBreakdownResponse = Schemas["ContextBreakdownResponse"];
 export type ContextCategory = Schemas["ContextCategory"];
 export type ContextSection = Schemas["ContextSection"];
 
+// --- Run timeline (GET /api/agents/{id}/run-timeline) ---
+
+export type RunTimelineResponse = Schemas["RunTimelineResponse"];
+
 // --- Per-agent inspector panel (GET /api/agents/{id}/inspect) ---
 
 export type AgentInspect = Schemas["AgentInspect"];

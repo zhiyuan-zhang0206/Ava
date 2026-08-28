@@ -120,6 +120,20 @@ describe("browser API timing", () => {
 });
 
 describe("lifecycle endpoints", () => {
+  it("getRunTimeline GETs the agent session endpoint with the selected window", async () => {
+    await api.getRunTimeline(405, {
+      from: "2026-08-29T08:00:00.000Z",
+      to: "2026-08-29T09:00:00.000Z",
+      level: "bucket",
+      bucket: "1h",
+    });
+
+    expect(calls[0].url).toMatch(
+      /\/api\/agents\/405\/run-timeline\?from=2026-08-29T08%3A00%3A00.000Z&to=2026-08-29T09%3A00%3A00.000Z&level=bucket&bucket=1h$/,
+    );
+    expect(calls[0].init?.method).toBeUndefined();
+  });
+
   it("listAgents defaults to the SQL-bounded live roster", async () => {
     await api.listAgents();
     expect(calls).toHaveLength(1);
