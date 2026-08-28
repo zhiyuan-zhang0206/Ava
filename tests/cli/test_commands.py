@@ -1121,6 +1121,33 @@ def test_stop_sessions_marks_unconfirmed_forced_kill_as_failure(
     assert "✗ ava-gateway (forced)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_stop_sessions_reports_graceful_exit_before_deadline(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
+    """A daemon that exits on SIGTERM (graceful_signal drops it from `alive`)
+    reads ✓ (graceful), never ⚠ (forced) — the exit-before-deadline path must
+    be locked too, not just the forced fallback (QA #863 nit 3)."""
+    from cli.commands.stop import _stop_sessions
+
+    service, _ = _fake_session_backends
+    service.alive.add("ava-gateway")
+
+    def _exit_on_signal(name: str) -> bool:
+        service.signalled.append(name)
+        service.alive.discard(name)
+        return True
+
+    monkeypatch.setattr(service, "graceful_signal", _exit_on_signal)
+
+    _stop_sessions(["ava-gateway"], graceful=True, deadline=0.0)
+
+    out = capsys.readouterr().out
+    assert "✓ ava-gateway (graceful)" in out  # pyright: ignore[reportUnknownMemberType]
+    assert "⚠" not in out
+
+
 def test_stop_sessions_keeps_warning_for_successful_force(
     capsys: pytest.CaptureFixture[str],
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],

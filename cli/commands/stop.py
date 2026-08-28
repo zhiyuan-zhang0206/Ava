@@ -359,8 +359,9 @@ def _do_stop(
         teardown; orthogonal to keep_infra (data plane, not agents), so `ava cluster
         destroy` reaps its cluster's agents too.
 
-    force_reap_agents=True (update only): CAS-mark local live agents restarting
-        and include their native process sessions in the graceful service batch.
+    force_reap_agents=True (update only, graceful path only): CAS-mark local
+        live agents restarting and include their native process sessions in
+        the graceful service batch. A non-graceful stop ignores the flag.
         Their persistent PTY sessions remain live, and the agents and services
         consume the same absolute stop deadline.
 
@@ -407,8 +408,14 @@ def _do_stop(
     # the agents before signalling anything so the paused restarter will bring
     # them back on new code; their persistent PTY sessions remain out of scope.
     stop_deadline = time.monotonic() + stop_timing.REAP_KILL_WINDOW_S if graceful else None
-    if force_reap_agents:
-        _ns._force_reap_local_agents(defer_process_stop=True)
+    # force_reap_agents is an update-only knob: the non-graceful stop path kills
+    # service sessions outright and never enters the include_agent_processes
+    # branch, so honouring the flag there would CAS-mark agents without any
+    # process kill to follow (QA nit 2). The force_reap stage keeps its
+    # telemetry marker for the update path (QA nit 1, #777 contract).
+    if force_reap_agents and graceful:
+        with updater_stage("force_reap"):
+            _ns._force_reap_local_agents(defer_process_stop=True)
 
     # 1) stop service sessions (and force-update agent processes when asked).
     # Controllers are signalled first, every target shares stop_deadline, and
@@ -416,7 +423,7 @@ def _do_stop(
     _stop_sessions(
         service_sessions,
         graceful=graceful,
-        include_agent_processes=force_reap_agents,
+        include_agent_processes=force_reap_agents and graceful,
         deadline=stop_deadline,
     )
 
