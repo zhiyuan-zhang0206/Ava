@@ -878,6 +878,11 @@ def test_stack_step_runs_for_station_role_without_marker(
     assert calls == [["bash", "start.sh"]]
 
 
+def _no_launchctl() -> subprocess.CompletedProcess[str]:
+    """A launchctl that reports nothing loaded (non-macOS CI has no binary)."""
+    return subprocess.CompletedProcess(["launchctl"], 1, "", "")
+
+
 def test_station_role_renders_full_native_set_without_marker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -891,6 +896,7 @@ def test_station_role_renders_full_native_set_without_marker(
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
     monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr(_lgtm_native, "_launchctl", _no_launchctl)
 
     _lgtm_native.ensure_lgtm_native(repo, home, station=True)
 
@@ -966,6 +972,7 @@ def test_station_role_creates_configured_storage_dirs(
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
     monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr(_lgtm_native, "_launchctl", _no_launchctl)
     monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", str(storage))
 
     _lgtm_native.ensure_lgtm_native(repo, home, station=True)

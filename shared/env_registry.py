@@ -257,6 +257,7 @@ _IDENTITY_FIELDS = frozenset(
     {
         "machine_serve_gateway",
         "machine_serve_agent_runner",
+        "machine_serve_observability_station",
         "machine_host",
         "machine_name",
         "machine_description",

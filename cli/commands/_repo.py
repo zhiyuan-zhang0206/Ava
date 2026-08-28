@@ -323,6 +323,7 @@ def _preflight_probes() -> int:
         "machine_name": None,
         "machine_serve_gateway": None,
         "machine_serve_agent_runner": None,
+        "machine_serve_observability_station": None,
         "machine_description": None,
         "memory_remote": None,
         "gateway_url": None,
