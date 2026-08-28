@@ -49,11 +49,7 @@ _DEMO_QUERY = (
 )
 
 # A stat-shaped inspector query (one aggregate row).
-_STAT_QUERY = (
-    "SELECT count(*) AS live "
-    "FROM agents_meta "
-    "WHERE status IN ('running', 'idling')"
-)
+_STAT_QUERY = "SELECT count(*) AS live FROM agents_meta WHERE status IN ('running', 'idling')"
 
 
 def _metric(
@@ -268,10 +264,7 @@ def test_metrics_runtime_query_error_per_metric(
         monkeypatch,
         _metric(
             name="broken",
-            query=(
-                "SELECT status::bigint AS n FROM agents_meta "
-                "WHERE id = %(agent_id)s"
-            ),
+            query=("SELECT status::bigint AS n FROM agents_meta WHERE id = %(agent_id)s"),
         ),
         _metric(name="healthy", panel="stat", query=_STAT_QUERY),
     )
