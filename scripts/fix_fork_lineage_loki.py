@@ -8,7 +8,9 @@ spawner + the frozen events archive — is corrected by
 ``migrations/*_fork-lineage-target-fix.sql``), so this script:
 
 1. finds fork events whose ``target_agent_id`` != payload ``fork_from`` (the
-   exact predicate the fleet_graph / neighbors ancestors readers rely on),
+   exact predicate the fleet_graph / neighbors ancestors readers rely on;
+   the scan covers the LIVE stream only — pre-cutover rows were corrected
+   by the SQL migration before the archive import, task #1281),
 2. deletes each misrecorded row via the Loki delete API — an exact label
    selector (event_name + agent_id + target_agent_id) over a narrow time
    window around the row's ts, unambiguous because fork events are rare,
@@ -34,9 +36,9 @@ from typing import Any
 
 import httpx
 
-import shared.db
 from gateway import loki_events
 from shared.config import settings
+from shared.loki_index_labels import ARCHIVE_FREEZE_AT
 
 
 def _misrecorded_rows() -> list[dict[str, Any]]:
@@ -48,11 +50,10 @@ def _misrecorded_rows() -> list[dict[str, Any]]:
     only rows that carry a fork_from payload are lineage-judged.
     """
     now = datetime.now(UTC)
-    with shared.db.connect() as conn, conn.cursor() as cur:
-        from gateway import events_archive
-
-        boundary = events_archive.load_frozen_boundary(cur)
-    from_ = boundary if boundary is not None else now - timedelta(days=30)
+    # The scan covers the live stream only: pre-cutover rows live in the
+    # Loki archive stream (task #1281) and were corrected by the SQL
+    # migration on the PG side before the archive was imported.
+    from_ = ARCHIVE_FREEZE_AT
     rows, has_more = loki_events.query_events(
         event_names=["fork"],
         categories=["audit"],

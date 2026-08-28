@@ -355,8 +355,11 @@ def _fetch_archive_edges() -> tuple[list[dict[str, Any]], bool]:
         to=ARCHIVE_FREEZE_AT,
         limit=_LOKI_EDGE_LIMIT,
         direction="forward",
+        # The whole-archive scan measured ~5.7s on prod; the result is cached
+        # for 24h, so a cold-cache fetch gets a generous budget (the live-tail
+        # reads keep the tighter 8s).
         archive=True,
-        timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+        timeout_s=30.0,
     )
     if has_more:
         logger.warning(

@@ -90,7 +90,7 @@ def test_fleet_archive_boundary_is_the_frozen_constant() -> None:
 
     from gateway.routers.fleet_graph import ARCHIVE_FREEZE_AT
 
-    assert datetime(2026, 8, 13, 3, 54, 10, tzinfo=UTC) == ARCHIVE_FREEZE_AT
+    assert datetime(2026, 8, 13, 3, 54, 10, 626517, tzinfo=UTC) == ARCHIVE_FREEZE_AT
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:
@@ -450,6 +450,10 @@ def test_loki_failure_serves_last_good_graph_without_writing_short_cache(
 
     def boom(**kwargs: object) -> object:
         query_args.update(kwargs)
+        if kwargs.get("archive"):
+            # The frozen archive fetch succeeds (cached separately); the
+            # LIVE tail is the failing upstream under test.
+            return [], False
         raise httpx.ConnectError("loki unreachable")
 
     monkeypatch.setattr(loki_events, "query_events", boom)
