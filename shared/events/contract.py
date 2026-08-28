@@ -994,6 +994,11 @@ EVENTS: dict[str, EventSpec] = {
         "poisoned editable-install direct_url repaired to the prod source root",
         tier="anomaly",
     ),
+    "source_tree_reset": _telemetry(
+        "source_tree_reset",
+        "prod source checkout reset to the installed commit / cleaned of untracked files",
+        tier="anomaly",
+    ),
     # labeler / trace housekeeping
     "label_generated": _telemetry("label_generated", "label auto-generated", tier="noise"),
     "label_generate_failed": _telemetry(

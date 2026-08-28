@@ -572,6 +572,44 @@ def test_disk_usage_failure_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _cluster_health._disk_usage_failure() is not None
 
 
+def test_source_tree_failure_alerts_without_rollback_counter(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+) -> None:
+    """A tampered prod source tree fails the probe (exit 1) and alerts the
+    owner, but never feeds the auto-rollback counter — rolling back code does
+    not undo an on-disk edit (the 2026-08-28 outage class: edited source broke
+    `import ava` for every agent on the box)."""
+    message = "prod source tree tampered: untracked outside whitelist: junk.txt"
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda: message)
+    _write_aged_alert_state(_home, f"FAIL: source tree — {message}")
+
+    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+
+    assert rc == 1
+    assert _read_count(_home).splitlines()[0] == "0"  # alert-only: counter reset, never advanced
+    assert len(_sent_alerts) == 1
+    assert "source tree" in _sent_alerts[0]
+    assert "junk.txt" in _sent_alerts[0]
+
+
+def test_source_tree_clean_passes(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clean tree must not fail the probe — the whitelist exists so the
+    routine frontend/ build output never fires a false alarm. The check is
+    patched so the test does not depend on this host's prod tree state."""
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda: None)
+
+    rc = _cluster_health.run_health_probe()
+
+    assert rc == 0
+
+
 def test_service_probe_failure_resets_stale_counter_before_alerting(
     _all_checks_pass: None,
     _home: Path,

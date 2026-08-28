@@ -185,6 +185,7 @@ consumers: see the comments at each emit point.
 | `pgbouncer_repaired` | pgbouncer watchdog repair | anomaly | — | — | 90d | events |
 | `editable_pth_repaired` | poisoned editable-install pointer repaired to the prod source root | anomaly | — | — | 90d | events |
 | `editable_direct_url_repaired` | poisoned editable-install direct_url repaired to the prod source root | anomaly | — | — | 90d | events |
+| `source_tree_reset` | prod source checkout reset to the installed commit / cleaned of untracked files | anomaly | — | — | 90d | events |
 | `label_generated` | label auto-generated | noise | — | — | 90d | events |
 | `label_generate_failed` | label generation failed | anomaly | — | — | 90d | events |
 | `label_generate_skipped` | label generation skipped | noise | — | — | 90d | events |

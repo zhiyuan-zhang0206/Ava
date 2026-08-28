@@ -180,6 +180,10 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # reconcile all share the session/registry primitives; the reconcile-split
     # refactor is tracked, not forgotten (Task #1825 pushed it over the line).
     "ava/watcher.py": ("#405", 500, "2026-12-31"),
+    # The converge step table — one aggregation of every bring-up step; the
+    # source-tree guard step (Task #1905) pushed it over the ceiling. The
+    # step-split refactor is tracked, not forgotten.
+    "cli/commands/_converge.py": ("#405", 800, "2026-12-31"),
 }
 
 

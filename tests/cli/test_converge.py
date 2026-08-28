@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 from typing import cast
@@ -224,6 +225,115 @@ def test_prod_editable_pth_converge_step_leaves_healthy_direct_url_alone(
         step.apply(_ctx(source_root, tmp_path / ".ava"))
 
     assert du.read_text() == original
+
+
+def test_source_tree_guard_is_registered_as_host_global() -> None:
+    """Without host-global scoping, a dev worktree converge could reset its own checkout."""
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "source tree reset + clean"),
+        None,
+    )
+
+    assert step is not None
+    assert step.host_global
+
+
+def test_start_resets_source_tree_before_the_integrity_guard() -> None:
+    """Task #1905 QA 2: the periodic reset must run before the start-time
+    guard, or the guard's auto-heal adopts drift as the installed commit and
+    the reset never bites on the regular operational path."""
+    from cli.commands.start import _cmd_start_body
+
+    src = inspect.getsource(_cmd_start_body)
+    reset_at = src.index("reset_prod_source_tree(repo)")
+    guard_at = src.index("_verify_source_integrity(repo)")
+
+    assert reset_at < guard_at
+
+
+def test_source_tree_step_skips_for_non_prod_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dev worktree start must never reset the prod tree (Task #1905 QA 2)."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    dev_repo = tmp_path / "dev" / "worktree"
+    dev_repo.mkdir(parents=True)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: False)
+    calls: list[object] = []
+
+    def fake_repair(repo: object) -> None:
+        calls.append(repo)
+
+    monkeypatch.setattr("shared.source_tree_guard.repair_source_tree", fake_repair)
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "source tree reset + clean"),
+        None,
+    )
+    assert step is not None
+
+    step.apply(_ctx(dev_repo, tmp_path / ".ava"))
+
+    assert calls == []
+
+
+def test_source_tree_step_skips_while_update_in_flight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rollout owns the tree: the reset must not fight a live checkout."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: True)
+    calls: list[object] = []
+
+    def fake_repair(repo: object) -> None:
+        calls.append(repo)
+
+    monkeypatch.setattr("shared.source_tree_guard.repair_source_tree", fake_repair)
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "source tree reset + clean"),
+        None,
+    )
+    assert step is not None
+
+    step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert calls == []
+
+
+def test_source_tree_step_repairs_when_idle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Outside a rollout the step resets + cleans and says what it did."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: False)
+    from shared.source_tree_guard import SourceTreeRepair
+
+    def _fake_repair(_repo: object) -> SourceTreeRepair:
+        return SourceTreeRepair(
+            reset_from="a" * 40,
+            reset_to="b" * 40,
+            cleaned=("junk.txt",),
+            kept_whitelisted=(),
+            errors=(),
+        )
+
+    monkeypatch.setattr("shared.source_tree_guard.repair_source_tree", _fake_repair)
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "source tree reset + clean"),
+        None,
+    )
+    assert step is not None
+
+    step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    out = capsys.readouterr().err
+    assert "source tree reset" in out
+    assert "junk.txt" in out
 
 
 def test_worktree_converge_does_not_touch_its_editable_pth(

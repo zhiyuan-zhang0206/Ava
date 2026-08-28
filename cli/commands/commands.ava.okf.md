@@ -59,7 +59,9 @@ schema change catches the DB up on its own.
   `_gateway_ready` uses the same audit when an off-box probe fails. See
   [[shared/shared.ava.okf.md|Shared Libraries]].
 - The prod editable-install assertion and update write window are one lifecycle
-  guard: [[editable-install-guard.ava.okf.md]].
+  guard: [[editable-install-guard.ava.okf.md]]; the prod source checkout's
+  integrity (periodic reset + probe detection) is its sibling guard:
+  [[source-tree-guard.ava.okf.md]].
 - `cli/enroll.py` and `cli/preflight.py` are routed **before** settings-gated
   imports in `main()`, so they work on a host with no usable config yet.
 - `cli/mcp_server.py` is the third top-level module a verb routes to

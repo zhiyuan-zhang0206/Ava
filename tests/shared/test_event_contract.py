@@ -98,7 +98,8 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     checkpoint_table_sizes (Task #1545a's post-vacuum absolute gauges) +
     agent_boot_failed (Task #1704's visible process-boot failure marker) +
     gate_auth_probe_failed (Task #1736's gate auth-probe failure
-    classification event).
+    classification event) + source_tree_reset (Task #1905's source-tree
+    guard repair audit).
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS

@@ -48,6 +48,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "pgbouncer_repaired",  # services/healthchecks/pgbouncer.py:_emit_repaired
         "editable_pth_repaired",  # shared/editable_install.py:repair_editable_ava_pth
         "editable_direct_url_repaired",  # shared/editable_install.py:repair_editable_direct_url
+        "source_tree_reset",  # shared/source_tree_guard.py:repair_source_tree
         "agent_boot_failed",  # agent/loop.py:_emit_boot_failure
         "sdk_call",  # agent/sdk_metering.py recorder (via shared/sdk_telemetry)
         # shared/plugin_activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
