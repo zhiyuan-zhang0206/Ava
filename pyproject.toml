@@ -343,6 +343,7 @@ ignore = [
 "shared/redis_client.py" = ["TID251"]
 "gateway/mcp_endpoint.py" = ["TID251"]
 "ava/_exports/help.py" = ["TID251"]
+"ava/_exports/discovery.py" = ["TID251"]
 # tests may import contextvars to exercise the propagation contracts
 "tests/shared/test_turn_identity.py" = ["TID251"]
 "tests/agent/test_turn_scoped_retry.py" = ["TID251"]

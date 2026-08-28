@@ -109,12 +109,32 @@ def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> No
     proc, _request, result = _spawn(
         tmp_path,
         f"import ava\nava.self.attach({str(image)!r}, label='render result')",
+        # attach is a media-capable-model feature (user ruling 2026-08-28):
+        # the child's default test model is text-only and rejects the call.
+        config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
     )
 
     assert proc.returncode == 0, proc.stderr
     assert read_result(result).attachments == [
         {"path": str(image.resolve()), "label": "render result"}
     ]
+
+
+def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
+    """A text-only-model child gets the model gate error, not a registration —
+    `ava.self.attach` is unavailable to it (user ruling 2026-08-28)."""
+    proc, _request, result = _spawn(
+        tmp_path,
+        "import ava\nava.self.attach('/tmp/render.png')",
+        config_overlay={"llm_model": "deepseek-v4-pro"},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "ava.self.attach is unavailable" in proc.stdout
+    assert "text-only" in proc.stdout
+    payload = read_result(result)
+    assert payload.kind == "crashed"
+    assert "text-only" in (payload.exc_msg or "")
 
 
 def test_child_crash_writes_envelope_with_traceback(tmp_path: Path) -> None:
@@ -375,3 +395,51 @@ def test_child_overlay_phases_framework_then_plugin(
         "plugins",
         "apply:plugin",
     ]
+
+
+def test_child_help_hides_attach_for_text_only_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interactive help in a text-only child omits the attach contract — the
+    SDK docs gate matches the system prompt (user ruling 2026-08-28)."""
+    # help(ava.self) renders MACHINE_SPEC, which needs a machine identity —
+    # the child's bare $AVA_HOME must carry its own machine_name file (env
+    # identity is dropped when the home's .env does not declare it).
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "machine_name").write_text("test-host", encoding="utf-8")
+    proc, _request, _result = _spawn(
+        tmp_path,
+        "import ava, io, contextlib\n"
+        "buf = io.StringIO()\n"
+        "with contextlib.redirect_stdout(buf):\n"
+        "    ava.help(ava.self)\n"
+        "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
+        config_overlay={"llm_model": "deepseek-v4-pro"},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "NO_ATTACH" in proc.stdout
+
+
+def test_child_help_keeps_attach_for_media_capable_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A media-capable child's interactive help keeps the attach contract
+    (user ruling 2026-08-28)."""
+    # help(ava.self) renders MACHINE_SPEC, which needs a machine identity —
+    # the child's bare $AVA_HOME must carry its own machine_name file (env
+    # identity is dropped when the home's .env does not declare it).
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "machine_name").write_text("test-host", encoding="utf-8")
+    proc, _request, _result = _spawn(
+        tmp_path,
+        "import ava, io, contextlib\n"
+        "buf = io.StringIO()\n"
+        "with contextlib.redirect_stdout(buf):\n"
+        "    ava.help(ava.self)\n"
+        "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
+        config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "HAS_ATTACH" in proc.stdout

@@ -202,6 +202,9 @@ def _sdk_expand_section() -> str:
 
     pieces: list[str] = []
     seen_targets: set[int] = set()
+    # Text-only models drop media-gated members (`ava.self.attach`; ruling 2026-08-28).
+    hidden: frozenset[str] = ava._attach.media_gated_members()
+    _hidden_token = ava._hidden_surface_members.set(hidden)
     # Render classes compactly in the system prompt: show name + docstring +
     # field annotations + enum values, skip methods and nested classes. Fields
     # stay so the agent sees attribute names; the full contract (methods) is one
@@ -239,6 +242,7 @@ def _sdk_expand_section() -> str:
                 ava.help(target)
             pieces.append(buf.getvalue().rstrip())
     finally:
+        ava._hidden_surface_members.reset(_hidden_token)
         ava._COMPACT_CLASSES.reset(_compact_token)
 
     if not pieces:

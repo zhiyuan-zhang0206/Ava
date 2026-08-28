@@ -289,7 +289,8 @@ def _run_code(code: str, payload: ResultPayload) -> None:
 def _run(request_path: str, result_path: str) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
-    from ava._attach import take_attachments
+    from ava._attach import media_gated_members, take_attachments
+    from ava._exports.discovery import _hidden_surface_members
     from ava.security import take_findings
 
     _line_buffered_output()
@@ -315,6 +316,10 @@ def _run(request_path: str, result_path: str) -> None:
         from agent._process_boot import _apply_per_agent_sdk_disable
 
         _apply_per_agent_sdk_disable()
+    # A text-only agent gets no attach contract anywhere in its SDK docs —
+    # including interactive `ava.help(ava.self)` (user ruling 2026-08-28).
+    # Set for the child's whole lifetime; the token is deliberately held.
+    _hidden_surface_members.set(media_gated_members())
     # Load plugin namespaces (ava.tasks etc.) + wraps + state fields into this
     # process — the same explicit load a watcher child runs. Idempotent.
     ava._ensure_plugins_loaded()
