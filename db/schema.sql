@@ -174,6 +174,9 @@ CREATE TABLE heartbeat_pause_log (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+COMMENT ON TABLE heartbeat_pause_log IS
+    'Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat call. The previous-window lookup for the backoff reminder reads the latest row per agent; the telemetry `heartbeat_paused` event stays the display surface.';
+
 -- (agent_id, created_at DESC, id DESC) matches the previous-window lookup's
 -- ORDER BY exactly (same shape as agent_activity's lateral index).
 CREATE INDEX heartbeat_pause_log_agent_created_idx
