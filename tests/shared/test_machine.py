@@ -77,10 +77,15 @@ def test_machine_role_observability_station_file(
 
 def test_is_observability_station_helper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """is_observability_station() mirrors is_gateway()/is_agent_runner()."""
+    from shared.machine import reset_identity
+
     monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
     (tmp_path / "machine_serve_observability_station").write_text("true")
     assert _machine.is_observability_station() is True
     assert _machine.is_gateway() is False
+    # machine_role() is process-cached — the identity holder must be reset for
+    # the re-resolve after the capability files change.
+    reset_identity()
     (tmp_path / "machine_serve_observability_station").unlink()
     (tmp_path / "machine_serve_gateway").write_text("true")
     assert _machine.is_observability_station() is False
