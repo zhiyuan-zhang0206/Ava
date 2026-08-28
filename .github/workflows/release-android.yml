@@ -9,6 +9,11 @@ on:
   push:
     tags:
       - 'android-v[0-9]+.[0-9]+.[0-9]+'
+    branches:
+      - main
+    paths:
+      - 'ui/app/**'
+      - '.github/workflows/release-android.yml'
   workflow_dispatch:
 
 permissions:
@@ -33,17 +38,18 @@ jobs:
         id: version
         env:
           REF_NAME: ${{ github.ref_name }}
-          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           python3 - <<'PY'
           import os, pathlib, re, tomllib
 
-          if os.environ["EVENT_NAME"] == "push":
+          if os.environ["REF_TYPE"] == "tag":
               match = re.fullmatch(r"android-v(\d+\.\d+\.\d+)", os.environ["REF_NAME"])
               if match is None:
                   raise SystemExit(f"invalid Android release tag: {os.environ['REF_NAME']}")
               version = match.group(1)
           else:
+              # main-branch build or manual dispatch: version comes from Cargo.
               cargo = tomllib.loads(pathlib.Path("ui/app/src-tauri/Cargo.toml").read_text())
               version = cargo["package"]["version"]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -178,10 +184,24 @@ jobs:
       - name: Create the release and upload the APK
         env:
           GH_TOKEN: ${{ github.token }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          if [ "$REF_TYPE" = "tag" ]; then
+            # Formal release: one tag, one release, history preserved.
+            TAG="$REF_NAME"
+          else
+            # main-branch build (or manual dispatch): keep a single mutable
+            # android-latest prerelease asset; users always download the newest.
+            TAG="android-latest"
+          fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "Ava App Android $TAG" \
-              --notes "Ava App Android APK release."
+            if [ "$REF_TYPE" = "tag" ]; then
+              gh release create "$TAG" --title "Ava App Android $TAG" \
+                --notes "Ava App Android APK release."
+            else
+              gh release create "$TAG" --title "Ava App Android latest" \
+                --notes "Latest APK built from main." --prerelease
+            fi
           fi
           gh release upload "$TAG" release-assets/*.apk --clobber
