@@ -1,7 +1,9 @@
 """Regression tests for fleet-graph upstream failures and Redis fallbacks."""
 
 import json
+import threading
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 import psycopg
@@ -649,3 +651,165 @@ def test_pg_cancellation_serves_last_good_graph(
     assert resp.status_code == 200
     assert resp.json() == expected
     assert redis.writes == []
+
+
+def test_archive_edges_single_flight_concurrent_misses_run_one_scan(
+    fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent frozen-archive misses run ONE whole-archive scan: a waiter
+    that cannot enter the fetch within the bounded wait serves live-only
+    edges instead of stacking its own scan on Loki (the stampede that
+    saturated the querier during the 2026-08-29/30 incident)."""
+    import gateway.routers.fleet_graph as fg
+
+    redis = _FakeRedis()
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    started = threading.Event()
+    release = threading.Event()
+    archive_calls = 0
+    original = fake_loki.query_events
+
+    def slow_archive_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        nonlocal archive_calls
+        if kwargs.get("archive"):
+            archive_calls += 1
+            started.set()
+            release.wait(timeout=10)
+        return original(**kwargs)
+
+    monkeypatch.setattr(loki_events, "query_events", slow_archive_query)
+
+    results: list[tuple[list[dict[str, Any]], bool]] = []
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            results.append(fg._cached_archive_edges())
+        except BaseException as exc:  # pragma: no cover - failure reporting
+            errors.append(exc)
+
+    first = threading.Thread(target=worker)
+    first.start()
+    assert started.wait(timeout=5)  # the first thread holds the fetch lock
+    second = threading.Thread(target=worker)
+    second.start()
+    second.join(timeout=10)
+    assert not second.is_alive()  # the waiter gave up after the bounded wait
+    release.set()
+    first.join(timeout=10)
+    assert not errors
+    assert archive_calls == 1  # one scan for two concurrent misses
+    # completion order is not deterministic (the waiter finishes first), so
+    # compare as a set: one holder ran the (empty-archive) scan, one waiter
+    # degraded after the bounded wait
+    assert sorted(results, key=lambda t: t[1]) == [([], False), ([], True)]
+
+
+def test_archive_fetch_failure_serves_stale_graph_and_negative_caches(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed whole-archive scan serves the last-good graph with its honest
+    stale flag and writes a short negative cache, so the next minute of polls
+    does not re-run the same doomed scan (the retry loop from the
+    2026-08-29/30 incident); the first poll after the negative entry is gone
+    retries and repopulates the real rows."""
+    import gateway.routers.fleet_graph as fg
+
+    source = _seed_agent(db_conn)
+    target = _seed_agent(db_conn)
+    _seed_archive_edge(fake_loki, source_agent=source, target_agent=target)
+    redis = _FakeRedis()
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom)
+
+    state = {"fail_next_archive": True}
+    archive_calls = 0
+    original = fake_loki.query_events
+
+    def flaky_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        nonlocal archive_calls
+        if kwargs.get("archive"):
+            archive_calls += 1
+        if kwargs.get("archive") and state["fail_next_archive"]:
+            state["fail_next_archive"] = False
+            raise httpx.ReadTimeout("timed out")
+        return original(**kwargs)
+
+    monkeypatch.setattr(loki_events, "query_events", flaky_query)
+
+    with TestClient(app) as client:
+        first = client.get("/api/fleet/graph")
+        assert first.status_code == 200
+        first_body = first.json()
+        assert first_body["stale"] is True  # honest marker, never an unflagged partial graph
+        assert first_body["edges"] == []
+        # the failed fetch wrote the negative cache: empty rows, degraded
+        # marker, short TTL — not nothing
+        neg_key = "fleet_graph:frozen:archive:v1"
+        assert neg_key in redis.values
+        neg_writes = [w for w in redis.writes if w[0] == neg_key]
+        assert json.loads(neg_writes[-1][1]) == {"rows": [], "degraded": True}
+        assert neg_writes[-1][2] == fg._NEGATIVE_CACHE_TTL_SECONDS
+        # within the negative window the poll hits the cache — no re-fetch
+        second = client.get("/api/fleet/graph")
+        assert second.status_code == 200
+        assert second.json()["stale"] is True
+        assert archive_calls == 1
+        # once the negative entry expires (simulated), the next poll
+        # refetches and repopulates the real rows
+        del redis.values[neg_key]
+        third = client.get("/api/fleet/graph")
+        assert third.status_code == 200
+        assert third.json()["stale"] is False
+        assert archive_calls == 2
+        assert "degraded" not in json.loads(redis.values[neg_key])
+
+
+def test_archive_lock_wait_serves_stale_graph_at_route_level(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Route-level behavior for the lock waiter: while one request holds the
+    archive fetch, a concurrent request answers a stale graph (honest flag)
+    instead of an unflagged live-only graph."""
+    import gateway.routers.fleet_graph as fg
+
+    source = _seed_agent(db_conn)
+    target = _seed_agent(db_conn)
+    _seed_archive_edge(fake_loki, source_agent=source, target_agent=target)
+    redis = _FakeRedis()
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom)
+
+    started = threading.Event()
+    release = threading.Event()
+    original = fake_loki.query_events
+
+    def slow_archive_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        if kwargs.get("archive"):
+            started.set()
+            release.wait(timeout=10)
+        return original(**kwargs)
+
+    monkeypatch.setattr(loki_events, "query_events", slow_archive_query)
+
+    outcomes: list[dict[str, object]] = []
+
+    def poll() -> None:
+        with TestClient(app) as client:
+            resp = client.get("/api/fleet/graph")
+            body = resp.json()
+            outcomes.append({"status": resp.status_code, "stale": body["stale"]})
+
+    first = threading.Thread(target=poll)
+    first.start()
+    assert started.wait(timeout=5)  # the first request holds the fetch lock
+    second = threading.Thread(target=poll)
+    second.start()
+    second.join(timeout=15)
+    release.set()
+    first.join(timeout=15)
+
+    # completion order is not deterministic (the waiter finishes first), so
+    # compare as a set: one holder fresh, one waiter honest-stale
+    assert all(o["status"] == 200 for o in outcomes)
+    assert sorted(bool(o["stale"]) for o in outcomes) == [False, True]
