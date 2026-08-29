@@ -31,6 +31,8 @@ LABELS = ("ok", "fumbled", "failed")
 # Thresholds — a run is "fumbled" once any single signal crosses these.
 FUMBLE_MIN_REPROMPTS = 2
 FUMBLE_MIN_COMPACTIONS = 3
+FUMBLE_MIN_EXEC_FAILURES = 3
+FUMBLE_TURNS_PER_EXEC_FAILURE = 10
 
 
 def label(rec: dict[str, Any]) -> str:
@@ -93,8 +95,13 @@ def _is_fumbled(rec: dict[str, Any]) -> bool:
     # but its context overflowed; this is a fumble, not a full failure.
     if rec["breached"]:
         return True
-    # A few execution failures are normal exploratory work; only flag
-    # repeated failure (3+) as a fumble signal.
-    if rec["exec_failed"] >= 3:
+    # A few execution failures are normal exploratory work. Keep the
+    # three-failure floor for short workers, then require one failure per ten
+    # turns so a completed long-running worker is not penalized for iterations.
+    exec_failure_threshold = max(
+        FUMBLE_MIN_EXEC_FAILURES,
+        -(-rec["turns"] // FUMBLE_TURNS_PER_EXEC_FAILURE),
+    )
+    if rec["exec_failed"] >= exec_failure_threshold:
         return True
     return rec["compactions"] >= FUMBLE_MIN_COMPACTIONS
