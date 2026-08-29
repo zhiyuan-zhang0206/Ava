@@ -32,6 +32,7 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
 from shared import telemetry
 from shared.config import settings
@@ -63,7 +64,7 @@ _LIVENESS_BEAT_STEP_S = 30.0
 #   * poll on a fine cadence (_DISPATCH_STEP_S), not once per idle window, so due
 #     agents are noticed in small time-slices instead of one 300s batch;
 #   * de-phase each agent's due-time by a deterministic per-agent jitter
-#     (_JITTER_SPAN_S) so a fleet that went idle together does not come due
+#     (JITTER_SPAN_S) so a fleet that went idle together does not come due
 #     together — this breaks the self-synchronization;
 #   * cap check-ins per dispatch step (_MAX_CHECKINS_PER_STEP) for a hard global
 #     wake-rate ceiling (~_MAX_CHECKINS_PER_STEP / _DISPATCH_STEP_S per second),
@@ -75,14 +76,8 @@ _LIVENESS_BEAT_STEP_S = 30.0
 # wait longer for their first check-in (backlog / ceiling seconds) — acceptable
 # for a liveness check-in that is a safety net, not a latency-sensitive signal.
 _DISPATCH_STEP_S = 15.0
-_JITTER_SPAN_S = 300.0
-# Freshness window for the "no pending inbound" guard (seconds): a pending
-# inbound older than this no longer counts as "about to wake" — the check-in
-# goes out anyway. Same value as `ops.controllers.hibernate`'s
-# _PENDING_FRESH_WINDOW_S (the two guards are two sides of the same
-# wake/swap decision); deliberately NOT shared.deploy_timing.NO_PROGRESS_TIMEOUT_S,
-# which is a deployment-progress judgment (2026-08-08 audit, P3-5).
-_STALE_PENDING_S = 900.0
+# JITTER_SPAN_S / STALE_PENDING_S live in `services.heartbeat` — the inspector's
+# projection mirrors them, so there is one drift-free source.
 _MAX_CHECKINS_PER_STEP = 25
 
 # Consecutive-failed-check-in backoff (Task #1928): a check-in that produces no
@@ -184,7 +179,7 @@ def _select_idle_agents_needing_heartbeat(
         ") "
         "ORDER BY last_active_at ASC"
     )
-    params: list[object] = [idle_threshold_s, jitter_span_s, _STALE_PENDING_S]
+    params: list[object] = [idle_threshold_s, jitter_span_s, STALE_PENDING_S]
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
@@ -352,7 +347,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     Dispatch runs on a fine `step` cadence (min of the configured
     `heartbeat_interval_seconds` and `_DISPATCH_STEP_S`) so due agents drain in
     small time-slices; each step checks in on at most `_MAX_CHECKINS_PER_STEP` of
-    them, and the due-time carries a per-agent jitter (`_JITTER_SPAN_S`).
+    them, and the due-time carries a per-agent jitter (`JITTER_SPAN_S`).
     Together these keep the fleet-wide wake rate bounded and de-synchronized —
     see the module-level "Wakeup-storm flattening" note.
     """
@@ -364,7 +359,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
         os.getpid(),
         step,
         idle_threshold,
-        _JITTER_SPAN_S,
+        JITTER_SPAN_S,
         _MAX_CHECKINS_PER_STEP,
         _MAX_CHECKINS_PER_STEP / step,
     )
@@ -385,7 +380,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
             rows = _select_idle_agents_needing_heartbeat(
                 pool,
                 idle_threshold,
-                jitter_span_s=_JITTER_SPAN_S,
+                jitter_span_s=JITTER_SPAN_S,
                 limit=_MAX_CHECKINS_PER_STEP,
                 backoff_until=_backoff_deadlines(failure_streak, idle_threshold),
             )

@@ -132,16 +132,23 @@ class HeartbeatInfo(BaseModel):
     states the panel renders:
 
     - idle-family (idling / hibernating / restarting — the statuses the fleet
-      view projects to "Idle") & not paused & nothing queued: `next_at` is set
-      (the projected next check-in, `last_active_at + idle_threshold`; an
-      overdue projection renders as "due" in the frontend, never as a past
-      time); everything else off.
-    - idle-family & not paused & a wake already queued: `heartbeat_pending` is
-      True — the daemon suppresses check-ins while any inbound is pending (its
-      `NOT EXISTS` guard), so no future check-in is projected. This is the state
-      a stuck agent sits in (a heartbeat check-in it never woke to process);
-      rendering it honestly is what stops the panel from projecting a
-      nonsensical past `next_at`.
+      view projects to "Idle") & not paused & no fresh wake queued: `next_at` is
+      set — the daemon's projected check-in due time,
+      `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)`. The daemon
+      dispatches the actual check-in at its first poll tick at/after that (at
+      most one 15s dispatch step later), so `next_at` is the earliest possible
+      check-in, and never later than what the daemon does. An overdue
+      projection renders as "due" in the frontend, never as a past time;
+      everything else off.
+    - idle-family & not paused & a *fresh* wake already queued (created within
+      the daemon's 900s `STALE_PENDING_S` freshness window): `heartbeat_pending`
+      is True — the daemon suppresses check-ins while a fresh inbound is pending
+      (its `NOT EXISTS` guard, windowed by `STALE_PENDING_S`), so no future
+      check-in is projected. This is the state a stuck agent sits in (a
+      heartbeat check-in it never woke to process); rendering it honestly is
+      what stops the panel from projecting a nonsensical past `next_at`. A
+      pending inbound older than the window is stale — the daemon checks in on
+      the agent anyway, so the panel projects `next_at` instead.
     - paused: `paused_until` is set (the active suppression end); `next_at` None.
     - running or terminated: all off — an active agent never gets a check-in,
       and a dead one never will.

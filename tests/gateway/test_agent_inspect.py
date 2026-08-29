@@ -41,6 +41,7 @@ from gateway.app import app
 from gateway.loki_events import _weighted_quantile
 from gateway.routers import _agent_cost, _inspect_stats, agent_inspect
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
+from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from shared.config import settings
 from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 
@@ -503,17 +504,30 @@ def _metrics_ledger_row(
 
 
 def _insert_pending_inbound(
-    db: psycopg.Connection, *, agent_id: int, kind: str = "heartbeat"
+    db: psycopg.Connection,
+    *,
+    agent_id: int,
+    kind: str = "heartbeat",
+    created_s_ago: float | None = None,
 ) -> None:
     """INSERT a pending inbound_messages row — models a check-in (or any wake) the
     daemon has queued but the agent has not yet claimed. `status` defaults to
     'pending', so this is what the daemon's `NOT EXISTS (pending inbound)` guard
-    (and now the inspector's `heartbeat_pending`) keys off."""
+    (and now the inspector's `heartbeat_pending`) keys off. `created_s_ago`
+    backdates created_at — a row older than `STALE_PENDING_S` is stale: the
+    daemon re-checks-in past it (and the panel projects next_at instead)."""
     with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, %s, %s)",
-            (agent_id, "Heartbeat.", kind),
-        )
+        if created_s_ago is None:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, %s, %s)",
+                (agent_id, "Heartbeat.", kind),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, created_at) "
+                "VALUES (%s, %s, %s, now() - make_interval(secs => %s))",
+                (agent_id, "Heartbeat.", kind, created_s_ago),
+            )
 
 
 def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
@@ -2024,7 +2038,8 @@ def test_inspect_heartbeat_running_agent_dashes(db_conn: psycopg.Connection) -> 
 
 
 def test_inspect_heartbeat_idle_projects_next_at(db_conn: psycopg.Connection) -> None:
-    """idle + no pause → next_at = effective_last_active + idle_threshold_s;
+    """idle + no pause → next_at = effective_last_active + idle_threshold_s +
+    per-agent jitter (id mod JITTER_SPAN_S), exactly the daemon's due-time;
     paused_until None. Parked 120s ago, so next_at ≈ now + (idle_threshold - 120)s."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     db_conn.commit()
@@ -2032,7 +2047,7 @@ def test_inspect_heartbeat_idle_projects_next_at(db_conn: psycopg.Connection) ->
         hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % int(JITTER_SPAN_S)
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -2105,8 +2120,8 @@ def test_inspect_heartbeat_no_pending_projects_from_last_active(
     assert hb["heartbeat_pending"] is False
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
-    # next_at is based on last_active_at (120s ago).
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120
+    # next_at is based on last_active_at (120s ago) + per-agent jitter.
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % int(JITTER_SPAN_S)
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -2142,7 +2157,8 @@ def test_inspect_heartbeat_idle_family_projects_next_at(
     """The fleet view projects hibernating/restarting rows to "Idle", so their
     page must show a computable next check-in like a plain idle agent (user
     report 2026-08-28: a restarting agent rendered an empty cell). Parked 120s
-    ago → next_at ≈ now + (idle_threshold - 120)s, exactly like idling."""
+    ago → next_at ≈ now + (idle_threshold - 120)s + jitter, exactly like
+    idling."""
     aid = _insert_agent(db_conn, status=status, status_changed_s_ago=120)
     db_conn.commit()
     with TestClient(app) as client:
@@ -2150,7 +2166,7 @@ def test_inspect_heartbeat_idle_family_projects_next_at(
     assert hb["paused_until"] is None
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % int(JITTER_SPAN_S)
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -2176,8 +2192,9 @@ def test_inspect_heartbeat_restarting_overdue_still_projects_raw_next_at(
 ) -> None:
     """A restarting agent's idle clock can run past its due time (the daemon
     does not check in while the process is down): the projection stays raw
-    `last_active_at + idle_threshold` (a past instant), and the frontend
-    renders a past next_at as "due" — never "4m ago" for a *next* heartbeat."""
+    `last_active_at + idle_threshold + jitter` (a past instant), and the
+    frontend renders a past next_at as "due" — never "4m ago" for a *next*
+    heartbeat."""
     aid = _insert_agent(
         db_conn,
         status="restarting",
@@ -2188,8 +2205,28 @@ def test_inspect_heartbeat_restarting_overdue_still_projects_raw_next_at(
         hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
-    # Raw projection: 2h ago + idle_threshold — clearly in the past.
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 7200
+    # Raw projection: 2h ago + idle_threshold + jitter — clearly in the past.
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 7200 + aid % int(JITTER_SPAN_S)
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_inspect_heartbeat_stale_pending_does_not_suppress(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A pending inbound older than the daemon's freshness window
+    (STALE_PENDING_S=900s) no longer counts as "about to wake": the daemon
+    re-checks-in on the agent, so the panel projects next_at instead of showing
+    heartbeat_pending forever. Mirrors the daemon's windowed `NOT EXISTS` guard
+    exactly (QA #877 N2) — the display never claims a stale wake is still
+    suppressing check-ins."""
+    aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
+    _insert_pending_inbound(db_conn, agent_id=aid, created_s_ago=STALE_PENDING_S + 300)
+    db_conn.commit()
+    with TestClient(app) as client:
+        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+    assert hb["heartbeat_pending"] is False
+    assert hb["next_at"] is not None
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % int(JITTER_SPAN_S)
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 

@@ -18,13 +18,12 @@ from gateway.routers import _agent_cost, _inspect_stats, _plugin_metrics
 from gateway.routers._agent_cost import _query_timeout, window_bounds
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
-from gateway.routers._inspect_live import db_rows_blocking, notice_blocking
+from gateway.routers._inspect_live import db_rows_blocking, notice_blocking, project_heartbeat
 from gateway.schemas import (
     AgentActivity,
     AgentInspect,
     AgentInspectLive,
     AgentTps,
-    HeartbeatInfo,
     HeartbeatLastPause,
     NeighborRow,
     NeighborsResponse,
@@ -33,8 +32,7 @@ from gateway.schemas import (
 )
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ShellInfo
-from shared.agents import AgentNotFound, AgentStatus
-from shared.config import settings
+from shared.agents import AgentNotFound
 
 router = APIRouter()
 
@@ -226,76 +224,6 @@ def _heartbeat_last_pause_or_none(agent_id: int) -> HeartbeatLastPause | None:
         return _heartbeat_last_pause(agent_id)
     except (httpx.HTTPError, ValueError):
         return None
-
-
-def _heartbeat(
-    status: str,
-    last_active_at: datetime,
-    paused_until: datetime | None,
-    *,
-    pending_inbound: bool,
-    last_pause: HeartbeatLastPause | None,
-) -> HeartbeatInfo:
-    """Idle-heartbeat state for one agent — the projected next check-in (or the
-    active pause / already-queued wake) plus the most recent pause from history.
-
-    `paused_until` is the agents_meta column already narrowed by the caller to a
-    *future* value (a NULL / past pause arrives here as None = not paused). The
-    display states are mutually exclusive:
-
-    - idle-family (idling / hibernating / restarting), paused → `paused_until`.
-    - idle-family, not paused, a wake already queued → `heartbeat_pending`.
-    - idle-family, not paused, nothing queued → `next_at` (the daemon's next
-      check-in; the frontend renders an overdue one as "due").
-    - running or terminated → all off (never checked in on).
-
-    `heartbeat_pending` mirrors the daemon's `NOT EXISTS (pending inbound)` guard:
-    the daemon checks in on an idle agent only when it has no inbound already
-    pending, so while one *is* pending (a heartbeat check-in already sent but not
-    yet processed, or a chat about to wake it) the daemon will not schedule
-    another and there is no future check-in to project. Surfacing this state —
-    instead of projecting `next_at` off a stale clock — is what keeps a stuck
-    agent (an unconsumed check-in it never woke to process) from rendering a
-    nonsensical past "next heartbeat" time. When no inbound is pending, any
-    earlier check-in was already consumed (its turn bumped `last_active_at` past
-    it), so `last_active_at` alone is the correct projection basis — no
-    `heartbeat_nudged`-event floor is needed.
-
-    `last_pause` is the cached event-history aggregate. Every other input is
-    from the request's fresh agents_meta read, so a status/heartbeat change is
-    visible immediately even while the historical Loki fan-out rides its TTL.
-    """
-    # The daemon projects the next check-in from last_active_at + idle_threshold_s
-    # (plus per-agent jitter). Use idle_threshold_s, not heartbeat_interval_seconds
-    # (the poll cadence), so the inspector matches the daemon's contract.
-    # heartbeat_interval_seconds is kept for the return value — the frontend badge
-    # ("every 5m") uses it as the configured check-in cadence.
-    idle_threshold_s = int(settings.daemon.heartbeat_idle_threshold_seconds)
-    interval_s = int(settings.daemon.heartbeat_interval_seconds)
-
-    next_at: datetime | None = None
-    active_pause: datetime | None = None
-    heartbeat_pending = False
-    if status in (AgentStatus.IDLING, AgentStatus.HIBERNATING, AgentStatus.RESTARTING):
-        if paused_until is not None:
-            active_pause = paused_until
-        # Mirror the daemon's `NOT EXISTS (pending inbound)` guard: with a
-        # wake already queued, no check-in is scheduled (heartbeat_pending);
-        # with nothing queued, project from the idle clock.
-        # `pending_inbound` is computed by the caller on the same DB
-        # connection (the inspector's agents_meta read).
-        elif pending_inbound:
-            heartbeat_pending = True
-        else:
-            # Overdue (daemon skips restarting agents) → frontend shows "due".
-            next_at = last_active_at + timedelta(seconds=idle_threshold_s)
-    return HeartbeatInfo(
-        interval_s=interval_s,
-        next_at=next_at,
-        paused_until=active_pause,
-        heartbeat_pending=heartbeat_pending,
-        last_pause=last_pause,
-    )
 
 
 # Per-op probe deadline for the inspector's shell list. The panel polls every
@@ -589,10 +517,11 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
         shells=shells,
         config_overlay=db.config_overlay,
         notice=notice,
-        heartbeat=_heartbeat(
+        heartbeat=project_heartbeat(
             status=db.status,
             last_active_at=db.last_active_at,
             paused_until=db.paused_until,
+            agent_id=agent_id,
             pending_inbound=db.pending_inbound,
             last_pause=last_pause,
         ),
@@ -636,8 +565,8 @@ async def get_agent_inspect(
     machine — its own included — is dialed at its registered ops URL), so a
     split deployment reflects each agent's runner and an unreachable machine
     degrades to an empty list rather than failing the panel. `heartbeat` is the agent's idle check-in state: the
-    projected next check-in when idle (or the active pause / running suppression)
-    plus its most recent pause from history.
+    projected next check-in due time when idle (or the active pause / running
+    suppression) plus its most recent pause from history.
 
     The retained live lifecycle leg begins at the index-label cutover and never
     scans the legacy slice. It has an 8-second Loki timeout and a per-agent
@@ -690,10 +619,11 @@ async def get_agent_inspect(
         stats=aggregates.stats,
         tps=aggregates.tps,
         activity=aggregates.activity,
-        heartbeat=_heartbeat(
+        heartbeat=project_heartbeat(
             status=db.status,
             last_active_at=db.last_active_at,
             paused_until=db.paused_until,
+            agent_id=agent_id,
             pending_inbound=db.pending_inbound,
             last_pause=aggregates.heartbeat_last_pause,
         ),
