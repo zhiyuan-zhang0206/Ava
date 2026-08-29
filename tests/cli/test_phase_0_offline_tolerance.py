@@ -62,6 +62,7 @@ def _drive(
     *,
     registered: list[tuple[str, str | None]],
     statuses: dict[str, dict[str, str]] | None = None,
+    local_update_rc: int = 0,
 ) -> _Rollout:
     """Run the gateway orchestration with `registered` as the reconciled rollout
     list and this host named `ME`, recording which hosts each phase reached.
@@ -93,7 +94,7 @@ def _drive(
     monkeypatch.setattr("shared.machines.list_stopped_agent_runners", list)
     monkeypatch.setattr(_cli, "_fan_out", _fan_out)
     monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: local_update_rc)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
@@ -155,8 +156,8 @@ def test_a_host_skipped_at_phase_0_is_excluded_from_later_phases(
 
     An ops timeout does not prove whether the fetch completed.  Letting a later
     successful pause re-admit that host strands it when Phase B validates a target
-    object the host may not have.  Its watchdog can safely self-heal after the
-    rollout instead.
+    object the host may not have.  The host converges at the next rollout, or
+    when `ava cluster update` runs on it again.
     """
     statuses = {"/api/cluster/fetch": {"air": "unreachable"}}
     rollout = _drive(
@@ -169,6 +170,31 @@ def test_a_host_skipped_at_phase_0_is_excluded_from_later_phases(
     assert rollout.rc == 0
     assert [h for h, s in rollout.results("/api/cluster/stop") if s == "ok"] == [ME, "wsl"]
     assert [h for h, s in rollout.results("/api/cluster/update") if s == "ok"] == ["wsl"]
+
+
+def test_a_skipped_host_is_not_resumed_when_the_rollout_fails(
+    monkeypatch: pytest.MonkeyPatch, set_machine_identity
+) -> None:
+    """A failed rollout's compensating resume shares the frozen eligible set.
+
+    `hosts_to_resume` materializes after Phase 0 excludes the skipped host, so
+    the `finally`'s resume fan-out must never dial it — even when the local leg
+    fails and every paused eligible host has to be unpaused.
+    """
+    statuses = {"/api/cluster/fetch": {"air": "unreachable"}}
+    rollout = _drive(
+        monkeypatch,
+        set_machine_identity,  # pyright: ignore[reportUnknownArgumentType]
+        registered=[(ME, None), ("air", None), ("wsl", None)],
+        statuses=statuses,
+        local_update_rc=1,
+    )
+
+    assert rollout.rc == 1
+    # Phase A paused only the eligible hosts; the failed local leg's compensating
+    # resume unpauses exactly those — the skipped host is never dialed.
+    assert rollout.results("/api/cluster/stop") == [(ME, "ok"), ("wsl", "ok")]
+    assert [h for h, _s in rollout.results("/api/cluster/resume")] == [ME, "wsl"]
 
 
 def test_phase_0_every_host_offline_still_rolls_the_gateway(

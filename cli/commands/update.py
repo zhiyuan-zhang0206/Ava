@@ -568,8 +568,8 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     # Freeze the eligible rollout set after Phase 0, while Postgres is up. A
     # host whose fetch timed out may come back before Phase A, but pausing it
     # would violate validate-before-kill: the timeout gave us no proof that it
-    # has the pinned target object Phase B will vet. The watchdog safely
-    # converges that host after the rollout instead.
+    # has the pinned target object Phase B will vet. The host converges at the
+    # next rollout, or when `ava cluster update` runs on it again.
     #
     # Materialize each eligible runner's ops URL for the same reason: the
     # compensating resume in the `finally` dials these directly (never a fresh
@@ -770,8 +770,8 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             print(
                 f"\n⚠ {len(skipped)} agent-runner(s) unreachable and skipped: "
                 f"{', '.join(sorted(skipped))} — never paused or updated by this rollout; "
-                "their watchdog pin-drift self-heals them to the pin when they come back "
-                "online (`ava cluster status` shows them off-pin until then).",
+                "they converge at the next rollout, or when `ava cluster update` runs on "
+                "that host (`ava cluster status` shows them off-pin until then).",
                 file=sys.stderr,
             )
         # One machine-readable line at the end of every rollout log: each phase's
