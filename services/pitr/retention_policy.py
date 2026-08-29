@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from services.pitr.base_manifest import CandidateManifest, _lsn
 from services.pitr.restore_manifest import ProtectedManifest, required_archive_names
@@ -20,6 +21,7 @@ from services.pitr.retention_manifest import (
 class RetentionEvidence:
     candidates: tuple[CandidateManifest, ...]
     protected: tuple[ProtectedManifest, ...]
+    local_acks: tuple[RetentionObject, ...]
     inventory: tuple[RetentionObject, ...]
     malformed_names: tuple[str, ...] = ()
     snapshot_before: str = ""
@@ -39,7 +41,21 @@ def plan_retention(  # noqa: PLR0915
     if evidence.malformed_names:
         blockers.add("unknown or malformed evidence exists")
 
-    candidates = {item.chain_id: item for item in evidence.candidates}
+    candidates: dict[str, CandidateManifest] = {}
+    capture_times: dict[str, datetime] = {}
+    for item in evidence.candidates:
+        try:
+            captured = datetime.strptime(item.chain_id, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+        except ValueError:
+            blockers.add("candidate chain identity is not a canonical UTC capture time")
+            continue
+        if captured.strftime("%Y%m%dT%H%M%SZ") != item.chain_id:
+            blockers.add("candidate chain identity is not canonical")
+            continue
+        if f"/base/{item.chain_id}/" not in item.base_object.object_name:
+            blockers.add("candidate capture identity differs from its base object")
+        candidates[item.chain_id] = item
+        capture_times[item.chain_id] = captured
     if len(candidates) != len(evidence.candidates):
         blockers.add("duplicate candidate chain identity")
     protected: dict[str, ProtectedManifest] = {}
@@ -53,9 +69,11 @@ def plan_retention(  # noqa: PLR0915
             continue
         protected[proof.chain_id] = proof
 
-    ordered = sorted(protected)
+    ordered = sorted(protected, key=capture_times.__getitem__)
     retained_chains = ordered[-retain_chains:]
     unprotected_chains = sorted(set(candidates) - set(protected))
+    if unprotected_chains:
+        blockers.add("unprotected candidate exists")
     if len(retained_chains) < retain_chains:
         blockers.add("fewer than two protected chains")
 
@@ -67,6 +85,28 @@ def plan_retention(  # noqa: PLR0915
         by_name.setdefault(item.object_name, set()).add(item.generation)
     if any(len(generations) != 1 for generations in by_name.values()):
         blockers.add("ambiguous remote object generation")
+
+    remote_by_archive = _archive_index(evidence.inventory, "remote", blockers)
+    local_by_archive = _archive_index(evidence.local_acks, "local ACK", blockers)
+    verified_inventory = {
+        identity: item for identity, item in inventory.items() if item.kind == "base"
+    }
+    for archive_name in sorted(set(remote_by_archive) | set(local_by_archive)):
+        remote = remote_by_archive.get(archive_name)
+        local = local_by_archive.get(archive_name)
+        if remote is None or local is None:
+            blockers.add("local ACK and remote archive inventory differ")
+            continue
+        if remote != local:
+            blockers.add("local ACK conflicts with exact remote archive identity")
+            continue
+        verified_inventory[(remote.object_name, remote.generation)] = remote
+    inventory = verified_inventory
+
+    if any(item.kind == "history" for item in evidence.inventory) or any(
+        wal_range.timeline > 1 for item in candidates.values() for wal_range in item.wal_ranges
+    ):
+        blockers.add("cross-timeline ancestry is not authenticated by this planner")
 
     keep: dict[tuple[str, int], str] = {}
     for chain_id in unprotected_chains:
@@ -80,7 +120,7 @@ def plan_retention(  # noqa: PLR0915
     oldest = retained_chains[0] if retained_chains else None
     if oldest is not None:
         high_water = _pin_contiguous_wal(
-            keep, candidates[oldest], evidence.inventory, blockers=blockers
+            keep, candidates[oldest], tuple(inventory.values()), blockers=blockers
         )
 
     protected_objects = {
@@ -136,8 +176,15 @@ def _pin_candidate(
     blockers: set[str],
 ) -> None:
     base = (candidate.base_object.object_name, candidate.base_object.generation)
-    if base not in inventory:
-        blockers.add("candidate base generation is missing")
+    actual_base = inventory.get(base)
+    if actual_base is None or (
+        actual_base.size,
+        actual_base.crc32c,
+    ) != (
+        candidate.base_object.ciphertext_size,
+        candidate.base_object.ciphertext_crc32c,
+    ):
+        blockers.add("candidate base generation is missing or changed")
     keep[base] = reason
     required = set(required_archive_names(candidate.wal_ranges, candidate.wal_segment_size))
     seen: set[str] = set()
@@ -160,7 +207,11 @@ def _pin_proof(
     for expected in objects:
         identity = (expected.object_name, expected.generation)
         actual = inventory.get(identity)
-        if actual is None or actual.size != expected.size:
+        if actual is None or (
+            actual.size,
+            actual.crc32c,
+            actual.metadata,
+        ) != (expected.size, expected.crc32c, expected.metadata):
             blockers.add("protected object generation is missing or changed")
         keep[identity] = reason
 
@@ -237,12 +288,31 @@ def _canonical_evidence(evidence: RetentionEvidence) -> str:
     value = {
         "candidates": sorted(item.to_json() for item in evidence.candidates),
         "protected": sorted(item.to_json() for item in evidence.protected),
+        "local_acks": [
+            json.dumps(item.__dict__, sort_keys=True, separators=(",", ":"))
+            for item in sorted(evidence.local_acks)
+        ],
         "inventory": [
             json.dumps(item.__dict__, sort_keys=True, separators=(",", ":"))
             for item in sorted(evidence.inventory)
         ],
         "malformed_names": sorted(evidence.malformed_names),
-        "snapshot_before": evidence.snapshot_before,
-        "snapshot_after": evidence.snapshot_after,
     }
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _archive_index(
+    objects: tuple[RetentionObject, ...], source: str, blockers: set[str]
+) -> dict[str, RetentionObject]:
+    values: dict[str, RetentionObject] = {}
+    for item in objects:
+        if item.kind == "base":
+            continue
+        if item.archive_name is None:
+            blockers.add(f"{source} archive lacks a canonical archive name")
+            continue
+        if item.archive_name in values:
+            blockers.add(f"duplicate {source} archive name")
+            continue
+        values[item.archive_name] = item
+    return values

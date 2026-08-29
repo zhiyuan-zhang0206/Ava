@@ -687,10 +687,14 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
         config = settings.physical_backup
         state.retention.enabled = config.pitr_retention_planner_enabled
         if config.pitr_retention_planner_enabled:
+            state.retention.last_attempt = time.time()
             try:
                 state.retention.plan = refresh_retention_plan(config)
+                state.retention.last_success = time.time()
+                state.retention.last_error = None
             except Exception as exc:
-                state.last_error = str(exc)
+                state.retention.plan = None
+                state.retention.last_error = str(exc)
                 _log.exception("PITR retention dry-run planning failed")
                 await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
                 continue

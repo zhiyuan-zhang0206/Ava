@@ -10,9 +10,14 @@ that selection logic with deletion would make the first rollout destructive.
 ## Decision
 
 Introduce only a local dry-run planner. It retains the latest two protected
-chains by candidate capture identity, pins every unprotected candidate, and
-keeps the continuous WAL/history recovery window from the oldest retained base
-through the local exact-generation ACK high-water. Unknown, malformed, missing,
+chains by strictly parsed UTC candidate capture identity. Any unprotected
+candidate blocks eligibility and remains fully pinned. Every WAL decision joins
+the local uploader ACK to the viewer-only remote inventory on archive name,
+object name, generation, size, CRC32C and immutable metadata; neither source can
+replace the other. The planner keeps the continuous WAL recovery window from the
+oldest retained base through the exact joined ACK high-water. Cross-timeline
+objects are pinned and block eligibility until authenticated history ancestry is
+implemented. Unknown, malformed, missing,
 forked, generation-ambiguous or concurrently changing evidence blocks the plan
 and forces the eligible set empty.
 
@@ -25,8 +30,7 @@ remote-delete method, credential or production enable.
 ## Consequences
 
 - Operators can observe eligibility and byte cost before any destructive API exists.
-- Candidate/proof/ACK corruption blocks cleanup instead of producing a partial plan.
-- A later, separately approved slice must verify remote inventory and generations.
+- Candidate/proof/ACK/inventory corruption blocks cleanup instead of producing a partial plan.
 - Daily and pre-update logical `pg_dump` retention is unchanged.
 
 ## Alternatives considered

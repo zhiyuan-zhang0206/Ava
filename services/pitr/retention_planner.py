@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from services.pitr.archive_shim import archive_name_is_valid
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.retention_inventory import RetentionInventoryReader
@@ -37,6 +38,7 @@ def build_local_evidence(
     malformed: list[str] = []
     candidates: list[CandidateManifest] = []
     protected: list[ProtectedManifest] = []
+    local_acks: list[RetentionObject] = []
     inventory: list[RetentionObject] = []
     candidate_dir = root / "base-manifests"
     protected_dir = root / "protected-manifests"
@@ -45,16 +47,6 @@ def build_local_evidence(
         try:
             candidate = CandidateManifest.from_json(path.read_text())
             candidates.append(candidate)
-            base = candidate.base_object
-            inventory.append(
-                RetentionObject(
-                    base.object_name,
-                    base.generation,
-                    base.ciphertext_size,
-                    None,
-                    "base",
-                )
-            )
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             malformed.append(str(path))
     for path in _strict_files(protected_dir, "*.json", malformed):
@@ -65,14 +57,25 @@ def build_local_evidence(
     for path in _strict_files(ack_dir, "*.ack.json", malformed):
         try:
             ack = AckManifest(**json.loads(path.read_text()))
+            _validate_ack_identity(ack)
             kind = "history" if ack.archive_name.endswith(".history") else "wal"
-            inventory.append(
+            metadata = {
+                "ava-archive-name": ack.archive_name,
+                "ava-source-sha256": ack.source_sha256,
+                "ava-source-size": str(ack.source_size),
+                "ava-ciphertext-crc32c": ack.ciphertext_crc32c,
+                "ava-encryption-format": ack.encryption_format,
+                "ava-key-id": ack.key_id,
+            }
+            local_acks.append(
                 RetentionObject(
                     ack.object_name,
                     ack.generation,
                     ack.ciphertext_size,
                     ack.archive_name,
                     kind,
+                    ack.ciphertext_crc32c,
+                    tuple(sorted(metadata.items())),
                 )
             )
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
@@ -88,6 +91,7 @@ def build_local_evidence(
     return RetentionEvidence(
         tuple(candidates),
         tuple(protected),
+        tuple(local_acks),
         tuple(inventory),
         tuple(sorted(set(malformed))),
         before,
@@ -120,6 +124,12 @@ def write_dry_run_plan(
 
 def inspect_dry_run_plan(root: Path) -> RetentionPlan:
     return RetentionPlan.from_json((root / "retention-plans" / "latest.dry-run.json").read_text())
+
+
+def _validate_ack_identity(ack: AckManifest) -> None:
+    expected_suffix = f"/wal/{ack.archive_name[:8]}/{ack.archive_name}.enc"
+    if not archive_name_is_valid(ack.archive_name) or not ack.object_name.endswith(expected_suffix):
+        raise ValueError("ACK archive name or object path is not canonical")
 
 
 def _strict_files(root: Path, pattern: str, malformed: list[str]) -> tuple[Path, ...]:
