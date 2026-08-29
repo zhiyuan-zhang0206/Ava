@@ -415,6 +415,7 @@ function tk(id: number, over: Partial<TaskRow> = {}): TaskRow {
     created_by: "user",
     created_at: "2026-06-14T00:00:00Z",
     updated_at: "2026-06-14T00:00:00Z",
+    reminder_count: 0,
     ...over,
   };
 }
