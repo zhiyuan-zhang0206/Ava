@@ -99,7 +99,8 @@ def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
 # Terminated owners remain eligible: direct delivery records without reviving them.
 _REMINDER_SQL = """
     SELECT id, owner, title, remind_interval_seconds,
-           EXTRACT(EPOCH FROM (now() - updated_at))::bigint AS elapsed
+           EXTRACT(EPOCH FROM (now() - updated_at))::bigint AS elapsed,
+           priority
     FROM agent_tasks
     WHERE status = 'in_progress'
       AND owner IS NOT NULL
@@ -110,6 +111,7 @@ _REMINDER_SQL = """
           last_reminded_at IS NULL
           OR now() - last_reminded_at > make_interval(secs => GREATEST(%s, remind_interval_seconds))
       )
+    ORDER BY priority, id
 """
 
 
@@ -141,13 +143,26 @@ def _advance_reminder_counters(pool: ConnectionPool, task_id: int) -> None:
         )
 
 
-def _reminder_digest_message(tasks: list[tuple[int, str, int, int]]) -> str:
-    """Format one owner's overdue tasks without a single-task special case."""
-    lines = [f"Task reminders — you have {len(tasks)} overdue task(s):"]
-    for task_id, title, remind_interval_seconds, elapsed in tasks:
+def _reminder_digest_message(tasks: list[tuple[int, str, int, int, str]]) -> str:
+    """Format one owner's overdue tasks without a single-task special case.
+
+    The copy is imperative (user ruling 2026-08-29): each line orders the
+    owner to report current status and push the next step, and to state why
+    and raise the reminder interval when it truly cannot advance -- an
+    explicit wait instead of silent idling. Tasks arrive priority-sorted
+    (P0 first) from _REMINDER_SQL; the idle window and reminder interval
+    stay on the line so the owner sees the silence it is being asked to
+    break."""
+    lines = [
+        f"Task reminders — you have {len(tasks)} overdue task(s). "
+        "Report status and push each forward now:"
+    ]
+    for task_id, title, remind_interval_seconds, elapsed, _priority in tasks:
         lines.append(
             f'- #{task_id} "{title}" — idle {elapsed / 3600:.1f}h '
-            f"(reminder interval: {remind_interval_seconds // 60}min)"
+            f"(reminder interval: {remind_interval_seconds // 60}min): report your "
+            "current status and advance the next step; if you cannot advance, state "
+            "why and raise the reminder interval to wait explicitly"
         )
     return "\n".join(lines)
 
@@ -166,8 +181,8 @@ def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
     for marked_task_id, marked_at in list(_pending_counter_writes.items()):
         if now_mono - marked_at > _DELIVER_DEDUP_WINDOW_S:
             del _pending_counter_writes[marked_task_id]
-    overdue_by_owner: dict[int, list[tuple[int, str, int, int]]] = defaultdict(list)
-    for task_id, owner, title, remind_interval_seconds, elapsed in overdue:
+    overdue_by_owner: dict[int, list[tuple[int, str, int, int, str]]] = defaultdict(list)
+    for task_id, owner, title, remind_interval_seconds, elapsed, priority in overdue:
         if task_id in _pending_counter_writes:
             # Delivered on an earlier sweep but the counter write failed, so
             # the backoff gate never advanced and the task is selected again.
@@ -188,9 +203,9 @@ def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
                 task_id,
             )
             continue
-        overdue_by_owner[owner].append((task_id, title, remind_interval_seconds, elapsed))
+        overdue_by_owner[owner].append((task_id, title, remind_interval_seconds, elapsed, priority))
     for owner, tasks in overdue_by_owner.items():
-        task_ids = [task_id for task_id, _, _, _ in tasks]
+        task_ids = [task_id for task_id, *_ in tasks]
         try:
             # Deliver before counters, so a failed digest leaves every task eligible.
             _deliver_message(pool, owner, _reminder_digest_message(tasks))
