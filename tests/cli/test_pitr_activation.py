@@ -220,3 +220,86 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
     assert failed.phase == "snapshot_pending"
     assert failed.pre_activation_pg_settings == pg
     assert failed.error == "RuntimeError"
+
+
+def test_frozen_pg_state_contract_with_real_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA #4788 contract: the frozen pre_activation_pg_settings must be exactly
+    the REAL _read_pg_state() face — nothing merged into it. Runs the actual
+    reader against a real throwaway PG17 (only the registry record and the
+    admin-URL formatter are faked; the reader's connections, SQL, key-set
+    construction, pg_controldata and psutil cross-checks all execute for real).
+
+    Discriminator: a frozen dict carrying extra credential-evidence keys — the
+    shape the old `current.update(credential_evidence)` merge produced — must
+    FAIL the same comparison, so a re-merge is caught instead of hidden by a
+    mock that copies the defect."""
+    import socket
+    import subprocess
+    from contextlib import closing
+    from types import SimpleNamespace
+
+    from shared.pg_tools import pg_tool
+
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    data = tmp_path / "pg"
+    log = tmp_path / "pg.log"
+    subprocess.run(  # noqa: S603 — resolved pg binaries + static flags
+        [pg_tool("initdb"), "-D", str(data), "-U", "ava", "-A", "trust"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(  # noqa: S603
+        [
+            pg_tool("pg_ctl"),
+            "-D",
+            str(data),
+            "-l",
+            str(log),
+            "-w",
+            "-t",
+            "30",
+            "start",
+            "-o",
+            f"-p {port} -c listen_addresses=127.0.0.1 "
+            "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        subprocess.run(  # noqa: S603
+            [pg_tool("createdb"), "-h", "127.0.0.1", "-p", str(port), "-U", "ava", "ava"],
+            check=True,
+            capture_output=True,
+        )
+        # Environment plumbing is faked; the reader itself runs for real.
+        monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
+        monkeypatch.setattr(
+            "shared.cluster.get_record",
+            lambda _home: SimpleNamespace(ports={"postgres": port}, db_name="ava"),
+        )
+        monkeypatch.setattr(
+            "cli.commands._cluster_instance.pg_admin_url",
+            lambda _pg_port: f"postgresql://ava@127.0.0.1:{port}/postgres",
+        )
+
+        frozen = activation._read_pg_state()
+        # The frozen face round-trips: unchanged cluster -> comparison passes.
+        activation._require_same_pg_state(frozen, "contract")
+        # Reading twice yields the identical 12-key face (stable, no drift).
+        assert activation._read_pg_state() == frozen
+        # Old defect shape: any extra credential-evidence key must fail.
+        with pytest.raises(RuntimeError, match="changed"):
+            activation._require_same_pg_state(
+                {**frozen, "uploader_client_email": "writer@example.test"}, "contract"
+            )
+    finally:
+        subprocess.run(  # noqa: S603
+            [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
+            check=False,
+            capture_output=True,
+        )
