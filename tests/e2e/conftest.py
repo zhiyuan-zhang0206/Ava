@@ -84,6 +84,12 @@ def pytest_collection_modifyitems(
 # only scopes the per-session AVA_HOME and the Redis channel names so
 # concurrent e2e workers don't collide.
 _E2E_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
+
+# The hosted e2e variant (CI job `e2e-hosted` sets AVA_RUNNER_MODE=hosted before
+# pytest starts): agents run inside the agent-host daemon instead of one process
+# each. Read once at import — the mode is cluster-pinned and the CI job pins it
+# for the whole run.
+_HOSTED = settings.daemon.runner_mode == "hosted"
 _AVA_HOME = _REPO_ROOT / "tmp" / f"ava_e2e_home_{_E2E_SUFFIX}"
 
 
@@ -557,6 +563,14 @@ def restarter_proc(gateway_proc: None) -> Iterator[None]:
     fail). `shared/daemon_health.health_port` first reads `AVA_RESTARTER_HEALTH_PORT`
     env, here same pattern as other e2e ports (kernel-assigned port 0) gives each worker its own.
     """
+    if _HOSTED:
+        # Hosted retires the restarter: there are no per-agent processes to
+        # respawn, and its controllers' predicates (pid probes, lease rows)
+        # would read hosted rows — pid NULL for life — as corpses. The hosted
+        # restart path is internal to the agent-host (restart_requested drops
+        # the cached runtime; the row never leaves a runnable status).
+        yield
+        return
     cmd = [
         "uv",
         "run",
@@ -591,6 +605,49 @@ def restarter_proc(gateway_proc: None) -> Iterator[None]:
             state = f"exited with code {code}" if code is not None else "still running"
             raise RuntimeError(
                 f"{e}; restarter daemon {state}; log tail:\n{proc_log_tail(str(log_path))}"
+            ) from e
+        yield
+
+
+@pytest.fixture
+def agent_host_proc(gateway_proc: None) -> Iterator[None]:
+    """services/agent_host/daemon.py — the hosted runner that hosts every local
+    agent's turns as asyncio tasks.
+
+    Only starts under AVA_RUNNER_MODE=hosted (the `e2e-hosted` CI job). In
+    process mode it yields immediately: a manually started agent-host would
+    claim inbound wakes and fight the per-agent processes. The daemon inherits
+    os.environ, so it sees the per-test AVA_LLM_OVERRIDE scenario and the e2e
+    machine identity (AVA_MACHINE_NAME), same as the gateway/ops procs.
+    """
+    if not _HOSTED:
+        yield
+        return
+    cmd = [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "services.agent_host.daemon",
+    ]
+    env = os.environ.copy()
+    # pidfile placed in e2e tmp dir, avoids conflict with dev daemon / cross-test residue
+    env["AVA_AGENT_HOST_PIDFILE"] = str(_AVA_HOME / "agent_host.pid")
+    # Dynamic health port (same pattern as restarter_proc — kernel-assigned per
+    # worker, so xdist workers never collide on the shared default).
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        agent_host_health_port = s.getsockname()[1]
+    env["AVA_AGENT_HOST_HEALTH_PORT"] = str(agent_host_health_port)
+    log_path = _LOG_DIR / f"agent-host-{_E2E_SUFFIX}.log"
+    with managed_proc(cmd, env=env, label="agent-host", log_path=str(log_path)) as proc:
+        try:
+            wait_for_port("127.0.0.1", agent_host_health_port, timeout=30.0, label="agent-host")
+        except RuntimeError as e:
+            code = proc.poll()
+            state = f"exited with code {code}" if code is not None else "still running"
+            raise RuntimeError(
+                f"{e}; agent-host daemon {state}; log tail:\n{proc_log_tail(str(log_path))}"
             ) from e
         yield
 
@@ -635,8 +692,13 @@ def ops_proc(gateway_proc: None) -> Iterator[None]:
 
 
 @pytest.fixture
-def spawned_agent(ops_proc: None, truncated_db: None) -> Iterator[int]:
+def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> Iterator[int]:
     """POST /api/agents asks gateway to spawn agent; poll until claimed IDLING; teardown terminates.
+
+    Process mode: IDLING plus a pid written by the first claim (a running process
+    up and waiting). Hosted mode: the row is idling from creation and its pid is
+    NULL for life (the agent is a turn task inside the agent-host), so the poll
+    accepts idling alone.
 
     On timeout, force terminate + raise with last_status diagnostic——avoid zombie agent
     process leak into next test.
@@ -659,7 +721,7 @@ def spawned_agent(ops_proc: None, truncated_db: None) -> Iterator[int]:
                 row = cur.fetchone()
             if row is not None:
                 last_status, last_pid = row
-                if last_status == AgentStatus.IDLING.value and last_pid is not None:
+                if last_status == AgentStatus.IDLING.value and (_HOSTED or last_pid is not None):
                     break
             time.sleep(0.3)
         else:
