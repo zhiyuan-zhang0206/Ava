@@ -566,7 +566,7 @@ supervisor socket for agent shells / watchers).
 | `restarter` ★ | `.venv/bin/python -m services.restarter.daemon` — runs three per-tick controllers over this host's agent rows. **RespawnController** (`ops/controllers/respawn.py`): restart dispatch, plus the dead-birth reaper for unclaimed `idling` rows past `boot_reap_grace_seconds`, the boot-phase reaper for dead `running`/`idling` rows that have produced no message, and the direct revive pass for dead post-message rows. Every reaper is machine scoped and excludes `hibernating`. **HibernateController** (`ops/controllers/hibernate.py`): memory swap-out/swap-in. Swap-out (gated on `AVA_HIBERNATE_ENABLED`) signals eligible resident `idling` agents and parks them `hibernating`; swap-in is always enabled and relaunches a `hibernating` agent with pending inbound. Hibernation is projected as `idling` to the SDK and frontend. **CrashResurrectController** (`ops/controllers/resurrect.py`): brings back involuntary deaths (`terminated` with `termination_source IN (reaper, launch-confirm)`) when work waits, subject to backoff. | `services.healthchecks.restarter` (`/healthz` :8102) |
 | `milvus`                 | `.venv/bin/python -m services.milvus.daemon` (`milvus-lite server` gRPC :19530, data dir `~/.ava/milvus-data/`) | `services.healthchecks.milvus` (TCP probe :19530) |
 | `memory-indexer`         | `.venv/bin/python -m services.memory_indexer.daemon` (watchdog fs watch `~/.ava/memory/` + Gemini Embedding 2 → milvus collection) | `services.healthchecks.memory_indexer` (`/healthz` :8105) |
-| `frontend`               | `cd ui/web && NEXT_PUBLIC_GATEWAY_PORT=<AVA_GATEWAY_PORT> npm run build && npm run start` (Next.js prod build, 0.0.0.0:3000; the build-time port is injected from `AVA_GATEWAY_PORT` so the browser dials the gateway on the right port even when it is not the default 8000) | `services.healthchecks.frontend` (curl) |
+| `frontend`               | `cd ui/web && NEXT_PUBLIC_GATEWAY_PORT=<AVA_GATEWAY_PORT> npm run build && npm run start -- -p <app_port>` (Next.js prod build, **loopback-only bind** (`next start -H 127.0.0.1`); off-box browsers reach it only through the fleet UI gate on the entry port `:3000` — see Private-network deployment. The build-time port is injected from `AVA_GATEWAY_PORT` so the browser dials the gateway on the right port even when it is not the default 8000) | `services.healthchecks.frontend` (curl) |
 | `pg-backup` (gateway only) | `.venv/bin/python -m services.backup_scheduler.daemon` (cluster-clock daily dump schedule with bounded retry; `/healthz` reports last-success age) | `services.healthchecks.pg_backup` (identity-verified `/healthz` :8116) |
 | `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering OR its reachable-address listener is missing — a silently degraded double bind, task #1288; when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/im-bridge/labeler/heartbeat/delivery-watchdog/events-maintenance/milvus/frontend/pg-backup/otel-collector/task-maintenance/memory-indexer — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/restarter (+browser, browser-mcp) — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
@@ -909,13 +909,15 @@ Differences between `ava cluster update` and `ava stop && ava start`:
 
 ## Private-network deployment (phone / multi-device access)
 
-Both the gateway and frontend bind all interfaces on the **gateway host**
-(the gateway both address families, the frontend `-H ::`); any
-private-network device (laptop, phone, other agent-runners) hits them directly at the
-gateway's private-network address — gateway on `:8000`, frontend on
-`:3000`. The exact host is whichever node holds the gateway role (a single-box
-deployment's only host). The access model below is the authoritative
-description of ports and trust boundary.
+The gateway binds all interfaces on the **gateway host** (both address
+families); the Next.js app binds loopback only and is reachable **only through
+the fleet UI gate** — the always-up entry on `:3000`, which itself binds all
+interfaces and proxies the app (`services/gate`). Any private-network device
+(laptop, phone, other agent-runners) hits them directly at the gateway's
+private-network address — gateway on `:8000`, UI entry on `:3000`. The exact
+host is whichever node holds the gateway role (a single-box deployment's only
+host). The access model below is the authoritative description of ports and
+trust boundary.
 
 ### Access model — private-network reachability + always-on cluster-secret auth
 
