@@ -27,7 +27,7 @@ def validate_wal_file(path: Path, candidate: CandidateManifest) -> None:
     """Bind page headers to filename, system id, timeline and segment size."""
 
     if path.name.endswith(".history"):
-        _validate_history(path)
+        _validate_history(path, candidate)
         return
     timeline, segment_number = _segment_identity(path.name, candidate.wal_segment_size)
     if path.stat().st_size != candidate.wal_segment_size:
@@ -35,13 +35,12 @@ def validate_wal_file(path: Path, candidate: CandidateManifest) -> None:
     segment_start = segment_number * candidate.wal_segment_size
     with path.open("rb") as source:
         for block_offset in range(0, candidate.wal_segment_size, _WAL_BLOCK_BYTES):
-            header = source.read(40)
-            if len(header) != 40:
+            page = source.read(_WAL_BLOCK_BYTES)
+            if len(page) != _WAL_BLOCK_BYTES:
                 raise ValueError("WAL page header is truncated")
-            magic, info, page_timeline = struct.unpack_from("<HHI", header, 0)
-            page_address = struct.unpack_from("<Q", header, 8)[0]
-            if magic == 0 and not any(header):
-                source.seek(_WAL_BLOCK_BYTES - 40, 1)
+            magic, info, page_timeline = struct.unpack_from("<HHI", page, 0)
+            page_address = struct.unpack_from("<Q", page, 8)[0]
+            if not any(page):
                 continue
             if magic == 0 or page_timeline != timeline:
                 raise ValueError("WAL page magic or timeline differs from its filename")
@@ -50,29 +49,41 @@ def validate_wal_file(path: Path, candidate: CandidateManifest) -> None:
             if block_offset == 0:
                 if not info & _XLP_LONG_HEADER:
                     raise ValueError("first WAL page omitted its long header")
-                system_identifier = struct.unpack_from("<Q", header, 24)[0]
-                segment_size, block_size = struct.unpack_from("<II", header, 32)
+                system_identifier = struct.unpack_from("<Q", page, 24)[0]
+                segment_size, block_size = struct.unpack_from("<II", page, 32)
                 if (
                     str(system_identifier) != candidate.system_identifier
                     or segment_size != candidate.wal_segment_size
                     or block_size != _WAL_BLOCK_BYTES
                 ):
                     raise ValueError("WAL long header differs from the candidate")
-            source.seek(_WAL_BLOCK_BYTES - 40, 1)
 
 
-def _validate_history(path: Path) -> None:
+def _validate_history(path: Path, candidate: CandidateManifest) -> None:
     timeline = int(path.name.removesuffix(".history"), 16)
+    transitions = [
+        (previous.timeline, current.timeline, current.start_lsn)
+        for previous, current in zip(candidate.wal_ranges, candidate.wal_ranges[1:], strict=False)
+        if current.timeline == timeline
+    ]
+    if len(transitions) != 1:
+        raise ValueError("timeline history is not required by the candidate")
     rows = [line for line in path.read_text().splitlines() if line and not line.startswith("#")]
     if not rows:
         raise ValueError("timeline history is empty")
-    parents: list[int] = []
+    parents: list[tuple[int, str]] = []
     for row in rows:
         fields = row.split("\t")
         if len(fields) < 2:
             raise ValueError("timeline history row is malformed")
-        parents.append(int(fields[0], 16))
+        parent = int(fields[0], 10)
         high, low = fields[1].split("/", 1)
         _position = (int(high, 16), int(low, 16))
-    if parents != sorted(set(parents)) or parents[-1] >= timeline:
+        parents.append((parent, fields[1]))
+    parent_timeline, _current_timeline, switch_lsn = transitions[0]
+    if (
+        [item[0] for item in parents] != sorted({item[0] for item in parents})
+        or parents[-1][0] >= timeline
+        or parents[-1] != (parent_timeline, switch_lsn)
+    ):
         raise ValueError("timeline history ancestry is not canonical")

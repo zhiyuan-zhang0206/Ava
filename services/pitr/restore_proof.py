@@ -422,7 +422,7 @@ def reconcile_restore_runtime(root: Path) -> None:  # noqa: PLR0915
             _stop_owned_sandbox(evidence, pgid)
         if evidence.get("state") in {"postgres_starting", "postgres_running"}:
             postmaster = partial / "sandbox" / "data" / "postmaster.pid"
-            if postmaster.exists():
+            if postmaster.exists() and _sandbox_is_live(evidence):
                 raise RestoreProofError("dead restore owner left unresolved postmaster evidence")
             evidence["state"] = "postgres_stopped"
         _remove_owned_restore(partial, owner, evidence)
