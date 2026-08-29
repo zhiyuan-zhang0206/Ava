@@ -20,6 +20,8 @@ pin that a dead DB can neither block it nor mask its failure.
 
 from __future__ import annotations
 
+import logging
+
 import psycopg
 import pytest
 
@@ -141,26 +143,31 @@ def test_a_same_cluster_stray_triggers_a_restart(
         lambda: (restarts.append(1), DaemonProbe.down("[Errno 48] Address already in use"))[1],
     )
 
-    with pytest.raises(SystemExit) as excinfo:
-        hc.main()
+    hc.main()  # no SystemExit since #1941 — the round reports and returns
 
     assert restarts == [1]
     assert standin_calls == [1]
-    assert excinfo.value.code == 1
 
 
-def test_unverified_restart_exits_nonzero(
-    monkeypatch: pytest.MonkeyPatch, standin_calls: list[int]
+def test_unverified_restart_reports_and_returns(
+    monkeypatch: pytest.MonkeyPatch,
+    standin_calls: list[int],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A respawn the daemon never confirmed is a FAILURE. Previously any
     a session spawn that returned cleanly was logged as a success, so nine
-    consecutive crashes read as nine successes."""
+    consecutive crashes read as nine successes. Since #1941 the round reports
+    the failure (WARNING naming the scheduled next attempt) and returns instead
+    of exiting — the backoff, not an exit code, paces the retries."""
     monkeypatch.setattr(hc, "_probe", lambda: DaemonProbe.down("healthz unreachable"))
     monkeypatch.setattr(hc, "_restart_daemon", lambda: DaemonProbe.down("healthz unreachable"))
 
-    with pytest.raises(SystemExit) as excinfo:
-        hc.main()
-    assert excinfo.value.code == 1
+    with caplog.at_level(logging.WARNING):
+        hc.main()  # no SystemExit
+    assert (
+        "daemon restart FAILED (healthz unreachable) — next respawn attempt in 60s" in caplog.text
+    )
+    assert standin_calls == [1]
 
 
 def test_verified_restart_does_not_exit(
@@ -209,8 +216,7 @@ def test_respawn_precedes_any_db_work(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(hc, "_standin_dispatch", lambda: order.append("standin"))
 
-    with pytest.raises(SystemExit):
-        hc.main()
+    hc.main()  # no SystemExit since #1941
 
     assert order == ["restart", "standin"]
 
@@ -225,10 +231,9 @@ def test_db_failure_does_not_mask_the_restart_failure(
     monkeypatch.setattr(hc, "_probe", lambda: DaemonProbe.down("healthz unreachable"))
     monkeypatch.setattr(hc, "_restart_daemon", lambda: DaemonProbe.down("healthz unreachable"))
 
-    with caplog.at_level("ERROR"), pytest.raises(SystemExit) as excinfo:
-        hc.main()
+    with caplog.at_level("WARNING"):
+        hc.main()  # no SystemExit since #1941
 
-    assert excinfo.value.code == 1
     assert "daemon restart FAILED" in caplog.text
 
 

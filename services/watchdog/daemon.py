@@ -319,17 +319,23 @@ async def _run_check(name: str, fn: Callable[[], None]) -> None:
     whole watchdog (matches cron behavior: each cron fork is
     independent; failure only drops one round).
 
-    `SystemExit` is caught alongside `Exception` and is NOT redundant: every
-    healthcheck signals a failed revive by exiting non-zero — the right contract
-    when cron runs the module standalone, but it is a `BaseException`, so an
-    `except Exception` alone let it escape `to_thread` and unwind the whole
-    daemon. The watchdog that exists to revive dead services would itself die on
-    the first service it could not revive, exactly when it is needed most.
+    `SystemExit` is caught alongside `Exception` and is NOT redundant: the
+    terminal verdict exits `EXIT_PORT_TAKEN` (3) and the browser healthcheck
+    (which does not use `run_keepalive`) exits `EXIT_RESPAWN_FAILED` (1) — the
+    right contract when cron runs a module standalone, but `SystemExit` is a
+    `BaseException`, so an `except Exception` alone would let it escape
+    `to_thread` and unwind the whole daemon. The watchdog that exists to revive
+    dead services would itself die on the first service it could not revive,
+    exactly when it is needed most. (The keepalive healthchecks no longer exit
+    on a failed respawn — task #1941: the round reports the scheduled backoff
+    and returns; their failure signal is the WARNING lines and the
+    `respawn_breaker_open` event, see [[healthchecks/terminal-verdict/
+    terminal-verdict.ava.okf.md]].)
 
     The code is logged because it carries meaning: `EXIT_RESPAWN_FAILED` (1) is
-    "respawned and it did not come up", retried next round, while
-    `EXIT_PORT_TAKEN` (3) is a daemon this unit cannot revive at all — another
-    cluster holds its port — which no further round will fix
+    "respawned and it did not come up" — since #1941 raised only by the browser
+    healthcheck, while `EXIT_PORT_TAKEN` (3) is a daemon this unit cannot revive
+    at all — another cluster holds its port — which no further round will fix
     ([[healthchecks/terminal-verdict/terminal-verdict.ava.okf.md]]).
 
     The line itself is emitted per episode, not per round: a repeated exit with

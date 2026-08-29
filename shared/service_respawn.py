@@ -20,7 +20,11 @@ respawn is only reported as a success once a probe confirms it.
 
 ``run_keepalive`` is the tier above — the shared body of every daemon
 healthcheck's ``main()``, holding the one policy that decides between "no-op",
-"respawn", and "report and stop because no respawn can win".
+"respawn", "back off and retry later", and "report and stop because no respawn
+can win". A condition a respawn cannot cure (GCS unreachable for hours, ENOSPC
+crash-loop) used to earn one doomed kill+restart per watchdog round forever;
+the policy now backs off exponentially and, past ``breaker_rounds`` consecutive
+non-alive rounds, holds with a single alert until a round probes alive.
 """
 
 from __future__ import annotations
@@ -33,7 +37,8 @@ from pathlib import Path
 from typing import NoReturn
 
 from shared.cluster import session_name
-from shared.daemon_health import EXIT_PORT_TAKEN, EXIT_RESPAWN_FAILED, DaemonProbe
+from shared.config import settings
+from shared.daemon_health import EXIT_PORT_TAKEN, DaemonProbe
 from shared.paths import prod_service_checkout_error
 from shared.platform import raise_fd_limit
 from shared.source_switch import is_switching
@@ -50,20 +55,86 @@ _VERIFY_DEADLINE_S = 20.0
 _VERIFY_INTERVAL_S = 0.5
 
 _consecutive_probe_failures: dict[str, int] = {}
-"""Per-watchdog-process failed probe counts, keyed by service label."""
-_consecutive_probe_failures_lock = threading.Lock()
+"""Per-watchdog-process consecutive rounds WITHOUT a probe-alive verdict, keyed by
+service label. One counter drives both the respawn threshold and the circuit
+breaker (task #1941's "N rounds without probe-alive"): it resets only on an
+alive verdict (or a terminal one), never on a respawn attempt, so a daemon that
+comes back dead every round still accumulates toward the breaker."""
+_respawn_attempts: dict[str, int] = {}
+"""Respawn attempts since the last alive verdict — the exponent of the 2^n backoff."""
+_next_respawn_at: dict[str, float] = {}
+"""Monotonic deadline of the next allowed respawn, keyed by service label. A round
+before it still probes, but skips the respawn."""
+_breaker_hold_since: dict[str, float] = {}
+"""Presence = the respawn breaker is open for that label; value = monotonic time it
+opened, so the per-round hold WARNING can report its age."""
+_keepalive_state_lock = threading.Lock()
+
+
+def _monotonic() -> float:
+    """Wall-independent clock for backoff deadlines — a module seam so tests can
+    advance time without sleeping."""
+    return time.monotonic()
+
+
+def _reset_keepalive_state(label: str) -> None:
+    """Full per-label reset: failure count, backoff exponent + deadline, breaker."""
+    with _keepalive_state_lock:
+        _consecutive_probe_failures.pop(label, None)
+        _respawn_attempts.pop(label, None)
+        _next_respawn_at.pop(label, None)
+        _breaker_hold_since.pop(label, None)
 
 
 def _reset_consecutive_probe_failures(label: str) -> None:
-    with _consecutive_probe_failures_lock:
-        _consecutive_probe_failures.pop(label, None)
+    """Legacy reset entry point (the tests/services/test_healthcheck_gateway.py
+    fixture); resets the whole per-label keepalive state."""
+    _reset_keepalive_state(label)
 
 
 def _record_consecutive_probe_failure(label: str) -> int:
-    with _consecutive_probe_failures_lock:
+    with _keepalive_state_lock:
         failures = _consecutive_probe_failures.get(label, 0) + 1
         _consecutive_probe_failures[label] = failures
         return failures
+
+
+def _record_respawn_attempt(label: str) -> int:
+    with _keepalive_state_lock:
+        attempts = _respawn_attempts.get(label, 0) + 1
+        _respawn_attempts[label] = attempts
+        return attempts
+
+
+def _respawn_attempt_count(label: str) -> int:
+    with _keepalive_state_lock:
+        return _respawn_attempts.get(label, 0)
+
+
+def _backoff_remaining(label: str) -> float:
+    """Seconds until the next respawn is due (0 when none is scheduled or it is due)."""
+    with _keepalive_state_lock:
+        deadline = _next_respawn_at.get(label)
+    if deadline is None:
+        return 0.0
+    return max(0.0, deadline - _monotonic())
+
+
+def _open_breaker(label: str) -> bool:
+    """Open the respawn breaker for `label`. Returns True only when THIS call opened
+    it (it was closed), so the caller alerts exactly once per hold episode."""
+    with _keepalive_state_lock:
+        if label in _breaker_hold_since:
+            return False
+        _breaker_hold_since[label] = _monotonic()
+        return True
+
+
+def _hold_age(label: str) -> float | None:
+    """Seconds since the breaker opened; None while the breaker is closed."""
+    with _keepalive_state_lock:
+        since = _breaker_hold_since.get(label)
+    return None if since is None else _monotonic() - since
 
 
 def respawn_service(
@@ -242,8 +313,12 @@ def run_keepalive(
       ("healthcheck <x> reported failure (exit 3)"), because a healthcheck that
       quietly declines to heal is the shape of the 98-minute outage.
     - **down** — info line, respawn after the configured consecutive-failure
-      threshold, then report what the *probe* says of the respawn
-      (``respawn_and_verify``), exiting non-zero if it never came up.
+      threshold, then report what the *probe* says of the respawn. A respawn that
+      never verifies alive schedules the exponential backoff and returns (no
+      ``SystemExit`` — the round's failure signal is the WARNING naming the next
+      attempt, and later the breaker alert); once ``breaker_rounds`` consecutive
+      non-alive rounds pass, the breaker holds — see the backoff/breaker
+      paragraph below.
 
     ``on_unrevivable`` is the caller's fallback for "this round will have no live
     daemon", run when the respawn failed to verify AND on the terminal path (where
@@ -257,6 +332,33 @@ def run_keepalive(
     restarter.py` documents, and putting the hook after every respawn attempt is
     what makes it unbreakable from here.
 
+    **Backoff and circuit breaker** (task #1941 — the third incident of the same
+    shape: #920 ENOSPC crash-loop, #903/3962 heartbeat, #927 GCS-unreachable 2h+
+    all "restart cannot cure it" conditions, each respawned every 60s forever).
+    After a respawn that failed to verify, the next attempt is delayed by
+    ``base * 2^n`` (base = the watchdog round interval, `watchdog_interval_seconds`;
+    cap = `watchdog_respawn_backoff_cap_seconds`, default 30min) — the window still
+    probes every round, but skips the respawn. Once ``breaker_rounds``
+    (`watchdog_respawn_breaker_rounds`, default 5) consecutive rounds have gone by
+    without a probe-alive verdict, the breaker opens: respawns stop and hold, the
+    round logs a WARNING carrying the hold age, and ONE `respawn_breaker_open`
+    event fires through the unified events pipeline (never one per round). Any
+    probe-alive round — or a verified-alive respawn — resets everything: failure
+    count, backoff exponent and deadline, and the breaker.
+
+    ``breaker_rounds`` must be configured strictly greater than
+    ``consecutive_failures_before_respawn``: the breaker check runs before the
+    threshold branch, so an equal value would open the breaker on the very round
+    the threshold is met and hold without a single respawn attempt (rejected at
+    validation).
+
+    One consequence: a failed respawn no longer raises ``SystemExit``
+    (``EXIT_RESPAWN_FAILED`` remains the browser healthcheck's own exit code —
+    it does not use `run_keepalive`). It schedules the backoff, runs
+    ``on_unrevivable``, and returns — the round's state lives in the WARNING
+    lines and the breaker alert, and the next round probes again instead of the
+    watchdog re-driving a doomed respawn.
+
     Raises ``SystemExit`` rather than returning a code: these mains are entry
     points, run standalone by an OS scheduler and in-thread by the watchdog
     (which catches ``SystemExit`` explicitly for exactly this reason).
@@ -267,15 +369,32 @@ def run_keepalive(
     """
     if consecutive_failures_before_respawn < 1:
         raise ValueError("consecutive_failures_before_respawn must be at least 1")
+    breaker_rounds = settings.services.watchdog_respawn_breaker_rounds
+    if breaker_rounds < 1:
+        raise ValueError("watchdog_respawn_breaker_rounds must be at least 1")
+    if breaker_rounds <= consecutive_failures_before_respawn:
+        # A breaker that trips the round the threshold is met — or before — would
+        # hold without a single respawn attempt: the breaker check runs before the
+        # threshold branch, so with breaker_rounds == threshold the round that
+        # would respawn instead opens the breaker. A dead configuration, not a
+        # policy.
+        raise ValueError(
+            "watchdog_respawn_breaker_rounds must be greater than "
+            "consecutive_failures_before_respawn"
+        )
+    backoff_base_s = settings.services.watchdog_interval_seconds
+    backoff_cap_s = settings.services.watchdog_respawn_backoff_cap_seconds
 
     result = probe()
     if result.alive:
-        _reset_consecutive_probe_failures(label)
+        # The one event that heals everything: any probe-alive round resets the
+        # failure count, the backoff exponent + deadline, and the breaker.
+        _reset_keepalive_state(label)
         log.debug("[%s healthcheck] daemon alive (%s), no-op", label, result.detail)
         return
 
     def _unrevivable(code: int, message: str, detail: str) -> NoReturn:
-        """Report, run the caller's fallback, exit. `NoReturn` so the three call
+        """Report, run the caller's fallback, exit. `NoReturn` so the two call
         sites below read as the terminating branches they are."""
         log.error(message, label, detail)
         if on_unrevivable is not None:
@@ -283,7 +402,7 @@ def run_keepalive(
         raise SystemExit(code)
 
     if result.terminal:
-        _reset_consecutive_probe_failures(label)
+        _reset_keepalive_state(label)
         # No respawn at all — see ProbeVerdict. The stand-in fallback still runs:
         # this is the case where "no live daemon" lasts until a human intervenes.
         _unrevivable(
@@ -294,6 +413,33 @@ def run_keepalive(
         )
 
     failures = _record_consecutive_probe_failure(label)
+    if failures >= breaker_rounds and _open_breaker(label):
+        # The breaker just tripped: breaker_rounds consecutive rounds without a
+        # probe-alive verdict, every respawn the backoff allowed has failed to come
+        # up — a condition a respawn cannot cure (the #920/#903/#927 shape). Stop
+        # respawning and hold. Alert exactly ONCE per episode through the unified
+        # events pipeline (loguru event= -> events stream), not once per round; the
+        # per-round WARNING below carries the continuing state.
+        from shared.log import logger
+
+        logger.warning(
+            "[{label} healthcheck] respawn breaker OPEN after {rounds} rounds without "
+            "a live daemon ({detail}) — holding respawns; manual intervention needed",
+            event="respawn_breaker_open",
+            label=label,
+            rounds=failures,
+            respawn_attempts=_respawn_attempt_count(label),
+            detail=result.detail,
+        )
+    hold_age = _hold_age(label)
+    if hold_age is not None:
+        log.warning(
+            "[%s healthcheck] daemon down, respawn held for %.0fs (%s) — not respawning",
+            label,
+            hold_age,
+            result.detail,
+        )
+        return
     if failures < consecutive_failures_before_respawn:
         log.warning(
             "[%s healthcheck] probe failed (%s/%s) — not respawning yet",
@@ -302,23 +448,48 @@ def run_keepalive(
             consecutive_failures_before_respawn,
         )
         return
-    _reset_consecutive_probe_failures(label)
+    backoff = _backoff_remaining(label)
+    if backoff > 0:
+        log.warning(
+            "[%s healthcheck] daemon dead (%s) — backing off after a failed respawn; "
+            "next attempt in %ds",
+            label,
+            result.detail,
+            int(backoff),
+        )
+        return
     log.info("[%s healthcheck] daemon dead (%s), restarting...", label, result.detail)
+    attempts = _record_respawn_attempt(label)
+    delay_s = min(backoff_base_s * (2 ** (attempts - 1)), backoff_cap_s)
+    with _keepalive_state_lock:
+        _next_respawn_at[label] = _monotonic() + delay_s
     after = respawn()
     if after.alive:
         log.info("[%s healthcheck] daemon restarted, verified alive (%s)", label, after.detail)
+        _reset_keepalive_state(label)
         return
     if after.terminal:
         # The occupant appeared between the probe and the respawn — same terminal
         # condition, reported the same way rather than as a generic failed restart.
+        _reset_keepalive_state(label)
         _unrevivable(
             EXIT_PORT_TAKEN,
             "[%s healthcheck] respawn cannot bind (%s) — not retrying; "
             "an operator must free the port or move this cluster's port block",
             after.detail,
         )
-    _unrevivable(
-        EXIT_RESPAWN_FAILED,
-        "[%s healthcheck] daemon restart FAILED (%s) — manual intervention needed",
+    # The respawn did not come up: the next attempt is already scheduled above
+    # (backoff), so this round reports, runs the fallback, and RETURNS instead of
+    # exiting — the round's failure signal is the WARNING naming the next attempt
+    # (and, later, the breaker alert), not an exit code the watchdog would have
+    # to re-drive next round. The ordering invariant holds: `on_unrevivable`
+    # still runs only after the attempt, never before it. The breaker opens once
+    # breaker_rounds non-alive rounds pass.
+    log.warning(
+        "[%s healthcheck] daemon restart FAILED (%s) — next respawn attempt in %ds",
+        label,
         after.detail,
+        int(delay_s),
     )
+    if on_unrevivable is not None:
+        on_unrevivable()

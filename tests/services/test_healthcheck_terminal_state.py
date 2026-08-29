@@ -36,7 +36,7 @@ from services.healthchecks import ops as ops_hc
 from services.healthchecks import restarter as restarter_hc
 from shared import daemon_health
 from shared.config import settings
-from shared.daemon_health import EXIT_PORT_TAKEN, EXIT_RESPAWN_FAILED, DaemonProbe
+from shared.daemon_health import EXIT_PORT_TAKEN, DaemonProbe
 
 # The healthcheck module under test, its daemon name, its `settings.services`
 # pidfile attribute, and the respawn entry point a terminal verdict must not reach.
@@ -133,22 +133,26 @@ def test_nothing_listening_still_respawns(
 
 
 @pytest.mark.parametrize(("mod", "name", "pidfile_attr"), _CASES)
-def test_a_respawn_that_never_comes_up_keeps_the_old_exit_code(
+def test_a_respawn_that_never_comes_up_reports_and_returns(
     mod: object,
     name: str,
     pidfile_attr: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """ "Respawned and it did not come up" is still exit 1 and still retried next
-    round. The new code is reserved for the condition retrying cannot fix, so an
-    operator (and the watchdog log) can tell the two apart."""
+    """ "Respawned and it did not come up" no longer exits (task #1941): the round
+    reports the failure with the scheduled backoff delay and returns — the
+    per-process backoff paces the retries, and the terminal exit code 3 stays the
+    one code that means "a human must intervene"."""
     _point_at(mod, _free_port(), tmp_path / f"{name}.pid", pidfile_attr, monkeypatch)
     monkeypatch.setattr(mod, "_restart_daemon", lambda: DaemonProbe.down("healthz unreachable"))
 
-    with pytest.raises(SystemExit) as excinfo:
-        mod.main()  # type: ignore[attr-defined]
-    assert excinfo.value.code == EXIT_RESPAWN_FAILED
+    with caplog.at_level("WARNING"):
+        mod.main()  # type: ignore[attr-defined] — no SystemExit
+    assert (
+        "daemon restart FAILED (healthz unreachable) — next respawn attempt in 60s" in caplog.text
+    )
 
 
 @pytest.mark.asyncio

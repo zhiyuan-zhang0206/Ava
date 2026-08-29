@@ -1055,6 +1055,12 @@ EVENTS: dict[str, EventSpec] = {
     "emergency_compact": _telemetry(
         "emergency_compact", "emergency compaction (overflow self-rescue)", tier="noise"
     ),
+    # watchdog respawn circuit breaker (task #1941)
+    "respawn_breaker_open": _telemetry(
+        "respawn_breaker_open",
+        "watchdog respawn circuit breaker opened — repeated failed respawns held until a probe-alive round",
+        tier="anomaly",
+    ),
     "history_dump": _telemetry(
         "history_dump", "pre-compact history dumped to workspace", tier="noise"
     ),

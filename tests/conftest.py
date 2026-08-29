@@ -1428,6 +1428,22 @@ def _guard_service_respawn(request: pytest.FixtureRequest, monkeypatch: pytest.M
 
 
 @pytest.fixture(autouse=True)
+def _reset_keepalive_state() -> Iterator[None]:
+    """`run_keepalive` keeps per-label state (failure count, backoff deadline +
+    exponent, breaker hold) in module globals, modeling the long-lived watchdog
+    process. Tests drive `main()` with fake probes, so without a reset one test's
+    failed respawn leaves a backoff window that silently skips the next test's
+    respawn — the shard-6/8 failure of task #1941's PR. Reset around every test;
+    the per-test cost is four dict clears under one lock."""
+    with shared.service_respawn._keepalive_state_lock:
+        shared.service_respawn._consecutive_probe_failures.clear()
+        shared.service_respawn._respawn_attempts.clear()
+        shared.service_respawn._next_respawn_at.clear()
+        shared.service_respawn._breaker_hold_since.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _guard_cluster_spawn(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[None]:

@@ -421,6 +421,8 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "ops_concurrency",
         "task_maintenance_enabled",
         "watchdog_interval_seconds",
+        "watchdog_respawn_backoff_cap_seconds",
+        "watchdog_respawn_breaker_rounds",
         "wedged_agent_enabled",
     }
 )
