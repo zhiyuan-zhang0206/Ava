@@ -4,6 +4,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 from cryptography.exceptions import InvalidTag
@@ -152,12 +153,11 @@ def test_412_size_crc_or_metadata_mismatch_is_critical(
         uploader.upload_one(source)
     remote = next(iter(store.objects.values()))
     if changed_field == "size":
-        changed = replace(remote, size=int(changed_value), created=False)
+        changed = replace(remote, size=cast(int, changed_value), created=False)
     elif changed_field == "crc32c":
-        changed = replace(remote, crc32c=str(changed_value), created=False)
+        changed = replace(remote, crc32c=cast(str, changed_value), created=False)
     elif changed_field == "metadata":
-        assert isinstance(changed_value, dict)
-        changed = replace(remote, metadata=changed_value, created=False)
+        changed = replace(remote, metadata=cast(dict[str, str], changed_value), created=False)
     else:
         raise AssertionError(changed_field)
     store.objects[remote.object_name] = changed

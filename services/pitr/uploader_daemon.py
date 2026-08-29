@@ -96,15 +96,20 @@ async def run() -> None:
     uploader = build_uploader()
     stop = asyncio.Event()
     liveness = Liveness(timeout_s=120)
+
+    def disk_health() -> dict[str, object]:
+        footprint = uploader.disk_footprint()
+        return {
+            "disk_footprint": {
+                **asdict(footprint),
+                "total_bytes": footprint.total_bytes,
+            }
+        }
+
     server = await start_health_server(
         "pitr_uploader",
         liveness=liveness,
-        extra=lambda: {
-            "disk_footprint": {
-                **asdict(footprint := uploader.disk_footprint()),
-                "total_bytes": footprint.total_bytes,
-            }
-        },
+        extra=disk_health,
     )
     try:
         await upload_loop(uploader, stop=stop, liveness=liveness)
