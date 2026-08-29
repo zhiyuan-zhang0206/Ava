@@ -31,19 +31,20 @@ def _digest(path: Path) -> tuple[int, str]:
 def restore(mapping_path: Path, archive_name: str, destination: Path) -> None:
     if Path(archive_name).name != archive_name or not archive_name:
         raise ValueError("restore request is not an archive basename")
-    mapping = json.loads(mapping_path.read_text())
+    mapping = cast(dict[str, object], json.loads(mapping_path.read_text()))
     if not isinstance(mapping, dict) or archive_name not in mapping:
         raise ValueError("restore request is absent from the protected allowlist")
-    record = mapping[archive_name]
-    if not isinstance(record, dict):
+    record_value = mapping[archive_name]
+    if not isinstance(record_value, dict):
         raise TypeError("restore allowlist record is not an object")
+    record = cast(dict[str, object], record_value)
     if set(record) != {"path", "sha256", "size"}:
         raise ValueError("restore allowlist record does not match schema")
-    record = cast(_ArchiveRecord, record)
-    source = Path(record["path"])
+    typed_record = cast(_ArchiveRecord, record)
+    source = Path(typed_record["path"])
     if source.is_symlink() or not source.is_file():
         raise ValueError("restore source is not an owned regular file")
-    if _digest(source) != (int(record["size"]), str(record["sha256"])):
+    if _digest(source) != (typed_record["size"], typed_record["sha256"]):
         raise ValueError("restore source differs from the protected allowlist")
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, raw = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
