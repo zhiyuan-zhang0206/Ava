@@ -171,6 +171,46 @@ describe("RunTimelineChart", () => {
     expect(screen.queryByText("Idle 2m")).toBeNull();
     expect(screen.queryByText(/^Idle/)).toBeNull();
   });
+  it("still renders an idle label for a sparse pair wider than the 55px minimum", () => {
+    // Discrimination guard for the dense-view rule above: the label gate is the
+    // pair width (nextX - x >= IDLE_LABEL_MIN_WIDTH) — a wide inter-row gap in
+    // a sparse view keeps its label, while a tight sibling pair in the same
+    // view is suppressed. Also pins the dark-theme halo stroke (stroke-card,
+    // matching the card surface behind the text).
+    const sparseTimeline: RunTimelineResponse = {
+      ...timeline,
+      rows: [
+        {
+          ...timeline.rows[0],
+          turn: 1,
+          start: "2026-08-29T08:00:00Z",
+          end: "2026-08-29T08:00:04Z",
+          tags: ["idle_before_1796s"],
+        },
+        {
+          ...timeline.rows[1],
+          turn: 2,
+          start: "2026-08-29T08:30:00Z",
+          end: "2026-08-29T08:30:04Z",
+          tags: ["idle_before_121s"],
+        },
+        {
+          ...timeline.rows[1],
+          turn: 3,
+          start: "2026-08-29T08:31:00Z",
+          end: "2026-08-29T08:31:04Z",
+          tags: [],
+        },
+      ],
+    };
+    render(<RunTimelineChart timeline={sparseTimeline} labels={labels} />);
+
+    // 30min gap = 465px >= 55px → label renders; halo stroke matches the card.
+    const label = screen.getByText("Idle 30m");
+    expect(label.getAttribute("class")).toContain("stroke-card");
+    // 1min gap = 15px < 55px → same sparse view suppresses the tight pair.
+    expect(screen.queryByText("Idle 2m")).toBeNull();
+  });
 
   it("caps the event rail at 120 colored chips", () => {
     const events: RunTimelineResponse["events"] = [
