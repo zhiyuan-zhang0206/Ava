@@ -8,6 +8,7 @@ import io
 import json
 import os
 import struct
+from collections.abc import Buffer
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -81,17 +82,18 @@ class _EncryptedReader(io.RawIOBase):
     def readable(self) -> bool:
         return True
 
-    def readinto(self, target: memoryview) -> int | None:
+    def readinto(self, target: Buffer) -> int | None:
+        view = memoryview(target)
         if not self._pending and not self._done:
-            chunk = self._source.read(max(len(target), 1024 * 1024))
+            chunk = self._source.read(max(len(view), 1024 * 1024))
             if chunk:
                 self._pending.extend(self._encryptor.update(chunk))
             else:
                 self._pending.extend(self._encryptor.finalize())
                 self._pending.extend(self._encryptor.tag)
                 self._done = True
-        count = min(len(target), len(self._pending))
-        target[:count] = self._pending[:count]
+        count = min(len(view), len(self._pending))
+        view[:count] = self._pending[:count]
         del self._pending[:count]
         return count
 
