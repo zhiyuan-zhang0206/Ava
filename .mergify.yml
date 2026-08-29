@@ -1,11 +1,21 @@
 # Mergify merge queue — this repo's PR merge automation.
 #
-# Flow: CI green → post `@mergifyio queue` as a PR comment → Mergify batches
-# queued PRs (batch_size 8) into one speculative draft PR, re-runs CI on the
-# combined tree, and lands every PR in the batch on green (rebase merges,
-# linear history). A red batch is bisected automatically to evict the culprit.
-# The speculative draft PRs ride branches under mergify/merge-queue/ — ci.yml's
-# draft-skip explicitly exempts that prefix, so batches always verify fully.
+# Flow: CI green → QA applies `qa-approved` → post `@mergifyio queue` as a PR
+# comment → Mergify batches queued PRs (batch_size 8) into one speculative
+# draft PR, re-runs CI on the combined tree, and lands every PR in the batch
+# on green (rebase merges, linear history). A red batch is bisected
+# automatically to evict the culprit. The speculative draft PRs ride branches
+# under mergify/merge-queue/ — ci.yml's draft-skip explicitly exempts that
+# prefix, so batches always verify fully.
+#
+# QA GATE: `qa-approved` is a hard merge precondition (merge_conditions). The
+# label is applied by QA / maintainers only, and only on a PASS or
+# PASS-with-nits conclusion; BLOCK / CONDITIONAL never carry it, and a later
+# BLOCK removes it immediately. A PR without the label is never merged even
+# with green CI and an enqueued position — it waits in the queue until QA
+# labels it (dependabot and other automated PRs are only delayed, never
+# broken). Authors never self-apply the label; any new commit after a PASS
+# still requires a delta re-review before the label is (re)applied.
 #
 # Batching requires draft-PR checks, which are incompatible with the
 # `Require branches to be up to date before merging` branch protection —
@@ -54,6 +64,9 @@ queue_rules:
           - check-success=e2e (Playwright happy path)
           - check-skipped=e2e (Playwright happy path)
     merge_conditions:
+      # QA gate: only QA / maintainers apply `qa-approved`, and only on a
+      # final PASS / PASS-with-nits conclusion. Without it nothing merges.
+      - label=qa-approved
       - or:
           - check-success=backend (pytest + pyright)
           - check-skipped=backend (pytest + pyright)
