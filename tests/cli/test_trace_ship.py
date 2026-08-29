@@ -125,7 +125,7 @@ def test_post_line_converts_otlp_json_hex_ids_to_protobuf_bytes() -> None:
 
 def test_ship_disabled_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """The OTLP kill switch off -> fail fast, the shipper is unconfigured."""
-    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
     monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", False)
     with pytest.raises(TraceShipError, match="AVA_TELEMETRY_OTLP_ENABLED"):
@@ -432,7 +432,7 @@ def test_gateway_ship_posts_to_local_tempo_without_auth(
 ) -> None:
     """A gateway replays straight to its loopback Tempo, bypassing its local
     collector because that collector would mirror the replay again."""
-    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
