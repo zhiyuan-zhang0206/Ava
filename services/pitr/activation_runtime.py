@@ -12,6 +12,7 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import psycopg
 
@@ -203,7 +204,7 @@ def _restore_pitr_env(baseline: dict[str, str]) -> None:
                 isinstance(line, str) for line in restored
             ):
                 raise RuntimeError("PITR environment baseline is invalid")
-            kept.extend(restored)
+            kept.extend(cast(list[str], restored))
         write_private_bytes(path, ("\n".join(kept) + "\n").encode())
 
 

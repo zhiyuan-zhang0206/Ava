@@ -213,7 +213,7 @@ class ActivationRecord:
                 isinstance(key, str) and isinstance(item, str) for key, item in items.items()
             ):
                 raise ValueError(f"PITR activation {name} must contain string pairs")
-            if name in _EVIDENCE_KEYS and set(items) != _EVIDENCE_KEYS[name]:
+            if name in _EVIDENCE_KEYS and set(cast(dict[str, str], value)) != _EVIDENCE_KEYS[name]:
                 raise ValueError(f"PITR activation {name} fields differ")
             return cast(dict[str, str], value)
 
