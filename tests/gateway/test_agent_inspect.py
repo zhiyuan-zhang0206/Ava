@@ -512,7 +512,11 @@ def _insert_pending_inbound(
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, %s, %s)",
-            (agent_id, "Heartbeat.", kind),
+            (
+                agent_id,
+                "Heartbeat. Find something to do, or pause your heartbeat for some time.",
+                kind,
+            ),
         )
 
 
