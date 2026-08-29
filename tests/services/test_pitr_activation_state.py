@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from services.pitr import activation_lease
 from services.pitr.activation_state import (
     ActivationRecord,
     load_record,
@@ -14,13 +15,61 @@ from services.pitr.activation_state import (
 )
 
 
+def _credentials() -> dict[str, str]:
+    return {
+        "uploader_client_email": "u@example.test",
+        "uploader_project_id": "project",
+        "uploader_private_key_id": "u-key",
+        "viewer_client_email": "v@example.test",
+        "viewer_project_id": "project",
+        "viewer_private_key_id": "v-key",
+        "bucket_name": "bucket",
+        "object_prefix": "pitr",
+        "backup_key_id": "key",
+        "backup_key_sha256": "0" * 64,
+    }
+
+
+def test_activation_lease_refuses_long_step_when_initial_ownership_is_lost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(activation_lease, "renew_update_lock", lambda _holder: False)
+    called = False
+
+    def action(_stop: object) -> None:
+        nonlocal called
+        called = True
+
+    with pytest.raises(RuntimeError, match="lost its deployment lease"):
+        activation_lease.run_while_renewing("pitr:op", action)
+    assert not called
+
+
+def test_activation_lease_cancels_child_and_never_returns_after_renewal_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    renewals = iter((True, False))
+    monkeypatch.setattr(activation_lease, "LEASE_RENEW_INTERVAL_S", 0.001)
+    monkeypatch.setattr(
+        activation_lease, "renew_update_lock", lambda _holder: next(renewals, False)
+    )
+
+    def action(stop: object) -> str:
+        assert isinstance(stop, activation_lease.threading.Event)
+        assert stop.wait(1)
+        return "must not advance"
+
+    with pytest.raises(RuntimeError, match="lost its deployment lease"):
+        activation_lease.run_while_renewing("pitr:op", action)
+
+
 def test_activation_record_keeps_original_started_at_across_resume(tmp_path: Path) -> None:
     first = ActivationRecord.start(operation_id="op-1", origin="agent:405")
     write_record(tmp_path, first)
     pending = first.advance(
         "snapshot_pending",
         pre_activation_pg_settings={"archive_mode": "off"},
-        pre_activation_credential_evidence={"viewer": "separate"},
+        pre_activation_credential_evidence=_credentials(),
     )
     resumed = pending.advance(
         "snapshot_verified",
@@ -46,6 +95,17 @@ def test_activation_record_rejects_unknown_fields(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="fields differ"):
         load_record(tmp_path)
+
+
+@pytest.mark.parametrize("missing", tuple(ActivationRecord.__dataclass_fields__))
+def test_activation_record_v3_rejects_every_single_missing_field(missing: str) -> None:
+    """The durable v3 record is closed-schema even when the missing value was null."""
+
+    raw = json.loads(json.dumps(ActivationRecord.start(operation_id="op-1", origin="cli").__dict__))
+    raw.pop(missing)
+
+    with pytest.raises(ValueError, match="fields differ"):
+        ActivationRecord.from_json(json.dumps(raw))
 
 
 def test_activation_record_atomic_write_leaves_no_partial(tmp_path: Path) -> None:
@@ -79,7 +139,7 @@ def test_activation_record_v3_crash_resume_requires_phase_evidence(tmp_path: Pat
         .advance(
             "snapshot_pending",
             pre_activation_pg_settings={"archive_mode": "off"},
-            pre_activation_credential_evidence={"viewer": "separate"},
+            pre_activation_credential_evidence=_credentials(),
         )
         .advance("snapshot_verified", pre_activation_snapshot="/backup.enc")
         .advance("wal_config_pending")
@@ -137,6 +197,41 @@ def test_activation_record_v3_rejects_unknown_evidence_fields(tmp_path: Path) ->
         load_record(tmp_path)
 
 
+def test_activation_record_v3_rejects_unknown_config_journal_kind() -> None:
+    record = (
+        ActivationRecord.start(operation_id="op-1", origin="cli")
+        .advance(
+            "snapshot_pending",
+            pre_activation_pg_settings={"archive_mode": "off"},
+            pre_activation_credential_evidence=_credentials(),
+        )
+        .advance("snapshot_verified", pre_activation_snapshot="/backup.enc")
+        .advance("wal_config_pending")
+        .advance(
+            "wal_config_applying",
+            wal_config_before_digest="before",
+            wal_config_desired_digest="desired",
+            pre_activation_pitr_env={"pitr_enabled": "[]"},
+            pre_activation_pg_auto_conf={"archive_mode": "__ABSENT__"},
+            pre_activation_env_b64="YQ==",
+            pre_activation_env_digest="env",
+            pre_activation_auto_conf_b64="Yg==",
+            pre_activation_auto_conf_digest="auto",
+        )
+    )
+    raw = record.__dict__ | {"config_apply_intent": {"kind": "future"}}
+    with pytest.raises(ValueError, match="kind is unknown"):
+        ActivationRecord.from_json(json.dumps(raw))
+
+
+def test_activation_record_v3_rejects_non_sha256_backup_key_fingerprint() -> None:
+    raw = ActivationRecord.start(operation_id="op-1", origin="cli").__dict__ | {
+        "pre_activation_credential_evidence": _credentials() | {"backup_key_sha256": "bad"}
+    }
+    with pytest.raises(ValueError, match="fingerprint"):
+        ActivationRecord.from_json(json.dumps(raw))
+
+
 def test_activation_record_v3_requires_utc_verification_deadline() -> None:
     record = ActivationRecord.start(operation_id="op-1", origin="cli")
     raw = record.__dict__ | {"wal_verification_deadline": "2026-08-29T10:00:00+08:00"}
@@ -153,7 +248,7 @@ def test_activation_record_rejects_phase_jump_backtrack_and_terminal_advance() -
     pending = record.advance(
         "snapshot_pending",
         pre_activation_pg_settings={"archive_mode": "off"},
-        pre_activation_credential_evidence={"viewer": "separate"},
+        pre_activation_credential_evidence=_credentials(),
     )
     with pytest.raises(ValueError, match="illegal PITR activation phase transition"):
         pending.advance("shadow")

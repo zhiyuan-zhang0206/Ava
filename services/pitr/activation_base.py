@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+from contextlib import suppress
+
 from services.pitr.base_candidate import create_base_candidate
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.base_object_store import GCSRestartableStreamingObjectStore
+from services.pitr.base_operation_runtime import publish_restore, run_restore, tree_bytes
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.space_budget import CandidateSpaceBudget
 from shared.config import settings
@@ -13,9 +18,9 @@ from shared.paths import ava_home
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 
 
-def build_activation_candidate(*, operation_id: str, chain_id: str) -> CandidateManifest:
-    from services.pitr.base_scheduler_daemon import _tree_bytes
-
+def build_activation_candidate(
+    *, operation_id: str, chain_id: str, stop: threading.Event
+) -> CandidateManifest:
     config = settings.physical_backup
     if not chain_id.endswith(f"-{operation_id}"):
         raise RuntimeError("activation candidate chain differs from operation")
@@ -46,24 +51,34 @@ def build_activation_candidate(*, operation_id: str, chain_id: str) -> Candidate
             credentials_file=str(credentials),
         ),
         budget=CandidateSpaceBudget(
-            compressed_staging_estimate=_tree_bytes(ava_home() / "pg"),
+            compressed_staging_estimate=tree_bytes(ava_home() / "pg"),
             spool_and_pg_wal_reserve=config.pitr_spool_hard_bytes,
             logical_backup_peak_reserve=logical_peak,
             emergency_floor=_EMERGENCY_FLOOR_BYTES,
         ),
         replication_db_url=config.pitr_replication_db_url,
+        stop=stop,
         forced_chain_id=chain_id,
     )
 
 
-async def restore_activation_candidate(candidate: CandidateManifest) -> ProtectedManifest:
-    from services.pitr.base_scheduler_daemon import (
-        _publish_restore_proof,
-        _restore_worker_input_for,
-        _run_restore_worker,
-    )
+async def restore_activation_candidate(
+    candidate: CandidateManifest, stop: threading.Event
+) -> ProtectedManifest:
+    task = asyncio.create_task(run_restore(candidate))
+    while not task.done():
+        await asyncio.wait({task}, timeout=1)
+        if stop.is_set():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+            raise RuntimeError("PITR restore cancelled after deployment lease loss")
+    outcome = task.result()
 
-    outcome = await _run_restore_worker(_restore_worker_input_for(candidate))
-    _publish_restore_proof(candidate, outcome)
+    def require_ownership() -> None:
+        if stop.is_set():
+            raise RuntimeError("PITR protected publication lost its deployment lease")
+
+    publish_restore(candidate, outcome, require_ownership=require_ownership)
     path = ava_home() / "physical-backup" / "protected-manifests" / f"{candidate.chain_id}.json"
     return ProtectedManifest.from_json(path.read_text())

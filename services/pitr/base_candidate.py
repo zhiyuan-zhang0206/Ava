@@ -547,7 +547,12 @@ def create_base_candidate(
         "ava-key-id": key_id,
         "ava-packer-version": str(plan.packer_version),
     }
-    ack = store.put_base_if_absent(source=source, object_name=object_name, metadata=metadata)
+    ack = store.put_base_if_absent(
+        source=source,
+        object_name=object_name,
+        metadata=metadata,
+        cancelled=stop.is_set,
+    )
     candidate = CandidateManifest(
         schema_version=SCHEMA_VERSION,
         chain_id=chain_id,
@@ -574,6 +579,8 @@ def create_base_candidate(
         migration_set_sha256=facts.migration_set_sha256,
     )
     manifest_path = root / "base-manifests" / f"{chain_id}.candidate.json"
+    if stop.is_set():
+        raise BaseCandidateError("base candidate lost ownership before manifest publication")
     _atomic_json(manifest_path, json.loads(candidate.to_json()))
     _remove_tree(ready)
     plan_path.unlink()

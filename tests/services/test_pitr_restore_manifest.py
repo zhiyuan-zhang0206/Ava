@@ -9,6 +9,7 @@ from services.pitr.restore_manifest import (
     ProtectedManifest,
     RestoreObject,
     RestoreProof,
+    candidate_sha256,
     required_archive_names,
 )
 
@@ -55,8 +56,8 @@ def test_protected_manifest_is_strict_and_requires_exact_wal_sequence() -> None:
     names = required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
     proof = RestoreProof(
         "run",
-        "start",
-        "end",
+        "2026-08-30T03:00:00+00:00",
+        "2026-08-30T03:01:00+00:00",
         candidate.end_lsn,
         candidate.end_lsn,
         1,
@@ -72,7 +73,7 @@ def test_protected_manifest_is_strict_and_requires_exact_wal_sequence() -> None:
         1,
         True,
         candidate.chain_id,
-        "candidate",
+        candidate_sha256(candidate),
         candidate,
         RestoreObject("base", "base", 7, 100, "crc", (("key", "value"),)),
         tuple(_object(name) for name in names),

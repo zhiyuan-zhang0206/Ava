@@ -13,17 +13,21 @@ from pathlib import Path
 import psutil
 import pytest
 
+import services.pitr.base_operation_runtime as restore_runtime
 import services.pitr.base_scheduler_daemon as daemon
+from services.pitr.activation_state import ActivationRecord, write_record
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
+from services.pitr.restore_manifest import (
+    ProtectedManifest,
+    RestoreObject,
+    RestoreProof,
+    candidate_sha256,
+)
 from services.pitr.retention_planner import DryRunResult
 from services.pitr.retention_scheduler import RetentionDryRunState
 from services.pitr.retention_scheduler import health_component as retention_health_component
-from services.pitr.worker_process import (
-    WorkerQueue,
-    group_members,
-    reap_restore_subprocess_group,
-)
+from shared.platform import LockTimeoutError
 from shared.process_env import restricted_process_env
 
 
@@ -94,13 +98,13 @@ def test_restricted_restore_group_reaps_orphan_descendant() -> None:
     )
     created_at = psutil.Process(process.pid).create_time()
     deadline = time.monotonic() + 10
-    while len(group_members(process.pid)) < 2 and time.monotonic() < deadline:
+    while len(daemon._group_members(process.pid)) < 2 and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert len(group_members(process.pid)) >= 2
+    assert len(daemon._group_members(process.pid)) >= 2
 
-    reap_restore_subprocess_group(process, created_at)
+    daemon._reap_restore_subprocess_group(process, created_at)
 
-    assert group_members(process.pid) == []
+    assert daemon._group_members(process.pid) == []
 
 
 def test_authoritative_verify_precedes_publisher_construction(
@@ -116,11 +120,11 @@ def test_authoritative_verify_precedes_publisher_construction(
             nonlocal constructed
             constructed = True
 
-    monkeypatch.setattr(daemon, "verify_candidate_proof", reject_mismatched_ack)
-    monkeypatch.setattr(daemon, "GCSProtectedManifestPublisher", Publisher)
+    monkeypatch.setattr(restore_runtime, "verify_candidate_proof", reject_mismatched_ack)
+    monkeypatch.setattr(restore_runtime, "GCSProtectedManifestPublisher", Publisher)
 
     with pytest.raises(ValueError, match="ACK generation mismatch"):
-        daemon._verify_then_construct_publisher(
+        restore_runtime.verify_then_construct_publisher(
             candidate=_candidate("verify-first"),
             root=tmp_path,
             ack_dir=tmp_path / "ack",
@@ -136,7 +140,7 @@ def _blocking_worker(
     started: Path,
     stopped: Path,
     stop: daemon.StopSignal,
-    _output: WorkerQueue,
+    _output: daemon._WorkerQueue,
 ) -> None:
     started.write_text(str(os.getpid()))
     stop.wait()
@@ -148,7 +152,7 @@ def _noncooperative_worker(
     armed: Path,
     late: Path,
     _stop: daemon.StopSignal,
-    _output: WorkerQueue,
+    _output: daemon._WorkerQueue,
 ) -> None:
     script = (
         "import signal,subprocess,sys,time\n"
@@ -210,6 +214,51 @@ def test_activation_candidate_never_satisfies_weekly_due(tmp_path: Path) -> None
     assert is_due(now, tmp_path)
 
 
+def test_weekly_restore_selector_never_adopts_activation_candidate(tmp_path: Path) -> None:
+    manifests = tmp_path / "base-manifests"
+    manifests.mkdir()
+    activation_candidate = _candidate("activation-20260830T030000Z-op")
+    weekly = _candidate("20260830T040000Z")
+    (manifests / "activation.candidate.json").write_text(activation_candidate.to_json())
+    (manifests / "weekly.candidate.json").write_text(weekly.to_json())
+    assert daemon._pending_restore_candidate(tmp_path) == weekly
+
+
+def test_hot_publish_updates_chain_identity() -> None:
+    state = BaseCandidateState(restore_error="old")
+    candidate = _candidate("20260830T040000Z")
+    daemon._record_protected(state, candidate)
+    assert state.last_protected is not None
+    assert state.last_protected_chain == candidate.chain_id
+    assert state.restore_error is None
+
+
+def test_scheduler_ownership_rechecks_activation_after_lock_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(daemon, "ava_home", lambda: tmp_path)
+    write_record(tmp_path, ActivationRecord.start(operation_id="op-1", origin="cli"))
+
+    with (
+        pytest.raises(RuntimeError, match="activation owns base/restore selection"),
+        daemon._claim_scheduler_ownership(),
+    ):
+        pytest.fail("scheduler entered an activation-owned critical section")
+
+
+def test_scheduler_ownership_lock_excludes_the_opposite_controller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(daemon, "ava_home", lambda: tmp_path)
+
+    with (
+        daemon._claim_scheduler_ownership(),
+        pytest.raises(LockTimeoutError),
+        daemon._claim_scheduler_ownership(),
+    ):
+        pytest.fail("two controllers owned candidate selection concurrently")
+
+
 def test_health_surfaces_corrupt_activation_state_without_throwing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -228,6 +277,207 @@ def test_health_surfaces_corrupt_activation_state_without_throwing(
 def test_health_never_calls_a_candidate_protected() -> None:
     components = _components(BaseCandidateState(running=True))
     assert components[0]["protected"] is False
+
+
+def test_cold_start_health_recovers_real_durable_protected_manifest(tmp_path: Path) -> None:
+    candidate = _candidate("20260830T030000Z")
+    archive_name = "000000010000000000000000"
+    protected = ProtectedManifest(
+        schema_version=1,
+        protected=True,
+        chain_id=candidate.chain_id,
+        candidate_sha256=candidate_sha256(candidate),
+        candidate=candidate,
+        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        wal=(RestoreObject(archive_name, "wal", 2, 10, "crc", ()),),
+        target_lsn="0/200",
+        wal_segment_size=candidate.wal_segment_size,
+        proof=RestoreProof(
+            "run",
+            "2026-08-30T03:00:00+00:00",
+            "2026-08-30T03:01:00+00:00",
+            "0/200",
+            "0/200",
+            123,
+            "live",
+            "verify",
+            1.0,
+            1.0,
+            1.0,
+            20,
+            "restored",
+        ),
+    )
+    root = tmp_path / "physical-backup"
+    manifests = root / "protected-manifests"
+    manifests.mkdir(parents=True)
+    (manifests / f"{candidate.chain_id}.json").write_text(protected.to_json())
+
+    last_protected, chain_id, error = daemon._last_durable_protected(root)
+    assert error is None
+    components = _components(
+        BaseCandidateState(last_protected=last_protected, last_protected_chain=chain_id)
+    )
+    restore = next(item for item in components if item["name"] == "pitr_restore_proof")
+    assert restore["protected"] is True
+    assert restore["chain_id"] == candidate.chain_id
+
+
+def test_cold_start_health_is_degraded_but_alive_for_corrupt_protected_only(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "physical-backup"
+    manifests = root / "protected-manifests"
+    manifests.mkdir(parents=True)
+    (manifests / "broken.json").write_text("{not-json")
+
+    last, chain, error = daemon._last_durable_protected(root)
+    components = _components(
+        BaseCandidateState(last_protected=last, last_protected_chain=chain, restore_error=error)
+    )
+    restore = next(item for item in components if item["name"] == "pitr_restore_proof")
+    assert (last, chain) == (None, None)
+    assert restore["status"] == "degraded"
+    assert restore["gate_readiness"] is False
+    assert restore["protected"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("completed_at", "bad"), ("started_at", "2026-08-30T03:00:00")),
+)
+def test_cold_start_health_degrades_for_invalid_proof_semantics(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    candidate = _candidate("20260830T030000Z")
+    protected = ProtectedManifest(
+        schema_version=1,
+        protected=True,
+        chain_id=candidate.chain_id,
+        candidate_sha256=candidate_sha256(candidate),
+        candidate=candidate,
+        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        wal=(),
+        target_lsn="0/200",
+        wal_segment_size=candidate.wal_segment_size,
+        proof=RestoreProof(
+            "run",
+            "2026-08-30T03:00:00+00:00",
+            "2026-08-30T03:01:00+00:00",
+            "0/200",
+            "0/200",
+            123,
+            "live",
+            "verify",
+            1.0,
+            1.0,
+            1.0,
+            10,
+            "restored",
+        ),
+    )
+    raw = json.loads(protected.to_json())
+    raw["proof"][field] = value
+    root = tmp_path / "physical-backup"
+    manifests = root / "protected-manifests"
+    manifests.mkdir(parents=True)
+    (manifests / "invalid.json").write_text(json.dumps(raw))
+
+    last, chain, error = daemon._last_durable_protected(root)
+
+    assert (last, chain) == (None, None)
+    assert error == "corrupt protected manifest(s): invalid.json"
+
+
+def test_cold_start_health_degrades_for_candidate_digest_mismatch(tmp_path: Path) -> None:
+    candidate = _candidate("20260830T030000Z")
+    protected = ProtectedManifest(
+        schema_version=1,
+        protected=True,
+        chain_id=candidate.chain_id,
+        candidate_sha256=candidate_sha256(candidate),
+        candidate=candidate,
+        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        wal=(),
+        target_lsn="0/200",
+        wal_segment_size=candidate.wal_segment_size,
+        proof=RestoreProof(
+            "run",
+            "2026-08-30T03:00:00+00:00",
+            "2026-08-30T03:01:00+00:00",
+            "0/200",
+            "0/200",
+            123,
+            "live",
+            "verify",
+            1.0,
+            1.0,
+            1.0,
+            10,
+            "restored",
+        ),
+    )
+    raw = json.loads(protected.to_json())
+    raw["candidate_sha256"] = "0" * 64
+    root = tmp_path / "physical-backup"
+    manifests = root / "protected-manifests"
+    manifests.mkdir(parents=True)
+    (manifests / "invalid.json").write_text(json.dumps(raw))
+
+    last, chain, error = daemon._last_durable_protected(root)
+
+    assert (last, chain) == (None, None)
+    assert error == "corrupt protected manifest(s): invalid.json"
+
+
+def test_cold_start_health_keeps_valid_proof_when_another_manifest_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate("20260830T030000Z")
+    protected = ProtectedManifest(
+        schema_version=1,
+        protected=True,
+        chain_id=candidate.chain_id,
+        candidate_sha256=candidate_sha256(candidate),
+        candidate=candidate,
+        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        wal=(),
+        target_lsn="0/200",
+        wal_segment_size=candidate.wal_segment_size,
+        proof=RestoreProof(
+            "run",
+            "2026-08-30T03:00:00+00:00",
+            "2026-08-30T03:01:00+00:00",
+            "0/200",
+            "0/200",
+            123,
+            "live",
+            "verify",
+            1.0,
+            1.0,
+            1.0,
+            10,
+            "restored",
+        ),
+    )
+    root = tmp_path / "physical-backup"
+    manifests = root / "protected-manifests"
+    manifests.mkdir(parents=True)
+    (manifests / f"{candidate.chain_id}.json").write_text(protected.to_json())
+    (manifests / "broken.json").write_text("[]")
+
+    last, chain, error = daemon._last_durable_protected(root)
+    restore = next(
+        item
+        for item in _components(
+            BaseCandidateState(last_protected=last, last_protected_chain=chain, restore_error=error)
+        )
+        if item["name"] == "pitr_restore_proof"
+    )
+    assert chain == candidate.chain_id
+    assert restore["status"] == "degraded"
+    assert restore["protected"] is True
+    assert restore["gate_readiness"] is False
 
 
 def test_retention_health_is_explicitly_dry_run_only(tmp_path: Path) -> None:
@@ -252,14 +502,14 @@ def test_retention_health_never_exposes_stale_or_failed_eligibility(tmp_path: Pa
         plan=result,
         last_attempt=time.time(),
         last_success=time.time(),
-        last_error="inventory unavailable",
+        base_error="inventory unavailable",
     )
     retention = retention_health_component(state)
     assert retention["status"] == "degraded"
     assert retention["eligible_objects"] == 0
     assert retention["eligible_bytes"] == 0
 
-    state.last_error = None
+    state.base_error = None
     state.last_success = time.time() - 3 * 3600
     stale = retention_health_component(state)
     assert stale["progress"] == "stale"
@@ -328,7 +578,7 @@ async def test_degraded_domain_condition_keeps_healthz_200() -> None:
     follows process liveness only."""
     from shared.daemon_health import Liveness, start_health_server, stop_health_server
 
-    state = BaseCandidateState(last_error="GCS credentials rejected")
+    state = BaseCandidateState(base_error="GCS credentials rejected")
     port = _find_free_port()
     liveness = Liveness(timeout_s=120)
     server = await start_health_server(
