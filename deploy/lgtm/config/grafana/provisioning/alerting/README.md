@@ -75,7 +75,7 @@ thresholds are deployment facts, not framework constants — what counts as
 |-----|--------|-----------|-------|----------|
 | `ava-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
 | `ava-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
-| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90 (Prometheus) | 15m | warning |
+| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding /mnt/wsl/docker-desktop/* (Prometheus) | 15m | warning |
 | `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
 | `ava-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
 
