@@ -20,6 +20,7 @@ class FakeStore:
         self.objects: dict[str, RemoteObjectAck] = {}
         self.puts = 0
         self.deletes = 0
+        self.crash_after_put = False
 
     def put_stream_if_absent(
         self,
@@ -47,6 +48,8 @@ class FakeStore:
             True,
         )
         self.objects[object_name] = ack
+        if self.crash_after_put:
+            raise RuntimeError("simulated crash after remote verification")
         return ack
 
     def stat(self, object_name: str) -> RemoteObjectAck | None:
@@ -114,9 +117,11 @@ def test_verified_upload_writes_ack_then_removes_local_files(tmp_path: Path) -> 
 def test_412_exact_remote_is_idempotent_but_collision_is_critical(tmp_path: Path) -> None:
     store = FakeStore()
     uploader, source = _uploader(tmp_path, store)
+    store.crash_after_put = True
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        uploader.upload_one(source)
+    store.crash_after_put = False
     uploader.upload_one(source)
-    uploader2, source = _uploader(tmp_path / "third", store)
-    uploader2.upload_one(source)
     assert store.puts == 2
 
     store.objects[next(iter(store.objects))] = replace(
