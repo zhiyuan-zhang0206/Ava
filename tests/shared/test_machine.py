@@ -338,10 +338,24 @@ def test_set_identity_host_injection() -> None:
 
 
 def test_format_capabilities_labels() -> None:
-    """Two capability booleans rendered as a single label — shared by ava status / cluster status."""
+    """Capability booleans rendered as a single label — shared by ava status / cluster status."""
     assert format_capabilities(True, True) == "gateway + agent-runner"
     assert format_capabilities(True, False) == "gateway"
     assert format_capabilities(False, True) == "agent-runner"
+    assert format_capabilities(False, False) == "none"
+
+
+def test_format_capabilities_station_labels() -> None:
+    """The observability-station flag joins the label in every combination — a
+    pure station host renders as "observability-station", and mixed hosts list
+    it in capability order (gateway, agent-runner, observability-station)."""
+    assert format_capabilities(False, False, True) == "observability-station"
+    assert format_capabilities(True, False, True) == "gateway + observability-station"
+    assert format_capabilities(False, True, True) == "agent-runner + observability-station"
+    assert format_capabilities(True, True, True) == "gateway + agent-runner + observability-station"
+    # The third flag defaults False — a caller that only knows the two original
+    # flags keeps the pre-station label.
+    assert format_capabilities(True, True) == "gateway + agent-runner"
     assert format_capabilities(False, False) == "none"
 
 

@@ -45,7 +45,7 @@ from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease, settle_hosts
 from shared.config import settings
 from shared.last_update import LastUpdate
-from shared.machine import is_agent_runner, is_gateway, machine_name
+from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.observability import cluster_label
 from shared.resource_sample import ResourceSample
 
@@ -94,10 +94,9 @@ def get_stats_dashboard(
         return cached
     cluster = cluster_label()
 
-    # The turn / W/E stats read Loki (task #1197 LGTM read side): the PG
-    # `events` table is a frozen pre-cutover archive, so a live window queried
-    # there flatlines to zero. Do not hold a pooled DB connection while these
-    # bounded-but-slow network queries wait for the global Loki budget.
+    # The turn / W/E stats read Loki (task #1197): the PG `events` table is a
+    # frozen pre-cutover archive, so a live window queried there flatlines to
+    # zero. Do not hold a pooled DB connection while these network queries wait.
     now = datetime.now(UTC)
     window_start = now - window_delta(hours)
     try:
@@ -198,10 +197,9 @@ def get_stats_dashboard(
             live_count = int(cur.fetchone()[0])
 
             # total_events is a historical constant — the frozen pre-cutover
-            # archive's parity row count (task #1281), not a live gauge: the
-            # PG events table was dropped with the #1823 cleanup and the
-            # dashboard's "total events" card shows the archive's size. See
-            # ARCHIVE_TOTAL_ROWS.
+            # archive's parity row count (task #1281), not a live gauge: the PG
+            # events table was dropped with the #1823 cleanup; the dashboard's
+            # "total events" card shows the archive's size. See ARCHIVE_TOTAL_ROWS.
             total_events = ARCHIVE_TOTAL_ROWS
 
         # Active class-wide dismissals, read like the daemon reads them.
@@ -416,6 +414,7 @@ async def _probe_agent_runner(
         name=name,
         serve_gateway="gateway" in role,
         serve_agent_runner="agent-runner" in role,
+        serve_observability_station="observability-station" in role,
         gateway_url=gateway_url or "",
         up_since_at=up_since_at,
         online=True,
@@ -574,6 +573,7 @@ def _local_machine_status_blocking(
         name=name,
         serve_gateway="gateway" in role,
         serve_agent_runner="agent-runner" in role,
+        serve_observability_station="observability-station" in role,
         gateway_url=url or "",
         up_since_at=up_since,
         online=True,
@@ -660,8 +660,7 @@ async def gather_cluster_status(
 
     hold_detail = deploy_lease.describe() if deploy_lease is not None else None
     # The hold's OWN population, read back from its note — never the machine table.
-    # A row absent from it is "not named by this hold", which is not the same as
-    # "converged" (a host that never acked was never covered).
+    # A row absent from it is "not named by this hold", not "converged".
     waited_on = frozenset(settle_hosts(deploy_lease.note) if deploy_lease is not None else [])
     machines = [
         m.model_copy(
@@ -729,6 +728,7 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
         current_machine=local_name,
         current_serve_gateway=is_gateway(),
         current_serve_agent_runner=is_agent_runner(),
+        current_serve_observability_station=is_observability_station(),
         current_paused=cluster_is_paused(),
         current_orchestration=current_orchestration(),
         machines=machines,
@@ -781,6 +781,7 @@ def get_system_status(request: Request) -> SystemStatus:
                     current_machine=machine_name(),
                     current_serve_gateway=is_gateway(),
                     current_serve_agent_runner=is_agent_runner(),
+                    current_serve_observability_station=is_observability_station(),
                     current_paused=cluster_is_paused(),
                     machines=[],
                 )

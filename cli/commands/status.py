@@ -239,7 +239,9 @@ def _print_gateway_cluster_status() -> None:
         print(f"  ✗ cannot resolve gateway URL: {e}")
         return
     status = ClusterStatus.model_validate(body)
-    caps = format_capabilities(status.serve_gateway, status.serve_agent_runner)
+    caps = format_capabilities(
+        status.serve_gateway, status.serve_agent_runner, status.serve_observability_station
+    )
     print(f"  machine_name: {status.machine_name}")
     print(f"  serves:       {caps}")
     print(f"  paused:       {status.paused}")

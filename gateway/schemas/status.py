@@ -53,9 +53,12 @@ class ClusterPanel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     current_machine: str
-    # This host's two capability flags (both true on a single-box host).
+    # This host's three capability flags (any combination on a single-box host).
+    # current_serve_observability_station defaults False so pre-station clients
+    # parse the payload.
     current_serve_gateway: bool
     current_serve_agent_runner: bool
+    current_serve_observability_station: bool = False
     current_paused: bool  # whether the current gateway is paused (local is_paused())
     # The whole-cluster orchestration in flight on this gateway, or None
     # when idle. A rollout / restart runs for minutes in a detached session after

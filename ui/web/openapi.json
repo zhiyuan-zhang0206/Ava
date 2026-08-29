@@ -7547,6 +7547,11 @@
             "type": "boolean",
             "title": "Current Serve Agent Runner"
           },
+          "current_serve_observability_station": {
+            "type": "boolean",
+            "title": "Current Serve Observability Station",
+            "default": false
+          },
           "current_paused": {
             "type": "boolean",
             "title": "Current Paused"
@@ -7631,6 +7636,11 @@
           "serve_agent_runner": {
             "type": "boolean",
             "title": "Serve Agent Runner"
+          },
+          "serve_observability_station": {
+            "type": "boolean",
+            "title": "Serve Observability Station",
+            "default": false
           },
           "paused": {
             "type": "boolean",
@@ -9713,6 +9723,11 @@
           "serve_agent_runner": {
             "type": "boolean",
             "title": "Serve Agent Runner"
+          },
+          "serve_observability_station": {
+            "type": "boolean",
+            "title": "Serve Observability Station",
+            "default": false
           },
           "gateway_url": {
             "type": "string",
