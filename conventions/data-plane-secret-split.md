@@ -81,6 +81,17 @@ paste URLs into tickets, or put passwords in command arguments.
 Run this only on the gateway checkout that owns the target cluster. It defaults
 to dry-run and has no `--home` flag.
 
+Run it in a gateway process context, not from an agent shell. An agent context
+sees the runner-projected `AVA_DB_URL`, while its profile hygiene removes the
+admin data-plane password variables; preflight would therefore misidentify the
+owner role. The script fails closed with an invocation-posture error instead.
+This is a footgun guard against accidental agent-context invocation, not an
+authorization boundary.
+
+```bash
+cd <gateway checkout (e.g. ~/.ava/source)> && unset AVA_PROCESS_PROFILE && set -a; . ~/.ava/.env; set +a && .venv/bin/python scripts/rotate_data_plane_secrets.py ...
+```
+
 ```bash
 .venv/bin/python scripts/rotate_data_plane_secrets.py
 .venv/bin/python scripts/rotate_data_plane_secrets.py --scope admin --execute
