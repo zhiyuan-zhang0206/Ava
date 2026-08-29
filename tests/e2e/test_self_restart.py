@@ -22,6 +22,7 @@ import time
 
 import psycopg
 import pytest
+from playwright.sync_api import Page
 
 from shared.agents import AgentStatus
 from shared.config import settings
@@ -34,6 +35,10 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
     agent_id = e2e_env.agent_id
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
+
+    if settings.daemon.runner_mode == "hosted":
+        _assert_hosted_self_restart(e2e_env, page, agent_id)
+        return
 
     # first process must already be IDLING (spawned_agent fixture polled) — capture PID for comparison
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
@@ -78,3 +83,54 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
         f"first_pid={first_pid} completed={last_completed} "
         f"status={last_status!r} pid={last_pid}"
     )
+
+
+def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> None:
+    """Hosted self-restart: no process to respawn and no restarter to INSERT
+    'restart_completed' — the claim renders the restart marker in the turn's
+    state, the restart_requested channel drops the cached runtime inside the
+    agent-host, and the row never leaves a runnable status. Asserts the row
+    stays idling with a NULL pid, the marker reaches the timeline, and no
+    restarter-style inbound row appears."""
+    import httpx
+
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    assert row is not None, "spawned row missing"
+    assert row[0] == AgentStatus.IDLING.value, f"expected idling before restart, got {row[0]!r}"
+    assert row[1] is None, "hosted rows never carry a pid"
+
+    page.fill('[data-testid="composer-input"]', "\u91cd\u542f")
+    page.click('[data-testid="composer-send"]')
+
+    deadline = time.monotonic() + 90.0
+    seen_marker = False
+    while True:
+        items = httpx.get(
+            f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
+        ).json()["items"]
+        seen_marker = any(
+            it.get("kind") == "system_marker"
+            and "You have been restarted" in (it.get("payload") or "")
+            for it in items
+        )
+        if seen_marker or time.monotonic() > deadline:
+            break
+        time.sleep(0.5)
+    assert seen_marker, "hosted restart marker never reached the timeline"
+
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+        cur.execute(
+            "SELECT 1 FROM inbound_messages "
+            "WHERE agent_id = %s AND kind = 'restart_completed' LIMIT 1",
+            (agent_id,),
+        )
+        completed = cur.fetchone()
+    assert row is not None and row[0] == AgentStatus.IDLING.value, (
+        f"hosted restart must keep the row runnable, got {row[0] if row else None!r}"
+    )
+    assert row[1] is None, "hosted rows never carry a pid"
+    assert completed is None, "hosted restart renders the marker in state; no restarter INSERT"
