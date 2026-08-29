@@ -560,7 +560,6 @@ def _project_rows(
             execs=[
                 RunTimelineExec(
                     tool="execute_code",
-                    dur_s=_num(e, "duration_seconds"),
                     ok=e.get("event_name") == "exec",
                 )
                 for e in r.execs

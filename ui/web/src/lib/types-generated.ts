@@ -6424,8 +6424,6 @@ export interface components {
         RunTimelineExec: {
             /** Tool */
             tool: string;
-            /** Dur S */
-            dur_s: number;
             /** Ok */
             ok: boolean;
         };

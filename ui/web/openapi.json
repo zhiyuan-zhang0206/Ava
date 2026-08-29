@@ -11824,11 +11824,6 @@
             "type": "string",
             "title": "Tool"
           },
-          "dur_s": {
-            "type": "number",
-            "minimum": 0.0,
-            "title": "Dur S"
-          },
           "ok": {
             "type": "boolean",
             "title": "Ok"
@@ -11837,7 +11832,6 @@
         "type": "object",
         "required": [
           "tool",
-          "dur_s",
           "ok"
         ],
         "title": "RunTimelineExec",

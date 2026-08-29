@@ -67,7 +67,7 @@ function timelineData(overrides: Partial<RunTimelineResponse> = {}): RunTimeline
         ok: true,
         trace_id: "a".repeat(32),
         llm: { calls: 1, in_total: 100, cache_read: 99, out_total: 10, reasoning: 2, latency_ms: 500, cost_usd: 0.01, model: "deepseek-v4-flash" },
-        execs: [{ tool: "execute_code", dur_s: 1, ok: true }],
+        execs: [{ tool: "execute_code", ok: true }],
         anomalies: [],
         tags: [],
       },

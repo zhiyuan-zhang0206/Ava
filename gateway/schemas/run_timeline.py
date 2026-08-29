@@ -50,7 +50,6 @@ class RunTimelineExec(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     tool: str
-    dur_s: float = Field(ge=0)
     ok: bool
 
 
