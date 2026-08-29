@@ -33,6 +33,7 @@ from services.pitr.base_candidate import (
 )
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.base_object_store import GCSRestartableStreamingObjectStore
+from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.restore_proof import (
     RestoreSpaceBudget,
     publish_candidate_proof,
@@ -296,15 +297,13 @@ def _publish_restore_proof(candidate: CandidateManifest, outcome: dict[str, str]
         or outcome.get("pending_sha256") != hashlib.sha256(pending.read_bytes()).hexdigest()
     ):
         raise RuntimeError("restricted restore outcome differs from authoritative evidence")
-    verified = verify_candidate_proof(
+    verified, publisher = _verify_then_construct_publisher(
         candidate=authoritative,
         root=root,
         ack_dir=root / "ack",
-    )
-    publisher = GCSProtectedManifestPublisher(
         project=config.pitr_gcs_project,
         bucket=config.pitr_gcs_bucket,
-        credentials_file=credentials,
+        credentials=credentials,
     )
     publish_candidate_proof(
         candidate=authoritative,
@@ -313,6 +312,22 @@ def _publish_restore_proof(candidate: CandidateManifest, outcome: dict[str, str]
         verified=verified,
         publisher=publisher,
     )
+
+
+def _verify_then_construct_publisher(
+    *,
+    candidate: CandidateManifest,
+    root: Path,
+    ack_dir: Path,
+    project: str,
+    bucket: str,
+    credentials: Path,
+) -> tuple[ProtectedManifest, GCSProtectedManifestPublisher]:
+    verified = verify_candidate_proof(candidate=candidate, root=root, ack_dir=ack_dir)
+    publisher = GCSProtectedManifestPublisher(
+        project=project, bucket=bucket, credentials_file=credentials
+    )
+    return verified, publisher
 
 
 async def _sleep(seconds: float) -> None:
