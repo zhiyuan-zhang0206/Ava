@@ -109,7 +109,7 @@ export function useNotices(): NoticesFeed {
  *  read immediately. The SSE-triggered refetch reconciles a beat later (and
  *  is a no-op against server truth), and the resolved history still arrives
  *  from the server. Only the open feed is touched — awaiting entries are
- *  filtered too (defensive: batch resolves only send FYI ids). */
+ *  filtered too (defensive). */
 export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): void {
   if (noticeIds.length === 0) return;
   const gone = new Set(noticeIds);

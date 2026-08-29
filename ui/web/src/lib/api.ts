@@ -353,16 +353,6 @@ export const api = {
     ).then(ok<{ status: string }>);
   },
 
-  // Mark many open FYI notices read in one request (the Inbox's "Mark all
-  // read" — Task #1814). The single-resolve path costs a round trip + a full
-  // queue refetch per notice; this clears the whole pile in one transaction.
-  // Idempotent: already-resolved rows are skipped server-side, not errors.
-  resolveNoticesBatch: (noticeIds: number[]): Promise<{ resolved: number; skipped: number }> => {
-    return f(`/api/notices/resolve-batch`, POST_JSON({ notice_ids: noticeIds })).then(
-      ok<{ resolved: number; skipped: number }>,
-    );
-  },
-
   compact: (agentId: number, mode: CompactMode): Promise<CompactEnqueued> => {
     return f(`/api/agents/${agentId}/compact?mode=${mode}`, POST).then(
       ok<CompactEnqueued>,
