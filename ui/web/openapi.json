@@ -5980,7 +5980,7 @@
     "/api/tasks": {
       "get": {
         "summary": "Get Tasks",
-        "description": "Return the task registry, newest first.\n\n`window` (7d / 30d / all, default all) narrows the list by last activity\n(updated_at) on the backend, so the task graph's default 7-day view never\npulls the full registry. A windowed list still carries every kept task's\nout-of-window ancestors flagged ghost=True (see _windowed_tasks); without\na window the full table is returned unchanged.\n\nNo pagination — the task registry is bounded (tasks are created by agents;\nclosed tasks are kept). Order by created_at DESC so the newest tasks\nsurface first in the Task Graph view.",
+        "description": "Return the task registry, newest first.\n\n`window` (24h / 7d / 30d / all, default all) narrows the list by last activity\n(updated_at) on the backend, so the task graph's default 7-day view never\npulls the full registry. A windowed list still carries every kept task's\nout-of-window ancestors flagged ghost=True (see _windowed_tasks); without\na window the full table is returned unchanged.\n\nNo pagination — the task registry is bounded (tasks are created by agents;\nclosed tasks are kept). Order by created_at DESC so the newest tasks\nsurface first in the Task Graph view.",
         "operationId": "get_tasks_api_tasks_get",
         "parameters": [
           {
@@ -5989,7 +5989,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "pattern": "^(7d|30d|all)$",
+              "pattern": "^(24h|7d|30d|all)$",
               "default": "all",
               "title": "Window"
             }

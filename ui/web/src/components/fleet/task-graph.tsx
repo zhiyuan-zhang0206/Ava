@@ -22,6 +22,7 @@ import { CheckCheck, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 
+import { WindowSelect, type WindowOption } from "@/components/window-select";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { PRIORITY_BG } from "@/lib/notices";
 import { formatRelative, formatUptime } from "@/lib/time";
@@ -251,28 +252,15 @@ function StaleBadge({ show }: { show: boolean }) {
 // on the BACKEND — the graph never pulls the full registry when thousands of
 // done tasks would crowd it out (Task #1969). in_progress tasks are exempt
 // server-side, and out-of-window ancestors of kept tasks still arrive as
-// ghost nodes so the tree stays connected.
-function WindowSelect({
-  value,
-  onChange,
-}: {
-  value: TaskWindow;
-  onChange: (w: TaskWindow) => void;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as TaskWindow)}
-      aria-label="Time window"
-      className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-    >
-      <option value="24h">24h</option>
-      <option value="7d">7d</option>
-      <option value="30d">30d</option>
-      <option value="all">All</option>
-    </select>
-  );
-}
+// ghost nodes so the tree stays connected. The dropdown is the project's
+// shared WindowSelect (user ruling 2026-08-30: one range picker, no new
+// variants) with the task window's option set.
+const TASK_WINDOW_OPTIONS: readonly WindowOption[] = [
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+  { value: "all", label: "All" },
+];
 
 // The right-hand filter cluster (window + status toggles) — shared by the
 // graph, kanban, and empty-state toolbars so they can never drift.
@@ -297,7 +285,13 @@ function FilterCluster({
 }) {
   return (
     <div className={cn("ml-auto flex-wrap items-center gap-1", FLEX)}>
-      <WindowSelect value={taskWindow} onChange={setTaskWindow} />
+      <WindowSelect
+        value={taskWindow}
+        options={TASK_WINDOW_OPTIONS}
+        onChange={(v) => setTaskWindow(v as TaskWindow)}
+        ariaLabel="Time window"
+        className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+      />
       <StatusToggleButton
         active={showDone}
         onClick={() => setShowDone(!showDone)}
@@ -336,11 +330,13 @@ export function TaskGraph({
   const mode: "graph" | "kanban" =
     settings["display.task_graph_mode"] === "kanban" ? "kanban" : "graph";
   const setMode = (m: "graph" | "kanban") => setSetting("display.task_graph_mode", m);
-  // Time filter (default 7 days, user ruling 2026-08-29): a garbage stored
+  // Time filter (default 24 hours, user ruling 2026-08-30): a garbage stored
   // value falls back to the default instead of exploding.
   const windowRaw = settings["display.task_window"];
   const taskWindow: TaskWindow =
-    windowRaw === "7d" || windowRaw === "30d" || windowRaw === "all" ? windowRaw : "7d";
+    windowRaw === "24h" || windowRaw === "7d" || windowRaw === "30d" || windowRaw === "all"
+      ? windowRaw
+      : "24h";
   const setTaskWindow = (w: TaskWindow) => setSetting("display.task_window", w);
   const { tasks, loading, error } = useTasks(taskWindow);
   const showDone = settings["display.task_show_done"] === true;

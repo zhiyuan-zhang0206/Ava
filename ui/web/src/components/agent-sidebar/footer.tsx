@@ -14,8 +14,9 @@ import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 
-import { errMsg as formatErrMsg } from "@/lib/errors";
 import { PluginNavIcons } from "@/components/plugin-nav";
+import { WindowSelect } from "@/components/window-select";
+import { errMsg as formatErrMsg } from "@/lib/errors";
 import {
   STATS_WINDOW_LABELS,
   STATS_WINDOWS,
@@ -158,18 +159,13 @@ export function StatsCards({
             </span>
           ) : null}
         </div>
-        <select
-          value={windowHours}
-          onChange={(e) => onWindowChange(Number(e.target.value) as StatsWindowHours)}
-          aria-label={t("statisticsWindow")}
+        <WindowSelect
+          value={String(windowHours)}
+          options={STATS_WINDOWS.map((h) => ({ value: String(h), label: STATS_WINDOW_LABELS[h] }))}
+          onChange={(v) => onWindowChange(Number(v) as StatsWindowHours)}
+          ariaLabel={t("statisticsWindow")}
           className="bg-transparent text-[10px] text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
-        >
-          {STATS_WINDOWS.map((h) => (
-            <option key={h} value={h}>
-              {STATS_WINDOW_LABELS[h]}
-            </option>
-          ))}
-        </select>
+        />
       </div>
       <div className="grid grid-cols-2 gap-1 px-3 py-2">
         {cards.map((card) =>
