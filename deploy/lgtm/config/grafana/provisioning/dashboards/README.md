@@ -42,7 +42,8 @@ row header. All sections are **expanded by default** (`collapsed: false`,
    sample count by route, turn duration, exec outcomes, syntax-fix triggers,
    halt classes, SDK Top 20, frontend interactions ×3, settings changes.
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
-   delivery-stalled total, and SSE backlog.
+   delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
+   (the gateway's 60s `agent_registry` gauge + its deriv rate, task #2010).
 5. **`Plugin quality`** — the ava_code / ava_fleet / ava_memory panels
    (was the plugins dashboard + the plugin rows; deduplicated).
 6. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
@@ -56,10 +57,12 @@ row header. All sections are **expanded by default** (`collapsed: false`,
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
 the dashboard time picker; there are no per-panel `timeFrom` overrides.
 
-The dashboard now has 76 panels: core ids remain below 1000 (the four new
-stat tiles are 44–47), plugin ids are >= 1000, host/data-plane panels are
-2101–2112, the cost-analysis panels are 38, 39, 41–43, and the event panels
-are 2201–2203 (business/anomaly logs, event-type table, raw stream). The
+The dashboard now has 80 panel entries (73 panels + 7 row headers): core
+ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
+>= 1000, host/data-plane panels are 2101–2112, the cost-analysis panels are
+38, 39, 41–43, the event panels are 2201–2203 (business/anomaly logs,
+event-type table, raw stream), and the Fleet growth panels are 2301–2302
+(Max Agent ID + deriv rate, task #2010). The
 duplicate plugin spawn-rate panel (1006) was removed because the Fleet
 summaries cover the same information.
 
