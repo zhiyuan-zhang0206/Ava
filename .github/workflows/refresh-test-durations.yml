@@ -1,0 +1,171 @@
+name: Refresh test durations
+
+# Nightly re-measure of pytest-split's duration data. The backend and e2e
+# shards split by per-test durations in .test_durations; that file goes stale
+# as the suite grows (new tests are costed at the average, which skewed the
+# shards ~20% as of 2026-08-30). This workflow runs both suites exactly as CI
+# runs them and opens ONE reviewable PR with the refreshed durations — the
+# same bot-PR pattern as update-model-pricing.yml, and the PR is never
+# auto-merged. Hosted minutes are unmetered for public repos, so the ~50
+# minute re-measure is free; it is why sharding was adopted in the first
+# place.
+
+on:
+  schedule:
+    - cron: '30 19 * * *'  # UTC — GitHub Actions schedule cron is always UTC
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-test-durations
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.ref == 'refs/heads/main'
+    name: Refresh .test_durations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.10.2'
+          enable-cache: true
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: ui/web
+        run: npm ci
+
+      - name: Cache Playwright chromium
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Install Playwright chromium
+        # Same bounded-install reasoning as the e2e-shard job (see ci.yml).
+        timeout-minutes: 10
+        run: uv run playwright install --with-deps chromium
+
+      - name: Refresh .test_durations
+        env:
+          # Sentinel data planes: the suite must provision its own throwaway
+          # cluster; a sentinel turns a leaked real-data-plane access into a
+          # connection error rather than a silent write. Same as ci.yml.
+          AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+          AVA_REDIS_URL: redis://127.0.0.1:1/0
+        run: uv run python scripts/refresh_test_durations.py
+
+      - name: Detect a change
+        id: diff
+        run: |
+          if git diff --quiet -- .test_durations; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare an isolated candidate branch
+        id: candidate
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ava-bot/test-durations
+        run: |
+          CANDIDATE="$RUNNER_TEMP/durations-candidate"
+          OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
+          if [ "$OPEN_PR" -gt 1 ]; then
+            echo "Expected at most one open durations PR, found $OPEN_PR" >&2
+            exit 1
+          fi
+          REMOTE_EXISTS=0
+          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH"; then
+            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            REMOTE_EXISTS=1
+          fi
+          if [ "$OPEN_PR" -eq 1 ]; then
+            if [ "$REMOTE_EXISTS" -ne 1 ]; then
+              echo "Open durations PR has no remote head branch" >&2
+              exit 1
+            fi
+            git worktree add -B "$BRANCH" "$CANDIDATE" "origin/$BRANCH"
+          else
+            git worktree add -B "$BRANCH" "$CANDIDATE" origin/main
+          fi
+          echo "path=$CANDIDATE" >> "$GITHUB_OUTPUT"
+
+      - name: Stage the refreshed durations
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+        run: cp .test_durations "$CANDIDATE/.test_durations"
+
+      - name: Push a review branch
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          BRANCH: ava-bot/test-durations
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+        run: |
+          git -C "$CANDIDATE" config user.name 'ava-durations-bot'
+          git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$CANDIDATE" add .test_durations
+          git -C "$CANDIDATE" commit -m 'ci: refresh .test_durations'
+          git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+
+      - name: Open or update the durations PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ava-bot/test-durations
+        run: |
+          PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title 'ci: refresh .test_durations (restore shard balance)' \
+              --body '## Summary
+
+          A nightly re-measure of the pytest-split duration data. The backend
+          and e2e shards split by per-test durations; the previous file was
+          stale (11 days / ~2k new tests, 83% of test files without an entry),
+          which skewed the shards ~20%. Both suites were re-run the same way
+          CI runs them and the durations were rewritten.
+
+          ## File tree
+
+          ```text
+          .test_durations  (M) ★ per-test durations for pytest-split
+          ```
+
+          ## Data flow
+
+          Full suite re-measure (backend -n 4, e2e -n 2) → --store-durations
+          --clean-durations → merge + drop <0.2s entries → commit.
+
+          This PR is never auto-merged.'
+          fi
+          gh workflow run ci.yml --ref "$BRANCH"

@@ -136,6 +136,34 @@ Push/PR → CI
 
 Pre-commit does not run pytest (needs DB), but runs ruff + pyright + frontend tsc + frontend vitest.
 
+## `.test_durations` — pytest-split duration data
+
+The backend shards (`--splits 12`) and the e2e shards (`--splits 4`) are
+balanced by per-test durations from the repo-root `.test_durations`; a test
+without an entry is costed at the average of this run's known durations, so a
+stale file skews the shards (measured ~20% skew as of 2026-08-30, after the
+file went 11 days without a refresh).
+
+Refresh the file manually after a significant test-suite change:
+
+```bash
+uv run python scripts/refresh_test_durations.py
+```
+
+The script re-runs both suites exactly as CI runs them — backend `-n 4` +
+`-m "not flaky"` + CI's `--cov` module list (coverage tracing is part of the
+shard environment), e2e `-n 2` — with `--store-durations --clean-durations`,
+merges the two runs, keeps entries `>= 0.2s`, and atomically rewrites
+`.test_durations` in the committed compact-JSON format (sorted keys,
+3-decimal values, one trailing newline). It never edits the file in place: a
+failed backend run aborts without touching it; a failed e2e run still keeps
+whatever durations it recorded, and if it recorded nothing the previous e2e
+entries are retained.
+
+`.github/workflows/refresh-test-durations.yml` runs this nightly on `main` and
+opens one reviewable PR (never auto-merged) when the file changed — follow its
+bot-PR pattern for manual refreshes too.
+
 ## Host isolation: what a test run may touch
 
 `tests/conftest.py` redirects every host resource the suite could otherwise
