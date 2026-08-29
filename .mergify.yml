@@ -8,6 +8,13 @@
 # under mergify/merge-queue/ — ci.yml's draft-skip explicitly exempts that
 # prefix, so batches always verify fully.
 #
+# Queue tuning (2026-08-30): `batch_max_wait_time: 300s` +
+# `max_parallel_checks: 2`. The old 30s wait meant a few queued PRs each paid
+# a full speculative CI cycle; the longer wait lets a burst fill one batch
+# (fewer CI cycles for the same landed set), and two parallel batches overlap
+# verification instead of serializing it. A lone PR pays up to 5 min queue
+# latency — accepted for the burst case.
+#
 # QA GATE: `qa-approved` is a hard merge precondition (merge_conditions). The
 # label is applied by QA / maintainers only, and only on a PASS or
 # PASS-with-nits conclusion; BLOCK / CONDITIONAL never carry it, and a later
@@ -33,7 +40,7 @@
 # duplicate it.
 
 merge_queue:
-  max_parallel_checks: 1
+  max_parallel_checks: 2
 
 queue_rules:
   - name: default
@@ -45,10 +52,10 @@ queue_rules:
     # Batch queued PRs into one speculative verification (draft PR); a red
     # batch bisects automatically.
     batch_size: 8
-    # Pin Mergify's default (30s): a batch that has not reached batch_size
-    # processes after at most 30s instead of waiting indefinitely for the
-    # batch to fill; keeps low-traffic merges snappy.
-    batch_max_wait_time: 30s
+    # Wait up to 300s for a burst to fill the batch before processing: burst
+    # PRs merge into one speculative batch (one CI cycle instead of several).
+    # A lone PR pays up to 5 min queue latency.
+    batch_max_wait_time: 300s
     # Without checks_timeout Mergify waits only the auto-derived 18m; on a
     # busy queue every batch re-runs CI and PRs get dequeued mid-run.
     # 3600s = comfortable headroom over the full suite.
