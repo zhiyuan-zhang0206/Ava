@@ -107,23 +107,23 @@ def _read_pg_state() -> dict[str, str]:
     if record is None:
         raise RuntimeError("cluster registry record is missing")
 
-    def scalar(conn: psycopg.Connection[tuple[object, ...]], query: str) -> object:
-        row = conn.execute(sql.SQL(query)).fetchone()
+    def scalar(conn: psycopg.Connection[tuple[object, ...]], query: sql.Composable) -> object:
+        row = conn.execute(query).fetchone()
         if row is None:
             raise RuntimeError(f"PostgreSQL returned no row for {query!r}")
         return row[0]
 
     with psycopg.connect(pg_admin_url(record_postgres_port(record)), autocommit=True) as conn:
-        system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
-        server_version = int(str(scalar(conn, "SHOW server_version_num")))
+        system_id = str(scalar(conn, sql.SQL("SELECT system_identifier FROM pg_control_system()")))
+        server_version = int(str(scalar(conn, sql.SQL("SHOW server_version_num"))))
         current = {
-            name: str(scalar(conn, f"SHOW {name}"))
+            name: str(scalar(conn, sql.SQL("SHOW {}").format(sql.Identifier(name))))
             for name in ("archive_mode", "archive_command", "archive_timeout", "wal_compression")
         }
-        current["data_directory"] = str(scalar(conn, "SHOW data_directory"))
-        current["port"] = str(scalar(conn, "SHOW port"))
+        current["data_directory"] = str(scalar(conn, sql.SQL("SHOW data_directory")))
+        current["port"] = str(scalar(conn, sql.SQL("SHOW port")))
         current["postmaster_started_at"] = str(
-            scalar(conn, "SELECT pg_postmaster_start_time()::text")
+            scalar(conn, sql.SQL("SELECT pg_postmaster_start_time()::text"))
         )
     if server_version // 10000 != 17:
         raise RuntimeError("running PostgreSQL server is not major version 17")

@@ -98,11 +98,18 @@ class ActivationRecord:
             return value
 
         raw_settings = raw["pre_activation_pg_settings"]
+        settings_items = (
+            None
+            if raw_settings is None
+            else cast(dict[object, object], raw_settings)
+            if isinstance(raw_settings, dict)
+            else None
+        )
         if raw_settings is not None and (
-            not isinstance(raw_settings, dict)
+            settings_items is None
             or not all(
                 isinstance(key, str) and isinstance(value, str)
-                for key, value in raw_settings.items()
+                for key, value in settings_items.items()
             )
         ):
             raise ValueError("PITR activation pre_activation_pg_settings must be string pairs")
