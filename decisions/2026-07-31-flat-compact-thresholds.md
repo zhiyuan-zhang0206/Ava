@@ -50,7 +50,7 @@ some model, the fix is a ceiling on that entry — or a new decision moving the
 flat rule — not a return to tracking vendor announcements per model.
 
 <!-- Superseded for deepseek only by:
-decisions/2026-08-01-deepseek-compact-thresholds.md — user decision
-(2026-08-27, superseding task #581's 374k/512k) pins the deepseek entries at
-soft 600k / hard 700k (0.6 / 0.7 of their 1M window). Every other model still runs this flat
+decisions/2026-08-29-deepseek-compact-thresholds-374k-512k.md — user decision
+(2026-08-29) pins the deepseek entries at soft 374k / hard 512k
+(0.374 / 0.512 of their 1M window). Every other model still runs this flat
 rule. -->
