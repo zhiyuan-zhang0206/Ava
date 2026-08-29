@@ -4292,6 +4292,11 @@ export interface components {
             current_serve_gateway: boolean;
             /** Current Serve Agent Runner */
             current_serve_agent_runner: boolean;
+            /**
+             * Current Serve Observability Station
+             * @default false
+             */
+            current_serve_observability_station: boolean;
             /** Current Paused */
             current_paused: boolean;
             /** Current Orchestration */
@@ -4319,6 +4324,11 @@ export interface components {
             serve_gateway: boolean;
             /** Serve Agent Runner */
             serve_agent_runner: boolean;
+            /**
+             * Serve Observability Station
+             * @default false
+             */
+            serve_observability_station: boolean;
             /** Paused */
             paused: boolean;
             /** Current Orchestration */
@@ -5359,6 +5369,11 @@ export interface components {
             serve_gateway: boolean;
             /** Serve Agent Runner */
             serve_agent_runner: boolean;
+            /**
+             * Serve Observability Station
+             * @default false
+             */
+            serve_observability_station: boolean;
             /** Gateway Url */
             gateway_url: string;
             /**

@@ -97,6 +97,7 @@ def stub_remote_probe(
             name=name,
             serve_gateway="gateway" in role,
             serve_agent_runner="agent-runner" in role,
+            serve_observability_station="observability-station" in role,
             gateway_url=gateway_url or "",
             up_since_at=up_since_at,
             online=online,
@@ -117,13 +118,16 @@ def _insert_machine(
     role: str,
     description: str | None = None,
 ) -> None:
-    """Direct INSERT of a machines row (bypassing register_self) — for test isolation."""
+    """Direct INSERT of a machines row (bypassing register_self) — for test isolation.
+
+    `role` is a comma-separated capability set ("gateway,agent-runner") — the
+    machines.role column is a TEXT[] of capability tokens."""
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machines (name, gateway_url, role, description) VALUES (%s, %s, %s, %s) "
             "ON CONFLICT (name) DO UPDATE SET gateway_url=EXCLUDED.gateway_url, "
             "role=EXCLUDED.role, description=EXCLUDED.description, up_since_at=NOW()",
-            (name, gateway_url, [role], description),  # machines.role is TEXT[] (capability set)
+            (name, gateway_url, [t for t in role.split(",") if t], description),
         )
     conn.commit()
 
@@ -206,6 +210,36 @@ class TestClusterPanel:
         assert by_name["wsl-test"]["paused"] is None
         assert by_name["wsl-test"]["serve_gateway"] is False
         assert by_name["wsl-test"]["serve_agent_runner"] is True
+
+    def test_station_machine_row_carries_station_capability(
+        self,
+        db_conn: psycopg.Connection,
+        fake_flag: Path,
+        stub_machine_identity: None,
+        stub_remote_probe: dict[str, tuple[bool, bool | None]],
+    ) -> None:
+        """A pure observability-station row (machines.role carries only the
+        station token) renders serve_observability_station=True and the two
+        legacy flags False — the roster must not lose the station capability
+        when deriving the flag triple from the role column."""
+        _ = fake_flag, stub_machine_identity
+        _insert_machine(db_conn, "station-a", None, "observability-station")
+        _insert_machine(
+            db_conn, "combo", "https://ava.example.com", "gateway,observability-station"
+        )
+        stub_remote_probe["station-a"] = (True, False)
+        stub_remote_probe["combo"] = (True, False)
+
+        with TestClient(app) as client:
+            r = client.get("/api/status")
+        assert r.status_code == 200
+        by_name = {m["name"]: m for m in r.json()["cluster"]["machines"]}
+        assert by_name["station-a"]["serve_observability_station"] is True
+        assert by_name["station-a"]["serve_gateway"] is False
+        assert by_name["station-a"]["serve_agent_runner"] is False
+        assert by_name["combo"]["serve_observability_station"] is True
+        assert by_name["combo"]["serve_gateway"] is True
+        assert by_name["combo"]["serve_agent_runner"] is False
 
     def test_agent_runner_gateway_url_null_no_crash(
         self,

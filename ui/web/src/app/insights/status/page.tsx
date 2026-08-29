@@ -359,6 +359,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
         {[
           data.current_serve_gateway && "gateway",
           data.current_serve_agent_runner && "agent-runner",
+          data.current_serve_observability_station && "observability-station",
         ]
           .filter(Boolean)
           .join(" + ") || "no capability"}

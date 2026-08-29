@@ -22,8 +22,8 @@ _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
 # transport failure to raise on. Every other status still fails fast.
 _DEPLOY_REFUSED_STATUS = 409
 # Roster `role` column width: the widest label format_capabilities emits is
-# "gateway + agent-runner" (22 chars).
-_ROLE_COL_W = 22
+# "gateway + agent-runner + observability-station" (44 chars).
+_ROLE_COL_W = 44
 # Roster `hold` column width: the widest cell is "waited-on" (9 chars).
 _HOLD_COL_W = 9
 
@@ -216,10 +216,11 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
     machine).
 
     Pure and split from the HTTP fetch so the row formatting is unit-testable
-    against the MachineStatus wire schema, which carries the two capability flags
-    (serve_gateway / serve_agent_runner) and no single `role` field — the role
-    column is derived via format_capabilities. Assumes a non-empty roster (the
-    caller short-circuits the empty case).
+    against the MachineStatus wire schema, which carries the three capability
+    flags (serve_gateway / serve_agent_runner / serve_observability_station)
+    and no single `role` field — the role column is derived via
+    format_capabilities. Assumes a non-empty roster (the caller short-circuits
+    the empty case).
     """
     name_w = max(
         *(len(f"{m.name} (staging)") if m.is_staging else len(m.name) for m in roster),
@@ -238,7 +239,9 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
         display_name = f"{m.name} (staging)" if m.is_staging else m.name
         paused_str = "?" if m.paused is None else "yes" if m.paused else "no"
         up_since = str(m.up_since_at)[:19] if m.online else "—"
-        role = format_capabilities(m.serve_gateway, m.serve_agent_runner)
+        role = format_capabilities(
+            m.serve_gateway, m.serve_agent_runner, m.serve_observability_station
+        )
         pin_str = _pin_cell(m.on_pin, m.head_sha)
         code_str = _code_cell(m.running_sha, m.head_sha)
         hold_str = _hold_cell(m.settle_waited_on)

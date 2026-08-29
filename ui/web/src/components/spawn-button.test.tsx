@@ -73,6 +73,7 @@ function statusWith(
       current_machine: current,
       current_serve_gateway: true,
       current_serve_agent_runner: false,
+      current_serve_observability_station: false,
       current_paused: false,
       machines: machines.map((m) => ({
         name: m.name,
@@ -81,6 +82,7 @@ function statusWith(
         // overridden per machine (both can be true for a single box).
         serve_gateway: m.serveGateway ?? m.name === current,
         serve_agent_runner: m.serveAgentRunner ?? m.name !== current,
+        serve_observability_station: false,
         identity_mismatch: false,
         settle_waited_on: false,
         is_staging: false,

@@ -35,12 +35,17 @@ class MachineStatus(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    # Two orthogonal capability flags — both can be true on a single-box host.
-    # The roster groups machines by capability rather than carrying a single
-    # categorical "role", so a machine is never reasoned about as "having
-    # multiple roles": it just answers two independent yes/no questions.
+    # Three orthogonal capability flags — any combination can be true on a
+    # single host. The roster groups machines by capability rather than
+    # carrying a single categorical "role", so a machine is never reasoned
+    # about as "having multiple roles": it just answers independent yes/no
+    # questions. serve_observability_station defaults False (added to the wire
+    # in WP2) so a client talking to a pre-station gateway parses its rows —
+    # the roster row's capability set is also derivable from the machines
+    # table's role column server-side.
     serve_gateway: bool
     serve_agent_runner: bool
+    serve_observability_station: bool = False
     gateway_url: str
     # When a process owning this machine last announced it was up (`ava start`,
     # or the ops daemon at its own boot) — a boot/announce stamp, NOT a

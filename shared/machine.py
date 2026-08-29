@@ -191,18 +191,28 @@ def is_observability_station() -> bool:
     return "observability-station" in machine_role()
 
 
-def format_capabilities(serve_gateway: bool, serve_agent_runner: bool) -> str:  # noqa: FBT001 — capability flags, mirror is_gateway/is_agent_runner
-    """Render the two capability flags as one human label.
+def format_capabilities(
+    serve_gateway: bool,  # noqa: FBT001 — capability flags, mirror is_gateway/is_agent_runner
+    serve_agent_runner: bool,  # noqa: FBT001
+    serve_observability_station: bool = False,  # noqa: FBT001, FBT002 — default keeps old callers' label
+) -> str:
+    """Render the capability flags as one human label.
 
     "gateway + agent-runner" on a single-box host, "gateway" or "agent-runner"
-    for a split node, "none" when a host serves neither. Single source for the
-    `ava status` serves: line and the `ava cluster status` role column, which
-    both display the capability pair (there is no single categorical role field
-    on the wire — see MachineStatus / ClusterStatus).
+    for a split node, "observability-station" for a pure station, "none" when
+    a host serves none. Single source for the `ava status` serves: line and
+    the `ava cluster status` role column, which both display the capability
+    set (there is no single categorical role field on the wire — see
+    MachineStatus / ClusterStatus). The third flag defaults False so a caller
+    that only knows the two original flags keeps the pre-station label.
     """
     caps = [
         name
-        for name, on in (("gateway", serve_gateway), ("agent-runner", serve_agent_runner))
+        for name, on in (
+            ("gateway", serve_gateway),
+            ("agent-runner", serve_agent_runner),
+            ("observability-station", serve_observability_station),
+        )
         if on
     ]
     return " + ".join(caps) or "none"

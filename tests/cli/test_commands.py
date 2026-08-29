@@ -1679,6 +1679,61 @@ def test_cmd_cluster_status_renders_pin_and_role_columns(
     assert "agent-runner" in wsl_line and "gateway +" not in wsl_line
 
 
+def test_cmd_cluster_status_role_column_shows_observability_station(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A pure observability-station host renders as "observability-station" in
+    the roster's role column (WP2 — previously the third capability flag was
+    not on the wire and such a host read as "none")."""
+    roster = [
+        _machine_row(
+            name="station-a",
+            serve_gateway=False,
+            serve_agent_runner=False,
+            serve_observability_station=True,
+        ),
+        _machine_row(
+            name="combo",
+            serve_gateway=True,
+            serve_agent_runner=False,
+            serve_observability_station=True,
+        ),
+    ]
+    _patch_roster_get(monkeypatch, roster)
+    rc = _cli.cmd_cluster_status()
+    assert rc == 0
+    out = capsys.readouterr().out
+    station_line = next(line for line in out.splitlines() if line.startswith("station-a"))
+    combo_line = next(line for line in out.splitlines() if line.startswith("combo"))
+    assert "observability-station" in station_line and "gateway" not in station_line
+    assert "gateway + observability-station" in combo_line
+
+
+def test_cmd_status_gateway_cluster_serves_line_shows_station(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`ava status`'s gateway cluster-status supplement renders the station
+    capability in the serves: line when the gateway snapshot carries it
+    (the function imports _fetch_gateway_cluster_status at call time, so the
+    module attribute patch is the rebind that takes effect)."""
+    monkeypatch.setattr(
+        "cli.commands.cluster._fetch_gateway_cluster_status",
+        lambda: {
+            "machine_name": "station-a",
+            "serve_gateway": False,
+            "serve_agent_runner": False,
+            "serve_observability_station": True,
+            "paused": False,
+        },
+    )
+    from cli.commands.status import _print_gateway_cluster_status
+
+    _print_gateway_cluster_status()
+    out = capsys.readouterr().out
+    assert "machine_name: station-a" in out
+    assert "serves:       observability-station" in out
+
+
 # ─── ava cluster status transport failures report, they do not traceback ──────────
 
 
