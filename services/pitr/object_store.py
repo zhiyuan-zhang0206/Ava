@@ -19,18 +19,20 @@ class RemoteObjectAck:
 
 
 class ObjectStore(Protocol):
-    def put_file_if_absent(
+    def put_wal_ciphertext_if_absent(
         self,
         path: Path,
         object_name: str,
         metadata: Mapping[str, str],
     ) -> RemoteObjectAck:
-        """Publish ``path`` under ``object_name`` iff it does not exist yet.
+        """Publish a bounded, seekable WAL ciphertext iff absent.
 
         ``path`` MUST be a real regular file: the SDK's resumable upload
         (> 8 MiB) seeks and re-reads its source, which only a seekable file
         supports (an in-memory encrypted stream raises UnsupportedOperation
         and every large WAL segment fails to upload — QA #920 block 1).
+        Base backups must use the separate restartable-stream boundary added
+        with base-chain support; they must never materialize through this API.
         """
         ...
 

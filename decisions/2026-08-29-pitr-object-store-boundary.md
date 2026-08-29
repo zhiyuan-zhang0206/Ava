@@ -25,6 +25,13 @@ boundary. Direct REST would reimplement Google authentication, resumable upload,
 checksum, precondition, and retry behavior. The official SDK already owns these
 mechanics; Ava owns only the durability and collision policy specific to PITR.
 
+This first adapter method is intentionally WAL-only. It stages at most one
+seekable ciphertext for the single uploader worker and rejects source files
+larger than 64 MiB before writing that stage. Weekly base backups are much
+larger and must not use this file-staging boundary: their rollout owns a
+separate restartable streaming upload contract so plaintext and ciphertext are
+never both materialized in full.
+
 Separating remote deletion prevents a retrying writer from accidentally turning
 an upload or crash-recovery path into retention. It also makes the ordering
 explicit: verified remote object, durable ACK, staging removal, spool removal.
