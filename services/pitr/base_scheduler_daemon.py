@@ -7,8 +7,8 @@ import logging
 import multiprocessing
 import queue
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -220,16 +220,24 @@ def _pending_restore_candidate(root: Path) -> CandidateManifest | None:
     return None
 
 
-@contextmanager
-def _claim_scheduler_ownership() -> Iterator[None]:
+def _claim_scheduler_ownership() -> ExitStack:
     """Serialize selection and execution with activation, then recheck state."""
 
+    stack = ExitStack()
     ensure_private_dir(activation_lock_path(ava_home()).parent)
-    with file_lock(activation_lock_path(ava_home()), timeout_s=0):
-        active = load_activation_record(ava_home())
-        if active is not None and active.phase not in {"protected", "rolled_back"}:
-            raise RuntimeError("activation owns base/restore selection")
-        yield
+    stack.enter_context(file_lock(activation_lock_path(ava_home()), timeout_s=0))
+    try:
+        _require_scheduler_idle()
+    except BaseException:
+        stack.close()
+        raise
+    return stack
+
+
+def _require_scheduler_idle() -> None:
+    active = load_activation_record(ava_home())
+    if active is not None and active.phase not in {"protected", "rolled_back"}:
+        raise RuntimeError("activation owns base/restore selection")
 
 
 def _restore_worker_input() -> _RestoreWorkerInput:

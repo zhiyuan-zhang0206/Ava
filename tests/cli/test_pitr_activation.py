@@ -14,6 +14,7 @@ from cli.commands import _pitr_activation_config as activation_config
 from ops.pitr_restart import PitrRestartContinuation
 from services.pitr.activation_observability import save_error
 from services.pitr.activation_runtime import (
+    _restore_exact_file,
     archiver_reached_target,
     pitr_env_is_desired,
     rollback_effect_state,
@@ -220,17 +221,17 @@ def test_exact_file_rollback_is_digest_cas_and_crash_idempotent(tmp_path: Path) 
     target = hashlib.sha256(original).hexdigest()
     expected = hashlib.sha256(activated).hexdigest()
 
-    activation._restore_exact_file(
+    _restore_exact_file(
         path, payload_b64=payload_b64, target_digest=target, expected_digest=expected
     )
-    activation._restore_exact_file(
+    _restore_exact_file(
         path, payload_b64=payload_b64, target_digest=target, expected_digest=expected
     )
     assert path.read_bytes() == original
 
     path.write_bytes(b"concurrent=true\n")
     with pytest.raises(RuntimeError, match="changed concurrently"):
-        activation._restore_exact_file(
+        _restore_exact_file(
             path, payload_b64=payload_b64, target_digest=target, expected_digest=expected
         )
 
@@ -478,9 +479,11 @@ def test_rollback_setting_crash_matrix_resumes_each_owned_alter(
 
     durable = load_record(tmp_path)
     assert durable is not None
+    intent = durable.rollback_setting_intent
+    assert intent is not None
     assert durable.rollback_setting_intent == {
         "name": crash_setting,
-        "expected_digest": durable.rollback_setting_intent["expected_digest"],
+        "expected_digest": intent["expected_digest"],
         "current_value": "activation-owned",
         "desired_value": "__ABSENT__",
     }

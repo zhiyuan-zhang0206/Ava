@@ -33,7 +33,10 @@ def _credentials() -> dict[str, str]:
 def test_activation_lease_refuses_long_step_when_initial_ownership_is_lost(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(activation_lease, "renew_update_lock", lambda _holder: False)
+    def lose_lease(_holder: str) -> bool:
+        return False
+
+    monkeypatch.setattr(activation_lease, "renew_update_lock", lose_lease)
     called = False
 
     def action(_stop: object) -> None:
@@ -50,9 +53,11 @@ def test_activation_lease_cancels_child_and_never_returns_after_renewal_race(
 ) -> None:
     renewals = iter((True, False))
     monkeypatch.setattr(activation_lease, "LEASE_RENEW_INTERVAL_S", 0.001)
-    monkeypatch.setattr(
-        activation_lease, "renew_update_lock", lambda _holder: next(renewals, False)
-    )
+
+    def renew_then_lose(_holder: str) -> bool:
+        return next(renewals, False)
+
+    monkeypatch.setattr(activation_lease, "renew_update_lock", renew_then_lose)
 
     def action(stop: object) -> str:
         assert isinstance(stop, activation_lease.threading.Event)
