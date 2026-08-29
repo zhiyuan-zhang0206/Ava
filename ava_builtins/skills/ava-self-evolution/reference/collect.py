@@ -219,14 +219,11 @@ def _inbounds_by_agent(
     flagged the whole fleet as fumbled every day (1336 "peer feedback"
     messages across 70 runs on a day when agents were fine).
 
-    Returns dict[agent_id, list[{"source": str, "content": str}]].
-    Source is "user" for user messages, "agent:<id>" for peer messages.
+    Returns dict[agent_id, list[{"source", "content", "is_broadcast"}]].
+    A broadcast is one source/content pair delivered to multiple agents in the
+    collection window. It remains visible in the record but does not count as
+    a correction or re-prompt for each recipient.
     """
-    base_sql = (
-        "SELECT id, agent_id, source, content FROM inbound_messages "
-        "WHERE agent_id = ANY(%s) AND kind = 'chat' "
-        "AND (source = ANY(%s) OR source LIKE 'agent:%%' OR source = 'system') "
-    )
     # Task prompts: the first-ever chat message per agent, regardless of age.
     cur.execute(
         "SELECT DISTINCT ON (agent_id) id, agent_id, source, content "
@@ -240,17 +237,32 @@ def _inbounds_by_agent(
     first_rows: dict[int, dict[str, Any]] = {}
     for msg_id, agent_id, source, content in cur.fetchall():
         first_ids[agent_id] = msg_id
-        first_rows[agent_id] = {"source": source, "content": content}
+        first_rows[agent_id] = {"source": source, "content": content, "is_broadcast": False}
     # Everything the agent actually received during this collection window.
     cur.execute(
-        base_sql + "AND created_at > now() - %s::interval ORDER BY agent_id, created_at",
+        "WITH window_inbounds AS ("
+        "SELECT id, agent_id, source, content, created_at "
+        "FROM inbound_messages "
+        "WHERE agent_id = ANY(%s) AND kind = 'chat' "
+        "AND (source = ANY(%s) OR source LIKE 'agent:%%' OR source = 'system') "
+        "AND created_at > now() - %s::interval"
+        "), broadcasts AS ("
+        "SELECT source, content FROM window_inbounds "
+        "GROUP BY source, content HAVING count(DISTINCT agent_id) > 1"
+        ") "
+        "SELECT inbound.id, inbound.agent_id, inbound.source, inbound.content, "
+        "broadcasts.source IS NOT NULL AS is_broadcast "
+        "FROM window_inbounds inbound "
+        "LEFT JOIN broadcasts ON broadcasts.source = inbound.source "
+        "AND broadcasts.content = inbound.content "
+        "ORDER BY inbound.agent_id, inbound.created_at",
         [agent_ids, TASK_SOURCES, window],
     )
     out: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for msg_id, agent_id, source, content in cur.fetchall():
+    for msg_id, agent_id, source, content, is_broadcast in cur.fetchall():
         if msg_id == first_ids.get(agent_id):
             continue  # the task prompt — already first via prepend below
-        out[agent_id].append({"source": source, "content": content})
+        out[agent_id].append({"source": source, "content": content, "is_broadcast": is_broadcast})
     # Prepend the task prompt so build_record still finds it at
     # user_msgs[0] / spawner_msgs[0].
     for agent_id, row in first_rows.items():
@@ -267,12 +279,24 @@ def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, tuple]:
 
 
 def _test_label_ids(cur: psycopg.Cursor, ids: list[int]) -> set[int]:
-    """Agent ids whose role label carries the TEST- prefix — benchmark /
-    probe spawns, not production runs. The scan must not label them
-    fumbled or feed them into the health metrics (2026-08-25 convention:
-    test spawns carry a TEST- label prefix)."""
-    cur.execute("SELECT id, label FROM agents WHERE id = ANY(%s)", [ids])
-    return {row[0] for row in cur.fetchall() if (row[1] or "").startswith("TEST-")}
+    """Benchmark/probe agents and their direct workers, excluded from health data.
+
+    A TEST- orchestrator's workers inherit its benchmark-only purpose even
+    though their own labels describe the task they execute.
+    """
+    cur.execute(
+        "SELECT child.id, child.label, parent.label "
+        "FROM agents child "
+        "LEFT JOIN agents_meta child_meta ON child_meta.id = child.id "
+        "LEFT JOIN agents parent ON child_meta.spawner = 'agent:' || parent.id::text "
+        "WHERE child.id = ANY(%s)",
+        [ids],
+    )
+    return {
+        row[0]
+        for row in cur.fetchall()
+        if (row[1] or "").startswith("TEST-") or (row[2] or "").startswith("TEST-")
+    }
 
 
 # ─────────────── driver ───────────────
@@ -397,7 +421,8 @@ def collect_one(
             [agent_id],
         )
         inbounds: list[dict[str, Any]] = [
-            {"source": source, "content": content} for source, content in cur.fetchall()
+            {"source": source, "content": content, "is_broadcast": False}
+            for source, content in cur.fetchall()
         ]
         cur.execute(
             "SELECT spawner, status, last_message_text FROM agents_meta WHERE id = %s", [agent_id]
