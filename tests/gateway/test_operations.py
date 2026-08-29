@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from ops import ops_cluster, ops_lifecycle
+from ops import ops_cluster, ops_exit, ops_lifecycle
 from ops.rpc_schemas import (
     LaunchAgentRequest,
     RestartAgentRequest,
@@ -911,7 +911,7 @@ async def test_mark_agent_exited_op_rowcount_gt_one_raises(
     faked cursor.rowcount=2 is the only way to exercise the guard. (The
     status-respecting WHERE-IN guard itself is covered against a real DB in
     tests/gateway/test_agents_internals.py:TestExitedEndpoint.)"""
-    monkeypatch.setattr(ops_lifecycle, "list_open_page_names", lambda _conn, _aid: [])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_exit, "list_open_page_names", lambda _conn, _aid: [])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     fake_cursor = MagicMock()
     fake_cursor.rowcount = 2
     fake_conn = MagicMock()
@@ -919,7 +919,7 @@ async def test_mark_agent_exited_op_rowcount_gt_one_raises(
     fake_pool = MagicMock()
     fake_pool.connection.return_value.__enter__.return_value = fake_conn
     with pytest.raises(RuntimeError, match="PK invariant violated"):
-        await ops_lifecycle.mark_agent_exited_op(42, fake_pool)
+        await ops_exit.mark_agent_exited_op(42, fake_pool)
 
 
 class TestResurrectIfTerminatedPlacement:
