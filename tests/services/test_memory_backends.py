@@ -27,6 +27,14 @@ def _vec(seed: int) -> np.ndarray:
 # ── factory ──────────────────────────────────────────────────────────────
 
 
+def test_factory_and_probe_registries_stay_in_sync() -> None:
+    """Every backend has both a constructor and a preflight probe — the
+    daemon's fail-fast preflight must not silently skip a backend."""
+    from services.memory_indexer.backends import probe
+
+    assert set(factory._BACKENDS) == set(probe._PROBES)
+
+
 def test_factory_default_is_milvus() -> None:
     """The unset switch yields the milvus backend — behavior unchanged."""
     from shared.config import settings
@@ -35,13 +43,22 @@ def test_factory_default_is_milvus() -> None:
     assert isinstance(factory.get_backend(), MilvusBackend)
 
 
+def test_factory_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AVA_MEMORY_SEARCH_BACKEND=numpy yields the NumPyBackend."""
+    from services.memory_indexer.backends.numpy import NumPyBackend
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
+    assert isinstance(factory.get_backend(), NumPyBackend)
+
+
 def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unrecognized AVA_MEMORY_SEARCH_BACKEND must not silently fall
     back to milvus — a typo would keep the old storage while the operator
     believes the switch happened."""
     from shared.config import settings
 
-    monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
+    monkeypatch.setattr(settings.services, "memory_search_backend", "qdrant")
     with pytest.raises(ValueError, match="unknown memory search backend"):
         factory.get_backend()
 

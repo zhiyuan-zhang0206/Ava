@@ -16,7 +16,7 @@ A collection of health-check scripts for each background service — called by w
 **Role attribution**: both sides — not an independent process; each probe module is called by the watchdog of the corresponding capability (`gateway-watchdog` / `agent-runner-watchdog`) according to its `ServiceSpec.healthcheck_module`.
 
 ## Health Check List
-The full roster — every checked module with its service, liveness probe, and restart method: [[services/healthchecks/check-roster.ava.okf.md]].
+The full roster — every checked module with its service, liveness probe, and restart method: [[services/healthchecks/check-roster/check-roster.ava.okf.md]].
 
 ## Core Responsibilities
 - **Independent liveness logic**: each service defines its own "alive" criteria (HTTP `/healthz` or `/api/health` / CDP / unix socket ping / real RPC via `MilvusClient` / redis PING) — there are no longer any pidfile-probed or port-open-only services in the table

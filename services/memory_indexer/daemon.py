@@ -65,6 +65,7 @@ from services.memory_indexer.backends.base import (
     content_hash,
 )
 from services.memory_indexer.backends.factory import get_backend
+from services.memory_indexer.backends.probe import probe_backend
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -447,7 +448,9 @@ async def _drain_loop(
             )
 
 
-async def _connect_backend_with_retry(deadline_s: float = 30.0) -> MemorySearchBackend:
+async def _connect_backend_with_retry(
+    deadline_s: float = 30.0, *, probe_message: str | None = None
+) -> MemorySearchBackend:
     """Connect to the configured backend at daemon startup — `ava start`
     spawns the storage service (e.g. the milvus session) and the
     memory_indexer session in order; server initialization takes a few
@@ -477,8 +480,9 @@ async def _connect_backend_with_retry(deadline_s: float = 30.0) -> MemorySearchB
                 exc,
             )
             await asyncio.sleep(2.0)
+    suffix = f" — {probe_message}" if probe_message else ""
     raise RuntimeError(
-        f"{backend.name} backend unreachable after {deadline_s}s: {last_exc}"
+        f"{backend.name} backend unreachable after {deadline_s}s: {last_exc}{suffix}"
     ) from last_exc
 
 
@@ -502,7 +506,26 @@ async def run() -> None:
     _log.info("[indexer] healthz listening on :%s", health_port("memory_indexer"))
 
     _MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
-    backend = await _connect_backend_with_retry()
+    # Preflight the selected backend BEFORE the retry loop: a backend that can
+    # never work (fatal) fails fast with the actionable fix instead of a 30s
+    # retry storm; a merely-unreachable one rides into the retry loop with its
+    # message attached to the terminal error (CTO ruling 2026-08-30 direction ②).
+    preflight = probe_backend(settings.services.memory_search_backend)
+    if preflight.fatal:
+        _log.critical(
+            "[indexer] %s backend preflight FAILED: %s",
+            settings.services.memory_search_backend,
+            preflight.message,
+        )
+        sys.stderr.write(f"[memory_indexer] FATAL: {preflight.message}\n")
+        sys.exit(1)
+    if preflight.message:
+        _log.warning(
+            "[indexer] %s backend preflight: %s",
+            settings.services.memory_search_backend,
+            preflight.message,
+        )
+    backend = await _connect_backend_with_retry(probe_message=preflight.message)
     _log.info("[indexer] connected to %s backend", backend.name)
     dirty_queue: queue.Queue[Path] = queue.Queue()
     handler = _MarkdownEventHandler(dirty_queue)
