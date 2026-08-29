@@ -182,7 +182,6 @@ const DesktopLayout = memo(function DesktopLayout({
         <div className={cn(FLEX_1, MIN_H_0, FLEX)}>
           <div className={cn(FLEX_1, MIN_W_0, MIN_H_0)}>
             <LeftGraphPanel
-              agents={agents}
               selectedAgentId={selectedAgentId}
               setSelectedAgentId={setSelectedAgentId}
               selectedTaskId={selectedTaskId}
@@ -214,7 +213,6 @@ const DesktopLayout = memo(function DesktopLayout({
         >
           <ResizablePanel defaultSize={52} minSize={25}>
             <LeftGraphPanel
-              agents={agents}
               selectedAgentId={selectedAgentId}
               setSelectedAgentId={setSelectedAgentId}
               selectedTaskId={selectedTaskId}
@@ -291,7 +289,6 @@ const MobileLayout = memo(function MobileLayout({
         {mobileTab === "tasks" ? (
           <div className="absolute inset-0">
             <TaskGraph
-              agents={agents}
               selectedTaskId={selectedTaskId}
               onSelectTask={setSelectedTaskId}
               selectedAgentId={selectedAgentId}
@@ -344,13 +341,11 @@ const MobileLayout = memo(function MobileLayout({
 // relationship Graph (default, unchanged) and the Task Graph. The view choice
 // persists so a refresh returns to it. Both feed the same shared selection.
 const LeftGraphPanel = memo(function LeftGraphPanel({
-  agents,
   selectedAgentId,
   setSelectedAgentId,
   selectedTaskId,
   setSelectedTaskId,
 }: {
-  agents: AgentRow[];
   selectedAgentId: number | null;
   setSelectedAgentId: (id: number | null) => void;
   selectedTaskId: number | null;
@@ -385,7 +380,6 @@ const LeftGraphPanel = memo(function LeftGraphPanel({
         ) : (
           <div className="absolute inset-0">
             <TaskGraph
-              agents={agents}
               selectedTaskId={selectedTaskId}
               onSelectTask={setSelectedTaskId}
               selectedAgentId={selectedAgentId}

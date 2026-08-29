@@ -254,10 +254,13 @@ export const ForceGraph = memo(function ForceGraph({
   );
   const { positions, layout } = useForceLayout(simNodes, simLinks, params);
 
-  // Hover anchor: the node id plus a viewport-coordinate point captured at
+  // Hover anchor: the node id plus the node's on-screen box captured at
   // mouseenter. The card is pinned there for the whole hover — it never
   // follows the cursor (user ruling 2026-08-29) — and clears on mouseleave.
-  const [hovered, setHovered] = useState<{ id: number; x: number; y: number } | null>(null);
+  // x/y anchor the card beside the node's top-right corner; flipX is the
+  // node's LEFT edge — the flip baseline (flipping off the right edge would
+  // park the card on top of the hovered node, QA #990).
+  const [hovered, setHovered] = useState<{ id: number; x: number; y: number; flipX: number } | null>(null);
 
   // The instant hover card. Content is computed only for the hovered node
   // (never per node per layout tick); when the view supplies no card the
@@ -286,7 +289,9 @@ export const ForceGraph = memo(function ForceGraph({
     const y = hovered.y - rect.top;
     let left = x + gap;
     let top = y + gap;
-    if (left + cardW > rect.width - 4) left = x - gap - cardW;
+    // Horizontal flip: anchor the card's RIGHT edge at the node's LEFT edge —
+    // the card ends up entirely on the node's other side (never on top of it).
+    if (left + cardW > rect.width - 4) left = hovered.flipX - rect.left - gap - cardW;
     if (top + cardH > rect.height - 4) top = y - gap - cardH;
     card.style.left = `${Math.max(4, left)}px`;
     card.style.top = `${Math.max(4, top)}px`;
@@ -603,10 +608,11 @@ export const ForceGraph = memo(function ForceGraph({
                   }}
                   onMouseEnter={(ev) => {
                     // Static anchor: the card is pinned to the node's own
-                    // on-screen box (top-right corner, viewport coords) and
-                    // stays put until mouseleave — no cursor chasing.
+                    // on-screen box and stays put until mouseleave — no
+                    // cursor chasing. x/y = the top-right corner (normal
+                    // side); flipX = the left edge (flip baseline).
                     const box = ev.currentTarget.getBoundingClientRect();
-                    setHovered({ id: n.id, x: box.right, y: box.top });
+                    setHovered({ id: n.id, x: box.right, y: box.top, flipX: box.left });
                   }}
                   onMouseLeave={() => setHovered((cur) => (cur?.id === n.id ? null : cur))}
                 >
