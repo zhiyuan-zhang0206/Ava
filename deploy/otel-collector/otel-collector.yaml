@@ -29,9 +29,12 @@ receivers:
   otlp:
     # OTLP/HTTP only — every Ava producer speaks OTLP/HTTP (shared/
     # telemetry_otlp.py rejects non-http schemes); no dead gRPC receiver.
+    # The receiver endpoint is baked from AVA_TELEMETRY_OTLP_PORT at converge
+    # (default 127.0.0.1:4318 — the standard OTLP port; single source in
+    # shared/config/observability.py, task #1945).
     protocols:
       http:
-        endpoint: 127.0.0.1:4318
+        endpoint: $OTLP_RECEIVER_ENDPOINT
 $REMOTE_OTLP_RECEIVER
 
   # ── The traditional SRE layer (issue #46) ────────────────────────────────

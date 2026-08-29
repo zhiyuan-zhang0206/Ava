@@ -18,7 +18,7 @@ in [decisions/2026-08-11-otel-viewer-selection.md](../../decisions/2026-08-11-ot
 ```
 agent process ── OTLP/HTTP ──▶ local collector ──▶ local JSONL trace mirror
                                       │
-pure runner collector ── Bearer ──────┤ gateway AVA_MACHINE_HOST:4318
+pure runner collector ── Bearer ──────┤ gateway AVA_MACHINE_HOST:<AVA_TELEMETRY_OTLP_PORT>
                                       ▼
 gateway collector ──▶ loopback Tempo + Loki + Prometheus ──▶ Grafana/read paths
 ```
@@ -35,6 +35,12 @@ gateway collector ──▶ loopback Tempo + Loki + Prometheus ──▶ Grafana
 - **Recovery replay** — `ava trace ship` bypasses the local collector so a
   replay cannot write itself back into the mirror. Gateway units dial loopback
   Tempo; pure runners dial the gateway collector with the cluster bearer.
+- **Ingress port single source** — the OTLP/HTTP ingress port
+  (`AVA_TELEMETRY_OTLP_PORT`, default the standard 4318) is one settings
+  field: the sidecar receiver, the gateway's authenticated remote receiver,
+  the pure-runner relay endpoint, and the roster/healthcheck port probes all
+  derive from it (WP3, task #1945); the agent-side export URL
+  `AVA_TELEMETRY_OTLP_ENDPOINT` keeps its own full-URL override.
 - **Backend** — `../../deploy/lgtm/` runs the Tempo + Loki + Prometheus +
   Grafana stack (lifecycle-owned on the marked host — see its README). It
   writes nothing to the mirror or the main flow, but the gateway's /ops +

@@ -1,8 +1,8 @@
 """OTel Collector sidecar healthcheck — called every 60s by the watchdog.
 
 Probes the sidecar's OTLP/HTTP receiver at the settings OTLP endpoint (default
-http://127.0.0.1:4318) with a valid empty ExportTraceServiceRequest and requires
-a 2xx. A socket that merely answers 401
+http://127.0.0.1:4318 — the port follows AVA_TELEMETRY_OTLP_PORT, task #1945)
+with a valid empty ExportTraceServiceRequest and requires a 2xx. A socket that merely answers 401
 or 415 is not a working ingestion path. It also reads the collector's pinned
 loopback Prometheus endpoint (the per-unit AVA_OTELCOL_METRICS_PORT, default
 8888) for current exporter queue saturation. Remote pressure is logged, not
@@ -73,7 +73,10 @@ def _metrics_url() -> str:
 
 def _collector_ports() -> tuple[int, int]:
     """Listener ports owned by this unit's collector process."""
-    return (4318, settings.observability.otel_collector_metrics_port)
+    return (
+        settings.observability.telemetry_otlp_port,
+        settings.observability.otel_collector_metrics_port,
+    )
 
 
 def _labels(text: str) -> dict[str, str]:

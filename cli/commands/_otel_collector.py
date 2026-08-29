@@ -1,7 +1,8 @@
 """OTel Collector sidecar install — pinned binary download + config generation.
 
 One collector per machine (task #1266): every agent on the host sends OTLP to
-its 127.0.0.1:4318 (OTLP/HTTP). A gateway collector fans out to its loopback
+its local receiver (127.0.0.1, on AVA_TELEMETRY_OTLP_PORT — default the
+standard 4318). A gateway collector fans out to its loopback
 Tempo/Loki/Prometheus backends; a pure runner collector relays each signal to
 the gateway collector's authenticated private-address receiver. Every machine
 mirrors its local traces to JSONL. This module is the converge step's engine —
@@ -72,7 +73,18 @@ _DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
 _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 5.0
 _DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
-_OTLP_HTTP_PORT = 4318
+
+
+def _otlp_ingress_port() -> int:
+    """The OTLP/HTTP ingress port — the single settings source (WP3, task #1945).
+
+    Rendered into the sidecar receiver, the gateway's authenticated remote
+    receiver, and the pure-runner relay endpoint; the roster gate and the
+    sidecar healthcheck probe the same port. Never a second literal here.
+    """
+    from shared.config import settings
+
+    return settings.observability.telemetry_otlp_port
 
 
 def platform_tag() -> str | None:
@@ -244,7 +256,7 @@ def gateway_otel_ingress_endpoint() -> str:
             "cannot build runner OTLP relay: gateway URL (AVA_GATEWAY_URL) must name the "
             f"gateway's non-loopback private address (got {gateway_url!r})"
         )
-    return f"http://{_host_port(host, _OTLP_HTTP_PORT)}"
+    return f"http://{_host_port(host, _otlp_ingress_port())}"
 
 
 def _cluster_bearer() -> str:
@@ -314,7 +326,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
   otlp/remote:
     protocols:
       http:
-        endpoint: {_yaml_quote(_host_port(host, _OTLP_HTTP_PORT))}
+        endpoint: {_yaml_quote(_host_port(host, _otlp_ingress_port()))}
         auth:
           authenticator: bearertokenauth/cluster
 """,
@@ -468,6 +480,7 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
         "PROM_BASE": prom_base,
         "RETENTION_DAYS": str(obs.trace_retention_days),
         "SELF_METRICS_PORT": str(settings.observability.otel_collector_metrics_port),
+        "OTLP_RECEIVER_ENDPOINT": _host_port("127.0.0.1", _otlp_ingress_port()),
         "DATA_PLANE_RECEIVERS": data_plane_block,
         "DATA_PLANE_PIPELINE_RECEIVERS": data_plane_pipeline,
         "OTLP_EXPORTERS": _otlp_exporters(roles),
