@@ -118,7 +118,8 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
     live = LivePostgresIdentity(11, 1.0, "/live", "42", "start", "probe")
 
     class Reader:
-        def download_exact(self, _expected: RestoreObject, destination: Path) -> None:
+        def download_exact(self, expected: RestoreObject, destination: Path) -> None:
+            assert expected.object_name == "base"
             calls.append("download")
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(b"x")
