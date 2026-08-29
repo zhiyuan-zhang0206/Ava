@@ -167,6 +167,25 @@ async def _wait_for_path(path: Path, *, timeout_s: float = 10) -> None:
     assert path.exists(), f"worker did not publish {path.name} before the deadline"
 
 
+async def _assert_tree_gone(pids: list[int], timeout_s: float = 5.0) -> None:
+    # After SIGKILL, dead processes can remain zombies until their new parent
+    # reaps them, and psutil.pid_exists() still reports those entries. Assert
+    # no live members, not that every process-table entry vanished (same
+    # discipline as tests/agent/test_exec_subprocess.py::_assert_tree_gone).
+    deadline = time.monotonic() + timeout_s
+    remaining = set(pids)
+    while remaining and time.monotonic() < deadline:
+        for pid in list(remaining):
+            try:
+                if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
+                    remaining.discard(pid)
+            except psutil.NoSuchProcess:
+                remaining.discard(pid)
+        if remaining:
+            await asyncio.sleep(0.05)
+    assert not remaining, f"process(es) still alive after forced shutdown: {sorted(remaining)}"
+
+
 def test_due_uses_durable_candidate_after_restart(tmp_path: Path) -> None:
     now = datetime(2026, 8, 30, 4, tzinfo=UTC)  # Sunday after the weekly window.
     assert is_due(now, tmp_path)
@@ -198,7 +217,7 @@ async def test_runner_cancellation_reaps_active_worker(
         await task
 
     assert stopped.read_text() == "stopped"
-    assert not psutil.pid_exists(child_pid)
+    await _assert_tree_gone([child_pid])
 
 
 # ── QA #931 R3: domain conditions never gate readiness ────────────────────
@@ -282,6 +301,4 @@ async def test_forced_shutdown_reaps_noncooperative_group_and_late_fork(
 
     await _wait_for_path(late)
     late_pid = int(late.read_text())
-    assert not psutil.pid_exists(worker_pid)
-    assert not psutil.pid_exists(child_pid)
-    assert not psutil.pid_exists(late_pid)
+    await _assert_tree_gone([worker_pid, child_pid, late_pid])

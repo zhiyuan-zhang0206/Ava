@@ -58,6 +58,13 @@ _log = logging.getLogger("services.pitr.base_scheduler_daemon")
 BASE_BACKUP_WEEKDAY = 6
 BASE_BACKUP_HOUR = 3
 BASE_BACKUP_RETRY_INTERVAL_S = 1800
+
+# Worker-must-not-fork-before-adoption: the ownership handshake includes a
+# controller-side ack (an Event) that releases the worker's target. The
+# controller can only reap the process group it was validated against, so any
+# target work (and any subprocess fork) happens strictly after adoption.
+# Timeout on the worker side if the controller never acknowledges.
+_CONTROLLER_ADOPTION_TIMEOUT_S = 30
 BASE_BACKUP_STALE_AFTER_S = 8 * 24 * 3600
 _SLEEP_CHUNK_S = 30
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
@@ -469,10 +476,19 @@ def _restore_worker_result(returncode: int, stderr: str, result: Path) -> dict[s
     return {key: str(value) for key, value in raw.items()}
 
 
+class _AdoptionGate(Protocol):
+    def is_set(self) -> bool: ...
+
+    def set(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> bool: ...
+
+
 def _worker_bootstrap(
     target: Callable[[StopSignal, _WorkerQueue], None],
     stop: StopSignal,
     output: _WorkerQueue,
+    adopted: _AdoptionGate,
 ) -> None:
     os.setsid()
     process = psutil.Process()
@@ -484,6 +500,12 @@ def _worker_bootstrap(
             repr(process.create_time()),
         )
     )
+    # Ownership gate: run the target only after the controller has validated
+    # the identity handshake. The controller can reap only the process group it
+    # was validated against, so a worker that forks before adoption leaves an
+    # unowned group behind when a cancellation lands mid-handshake.
+    if not adopted.wait(timeout=_CONTROLLER_ADOPTION_TIMEOUT_S):
+        raise SystemExit("base candidate worker timed out waiting for controller adoption")
     target(stop, output)
 
 
@@ -581,7 +603,7 @@ def _backup_key() -> tuple[bytes, str]:
     return key_path.read_bytes(), config.pitr_backup_key_id
 
 
-async def _run_worker(
+async def _run_worker(  # noqa: PLR0915
     *,
     target: Callable[[StopSignal, _WorkerQueue], None] = _worker_entry,
     cooperative_timeout_s: float = 30,
@@ -591,8 +613,11 @@ async def _run_worker(
     _enable_child_subreaper()
     context = multiprocessing.get_context("spawn")
     stop = context.Event()
+    adopted = context.Event()
     output = cast(_WorkerQueue, context.Queue(maxsize=2))
-    process = context.Process(target=_worker_bootstrap, args=(target, stop, output), daemon=False)
+    process = context.Process(
+        target=_worker_bootstrap, args=(target, stop, output, adopted), daemon=False
+    )
     process.start()
     worker_pid = process.pid
     if worker_pid is None:
@@ -614,6 +639,10 @@ async def _run_worker(
                 await asyncio.sleep(0.05)
                 continue
             pgid, leader_created_at = _validate_ready_message(message, expected_pid=worker_pid)
+            # Release the worker's ownership gate: it must not fork until this
+            # point, so a cancellation that lands during the handshake cannot
+            # orphan a process group the controller does not yet own.
+            adopted.set()
         while process.is_alive():
             await asyncio.sleep(0.25)
         process.join()
