@@ -32,8 +32,17 @@ from agent.state import clear_plugin_registrations
 @pytest.fixture(autouse=True)
 def _isolate_namespaces():
     """Before/after each test clear plugin-registered namespaces to prevent cross-test leaks,
-    ensuring ava surface matches pre-test state after completion."""
+    ensuring ava surface (package attrs, `__all_for_ava__`, sys.modules aliases)
+    matches pre-test state after completion."""
     _saved_ns = dict(ava._REGISTERED_NAMESPACES)
+    # `ava.<name>` aliases in sys.modules are part of the surface
+    # register_namespace now writes; snapshot them too so teardown puts the
+    # pre-test objects back instead of leaving test-created ones behind.
+    _saved_modules = {
+        f"ava.{name}": sys.modules[f"ava.{name}"]
+        for name in _saved_ns
+        if f"ava.{name}" in sys.modules
+    }
     ava.clear_registered_namespaces()
     yield
     ava.clear_registered_namespaces()
@@ -43,6 +52,13 @@ def _isolate_namespaces():
             ava._REGISTERED_NAMESPACES[_name] = "<restored>"
         if _name not in ava.__all_for_ava__:
             ava.__all_for_ava__.append(_name)
+    # Restore the sys.modules aliases the tests see: `clear_registered_namespaces`
+    # already popped entries created during the test; put the pre-test objects
+    # back (a later test must import the same namespace the earlier ones did —
+    # e.g. a plugin-registered `ava.memory` — not a stale test stub).
+    for _key, _mod in _saved_modules.items():
+        if sys.modules.get(_key) is not _mod:
+            sys.modules[_key] = _mod
 
 
 def _make_module(name: str) -> ModuleType:
@@ -147,6 +163,27 @@ def test_register_namespace_conflict_with_getattr_served_attr_raises():
     collision also is FrameworkNamespaceConflictError."""
     with pytest.raises(ava.FrameworkNamespaceConflictError, match=r"ava\.DB_URL"):
         ava.register_namespace("DB_URL", _make_module("x"))
+
+
+def test_register_namespace_refuses_disabled_sentinel():
+    """AVA_SDK_DISABLE swaps sys.modules['ava.<name>'] for a disabled-module
+    sentinel at import time (before plugin load); register_namespace must not
+    clobber it — the namespace stays disabled (framework-owned, not
+    overridable) and the sentinel keeps raising its legible error."""
+    from ava._exports.sdk_disable import _DisabledSDKModule
+
+    sentinel = _DisabledSDKModule("ava.code")
+    sys.modules["ava.code"] = sentinel
+    try:
+        with pytest.raises(ava.FrameworkNamespaceConflictError, match="AVA_SDK_DISABLE"):
+            ava.register_namespace("code", _make_module("code"))
+        # The sentinel survives: the namespace stays disabled for downstream
+        # `ava.code.anything` access.
+        assert sys.modules["ava.code"] is sentinel
+        assert not hasattr(ava, "code")
+        assert "code" not in ava.__all_for_ava__
+    finally:
+        sys.modules.pop("ava.code", None)
 
 
 def test_register_namespace_case_sensitive_check():

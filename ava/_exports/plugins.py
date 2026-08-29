@@ -12,6 +12,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, Literal
 
 from . import ava_module
+from .sdk_disable import _DisabledSDKModule
 
 # ── plugin SDK extension point ────────────────────────────────────────────
 #
@@ -143,14 +144,15 @@ def _record(
 def _materialize_namespace(name: str, ns: SimpleNamespace) -> ModuleType:
     """Turn a SimpleNamespace plugin namespace into a real module.
 
-    `import ava.<name>` resolves through `sys.modules`, which must hold a
-    ModuleType: a bare SimpleNamespace there breaks module semantics
-    (importlib.reload, `dir()`-based discovery, getattr_static probes). The
-    namespace is materialized as a real module named `ava.<name>` with its
-    members copied into the module dict, so every discovery path
-    (`agent_visible_names`, help rendering) reads the same members — and the
-    same `__all_for_ava__` surface, synthesized from the public members when
-    the namespace did not declare one — it reads today.
+    `import ava.<name>` resolves through `sys.modules`, whose entries are
+    conventionally real modules: a bare SimpleNamespace there is missed by
+    the module predicates (`ismodule()`) behind discovery and help rendering,
+    so `dir()` / `getattr_static` probes would see an object that does not
+    look like a module. Materializing it as a real module named `ava.<name>`
+    keeps every discovery path (`agent_visible_names`, help rendering)
+    consistent — the members are copied into the module dict, and the
+    `__all_for_ava__` surface is synthesized from the public members when the
+    namespace did not declare one.
     """
     module = ModuleType(f"ava.{name}")
     module.__dict__.update(vars(ns))
@@ -164,6 +166,13 @@ def _materialize_namespace(name: str, ns: SimpleNamespace) -> ModuleType:
 def register_namespace(name: str, module: Any) -> None:
     """Plugin actively adds a submodule to the ava top level; agent accesses via `ava.{name}.foo()`.
 
+    Registration makes the namespace importable (`import ava.<name>`) for the rest of
+    the process. Boundary: in a cold process where the registering plugin has not
+    loaded yet (bare `import ava`, no agent bootstrap), `import ava.<name>` still
+    raises ModuleNotFoundError — import resolution goes through sys.modules, not the
+    package's dynamic attribute surface; only attribute access (`ava.<name>.x`)
+    works then. That is expected, not a regression.
+
     Args:
         name: submodule name — valid Python identifier, no underscore
             prefix, cannot collide with ava builtin modules / top-level
@@ -176,7 +185,8 @@ def register_namespace(name: str, module: Any) -> None:
         InvalidNamespaceNameError: `name` is not a valid identifier or starts with underscore.
         InvalidNamespaceModuleError: `module` is not ModuleType / SimpleNamespace.
         FrameworkNamespaceConflictError: `name` already taken by a
-            framework-builtin submodule or top-level attr.
+            framework-builtin submodule or top-level attr, or disabled by
+            AVA_SDK_DISABLE.
         PluginNamespaceConflictError: `name` already registered by another plugin.
     """
     if not name.isidentifier():
@@ -204,6 +214,16 @@ def register_namespace(name: str, module: Any) -> None:
         raise FrameworkNamespaceConflictError(
             f"ava.{name} already exists (framework-builtin submodule / top-level attribute); plugin cannot override."
         )
+    # AVA_SDK_DISABLE may have replaced the sys.modules entry with a
+    # disabled-module sentinel before plugin load (the env is applied at
+    # `import ava`; plugins register later). Registration must NOT clobber
+    # the sentinel — the sentinel is the legible "disabled" error surface
+    # the disable machinery put there, and a disabled name is framework-owned
+    # (not overridable), so fail loud with the same conflict class.
+    if isinstance(_sys.modules.get(f"ava.{name}"), _DisabledSDKModule):
+        raise FrameworkNamespaceConflictError(
+            f"ava.{name} is disabled by AVA_SDK_DISABLE — a disabled namespace is framework-owned and not overridable; plugin must rename."
+        )
 
     if isinstance(module, SimpleNamespace):
         module = _materialize_namespace(name, module)
@@ -215,6 +235,16 @@ def register_namespace(name: str, module: Any) -> None:
     # object is set on the package, so `ava.<name>` and `import ava.<name>`
     # always agree. Kept in lockstep with `clear_registered_namespaces`,
     # which pops the entry on teardown.
+    #
+    # Boundary (documented, not a regression): the entry is written by THIS
+    # registration, so `import ava.<name>` only succeeds once the registering
+    # plugin has loaded. In a cold process that never loads the plugin — a
+    # bare `import ava` without agent bootstrap — `import ava.<name>` still
+    # raises ModuleNotFoundError: the import machinery resolves submodules
+    # through sys.modules, not through the package's dynamic attribute
+    # surface, so plugin namespaces are importable exactly when the plugin
+    # registered them. Attribute access (`ava.<name>.x`) works either way.
+    # AVA_SDK_DISABLE's disabled-module sentinel is never clobbered.
     _sys.modules[f"ava.{name}"] = module
 
     setattr(pkg, name, module)
