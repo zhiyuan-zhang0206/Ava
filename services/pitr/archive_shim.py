@@ -61,14 +61,17 @@ def archive(source: Path, name: str, spool: Path, hard_bytes: int) -> int:
         _validate(source, name, spool)
         lock_fd = os.open(spool / ".archive.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
+            if not stat.S_ISREG(os.fstat(lock_fd).st_mode):
+                return EXIT_UNSAFE_PATH
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            spooled_bytes = _spooled_bytes(spool)
             target = spool / name
             if target.exists():
                 if target.is_symlink() or not target.is_file():
                     return EXIT_COLLISION
                 return 0 if _digest(source) == _digest(target) else EXIT_COLLISION
             size = source.stat().st_size
-            if _spooled_bytes(spool) + size > hard_bytes:
+            if spooled_bytes + size > hard_bytes:
                 return EXIT_QUOTA
             fd, raw_partial = tempfile.mkstemp(prefix=f".{name}.", suffix=".partial", dir=spool)
             partial = Path(raw_partial)
