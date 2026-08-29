@@ -3,25 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import hashlib
 import json
 import logging
 import multiprocessing
-import os
 import queue
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import NoReturn, Protocol, cast
+from typing import cast
 
 import psutil
 
@@ -51,6 +47,18 @@ from services.pitr.retention_scheduler import (
     refresh as refresh_retention_plan,
 )
 from services.pitr.space_budget import CandidateSpaceBudget
+from services.pitr.worker_process import (
+    WorkerQueue,
+    enable_child_subreaper,
+    group_members,
+    raise_live_descendants,
+    raise_surviving_restore_group,
+    reap_job_group,
+    reap_restore_subprocess_group,
+    reject_restore_descendants,
+    validate_ready_message,
+    worker_bootstrap,
+)
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -68,30 +76,9 @@ BASE_BACKUP_WEEKDAY = 6
 BASE_BACKUP_HOUR = 3
 BASE_BACKUP_RETRY_INTERVAL_S = 1800
 
-# Ownership gate (worker must not fork before controller adoption).
-_ADOPTION_TIMEOUT_S = 30
 BASE_BACKUP_STALE_AFTER_S = 8 * 24 * 3600
 _SLEEP_CHUNK_S = 30
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
-_LINUX_CHILD_ADOPTION_OPTION = 36
-
-
-class _WorkerQueue(Protocol):
-    def put(self, item: object) -> None: ...
-
-    def get(self, timeout: float | None = None) -> object: ...
-
-    def get_nowait(self) -> object: ...
-
-    def close(self) -> None: ...
-
-    def join_thread(self) -> None: ...
-
-
-class _OwnedProcess(Protocol):
-    def is_alive(self) -> bool: ...
-
-    def join(self, timeout: float | None = None) -> None: ...
 
 
 @dataclass
@@ -351,7 +338,7 @@ async def _sleep(seconds: float) -> None:
         remaining -= chunk
 
 
-def _worker_entry(stop: StopSignal, output: _WorkerQueue) -> None:
+def _worker_entry(stop: StopSignal, output: WorkerQueue) -> None:
     try:
         output.put((True, _build_candidate(stop).to_json()))
     except BaseException as exc:
@@ -405,65 +392,26 @@ async def _run_restore_worker(inputs: _RestoreWorkerInput) -> dict[str, str]:
                 stderr = process.stderr.read() if process.stderr is not None else ""
                 return _restore_worker_result(process.returncode, stderr, result)
             await asyncio.sleep(0.25)
-        members = [member for member in _group_members(process.pid) if member.pid != process.pid]
+        members = [member for member in group_members(process.pid) if member.pid != process.pid]
         if members:
-            _reap_restore_subprocess_group(process, leader_created_at)
-            _reject_restore_descendants()
+            reap_restore_subprocess_group(process, leader_created_at)
+            reject_restore_descendants()
         acknowledgement.write_text("accepted")
         acknowledgement.chmod(0o600)
         while process.poll() is None:
             await asyncio.sleep(0.05)
-        if _group_members(process.pid):
-            _raise_surviving_restore_group()
+        if group_members(process.pid):
+            raise_surviving_restore_group()
         stderr = process.stderr.read() if process.stderr is not None else ""
         return _restore_worker_result(process.returncode, stderr, result)
     except BaseException:
-        if process.poll() is None or _group_members(process.pid):
-            _reap_restore_subprocess_group(process, leader_created_at)
+        if process.poll() is None or group_members(process.pid):
+            reap_restore_subprocess_group(process, leader_created_at)
         raise
     finally:
         if process.stderr is not None:
             process.stderr.close()
         shutil.rmtree(work, ignore_errors=True)
-
-
-def _reap_restore_subprocess_group(
-    process: subprocess.Popen[str], leader_created_at: float
-) -> None:
-    if process.pid == os.getpgrp():
-        raise RuntimeError("refusing to signal the controller process group")
-    try:
-        leader = psutil.Process(process.pid)
-        if abs(leader.create_time() - leader_created_at) >= 0.01:
-            raise RuntimeError("restricted restore worker PID identity changed")
-    except psutil.NoSuchProcess as exc:
-        if _group_members(process.pid):
-            raise RuntimeError(
-                "restricted restore descendants outlived their verifiable leader"
-            ) from exc
-        process.wait(timeout=1)
-        return
-    deadline = time.monotonic() + 20
-    with suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGTERM)
-    grace = min(deadline, time.monotonic() + 5)
-    while _group_members(process.pid) and time.monotonic() < grace:
-        time.sleep(0.1)
-    while _group_members(process.pid) and time.monotonic() < deadline:
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        time.sleep(0.1)
-    process.wait(timeout=max(0.1, deadline - time.monotonic()))
-    if _group_members(process.pid):
-        raise RuntimeError("restricted restore worker process group could not be emptied")
-
-
-def _reject_restore_descendants() -> NoReturn:
-    raise RuntimeError("restricted restore worker left live descendants")
-
-
-def _raise_surviving_restore_group() -> NoReturn:
-    raise RuntimeError("restricted restore worker group survived its owned leader")
 
 
 def _restore_worker_result(returncode: int, stderr: str, result: Path) -> dict[str, str]:
@@ -482,112 +430,10 @@ def _restore_worker_result(returncode: int, stderr: str, result: Path) -> dict[s
     return {key: str(value) for key, value in raw.items()}
 
 
-def _worker_bootstrap(
-    target: Callable[[StopSignal, _WorkerQueue], None],
-    stop: StopSignal,
-    output: _WorkerQueue,
-    adopted: StopSignal,
-) -> None:
-    os.setsid()
-    process = psutil.Process()
-    output.put(
-        (
-            "ready",
-            str(process.pid),
-            str(os.getpgrp()),
-            repr(process.create_time()),
-        )
-    )
-    # No target work (no fork) before the controller adopts this worker.
-    if not adopted.wait(timeout=_ADOPTION_TIMEOUT_S):
-        raise SystemExit("base candidate worker timed out waiting for controller adoption")
-    target(stop, output)
-
-
-def _group_members(pgid: int) -> list[psutil.Process]:
-    members: list[psutil.Process] = []
-    for process in psutil.process_iter(["pid"]):
-        try:
-            if os.getpgid(process.pid) == pgid:
-                members.append(process)
-        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
-            continue
-    return members
-
-
-def _enable_child_subreaper() -> None:
-    if sys.platform != "linux":
-        return
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(_LINUX_CHILD_ADOPTION_OPTION, 1, 0, 0, 0) != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, "could not own orphaned base candidate descendants")
-
-
-def _reap_exited_group_children(process: _OwnedProcess, pgid: int) -> None:
-    process.join(timeout=0)
-    while True:
-        try:
-            pid, _status = os.waitpid(-pgid, os.WNOHANG)
-        except ChildProcessError:
-            return
-        if pid == 0:
-            return
-
-
-def _reap_job_group(
-    process: _OwnedProcess,
-    *,
-    worker_pid: int,
-    pgid: int,
-    leader_created_at: float,
-    grace_s: float = 5,
-    deadline_s: float = 20,
-) -> None:
-    if pgid != worker_pid or pgid == os.getpgrp():
-        raise RuntimeError("refusing to signal an unowned base candidate process group")
-    leader: psutil.Process | None = None
-    with suppress(psutil.NoSuchProcess):
-        leader = psutil.Process(worker_pid)
-    if leader is not None and abs(leader.create_time() - leader_created_at) >= 0.01:
-        raise RuntimeError("base candidate worker PID identity changed")
-    deadline = time.monotonic() + deadline_s
-    with suppress(ProcessLookupError):
-        os.killpg(pgid, signal.SIGTERM)
-    grace_end = min(deadline, time.monotonic() + grace_s)
-    _reap_exited_group_children(process, pgid)
-    while _group_members(pgid) and time.monotonic() < grace_end:
-        time.sleep(0.1)
-        _reap_exited_group_children(process, pgid)
-    while _group_members(pgid) and time.monotonic() < deadline:
-        with suppress(ProcessLookupError):
-            os.killpg(pgid, signal.SIGKILL)
-        time.sleep(0.1)
-        _reap_exited_group_children(process, pgid)
-    if _group_members(pgid):
-        raise RuntimeError("base candidate process group could not be emptied")
-    process.join(timeout=max(0, deadline - time.monotonic()))
-    if process.is_alive():
-        raise RuntimeError("base candidate worker leader could not be reaped")
-
-
 def _worker_result(*, succeeded: bool, value: str) -> CandidateManifest:
     if not succeeded:
         raise RuntimeError(value)
     return CandidateManifest.from_json(value)
-
-
-def _validate_ready_message(
-    message: tuple[str, str, str, str], *, expected_pid: int
-) -> tuple[int, float]:
-    kind, raw_pid, raw_pgid, raw_created_at = message
-    if kind != "ready" or int(raw_pid) != expected_pid or int(raw_pgid) != expected_pid:
-        raise RuntimeError("base candidate worker reported invalid process ownership")
-    return int(raw_pgid), float(raw_created_at)
-
-
-def _raise_live_descendants() -> NoReturn:
-    raise RuntimeError("base candidate worker left live descendants")
 
 
 def _backup_key() -> tuple[bytes, str]:
@@ -600,18 +446,18 @@ def _backup_key() -> tuple[bytes, str]:
 
 async def _run_worker(  # noqa: PLR0915
     *,
-    target: Callable[[StopSignal, _WorkerQueue], None] = _worker_entry,
+    target: Callable[[StopSignal, WorkerQueue], None] = _worker_entry,
     cooperative_timeout_s: float = 30,
     group_grace_s: float = 5,
     group_deadline_s: float = 20,
 ) -> CandidateManifest:
-    _enable_child_subreaper()
+    enable_child_subreaper()
     context = multiprocessing.get_context("spawn")
     stop = context.Event()
     adopted = context.Event()
-    output = cast(_WorkerQueue, context.Queue(maxsize=2))
+    output = cast(WorkerQueue, context.Queue(maxsize=2))
     process = context.Process(
-        target=_worker_bootstrap, args=(target, stop, output, adopted), daemon=False
+        target=worker_bootstrap, args=(target, stop, output, adopted), daemon=False
     )
     process.start()
     worker_pid = process.pid
@@ -633,13 +479,13 @@ async def _run_worker(  # noqa: PLR0915
                     ) from None
                 await asyncio.sleep(0.05)
                 continue
-            pgid, leader_created_at = _validate_ready_message(message, expected_pid=worker_pid)
+            pgid, leader_created_at = validate_ready_message(message, expected_pid=worker_pid)
             adopted.set()  # release the ownership gate; worker may fork now
         while process.is_alive():
             await asyncio.sleep(0.25)
         process.join()
-        if _group_members(pgid):
-            _reap_job_group(
+        if group_members(pgid):
+            reap_job_group(
                 process,
                 worker_pid=worker_pid,
                 pgid=pgid,
@@ -647,7 +493,7 @@ async def _run_worker(  # noqa: PLR0915
                 grace_s=group_grace_s,
                 deadline_s=group_deadline_s,
             )
-            _raise_live_descendants()
+            raise_live_descendants()
         try:
             succeeded, value = cast(tuple[bool, str], output.get(timeout=5))
         except queue.Empty as exc:
@@ -656,8 +502,8 @@ async def _run_worker(  # noqa: PLR0915
     except BaseException:
         stop.set()
         process.join(timeout=cooperative_timeout_s)
-        if pgid is not None and leader_created_at is not None and _group_members(pgid):
-            _reap_job_group(
+        if pgid is not None and leader_created_at is not None and group_members(pgid):
+            reap_job_group(
                 process,
                 worker_pid=worker_pid,
                 pgid=pgid,
