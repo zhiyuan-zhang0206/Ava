@@ -79,9 +79,9 @@ def _send_chat(agent_id: int, text: str) -> None:
 
 
 def _insert_heartbeat_inbound(agent_id: int) -> None:
-    """Model a heartbeat check-in inbound of the shape the daemon queues, with no
-    process listening. For a hibernating agent, it is the wake the controller's
-    swap-in poll picks up."""
+    """The exact INSERT the heartbeat daemon's `_send_heartbeat_checkin` does — a
+    `heartbeat` inbound with no process listening. For a hibernating agent it is
+    the wake that the controller's swap-in poll picks up."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
