@@ -93,7 +93,7 @@ def restore_archive_settings(
         if intent is not None:
             if (
                 intent.get("name") != name
-                or intent.get("current_value") not in {current, desired}
+                or current not in {intent.get("current_value"), desired}
                 or intent.get("desired_value") != desired
             ):
                 raise RuntimeError("PostgreSQL setting differs from durable rollback intent")

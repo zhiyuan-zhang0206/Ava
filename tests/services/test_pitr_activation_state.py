@@ -267,7 +267,7 @@ def test_activation_record_allows_same_phase_error_update_only() -> None:
     assert failed.error == "interrupted"
     assert failed.started_at == record.started_at
 
-    with pytest.raises(ValueError, match="may only change error"):
+    with pytest.raises(ValueError, match="may only change diagnostics"):
         failed.advance("shadow", origin="other")
 
     with pytest.raises(ValueError, match="identity fields are immutable"):
@@ -284,7 +284,7 @@ def test_v2_wal_config_pending_upgrades_strictly_and_can_roll_back(tmp_path: Pat
         "origin": "cli",
         "pre_activation_snapshot": "/verified.dump.enc",
         "pre_activation_pg_settings": {"archive_mode": "off"},
-        "pre_activation_credential_evidence": {"viewer": "separate"},
+        "pre_activation_credential_evidence": _credentials(),
         "switched_wal": None,
         "protected_manifest": None,
         "error": None,

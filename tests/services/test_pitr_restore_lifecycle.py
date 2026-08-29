@@ -233,9 +233,7 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
             self, *, payload: bytes, object_name: str, metadata: dict[str, str]
         ) -> RemoteObjectAck:
             nonlocal lost
-            ack = super().put_manifest_if_absent(
-                payload=payload, object_name=object_name, metadata=metadata
-            )
+            ack = RemoteObjectAck(object_name, 9, len(payload), "manifest-crc", metadata, True)
             lost = True
             return ack
 
