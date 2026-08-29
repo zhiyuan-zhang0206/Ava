@@ -24,16 +24,13 @@
 // its reply box focused -- so a stack clears with Enter, Enter, Enter. The
 // resolved history (both kinds, newest first) sits behind a collapsed disclosure
 // so it never occupies the main stream.
-import { useQueryClient } from "@tanstack/react-query";
 import { memo, useEffect, useMemo, useState } from "react";
 
-import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
 import { PRIORITY_RANK } from "@/lib/notices";
 import { groupByTaskSubtree } from "@/lib/task-notify";
 import type { AgentRow, PublicAgentStatus, NoticeItem, PageRow } from "@/lib/types";
 import { useAllPages } from "@/lib/use-all-pages";
-import { dropOpenNotices, useNotices } from "@/lib/use-notices";
+import { useNotices } from "@/lib/use-notices";
 import { useTasks } from "@/lib/use-tasks";
 import { cn } from "@/lib/utils";
 
@@ -130,9 +127,6 @@ export const InboxQueue = memo(function InboxQueue({
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [resolvedOpen, setResolvedOpen] = useState(false);
-  const queryClient = useQueryClient();
-  const [markAllPending, setMarkAllPending] = useState(false);
-  const [markAllError, setMarkAllError] = useState<string | null>(null);
 
   // When an external selection arrives (tree/graph click), select the first open
   // notice from that agent so the list syncs bidirectionally.
@@ -160,30 +154,6 @@ export const InboxQueue = memo(function InboxQueue({
       : null;
 
   const total = openItems.length;
-  const fyiCount = useMemo(
-    () => openItems.filter((it) => !it.notice.require_response).length,
-    [openItems],
-  );
-
-  // "Mark all read" — one batch request clears every open FYI notice (Task
-  // #1814). The open queue used to resolve one notice per click with a full
-  // refetch each; this is the N → 1 path. On success the cleared notices drop
-  // out of the cache immediately (the SSE-triggered refetch reconciles a beat
-  // later); on failure the rows stay and the error is surfaced in the header.
-  const markAllRead = async () => {
-    const fyi = openItems.filter((it) => !it.notice.require_response).map((it) => it.notice.id);
-    if (fyi.length === 0) return;
-    setMarkAllPending(true);
-    setMarkAllError(null);
-    try {
-      await api.resolveNoticesBatch(fyi);
-      dropOpenNotices(queryClient, fyi);
-    } catch (e: unknown) {
-      setMarkAllError(errMsg(e));
-    } finally {
-      setMarkAllPending(false);
-    }
-  };
 
   // Sync effective selection to the parent so the graph auto-focuses the right
   // node on tab switch / initial load.
@@ -230,14 +200,7 @@ export const InboxQueue = memo(function InboxQueue({
       <div className={cn("h-full", className, FLEX, FLEX_COL, MIN_H_0)}>
         {openSel == null && selectedResolved == null ? (
           <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
-            <QueueHeader
-              total={total}
-              stale={stale}
-              fyiCount={fyiCount}
-              onMarkAllRead={markAllRead}
-              markAllPending={markAllPending}
-              markAllError={markAllError}
-            />
+            <QueueHeader total={total} stale={stale} />
             {empty ? (
               <EmptyState failed={(error || resolvedError) && empty} loading={isLoading && empty} />
             ) : (
@@ -279,15 +242,7 @@ export const InboxQueue = memo(function InboxQueue({
     // own synchronous Storage interface (autoSaveId). Kept per-device by design.
     <div className={cn( className, FLEX)}>
       <div className={cn("h-full w-[42%] shrink-0", FLEX, FLEX_COL, MIN_H_0)}>
-        <QueueHeader
-          total={total}
-          onCollapse={onCollapse}
-          stale={stale}
-          fyiCount={fyiCount}
-          onMarkAllRead={markAllRead}
-          markAllPending={markAllPending}
-          markAllError={markAllError}
-        />
+        <QueueHeader total={total} onCollapse={onCollapse} stale={stale} />
         {empty ? (
           <EmptyState failed={(error || resolvedError) && empty} loading={isLoading && empty} />
         ) : (
