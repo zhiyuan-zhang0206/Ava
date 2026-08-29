@@ -23,8 +23,9 @@ case "$OS" in
     # provisioned under $AVA_HOME by `ava start`.
     if [ -x /usr/lib/postgresql/17/bin/initdb ] \
         && command -v redis-server >/dev/null 2>&1 \
-        && command -v pgbouncer >/dev/null 2>&1; then
-      prov_log "pg17 + redis + pgbouncer already present — skipping apt (works without sudo)"
+        && command -v pgbouncer >/dev/null 2>&1 \
+        && [ -f /usr/share/postgresql/17/extension/vector.control ]; then
+      prov_log "pg17 + redis + pgbouncer + pgvector already present — skipping apt (works without sudo)"
     elif ! prov_sudo apt-get update; then
       prov_log "WARNING apt-get update failed (no passwordless sudo?) — data-plane packages not installed."
       prov_log "  Install them later with: sudo apt-get install -y postgresql-17 redis pgbouncer"
@@ -52,7 +53,9 @@ case "$OS" in
       # ride along as a dependency.
       prov_apt_install postgresql-common
       prov_sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-      prov_apt_install postgresql-17
+      # pgvector rides the same pgdg repo — the memory search pgvector backend
+      # needs the extension binaries (CREATE EXTENSION vector at connect).
+      prov_apt_install postgresql-17 postgresql-17-pgvector
     fi
     ;;
   macos)
@@ -60,7 +63,7 @@ case "$OS" in
     # superuser; ava start provisions the per-cluster role + db on first boot
     # (cli/commands/_cluster_instance.py) and drives pg via pg_ctl, not brew
     # services.
-    brew install postgresql@17 redis@8.2 pgbouncer
+    brew install postgresql@17 redis@8.2 pgbouncer pgvector
     ;;
   windows)
     # PostgreSQL and Redis are provided via Docker Desktop (WSL2 backend).
