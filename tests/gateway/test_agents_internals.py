@@ -859,7 +859,7 @@ class TestResurrectAgent:
                 return True, "killed"
 
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
-        monkeypatch.setattr("ops.ops_lifecycle.native_proc", _Supervisor)
+        monkeypatch.setattr("ops.ops_exit.native_proc", _Supervisor)
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
 
         def _observe_force_lock(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
@@ -1013,7 +1013,7 @@ class TestResurrectAgent:
                 return True, "killed"
 
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
-        monkeypatch.setattr("ops.ops_lifecycle.native_proc", _Supervisor)
+        monkeypatch.setattr("ops.ops_exit.native_proc", _Supervisor)
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
 
         def _observe_latch(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
@@ -1094,7 +1094,7 @@ class TestResurrectAgent:
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
         monkeypatch.setattr(agent_launch, "_wait_for_agent_claim", _never_confirms)
         monkeypatch.setattr(agent_launch, "_LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
-        monkeypatch.setattr("ops.ops_lifecycle.native_proc", _Supervisor)
+        monkeypatch.setattr("ops.ops_exit.native_proc", _Supervisor)
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
 
         def _block_retry_machine_lock(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:

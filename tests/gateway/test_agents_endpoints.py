@@ -30,7 +30,7 @@ def _stub_native_kill(monkeypatch: pytest.MonkeyPatch) -> None:
         def kill_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
             return (True, "noop")
 
-    monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _FakeSupervisor)
+    monkeypatch.setattr("ops.ops_exit.native_proc", lambda: _FakeSupervisor)
 
 
 def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
@@ -345,8 +345,8 @@ class TestTerminate:
                 session_kills.append((name, graceful))
                 return True, "noop"
 
-        monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _RecordingSupervisor)
-        monkeypatch.setattr("ops.ops_lifecycle.force_kill", pid_kills.append)
+        monkeypatch.setattr("ops.ops_exit.native_proc", lambda: _RecordingSupervisor)
+        monkeypatch.setattr("ops.ops_exit.force_kill", pid_kills.append)
         monkeypatch.setattr(
             "ops.ops_lifecycle.publish_agent_updated_sync",
             _capture_agent_updated,
@@ -396,8 +396,8 @@ class TestTerminate:
                 session_kills.append((name, graceful))
                 return True, "noop"
 
-        monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _RecordingSupervisor)
-        monkeypatch.setattr("ops.ops_lifecycle.force_kill", pid_kills.append)
+        monkeypatch.setattr("ops.ops_exit.native_proc", lambda: _RecordingSupervisor)
+        monkeypatch.setattr("ops.ops_exit.force_kill", pid_kills.append)
 
         def _gone_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
             return AgentProcessIdentity.GONE
@@ -444,7 +444,7 @@ class TestTerminate:
         def _owned_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
             return AgentProcessIdentity.OWNED
 
-        monkeypatch.setattr("ops.ops_lifecycle.force_kill", _no_kill)
+        monkeypatch.setattr("ops.ops_exit.force_kill", _no_kill)
         monkeypatch.setattr("ops.ops_lifecycle.process_alive", _not_alive, raising=False)
         monkeypatch.setattr(
             "ops.ops_lifecycle.probe_agent_process",
@@ -484,7 +484,7 @@ class TestTerminate:
         def _unreadable_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
             return AgentProcessIdentity.UNREADABLE
 
-        monkeypatch.setattr("ops.ops_lifecycle.force_kill", _no_kill)
+        monkeypatch.setattr("ops.ops_exit.force_kill", _no_kill)
         monkeypatch.setattr("ops.ops_lifecycle.process_alive", _not_alive, raising=False)
         monkeypatch.setattr(
             "ops.ops_lifecycle.probe_agent_process",
@@ -582,8 +582,8 @@ class TestTerminate:
                 session_kills.append((name, graceful))
                 return (True, "noop")
 
-        monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _RecordingSupervisor)
-        monkeypatch.setattr("ops.ops_lifecycle.force_kill", pid_kills.append)
+        monkeypatch.setattr("ops.ops_exit.native_proc", lambda: _RecordingSupervisor)
+        monkeypatch.setattr("ops.ops_exit.force_kill", pid_kills.append)
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
@@ -638,7 +638,7 @@ class TestTerminate:
             return AgentProcessIdentity.OWNED
 
         monkeypatch.setattr(
-            "ops.ops_lifecycle.probe_agent_process",
+            "ops.ops_exit.probe_agent_process",
             _owned_process,
         )
 
