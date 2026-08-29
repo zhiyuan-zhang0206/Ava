@@ -14,7 +14,7 @@ now share one process:
    per-agent runtime is rebuilt rather than reused. This is the hosted
    replacement for "the process exits and boots with the merged config"; a
    cache that missed it would run an agent on a model the DB says it left.
-3. **The three-way turn loop** — `exit_requested` is terminal, `turn_idle` ends
+3. **The four-way turn loop** — `exit_requested` is terminal, `restart_requested` drops the runtime without a notify, `turn_idle` ends
    the task, and neither means re-invoke on the same thread.
 4. **Runnability** — a wake for another machine's agent, or for a terminated
    one, must not start a turn. The dispatcher's subscription is cluster-wide, so
@@ -206,7 +206,7 @@ class _FakeGraph:
         queued = self._results.get(agent_id)
         if queued:
             return queued.pop(0)
-        return {"exit_requested": False, "turn_idle": True}
+        return {"exit_requested": False, "turn_idle": True, "restart_requested": False}
 
 
 _Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
@@ -388,12 +388,15 @@ class TestConfigRebind:
         assert pool.reads == 2
 
 
-# ── 3. the three-way turn loop ───────────────────────────────────────────────
+# ── 3. the four-way turn loop ────────────────────────────────────────────────
 
 
 class TestTurnLoop:
     async def test_turn_idle_ends_the_task(self, wired: _Build) -> None:
-        host, graph, _ = wired({1: _Row()}, {1: [{"exit_requested": False, "turn_idle": True}]})
+        host, graph, _ = wired(
+            {1: _Row()},
+            {1: [{"exit_requested": False, "turn_idle": True, "restart_requested": False}]},
+        )
         await asyncio.wait_for(host.run_turn(1), 2)
         assert len(graph.observations) == 1
 
@@ -405,9 +408,9 @@ class TestTurnLoop:
             {1: _Row()},
             {
                 1: [
-                    {"exit_requested": False, "turn_idle": False},
-                    {"exit_requested": False, "turn_idle": False},
-                    {"exit_requested": False, "turn_idle": True},
+                    {"exit_requested": False, "turn_idle": False, "restart_requested": False},
+                    {"exit_requested": False, "turn_idle": False, "restart_requested": False},
+                    {"exit_requested": False, "turn_idle": True, "restart_requested": False},
                 ]
             },
         )
@@ -426,7 +429,7 @@ class TestTurnLoop:
         monkeypatch.setattr(host_mod, "_notify_exit", notified.append)
         host, graph, _ = wired(
             {1: _Row()},
-            {1: [{"exit_requested": True, "turn_idle": False}]},
+            {1: [{"exit_requested": True, "turn_idle": False, "restart_requested": False}]},
         )
         await asyncio.wait_for(host.run_turn(1), 2)
         assert len(graph.observations) == 1
@@ -434,8 +437,30 @@ class TestTurnLoop:
 
     async def test_exit_drops_the_cached_runtime(self, wired: _Build) -> None:
         """The next wake must start clean — the fresh-process half of a restart."""
-        host, _, _ = wired({1: _Row()}, {1: [{"exit_requested": True, "turn_idle": False}]})
+        host, _, _ = wired(
+            {1: _Row()},
+            {1: [{"exit_requested": True, "turn_idle": False, "restart_requested": False}]},
+        )
         await asyncio.wait_for(host.run_turn(1), 2)
+        assert 1 not in host._runtimes
+
+    async def test_restart_requested_drops_runtime_without_notify(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The hosted restart answer: end the task, drop the cached runtime (the
+        fresh-process half), and do NOT tell the gateway — there is no process
+        exiting and the row must stay runnable for the next wake."""
+        import services.agent_host.host as host_mod
+
+        notified: list[int] = []
+        monkeypatch.setattr(host_mod, "_notify_exit", notified.append)
+        host, graph, _ = wired(
+            {1: _Row()},
+            {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
+        )
+        await asyncio.wait_for(host.run_turn(1), 2)
+        assert len(graph.observations) == 1
+        assert notified == []
         assert 1 not in host._runtimes
 
     async def test_a_crashing_turn_drops_the_runtime(self, wired: _Build) -> None:

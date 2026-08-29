@@ -42,8 +42,9 @@ from agent.graph._context import AvaContext
 from shared.inbound import InboundKind
 
 # The four targets claim itself routes to: BEFORE_LLM (has work), END
-# (terminate/restart with exit_requested=True, or the turn boundary with it
-# False — the runloop re-invokes and the fresh invocation's claim waits), back
+# (terminate with exit_requested=True, a hosted restart with
+# restart_requested=True, or the turn boundary with both False — the runloop
+# re-invokes and the fresh invocation's claim waits), back
 # to CLAIM (cancel/pause -> re-enter with halted=True; the re-entered pass
 # hits the turn boundary and ends the invocation), or INIT_CONTEXT (a
 # compaction emptied the history; that node re-establishes the standing head,
