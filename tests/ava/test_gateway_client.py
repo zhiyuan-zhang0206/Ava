@@ -54,6 +54,30 @@ class TestRaiseFromResponse:
         with pytest.raises(httpx.HTTPStatusError):
             _raise_from_response(resp)
 
+    def test_corrupted_content_encoding_falls_through(self):
+        """A response body whose Content-Encoding fails to decode raises
+        httpx.DecodingError (0.28.1, broken gzip/br stream) — same
+        protocol-mismatch class as non-JSON: falls through to the clean
+        HTTPStatusError instead of the DecodingError masking the status.
+
+        Regression: _wire_reason only caught JSONDecodeError (task #1669).
+        """
+        from ava._gateway_client import _raise_from_response
+
+        resp = MagicMock(spec=httpx.Response)
+        resp.is_success = False
+        resp.status_code = 502
+        resp.json.side_effect = httpx.DecodingError("corrupted gzip stream")
+        http_err = httpx.HTTPStatusError("error", request=MagicMock(), response=resp)
+        resp.raise_for_status.side_effect = http_err
+
+        with pytest.raises(httpx.HTTPStatusError) as excinfo:
+            _raise_from_response(resp)
+        # The status was surfaced as the primary error — the DecodingError
+        # never escapes as the exception seen by the caller.
+        assert excinfo.value.response.status_code == 502
+        assert not isinstance(excinfo.value.__context__, httpx.DecodingError)
+
     def test_missing_reason_field_falls_through(self):
         """JSON present but missing reason field → raise_for_status."""
         from ava._gateway_client import _raise_from_response
