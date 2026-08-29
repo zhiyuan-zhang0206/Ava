@@ -241,7 +241,7 @@ export const InboxQueue = memo(function InboxQueue({
     // per-viewport layout value persisted by react-resizable-panels through its
     // own synchronous Storage interface (autoSaveId). Kept per-device by design.
     <div className={cn( className, FLEX)}>
-      <div className={cn("h-full w-[42%] shrink-0", FLEX, FLEX_COL, MIN_H_0)}>
+      <div className={cn("h-full w-[42%] shrink-0", FLEX, FLEX_COL, MIN_H_0, MIN_W_0)}>
         <QueueHeader total={total} onCollapse={onCollapse} stale={stale} />
         {empty ? (
           <EmptyState failed={(error || resolvedError) && empty} loading={isLoading && empty} />
