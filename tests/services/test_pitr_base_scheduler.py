@@ -220,6 +220,15 @@ def test_retention_health_never_exposes_stale_or_failed_eligibility(tmp_path: Pa
     assert stale["current"] is False
     assert stale["plan_digest"] is None
 
+    state.enabled = False
+    disabled = retention_health_component(state)
+    assert disabled["progress"] == "disabled"
+    assert disabled["current"] is False
+    assert disabled["retained_objects"] == 0
+    assert disabled["eligible_objects"] == 0
+    assert disabled["retained_bytes"] == 0
+    assert disabled["eligible_bytes"] == 0
+
 
 @pytest.mark.asyncio
 async def test_runner_cancellation_reaps_active_worker(

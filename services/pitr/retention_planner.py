@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,17 +44,34 @@ def build_local_evidence(
     candidate_dir = root / "base-manifests"
     protected_dir = root / "protected-manifests"
     ack_dir = root / "ack"
+    parsed_candidates: list[tuple[Path, CandidateManifest]] = []
     for path in _strict_files(candidate_dir, "*.candidate.json", malformed):
         try:
             candidate = CandidateManifest.from_json(path.read_text())
-            candidates.append(candidate)
+            parsed_candidates.append((path, candidate))
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             malformed.append(str(path))
+    candidate_counts = _chain_counts(item.chain_id for _, item in parsed_candidates)
+    for path, candidate in parsed_candidates:
+        if (
+            path.name != f"{candidate.chain_id}.candidate.json"
+            or candidate_counts[candidate.chain_id] != 1
+        ):
+            malformed.append(str(path))
+            continue
+        candidates.append(candidate)
+    parsed_protected: list[tuple[Path, ProtectedManifest]] = []
     for path in _strict_files(protected_dir, "*.json", malformed):
         try:
-            protected.append(ProtectedManifest.from_json(path.read_text()))
+            parsed_protected.append((path, ProtectedManifest.from_json(path.read_text())))
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             malformed.append(str(path))
+    protected_counts = _chain_counts(item.chain_id for _, item in parsed_protected)
+    for path, proof in parsed_protected:
+        if path.name != f"{proof.chain_id}.json" or protected_counts[proof.chain_id] != 1:
+            malformed.append(str(path))
+            continue
+        protected.append(proof)
     for path in _strict_files(ack_dir, "*.ack.json", malformed):
         try:
             ack = AckManifest(**json.loads(path.read_text()))
@@ -130,6 +148,13 @@ def _validate_ack_identity(ack: AckManifest) -> None:
     expected_suffix = f"/wal/{ack.archive_name[:8]}/{ack.archive_name}.enc"
     if not archive_name_is_valid(ack.archive_name) or not ack.object_name.endswith(expected_suffix):
         raise ValueError("ACK archive name or object path is not canonical")
+
+
+def _chain_counts(chain_ids: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for chain_id in chain_ids:
+        counts[chain_id] = counts.get(chain_id, 0) + 1
+    return counts
 
 
 def _strict_files(root: Path, pattern: str, malformed: list[str]) -> tuple[Path, ...]:
