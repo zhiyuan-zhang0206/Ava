@@ -412,6 +412,12 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
       - INSERT, UPDATE on agent_tasks (`ava.tasks`) and agent_watchers
         (`ava.watcher`), UPDATE on agent_pages (page close at exit) — the SDK
         surfaces the agent process writes directly
+      - SELECT, INSERT on heartbeat_pause_log (ava.self.pause_heartbeat
+        logs its window from the runner process: SELECT the previous one,
+        INSERT the new row; append-only — no UPDATE/DELETE path, so they
+        stay out — task #1932: the table shipped without this entry and
+        the fleet-wide pause_heartbeat INSERT failed with
+        InsufficientPrivilege)
       - ALL on the LangGraph checkpoint tables (agent state: checkpoints,
         checkpoint_blobs, checkpoint_writes)
 
@@ -567,6 +573,17 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         # reaper (main identity) reads and deletes the rows.
         conn.execute(
             pgsql.SQL("GRANT INSERT ON agent_shell_ttls TO {}").format(
+                pgsql.Identifier(RUNNER_ROLE)
+            )
+        )
+        # ava.self.pause_heartbeat: the pause trail (SELECT the previous window
+        # + INSERT the new row; the sequence USAGE comes from the ALL SEQUENCES
+        # grant above). Append-only — no runner path UPDATEs or DELETEs rows,
+        # so those stay out. Regression for task #1932: this entry was missing
+        # when the table shipped, and every runner's pause_heartbeat INSERT
+        # failed with InsufficientPrivilege until prod was patched by hand.
+        conn.execute(
+            pgsql.SQL("GRANT SELECT, INSERT ON heartbeat_pause_log TO {}").format(
                 pgsql.Identifier(RUNNER_ROLE)
             )
         )
