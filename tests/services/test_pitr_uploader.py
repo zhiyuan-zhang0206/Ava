@@ -552,6 +552,61 @@ def test_upload_loop_survives_oserror_enospc(monkeypatch: pytest.MonkeyPatch) ->
     assert uploader.calls == 2, "first call hit ENOSPC, retry succeeded — loop stayed up"
 
 
+def test_upload_loop_oserror_permission_backs_off_critically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Permission-class OSErrors (EACCES/EPERM/EROFS) take the critical 300s
+    backoff — an operator fix, not a transient retry (QA #4696 yellow 1 /
+    #4700 gate). Discriminator: if the branch is reverted to the transient
+    swallow, the delay falls to the 2s/4s bounded cadence and the critical
+    counter stays 0, so this test goes red."""
+    import asyncio
+    import errno
+
+    from services.pitr import uploader_daemon
+    from services.pitr.uploader_daemon import _CRITICAL_BACKOFF_S, _LoopErrors
+
+    class _PermissionDeniedUploader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def pending(self) -> list[Path]:
+            return [Path("000000010000000000000001")]
+
+        def upload_one(self, _source: Path) -> str:
+            self.calls += 1
+            raise OSError(errno.EACCES, "Permission denied")
+
+    uploader = _PermissionDeniedUploader()
+    errors = _LoopErrors()
+    stop = asyncio.Event()
+    delays: list[float] = []
+
+    async def fake_wait(_stop: object, delay: float, _liveness: object | None = None) -> None:
+        # Record the backoff delay; end the loop after two failed rounds.
+        delays.append(delay)
+        if uploader.calls >= 2:
+            stop.set()
+
+    monkeypatch.setattr(uploader_daemon, "_wait_with_heartbeat", fake_wait)
+
+    async def drive() -> None:
+        await uploader_daemon.upload_loop(
+            uploader,  # pyright: ignore[reportArgumentType]
+            stop=stop,
+            errors=errors,
+        )
+
+    asyncio.run(drive())
+    assert uploader.calls == 2
+    assert delays == [_CRITICAL_BACKOFF_S, _CRITICAL_BACKOFF_S], (
+        "permission failures must back off on the critical cadence, not the transient 2s/4s ramp"
+    )
+    assert errors.critical == 2 and errors.transient == 0, (
+        "permission failures count as critical, never transient"
+    )
+
+
 # ── QA #4681 block 3: AVA_PITR_UNACKED_* are live health inputs ──────────
 
 
