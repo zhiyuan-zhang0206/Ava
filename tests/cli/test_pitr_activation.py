@@ -38,19 +38,20 @@ def _credentials() -> dict[str, str]:
 
 
 def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+    digest = "0" * 64
     monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
     monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "off")
     monkeypatch.setattr(activation_config, "_enable_pitr_services", lambda _digest: b"a")
     monkeypatch.setattr(activation_config, "_env_payload", lambda _home: b"a")
     monkeypatch.setattr(activation_config, "pitr_env_is_desired", lambda _payload: False)
-    monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", "digest"))
-    monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("YQ==", "digest"))
+    monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", digest))
+    monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("YQ==", digest))
     monkeypatch.setattr(
         activation,
         "capture_pitr_env_baseline",
         lambda _path: (
             "YQ==",
-            "digest",
+            digest,
             dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
         ),
     )
@@ -360,7 +361,7 @@ def test_wal_config_pending_drift_refuses_before_any_config_mutation(
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
     monkeypatch.setattr(activation, "apply_wal_config", mutate)
 
-    with pytest.raises(RuntimeError, match="changed before PITR mutation"):
+    with pytest.raises(RuntimeError, match="changed before wal_config_pending"):
         activation._advance_activation(tmp_path, record, "holder")
     assert called is False
     assert load_record(tmp_path) == record
@@ -500,7 +501,13 @@ def test_env_baseline_restores_exact_raw_presence_and_duplicate_values(
     env.write_text("KEEP='unchanged'\nAVA_PITR_ENABLED='false'\nAVA_PITR_ENABLED=false # exact\n")
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
     baseline = activation._pitr_env_baseline()
-    env.write_text("KEEP='unchanged'\nAVA_PITR_ENABLED=true\n")
+    env.write_text(
+        "KEEP='unchanged'\n"
+        "AVA_PITR_ENABLED=true\n"
+        "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
+        "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
+        "AVA_PITR_RETENTION_PLANNER_ENABLED=false\n"
+    )
 
     from services.pitr.activation_runtime import _restore_pitr_env
 

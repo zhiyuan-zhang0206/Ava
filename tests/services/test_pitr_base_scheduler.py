@@ -358,7 +358,7 @@ def test_cold_start_health_degrades_for_invalid_proof_semantics(
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
         base=RestoreObject("base", "base", 1, 10, "crc", ()),
-        wal=(),
+        wal=(RestoreObject("000000010000000000000000", "wal", 2, 10, "crc", ()),),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
         proof=RestoreProof(
@@ -399,7 +399,7 @@ def test_cold_start_health_degrades_for_candidate_digest_mismatch(tmp_path: Path
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
         base=RestoreObject("base", "base", 1, 10, "crc", ()),
-        wal=(),
+        wal=(RestoreObject("000000010000000000000000", "wal", 2, 10, "crc", ()),),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
         proof=RestoreProof(
@@ -442,7 +442,7 @@ def test_cold_start_health_keeps_valid_proof_when_another_manifest_is_corrupt(
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
         base=RestoreObject("base", "base", 1, 10, "crc", ()),
-        wal=(),
+        wal=(RestoreObject("000000010000000000000000", "wal", 2, 10, "crc", ()),),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
         proof=RestoreProof(
