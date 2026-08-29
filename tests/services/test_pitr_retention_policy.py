@@ -381,7 +381,7 @@ def test_local_manifests_require_chain_owned_canonical_filenames(tmp_path: Path)
 
     assert evidence.candidates == ()
     assert evidence.protected == ()
-    assert len(evidence.malformed) == 2
+    assert len(evidence.malformed_names) == 2
     assert "unknown or malformed evidence exists" in plan.blocked_reasons
     assert plan.eligible == ()
 
@@ -403,7 +403,7 @@ def test_duplicate_chain_manifests_block_even_when_contents_match(tmp_path: Path
 
     assert evidence.candidates == ()
     assert evidence.protected == ()
-    assert len(evidence.malformed) == 4
+    assert len(evidence.malformed_names) == 4
     assert "unknown or malformed evidence exists" in plan.blocked_reasons
     assert plan.eligible == ()
 
