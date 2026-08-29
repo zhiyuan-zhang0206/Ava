@@ -81,7 +81,7 @@ def test_restricted_restore_group_reaps_orphan_descendant() -> None:
         "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)']);"
     )
     process = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", script], start_new_session=True
+        [sys.executable, "-c", script], start_new_session=True, text=True
     )
     created_at = psutil.Process(process.pid).create_time()
     process.wait(timeout=10)
