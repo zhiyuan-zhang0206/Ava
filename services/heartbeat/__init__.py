@@ -3,9 +3,10 @@
 The gateway is responsible for every agent in the cluster. This daemon
 periodically scans idle agents and sends a check-in (a normal inbound
 message) to those that have been idle past a threshold and have not asked to be
-left alone via `ava.self.pause_heartbeat()`. The check-in asks the agent whether it
-is still working, waiting, or done — turning "don't disturb me" into an active
-agent choice (call `pause_heartbeat`) rather than a passive classifier guess.
+left alone via `ava.self.pause_heartbeat()`. The check-in nudges the agent to
+find something to do or pause its heartbeat — turning "don't disturb me" into
+an active agent choice (call `pause_heartbeat`) rather than a passive classifier
+guess.
 
 Cluster-wide, not machine-scoped: it only INSERTs inbound rows; the target
 agent — on whatever machine it runs on — picks them up on its next SELECT

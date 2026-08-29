@@ -428,7 +428,7 @@ class TestSendHeartbeatCheckin:
         assert kind == "heartbeat"
         assert source == "system"
         assert (
-            content == "Heartbeat."
+            content == "Heartbeat. Find something to do, or pause your heartbeat for some time."
         )  # idle-minutes detail lives in the event row, not the content (0064)
         assert ev is not None
         assert ev[0] == "heartbeat_nudged"
