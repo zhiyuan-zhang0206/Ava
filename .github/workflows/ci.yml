@@ -513,9 +513,10 @@ jobs:
         # filters the file to this run's node ids; the nightly refresh measures
         # both suites), so the split is duration-balanced once e2e entries land.
         # With only ~27 tests, least_duration (LPT) balances far better than the
-        # sequential duration_based_chunks default: measured 40/93/157/83s vs a
-        # 93/93/93/93s split (2026-08-30 run). Before e2e entries land, absent
-        # tests cost the average = an even split by count.
+        # sequential duration_based_chunks default: a 2026-08-30 run measured
+        # 40/93/157/83s per group under the count-based split, vs 93/93/93/93s
+        # once e2e carries refreshed durations + LPT. Before any e2e entry
+        # lands, absent tests cost the average = an even split by count.
         run: >
           uv run pytest tests/e2e/ -v -n 2
           --splits 4 --group ${{ matrix.group }}
