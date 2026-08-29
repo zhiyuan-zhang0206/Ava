@@ -196,7 +196,7 @@ export function RunTimelineChart({
                   <text
                     x={x}
                     y="104"
-                    className="fill-muted-foreground [paint-order:stroke] stroke-background stroke-[3px]"
+                    className="fill-muted-foreground [paint-order:stroke] stroke-card stroke-[3px]"
                   >
                     {idle}
                   </text>
