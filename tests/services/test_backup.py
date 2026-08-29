@@ -359,12 +359,18 @@ def test_prune_with_snapshot_alone_keeps_newest_snapshot(bdir: Path) -> None:
     assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
 
 
-def test_prune_never_removes_pitr_activation_snapshot(bdir: Path) -> None:
-    activation = _touch(bdir, "ava-20260601T100000Z.pitr-activation.dump.enc")
-    for day in range(1, backup.BACKUP_KEEP + 3):
-        _touch(bdir, f"ava-202607{day:02d}T100000Z.dump.enc")
+def test_prune_bounds_terminal_pitr_activation_snapshots(bdir: Path) -> None:
+    activations = [
+        _touch(
+            bdir,
+            f"ava-2026060{day}T100000Z.pitr-activation-"
+            f"00000000-0000-0000-0000-00000000000{day}.dump.enc",
+        )
+        for day in range(1, backup.ACTIVATION_KEEP + 2)
+    ]
     backup._prune(bdir)
-    assert activation.exists()
+    assert not activations[0].exists()
+    assert all(path.exists() for path in activations[-backup.ACTIVATION_KEEP :])
 
 
 def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -411,9 +417,11 @@ def test_run_backup_pitr_activation_has_independent_kind(
     path = backup.run_backup(
         datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
         db_url="dbname=ava",
-        pitr_activation=True,
+        pitr_activation="11111111-1111-1111-1111-111111111111",
     )
-    assert path.name == "ava-20260609T190000Z.pitr-activation.dump.enc"
+    assert path.name == (
+        "ava-20260609T190000Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc"
+    )
     assert backup._is_activation(path)
 
 

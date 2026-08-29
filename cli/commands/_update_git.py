@@ -608,7 +608,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
         return dump_path
 
 
-def snapshot_pre_activation_data() -> Path:
+def snapshot_pre_activation_data(*, operation_id: str, db_url: str) -> Path:
     """Create the mandatory logical recovery floor before first PITR activation.
 
     Unlike the rollout helper above this is intentionally unconditional: the
@@ -620,7 +620,8 @@ def snapshot_pre_activation_data() -> Path:
         try:
             dump_path = run_backup(
                 timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
-                pitr_activation=True,
+                db_url=db_url,
+                pitr_activation=operation_id,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
