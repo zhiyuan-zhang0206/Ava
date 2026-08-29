@@ -278,6 +278,64 @@ def _test_label_ids(cur: psycopg.Cursor, ids: list[int]) -> set[int]:
 # ─────────────── driver ───────────────
 
 
+def collect_with_counts(
+    days: int,
+    week: str,
+    *,
+    from_: datetime | None = None,
+    to: datetime | None = None,
+    include_test: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """collect() plus the pre-record counts the daily sentinel needs.
+
+    Returns (records, counts) where counts is
+    {"seen": distinct window agents with events,
+     "excluded_test": dropped by the TEST- filter,
+     "skipped_meta": dropped for a missing lifecycle row}.
+    The daily scan's empty-dataset sentinel (2026-08-14: 0 runs = data
+    source outage) keys on pre-filter activity, so a TEST-only window — a
+    healthy source whose every run the filter removed by design — stays
+    distinguishable from a source that produced nothing (QA review of
+    PR #698, 2026-08-29).
+    """
+    window_to = to or datetime.now(UTC)
+    window_from = from_ or (window_to - timedelta(days=days))
+    if window_from >= window_to:
+        raise ValueError(f"empty window: [{window_from}, {window_to})")
+    telemetry = _fetch_events_window("telemetry", window_from, window_to)
+    audit = _fetch_events_window("audit", window_from, window_to)
+    events = _group_by_agent(telemetry)
+    logs = _group_by_agent(audit)
+    ids = sorted(events)
+    window = f"{days} days"
+    with connect() as conn, conn.cursor() as cur:
+        inbounds = _inbounds_by_agent(cur, ids, window)
+        meta = _meta_by_agent(cur, ids)
+        test_ids = set() if include_test else _test_label_ids(cur, ids)
+    records = []
+    excluded_test = 0
+    skipped_meta = 0
+    for agent_id in ids:
+        if agent_id not in meta:
+            skipped_meta += 1
+            continue  # active in events but no lifecycle row — skip, not a real run
+        if agent_id in test_ids:
+            excluded_test += 1
+            continue  # benchmark/probe spawn — never into the health dataset
+        records.append(
+            build_record(
+                agent_id,
+                week,
+                events.get(agent_id, []),
+                logs.get(agent_id, []),
+                inbounds.get(agent_id, []),
+                meta[agent_id],
+            )
+        )
+    counts = {"seen": len(ids), "excluded_test": excluded_test, "skipped_meta": skipped_meta}
+    return records, counts
+
+
 def collect(
     days: int,
     week: str,
@@ -300,38 +358,12 @@ def collect(
     spawns) are excluded by default so they never reach the health dataset
     or its labels; pass `include_test=True` to collect them (a measurement
     run that reads the same fields).
+
+    Callers that must tell a TEST-only window from a broken data source
+    use collect_with_counts(), which returns the same records plus the
+    pre-filter counts.
     """
-    window_to = to or datetime.now(UTC)
-    window_from = from_ or (window_to - timedelta(days=days))
-    if window_from >= window_to:
-        raise ValueError(f"empty window: [{window_from}, {window_to})")
-    telemetry = _fetch_events_window("telemetry", window_from, window_to)
-    audit = _fetch_events_window("audit", window_from, window_to)
-    events = _group_by_agent(telemetry)
-    logs = _group_by_agent(audit)
-    ids = sorted(events)
-    window = f"{days} days"
-    with connect() as conn, conn.cursor() as cur:
-        inbounds = _inbounds_by_agent(cur, ids, window)
-        meta = _meta_by_agent(cur, ids)
-        test_ids = set() if include_test else _test_label_ids(cur, ids)
-    records = []
-    for agent_id in ids:
-        if agent_id not in meta:
-            continue  # active in events but no lifecycle row — skip, not a real run
-        if agent_id in test_ids:
-            continue  # benchmark/probe spawn — never into the health dataset
-        records.append(
-            build_record(
-                agent_id,
-                week,
-                events.get(agent_id, []),
-                logs.get(agent_id, []),
-                inbounds.get(agent_id, []),
-                meta[agent_id],
-            )
-        )
-    return records
+    return collect_with_counts(days, week, from_=from_, to=to, include_test=include_test)[0]
 
 
 def collect_one(
