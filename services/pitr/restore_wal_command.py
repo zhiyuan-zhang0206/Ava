@@ -9,6 +9,13 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import TypedDict, cast
+
+
+class _ArchiveRecord(TypedDict):
+    path: str
+    sha256: str
+    size: int
 
 
 def _digest(path: Path) -> tuple[int, str]:
@@ -28,8 +35,11 @@ def restore(mapping_path: Path, archive_name: str, destination: Path) -> None:
     if not isinstance(mapping, dict) or archive_name not in mapping:
         raise ValueError("restore request is absent from the protected allowlist")
     record = mapping[archive_name]
+    if not isinstance(record, dict):
+        raise TypeError("restore allowlist record is not an object")
     if set(record) != {"path", "sha256", "size"}:
         raise ValueError("restore allowlist record does not match schema")
+    record = cast(_ArchiveRecord, record)
     source = Path(record["path"])
     if source.is_symlink() or not source.is_file():
         raise ValueError("restore source is not an owned regular file")

@@ -123,7 +123,7 @@ class _ChunkReader(io.RawIOBase):
     def readable(self) -> bool:
         return True
 
-    def readinto(self, target: bytearray) -> int:
+    def readinto(self, target: bytearray) -> int:  # pyright: ignore[reportIncompatibleMethodOverride]
         while not self._pending and not self._done:
             try:
                 self._pending.extend(next(self._chunks))
@@ -152,7 +152,9 @@ def extract_authenticated_base(
     destination.mkdir(parents=True, mode=0o700)
     data_root = destination / "data"
     try:
-        raw = io.BufferedReader(_ChunkReader(_plaintext_chunks(source, key=key, expected=expected)))
+        raw = io.BufferedReader(  # pyright: ignore[reportArgumentType]
+            _ChunkReader(_plaintext_chunks(source, key=key, expected=expected))
+        )
         with (
             zstandard.ZstdDecompressor().stream_reader(raw) as decompressed,
             tarfile.open(fileobj=decompressed, mode="r|") as archive,
@@ -175,7 +177,7 @@ def extract_authenticated_base(
                     continue
                 target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 extracted = archive.extractfile(member)
-                extracted = _require_content(extracted)
+                extracted = _require_content(extracted)  # pyright: ignore[reportArgumentType]
                 fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
                 with os.fdopen(fd, "wb") as output:
                     shutil.copyfileobj(extracted, output, length=_CHUNK_BYTES)

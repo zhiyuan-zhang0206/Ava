@@ -37,6 +37,7 @@ class CandidateManifest:
     chain_id: str
     protected: bool
     postgres_major: int
+    database_name: str
     system_identifier: str
     wal_segment_size: int
     timeline: int

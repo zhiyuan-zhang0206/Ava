@@ -39,10 +39,10 @@ class RestoreProof:
     achieved_lsn: str
     live_postgres_pid: int
     live_probe_sha256: str
-    verify_before_restore_seconds: float
+    candidate_verify_evidence_sha256: str
     replay_seconds: float
     smoke_seconds: float
-    second_verify_seconds: float
+    restored_verify_seconds: float
     downloaded_bytes: int
     restored_fingerprint_sha256: str
 

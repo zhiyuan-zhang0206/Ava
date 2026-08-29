@@ -115,6 +115,40 @@ def _append_recovery_config(
     (pgdata / "recovery.signal").touch(mode=0o600, exist_ok=False)
 
 
+def _write_sandbox_config(pgdata: Path, socket_dir: Path, port: int, run_root: Path) -> Path:
+    config = run_root / "sandbox-postgresql.conf"
+    hba = run_root / "sandbox-pg_hba.conf"
+    ident = run_root / "sandbox-pg_ident.conf"
+    hba.write_text("local all all trust\n")
+    ident.write_text("")
+    hba.chmod(0o600)
+    ident.chmod(0o600)
+    values = {
+        "data_directory": str(pgdata),
+        "hba_file": str(hba),
+        "ident_file": str(ident),
+        "listen_addresses": "",
+        "unix_socket_directories": str(socket_dir),
+        "port": str(port),
+        "external_pid_file": "",
+        "ssl": "off",
+        "logging_collector": "off",
+        "shared_preload_libraries": "",
+        "archive_mode": "off",
+        "archive_command": "",
+        "primary_conninfo": "",
+        "primary_slot_name": "",
+        "hot_standby": "off",
+    }
+    fd = os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as output:
+        for key, value in values.items():
+            output.write(f"{key} = {value!r}\n")
+        output.flush()
+        os.fsync(output.fileno())
+    return config
+
+
 def _run(command: list[str], *, timeout: float) -> None:
     result = subprocess.run(  # noqa: S603
         command,
@@ -223,23 +257,22 @@ class IsolatedPostgresRestoreExecutor:
             raise RestoreProofError("restore sandbox already has a postmaster")
         verify_started = time.monotonic()
         _verify_candidate(pgdata, threading.Event())
-        first_verify_seconds = time.monotonic() - verify_started
-        second_verify_started = time.monotonic()
-        _verify_candidate(pgdata, threading.Event())
-        second_verify_seconds = time.monotonic() - second_verify_started
+        restored_verify_seconds = time.monotonic() - verify_started
         socket_dir = run_root / "socket"
         socket_dir.mkdir(mode=0o700)
         port = _free_port()
         _append_recovery_config(pgdata, wal_dir, socket_dir, candidate.end_lsn, run_root)
-        options = (
-            f"-c listen_addresses='' -c unix_socket_directories={shlex.quote(str(socket_dir))} "
-            f"-c archive_mode=off -c archive_command='' -c primary_conninfo='' "
-            f"-c shared_preload_libraries='' -c hot_standby=off -p {port}"
-        )
+        sandbox_config = _write_sandbox_config(pgdata, socket_dir, port, run_root)
+        options = f"-c config_file={shlex.quote(str(sandbox_config))}"
         replay_started = time.monotonic()
         sandbox: SandboxPostgresIdentity | None = None
         try:
-            update_restore_owner(owner_path, state="postgres_starting")
+            update_restore_owner(
+                owner_path,
+                state="postgres_starting",
+                sandbox_pgdata=str(pgdata.resolve()),
+                expected_sandbox_pgid=os.getpgrp(),
+            )
             _run(
                 [
                     str(pg_tool("pg_ctl")),
@@ -272,10 +305,9 @@ class IsolatedPostgresRestoreExecutor:
                 raise RestoreProofError("live PostgreSQL changed while sandbox was running")
             return DrillResult(
                 achieved,
-                first_verify_seconds,
                 replay_seconds,
                 smoke_seconds,
-                second_verify_seconds,
+                restored_verify_seconds,
                 restored_fingerprint,
             )
         finally:
@@ -313,7 +345,7 @@ class IsolatedPostgresRestoreExecutor:
 
     @staticmethod
     def _smoke(socket_dir: Path, port: int, candidate: CandidateManifest) -> str:
-        db_url = f"postgresql://?host={socket_dir}&port={port}&dbname=ava_main"
+        db_url = f"postgresql://?host={socket_dir}&port={port}&dbname={candidate.database_name}"
         with psycopg.connect(db_url, connect_timeout=5) as conn, conn.cursor() as cur:
             cur.execute("SELECT system_identifier FROM pg_control_system()")
             row = cur.fetchone()

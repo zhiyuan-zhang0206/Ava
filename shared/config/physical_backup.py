@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import stat
 from pathlib import Path, PurePosixPath
@@ -23,6 +25,29 @@ def _require_private_regular_file(path: Path | None, alias: str) -> None:
         raise ValueError(f"{alias} must exist") from exc
     if not stat.S_ISREG(info.st_mode) or path.is_symlink() or stat.S_IMODE(info.st_mode) != 0o600:
         raise ValueError(f"{alias} must be a non-symlink regular file with mode 0600")
+
+
+def _service_account_identity(path: Path, alias: str) -> tuple[str, str, str]:
+    try:
+        payload = path.read_bytes()
+        raw = json.loads(payload)
+        _validate_service_account_payload(raw)
+        return (
+            str(raw["client_email"]),
+            str(raw["project_id"]),
+            hashlib.sha256(payload).hexdigest(),
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{alias} must contain a service-account identity") from exc
+
+
+def _validate_service_account_payload(raw: object) -> None:
+    if not isinstance(raw, dict):
+        raise TypeError("service-account payload must be an object")
+    if {"type", "client_email", "project_id", "private_key_id"} - set(raw):
+        raise ValueError("service-account identity fields are missing")
+    if raw["type"] != "service_account":
+        raise ValueError("credential is not a service account")
 
 
 class PhysicalBackupSettings(EnvSettings):
@@ -229,7 +254,7 @@ class PhysicalBackupSettings(EnvSettings):
     )
 
     @model_validator(mode="after")
-    def _validate_contract(self) -> PhysicalBackupSettings:
+    def _validate_contract(self) -> PhysicalBackupSettings:  # noqa: PLR0915
         raw_prefix = self.pitr_gcs_prefix
         if "//" in raw_prefix or any(part in {"", ".", ".."} for part in raw_prefix.split("/")):
             raise ValueError("AVA_PITR_GCS_PREFIX must be a safe relative object prefix")
@@ -318,5 +343,23 @@ class PhysicalBackupSettings(EnvSettings):
                 ):
                     raise ValueError(
                         "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE must be a distinct viewer-only credential"
+                    )
+                uploader_identity = _service_account_identity(
+                    uploader, "AVA_PITR_GCS_CREDENTIALS_FILE"
+                )
+                viewer_identity = _service_account_identity(
+                    viewer, "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE"
+                )
+                if (
+                    uploader_identity[1] != self.pitr_gcs_project
+                    or viewer_identity[1] != self.pitr_gcs_project
+                ):
+                    raise ValueError("PITR service-account project must match AVA_PITR_GCS_PROJECT")
+                if (
+                    uploader_identity[0] == viewer_identity[0]
+                    or uploader_identity[2] == viewer_identity[2]
+                ):
+                    raise ValueError(
+                        "restore proof requires a distinct viewer-only service-account identity"
                     )
         return self
