@@ -385,7 +385,7 @@ def test_fleet_layout_invariants(
 
         # Tasks toolbar — the non-wrapping shrink-0 chips row (#979 fleet half).
         # TaskGraph defaults to graph mode: "Kanban" is the mode-switch button,
-        # the chips (Done / Canceled) sit at the row's right end.
+        # the chips (time window / Done / Canceled) sit at the row's right end.
         page.locator('[role="tab"]', has_text="Tasks").click()
         page.wait_for_selector('button:has-text("Kanban")', timeout=15_000)
         page.wait_for_timeout(800)

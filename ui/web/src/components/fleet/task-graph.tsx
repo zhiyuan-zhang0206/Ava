@@ -357,8 +357,17 @@ export function TaskGraph({
       ),
     [tasks, showDone, showCanceled],
   );
-  const hiddenDoneCount = useMemo(() => tasks.filter((t) => t.status === "done").length, [tasks]);
-  const hiddenCanceledCount = useMemo(() => tasks.filter((t) => t.status === "cancelled").length, [tasks]);
+  // Ghost rows (out-of-window structural ancestors) are never revealed by the
+  // status toggles — they render dimmed regardless — so they stay out of the
+  // toggle pills too.
+  const hiddenDoneCount = useMemo(
+    () => tasks.filter((t) => t.status === "done" && t.ghost !== true).length,
+    [tasks],
+  );
+  const hiddenCanceledCount = useMemo(
+    () => tasks.filter((t) => t.status === "cancelled" && t.ghost !== true).length,
+    [tasks],
+  );
 
   // Id → task lookup for the hover card's parent/owner resolution.
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
@@ -553,7 +562,7 @@ export function TaskGraph({
             </span>
           </div>
           <span className="text-xs text-muted-foreground">
-            {subtasks.length} task{subtasks.length !== 1 ? "s" : ""}
+            {subtasks.filter((t) => t.ghost !== true).length} task{subtasks.filter((t) => t.ghost !== true).length !== 1 ? "s" : ""}
           </span>
           <StaleBadge show={error} />
           <FilterCluster
@@ -596,7 +605,7 @@ export function TaskGraph({
           </button>
         </div>
         <span className="text-xs text-muted-foreground">
-          {subtasks.length} task{subtasks.length !== 1 ? "s" : ""}
+          {subtasks.filter((t) => t.ghost !== true).length} task{subtasks.filter((t) => t.ghost !== true).length !== 1 ? "s" : ""}
         </span>
         <StaleBadge show={error} />
         <FilterCluster
