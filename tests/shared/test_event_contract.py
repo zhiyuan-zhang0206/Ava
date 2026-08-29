@@ -115,8 +115,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # the gateway auth-401 aggregate (Task #1712) adds auth401_rejected,
     # raising it to 126; hook_timing (Task #1963's per-hook node attribution)
     # raises it to 127; the agent-registry max-id gauge (Task #2010) adds
-    # agent_registry, raising it to 128.
-    assert len(_TELEMETRY_KINDS) == 128
+    # agent_registry, raising it to 128; archive_fetch_degraded (Task #2004)
+    # raises it to 129.
+    assert len(_TELEMETRY_KINDS) == 129
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

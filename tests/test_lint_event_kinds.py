@@ -73,6 +73,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "error_reopened",
         "resolution_status",
         "checkpoint_table_sizes",  # services/events_maintenance/blob_vacuum.py telemetry.emit (positional)
+        # Positional emit from both frozen-archive readers (task #2004).
+        "archive_fetch_degraded",  # gateway/neighbors.py:_emit_archive_degraded + gateway/routers/fleet_graph.py:_emit_archive_degraded
         # Legacy bracketed name: the pre-W8-rename value, still a migrate_events.py
         # mapping target and present in existing DB rows. New code must not emit it;
         # the registration survives only to backfill the metric.
