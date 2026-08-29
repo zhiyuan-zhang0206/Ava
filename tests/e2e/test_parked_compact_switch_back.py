@@ -21,8 +21,18 @@ This test locks the full flow in the real browser:
 4. wait for the compact to commit (REST timeline shows the envelope)
 5. switch back to A and assert, at the network layer, a fresh GET /timeline
    fired for A AFTER the compact, and at the DOM layer the post-compact state
-   renders — the compact envelope is present and the pre-compact reply is
+   renders — the compact envelope is present and the pre-compact replies are
    GONE (no resurrection).
+
+Deflake note: the switch-back deliberately does NOT sleep for the SSE frames.
+The stream can lose the parked thread's compact events entirely (the
+all-events re-key on agent switch drops whatever publishes inside the
+reconnect gap), so the test waits on the REAL post-compact condition — the
+post-compact-only narration renders — and holds the no-resurrection invariant
+with auto-retrying counts. The frontend heals the lost-event case at the
+merge (the fetched snapshot's compact envelope is a fingerprint the stale
+bucket cannot match → wholesale replace), so the condition always converges
+instead of racing a clock.
 """
 
 from __future__ import annotations
@@ -34,15 +44,18 @@ from typing import Any
 import httpx
 import psycopg
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
-from tests.e2e.fakes.scenarios.parked_compact import REPLY_1, REPLY_2, REPLY_3
-
-_PARKED_SETTLE_SECONDS = 2.0
+from tests.e2e.fakes.scenarios.parked_compact import (
+    POST_COMPACT_NARRATION,
+    REPLY_1,
+    REPLY_2,
+    REPLY_3,
+)
 
 
 def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:
@@ -129,10 +142,6 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
         assert resp.json()["status"] == "enqueued"
         _wait_kind(gateway_url, agent_a, "inbound_compact_request")
         wait_for_status(agent_a, AgentStatus.IDLING.value)
-        # Let the SSE frames (compact_done + post-compact snapshot) reach the
-        # browser before the switch-back — the test must exercise the folded
-        # bucket, not a race against the event delivery itself.
-        time.sleep(_PARKED_SETTLE_SECONDS)
 
         # ── 4. switch back: network evidence + post-compact DOM state ──
         timeline_requests: list[str] = []
@@ -155,22 +164,23 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
         assert timeline_requests, "switch-back after a parked compact did not refetch the timeline"
 
         # DOM layer: the post-compact state renders — the compact envelope is
-        # there and the compacted-away reply is GONE (the regression left the
-        # pre-compact reply resurrected by the keep-all merge).
+        # there and the compacted-away replies are GONE (the regression left
+        # them resurrected by the keep-all merge).
         page.wait_for_selector("text=Compact request", timeout=15_000)
+        # Wait on the REAL post-compact condition, not a clock: the narration
+        # is content that exists only in the post-compact history, so it proves
+        # the rendered thread has left the pre-compact state behind. The
+        # switch-back refetch may land a beat after the (possibly stale)
+        # parked bucket seeds, so this is a condition wait, not a sleep.
+        page.wait_for_selector(f"text={POST_COMPACT_NARRATION}", timeout=15_000)
         # Pre-compact exchanges sit at item_ids above the post-compact tail
         # (the envelope + narration reuse only the first two wiped slots) — a
-        # keep-all merge of the stale parked bucket resurrects them (the
-        # regression); the post-compact bucket must replace the thread
-        # wholesale.
-        assert page.get_by_text(REPLY_2).count() == 0, (
-            "pre-compact reply resurrected after switch-back "
-            f"(timeline requests: {timeline_requests})"
-        )
-        assert page.get_by_text(REPLY_3).count() == 0, (
-            "pre-compact reply resurrected after switch-back "
-            f"(timeline requests: {timeline_requests})"
-        )
+        # keep-all merge of the stale parked bucket would resurrect them (the
+        # regression). Auto-retrying counts: a late resurrecting merge must
+        # flip these red, so the assertion holds the invariant instead of
+        # sampling it once.
+        expect(page.get_by_text(REPLY_2)).to_have_count(0, timeout=15_000)
+        expect(page.get_by_text(REPLY_3)).to_have_count(0, timeout=15_000)
     finally:
         with contextlib.suppress(httpx.HTTPError):
             httpx.post(f"{gateway_url}/api/agents/{agent_b}/terminate", timeout=5.0)
