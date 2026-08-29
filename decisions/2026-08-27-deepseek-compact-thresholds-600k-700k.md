@@ -1,3 +1,7 @@
+> **Superseded 2026-08-29** — the user reverted the deepseek pin to soft 374k /
+> hard 512k; see
+> [`2026-08-29-deepseek-compact-thresholds-374k-512k.md`](2026-08-29-deepseek-compact-thresholds-374k-512k.md).
+
 # DeepSeek compact thresholds: soft 600k / hard 700k
 
 ## Context
