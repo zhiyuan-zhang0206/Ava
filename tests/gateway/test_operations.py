@@ -1085,3 +1085,79 @@ class TestResurrectIfTerminatedPlacement:
             5, trigger_inbound_id=99, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_launch_agent_op_hosted_skips_process_and_wakes(
+    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+) -> None:
+    """Hosted mode: the row the gateway created IS the agent. No fork, no
+    launch-confirm — the prompt INSERT (which publishes its own wake inside
+    `insert_inbound_message`) plus one explicit wake is the whole launch."""
+    monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: True)
+    launches: list[int] = []
+    confirmed: list[int] = []
+    monkeypatch.setattr(
+        ops_lifecycle.agent_launch,
+        "_launch_agent_process",
+        lambda *_a, **_k: launches.append(1),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(ops_lifecycle.agent_launch, "schedule_launch_confirm", confirmed.append)  # pyright: ignore[reportUnknownArgumentType]
+    inserted: list[tuple[int, str, str]] = []
+
+    def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
+        inserted.append((agent_id, prompt, source))
+        return 11
+
+    monkeypatch.setattr(ops_lifecycle, "_insert_prompt_blocking", _fake_insert)
+
+    async def _fake_publish(*_a: object, **_k: object) -> None:
+        return None
+
+    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
+    wakes: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        ops_lifecycle, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
+    )
+
+    body = LaunchAgentRequest(agent_id=7, prompt="go do X", prompt_source="user")
+    result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+    assert result.id == 7
+    assert launches == []  # hosted never forks
+    assert confirmed == []  # hosted never confirms a pid
+    assert inserted == [(7, "go do X", "user")]
+    assert wakes == [(7, "0")]
+
+
+@pytest.mark.asyncio
+async def test_launch_agent_op_hosted_fork_still_wakes(
+    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+) -> None:
+    """A fork's inbounds were pre-inserted by create_agent_row as raw SQL (no
+    wake inside) — the hosted launch must publish the wake explicitly, and must
+    not insert a second prompt."""
+    monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: True)
+    monkeypatch.setattr(ops_lifecycle.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_lifecycle.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    inserted: list[int] = []
+
+    def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
+        inserted.append(1)
+        return 0
+
+    monkeypatch.setattr(ops_lifecycle, "_insert_prompt_blocking", _fake_insert)
+
+    async def _fake_publish(*_a: object, **_k: object) -> None:
+        return None
+
+    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
+    wakes: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        ops_lifecycle, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
+    )
+
+    body = LaunchAgentRequest(agent_id=8)
+    result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+    assert result.id == 8
+    assert inserted == []  # fork prompt is delivered pre-launch, never here
+    assert wakes == [(8, "0")]

@@ -1,4 +1,4 @@
-"""Fail-closed runner-mode read used by the service roster."""
+"""Fail-closed runner-mode read used by the service roster and the lifecycle ops."""
 
 from __future__ import annotations
 
@@ -16,3 +16,14 @@ def runner_mode() -> str:
         return str(settings.daemon.runner_mode)
     except Exception:
         return "process"
+
+
+def is_hosted() -> bool:
+    """Whether this cluster runs the hosted agent-runner.
+
+    Same fail-closed discipline as `runner_mode`: any config surprise reads as
+    process mode, and process mode is where the lifecycle ops keep forking
+    processes. Hosted is only ever entered on a deliberate, readable
+    `AVA_RUNNER_MODE=hosted`.
+    """
+    return runner_mode() == "hosted"
