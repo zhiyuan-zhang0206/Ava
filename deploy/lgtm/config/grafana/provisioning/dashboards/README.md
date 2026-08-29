@@ -30,8 +30,12 @@ row header. All sections are **expanded by default** (`collapsed: false`,
    Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
    hit, Turn success rate, and the three full-width **Events** panels:
    business/anomaly logs, the event-type table, and the parse-clean
-   raw stream for debugging. The two unresolved-class tiles read the
-   events-maintenance daemon's fixed-six-hour Prometheus gauges.
+   raw stream for debugging. The four resolution tiles read the
+   events-maintenance daemon's fixed-six-hour Prometheus gauges: Warning /
+   Error (Loki `$__range` totals) sit beside Dismissed Warning / Dismissed
+   Error and Unresolved Warning / Unresolved Error, so the user-visible trio
+   (total / resolved / net) sums by construction at the default six-hour
+   window (task #1935).
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/p99/max + p95/p99 and
@@ -81,7 +85,7 @@ summaries cover the same information.
 Datasources (provisioned in `../datasources/datasources.yml`): **Loki**
 (fixed uid `loki`) for event panels; **Postgres** (uid `ops`) for the `Live
 agents` stat (`agents_meta` is not in Loki); **Prometheus** (uid `prometheus`)
-for the two unresolved-class tiles, turn-duration percentile alerting, and the
+for the four resolution tiles, turn-duration percentile alerting, and the
 host & data-plane panels
 (per-machine OTel Collector sidecar scrapes, `job="ava-infra"` + `host` (OS
 hostname) and `machine_name` (Ava roster name) labels; panels group by
@@ -138,7 +142,7 @@ grouped series (`"{{attributes_route}}"`, `"{{agent_id}}"`). Do not add a
 Range panels use fixed windows selected by metric semantics: count trends use
 `[5m]`, rates use `[1m]`, calls-per-bucket uses `[30m]`, and Fleet/SSE/delivery
 window summaries use instant `[$__range]` queries. Stats and tables remain
-instant over `[$__range]`, except the two unresolved-class stats: the
+instant over `[$__range]`, except the four resolution stats: the
 events-maintenance daemon computes their fixed six-hour window and refreshes
 their Prometheus gauges every five minutes. Every panel follows the dashboard
 time picker; no panel sets a `timeFrom` or fixed `interval` override.

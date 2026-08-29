@@ -168,7 +168,11 @@ def test_dashboard_has_89_loki_targets() -> None:
 
 
 def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
-    """Daemon emission, Prometheus instruments, and the visible tiles share names."""
+    """Daemon emission, Prometheus instruments, and the visible tiles share names.
+
+    The unresolved and dismissed tiles together render the total / resolved /
+    net trio (task #1935): each gauge is registered, dispositioned, and
+    wired into the dashboard JSON with the same name."""
 
     from shared.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
 
@@ -176,9 +180,13 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
     for field, name in (
         ("unresolved_warnings", "core_unresolved_warning"),
         ("unresolved_errors", "core_unresolved_error"),
+        ("dismissed_warnings", "core_dismissed_warning"),
+        ("dismissed_errors", "core_dismissed_error"),
     ):
         assert _METRIC_DISPOSITION[("resolution_status", field)] == "gauge"
         assert specs[name].query == f"ava_resolution_status_{_strip_unit_suffix(field)}"
+        assert specs[name].query_type == "promql"
+        assert specs[name].panel == "stat"
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:

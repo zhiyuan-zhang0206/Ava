@@ -279,7 +279,8 @@ def test_metrics_resource_carries_cluster(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
-    """Absolute unresolved counts are gauges, not counters adding every pass."""
+    """Absolute unresolved/dismissed counts are gauges, not counters adding
+    every pass (task #1935)."""
 
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
@@ -289,6 +290,8 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
                 attributes={
                     "unresolved_warnings": 9,
                     "unresolved_errors": 4,
+                    "dismissed_warnings": 5,
+                    "dismissed_errors": 2,
                     "window": "6h",
                 },
             ),
@@ -297,6 +300,8 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
                 attributes={
                     "unresolved_warnings": 2,
                     "unresolved_errors": 1,
+                    "dismissed_warnings": 7,
+                    "dismissed_errors": 3,
                     "window": "6h",
                 },
             ),
@@ -307,8 +312,12 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
     metrics = _metrics(metric_reader)
     warning = metrics["ava_resolution_status_unresolved_warnings"]
     error = metrics["ava_resolution_status_unresolved_errors"]
+    dismissed_warning = metrics["ava_resolution_status_dismissed_warnings"]
+    dismissed_error = metrics["ava_resolution_status_dismissed_errors"]
     assert warning.data.data_points[0].value == 2.0
     assert error.data.data_points[0].value == 1.0
+    assert dismissed_warning.data.data_points[0].value == 7.0
+    assert dismissed_error.data.data_points[0].value == 3.0
     assert _attrs_of(warning.data.data_points[0])["window"] == "6h"
 
 

@@ -39,14 +39,20 @@ are mounted. `hours` is the aggregation window, whitelisted to
 |---|---|
 | `live_count`, lifetime event estimate | Postgres metadata |
 | windowed tokens, cost, turn duration, warning/error counts | Loki event history |
+| warning/error `*_dismissed` / `*_net` split | active `event_dismissals` rows (Postgres) applied to the same window's Loki class counts |
 
 No standalone daemon: the gateway aggregates on demand. Loki work runs before
 the short Postgres metadata read, so waiting for the global Loki budget never
 holds a pooled DB connection. The four telemetry `llm_usage` token/cost sums
 are full-window instant aggregates and cache for 60s per requested window to
 absorb every other sidebar poll. Turn/warning/error aggregates remain fresh
-and use one query for a <=3h window or merge the shared helper's contiguous,
-clock-aligned <=3h shards for a longer window. The `llm_usage.cost_usd` sum is
+and merge the shared helper's contiguous, clock-aligned 12h shards for a
+longer window. The warning/error section reads per-class counts with the
+events-maintenance daemon's grouped query and applies its class arithmetic
+(`resolution.level_splits`) over the SELECTED window (task #1935): events
+whose class has an active dismissal in `event_dismissals` land in
+`*_dismissed`, the rest in `*_net`, and dismissed + net == the raw total —
+the same cancellation the daemon's fixed-six-hour Grafana gauges apply. The `llm_usage.cost_usd` sum is
 the usage-time quote snapshot, not historical tokens repriced against today's
 registry. A local budget refusal retains the global typed 503 response; a Loki
 transport/status failure is a retriable 503 with `Retry-After: 1` after

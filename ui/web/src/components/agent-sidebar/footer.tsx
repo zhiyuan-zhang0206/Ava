@@ -53,7 +53,10 @@ export function StatsCards({
   const windowMismatch = stats !== undefined && stats.window_hours !== windowHours;
   const windowedPlaceholder = windowMismatch ? "…" : placeholder;
   const windowedTitle = windowMismatch ? t("statisticsUpdatingFor", { win }) : null;
-  const cards: { label: string; value: string; title?: string; windowed?: boolean }[] = [
+  const cards: (
+    | { kind?: undefined; label: string; value: string; title?: string; windowed?: boolean }
+    | { kind: "warnings"; title?: string; windowed?: boolean }
+  )[] = [
     {
       label: t("liveAgents"),
       value: stats ? String(stats.live_count) : placeholder,
@@ -111,17 +114,15 @@ export function StatsCards({
       title: windowedTitle ?? errMsg ?? t("avgTurnTitle", { win }),
     },
     {
-      label: t("warningsErrors"),
+      kind: "warnings",
       windowed: true,
-      value: windowMismatch
-        ? windowedPlaceholder
-        : stats
-          ? `${stats.warnings} / ${stats.errors}`
-          : placeholder,
       title: windowedTitle ?? errMsg ?? t("warningsTitle", { win }),
     },
   ];
   const valueClass = failedWithoutData
+    ? "font-mono tabular-nums text-sm text-destructive"
+    : "font-mono tabular-nums text-sm";
+  const placeholderClass = failedWithoutData
     ? "font-mono tabular-nums text-sm text-destructive"
     : "font-mono tabular-nums text-sm";
   return (
@@ -170,25 +171,36 @@ export function StatsCards({
         </select>
       </div>
       <div className="grid grid-cols-2 gap-1 px-3 py-2">
-        {cards.map((card) => (
-          <div
-            key={card.label}
-            title={windowMismatch && card.windowed ? card.title : undefined}
-            className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
-          >
-            <span className="text-[10px] tracking-wide text-muted-foreground">
-              {card.label}
-            </span>
-            {firstLoad ? (
-              <span
-                className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
-                aria-hidden
-              />
-            ) : (
-              <span className={valueClass}>{card.value}</span>
-            )}
-          </div>
-        ))}
+        {cards.map((card) =>
+          card.kind === "warnings" ? (
+            <WarningErrorCard
+              key="warnings"
+              stats={windowMismatch ? undefined : stats}
+              placeholder={windowedPlaceholder}
+              placeholderClass={placeholderClass}
+              firstLoad={firstLoad}
+              title={windowMismatch ? card.title : undefined}
+            />
+          ) : (
+            <div
+              key={card.label}
+              title={windowMismatch && card.windowed ? card.title : undefined}
+              className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
+            >
+              <span className="text-[10px] tracking-wide text-muted-foreground">
+                {card.label}
+              </span>
+              {firstLoad ? (
+                <span
+                  className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
+                  aria-hidden
+                />
+              ) : (
+                <span className={valueClass}>{card.value}</span>
+              )}
+            </div>
+          ),
+        )}
       </div>
     </div>
   );
@@ -286,6 +298,97 @@ function SidebarNavButton({
     >
       {children}
     </button>
+  );
+}
+
+// ── Warning / Error three-way card (task #1935) ──
+//
+// The user-visible trio per level: total / resolved (dismissed) / remaining
+// (net). The backend derives all three from the same per-class counts and
+// the active `event_dismissals` rows, so resolved + remaining == total by
+// construction. A zero remaining renders the positive all-clear state
+// instead of a bare 0. `stats` is passed undefined during a window
+// transition so the card shows the same "…" placeholder as the other cards
+// instead of displaying a previous window's totals.
+function WarningErrorCard({
+  stats,
+  placeholder,
+  placeholderClass,
+  firstLoad,
+  title,
+}: {
+  stats: StatsDashboard | undefined;
+  placeholder: string;
+  placeholderClass: string;
+  firstLoad: boolean;
+  title: string | undefined;
+}) {
+  const t = useTranslations("sidebar");
+  const rows = stats
+    ? [
+        {
+          level: "warning",
+          total: stats.warnings,
+          dismissed: stats.warnings_dismissed,
+          net: stats.warnings_net,
+        },
+        {
+          level: "error",
+          total: stats.errors,
+          dismissed: stats.errors_dismissed,
+          net: stats.errors_net,
+        },
+      ]
+    : null;
+  return (
+    <div
+      title={title}
+      className={cn(
+        "gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5 col-span-2",
+        FLEX,
+        FLEX_COL,
+      )}
+    >
+      <span className="text-[10px] tracking-wide text-muted-foreground">
+        {t("warningsErrors")}
+      </span>
+      {firstLoad ? (
+        <span
+          className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
+          aria-hidden
+        />
+      ) : rows === null ? (
+        <span className={placeholderClass}>{placeholder}</span>
+      ) : (
+        rows.map((row) => (
+          <div
+            key={row.level}
+            className={cn("items-center gap-1 font-mono text-[11px] tabular-nums", FLEX)}
+          >
+            <span className="w-8 shrink-0 text-muted-foreground">
+              {row.level === "warning" ? t("warningLevel") : t("errorLevel")}
+            </span>
+            <span className="text-foreground">
+              {t("statsTotal")} {row.total.toLocaleString()}
+            </span>
+            <span className="text-muted-foreground">
+              · {t("statsDismissed")} {row.dismissed.toLocaleString()}
+            </span>
+            <span className="ml-auto shrink-0">
+              {row.net === 0 ? (
+                <span className="rounded bg-emerald-500/15 px-1 text-emerald-600 dark:text-emerald-400">
+                  {t("statsAllClear")}
+                </span>
+              ) : (
+                <span className="text-foreground">
+                  {t("statsNet")} {row.net.toLocaleString()}
+                </span>
+              )}
+            </span>
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 

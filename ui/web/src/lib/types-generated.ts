@@ -3031,7 +3031,9 @@ export interface paths {
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
          *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
          *     - average turn duration: Loki's unified event stream in 12-hour shards
-         *     - warning/error counts: one grouped Loki query per 12-hour shard
+         *     - warning/error counts: per-class counts via the resolution daemon's
+         *       grouped query (12h shards), split into total / dismissed / net with
+         *       the daemon's class arithmetic over the SELECTED window (task #1935)
          *     - `total_events`: archived event row count — frozen historical constant
          *       (task #1281 parity run; PG events dropped; not a live gauge)
          *
@@ -6888,9 +6890,18 @@ export interface components {
          *       most 60s with `tokens`)
          *     - `avg_turn_seconds`: windowed avg LLM call wall time
          *       (event=turn_end + ok=true)
-         *     - `warnings` / `errors`: level counts. Agent trial-and-error
-         *       (exec_failed) logs at INFO and is deliberately NOT counted — these
-         *       numbers are operator-facing alerts, not agent activity.
+         *     - `warnings` / `errors`: raw level totals over the window (critical
+         *       folds into error). Agent trial-and-error (exec_failed) logs at INFO
+         *       and is deliberately NOT counted — these numbers are operator-facing
+         *       alerts, not agent activity.
+         *     - `warnings_dismissed` / `warnings_net` / `errors_dismissed` /
+         *       `errors_net`: the three-way resolution split (task #1935). The
+         *       arithmetic is the events-maintenance daemon's class subtraction
+         *       (`services.events_maintenance.resolution.level_splits`) applied to the
+         *       SELECTED window instead of the daemon's fixed six hours: events whose
+         *       (category, level, event_name, source) class has an active dismissal in
+         *       `event_dismissals` count as dismissed, the rest as net, and
+         *       dismissed + net == the raw total by construction.
          *     - `total_events`: archived event row count (frozen — the PG events copy
          *       stopped growing at the LGTM cutover; not a live gauge)
          *
@@ -6910,6 +6921,14 @@ export interface components {
             warnings: number;
             /** Errors */
             errors: number;
+            /** Warnings Dismissed */
+            warnings_dismissed: number;
+            /** Warnings Net */
+            warnings_net: number;
+            /** Errors Dismissed */
+            errors_dismissed: number;
+            /** Errors Net */
+            errors_net: number;
             /** Total Events */
             total_events: number;
         };

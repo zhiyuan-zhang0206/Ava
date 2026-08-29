@@ -436,10 +436,19 @@ class EventClassReopened(TypedDict):
 
 
 class ResolutionStatus(TypedDict):
-    """`resolution_status` payload — absolute class-resolution gauges."""
+    """`resolution_status` payload — absolute class-resolution gauges.
+
+    ``unresolved_*`` are the events of actively-dismissed classes subtracted
+    from the fixed window's per-class counts (the net); ``dismissed_*`` are
+    the subtracted counts themselves, so the visible Grafana trio
+    (total = Warning/Error tiles, dismissed, unresolved) sums by construction
+    (task #1935).
+    """
 
     unresolved_warnings: int
     unresolved_errors: int
+    dismissed_warnings: int
+    dismissed_errors: int
     window: str
 
 
@@ -1127,7 +1136,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "resolution_status": _telemetry(
         "resolution_status",
-        "absolute unresolved warning/error class counts over the daemon's fixed six-hour window",
+        "absolute unresolved + dismissed warning/error class counts over the daemon's fixed six-hour window",
         payload=ResolutionStatus,
         tier="noise",
     ),

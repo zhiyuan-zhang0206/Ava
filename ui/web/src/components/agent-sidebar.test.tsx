@@ -614,6 +614,10 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       avg_turn_seconds: 3.14,
       warnings: 2,
       errors: 1,
+      warnings_dismissed: 1,
+      warnings_net: 1,
+      errors_dismissed: 1,
+      errors_net: 0,
       total_events: 100,
     };
     wrap(<AgentSidebar {...handlers} />);
@@ -623,7 +627,14 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     expect(screen.getByText("80.00%")).toBeTruthy(); // cache hit, 2 decimals
     expect(screen.getByText("$1.23")).toBeTruthy(); // windowed cost
     expect(screen.getByText("3s")).toBeTruthy(); // avg turn
-    expect(screen.getByText("2 / 1")).toBeTruthy(); // warn / err
+    // warn / err three-way rows: total / resolved / remaining (total / resolved / remaining)
+    expect(screen.getByText("Total 2")).toBeTruthy();
+    // the resolved/remaining cells share their span with the "· " separator
+    expect(screen.getAllByText(/Resolved 1/)).toHaveLength(2); // warning + error rows
+    expect(screen.getByText(/Remaining 1/)).toBeTruthy(); // warning row
+    expect(screen.getByText("Total 1")).toBeTruthy();
+    // error row is fully dismissed -> positive "all clear" state instead of a 0
+    expect(screen.getByText("All clear")).toBeTruthy();
   });
 
   it("error without data shows retry and clicking it refetches", () => {
@@ -651,6 +662,10 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       avg_turn_seconds: 3,
       warnings: 2,
       errors: 1,
+      warnings_dismissed: 1,
+      warnings_net: 1,
+      errors_dismissed: 1,
+      errors_net: 0,
       total_events: 100,
     };
     state.statsError = new Error("stats endpoint 500");
@@ -672,6 +687,10 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
+      warnings_dismissed: 0,
+      warnings_net: 0,
+      errors_dismissed: 0,
+      errors_net: 0,
       total_events: 0,
     };
     wrap(<AgentSidebar {...handlers} />);
@@ -689,6 +708,10 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
+      warnings_dismissed: 0,
+      warnings_net: 0,
+      errors_dismissed: 0,
+      errors_net: 0,
       total_events: 0,
     };
     wrap(<AgentSidebar {...handlers} />);
@@ -709,6 +732,10 @@ describe("StatsCards window selector", () => {
       avg_turn_seconds: 3.14,
       warnings: 2,
       errors: 1,
+      warnings_dismissed: 1,
+      warnings_net: 1,
+      errors_dismissed: 1,
+      errors_net: 0,
       total_events: 100,
     };
 
@@ -716,12 +743,13 @@ describe("StatsCards window selector", () => {
     openStats();
 
     expect(screen.getByText("5")).toBeTruthy();
+    // all five windowed cards (incl. the three-way W/E card) hide stale totals
     expect(screen.getAllByText("…")).toHaveLength(5);
     expect(screen.queryByText("19.1k")).toBeNull();
     expect(screen.queryByText("80.00%")).toBeNull();
     expect(screen.queryByText("$1.23")).toBeNull();
     expect(screen.queryByText("3s")).toBeNull();
-    expect(screen.queryByText("2 / 1")).toBeNull();
+    expect(screen.queryByText("Total 2")).toBeNull();
     expect(screen.getAllByTitle("Updating for 1h…")).toHaveLength(5);
   });
 

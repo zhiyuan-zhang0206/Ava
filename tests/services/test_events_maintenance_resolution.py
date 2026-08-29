@@ -81,10 +81,22 @@ def _capture_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dic
 def test_resolution_query_uses_json_fields_until_the_legacy_expiry() -> None:
     """The fixed window aggregates classes without unsafe stream-label filters."""
 
-    assert resolution._grouped_count_query("6h") == (
+    assert resolution.grouped_count_query("6h") == (
         "sum by (category, level, event_name, source) "
         '(count_over_time({service_name="unknown_service"} | json | '
         'category=~"telemetry|log" | level=~"warning|error|critical" [6h]))'
+    )
+
+
+def test_resolution_query_optional_cluster_stage() -> None:
+    """The gateway dashboard scopes raw class counts to its home cluster
+    without changing the daemon's unfiltered query (task #1935)."""
+
+    assert resolution.grouped_count_query("6h", cluster='my"cluster') == (
+        "sum by (category, level, event_name, source) "
+        '(count_over_time({service_name="unknown_service"} | json | '
+        'category=~"telemetry|log" | level=~"warning|error|critical"'
+        ' | cluster="my\\"cluster" or cluster="" [6h]))'
     )
 
 
@@ -117,7 +129,13 @@ def test_unresolved_math_excludes_active_classes(
         (
             "telemetry",
             "resolution_status",
-            {"unresolved_warnings": 2, "unresolved_errors": 4, "window": "6h"},
+            {
+                "unresolved_warnings": 2,
+                "unresolved_errors": 4,
+                "dismissed_warnings": 7,
+                "dismissed_errors": 3,
+                "window": "6h",
+            },
         )
     ]
 
@@ -204,3 +222,67 @@ def test_auto_dismiss_is_off_by_default(
         cur.execute("SELECT count(*) FROM event_dismissals")
         assert cur.fetchone() == (0,)
     assert [event_name for _category, event_name, _attrs in emitted] == ["resolution_status"]
+
+
+def test_level_splits_three_way_arithmetic() -> None:
+    """The shared window-agnostic split: total / dismissed / net per level,
+    with critical folding into error (task #1935)."""
+    dismissed_warning = _event_class(event_name="dismissed-warning")
+    remaining_warning = _event_class(event_name="remaining-warning")
+    dismissed_error = _event_class(level="error", event_name="dismissed-error")
+    remaining_critical = _event_class(level="critical", event_name="remaining-critical")
+    counts = {
+        dismissed_warning: 7,
+        remaining_warning: 2,
+        dismissed_error: 3,
+        remaining_critical: 4,
+    }
+    active = {dismissed_warning, dismissed_error}
+
+    splits = resolution.level_splits(counts, active)
+
+    assert splits == {
+        "warning": resolution.LevelSplit(total=9, dismissed=7, net=2),
+        "error": resolution.LevelSplit(total=7, dismissed=3, net=4),
+    }
+    assert splits["warning"].total == splits["warning"].dismissed + splits["warning"].net
+    assert splits["error"].total == splits["error"].dismissed + splits["error"].net
+
+
+def test_level_splits_empty_and_unknown_levels() -> None:
+    """No counts -> no levels; a level outside warning/error still buckets
+    by the same rule (anything non-warning is the error family)."""
+    assert resolution.level_splits({}, set()) == {}
+    odd = _event_class(level="critical", event_name="c")
+    splits = resolution.level_splits({odd: 5}, set())
+    assert splits == {"error": resolution.LevelSplit(total=5, dismissed=0, net=5)}
+
+
+def test_daemon_emits_dismissed_gauges_alongside_unresolved(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """resolution_status carries the dismissed counts so Grafana can render
+    the total / resolved / net trio (task #1935)."""
+    dismissed = _event_class(event_name="dismissed")
+    _insert_dismissal(db_conn, dismissed)
+    counts = {dismissed: 4, _event_class(event_name="kept"): 1}
+
+    def query_class_counts(window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+        return counts if window == "6h" else {}
+
+    monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
+    emitted = _capture_events(monkeypatch)
+
+    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+
+    assert result == resolution.ResolutionResult(1, 0, reopened=0, auto_dismissed=0)
+    status_event = next(
+        (category, name, attrs) for category, name, attrs in emitted if name == "resolution_status"
+    )
+    assert status_event[2] == {
+        "unresolved_warnings": 1,
+        "unresolved_errors": 0,
+        "dismissed_warnings": 4,
+        "dismissed_errors": 0,
+        "window": "6h",
+    }

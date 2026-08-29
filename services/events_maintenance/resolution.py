@@ -3,11 +3,19 @@
 The event stream is append-only in Loki, so no resolution path may write a
 ``resolved_by`` attribute back onto historical events. Active rows in
 ``event_dismissals`` instead remove one exact (category, level, event_name,
-source) class from the fixed six-hour count. The companion ten-minute query is
-the safety valve: a renewed burst reopens the class before it can hide a new
-incident.
+source) class from the count. The companion ten-minute query is the safety
+valve: a renewed burst reopens the class before it can hide a new incident.
 
-The public seam is :func:`run_resolution_slice`; tests replace
+The class arithmetic is window-agnostic: :func:`level_splits` turns any
+window's per-class counts plus the active dismissals into per-level
+total / dismissed / net triples. The daemon's :func:`run_resolution_slice`
+applies it to its fixed six-hour window and publishes the unresolved and
+dismissed gauges; the gateway stats dashboard (``gateway/routers/status.py``)
+applies the same arithmetic to the frontend-selected window, so the two
+surfaces agree class for class.
+
+The public seams are :func:`run_resolution_slice`, :func:`level_splits`,
+:func:`grouped_count_query`, and :func:`active_dismissals`; tests replace
 ``_query_class_counts`` to cover the arithmetic without a Loki process.
 """
 
@@ -24,6 +32,7 @@ from psycopg_pool import ConnectionPool
 from services.events_maintenance.rollup import _query_instant
 from shared import telemetry
 from shared.config import settings
+from shared.loki_index_labels import escape_logql_label
 
 _log = logging.getLogger("services.events_maintenance.resolution")
 
@@ -63,36 +72,62 @@ class ResolutionResult:
     auto_dismissed: int
 
 
+@dataclass(frozen=True)
+class LevelSplit:
+    """The three-way breakdown of one level within a window.
+
+    ``dismissed`` counts the window events whose class has an active
+    dismissal; ``net`` is what remains after subtracting them. ``total`` is
+    always ``dismissed + net`` — the dashboard and the Grafana gauges derive
+    all three from the same class counts, so the user-visible trio stays
+    consistent by construction.
+    """
+
+    total: int
+    dismissed: int
+    net: int
+
+
 _last_auto_dismiss_day: list[date | None] = [None]
 
 
-def _grouped_count_query(window: str) -> str:
+def grouped_count_query(window: str, *, cluster: str | None = None) -> str:
     """One capped series aggregation for the event classes in ``window``.
 
     Do not add category/level/event-name stream-selector labels before
     ``LEGACY_READ_EXPIRES_AT = 2026-08-30T11:10Z``. Legacy chunks have those
     values only in their JSON body; filtering them in the selector would make
     active dismissals depend on a rollout boundary (#1467).
+
+    ``cluster`` is an optional pipeline stage (``| cluster="X" or cluster=""``,
+    the same unlabeled-row acceptance the gateway's aggregate pipelines use)
+    — the daemon's fixed-window gauge pass leaves it unset, while the gateway
+    dashboard scopes its raw counts to the current home cluster. The
+    dismissal SET stays global either way, so the two surfaces cancel the
+    same classes (task #1935).
     """
 
-    return (
-        "sum by (category, level, event_name, source) "
-        '(count_over_time({service_name="unknown_service"} | json | '
-        'category=~"telemetry|log" | level=~"warning|error|critical" '
-        f"[{window}]))"
+    pipeline = (
+        '{service_name="unknown_service"} | json | '
+        'category=~"telemetry|log" | level=~"warning|error|critical"'
     )
+    if cluster is not None:
+        escaped = escape_logql_label(cluster)
+        pipeline += f' | cluster="{escaped}" or cluster=""'
+    return f"sum by (category, level, event_name, source) (count_over_time({pipeline} [{window}]))"
 
 
 def _query_class_counts(window: str, at: datetime) -> dict[EventClass, int]:
     """Read one grouped Loki vector as exact event-class counts.
 
-    ``sum by`` gives one series per class, and the outer sum prevents the raw
-    stream series cap from truncating a busy event stream. A malformed group
-    is a read failure rather than a guessed class: emitting a stale zero would
-    make an unhealthy Loki side look resolved.
+    ``sum by`` gives one series per class via :func:`grouped_count_query` —
+    the same LogQL the gateway dashboard runs over its selected window, so a
+    class dismissed on one surface is subtracted identically on the other. A
+    malformed group is a read failure rather than a guessed class: emitting a
+    stale zero would make an unhealthy Loki side look resolved.
     """
 
-    rows = _query_instant(_grouped_count_query(window), at)
+    rows = _query_instant(grouped_count_query(window), at)
     counts: dict[EventClass, int] = {}
     for labels, value in rows:
         event_class = EventClass(
@@ -105,7 +140,7 @@ def _query_class_counts(window: str, at: datetime) -> dict[EventClass, int]:
     return counts
 
 
-def _active_dismissals(conn: Any) -> list[Dismissal]:
+def active_dismissals(conn: Any) -> list[Dismissal]:
     """Load class-wide active dismissals only.
 
     The v1 API rejects a non-NULL agent_id rather than subtracting it from a
@@ -246,18 +281,31 @@ def _emit_auto_resolved(event_class: EventClass, days: int) -> None:
     )
 
 
-def _unresolved_totals(counts: dict[EventClass, int], active: set[EventClass]) -> tuple[int, int]:
-    """Sum active classes after whole-class dismissal subtraction."""
+def level_splits(counts: dict[EventClass, int], active: set[EventClass]) -> dict[str, LevelSplit]:
+    """The window-agnostic class arithmetic: per-level total / dismissed / net.
 
-    warnings = errors = 0
+    Every class in ``counts`` contributes its count to its level's ``total``;
+    a class with an active dismissal moves the count from ``net`` to
+    ``dismissed`` instead. Levels are ``"warning"`` and ``"error"`` —
+    ``critical`` classes fold into ``error`` exactly as the Loki query's
+    level domain (``warning|error|critical``) and the operator gauges do, so
+    the three-way split always sums to the raw level counts.
+
+    This is the single arithmetic both the daemon's fixed-window gauges and
+    the dashboard's user-selected window use (task #1935).
+    """
+
+    splits: dict[str, LevelSplit] = {}
     for event_class, count in counts.items():
-        if event_class in active:
-            continue
-        if event_class.level == "warning":
-            warnings += count
-        else:  # Loki query limits the domain to error | critical beyond warning.
-            errors += count
-    return warnings, errors
+        level = "warning" if event_class.level == "warning" else "error"
+        split = splits.get(level, LevelSplit(0, 0, 0))
+        dismissed = count if event_class in active else 0
+        splits[level] = LevelSplit(
+            total=split.total + count,
+            dismissed=split.dismissed + dismissed,
+            net=split.net + count - dismissed,
+        )
+    return splits
 
 
 def run_resolution_slice(
@@ -285,7 +333,7 @@ def run_resolution_slice(
     reopened: list[tuple[Dismissal, int]] = []
     auto_dismissed: list[EventClass] = []
     with pool.connection() as conn:
-        active = _active_dismissals(conn)
+        active = active_dismissals(conn)
         active_classes = {dismissal.event_class for dismissal in active}
         for dismissal in active:
             burst_count = burst_counts.get(dismissal.event_class, 0)
@@ -306,20 +354,24 @@ def run_resolution_slice(
     for event_class in auto_dismissed:
         _emit_auto_resolved(event_class, settings.daemon.events_auto_dismiss_days)
 
-    warnings, errors = _unresolved_totals(unresolved_counts, active_classes)
+    splits = level_splits(unresolved_counts, active_classes)
+    warning = splits.get("warning", LevelSplit(0, 0, 0))
+    error = splits.get("error", LevelSplit(0, 0, 0))
     telemetry.emit(
         "telemetry",
         "resolution_status",
         source="events-maintenance",
         attributes={
-            "unresolved_warnings": warnings,
-            "unresolved_errors": errors,
+            "unresolved_warnings": warning.net,
+            "unresolved_errors": error.net,
+            "dismissed_warnings": warning.dismissed,
+            "dismissed_errors": error.dismissed,
             "window": _UNRESOLVED_WINDOW,
         },
     )
     return ResolutionResult(
-        unresolved_warnings=warnings,
-        unresolved_errors=errors,
+        unresolved_warnings=warning.net,
+        unresolved_errors=error.net,
         reopened=len(reopened),
         auto_dismissed=len(auto_dismissed),
     )

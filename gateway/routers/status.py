@@ -76,7 +76,9 @@ def get_stats_dashboard(
     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
     - average turn duration: Loki's unified event stream in 12-hour shards
-    - warning/error counts: one grouped Loki query per 12-hour shard
+    - warning/error counts: per-class counts via the resolution daemon's
+      grouped query (12h shards), split into total / dismissed / net with
+      the daemon's class arithmetic over the SELECTED window (task #1935)
     - `total_events`: archived event row count — frozen historical constant
       (task #1281 parity run; PG events dropped; not a live gauge)
 
@@ -166,44 +168,49 @@ def get_stats_dashboard(
         )
         avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
 
-        # events.level is lowercase (W9 switch; agent_events stored loguru's
-        # uppercase 'WARNING'/'ERROR'). critical folds into 'error' so the
-        # operator gauge sees daemon/schema-drift failures.
-        grouped_levels = _inspect_pg.query_loki_shards(
+        # Per-class counts over the selected window (12h shards), split by
+        # the daemon's class arithmetic (resolution.level_splits) (task #1935).
+        from services.events_maintenance import resolution as _resolution
+
+        class_counts: dict[Any, int] = {}
+        for shard_counts in _inspect_pg.query_loki_shards(
             window_start,
             now,
-            lambda shard_start, shard_end: loki_events.count_grouped(
-                group_by="level",
-                level_min="warning",
-                categories=["telemetry", "log"],
-                cluster=cluster,
+            lambda shard_start, shard_end: loki_events.count_event_classes(
                 from_=shard_start,
                 to=shard_end,
+                cluster=cluster,
                 timeout_s=8.0,
             ),
             shard_width=timedelta(hours=12),
-        )
-        warn_err = {
-            "warning": sum(grouped.get("warning", 0) for grouped in grouped_levels),
-            "error": sum(
-                grouped.get("error", 0) + grouped.get("critical", 0) for grouped in grouped_levels
-            ),
-        }
+        ):
+            for event_class, count in shard_counts.items():
+                class_counts[event_class] = class_counts.get(event_class, 0) + count
     except loki_query_budget.LokiQueryBudgetError:
         # Preserve the process-wide admission handler's machine-readable reason.
         raise
     except httpx.HTTPError as exc:
         raise_backend_unavailable(exc)
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
-        live_count = int(cur.fetchone()[0])
+    with request.app.state.db_pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
+            live_count = int(cur.fetchone()[0])
 
-        # total_events is a historical constant — the frozen pre-cutover archive's
-        # parity row count (task #1281), not a live gauge: the PG events table was
-        # dropped with the #1823 cleanup and the dashboard's "total events" card
-        # shows the archive's size. See ARCHIVE_TOTAL_ROWS.
-        total_events = ARCHIVE_TOTAL_ROWS
+            # total_events is a historical constant — the frozen pre-cutover
+            # archive's parity row count (task #1281), not a live gauge: the
+            # PG events table was dropped with the #1823 cleanup and the
+            # dashboard's "total events" card shows the archive's size. See
+            # ARCHIVE_TOTAL_ROWS.
+            total_events = ARCHIVE_TOTAL_ROWS
+
+        # Active class-wide dismissals, read like the daemon reads them.
+        splits = _resolution.level_splits(
+            class_counts,
+            {dismissal.event_class for dismissal in _resolution.active_dismissals(conn)},
+        )
+    warning = splits.get("warning", _resolution.LevelSplit(0, 0, 0))
+    error = splits.get("error", _resolution.LevelSplit(0, 0, 0))
 
     response = StatsDashboard(
         live_count=live_count,
@@ -216,8 +223,12 @@ def get_stats_dashboard(
         ),
         cost_usd=window_cost_usd,
         avg_turn_seconds=avg_turn_seconds,
-        warnings=warn_err.get("warning", 0),
-        errors=warn_err.get("error", 0),
+        warnings=warning.total,
+        errors=error.total,
+        warnings_dismissed=warning.dismissed,
+        warnings_net=warning.net,
+        errors_dismissed=error.dismissed,
+        errors_net=error.net,
         total_events=total_events,
     )
     _stats_dashboard.cache_put(hours, response)

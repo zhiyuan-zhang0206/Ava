@@ -282,6 +282,8 @@ def test_class_resolution_markers_are_telemetry_category() -> None:
     assert payload_keys("resolution_status") == (
         "unresolved_warnings",
         "unresolved_errors",
+        "dismissed_warnings",
+        "dismissed_errors",
         "window",
     )
 

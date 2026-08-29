@@ -7,8 +7,9 @@ pre-retention gaps from the 90-day filtered JSONL replay source
 (`services.events_maintenance.jsonl_replay`), runs the checkpoint reaper /
 blob vacuum (checkpoint retention), and samples checkpoint table sizes. A
 separate five-minute resolution slice reads immutable Loki event classes,
-combines them with `event_dismissals`, and publishes unresolved warning/error
-gauges (`services.events_maintenance.resolution`). The PG `events` archive
+combines them with `event_dismissals`, and publishes unresolved + dismissed
+warning/error gauges (`services.events_maintenance.resolution`); the gateway
+stats dashboard reuses the same class arithmetic for its selected window. The PG `events` archive
 maintenance slices (partitions / retention / table retention / reindex) were
 removed with the task #1281/#1823 cleanup — the table was dropped.
 See `services.events_maintenance.daemon` for the poll loops.
