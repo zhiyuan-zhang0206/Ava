@@ -17,6 +17,7 @@ from services.pitr.restore_proof import (
     RestoreSpaceBudget,
     prove_candidate,
     publish_candidate_proof,
+    verify_candidate_proof,
 )
 
 
@@ -203,11 +204,16 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
     assert pending.protected is True
     assert calls == ["live", "download", "restore", "live"]
     assert not (tmp_path / "protected-manifests" / f"{candidate.chain_id}.json").exists()
-    protected = publish_candidate_proof(
+    verified = verify_candidate_proof(
         candidate=candidate,
         root=tmp_path,
         ack_dir=tmp_path / "ack",
+    )
+    protected = publish_candidate_proof(
+        candidate=candidate,
+        root=tmp_path,
         prefix="pitr",
+        verified=verified,
         publisher=Publisher(),
     )
 

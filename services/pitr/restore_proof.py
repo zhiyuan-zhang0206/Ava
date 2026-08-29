@@ -633,15 +633,13 @@ def prove_candidate(  # noqa: PLR0915
                 _fsync_dir(owner.parent)
 
 
-def publish_candidate_proof(
+def verify_candidate_proof(
     *,
     candidate: CandidateManifest,
     root: Path,
     ack_dir: Path,
-    prefix: str,
-    publisher: ProtectedManifestPublisher,
 ) -> ProtectedManifest:
-    """Publish an already-durable proof from the controller process only."""
+    """Verify durable proof against authoritative local candidate and ACK evidence."""
 
     local = root / "protected-manifests" / f"{candidate.chain_id}.json"
     pending = root / "protected-pending" / f"{candidate.chain_id}.json"
@@ -655,9 +653,33 @@ def publish_candidate_proof(
     authoritative_wal = wal_objects_from_acks(ack_dir=ack_dir, archive_names=archive_names)
     if protected.base != _base_restore_object(candidate) or protected.wal != authoritative_wal:
         raise RestoreProofError("pending proof differs from authoritative object generations")
-    resumed = _resume_protected_publish(
-        root=root, candidate=candidate, prefix=prefix, publisher=publisher
-    )
-    if resumed is None:
-        raise RestoreProofError("protected publication lost its durable proof")
-    return resumed
+    return protected
+
+
+def publish_candidate_proof(
+    *,
+    candidate: CandidateManifest,
+    root: Path,
+    prefix: str,
+    verified: ProtectedManifest,
+    publisher: ProtectedManifestPublisher,
+) -> ProtectedManifest:
+    """Publish bytes already verified before publisher authority was constructed."""
+
+    payload = verified.to_json().encode()
+    pending = root / "protected-pending" / f"{candidate.chain_id}.json"
+    local = root / "protected-manifests" / f"{candidate.chain_id}.json"
+    source = local if local.is_file() else pending if pending.is_file() else None
+    if source is None or source.read_bytes() != payload:
+        raise RestoreProofError("verified proof changed before publication")
+    if source == pending:
+        _publish_protected(
+            root=root,
+            candidate=candidate,
+            prefix=prefix,
+            payload=payload,
+            publisher=publisher,
+        )
+        pending.unlink()
+        _fsync_dir(pending.parent)
+    return verified
