@@ -5,7 +5,6 @@ from shared.events.contract import (
     LLM_ERROR_FAMILY,
     OPS_BUCKET_S,
     OPS_GRID_ORIGIN,
-    RETENTION_BY_CATEGORY,
     TIER_BY_EVENT,
     Category,
     EventSpec,
@@ -13,7 +12,6 @@ from shared.events.contract import (
     category_for_kind,
     family_events,
     payload_keys,
-    retention_days,
     telemetry_events,
     tier_for,
 )
@@ -23,7 +21,6 @@ __all__ = [
     "LLM_ERROR_FAMILY",
     "OPS_BUCKET_S",
     "OPS_GRID_ORIGIN",
-    "RETENTION_BY_CATEGORY",
     "TIER_BY_EVENT",
     "Category",
     "EventSpec",
@@ -31,7 +28,6 @@ __all__ = [
     "category_for_kind",
     "family_events",
     "payload_keys",
-    "retention_days",
     "telemetry_events",
     "tier_for",
 ]

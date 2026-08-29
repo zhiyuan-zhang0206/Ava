@@ -2,7 +2,7 @@
 
 The registry is the single source of truth for event names (design-r2 §4.3):
 one declaration per event; every derived view (category projection, families,
-payload keys, retention) is a pure function of it.
+payload keys) is a pure function of it.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from shared.events.contract import (
     category_for_kind,
     family_events,
     payload_keys,
-    retention_days,
     telemetry_events,
     tier_for,
 )
@@ -231,13 +230,6 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
 
 def test_payload_keys_unknown_event_empty() -> None:
     assert payload_keys("no_such_event") == ()
-
-
-def test_retention_by_category_and_override() -> None:
-    assert retention_days("llm_usage") == 90  # telemetry
-    assert retention_days("spawn") == 365  # audit
-    assert retention_days("log") == 30  # log
-    assert retention_days("no_such_event") == 30
 
 
 def test_grid_constants_are_single_definitions() -> None:
