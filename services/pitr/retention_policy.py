@@ -144,8 +144,7 @@ def _pin_candidate(
     for identity, item in inventory.items():
         if item.archive_name in required:
             keep[identity] = reason
-            if item.archive_name is not None:
-                seen.add(item.archive_name)
+            seen.add(item.archive_name)
     if seen != required:
         blockers.add("candidate WAL or timeline ancestry is missing")
 
