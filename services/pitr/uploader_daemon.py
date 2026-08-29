@@ -5,12 +5,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from dataclasses import asdict
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.gcs_store import GCSObjectStore
 from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
-from services.pitr.uploader import PitrUploader, RemoteCollisionError, WalSourceTooLargeError
+from services.pitr.uploader import (
+    AckCorruptionError,
+    PitrUploader,
+    RemoteCollisionError,
+    WalSourceTooLargeError,
+)
+from shared import health_schema
 from shared.config import settings
 from shared.daemon_health import Liveness, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -47,6 +54,44 @@ def build_uploader() -> PitrUploader:
 
 
 _CRITICAL_BACKOFF_S = 300.0
+_BACKOFF_HEARTBEAT_S = 30.0
+
+
+def _disk_components(
+    uploader: PitrUploader, *, warn_bytes: int, hard_bytes: int
+) -> list[dict[str, object]]:
+    footprint = uploader.disk_footprint()
+    total = footprint.total_bytes
+    if total >= hard_bytes:
+        status = health_schema.DOWN
+        detail = "combined WAL spool and staging reached the hard disk bound"
+    elif total >= warn_bytes:
+        status = health_schema.DEGRADED
+        detail = "combined WAL spool and staging reached the warning disk bound"
+    else:
+        status = health_schema.OK
+        detail = None
+    return [health_schema.component("pitr_disk", status, detail=detail)]
+
+
+async def _wait_with_heartbeat(
+    stop: asyncio.Event,
+    delay: float,
+    liveness: Liveness | None,
+    *,
+    heartbeat_interval: float = _BACKOFF_HEARTBEAT_S,
+) -> None:
+    """Wait interruptibly while reporting that intentional backoff is alive."""
+
+    deadline = time.monotonic() + delay
+    while not stop.is_set():
+        if liveness is not None:
+            liveness.beat()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=min(remaining, heartbeat_interval))
 
 
 async def upload_loop(
@@ -80,13 +125,13 @@ async def upload_loop(
                 _log.warning("PITR upload temporarily failed; retrying after bounded backoff")
             except (
                 PermanentObjectStoreError,
+                AckCorruptionError,
                 RemoteCollisionError,
                 WalSourceTooLargeError,
             ) as exc:
                 _log.error("PITR upload critical (operator action needed): %s", exc)
                 delay = _CRITICAL_BACKOFF_S
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=delay)
+        await _wait_with_heartbeat(stop, delay, liveness)
 
 
 async def run() -> None:
@@ -106,9 +151,17 @@ async def run() -> None:
             }
         }
 
+    def disk_components() -> list[dict[str, object]]:
+        return _disk_components(
+            uploader,
+            warn_bytes=settings.physical_backup.pitr_spool_warn_bytes,
+            hard_bytes=settings.physical_backup.pitr_spool_hard_bytes,
+        )
+
     server = await start_health_server(
         "pitr_uploader",
         liveness=liveness,
+        components=disk_components,
         extra=disk_health,
     )
     try:

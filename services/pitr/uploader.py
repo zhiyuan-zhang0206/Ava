@@ -67,12 +67,19 @@ def _digest(path: Path) -> tuple[str, int]:
     return value.hexdigest(), size
 
 
-def _file_crc32c(path: Path) -> str:
-    """Base64 crc32c of the staging ciphertext — the value GCS reports back."""
+def _verify_staged_ciphertext(path: Path, source: Path, *, key: bytes, plan: EncryptionPlan) -> str:
+    """Verify a crash-preserved stage byte-for-byte against its durable plan."""
+
     checksum = google_crc32c.Checksum()  # pyright: ignore[reportUnknownMemberType]
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            checksum.update(chunk)  # pyright: ignore[reportUnknownMemberType]
+    with path.open("rb") as staged, open_encrypted(source, key=key, plan=plan) as expected:
+        while True:
+            staged_chunk = staged.read(1024 * 1024)
+            expected_chunk = expected.read(1024 * 1024)
+            if staged_chunk != expected_chunk:
+                raise AckCorruptionError("staged WAL ciphertext differs from its plan")
+            if not staged_chunk:
+                break
+            checksum.update(staged_chunk)  # pyright: ignore[reportUnknownMemberType]
     return base64.b64encode(checksum.digest()).decode("ascii")
 
 
@@ -151,16 +158,7 @@ class PitrUploader:
     def _load_or_create_plan(self, source: Path, object_name: str) -> tuple[EncryptionPlan, Path]:
         plan_path = self._staging / f"{source.name}.plan.json"
         if plan_path.exists():
-            try:
-                plan = EncryptionPlan(**json.loads(plan_path.read_text()))
-            except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise AckCorruptionError("invalid encryption plan") from exc
-            # open_encrypted performs the source identity check before any remote I/O.
-            with open_encrypted(source, key=self._key, plan=plan):
-                pass
-            if plan.object_name != object_name or plan.key_id != self._key_id:
-                raise AckCorruptionError("encryption plan targets a different immutable object")
-            return plan, plan_path
+            return self._load_plan(source, object_name, plan_path), plan_path
         plan = create_plan(source, key_id=self._key_id, object_name=object_name)
         fd, raw = tempfile.mkstemp(prefix=f".{plan_path.name}.", dir=self._staging)
         staged = Path(raw)
@@ -175,6 +173,17 @@ class PitrUploader:
         finally:
             staged.unlink(missing_ok=True)
         return plan, plan_path
+
+    def _load_plan(self, source: Path, object_name: str, plan_path: Path) -> EncryptionPlan:
+        try:
+            plan = EncryptionPlan(**json.loads(plan_path.read_text()))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise AckCorruptionError("invalid encryption plan") from exc
+        with open_encrypted(source, key=self._key, plan=plan):
+            pass
+        if plan.object_name != object_name or plan.key_id != self._key_id:
+            raise AckCorruptionError("encryption plan targets a different immutable object")
+        return plan
 
     def _write_staging(self, source: Path, plan: EncryptionPlan) -> Path:
         """Materialize the encrypted archive as a real seekable file.
@@ -214,6 +223,33 @@ class PitrUploader:
             staged.unlink(missing_ok=True)
         return staging_path
 
+    def _cleanup_acknowledged_local_files(
+        self, source: Path, ack: AckManifest, object_name: str
+    ) -> None:
+        """Reconcile any crash-left stage/plan before deleting acknowledged WAL."""
+
+        plan_path = self._staging / f"{source.name}.plan.json"
+        staging_path = self._staging / f"{source.name}.enc"
+        if staging_path.exists() and not plan_path.exists():
+            raise AckCorruptionError("acknowledged WAL stage has no encryption plan")
+        if plan_path.exists():
+            plan = self._load_plan(source, object_name, plan_path)
+            if plan.ciphertext_size != ack.ciphertext_size:
+                raise AckCorruptionError("acknowledged WAL plan differs from ACK")
+            if staging_path.exists():
+                crc32c = _verify_staged_ciphertext(staging_path, source, key=self._key, plan=plan)
+                if (
+                    staging_path.stat().st_size != ack.ciphertext_size
+                    or crc32c != ack.ciphertext_crc32c
+                ):
+                    raise AckCorruptionError("acknowledged WAL stage differs from ACK")
+                staging_path.unlink()
+                _fsync_dir(self._staging)
+            plan_path.unlink()
+            _fsync_dir(self._staging)
+        source.unlink()
+        _fsync_dir(self._spool)
+
     def upload_one(self, source: Path) -> AckManifest:
         if not archive_name_is_valid(source.name):
             raise ValueError("unsupported archive filename")
@@ -228,16 +264,24 @@ class PitrUploader:
         ack_path = self._ack_dir / f"{source.name}.ack.json"
         if ack_path.exists():
             ack = self._read_ack(ack_path)
-            if ack.source_sha256 != source_hash or ack.source_size != source_size:
+            object_name = self._object_name(source.name)
+            if (
+                ack.archive_name != source.name
+                or ack.source_sha256 != source_hash
+                or ack.source_size != source_size
+                or ack.object_name != object_name
+                or ack.encryption_format != MAGIC.decode()
+                or ack.key_id != self._key_id
+                or ack.generation <= 0
+            ):
                 raise AckCorruptionError("ACK does not describe the local spool object")
-            source.unlink()
-            _fsync_dir(self._spool)
+            self._cleanup_acknowledged_local_files(source, ack, object_name)
             return ack
 
         object_name = self._object_name(source.name)
-        plan, plan_path = self._load_or_create_plan(source, object_name)
+        plan, _ = self._load_or_create_plan(source, object_name)
         staging_path = self._write_staging(source, plan)
-        expected_crc = _file_crc32c(staging_path)
+        expected_crc = _verify_staged_ciphertext(staging_path, source, key=self._key, plan=plan)
         metadata = {
             "ava-archive-name": source.name,
             "ava-source-sha256": plan.source_sha256,
@@ -261,11 +305,7 @@ class PitrUploader:
             datetime.now(UTC).isoformat(),
         )
         self._write_ack(ack, ack_path)
-        staging_path.unlink()
-        plan_path.unlink()
-        _fsync_dir(self._staging)
-        source.unlink()
-        _fsync_dir(self._spool)
+        self._cleanup_acknowledged_local_files(source, ack, object_name)
         return ack
 
     @staticmethod
