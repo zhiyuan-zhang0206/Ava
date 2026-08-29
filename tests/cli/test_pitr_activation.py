@@ -11,6 +11,7 @@ import pytest
 
 from cli.commands import _pitr_activation as activation
 from ops.pitr_restart import PitrRestartContinuation
+from services.pitr.activation_runtime import archiver_reached_target
 from services.pitr.activation_state import ActivationRecord, load_record, write_record
 
 
@@ -228,13 +229,13 @@ def test_pre_activation_env_evidence_and_baseline_share_one_exact_capture(
 
 def test_archiver_target_is_timeline_aware_and_allows_later_success() -> None:
     target = "00000001000000000000000A"
-    assert activation._archiver_reached_target(
+    assert archiver_reached_target(
         last_archived="00000001000000000000000B", timeline="1", target=target
     )
-    assert not activation._archiver_reached_target(
+    assert not archiver_reached_target(
         last_archived="00000002000000000000000B", timeline="1", target=target
     )
-    assert not activation._archiver_reached_target(
+    assert not archiver_reached_target(
         last_archived="000000010000000000000009", timeline="1", target=target
     )
 
