@@ -576,7 +576,7 @@ class TestMemoryEntries:
         monkeypatch.setattr(
             _gateway_client,
             "memory_search",
-            lambda q, k: seen.update(q=q, k=k) or [],  # pyright: ignore[reportUnknownArgumentType]
+            lambda q, k, **_kw: seen.update(q=q, k=k) or [],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
 
         memory_plugin._search(("query",))  # pyright: ignore[reportArgumentType]
@@ -586,7 +586,7 @@ class TestMemoryEntries:
         from ava import _gateway_client
         from ava_builtins.plugins.ava_memory import sdk as memory_plugin
 
-        monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k: [])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="query must be a string"):
             memory_plugin._search(("a", "b"))  # pyright: ignore[reportArgumentType]
 

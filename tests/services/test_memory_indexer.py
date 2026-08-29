@@ -104,9 +104,16 @@ def _dummy_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
 def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Neutralize shared.resilience backoff sleeps so retry-path tests do
     not hang; the retry loop itself is still exercised (call counts). The
-    embedder's policy is a module constant (R2-D), no longer settings-driven."""
+    embedder's policy is a module constant (R2-D), no longer settings-driven.
+    `_asleep` must be a REAL coroutine function: `aretry` awaits it, so a sync
+    lambda turns every async retry into `TypeError: object NoneType can't be
+    used in 'await' expression`."""
     monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.resilience._asleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    async def _no_asleep(_s: float) -> None:
+        return None
+
+    monkeypatch.setattr("shared.resilience._asleep", _no_asleep)
 
 
 @pytest.fixture(autouse=True)
@@ -184,7 +191,53 @@ def test_embed_http_error_status_retries_then_raises(monkeypatch: pytest.MonkeyP
     with pytest.raises(embedder.EmbeddingAPIError, match="failed after"):
         embedder.embed_query("hello")
 
-    assert fake.call_count == embedder._EMBED_POLICY.max_attempts
+    assert fake.call_count == embedder._QUERY_EMBED_POLICY.max_attempts
+
+
+def test_query_embed_policy_is_lighter_than_document_policy() -> None:
+    """Query embeds and indexer document embeds answer to different masters
+    (task #2003/B): a search query sits inside the gateway's own search
+    deadline, so the indexer's 4-attempt schedule (1->2->4->8s) could spend
+    the whole budget retrying a 429 the caller watches expire — the caller
+    retries the *search*, the daemon has no caller and needs the resilience.
+    Locks the split, so a future consolidation cannot quietly reunite them."""
+    assert embedder._QUERY_EMBED_POLICY.max_attempts < embedder._EMBED_POLICY.max_attempts
+
+
+def test_embed_query_async_uses_the_query_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gateway's async query embed retries on the lighter query schedule
+    (2 attempts), not the indexer's 4: a 429 during a fleet wake must not burn
+    the search deadline on retries."""
+
+    class _FailingClient:
+        """AsyncClient stand-in whose POST always raises a transient error.
+
+        A class-level counter: the client instance is constructed inside
+        `embed_query_async`, so the test cannot reach the instance — and a
+        class (not a lambda) keeps pyright happy about `AsyncClient`'s type.
+        """
+
+        post_calls: int = 0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> _FailingClient:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(self, *args: object, **kwargs: object) -> None:
+            _FailingClient.post_calls += 1
+            raise httpx.ConnectError("simulated network failure")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FailingClient)
+    with pytest.raises(embedder.EmbeddingAPIError, match="failed after 2 attempts"):
+        asyncio.run(embedder.embed_query_async("hello"))
+    assert _FailingClient.post_calls == embedder._QUERY_EMBED_POLICY.max_attempts
 
 
 def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:

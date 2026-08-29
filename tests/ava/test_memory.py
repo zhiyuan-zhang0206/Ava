@@ -40,8 +40,8 @@ def _wrap_memory_search(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from ava import _gateway_client as _client
 
-    def _wrapper(inner, query: str, k: int = 5):
-        results = _client.memory_search(query, k)
+    def _wrapper(inner, query: str, k: int = 5, *, timeout: float | None = None):
+        results = _client.memory_search(query, k, timeout=timeout)
         return [(ava.memory.PATH / r.path, r.description, list(r.tags)) for r in results]
 
     ava.extend.wrap("memory.search", _wrapper)
@@ -77,7 +77,7 @@ def test_search_forwards_query_and_k_to_gateway(monkeypatch: pytest.MonkeyPatch)
 
     captured: dict[str, Any] = {}
 
-    def _fake(query: str, k: int) -> list[dict[str, str]]:
+    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
         captured["query"] = query
         captured["k"] = k
         return []
@@ -93,13 +93,54 @@ def test_search_default_k_is_5(monkeypatch: pytest.MonkeyPatch) -> None:
 
     captured: dict[str, Any] = {}
 
-    def _fake(query: str, k: int) -> list[dict[str, str]]:
+    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
         captured["k"] = k
         return []
 
     monkeypatch.setattr(_gateway_client, "memory_search", _fake)
     ava.memory.search("q")
     assert captured["k"] == 5
+
+
+def test_search_defaults_timeout_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No `timeout` passed → the client's dedicated default applies
+    (gateway deadline + margin); the SDK does not invent one."""
+    from ava import _gateway_client
+
+    captured: dict[str, Any] = {}
+
+    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
+        captured["timeout"] = timeout
+        return []
+
+    monkeypatch.setattr(_gateway_client, "memory_search", _fake)
+    ava.memory.search("q")
+    assert captured["timeout"] is None
+
+
+def test_search_forwards_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller-provided `timeout` reaches the gateway client unmodified."""
+    from ava import _gateway_client
+
+    captured: dict[str, Any] = {}
+
+    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
+        captured["timeout"] = timeout
+        return []
+
+    monkeypatch.setattr(_gateway_client, "memory_search", _fake)
+    ava.memory.search("q", timeout=7.0)
+    assert captured["timeout"] == 7.0
+
+
+def test_search_rejects_non_number_timeout() -> None:
+    """A non-numeric `timeout` fails loud at the SDK boundary — the public
+    path's coerce, not the wire (the fixture wrapper bypasses `_search`'s
+    validation, so exercise `_search` directly)."""
+    from ava_builtins.plugins.ava_memory.sdk import _search as sdk_search
+
+    with pytest.raises(TypeError, match="timeout must be"):
+        sdk_search("q", timeout="fast")  # type: ignore[arg-type]
 
 
 def test_search_prefixes_paths_with_memory_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,7 +156,7 @@ def test_search_prefixes_paths_with_memory_path(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         _gateway_client,
         "memory_search",
-        lambda _q, _k: [  # pyright: ignore[reportUnknownArgumentType]
+        lambda _q, _k, **_kw: [  # pyright: ignore[reportUnknownArgumentType]
             MemorySearchResult(path="notes/foo.md", description="desc1"),
             MemorySearchResult(path="bar.md", description=""),
         ],
@@ -136,7 +177,7 @@ def test_search_empty_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """Gateway returns [] (no match) → SDK also returns []."""
     from ava import _gateway_client
 
-    monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
     assert ava.memory.search("nothing matches") == []
 
 
@@ -193,7 +234,7 @@ def test_search_returns_path_description_and_tags(
     monkeypatch.setattr(
         _gateway_client,
         "memory_search",
-        lambda _q, _k: [  # pyright: ignore[reportUnknownArgumentType]
+        lambda _q, _k, **_kw: [  # pyright: ignore[reportUnknownArgumentType]
             MemorySearchResult(path="notes/foo.md", description="My note about foo"),
             MemorySearchResult(path="bar.md", description=""),
         ],
@@ -213,7 +254,7 @@ def test_search_returns_tags(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         _gateway_client,
         "memory_search",
-        lambda _q, _k: [  # pyright: ignore[reportUnknownArgumentType]
+        lambda _q, _k, **_kw: [  # pyright: ignore[reportUnknownArgumentType]
             MemorySearchResult(
                 path="notes/project.md",
                 description="Project note",
@@ -229,7 +270,7 @@ def test_search_empty_result_desc(monkeypatch: pytest.MonkeyPatch) -> None:
     """No matches returns empty list."""
     from ava import _gateway_client
 
-    monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
     assert ava.memory.search("nothing") == []
 
 
@@ -239,7 +280,7 @@ def test_search_default_k_desc(monkeypatch: pytest.MonkeyPatch) -> None:
 
     captured: dict[str, int] = {}
 
-    def _fake(query: str, k: int) -> list[dict[str, str]]:
+    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
         captured["k"] = k
         return []
 

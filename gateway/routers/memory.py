@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -68,6 +70,30 @@ def _search_semaphore() -> asyncio.Semaphore:
     constant, so a deployment can widen or narrow it without a code change
     (config panel or env; takes effect on gateway restart)."""
     return asyncio.Semaphore(settings.services.memory_search_max_concurrency)
+
+
+@asynccontextmanager
+async def _bounded_semaphore(semaphore: asyncio.Semaphore) -> AsyncGenerator[None]:
+    """Acquire a search-gate permit with a short queue budget.
+
+    The overall search deadline already covers the acquire, but a deep queue
+    under that deadline is exactly the 2026-08-29 fleet-wake storm: every
+    late request waits the full deadline and endpoint latency scales with
+    queue length. Failing fast on the acquire — a permit not free within
+    `memory_search_acquire_timeout_seconds` is congestion, not a backend the
+    caller should wait out — answers 503 in ~1s, so passive recall's own
+    deadline degrades in ~1s instead of ~5s and an explicit search learns
+    immediately instead of queueing.
+    """
+    budget = settings.services.memory_search_acquire_timeout_seconds
+    try:
+        await asyncio.wait_for(semaphore.acquire(), timeout=budget)
+    except TimeoutError as exc:
+        raise IndexerUnavailable(f"memory search concurrency gate busy after {budget:g}s") from exc
+    try:
+        yield
+    finally:
+        semaphore.release()
 
 
 # Files reserved by OKF spec — excluded from concept graph
@@ -216,15 +242,22 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
     # The deadline wraps the semaphore acquires as well as the two phases: a
     # request parked in acquire behind a stalled peer is just as stuck as one
     # parked in the backend, and only a bound that covers both guarantees the
-    # permit comes back. On expiry the CancelledError unwinds through
+    # permit comes back. Each acquire is separately bounded by
+    # `memory_search_acquire_timeout_seconds` (`_bounded_semaphore`), which
+    # is what turns a congested gate into a ~1s 503 instead of a wait until
+    # the overall deadline. On expiry the CancelledError unwinds through
     # `async with`, whose release is synchronous — so the permit is returned
     # even though the cleanup awaits below never get to run.
     deadline = settings.services.memory_search_deadline_seconds
     try:
         async with asyncio.timeout(deadline):
             try:
-                async with _search_semaphore():
+                async with _bounded_semaphore(_search_semaphore()):
                     query_vector = await embedder.embed_query_async(body.query)
+            except IndexerUnavailable:
+                # The gate was busy (`_bounded_semaphore`'s fast-fail) — a
+                # modelled state, not a backend failure; do not re-wrap it.
+                raise
             except Exception as exc:
                 # Symmetric with the backend phase below, and with what this
                 # endpoint documents raising. Catching only EmbeddingAPIError
@@ -240,8 +273,10 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
                 raise IndexerUnavailable(f"embed query failed: {exc}") from exc
 
             try:
-                async with _search_semaphore():
+                async with _bounded_semaphore(_search_semaphore()):
                     abs_paths = await _backend_topk(query_vector, body.k, deadline)
+            except IndexerUnavailable:
+                raise
             except Exception as exc:
                 raise IndexerUnavailable(f"memory search backend failed: {exc}") from exc
     except TimeoutError as exc:
