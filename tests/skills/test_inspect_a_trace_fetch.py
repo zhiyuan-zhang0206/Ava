@@ -12,7 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -38,6 +38,7 @@ _OTHER = "ffeeddccbbaa99887766554433221100"
 _SPAN_A = "0102030405060708"
 _SPAN_B = "1112131415161718"
 _SPAN_C = "2122232425262728"
+_SPAN_D = "3132333435363738"
 
 
 def _span(
@@ -196,11 +197,16 @@ def test_fetch_from_mirror_merges_across_rotation_and_skips_bad_lines(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     active = tmp_path / "spans.jsonl"
-    rotated = tmp_path / "spans-2026-08-25T16-14-01.621-size.jsonl"
+    # Relative date: the retention window slides with the wall clock — a hard
+    # coded date becomes a CI time bomb (2026-09-24 for 2026-08-25 + days=30).
+    rotated_day = datetime.now(UTC).date() - timedelta(days=1)
+    rotated = tmp_path / f"spans-{rotated_day}T16-14-01.621-size.jsonl"
+    legacy_unpadded = ft._trace_id_b64(_TRACE).rstrip("=")
     active.write_text(
         chr(10).join(
             [
                 json.dumps(_envelope(_span(_SPAN_A), _span(_SPAN_B, trace_id=_OTHER))),
+                json.dumps(_envelope(_span(_SPAN_D, trace_id=legacy_unpadded))),
                 "not-json-at-all",
             ]
         )
@@ -223,4 +229,4 @@ def test_fetch_from_mirror_merges_across_rotation_and_skips_bad_lines(
     spans = ft.fetch_from_mirror(args, _TRACE)
     capsys.readouterr()
 
-    assert sorted(s["span_id"] for s in spans) == sorted([_SPAN_A, _SPAN_C])
+    assert sorted(s["span_id"] for s in spans) == sorted([_SPAN_A, _SPAN_C, _SPAN_D])

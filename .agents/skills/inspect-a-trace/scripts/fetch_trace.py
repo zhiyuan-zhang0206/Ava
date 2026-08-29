@@ -176,8 +176,9 @@ def cmd_search(args) -> int:
         start_ns = int(t.get("startTimeUnixNano", 0))
         started = datetime.fromtimestamp(start_ns / 1e9, tz=UTC).isoformat()
         # Tempo search trims leading zero nibbles; pad back so the id pastes
-        # straight into --trace-id.
-        trace_id = t["traceID"].zfill(32)
+        # straight into --trace-id. Lowercase too: the ids are hex, and
+        # cmd_fetch accepts [0-9a-f] only.
+        trace_id = t["traceID"].lower().zfill(32)
         print(
             f"  {trace_id}  dur={t.get('durationMs')}ms  "
             f"spans={t.get('spanSet', {}).get('matched')}  root={t.get('rootServiceName')}  "
@@ -239,8 +240,12 @@ def _mirror_files(directory: Path, days: int) -> list[Path]:
 
 def fetch_from_mirror(args, hex_trace_id: str) -> list[dict]:
     directory = _mirror_dir(args)
-    # Current mirror lines carry hex ids; legacy pre-#1266 lines carry base64.
-    needles = {hex_trace_id, _trace_id_b64(hex_trace_id)}
+    # Current mirror lines carry hex ids; legacy pre-#1266 lines carry
+    # base64 (protojson, padded, but unpadded writers exist) — include the
+    # unpadded form too, or the prefilter would drop those lines before
+    # `_id_to_hex`'s padding fallback ever runs.
+    b64_id = _trace_id_b64(hex_trace_id)
+    needles = {hex_trace_id, b64_id, b64_id.rstrip("=")}
     files = _mirror_files(directory, args.days)
     print(f"scanning {len(files)} mirror file(s) in {directory} (days={args.days})")
     # A trace can straddle a rotation boundary (the sidecar rotates on size),
