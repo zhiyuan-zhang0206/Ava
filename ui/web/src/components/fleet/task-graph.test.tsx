@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskRow } from "@/lib/types";
 import type { TasksResult } from "@/lib/use-tasks";
-import { resetMockSettings } from "@/test-support/user-settings-mock";
+import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
 
 import { FORCE_DEFAULTS, FORCE_GROUPS, TASK_FORCE_GROUPS, type ForceGroup } from "./force-controls";
 import { TASK_FORCE_KEY } from "./task-graph";
@@ -800,5 +800,68 @@ describe("TaskGraph layout controls", () => {
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const wrapper = screen.getByLabelText("Graph layout settings").parentElement!;
     expect([...wrapper.classList]).toEqual(expect.arrayContaining(["absolute", "left-3", "top-3"]));
+  });
+});
+describe("TaskGraph time filter (Task #1969)", () => {
+  // The window filter is applied BACKEND-side (GET /api/tasks?window=); the
+  // board's job is to select the window (DB-backed, default 24h), pass it to
+  // useTasks, and render server-delivered out-of-window ancestors (ghost
+  // rows) dimmed in the graph — the kanban hides them (they are graph-only
+  // scaffolding).
+
+  it("defaults to the 24h window", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
+    const sel = screen.getByLabelText<HTMLSelectElement>("Time window");
+    expect(sel.value).toBe("24h");
+    expect([...sel.options].map((o) => o.value)).toEqual(["24h", "7d", "30d", "all"]);
+  });
+
+  it("persists the window choice as a user setting", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
+    fireEvent.change(screen.getByLabelText("Time window"), { target: { value: "30d" } });
+    expect(mockSetSettingCalls()).toContainEqual({ key: "display.task_window", value: "30d" });
+  });
+
+  it("falls back to 24h when the stored window is garbage", async () => {
+    resetMockSettings({ "display.task_window": "banana" });
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
+    expect(screen.getByLabelText<HTMLSelectElement>("Time window").value).toBe("24h");
+  });
+
+  it("renders server-delivered out-of-window ancestors (ghost rows) dimmed in the graph", async () => {
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      task(1815, { title: "old-parent", status: "done", parent_id: 1, ghost: true }),
+      task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
+    ];
+    useTasks.mockReturnValue(ok(tasks));
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
+    // The ghost ancestor renders dimmed even though it is not a
+    // toggle-hidden parent (the server flagged it).
+    const ghostG = screen.getAllByText(/#1815/)[0].closest("g")!;
+    expect(ghostG.classList.contains("opacity-40")).toBe(true);
+    // The child is a normal node.
+    expect(screen.getAllByText(/#1848/)[0].closest("g")!.classList.contains("opacity-40")).toBe(false);
+  });
+
+  it("hides ghost ancestors in the kanban (they are graph-only scaffolding)", async () => {
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      task(1815, { title: "old-parent", status: "done", parent_id: 1, ghost: true }),
+      task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
+    ];
+    useTasks.mockReturnValue(ok(tasks));
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
+    fireEvent.click(screen.getByText("Kanban"));
+    await screen.findByText(/child/);
+    expect(screen.queryByText(/old-parent/)).toBeNull();
   });
 });

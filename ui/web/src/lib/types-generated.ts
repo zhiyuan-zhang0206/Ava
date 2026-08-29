@@ -3412,7 +3412,13 @@ export interface paths {
         };
         /**
          * Get Tasks
-         * @description Return every task in the agent_tasks table, newest first.
+         * @description Return the task registry, newest first.
+         *
+         *     `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
+         *     (updated_at) on the backend, so the task graph's default 7-day view never
+         *     pulls the full registry. A windowed list still carries every kept task's
+         *     out-of-window ancestors flagged ghost=True (see _windowed_tasks); without
+         *     a window the full table is returned unchanged.
          *
          *     No pagination — the task registry is bounded (tasks are created by agents;
          *     closed tasks are kept). Order by created_at DESC so the newest tasks
@@ -7068,6 +7074,11 @@ export interface components {
              * @default 0
              */
             reminder_count: number;
+            /**
+             * Ghost
+             * @default false
+             */
+            ghost: boolean;
         };
         /**
          * TaskUpdateRequest
@@ -11555,7 +11566,9 @@ export interface operations {
     };
     get_tasks_api_tasks_get: {
         parameters: {
-            query?: never;
+            query?: {
+                window?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11569,6 +11582,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

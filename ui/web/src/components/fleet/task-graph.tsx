@@ -22,11 +22,12 @@ import { CheckCheck, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 
+import { WindowSelect, type WindowOption } from "@/components/window-select";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { PRIORITY_BG } from "@/lib/notices";
 import { formatRelative, formatUptime } from "@/lib/time";
 import type { TaskRow } from "@/lib/types";
-import { useTasks } from "@/lib/use-tasks";
+import { useTasks, type TaskWindow } from "@/lib/use-tasks";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
@@ -247,6 +248,68 @@ function StaleBadge({ show }: { show: boolean }) {
   );
 }
 
+// The board's time filter: a last-activity window (default 24 hours) applied
+// on the BACKEND — the graph never pulls the full registry when thousands of
+// done tasks would crowd it out (Task #1969). in_progress tasks are exempt
+// server-side, and out-of-window ancestors of kept tasks still arrive as
+// ghost nodes so the tree stays connected. The dropdown is the project's
+// shared WindowSelect (user ruling 2026-08-30: one range picker, no new
+// variants) with the task window's option set.
+const TASK_WINDOW_OPTIONS: readonly WindowOption[] = [
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+  { value: "all", label: "All" },
+];
+
+// The right-hand filter cluster (window + status toggles) — shared by the
+// graph, kanban, and empty-state toolbars so they can never drift.
+function FilterCluster({
+  taskWindow,
+  setTaskWindow,
+  showDone,
+  setShowDone,
+  hiddenDoneCount,
+  showCanceled,
+  setShowCanceled,
+  hiddenCanceledCount,
+}: {
+  taskWindow: TaskWindow;
+  setTaskWindow: (w: TaskWindow) => void;
+  showDone: boolean;
+  setShowDone: (v: boolean) => void;
+  hiddenDoneCount: number;
+  showCanceled: boolean;
+  setShowCanceled: (v: boolean) => void;
+  hiddenCanceledCount: number;
+}) {
+  return (
+    <div className={cn("ml-auto flex-wrap items-center gap-1", FLEX)}>
+      <WindowSelect
+        value={taskWindow}
+        options={TASK_WINDOW_OPTIONS}
+        onChange={(v) => setTaskWindow(v as TaskWindow)}
+        ariaLabel="Time window"
+        className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+      />
+      <StatusToggleButton
+        active={showDone}
+        onClick={() => setShowDone(!showDone)}
+        label="Done"
+        hiddenCount={showDone ? 0 : hiddenDoneCount}
+        icon={<CheckCheck className="size-3" />}
+      />
+      <StatusToggleButton
+        active={showCanceled}
+        onClick={() => setShowCanceled(!showCanceled)}
+        label="Canceled"
+        hiddenCount={showCanceled ? 0 : hiddenCanceledCount}
+        icon={<EyeOff className="size-3" />}
+      />
+    </div>
+  );
+}
+
 export function TaskGraph({
   selectedTaskId,
   onSelectTask,
@@ -259,7 +322,6 @@ export function TaskGraph({
   onSelectAgent: (id: number | null) => void;
 }) {
   const router = useRouter();
-  const { tasks, loading, error } = useTasks();
   const { params, setParams, reset } = useForceParams(TASK_FORCE_KEY, FORCE_DEFAULTS);
 
   // Mode + filters are DB-backed user settings (display.task_*), so they follow
@@ -268,6 +330,15 @@ export function TaskGraph({
   const mode: "graph" | "kanban" =
     settings["display.task_graph_mode"] === "kanban" ? "kanban" : "graph";
   const setMode = (m: "graph" | "kanban") => setSetting("display.task_graph_mode", m);
+  // Time filter (default 24 hours, user ruling 2026-08-30): a garbage stored
+  // value falls back to the default instead of exploding.
+  const windowRaw = settings["display.task_window"];
+  const taskWindow: TaskWindow =
+    windowRaw === "24h" || windowRaw === "7d" || windowRaw === "30d" || windowRaw === "all"
+      ? windowRaw
+      : "24h";
+  const setTaskWindow = (w: TaskWindow) => setSetting("display.task_window", w);
+  const { tasks, loading, error } = useTasks(taskWindow);
   const showDone = settings["display.task_show_done"] === true;
   const setShowDone = (v: boolean) => setSetting("display.task_show_done", v);
   const showCanceled = settings["display.task_show_canceled"] === true;
@@ -282,8 +353,17 @@ export function TaskGraph({
       ),
     [tasks, showDone, showCanceled],
   );
-  const hiddenDoneCount = useMemo(() => tasks.filter((t) => t.status === "done").length, [tasks]);
-  const hiddenCanceledCount = useMemo(() => tasks.filter((t) => t.status === "cancelled").length, [tasks]);
+  // Ghost rows (out-of-window structural ancestors) are never revealed by the
+  // status toggles — they render dimmed regardless — so they stay out of the
+  // toggle pills too.
+  const hiddenDoneCount = useMemo(
+    () => tasks.filter((t) => t.status === "done" && t.ghost !== true).length,
+    [tasks],
+  );
+  const hiddenCanceledCount = useMemo(
+    () => tasks.filter((t) => t.status === "cancelled" && t.ghost !== true).length,
+    [tasks],
+  );
 
   // Id → task lookup for the hover card's parent/owner resolution.
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
@@ -403,8 +483,9 @@ export function TaskGraph({
         // node sits at the minimum radius — subtree size no longer drives
         // the square. The Agent Graph keeps its score-driven sizing.
         score: 0,
-        // Hidden-by-toggle structural parents render dimmed (see ghostTasks).
-        ghost: ghostIds.has(t.id),
+        // Dimmed for hidden-by-toggle structural parents (see ghostTasks) and
+        // for server-delivered out-of-window ancestors (t.ghost).
+        ghost: t.ghost === true || ghostIds.has(t.id),
       })),
     [graphTasks, ghostIds],
   );
@@ -437,9 +518,25 @@ export function TaskGraph({
     );
   }
   if (filteredTasks.length === 0) {
+    // The 24h default window can legitimately empty the board — keep the
+    // filter toolbar (window + toggles) reachable so the user can widen it.
     return (
-      <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
-        No tasks yet.
+      <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
+        <div className={cn("shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1.5", FLEX)}>
+          <FilterCluster
+            taskWindow={taskWindow}
+            setTaskWindow={setTaskWindow}
+            showDone={showDone}
+            setShowDone={setShowDone}
+            hiddenDoneCount={hiddenDoneCount}
+            showCanceled={showCanceled}
+            setShowCanceled={setShowCanceled}
+            hiddenCanceledCount={hiddenCanceledCount}
+          />
+        </div>
+        <div className={cn("items-center justify-center px-4 text-center text-xs text-muted-foreground", FLEX, FLEX_1)}>
+          No tasks yet.
+        </div>
       </div>
     );
   }
@@ -461,28 +558,22 @@ export function TaskGraph({
             </span>
           </div>
           <span className="text-xs text-muted-foreground">
-            {subtasks.length} task{subtasks.length !== 1 ? "s" : ""}
+            {subtasks.filter((t) => t.ghost !== true).length} task{subtasks.filter((t) => t.ghost !== true).length !== 1 ? "s" : ""}
           </span>
           <StaleBadge show={error} />
-          <div className={cn("ml-auto items-center gap-1", FLEX)}>
-            <StatusToggleButton
-              active={showDone}
-              onClick={() => setShowDone(!showDone)}
-              label="Done"
-              hiddenCount={showDone ? 0 : hiddenDoneCount}
-              icon={<CheckCheck className="size-3" />}
-            />
-            <StatusToggleButton
-              active={showCanceled}
-              onClick={() => setShowCanceled(!showCanceled)}
-              label="Canceled"
-              hiddenCount={showCanceled ? 0 : hiddenCanceledCount}
-              icon={<EyeOff className="size-3" />}
-            />
-          </div>
+          <FilterCluster
+            taskWindow={taskWindow}
+            setTaskWindow={setTaskWindow}
+            showDone={showDone}
+            setShowDone={setShowDone}
+            hiddenDoneCount={hiddenDoneCount}
+            showCanceled={showCanceled}
+            setShowCanceled={setShowCanceled}
+            hiddenCanceledCount={hiddenCanceledCount}
+          />
         </div>
         <TaskKanban
-          tasks={filteredTasks}
+          tasks={filteredTasks.filter((t) => t.ghost !== true)}
           statusFill={STATUS_FILL}
           statusLabel={STATUS_LABEL}
           selectedTaskId={selectedTaskId}
@@ -510,25 +601,19 @@ export function TaskGraph({
           </button>
         </div>
         <span className="text-xs text-muted-foreground">
-          {subtasks.length} task{subtasks.length !== 1 ? "s" : ""}
+          {subtasks.filter((t) => t.ghost !== true).length} task{subtasks.filter((t) => t.ghost !== true).length !== 1 ? "s" : ""}
         </span>
         <StaleBadge show={error} />
-        <div className={cn("ml-auto items-center gap-1", FLEX)}>
-          <StatusToggleButton
-            active={showDone}
-            onClick={() => setShowDone(!showDone)}
-            label="Done"
-            hiddenCount={showDone ? 0 : hiddenDoneCount}
-            icon={<CheckCheck className="size-3" />}
-          />
-          <StatusToggleButton
-            active={showCanceled}
-            onClick={() => setShowCanceled(!showCanceled)}
-            label="Canceled"
-            hiddenCount={showCanceled ? 0 : hiddenCanceledCount}
-            icon={<EyeOff className="size-3" />}
-          />
-        </div>
+        <FilterCluster
+          taskWindow={taskWindow}
+          setTaskWindow={setTaskWindow}
+          showDone={showDone}
+          setShowDone={setShowDone}
+          hiddenDoneCount={hiddenDoneCount}
+          showCanceled={showCanceled}
+          setShowCanceled={setShowCanceled}
+          hiddenCanceledCount={hiddenCanceledCount}
+        />
       </div>
       <div className={cn("relative", FLEX_1, MIN_H_0)}>
         <ForceGraph

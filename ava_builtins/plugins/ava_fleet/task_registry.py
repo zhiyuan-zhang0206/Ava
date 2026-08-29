@@ -368,8 +368,10 @@ def _append_note_to_results(cur, task_id: int, note: str) -> None:  # noqa: ANN0
     current = cur.fetchone()[0] or ""
     if current and not current.endswith("\n"):
         current += "\n"
+    # The update also bumps updated_at: a note append is real task activity,
+    # so the task graph's last-activity window must see it (Task #1969).
     cur.execute(
-        "UPDATE agent_tasks SET results = %s WHERE id = %s",
+        "UPDATE agent_tasks SET results = %s, updated_at = now() WHERE id = %s",
         (current + line, task_id),
     )
 

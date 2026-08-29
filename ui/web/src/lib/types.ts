@@ -639,6 +639,9 @@ export interface TaskRow {
   readonly remind_interval_seconds?: number | null;
   readonly last_reminded_at?: string | null;
   readonly reminder_count: number;
+  // Out-of-window structural ancestor delivered by a windowed GET /api/tasks
+  // (the task graph renders it dimmed so the tree never dangles).
+  readonly ghost?: boolean;
 }
 
 export interface TaskListResponse {
@@ -721,6 +724,8 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.task_graph_mode": "graph",
   "display.task_show_done": false,
   "display.task_show_canceled": false,
+  // Task graph time filter — last-activity window ("24h" | "7d" | "30d" | "all").
+  "display.task_window": "24h",
   // Shell tail page terminal theme: "system" | "light" | "dark".
   "display.shell_terminal_theme": "system",
   // Plugin-contributed skin, as "<plugin>/<theme>" (themePackId). null = the

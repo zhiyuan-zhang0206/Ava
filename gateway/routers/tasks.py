@@ -1,6 +1,6 @@
 """Task registry endpoints — read the full agent_tasks table and update tasks.
 
-GET /api/tasks — the full task list (the registry).
+GET /api/tasks — the task list (optionally narrowed by a last-activity window).
 PATCH /api/tasks/{id} — partial update (status / title / description /
 results / remind_interval_seconds / owner). Closing a parent is rejected while
 any child remains in progress.
@@ -8,9 +8,10 @@ any child remains in progress.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import TaskListResponse, TaskRow, TaskUpdateRequest
@@ -22,6 +23,14 @@ router = APIRouter()
 # positive — mirrors ava_builtins/plugins/ava_fleet/task_registry._MAX_REMIND_INTERVAL_SECONDS
 # across the SDK/gateway layer boundary (gateway may not import plugins).
 _MAX_REMIND_INTERVAL_SECONDS = 86400
+
+# Last-activity windows for GET /api/tasks (the task graph's time filter).
+# "all" disables the filter entirely.
+_TASK_WINDOWS = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
 
 _TASK_COLS = (
     "t.id, t.parent_id, t.title, t.description, t.results, t.status, t.owner, "
@@ -52,9 +61,60 @@ def _row_to_task(row: tuple[Any, ...], owner_label: str | None = None) -> TaskRo
     )
 
 
+def _windowed_tasks(tasks: list[TaskRow], window: str) -> list[TaskRow]:
+    """Narrow the registry to a last-activity window, keeping tree structure.
+
+    Kept tasks: the system root (parent_id NULL), every not-finished task
+    (in_progress / ongoing) regardless of age, and every task whose updated_at
+    falls inside the window. Each kept task's ancestors that fall outside the
+    window are delivered too, flagged ghost=True — the graph renders them
+    dimmed so a kept task never dangles as a fake orphan (the client renders
+    toggle-hidden parents the same way). done/cancelled tasks outside the
+    window with no kept descendant are omitted. Order preserved.
+    """
+    cutoff = datetime.now(UTC) - _TASK_WINDOWS[window]
+    kept: set[int] = set()
+    for t in tasks:
+        if (
+            t.parent_id is None
+            or t.status in ("in_progress", "ongoing")
+            or datetime.fromisoformat(t.updated_at) >= cutoff
+        ):
+            kept.add(t.id)
+
+    by_id = {t.id: t for t in tasks}
+    ghost: set[int] = set()
+    for tid in list(kept):
+        pid = by_id[tid].parent_id
+        # Walk up while the parent exists, is outside the kept set, and has
+        # not been collected yet. A corrupt parent cycle terminates because
+        # each visited id lands in `ghost` before its children are followed.
+        while pid is not None and pid not in kept and pid not in ghost:
+            ghost.add(pid)
+            parent = by_id.get(pid)
+            pid = parent.parent_id if parent is not None else None
+
+    result: list[TaskRow] = []
+    for t in tasks:
+        if t.id in kept:
+            result.append(t)
+        elif t.id in ghost:
+            result.append(t.model_copy(update={"ghost": True}))
+    return result
+
+
 @router.get("/api/tasks", dependencies=[Depends(deny_isolated_result_read)])
-def get_tasks(request: Request) -> TaskListResponse:
-    """Return every task in the agent_tasks table, newest first.
+def get_tasks(
+    request: Request,
+    window: str = Query("all", pattern="^(24h|7d|30d|all)$"),
+) -> TaskListResponse:
+    """Return the task registry, newest first.
+
+    `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
+    (updated_at) on the backend, so the task graph's default 7-day view never
+    pulls the full registry. A windowed list still carries every kept task's
+    out-of-window ancestors flagged ghost=True (see _windowed_tasks); without
+    a window the full table is returned unchanged.
 
     No pagination — the task registry is bounded (tasks are created by agents;
     closed tasks are kept). Order by created_at DESC so the newest tasks
@@ -68,7 +128,9 @@ def get_tasks(request: Request) -> TaskListResponse:
             "ORDER BY t.created_at DESC"
         )
         tasks = [_row_to_task(r[:-1], owner_label=r[-1]) for r in cur.fetchall()]
-    return TaskListResponse(tasks=tasks)
+    if window == "all":
+        return TaskListResponse(tasks=tasks)
+    return TaskListResponse(tasks=_windowed_tasks(tasks, window))
 
 
 def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:

@@ -503,6 +503,33 @@ def test_log_resets_reminder_count(db_conn: psycopg.Connection, root_task_id: in
         ava._boot._agent_id = original
 
 
+def test_log_bumps_updated_at(db_conn: psycopg.Connection, root_task_id: int) -> None:
+    """A note append is real task activity: updated_at moves, so the task
+    graph's last-activity window (Task #1969) keeps a task that only received
+    log notes."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create("log-activity", "detail", parent=root_task_id)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agent_tasks SET updated_at = now() - interval '30 days' WHERE id = %s",
+                (task.id,),
+            )
+        db_conn.commit()
+        task_registry.log(task.id, "note")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT now() - updated_at < interval '1 hour' FROM agent_tasks WHERE id = %s",
+                (task.id,),
+            )
+            row = cur.fetchone()
+        assert row == (True,)
+    finally:
+        ava._boot._agent_id = original
+
+
 def test_log_missing_task_raises(db_conn: psycopg.Connection) -> None:
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
