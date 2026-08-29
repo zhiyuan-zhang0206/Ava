@@ -245,7 +245,7 @@ export function SidebarFooter() {
           <Popover.Content
             sideOffset={6}
             align="start"
-            className="z-50 w-[17.625rem] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
+            className="z-50 w-64 rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
           >
             <StatsCards
               stats={stats}
@@ -307,15 +307,14 @@ function SidebarNavButton({
   );
 }
 
-// ── Warning / Error three-way card (task #1935) ──
+// ── Warning / Error unresolved card (user ruling 2026-08-29) ──
 //
-// The user-visible trio per level: total / resolved (dismissed) / remaining
-// (net). The backend derives all three from the same per-class counts and
-// the active `event_dismissals` rows, so resolved + remaining == total by
-// construction. A zero remaining renders the positive all-clear state
-// instead of a bare 0. `stats` is passed undefined during a window
-// transition so the card shows the same "…" placeholder as the other cards
-// instead of displaying a previous window's totals.
+// One unresolved number per level (the net of the daemon's class
+// resolution; the full total / resolved / net split lives on the Grafana
+// tiles). A zero remaining renders the positive all-clear state instead of
+// a bare 0. `stats` is passed undefined during a window transition so the
+// card shows the same "…" placeholder as the other cards instead of
+// displaying a previous window's numbers.
 function WarningErrorCard({
   stats,
   placeholder,
@@ -332,18 +331,8 @@ function WarningErrorCard({
   const t = useTranslations("sidebar");
   const rows = stats
     ? [
-        {
-          level: "warning",
-          total: stats.warnings,
-          dismissed: stats.warnings_dismissed,
-          net: stats.warnings_net,
-        },
-        {
-          level: "error",
-          total: stats.errors,
-          dismissed: stats.errors_dismissed,
-          net: stats.errors_net,
-        },
+        { level: "warning", net: stats.warnings_net },
+        { level: "error", net: stats.errors_net },
       ]
     : null;
   return (
@@ -369,28 +358,19 @@ function WarningErrorCard({
         rows.map((row) => (
           <div
             key={row.level}
-            className={cn("flex-wrap items-center gap-0.5 font-mono text-[11px] tabular-nums", FLEX)}
+            data-level={row.level}
+            className={cn("items-center gap-1 font-mono text-[11px] tabular-nums", FLEX)}
           >
-            <span className="w-7 shrink-0 whitespace-nowrap text-muted-foreground">
+            <span className="w-7 shrink-0 text-muted-foreground">
               {row.level === "warning" ? t("warningLevel") : t("errorLevel")}
             </span>
-            <span className="whitespace-nowrap text-foreground">
-              {t("statsTotal")} {row.total.toLocaleString()}
-            </span>
-            <span className="whitespace-nowrap text-muted-foreground">
-              · {t("statsDismissed")} {row.dismissed.toLocaleString()}
-            </span>
-            <span className="ml-auto shrink-0 whitespace-nowrap">
-              {row.net === 0 ? (
-                <span className="rounded bg-emerald-500/15 px-1 text-emerald-600 dark:text-emerald-400">
-                  {t("statsAllClear")}
-                </span>
-              ) : (
-                <span className="text-foreground">
-                  {t("statsNet")} {row.net.toLocaleString()}
-                </span>
-              )}
-            </span>
+            {row.net === 0 ? (
+              <span className="rounded bg-emerald-500/15 px-1 text-emerald-600 dark:text-emerald-400">
+                {t("statsAllClear")}
+              </span>
+            ) : (
+              <span className="text-foreground">{row.net.toLocaleString()}</span>
+            )}
           </div>
         ))
       )}
