@@ -14,13 +14,13 @@ BASE_BACKUP_STALE_AFTER_S = 8 * 24 * 60 * 60
 
 def components(state: Any) -> list[dict[str, object]]:
     if state.cleanup_pending:
-        status, detail = DEGRADED, state.last_error or "completed candidate cleanup is pending"
+        status, detail = DEGRADED, state.base_error or "completed candidate cleanup is pending"
         progress = "cleanup"
     elif state.running:
         status, detail = OK, None
         progress = "running"
-    elif state.last_error:
-        status, detail = DEGRADED, state.last_error
+    elif state.base_error:
+        status, detail = DEGRADED, state.base_error
         progress = "idle"
     elif state.last_success and time.time() - state.last_success > BASE_BACKUP_STALE_AFTER_S:
         status, detail = DEGRADED, "last base candidate is older than eight days"
@@ -45,17 +45,18 @@ def components(state: Any) -> list[dict[str, object]]:
     record["protected"] = False
     record["deferred_for_logical_backup"] = state.deferred_for_logical_backup
     record["cleanup_pending"] = state.cleanup_pending
-    restore_status = OK if state.last_protected or not state.last_error else DEGRADED
+    restore_status = DEGRADED if state.restore_error else OK
     restore = component(
         "pitr_restore_proof",
         restore_status,
         last_success=state.last_protected,
         progress="running" if state.restore_running else "idle",
-        detail=state.last_error if restore_status == DEGRADED else None,
+        detail=state.restore_error,
         now=time.time() if state.last_protected else None,
         gate_readiness=False,
     )
     restore["protected"] = state.last_protected is not None
+    restore["chain_id"] = state.last_protected_chain
     return [
         record,
         restore,

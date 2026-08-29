@@ -22,21 +22,21 @@ from google.cloud import storage
 from google.oauth2 import service_account
 from psycopg.conninfo import make_conninfo
 
+from cli.commands._pitr_activation_config import apply_wal_config, restore_archive_settings
+from services.pitr.activation_lease import run_while_renewing
+from services.pitr.activation_observability import save_error as _save_error
 from services.pitr.activation_runtime import (
     _PITR_ENV_FIELDS as _PITR_ENV_FIELDS,
 )
 from services.pitr.activation_runtime import (
     _archive_settings,
     _desired_archive_settings,
-    _enable_pitr_services,
     _file_evidence,
     _pitr_env_baseline,
-    _restore_exact_file,
+    _restore_pitr_env,
     _settings_digest,
     capture_pitr_env_baseline,
-)
-from services.pitr.activation_runtime import (
-    _restore_pitr_env as _restore_pitr_env,
+    rollback_effect_state,
 )
 from services.pitr.activation_runtime import (
     forced_candidate as _forced_candidate,
@@ -101,16 +101,17 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _probe_bucket(credentials_path: Path) -> str:
+def _probe_bucket_read_access(credentials_path: Path) -> str:
     credentials = service_account.Credentials.from_service_account_file(str(credentials_path))
     client = storage.Client(
         project=settings.physical_backup.pitr_gcs_project, credentials=credentials
     )
-    bucket = client.get_bucket(settings.physical_backup.pitr_gcs_bucket, timeout=30)
-    location = str(bucket.location or "").upper()
-    if not location:
-        raise RuntimeError("PITR bucket metadata omitted its region")
-    return location
+    bucket_name = settings.physical_backup.pitr_gcs_bucket
+    # objectViewer includes list/read, but deliberately not storage.buckets.get.
+    # Consuming one result authenticates the viewer against the configured bucket
+    # without creating a synthetic probe object or deleting retained evidence.
+    next(iter(client.list_blobs(bucket_name, max_results=1, timeout=30)), None)
+    return bucket_name
 
 
 def _validate_secrets() -> dict[str, str]:
@@ -131,10 +132,8 @@ def _validate_secrets() -> dict[str, str]:
         raise RuntimeError("uploader and viewer service-account identities must differ")
     if uploader_id[1] != config.pitr_gcs_project or viewer_id[1] != config.pitr_gcs_project:
         raise RuntimeError("PITR service-account project differs from configured GCS project")
-    uploader_location = _probe_bucket(uploader)
-    viewer_location = _probe_bucket(viewer)
-    if uploader_location != viewer_location:
-        raise RuntimeError("uploader and viewer resolved different bucket regions")
+    # Data-plane uploader is objectCreator + objectViewer; no synthetic write/delete probe.
+    bucket_name = _probe_bucket_read_access(viewer)
     return {
         "uploader_client_email": uploader_id[0],
         "uploader_project_id": uploader_id[1],
@@ -142,7 +141,10 @@ def _validate_secrets() -> dict[str, str]:
         "viewer_client_email": viewer_id[0],
         "viewer_project_id": viewer_id[1],
         "viewer_private_key_id": viewer_id[2],
-        "bucket_location": uploader_location,
+        "bucket_name": bucket_name,
+        "object_prefix": config.pitr_gcs_prefix,
+        "backup_key_id": config.pitr_backup_key_id,
+        "backup_key_sha256": _sha256(key),
     }
 
 
@@ -269,8 +271,8 @@ def _print_record(record: ActivationRecord | None) -> int:
     print(f"  updated_at: {record.updated_at}")
     if record.pre_activation_snapshot:
         print(f"  logical recovery floor: {record.pre_activation_snapshot}")
-    if record.error:
-        print(f"  error: {record.error}")
+    if record.error_code:
+        print(f"  error: {record.error_code}: {record.error_detail}")
     return 0
 
 
@@ -292,13 +294,6 @@ def cmd_pitr_status() -> int:
     return _print_record(record)
 
 
-def _save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None:
-    latest = load_record(home)
-    if latest is None or latest.operation_id != record.operation_id:
-        raise RuntimeError("PITR activation operation changed while recording failure") from exc
-    write_record(home, latest.advance(latest.phase, error=type(exc).__name__))
-
-
 def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> None:
     if expected is None or _read_pg_state() != expected:
         raise RuntimeError(f"PostgreSQL identity/settings changed {boundary}")
@@ -307,6 +302,24 @@ def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> No
 def _require_same_credentials(expected: dict[str, str] | None, boundary: str) -> None:
     if expected is None or _validate_secrets() != expected:
         raise RuntimeError(f"PITR credential/bucket evidence changed {boundary}")
+
+
+def _require_same_pre_mutation_state(record: ActivationRecord) -> None:
+    expected = record.pre_activation_pg_settings
+    current = _read_pg_state()
+    immutable = (
+        "system_identifier",
+        "data_directory",
+        "port",
+        "dbname",
+        "archive_mode",
+        "archive_command",
+        "archive_timeout",
+        "wal_compression",
+    )
+    if expected is None or any(expected.get(name) != current.get(name) for name in immutable):
+        raise RuntimeError("PostgreSQL identity/settings changed before PITR mutation")
+    _require_same_credentials(record.pre_activation_credential_evidence, "before PITR mutation")
 
 
 def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
@@ -407,21 +420,11 @@ def _switch_wal() -> str:
     return str(row[0])
 
 
-def _alter_archive_settings(values: dict[str, str]) -> None:
-    from psycopg import sql
-
-    from cli.commands._cluster_instance import pg_admin_url
-    from shared.cluster import get_record, record_postgres_port
-
-    cluster = get_record(ava_home())
-    if cluster is None:
-        raise RuntimeError("cluster registry record is missing")
-    with psycopg.connect(pg_admin_url(record_postgres_port(cluster)), autocommit=True) as conn:
-        for name, value in values.items():
-            conn.execute(sql.SQL("ALTER SYSTEM SET {} = %s").format(sql.Identifier(name)), (value,))
-
-
-def _advance_activation(home: Path, record: ActivationRecord) -> ActivationRecord:
+def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> ActivationRecord:
+    if record.phase != "shadow":
+        _require_same_credentials(
+            record.pre_activation_credential_evidence, f"before {record.phase}"
+        )
     if record.phase == "shadow":
         readiness = _shadow_readiness()
         record = record.advance(
@@ -440,6 +443,7 @@ def _advance_activation(home: Path, record: ActivationRecord) -> ActivationRecor
     desired = _desired_archive_settings(home)
     if record.phase == "wal_config_pending":
         _validate_snapshot(record)
+        _require_same_pre_mutation_state(record)
         before = _archive_settings(_read_pg_state())
         env_b64, env_digest, env_baseline = capture_pitr_env_baseline(home / ".env")
         auto_b64, auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")
@@ -455,25 +459,12 @@ def _advance_activation(home: Path, record: ActivationRecord) -> ActivationRecor
             pre_activation_env_digest=env_digest,
             pre_activation_auto_conf_b64=auto_b64,
             pre_activation_auto_conf_digest=auto_digest,
+            rollback_expected_env_digest=env_digest,
+            rollback_expected_auto_conf_digest=auto_digest,
             error=None,
         )
     if record.phase == "wal_config_applying":
-        _alter_archive_settings(desired)
-        owned_env = _enable_pitr_services()
-        owned_env_digest = hashlib.sha256(owned_env).hexdigest()
-        _owned_auto_b64, owned_auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")
-        handoff = str(uuid.uuid4())
-        orchestration = str(uuid.uuid4())
-        record = _persist_transition(
-            home,
-            record,
-            "wal_restart_pending",
-            restart_handoff=handoff,
-            restart_orchestration=orchestration,
-            rollback_expected_env_digest=owned_env_digest,
-            rollback_expected_auto_conf_digest=owned_auto_digest,
-            error=None,
-        )
+        record = apply_wal_config(home, record, desired)
     if record.phase == "wal_restart_pending":
         if not _restart_ready(record, desired):
             return record
@@ -490,7 +481,7 @@ def _advance_activation(home: Path, record: ActivationRecord) -> ActivationRecor
         # Reissuing a switch after a crash is safe: immutable naming and the
         # persisted target segment make proof exact; the extra segment is retained.
         _switch_wal()
-        ack, viewer = _remote_wal_proof(record)
+        ack, viewer = run_while_renewing(holder, lambda stop: _remote_wal_proof(record, stop))
         record = _persist_transition(
             home,
             record,
@@ -510,7 +501,9 @@ def _advance_activation(home: Path, record: ActivationRecord) -> ActivationRecor
             error=None,
         )
     if record.phase == "base_pending":
-        candidate_json, digest = _forced_candidate(record)
+        candidate_json, digest = run_while_renewing(
+            holder, lambda stop: _forced_candidate(record, stop)
+        )
         record = _persist_transition(
             home,
             record,
@@ -522,7 +515,9 @@ def _advance_activation(home: Path, record: ActivationRecord) -> ActivationRecor
     if record.phase == "restore_pending":
         if record.protected_manifest is None:
             raise RuntimeError("activation candidate manifest is missing")
-        protected, digest = _restore_candidate(record)
+        protected, digest = run_while_renewing(
+            holder, lambda stop: _restore_candidate(record, stop)
+        )
         record = _persist_transition(
             home,
             record,
@@ -564,15 +559,6 @@ def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
                 raise RuntimeError("PITR environment differs from rollback baseline")
             if _pg_auto_conf_baseline(home, current) != record.pre_activation_pg_auto_conf:
                 raise RuntimeError("PostgreSQL ALTER SYSTEM ownership differs after rollback")
-            if hashlib.sha256((home / ".env").read_bytes()).hexdigest() != (
-                record.pre_activation_env_digest
-            ):
-                raise RuntimeError("exact PITR environment bytes differ after rollback")
-            if (
-                hashlib.sha256((home / "pg" / "postgresql.auto.conf").read_bytes()).hexdigest()
-                != record.pre_activation_auto_conf_digest
-            ):
-                raise RuntimeError("exact PostgreSQL auto-conf bytes differ after rollback")
             return _persist_transition(home, record, "rolled_back", error=None)
         if record.phase == "rolled_back":
             return record
@@ -609,19 +595,45 @@ def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
             record.rollback_expected_auto_conf_digest,
         }:
             raise RuntimeError("rollback has no exact config byte ownership evidence")
-        _restore_exact_file(
-            home / ".env",
-            payload_b64=str(record.pre_activation_env_b64),
-            target_digest=str(record.pre_activation_env_digest),
-            expected_digest=str(record.rollback_expected_env_digest),
+        current_env_digest = hashlib.sha256((home / ".env").read_bytes()).hexdigest()
+        env_changed = rollback_effect_state(
+            current=current_env_digest,
+            before=str(record.pre_activation_env_digest),
+            owned=str(record.rollback_expected_env_digest),
         )
-        _restore_exact_file(
-            home / "pg" / "postgresql.auto.conf",
-            payload_b64=str(record.pre_activation_auto_conf_b64),
-            target_digest=str(record.pre_activation_auto_conf_digest),
-            expected_digest=str(record.rollback_expected_auto_conf_digest),
+        if env_changed:
+            if record.pre_activation_pitr_env is None:
+                raise RuntimeError("rollback lacks PITR environment key baseline")
+            _restore_pitr_env(record.pre_activation_pitr_env)
+        current_auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
+        try:
+            rollback_effect_state(
+                current=current_auto_digest,
+                before=str(record.pre_activation_auto_conf_digest),
+                owned=str(record.rollback_expected_auto_conf_digest),
+            )
+        except RuntimeError:
+            intent = record.config_apply_intent
+            if (
+                intent is None
+                or intent.get("kind") != "postgresql_auto_conf"
+                or intent.get("expected_digest") != record.rollback_expected_auto_conf_digest
+                or current.get(str(intent.get("name"))) != intent.get("desired_value")
+            ):
+                raise
+            # Exact preimage + intended field/value owns the post-ALTER crash window.
+        baseline = record.pre_activation_pg_auto_conf
+        if baseline is None:
+            raise RuntimeError("rollback lacks PostgreSQL owned-field baseline")
+        record = restore_archive_settings(home, record, baseline)
+        restored_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
+        return _persist_transition(
+            home,
+            record,
+            "rollback_restart_pending",
+            rollback_expected_auto_conf_digest=restored_digest,
+            error=None,
         )
-        return _persist_transition(home, record, "rollback_restart_pending", error=None)
     finally:
         release_update_lock(holder)
 
@@ -678,13 +690,7 @@ def _restart_session() -> str:
 
 
 def cmd_pitr_activate(*, origin: str) -> int:
-    """Advance only through shadow readiness and the first-rollout snapshot.
-
-    PostgreSQL remains untouched at ``wal_config_pending``.  The next delivery
-    owns the privileged archive configuration, restart and remote-ACK gate;
-    keeping that boundary explicit prevents a foundation command from claiming
-    protection it cannot yet prove.
-    """
+    """Resume the durable activation through restart, WAL, base, and restore proof."""
     home = ava_home()
     ensure_private_dir(home / "physical-backup" / "activation")
     try:
@@ -716,7 +722,7 @@ def cmd_pitr_activate(*, origin: str) -> int:
                 _save_error(home, record, exc)
                 raise exc
             try:
-                record = _advance_activation(home, record)
+                record = _advance_activation(home, record, holder)
             except BaseException as exc:
                 _save_error(home, record, exc)
                 raise

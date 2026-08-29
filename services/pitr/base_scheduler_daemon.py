@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import multiprocessing
 import queue
-import shutil
-import subprocess
 import sys
-import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +19,7 @@ import psutil
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.activation_state import load_record as load_activation_record
+from services.pitr.activation_state import lock_path as activation_lock_path
 from services.pitr.base_candidate import (
     StopSignal,
     create_base_candidate,
@@ -30,15 +27,30 @@ from services.pitr.base_candidate import (
 )
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.base_object_store import GCSRestartableStreamingObjectStore
+from services.pitr.base_operation_runtime import (
+    RestoreWorkerInput as _RestoreWorkerInput,
+)
+from services.pitr.base_operation_runtime import (
+    input_for as _restore_worker_input_for,
+)
+from services.pitr.base_operation_runtime import (
+    publish as _publish_restore_proof,
+)
+from services.pitr.base_operation_runtime import (
+    reap_restore_group as _reap_restore_subprocess_group,
+)
+from services.pitr.base_operation_runtime import (
+    restore_result as _restore_worker_result,
+)
+from services.pitr.base_operation_runtime import (
+    run_restore_input as _run_restore_worker,
+)
+from services.pitr.base_operation_runtime import (
+    verify_then_construct_publisher as _verify_then_construct_publisher,
+)
 from services.pitr.base_scheduler_health import components as _components
 from services.pitr.restore_manifest import ProtectedManifest
-from services.pitr.restore_proof import (
-    RestoreSpaceBudget,
-    publish_candidate_proof,
-    reconcile_restore_runtime,
-    verify_candidate_proof,
-)
-from services.pitr.restore_publish_store import GCSProtectedManifestPublisher
+from services.pitr.restore_proof import reconcile_restore_runtime
 from services.pitr.retention_scheduler import (
     RetentionDryRunState,
 )
@@ -46,29 +58,35 @@ from services.pitr.retention_scheduler import (
     refresh as refresh_retention_plan,
 )
 from services.pitr.space_budget import CandidateSpaceBudget
-from services.pitr.worker_process import (
-    WorkerQueue,
-    enable_child_subreaper,
-    group_members,
-    raise_live_descendants,
-    raise_surviving_restore_group,
-    reap_job_group,
-    reap_restore_subprocess_group,
-    reject_restore_descendants,
-    validate_ready_message,
-    worker_bootstrap,
-)
+from services.pitr.worker_process import WorkerQueue as _WorkerQueue
+from services.pitr.worker_process import enable_child_subreaper as _enable_child_subreaper
+from services.pitr.worker_process import group_members as _group_members
+from services.pitr.worker_process import raise_live_descendants as _raise_live_descendants
+from services.pitr.worker_process import reap_job_group as _reap_job_group
+from services.pitr.worker_process import validate_ready_message as _validate_ready_message
+from services.pitr.worker_process import worker_bootstrap as _worker_bootstrap
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
-from shared.db import direct_db_url
 from shared.log import init_gateway_process
 from shared.paths import ava_home
-from shared.pg_tools import pg_tool
-from shared.platform import LockTimeoutError
-from shared.process_env import restricted_process_env
+from shared.platform import LockTimeoutError, file_lock
+from shared.private_storage import ensure_private_dir
 
 _log = logging.getLogger("services.pitr.base_scheduler_daemon")
+
+# Compatibility surface for tests and operators that imported the daemon's
+# former private restore-controller names before the implementation moved.
+__all__ = (
+    "_RestoreWorkerInput",
+    "_group_members",
+    "_publish_restore_proof",
+    "_reap_restore_subprocess_group",
+    "_restore_worker_input_for",
+    "_restore_worker_result",
+    "_run_restore_worker",
+    "_verify_then_construct_publisher",
+)
 
 BASE_BACKUP_WEEKDAY = 6
 BASE_BACKUP_HOUR = 3
@@ -77,35 +95,20 @@ BASE_BACKUP_RETRY_INTERVAL_S = 1800
 BASE_BACKUP_STALE_AFTER_S = 8 * 24 * 3600
 _SLEEP_CHUNK_S = 30
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
-
-
 @dataclass
 class BaseCandidateState:
     started_at: float = field(default_factory=time.monotonic)
     running: bool = False
     last_attempt: float | None = None
     last_success: float | None = None
-    last_error: str | None = None
+    base_error: str | None = None
     deferred_for_logical_backup: bool = False
     cleanup_pending: bool = False
     restore_running: bool = False
     last_protected: float | None = None
+    last_protected_chain: str | None = None
+    restore_error: str | None = None
     retention: RetentionDryRunState = field(default_factory=RetentionDryRunState)
-
-
-@dataclass(frozen=True)
-class _RestoreWorkerInput:
-    candidate_json: str
-    root: Path
-    ack_dir: Path
-    key_path: Path
-    project: str
-    bucket: str
-    viewer_credentials: Path
-    budget: RestoreSpaceBudget
-    live_db_url: str
-    pg_ctl: Path
-    pg_verifybackup: Path
 
 
 def _candidate_manifests(root: Path) -> list[CandidateManifest]:
@@ -153,10 +156,21 @@ def _last_durable_success(root: Path) -> float | None:
     return max(_candidate_time(item).timestamp() for item in candidates)
 
 
-def _tree_bytes(path: Path) -> int:
-    if not path.exists():
-        return 0
-    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+def _last_durable_protected(
+    root: Path,
+) -> tuple[float | None, str | None, str | None]:
+    manifests: list[ProtectedManifest] = []
+    corrupt: list[str] = []
+    for path in sorted((root / "protected-manifests").glob("*.json")):
+        try:
+            manifests.append(ProtectedManifest.from_json(path.read_text()))
+        except (OSError, TypeError, ValueError):
+            corrupt.append(path.name)
+    error = f"corrupt protected manifest(s): {', '.join(corrupt)}" if corrupt else None
+    if not manifests:
+        return None, None, error
+    latest = max(manifests, key=lambda item: datetime.fromisoformat(item.proof.completed_at))
+    return datetime.fromisoformat(latest.proof.completed_at).timestamp(), latest.chain_id, error
 
 
 def _build_candidate(stop: StopSignal) -> CandidateManifest:
@@ -168,7 +182,9 @@ def _build_candidate(stop: StopSignal) -> CandidateManifest:
     if key_path is None or credentials is None:
         raise RuntimeError("validated PITR secrets are missing")
     root = ava_home() / "physical-backup"
-    pgdata_bytes = _tree_bytes(ava_home() / "pg")
+    pgdata_bytes = sum(
+        item.stat().st_size for item in (ava_home() / "pg").rglob("*") if item.is_file()
+    )
     logical_peak = max(
         (item.stat().st_size for item in (ava_home() / "backups" / "db").glob("*.enc")),
         default=0,
@@ -198,41 +214,23 @@ def _build_candidate(stop: StopSignal) -> CandidateManifest:
 def _pending_restore_candidate(root: Path) -> CandidateManifest | None:
     protected = root / "protected-manifests"
     for candidate in _candidate_manifests(root / "base-manifests"):
+        if candidate.chain_id.startswith("activation-"):
+            continue
         if not (protected / f"{candidate.chain_id}.json").is_file():
             return candidate
     return None
 
 
-def _restore_worker_input_for(candidate: CandidateManifest) -> _RestoreWorkerInput:
-    config = settings.physical_backup
-    if not config.pitr_restore_proof_enabled:
-        raise RuntimeError("restore proof cannot run while its flag is off")
-    key_path = config.pitr_backup_key_file
-    read_credentials = config.pitr_restore_gcs_credentials_file
-    if key_path is None or read_credentials is None:
-        raise RuntimeError("validated viewer-only restore proof secrets are missing")
-    root = ava_home() / "physical-backup"
-    logical_peak = max(
-        (item.stat().st_size for item in (ava_home() / "backups" / "db").glob("*.enc")),
-        default=0,
-    )
-    return _RestoreWorkerInput(
-        candidate.to_json(),
-        root,
-        root / "ack",
-        key_path,
-        config.pitr_gcs_project,
-        config.pitr_gcs_bucket,
-        read_credentials,
-        RestoreSpaceBudget(
-            config.pitr_spool_hard_bytes,
-            logical_peak,
-            _EMERGENCY_FLOOR_BYTES,
-        ),
-        direct_db_url(),
-        pg_tool("pg_ctl"),
-        pg_tool("pg_verifybackup"),
-    )
+@contextmanager
+def _claim_scheduler_ownership() -> Iterator[None]:
+    """Serialize selection and execution with activation, then recheck state."""
+
+    ensure_private_dir(activation_lock_path(ava_home()).parent)
+    with file_lock(activation_lock_path(ava_home()), timeout_s=0):
+        active = load_activation_record(ava_home())
+        if active is not None and active.phase not in {"protected", "rolled_back"}:
+            raise RuntimeError("activation owns base/restore selection")
+        yield
 
 
 def _restore_worker_input() -> _RestoreWorkerInput:
@@ -243,58 +241,6 @@ def _restore_worker_input() -> _RestoreWorkerInput:
     return _restore_worker_input_for(candidate)
 
 
-def _publish_restore_proof(candidate: CandidateManifest, outcome: dict[str, str]) -> None:
-    """Publish durable proof only from the controller that owns uploader authority."""
-
-    config = settings.physical_backup
-    credentials = config.pitr_gcs_credentials_file
-    if credentials is None:
-        raise RuntimeError("validated PITR publisher credential is missing")
-    root = ava_home() / "physical-backup"
-    manifest_path = root / "base-manifests" / f"{candidate.chain_id}.candidate.json"
-    authoritative = CandidateManifest.from_json(manifest_path.read_text())
-    candidate_digest = hashlib.sha256(authoritative.to_json().encode()).hexdigest()
-    pending = root / "protected-pending" / f"{authoritative.chain_id}.json"
-    if (
-        authoritative != candidate
-        or outcome.get("chain_id") != authoritative.chain_id
-        or outcome.get("candidate_sha256") != candidate_digest
-        or outcome.get("pending_sha256") != hashlib.sha256(pending.read_bytes()).hexdigest()
-    ):
-        raise RuntimeError("restricted restore outcome differs from authoritative evidence")
-    verified, publisher = _verify_then_construct_publisher(
-        candidate=authoritative,
-        root=root,
-        ack_dir=root / "ack",
-        project=config.pitr_gcs_project,
-        bucket=config.pitr_gcs_bucket,
-        credentials=credentials,
-    )
-    publish_candidate_proof(
-        candidate=authoritative,
-        root=root,
-        prefix=config.pitr_gcs_prefix,
-        verified=verified,
-        publisher=publisher,
-    )
-
-
-def _verify_then_construct_publisher(
-    *,
-    candidate: CandidateManifest,
-    root: Path,
-    ack_dir: Path,
-    project: str,
-    bucket: str,
-    credentials: Path,
-) -> tuple[ProtectedManifest, GCSProtectedManifestPublisher]:
-    verified = verify_candidate_proof(candidate=candidate, root=root, ack_dir=ack_dir)
-    publisher = GCSProtectedManifestPublisher(
-        project=project, bucket=bucket, credentials_file=credentials
-    )
-    return verified, publisher
-
-
 async def _sleep(seconds: float) -> None:
     remaining = seconds
     while remaining > 0:
@@ -303,96 +249,11 @@ async def _sleep(seconds: float) -> None:
         remaining -= chunk
 
 
-def _worker_entry(stop: StopSignal, output: WorkerQueue) -> None:
+def _worker_entry(stop: StopSignal, output: _WorkerQueue) -> None:
     try:
         output.put((True, _build_candidate(stop).to_json()))
     except BaseException as exc:
         output.put((False, f"{type(exc).__name__}: {exc}"))
-
-
-def _restore_request(inputs: _RestoreWorkerInput) -> dict[str, object]:
-    return {
-        "candidate_json": inputs.candidate_json,
-        "root": str(inputs.root),
-        "ack_dir": str(inputs.ack_dir),
-        "key_path": str(inputs.key_path),
-        "project": inputs.project,
-        "bucket": inputs.bucket,
-        "viewer_credentials": str(inputs.viewer_credentials),
-        "budget": {
-            "spool_and_pg_wal_reserve": inputs.budget.spool_and_pg_wal_reserve,
-            "logical_backup_peak": inputs.budget.logical_backup_peak,
-            "emergency_floor": inputs.budget.emergency_floor,
-        },
-        "live_db_url": inputs.live_db_url,
-        "pg_ctl": str(inputs.pg_ctl),
-        "pg_verifybackup": str(inputs.pg_verifybackup),
-    }
-
-
-async def _run_restore_worker(inputs: _RestoreWorkerInput) -> dict[str, str]:
-    control_root = inputs.root / "restore-control"
-    control_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    work = Path(tempfile.mkdtemp(prefix=".proof-", dir=control_root))
-    request = work / "request.json"
-    result = work / "result.json"
-    acknowledgement = result.with_suffix(".ack")
-    request.write_text(json.dumps(_restore_request(inputs), sort_keys=True, separators=(",", ":")))
-    request.chmod(0o600)
-    process = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-m", "services.pitr.restore_worker", str(request), str(result)],
-        cwd=Path(__file__).resolve().parents[2],
-        env=restricted_process_env(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-        close_fds=True,
-        text=True,
-    )
-    leader_created_at = psutil.Process(process.pid).create_time()
-    try:
-        while not result.is_file():
-            if process.poll() is not None:
-                stderr = process.stderr.read() if process.stderr is not None else ""
-                return _restore_worker_result(process.returncode, stderr, result)
-            await asyncio.sleep(0.25)
-        members = [member for member in group_members(process.pid) if member.pid != process.pid]
-        if members:
-            reap_restore_subprocess_group(process, leader_created_at)
-            reject_restore_descendants()
-        acknowledgement.write_text("accepted")
-        acknowledgement.chmod(0o600)
-        while process.poll() is None:
-            await asyncio.sleep(0.05)
-        if group_members(process.pid):
-            raise_surviving_restore_group()
-        stderr = process.stderr.read() if process.stderr is not None else ""
-        return _restore_worker_result(process.returncode, stderr, result)
-    except BaseException:
-        if process.poll() is None or group_members(process.pid):
-            reap_restore_subprocess_group(process, leader_created_at)
-        raise
-    finally:
-        if process.stderr is not None:
-            process.stderr.close()
-        shutil.rmtree(work, ignore_errors=True)
-
-
-def _restore_worker_result(returncode: int, stderr: str, result: Path) -> dict[str, str]:
-    if returncode != 0:
-        raise RuntimeError(f"restricted restore worker exited {returncode}: {stderr}")
-    loaded: object = json.loads(result.read_text())
-    if not isinstance(loaded, dict):
-        raise TypeError("restricted restore worker result must be an object")
-    raw = cast(dict[str, object], loaded)
-    if set(raw) != {
-        "chain_id",
-        "candidate_sha256",
-        "pending_sha256",
-    }:
-        raise RuntimeError("restricted restore worker returned an invalid result")
-    return {key: str(value) for key, value in raw.items()}
 
 
 def _worker_result(*, succeeded: bool, value: str) -> CandidateManifest:
@@ -409,20 +270,39 @@ def _backup_key() -> tuple[bytes, str]:
     return key_path.read_bytes(), config.pitr_backup_key_id
 
 
+def _reconcile_owned_runtime() -> None:
+    """Reconcile only after the activation lock and its post-lock state check."""
+
+    with _claim_scheduler_ownership():
+        key, key_id = _backup_key()
+        reconcile_restore_runtime(ava_home() / "physical-backup")
+        reconcile_runtime_state(
+            ava_home() / "physical-backup",
+            key=key,
+            key_id=key_id,
+        )
+
+
+def _record_protected(state: BaseCandidateState, candidate: CandidateManifest) -> None:
+    state.last_protected = time.time()
+    state.last_protected_chain = candidate.chain_id
+    state.restore_error = None
+
+
 async def _run_worker(  # noqa: PLR0915
     *,
-    target: Callable[[StopSignal, WorkerQueue], None] = _worker_entry,
+    target: Callable[[StopSignal, _WorkerQueue], None] = _worker_entry,
     cooperative_timeout_s: float = 30,
     group_grace_s: float = 5,
     group_deadline_s: float = 20,
 ) -> CandidateManifest:
-    enable_child_subreaper()
+    _enable_child_subreaper()
     context = multiprocessing.get_context("spawn")
     stop = context.Event()
     adopted = context.Event()
-    output = cast(WorkerQueue, context.Queue(maxsize=2))
+    output = cast(_WorkerQueue, context.Queue(maxsize=2))
     process = context.Process(
-        target=worker_bootstrap, args=(target, stop, output, adopted), daemon=False
+        target=_worker_bootstrap, args=(target, stop, output, adopted), daemon=False
     )
     process.start()
     worker_pid = process.pid
@@ -444,13 +324,13 @@ async def _run_worker(  # noqa: PLR0915
                     ) from None
                 await asyncio.sleep(0.05)
                 continue
-            pgid, leader_created_at = validate_ready_message(message, expected_pid=worker_pid)
+            pgid, leader_created_at = _validate_ready_message(message, expected_pid=worker_pid)
             adopted.set()  # release the ownership gate; worker may fork now
         while process.is_alive():
             await asyncio.sleep(0.25)
         process.join()
-        if group_members(pgid):
-            reap_job_group(
+        if _group_members(pgid):
+            _reap_job_group(
                 process,
                 worker_pid=worker_pid,
                 pgid=pgid,
@@ -458,7 +338,7 @@ async def _run_worker(  # noqa: PLR0915
                 grace_s=group_grace_s,
                 deadline_s=group_deadline_s,
             )
-            raise_live_descendants()
+            _raise_live_descendants()
         try:
             succeeded, value = cast(tuple[bool, str], output.get(timeout=5))
         except queue.Empty as exc:
@@ -467,8 +347,8 @@ async def _run_worker(  # noqa: PLR0915
     except BaseException:
         stop.set()
         process.join(timeout=cooperative_timeout_s)
-        if pgid is not None and leader_created_at is not None and group_members(pgid):
-            reap_job_group(
+        if pgid is not None and leader_created_at is not None and _group_members(pgid):
+            _reap_job_group(
                 process,
                 worker_pid=worker_pid,
                 pgid=pgid,
@@ -492,15 +372,9 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
     while True:
         state.cleanup_pending = True
         try:
-            reconcile_restore_runtime(ava_home() / "physical-backup")
-            key, key_id = _backup_key()
-            reconcile_runtime_state(
-                ava_home() / "physical-backup",
-                key=key,
-                key_id=key_id,
-            )
+            _reconcile_owned_runtime()
         except Exception as exc:
-            state.last_error = str(exc)
+            state.base_error = str(exc)
             _log.exception("base candidate reconciliation failed")
             await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
             continue
@@ -531,14 +405,16 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
         ):
             state.restore_running = True
             try:
-                inputs = _restore_worker_input()
-                outcome = await _run_restore_worker(inputs)
-                candidate = CandidateManifest.from_json(inputs.candidate_json)
-                _publish_restore_proof(candidate, outcome)
-                state.last_protected = time.time()
-                state.last_error = None
+                with _claim_scheduler_ownership():
+                    inputs = _restore_worker_input()
+                    outcome = await _run_restore_worker(
+                        inputs
+                    )  # async-blocking-ok: ownership lock spans child proof
+                    candidate = CandidateManifest.from_json(inputs.candidate_json)
+                    _publish_restore_proof(candidate, outcome)
+                _record_protected(state, candidate)
             except Exception as exc:
-                state.last_error = str(exc)
+                state.restore_error = str(exc)
                 _log.exception("restore proof failed; candidate remains unprotected")
             finally:
                 state.restore_running = False
@@ -552,14 +428,15 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
         state.running = True
         state.deferred_for_logical_backup = False
         try:
-            await _run_worker()
+            with _claim_scheduler_ownership():
+                await _run_worker()  # async-blocking-ok: ownership lock spans candidate child
             state.last_success = time.time()
-            state.last_error = None
+            state.base_error = None
         except LockTimeoutError:
             state.deferred_for_logical_backup = True
             _log.info("base candidate deferred while logical backup owns backup lock")
         except Exception as exc:
-            state.last_error = str(exc)
+            state.base_error = str(exc)
             _log.exception("base candidate failed; retrying on bounded cadence")
         finally:
             state.running = False
@@ -584,11 +461,18 @@ async def run() -> None:
             for path in (physical_root / "base-candidates").glob("*.ready")
         )
     )
+    last_protected, last_protected_chain, protected_scan_error = _last_durable_protected(
+        physical_root
+    )
     state = BaseCandidateState(
-        last_success=_last_durable_success(root), cleanup_pending=cleanup_pending
+        last_success=_last_durable_success(root),
+        cleanup_pending=cleanup_pending,
+        last_protected=last_protected,
+        last_protected_chain=last_protected_chain,
+        restore_error=protected_scan_error,
     )
     if state.last_success is None and is_due(datetime.now(UTC), root):
-        state.last_error = "no durable base candidate exists for the most recent weekly window"
+        state.base_error = "no durable base candidate exists for the most recent weekly window"
     health = await start_health_server("pitr_base_backup", components=lambda: _components(state))
     _log.info("PITR base candidate healthz listening on :%s", health_port("pitr_base_backup"))
     try:

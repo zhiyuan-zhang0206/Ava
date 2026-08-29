@@ -9,12 +9,15 @@ import json
 import os
 import shlex
 import tempfile
+import threading
 import time
 from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 from typing import cast
 
 import psycopg
+from dotenv import dotenv_values
 
 from services.pitr.activation_state import ActivationRecord
 from shared.config import settings
@@ -43,11 +46,12 @@ def activation_health_component() -> dict[str, object]:
         "pitr_activation",
         status,
         progress="unknown" if error else "not_started" if activation is None else activation.phase,
-        detail=error or (activation.error if activation is not None else None),
+        detail=error or (activation.error_detail if activation is not None else None),
         gate_readiness=False,
     )
     health["operation_id"] = None if activation is None else activation.operation_id
     health["protected"] = activation is not None and activation.phase == "protected"
+    health["error_code"] = None if activation is None else activation.error_code
     return health
 
 
@@ -134,7 +138,7 @@ def _desired_archive_settings(home: Path) -> dict[str, str]:
     }
 
 
-def _enable_pitr_services() -> bytes:
+def _enable_pitr_services(expected_digest: str) -> bytes:
     from shared.runtime_config import write_fields
 
     captured = write_fields(
@@ -146,6 +150,7 @@ def _enable_pitr_services() -> bytes:
         },
         set(),
         capture_bytes=True,
+        expected_digest=expected_digest,
     )
     if captured is None:
         raise RuntimeError("PITR environment write did not return owned bytes")
@@ -187,6 +192,29 @@ def capture_pitr_env_baseline(path: Path) -> tuple[str, str, dict[str, str]]:
     )
 
 
+def pitr_env_is_desired(payload: bytes) -> bool:
+    values = dotenv_values(stream=StringIO(payload.decode()))
+    return all(
+        values.get(alias) == desired
+        for alias, desired in {
+            "AVA_PITR_ENABLED": "true",
+            "AVA_PITR_BASE_BACKUP_ENABLED": "true",
+            "AVA_PITR_RESTORE_PROOF_ENABLED": "true",
+            "AVA_PITR_RETENTION_PLANNER_ENABLED": "false",
+        }.items()
+    )
+
+
+def rollback_effect_state(*, current: str, before: str, owned: str) -> bool:
+    """Return whether rollback owns a mutation; reject every third-party byte state."""
+
+    if current == before:
+        return False
+    if current == owned:
+        return True
+    raise RuntimeError("config is neither pre-effect nor exact owned post-effect")
+
+
 def _restore_pitr_env(baseline: dict[str, str]) -> None:
     from shared.envfile import env_lock_path, snapshot_env
     from shared.platform import file_lock
@@ -195,8 +223,11 @@ def _restore_pitr_env(baseline: dict[str, str]) -> None:
     path = ava_home() / ".env"
     aliases = set(_PITR_ENV_FIELDS.values())
     with file_lock(env_lock_path(path), timeout_s=30):
+        current = path.read_bytes() if path.exists() else b""
+        if not pitr_env_is_desired(current):
+            raise RuntimeError("PITR-owned environment keys changed before rollback")
         snapshot_env(path)
-        lines = path.read_text().splitlines() if path.exists() else []
+        lines = current.decode().splitlines()
         kept = [line for line in lines if line.split("=", 1)[0].strip() not in aliases]
         for encoded in baseline.values():
             restored = json.loads(encoded)
@@ -218,7 +249,9 @@ def archiver_reached_target(*, last_archived: str, timeline: str, target: str) -
     )
 
 
-def remote_wal_proof(record: ActivationRecord) -> tuple[dict[str, str], dict[str, str]]:
+def remote_wal_proof(
+    record: ActivationRecord, stop: threading.Event | None = None
+) -> tuple[dict[str, str], dict[str, str]]:
     from services.pitr.gcs_store import GCSObjectStore
     from services.pitr.uploader import AckManifest
     from shared.db import direct_db_url
@@ -233,6 +266,8 @@ def remote_wal_proof(record: ActivationRecord) -> tuple[dict[str, str], dict[str
     switch_intent = datetime.fromisoformat(exact["switch_intent_at"])
     ack_path = ava_home() / "physical-backup" / "ack" / f"{archive_name}.ack.json"
     while datetime.now(UTC) <= deadline:
+        if stop is not None and stop.is_set():
+            raise RuntimeError("PITR WAL proof lost its deployment lease")
         with psycopg.connect(direct_db_url(), autocommit=True) as conn:
             row = conn.execute(
                 "SELECT last_archived_wal, failed_count::text, archived_count::text "
@@ -255,6 +290,8 @@ def remote_wal_proof(record: ActivationRecord) -> tuple[dict[str, str], dict[str
             acknowledged = datetime.fromisoformat(ack.acknowledged_at)
             if not switch_intent <= acknowledged <= deadline:
                 raise RuntimeError("durable WAL ACK falls outside the activation window")
+            if stop is not None and stop.is_set():
+                raise RuntimeError("PITR WAL proof lost its deployment lease")
             remote = GCSObjectStore(
                 project=config.pitr_gcs_project,
                 bucket=config.pitr_gcs_bucket,
@@ -282,10 +319,14 @@ def remote_wal_proof(record: ActivationRecord) -> tuple[dict[str, str], dict[str
             common = {
                 "timeline": exact["timeline"],
                 "segment": archive_name,
+                "bucket_name": str(config.pitr_gcs_bucket),
+                "object_prefix": config.pitr_gcs_prefix,
                 "object_name": ack.object_name,
                 "generation": str(ack.generation),
                 "ciphertext_size": str(ack.ciphertext_size),
                 "ciphertext_crc32c": ack.ciphertext_crc32c,
+                "source_sha256": ack.source_sha256,
+                "source_size": str(ack.source_size),
                 "key_id": ack.key_id,
                 "encryption_format": ack.encryption_format,
             }
@@ -303,19 +344,19 @@ def remote_wal_proof(record: ActivationRecord) -> tuple[dict[str, str], dict[str
     raise RuntimeError("WAL remote proof deadline expired")
 
 
-def forced_candidate(record: ActivationRecord) -> tuple[str, str]:
+def forced_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[str, str]:
     from services.pitr.activation_base import build_activation_candidate
 
     if record.candidate_chain_id is None:
         raise RuntimeError("activation candidate intent is missing")
     candidate = build_activation_candidate(
-        operation_id=record.operation_id, chain_id=record.candidate_chain_id
+        operation_id=record.operation_id, chain_id=record.candidate_chain_id, stop=stop
     )
     payload = candidate.to_json()
     return payload, hashlib.sha256(payload.encode()).hexdigest()
 
 
-def restore_candidate(record: ActivationRecord) -> tuple[str, str]:
+def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[str, str]:
     from services.pitr.activation_base import restore_activation_candidate
     from services.pitr.base_manifest import CandidateManifest
 
@@ -330,7 +371,7 @@ def restore_candidate(record: ActivationRecord) -> tuple[str, str]:
         or digest != record.candidate_digest
     ):
         raise RuntimeError("restore candidate differs from durable activation intent")
-    protected = asyncio.run(restore_activation_candidate(candidate))
+    protected = asyncio.run(restore_activation_candidate(candidate, stop))
     if (
         protected.chain_id != candidate.chain_id
         or protected.candidate != candidate

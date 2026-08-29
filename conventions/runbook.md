@@ -613,12 +613,19 @@ terminal runs use a bounded two-artifact retention window.
 Resume and status reverify that artifact. Preparation serializes with cluster
 update/maintenance, binds the live PGDATA/port/postmaster/system-id identity on
 both sides of the dump, and persists failures without resetting `started_at`.
-Its credential check proves distinct service-account emails, not merely distinct keys, and
-non-mutating bucket metadata access. Never edit PostgreSQL or `.env` manually
+Its credential check proves distinct service-account emails, not merely distinct keys. The
+viewer proves object-list/read access without requiring bucket-metadata access; the
+objectCreator + objectViewer uploader is identity-checked without creating or deleting a probe. Never edit PostgreSQL or `.env` manually
 during this sequence. Resume a pending restart through the command; do not call
 `pg_ctl` or introduce another restart mechanism. `ava cluster pitr rollback`
 persists rollback intent, restores the frozen settings, disables PITR and
 retention gates, and uses the same durable whole-cluster restart continuation.
+Each of the four owned PostgreSQL settings has its own intent and applied
+journal entry: resume distinguishes pre-ALTER from post-ALTER/pre-journal
+failure without replaying a completed setting. Rollback restores only those
+owned fields, so unrelated concurrent `ALTER SYSTEM` keys survive; readiness
+verifies the owned semantic baseline after restart instead of requiring the
+whole `postgresql.auto.conf` file to equal its old bytes.
 It preserves logical dumps, local ACKs, remote objects, and protected manifests.
 
 Restore proof additionally requires

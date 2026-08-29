@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -79,6 +80,20 @@ _FORWARD_PHASES: tuple[ActivationPhase, ...] = (
 )
 _ROLLBACK_ENTRY_PHASES = frozenset(_FORWARD_PHASES[3:])
 _EVIDENCE_KEYS = {
+    "pre_activation_credential_evidence": frozenset(
+        {
+            "uploader_client_email",
+            "uploader_project_id",
+            "uploader_private_key_id",
+            "viewer_client_email",
+            "viewer_project_id",
+            "viewer_private_key_id",
+            "bucket_name",
+            "object_prefix",
+            "backup_key_id",
+            "backup_key_sha256",
+        }
+    ),
     "wal_exact_evidence": frozenset(
         {
             "timeline",
@@ -93,10 +108,14 @@ _EVIDENCE_KEYS = {
         {
             "timeline",
             "segment",
+            "bucket_name",
+            "object_prefix",
             "object_name",
             "generation",
             "ciphertext_size",
             "ciphertext_crc32c",
+            "source_sha256",
+            "source_size",
             "key_id",
             "encryption_format",
             "acknowledged_at",
@@ -107,10 +126,14 @@ _EVIDENCE_KEYS = {
             "viewer_id",
             "timeline",
             "segment",
+            "bucket_name",
+            "object_prefix",
             "object_name",
             "generation",
             "ciphertext_size",
             "ciphertext_crc32c",
+            "source_sha256",
+            "source_size",
             "key_id",
             "encryption_format",
             "observed_at",
@@ -142,6 +165,10 @@ class ActivationRecord:
     protected_manifest: str | None = None
     wal_config_before_digest: str | None = None
     wal_config_desired_digest: str | None = None
+    config_apply_intent: dict[str, str] | None = None
+    config_apply_applied: dict[str, str] | None = None
+    rollback_setting_intent: dict[str, str] | None = None
+    rollback_settings_applied: dict[str, str] | None = None
     restart_handoff: str | None = None
     restart_orchestration: str | None = None
     rollback_postmaster_started_at: str | None = None
@@ -155,6 +182,8 @@ class ActivationRecord:
     candidate_chain_id: str | None = None
     protected_digest: str | None = None
     error: str | None = None
+    error_code: str | None = None
+    error_detail: str | None = None
 
     @classmethod
     def start(cls, *, operation_id: str, origin: str) -> ActivationRecord:
@@ -254,6 +283,10 @@ class ActivationRecord:
             protected_manifest=optional_string("protected_manifest"),
             wal_config_before_digest=optional_string("wal_config_before_digest"),
             wal_config_desired_digest=optional_string("wal_config_desired_digest"),
+            config_apply_intent=optional_string_map("config_apply_intent"),
+            config_apply_applied=optional_string_map("config_apply_applied"),
+            rollback_setting_intent=optional_string_map("rollback_setting_intent"),
+            rollback_settings_applied=optional_string_map("rollback_settings_applied"),
             restart_handoff=optional_string("restart_handoff"),
             restart_orchestration=optional_string("restart_orchestration"),
             rollback_postmaster_started_at=optional_string("rollback_postmaster_started_at"),
@@ -267,6 +300,8 @@ class ActivationRecord:
             candidate_chain_id=optional_string("candidate_chain_id"),
             protected_digest=optional_string("protected_digest"),
             error=optional_string("error"),
+            error_code=optional_string("error_code"),
+            error_detail=optional_string("error_detail"),
         )
         if record.schema_version != _SCHEMA_VERSION:
             raise ValueError("unsupported PITR activation record schema")
@@ -288,6 +323,145 @@ class ActivationRecord:
             utc_timestamp(record.wal_viewer_proof["observed_at"], "observed_at")
         if record.wal_exact_evidence is not None:
             utc_timestamp(record.wal_exact_evidence["switch_intent_at"], "switch_intent_at")
+            exact = record.wal_exact_evidence
+            segment = exact["segment"]
+            if not re.fullmatch(r"[0-9A-F]{24}", segment) or segment[:8] != (
+                f"{int(exact['timeline']):08X}"
+            ):
+                raise ValueError("PITR WAL intent has a non-canonical segment")
+        for journal, label in (
+            (record.config_apply_intent, "intent"),
+            (record.config_apply_applied, "applied"),
+        ):
+            if journal is None:
+                continue
+            if journal.get("kind") not in {"env", "postgresql_auto_conf"}:
+                raise ValueError(f"PITR config apply {label} kind is unknown")
+            expected = (
+                {"kind", "expected_digest", "desired_digest"}
+                if journal.get("kind") == "env" and label == "intent"
+                else {"kind", "digest"}
+                if journal.get("kind") == "env"
+                else {"kind", "name", "expected_digest", "desired_value"}
+                if label == "intent"
+                else {"kind", "name", "digest"}
+            )
+            if set(journal) != expected:
+                raise ValueError(f"PITR config apply {label} fields differ")
+        rollback_names = {
+            "archive_mode",
+            "archive_command",
+            "archive_timeout",
+            "wal_compression",
+        }
+        if record.rollback_setting_intent is not None and set(record.rollback_setting_intent) != {
+            "name",
+            "expected_digest",
+            "current_value",
+            "desired_value",
+        }:
+            raise ValueError("PITR rollback setting intent fields differ")
+        if (
+            record.rollback_setting_intent is not None
+            and record.rollback_setting_intent["name"] not in rollback_names
+        ):
+            raise ValueError("PITR rollback setting intent name is unknown")
+        if record.rollback_settings_applied is not None:
+            if not set(record.rollback_settings_applied) <= rollback_names:
+                raise ValueError("PITR rollback applied setting name is unknown")
+            for evidence in record.rollback_settings_applied.values():
+                value = json.loads(evidence)
+                if (
+                    not isinstance(value, dict)
+                    or set(value)
+                    != {
+                        "desired_value",
+                        "post_digest",
+                    }
+                    or not all(isinstance(item, str) for item in value.values())
+                ):
+                    raise ValueError("PITR rollback applied evidence fields differ")
+                if not re.fullmatch(r"[0-9a-f]{64}", value["post_digest"]):
+                    raise ValueError("PITR rollback applied digest is invalid")
+        baseline = record.pre_activation_pg_auto_conf or {}
+        if record.rollback_setting_intent is not None and record.rollback_setting_intent[
+            "desired_value"
+        ] != baseline.get(record.rollback_setting_intent["name"]):
+            raise ValueError("PITR rollback setting intent differs from baseline")
+        if record.rollback_settings_applied is not None and any(
+            json.loads(evidence)["desired_value"] != baseline.get(name)
+            for name, evidence in record.rollback_settings_applied.items()
+        ):
+            raise ValueError("PITR rollback applied evidence differs from baseline")
+        if record.wal_ack_evidence is not None and record.wal_viewer_proof is not None:
+            ack, viewer = record.wal_ack_evidence, record.wal_viewer_proof
+            immutable = (
+                "timeline",
+                "segment",
+                "bucket_name",
+                "object_prefix",
+                "object_name",
+                "generation",
+                "ciphertext_size",
+                "ciphertext_crc32c",
+                "key_id",
+                "encryption_format",
+                "source_sha256",
+                "source_size",
+            )
+            if any(ack[name] != viewer[name] for name in immutable):
+                raise ValueError("PITR ACK and viewer immutable evidence differ")
+            frozen = record.pre_activation_credential_evidence or {}
+            if record.wal_exact_evidence is None or any(
+                (
+                    ack["segment"] != record.wal_exact_evidence["segment"],
+                    ack["timeline"] != record.wal_exact_evidence["timeline"],
+                    ack["bucket_name"] != frozen.get("bucket_name"),
+                    ack["object_prefix"] != frozen.get("object_prefix"),
+                    ack["key_id"] != frozen.get("backup_key_id"),
+                    viewer["viewer_id"] != frozen.get("viewer_client_email"),
+                )
+            ):
+                raise ValueError("PITR remote evidence differs from WAL intent")
+            expected_object = (
+                f"{frozen.get('object_prefix', '').rstrip('/')}/wal/"
+                f"{ack['segment'][:8]}/{ack['segment']}.enc"
+            )
+            if ack["object_name"] != expected_object:
+                raise ValueError("PITR remote object name is not canonical")
+            if int(ack["generation"]) <= 0 or int(ack["ciphertext_size"]) <= 0:
+                raise ValueError("PITR remote identity must have positive generation and size")
+            if int(ack["source_size"]) <= 0 or not re.fullmatch(
+                r"[0-9a-f]{64}", ack["source_sha256"]
+            ):
+                raise ValueError("PITR remote evidence has invalid source identity")
+            if not re.fullmatch(r"[A-Za-z0-9+/]{6}==", ack["ciphertext_crc32c"]):
+                raise ValueError("PITR remote evidence has invalid CRC32C")
+            intent_at = datetime.fromisoformat(record.wal_exact_evidence["switch_intent_at"])
+            acknowledged = datetime.fromisoformat(ack["acknowledged_at"])
+            observed = datetime.fromisoformat(viewer["observed_at"])
+            if record.wal_verification_deadline is None:
+                raise ValueError("PITR remote proof lacks its durable deadline")
+            deadline = datetime.fromisoformat(record.wal_verification_deadline)
+            if not intent_at <= acknowledged <= observed <= deadline:
+                raise ValueError("PITR remote evidence falls outside its durable deadline")
+        if record.error_code is not None and record.error_code not in {
+            "gcs_forbidden",
+            "wal_deadline",
+            "credential_drift",
+            "state_cas",
+            "restore_mismatch",
+            "restart_failure",
+            "activation_failure",
+        }:
+            raise ValueError("PITR activation error code is unknown")
+        if (record.error_code is None) != (record.error_detail is None):
+            raise ValueError("PITR activation diagnostics are incomplete")
+        if record.pre_activation_credential_evidence is not None and not re.fullmatch(
+            r"[0-9a-f]{64}",
+            record.pre_activation_credential_evidence["backup_key_sha256"],
+        ):
+            raise ValueError("PITR backup key fingerprint must be lowercase SHA256")
         if record.phase in _EVIDENCE_PHASES and (
             not record.pre_activation_snapshot
             or not record.pre_activation_pg_settings
@@ -337,6 +511,8 @@ class ActivationRecord:
             not record.protected_manifest or not record.protected_digest
         ):
             raise ValueError("protected PITR activation is missing protected evidence")
+        if record.phase == "protected" and record.config_apply_intent is not None:
+            raise ValueError("protected PITR activation retains a config intent")
         if record.phase in {"rollback_pending", "rollback_restart_pending"} and (
             not record.wal_config_before_digest
             or not record.restart_handoff
@@ -353,6 +529,11 @@ class ActivationRecord:
             or not record.pre_activation_pg_settings
         ):
             raise ValueError("PITR rollback phase is missing restart evidence")
+        if record.phase == "rollback_restart_pending" and (
+            record.rollback_setting_intent is not None
+            or set(record.rollback_settings_applied or {}) != rollback_names
+        ):
+            raise ValueError("PITR rollback restart lacks per-setting applied evidence")
         if (
             record.phase == "rolled_back"
             and record.wal_config_before_digest is not None
@@ -397,14 +578,18 @@ class ActivationRecord:
                 or not protected.chain_id.endswith(f"-{record.operation_id}")
                 or protected.candidate_sha256 != record.candidate_digest
                 or hashlib.sha256(canonical.encode()).hexdigest() != record.protected_digest
+                or protected.candidate.system_identifier
+                != (record.pre_activation_pg_settings or {}).get("system_identifier")
+                or protected.candidate.base_object.key_id
+                != (record.pre_activation_credential_evidence or {}).get("backup_key_id")
             ):
                 raise ValueError("protected manifest differs from activation evidence")
         return record
 
     def advance(self, phase: ActivationPhase, **changes: object) -> ActivationRecord:
         if phase == self.phase:
-            if set(changes) - {"error"}:
-                raise ValueError("same-phase PITR activation update may only change error")
+            if set(changes) - {"error", "error_code", "error_detail"}:
+                raise ValueError("same-phase PITR activation update may only change diagnostics")
         elif phase == "rollback_pending":
             if self.phase not in _ROLLBACK_ENTRY_PHASES:
                 raise ValueError("illegal PITR activation rollback entry")
@@ -427,7 +612,37 @@ class ActivationRecord:
             raise ValueError("PITR activation identity fields are immutable")
         raw = asdict(self)
         raw.update(changes)
+        if phase != self.phase and changes.get("error") is None:
+            raw["error_code"] = None
+            raw["error_detail"] = None
         raw["phase"] = phase
+        raw["updated_at"] = datetime.now(UTC).isoformat()
+        return ActivationRecord.from_json(json.dumps(raw))
+
+    def journal_config(self, **changes: object) -> ActivationRecord:
+        allowed = {
+            "config_apply_intent",
+            "config_apply_applied",
+            "rollback_expected_env_digest",
+            "rollback_expected_auto_conf_digest",
+        }
+        if self.phase != "wal_config_applying" or set(changes) - allowed:
+            raise ValueError("invalid PITR config application journal update")
+        raw = asdict(self)
+        raw.update(changes)
+        raw["updated_at"] = datetime.now(UTC).isoformat()
+        return ActivationRecord.from_json(json.dumps(raw))
+
+    def journal_rollback(self, **changes: object) -> ActivationRecord:
+        allowed = {
+            "rollback_setting_intent",
+            "rollback_settings_applied",
+            "rollback_expected_auto_conf_digest",
+        }
+        if self.phase != "rollback_pending" or set(changes) - allowed:
+            raise ValueError("invalid PITR rollback setting journal update")
+        raw = asdict(self)
+        raw.update(changes)
         raw["updated_at"] = datetime.now(UTC).isoformat()
         return ActivationRecord.from_json(json.dumps(raw))
 

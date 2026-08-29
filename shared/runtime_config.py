@@ -116,7 +116,11 @@ def env_value_text(value: Any) -> str:
 
 
 def write_fields(
-    updates: dict[str, Any], removals: set[str], *, capture_bytes: bool = False
+    updates: dict[str, Any],
+    removals: set[str],
+    *,
+    capture_bytes: bool = False,
+    expected_digest: str | None = None,
 ) -> bytes | None:
     """Set each field's alias in this unit's `.env`, and unset each removed field's.
 
@@ -144,6 +148,12 @@ def write_fields(
     # taken mid-rewrite would preserve a state that never existed.
     captured: bytes | None = None
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
+        if expected_digest is not None:
+            import hashlib
+
+            current = path.read_bytes() if path.exists() else b""
+            if hashlib.sha256(current).hexdigest() != expected_digest:
+                raise RuntimeError(".env changed before owned runtime-config write")
         snapshot_env(path)
         path.touch(exist_ok=True)
         sp = str(path)

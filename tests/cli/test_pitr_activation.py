@@ -10,14 +10,39 @@ from pathlib import Path
 import pytest
 
 from cli.commands import _pitr_activation as activation
+from cli.commands import _pitr_activation_config as activation_config
 from ops.pitr_restart import PitrRestartContinuation
-from services.pitr.activation_runtime import archiver_reached_target
+from services.pitr.activation_observability import save_error
+from services.pitr.activation_runtime import (
+    archiver_reached_target,
+    pitr_env_is_desired,
+    rollback_effect_state,
+)
 from services.pitr.activation_state import ActivationRecord, load_record, write_record
 
 
+def _credentials() -> dict[str, str]:
+    return {
+        "uploader_client_email": "u@example.test",
+        "uploader_project_id": "project",
+        "uploader_private_key_id": "u-key",
+        "viewer_client_email": "v@example.test",
+        "viewer_project_id": "project",
+        "viewer_private_key_id": "v-key",
+        "bucket_name": "bucket",
+        "object_prefix": "pitr",
+        "backup_key_id": "key",
+        "backup_key_sha256": "0" * 64,
+    }
+
+
 def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(activation, "_alter_archive_settings", lambda _values: None)
-    monkeypatch.setattr(activation, "_enable_pitr_services", lambda: b"a")
+    monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
+    monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "off")
+    monkeypatch.setattr(activation_config, "_enable_pitr_services", lambda _digest: b"a")
+    monkeypatch.setattr(activation_config, "_env_payload", lambda _home: b"a")
+    monkeypatch.setattr(activation_config, "pitr_env_is_desired", lambda _payload: False)
+    monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", "digest"))
     monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("YQ==", "digest"))
     monkeypatch.setattr(
         activation,
@@ -68,7 +93,7 @@ def _wal_config_pending_record() -> ActivationRecord:
                 "wal_compression": "off",
                 "postmaster_started_at": "2026-08-29 00:00:00+00",
             },
-            pre_activation_credential_evidence={"viewer": "separate"},
+            pre_activation_credential_evidence=_credentials(),
         )
         .advance("snapshot_verified", pre_activation_snapshot="/verified.dump.enc")
         .advance("wal_config_pending")
@@ -253,7 +278,7 @@ def test_activate_persists_snapshot_before_wal_pending(
         "direct_db_url": "dbname=ava",
         "postmaster_started_at": "2026-08-29 00:00:00+00",
     }
-    credentials = {"uploader_client_email": "writer@example.test"}
+    credentials = _credentials()
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(
         activation,
@@ -310,6 +335,77 @@ def test_activate_resume_never_repeats_snapshot(
     assert activation.cmd_pitr_activate(origin="cli") == 0
 
 
+@pytest.mark.parametrize("drift", ["system_identifier", "bucket_name", "backup_key_id"])
+def test_wal_config_pending_drift_refuses_before_any_config_mutation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, drift: str
+) -> None:
+    record = _wal_config_pending_record()
+    write_record(tmp_path, record)
+    pg = dict(record.pre_activation_pg_settings or {})
+    credentials = dict(record.pre_activation_credential_evidence or {})
+    if drift == "system_identifier":
+        pg[drift] = "replacement-cluster"
+    else:
+        credentials[drift] = "replacement-target"
+    called = False
+
+    def mutate(*_args: object, **_kwargs: object) -> ActivationRecord:
+        nonlocal called
+        called = True
+        raise AssertionError("config mutation ran after frozen identity drift")
+
+    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
+    monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
+    monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
+    monkeypatch.setattr(activation, "apply_wal_config", mutate)
+
+    with pytest.raises(RuntimeError, match="changed before PITR mutation"):
+        activation._advance_activation(tmp_path, record, "holder")
+    assert called is False
+    assert load_record(tmp_path) == record
+
+
+def test_config_apply_journals_intent_before_alter_and_resumes_partial_crash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "pg").mkdir()
+    (tmp_path / "pg" / "postgresql.auto.conf").write_text("")
+    (tmp_path / ".env").write_text("OTHER=kept\n")
+    record = _wal_config_pending_record().advance(
+        "wal_config_applying",
+        wal_config_before_digest="before",
+        wal_config_desired_digest="desired",
+        pre_activation_pitr_env=dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+        pre_activation_pg_auto_conf={"archive_mode": "__ABSENT__"},
+        pre_activation_env_b64="T1RIRVI9a2VwdAo=",
+        pre_activation_env_digest=hashlib.sha256(b"OTHER=kept\n").hexdigest(),
+        pre_activation_auto_conf_b64="",
+        pre_activation_auto_conf_digest=hashlib.sha256(b"").hexdigest(),
+        rollback_expected_env_digest=hashlib.sha256(b"OTHER=kept\n").hexdigest(),
+        rollback_expected_auto_conf_digest=hashlib.sha256(b"").hexdigest(),
+    )
+    write_record(tmp_path, record)
+
+    def crash_after_intent(_name: str, _value: str) -> None:
+        durable = load_record(tmp_path)
+        assert durable is not None and durable.config_apply_intent is not None
+        raise RuntimeError("crash after intent")
+
+    monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "off")
+    monkeypatch.setattr(activation_config, "_alter", crash_after_intent)
+    with pytest.raises(RuntimeError, match="crash after intent"):
+        activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
+    durable = load_record(tmp_path)
+    assert durable is not None
+    assert durable.phase == "wal_config_applying"
+    assert durable.config_apply_intent == {
+        "kind": "postgresql_auto_conf",
+        "name": "archive_mode",
+        "expected_digest": hashlib.sha256(b"").hexdigest(),
+        "desired_value": "on",
+    }
+
+
 def test_rollback_preserves_snapshot_and_is_idempotent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -327,6 +423,73 @@ def test_rollback_preserves_snapshot_and_is_idempotent(
     assert rolled_back.pre_activation_snapshot == "/verified.dump.enc"
 
 
+@pytest.mark.parametrize(
+    "crash_setting",
+    ["archive_mode", "archive_command", "archive_timeout", "wal_compression"],
+)
+@pytest.mark.parametrize("window", ["before_effect", "after_effect_before_journal"])
+def test_rollback_setting_crash_matrix_resumes_each_owned_alter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    crash_setting: str,
+    window: str,
+) -> None:
+    baseline = {
+        "archive_mode": "__ABSENT__",
+        "archive_command": "__ABSENT__",
+        "archive_timeout": "__ABSENT__",
+        "wal_compression": "__ABSENT__",
+    }
+    current = dict.fromkeys(baseline, "activation-owned")
+    record = _wal_restart_pending_record().advance(
+        "rollback_pending",
+        wal_config_before_digest="before",
+        restart_handoff="rollback-handoff",
+        restart_orchestration="rollback-orchestration",
+        rollback_postmaster_started_at="2026-08-29 01:00:00+00",
+    )
+    write_record(tmp_path, record)
+    crashed = False
+
+    monkeypatch.setattr(
+        activation_config, "_persistent_archive_settings", lambda _home: dict(current)
+    )
+    monkeypatch.setattr(
+        activation_config,
+        "_file_evidence",
+        lambda _path: (
+            "",
+            hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest(),
+        ),
+    )
+
+    def alter(name: str, desired: str) -> None:
+        nonlocal crashed
+        if name == crash_setting and not crashed:
+            crashed = True
+            if window == "after_effect_before_journal":
+                current[name] = desired
+            raise RuntimeError(window)
+        current[name] = desired
+
+    monkeypatch.setattr(activation_config, "_alter_restore", alter)
+    with pytest.raises(RuntimeError, match=window):
+        activation_config.restore_archive_settings(tmp_path, record, baseline)
+
+    durable = load_record(tmp_path)
+    assert durable is not None
+    assert durable.rollback_setting_intent == {
+        "name": crash_setting,
+        "expected_digest": durable.rollback_setting_intent["expected_digest"],
+        "current_value": "activation-owned",
+        "desired_value": "__ABSENT__",
+    }
+    resumed = activation_config.restore_archive_settings(tmp_path, durable, baseline)
+    assert resumed.rollback_setting_intent is None
+    assert set(resumed.rollback_settings_applied or {}) == set(baseline)
+    assert current == baseline
+
+
 def test_env_baseline_restores_exact_raw_presence_and_duplicate_values(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -336,7 +499,9 @@ def test_env_baseline_restores_exact_raw_presence_and_duplicate_values(
     baseline = activation._pitr_env_baseline()
     env.write_text("KEEP='unchanged'\nAVA_PITR_ENABLED=true\n")
 
-    activation._restore_pitr_env(baseline)
+    from services.pitr.activation_runtime import _restore_pitr_env
+
+    _restore_pitr_env(baseline)
 
     lines = env.read_text().splitlines()
     assert lines == [
@@ -345,6 +510,23 @@ def test_env_baseline_restores_exact_raw_presence_and_duplicate_values(
         "AVA_PITR_ENABLED=false # exact",
     ]
     assert json.loads(baseline["pitr_base_backup_enabled"]) == []
+
+
+def test_pitr_env_desired_requires_all_four_owned_aliases() -> None:
+    assert pitr_env_is_desired(
+        b"AVA_PITR_ENABLED=true\n"
+        b"AVA_PITR_BASE_BACKUP_ENABLED=true\n"
+        b"AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
+        b"AVA_PITR_RETENTION_PLANNER_ENABLED=false\n"
+    )
+    assert not pitr_env_is_desired(b"AVA_PITR_ENABLED=true\n")
+
+
+def test_rollback_effect_accepts_only_exact_pre_or_owned_postimage() -> None:
+    assert rollback_effect_state(current="before", before="before", owned="after") is False
+    assert rollback_effect_state(current="after", before="before", owned="after") is True
+    with pytest.raises(RuntimeError, match="neither pre-effect nor exact owned post-effect"):
+        rollback_effect_state(current="third-party", before="before", owned="after")
 
 
 def test_pg_auto_conf_baseline_preserves_absence_and_last_owned_line(
@@ -386,6 +568,34 @@ def test_concurrent_activation_refuses_without_snapshot(
     assert called is False
     record = load_record(tmp_path)
     assert record is not None and record.started_at and record.error == "RuntimeError"
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        (PermissionError("403 secret-token"), "gcs_forbidden"),
+        (RuntimeError("WAL deadline https://credential.example"), "wal_deadline"),
+        (RuntimeError("credential drift private-key"), "credential_drift"),
+        (RuntimeError("state CAS changed"), "state_cas"),
+        (RuntimeError("restore candidate mismatch"), "restore_mismatch"),
+        (RuntimeError("restart session failed"), "restart_failure"),
+    ],
+)
+def test_activation_error_diagnostics_are_stable_and_redacted(
+    tmp_path: Path, failure: BaseException, code: str
+) -> None:
+    record = ActivationRecord.start(operation_id="op-1", origin="cli")
+    write_record(tmp_path, record)
+
+    save_error(tmp_path, record, failure)
+
+    saved = load_record(tmp_path)
+    assert saved is not None
+    assert saved.error_code == code
+    assert saved.error_detail is not None
+    assert "secret-token" not in saved.error_detail
+    assert "credential.example" not in saved.error_detail
+    assert "private-key" not in saved.error_detail
 
 
 def test_concurrent_rollback_persists_error_and_preserves_phase(
@@ -443,7 +653,7 @@ def test_release_failure_does_not_roll_back_durable_phase(
         "direct_db_url": "dbname=ava",
         "postmaster_started_at": "2026-08-29 00:00:00+00",
     }
-    credentials = {"viewer": "separate"}
+    credentials = _credentials()
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(
         activation,
@@ -479,7 +689,7 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
     record = ActivationRecord.start(operation_id="op-1", origin="cli").advance(
         "snapshot_pending",
         pre_activation_pg_settings=pg,
-        pre_activation_credential_evidence={"viewer_client_email": "old@example.test"},
+        pre_activation_credential_evidence=_credentials(),
     )
     write_record(tmp_path, record)
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
@@ -487,7 +697,7 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
     monkeypatch.setattr(
         activation,
         "_validate_secrets",
-        lambda: {"viewer_client_email": "new@example.test"},
+        lambda: {**_credentials(), "viewer_client_email": "new@example.test"},
     )
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
