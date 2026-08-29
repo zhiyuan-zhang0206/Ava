@@ -33,8 +33,8 @@ tags:
   compensating-resume set for this rollout. A later successful ops dial cannot
   re-admit it because reachability does not prove the pinned Git object arrived;
   pausing without that proof strands the runner at Phase B's migration-layout
-  validation. The runner remains serving and its pin-drift watchdog converges it
-  after the rollout.
+  validation. The runner remains serving and converges at the next rollout, or
+  when `ava cluster update` runs on that host.
 - `update.py`'s Phase-B poll answers a `PollVerdict` per host — the stall verdict
   reads the host's `host_deploy_state` row (idle → OK; live lease → working;
   paused+expired / converging+no-lease → STALLED ×2). A POLL_* status plus the
