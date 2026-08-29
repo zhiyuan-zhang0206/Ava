@@ -1377,3 +1377,187 @@ def test_root_task_ongoing_migration_down_restores_legacy_schema() -> None:
                 """UPDATE agent_tasks SET status = 'ongoing'
                        WHERE id = 2"""
             )
+
+
+# ─── drop-task-open-status migration: legacy-schema execution ────────────────
+
+
+_DROP_OPEN_UP = (
+    Path(__file__).resolve().parents[2] / "migrations" / "20260829T090700_drop-task-open-status.sql"
+)
+_DROP_OPEN_DOWN = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260829T090700_drop-task-open-status.down.sql"
+)
+
+# The pre-ruling agent_tasks shape: 5-value status CHECK (auto-named
+# agent_tasks_status_check), DEFAULT 'open', the root pinned 'ongoing', and the
+# old partial unique title index. Minimal but faithful — the migration only
+# touches agent_tasks, so the scratch DB needs no other tables (owner FK
+# references agents, created inline). One 'open' row is seeded so the data
+# migration is exercised.
+_LEGACY_OPEN_AGENT_TASKS = """
+CREATE TABLE agents (id BIGSERIAL PRIMARY KEY, label TEXT);
+CREATE TABLE agent_tasks (
+    id          BIGSERIAL PRIMARY KEY,
+    parent_id   BIGINT REFERENCES agent_tasks(id),
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL,
+    results     TEXT,
+    status      TEXT NOT NULL DEFAULT 'open'
+                CHECK (status IN ('open', 'in_progress', 'done', 'cancelled', 'ongoing')),
+    priority    TEXT NOT NULL DEFAULT 'P2',
+    owner       BIGINT REFERENCES agents(id),
+    created_by  TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    is_root     BOOLEAN NOT NULL DEFAULT FALSE,
+    remind_interval_seconds INTEGER DEFAULT 1800,
+    last_reminded_at TIMESTAMPTZ,
+    reminder_count INTEGER NOT NULL DEFAULT 0
+);
+ALTER TABLE agent_tasks ADD CONSTRAINT agent_tasks_root_status_ongoing
+    CHECK ((is_root AND status = 'ongoing') OR (NOT is_root AND status <> 'ongoing'));
+CREATE UNIQUE INDEX agent_tasks_title_unique_open
+    ON agent_tasks (title) WHERE status IN ('open', 'in_progress');
+INSERT INTO agents (id, label) VALUES (1, 'agent');
+INSERT INTO agent_tasks (id, title, description, status, created_by, is_root, owner)
+VALUES (1, 'Root', 'root', 'ongoing', 'system', TRUE, NULL),
+       (2, 'open task', 'open', 'open', '1', FALSE, 1),
+       (3, 'active task', 'active', 'in_progress', '1', FALSE, 1),
+       (4, 'done task', 'done', 'done', '1', FALSE, 1);
+-- The explicit ids above do not advance the BIGSERIAL sequence; the tests
+-- insert without ids afterwards, so the sequence must be set to the max.
+SELECT setval(pg_get_serial_sequence('agent_tasks', 'id'),
+              (SELECT max(id) FROM agent_tasks));
+"""
+
+
+def _drop_open_shape(url: str) -> tuple[str, str, str, set[str]]:
+    """Return (status_default, status_check_sql, root_status, index_names)."""
+    with psycopg.connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_default FROM information_schema.columns "
+            "WHERE table_name = 'agent_tasks' AND column_name = 'status'"
+        )
+        default_row = cur.fetchone()
+        assert default_row is not None
+        cur.execute(
+            """SELECT pg_get_constraintdef(oid) FROM pg_constraint
+               WHERE conrelid = 'agent_tasks'::regclass
+                 AND conname = 'agent_tasks_status_check'"""
+        )
+        status_row = cur.fetchone()
+        assert status_row is not None
+        cur.execute("SELECT status FROM agent_tasks WHERE is_root")
+        root_row = cur.fetchone()
+        assert root_row is not None
+        cur.execute(
+            "SELECT indexname FROM pg_indexes WHERE tablename = 'agent_tasks' "
+            "AND indexname IN ('agent_tasks_title_unique_open', "
+            "'agent_tasks_title_unique_in_progress')"
+        )
+        index_rows = cur.fetchall()
+    return (
+        default_row[0],
+        status_row[0],
+        root_row[0],
+        {r[0] for r in index_rows},
+    )
+
+
+def test_drop_task_open_status_migration_upgrades_legacy_schema() -> None:
+    """The migration runs on a pre-ruling cluster: 5-value CHECK + DEFAULT
+    'open' + old unique index + live 'open' rows. Asserts the full legacy ->
+    new shape transition: rows migrated to 'in_progress', default flipped,
+    CHECK narrowed, unique index recreated under the new name, root untouched."""
+    with _throwaway_database("drop-open-up") as url:
+        _run_sql(url, _LEGACY_OPEN_AGENT_TASKS)
+        # Precondition: legacy shape.
+        default, status_check, root_status, indexes = _drop_open_shape(url)
+        assert default == "'open'::text"
+        assert "'open'" in status_check and "'ongoing'" in status_check
+        assert root_status == "ongoing"
+        assert indexes == {"agent_tasks_title_unique_open"}
+
+        # Apply the UP migration — must succeed on the legacy shape.
+        _run_sql(url, _DROP_OPEN_UP.read_text())
+
+        default, status_check, root_status, indexes = _drop_open_shape(url)
+        assert default == "'in_progress'::text"
+        assert "'open'" not in status_check and "'ongoing'" in status_check
+        assert root_status == "ongoing"  # the root pin is untouched
+        assert indexes == {"agent_tasks_title_unique_in_progress"}
+
+        # Every former 'open' row now reads 'in_progress'; non-open rows keep
+        # their statuses.
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("SELECT id, status FROM agent_tasks ORDER BY id")
+            rows = cur.fetchall()
+        assert rows == [
+            (1, "ongoing"),
+            (2, "in_progress"),
+            (3, "in_progress"),
+            (4, "done"),
+        ]
+
+        # 'open' is no longer a legal value at all.
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute(
+                """INSERT INTO agent_tasks (title, description, status, created_by, owner)
+                       VALUES ('new', 'd', 'open', '1', 1)"""
+            )
+
+        # The narrowed unique index still backstops duplicate in_progress titles.
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.UniqueViolation),
+        ):
+            cur.execute(
+                """INSERT INTO agent_tasks (title, description, status, created_by, owner)
+                       VALUES ('active task', 'd', 'in_progress', '1', 1)"""
+            )
+
+
+def test_drop_task_open_status_migration_down_restores_legacy_schema() -> None:
+    """The DOWN migration restores the pre-ruling shape on a cluster that ran
+    the UP: CHECK widened back, DEFAULT 'open', old unique index back. Migrated
+    rows stay 'in_progress' — nothing distinguishes them from tasks born
+    'in_progress', so the down restores the vocabulary, not the data."""
+    with _throwaway_database("drop-open-down") as url:
+        _run_sql(url, _LEGACY_OPEN_AGENT_TASKS)
+        _run_sql(url, _DROP_OPEN_UP.read_text())
+        # Sanity: we are on the new shape before rolling back.
+        default, _, _, indexes = _drop_open_shape(url)
+        assert default == "'in_progress'::text"
+        assert indexes == {"agent_tasks_title_unique_in_progress"}
+
+        _run_sql(url, _DROP_OPEN_DOWN.read_text())
+
+        default, status_check, root_status, indexes = _drop_open_shape(url)
+        assert default == "'open'::text"
+        assert "'open'" in status_check and "'ongoing'" in status_check
+        assert root_status == "ongoing"
+        assert indexes == {"agent_tasks_title_unique_open"}
+
+        # 'open' is legal again, and the old index backstops it too.
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO agent_tasks (title, description, status, created_by, owner)
+                       VALUES ('fresh', 'd', 'open', '1', 1)"""
+            )
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.UniqueViolation),
+        ):
+            cur.execute(
+                """INSERT INTO agent_tasks (title, description, status, created_by, owner)
+                       VALUES ('fresh', 'd', 'in_progress', '1', 1)"""
+            )

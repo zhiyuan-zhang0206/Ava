@@ -30,13 +30,15 @@ from shared.task_timestamps import render_task_timestamps
 # spelled `builtins.list[...]`.
 __all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", "update"]
 
-# The four statuses an agent can assign to a task. 'ongoing' is deliberately NOT
+# The three statuses an agent can assign to a task. 'ongoing' is deliberately NOT
 # here: it is the system root task's permanent state (schema CHECK + DB constraint
 # agent_tasks_root_status_ongoing), set only by the schema seed / migration, never
 # by create()/update() -- the root itself is immutable (see _write_task_update),
 # and a non-root task must never be 'ongoing'. list(status=...) additionally
 # accepts 'ongoing' (a read filter, so the root is addressable by status there).
-_STATUSES = frozenset({"open", "in_progress", "done", "cancelled"})
+# A task is born 'in_progress' (the DB default; user ruling 2026-08-29 -- the
+# 'open' status was meaningless, creation starts the work immediately).
+_STATUSES = frozenset({"in_progress", "done", "cancelled"})
 
 # The stakes axis of a task (P0 highest .. P3 lowest) — same four rungs as a
 # notice, both validated against the shared Priority enum. Orders the board
@@ -167,17 +169,17 @@ def _insert_task(
 ) -> Task:
     """INSERT a task row + its create event log inside the caller's transaction.
 
-    Rejects duplicate open/in_progress titles -- prevents agents from creating
+    Rejects duplicate in_progress titles -- prevents agents from creating
     the same task twice (#60, #253)."""
     cur.execute(
-        "SELECT id, status FROM agent_tasks WHERE title = %s AND status IN ('open', 'in_progress') LIMIT 1",
+        "SELECT id, status FROM agent_tasks WHERE title = %s AND status = 'in_progress' LIMIT 1",
         (title,),
     )
     existing = cur.fetchone()
     if existing is not None:
         raise ValueError(
             f"task with title {title!r} already exists (task #{existing[0]} is {existing[1]}) — "
-            f"duplicate open/in_progress titles are not allowed"
+            f"duplicate in_progress titles are not allowed"
         )
     sql = f"INSERT INTO agent_tasks (parent_id, title, description, created_by, owner, remind_interval_seconds, priority) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {_COLS}"  # noqa: S608
     try:
@@ -196,12 +198,12 @@ def _insert_task(
     except psycopg.errors.UniqueViolation as exc:
         # The pre-check above is the common path; this catches the race where
         # two creates both pass it and the partial unique index
-        # (agent_tasks_title_unique_open) rejects the second insert. The
+        # (agent_tasks_title_unique_in_progress) rejects the second insert. The
         # transaction is aborted, so no lookup is possible here — the message
         # is generic by design.
         raise ValueError(
-            f"task with title {title!r} already exists among open/in_progress tasks — "
-            "duplicate open/in_progress titles are not allowed (enforced by the database)"
+            f"task with title {title!r} already exists among in_progress tasks — "
+            "duplicate in_progress titles are not allowed (enforced by the database)"
         ) from exc
     row = cur.fetchone()
     if row is None:
@@ -235,7 +237,7 @@ def create(
 ) -> Task:
     """
     Args:
-        title: unique among open/in_progress tasks.
+        title: unique among in_progress tasks.
         parent: id of an existing task this task descends from. The system
             root task (id 1) parents only top-level tasks; every other task
             must reference an existing task. Raises ValueError when the
@@ -538,7 +540,7 @@ def _write_task_update(
     if status in ("done", "cancelled"):
         cur.execute(
             "SELECT id, count(*) OVER () FROM agent_tasks "
-            "WHERE parent_id = %s AND status IN ('open', 'in_progress') "
+            "WHERE parent_id = %s AND status = 'in_progress' "
             "ORDER BY id LIMIT 1",
             (task_id,),
         )
@@ -546,21 +548,21 @@ def _write_task_update(
         if active_child is not None:
             child_id, child_count = active_child
             raise ValueError(
-                f"task {task_id} has {child_count} open/in_progress child tasks "
+                f"task {task_id} has {child_count} in_progress child tasks "
                 f"(e.g. #{child_id}) — close or cancel them first"
             )
-    # A rename must keep create()'s invariant: no two open/in_progress
+    # A rename must keep create()'s invariant: no two in_progress
     # tasks share a title.
     if title is not None:
         cur.execute(
-            "SELECT id, status FROM agent_tasks WHERE title = %s AND status IN ('open', 'in_progress') AND id != %s LIMIT 1",
+            "SELECT id, status FROM agent_tasks WHERE title = %s AND status = 'in_progress' AND id != %s LIMIT 1",
             (title, task_id),
         )
         dup = cur.fetchone()
         if dup is not None:
             raise ValueError(
                 f"task with title {title!r} already exists (task #{dup[0]} is {dup[1]}) — "
-                f"duplicate open/in_progress titles are not allowed"
+                f"duplicate in_progress titles are not allowed"
             )
     sql = f"UPDATE agent_tasks SET {', '.join(sets)}, updated_at = now() WHERE id = %s"  # noqa: S608
     # type: ignore[arg-type] — the SET clause is assembled at runtime from
@@ -573,8 +575,8 @@ def _write_task_update(
         # rejected the write. Transaction aborted — generic message, see
         # _insert_task.
         raise ValueError(
-            f"task with title {title!r} already exists among open/in_progress tasks — "
-            "duplicate open/in_progress titles are not allowed (enforced by the database)"
+            f"task with title {title!r} already exists among in_progress tasks — "
+            "duplicate in_progress titles are not allowed (enforced by the database)"
         ) from exc
 
     # Append a timestamped note to results — works with any status or
@@ -642,8 +644,8 @@ def update(
     a notification.
 
     Args:
-        status: one of "open", "in_progress", "done", "cancelled". Closing a
-            task is rejected while any direct child is open or in progress.
+        status: one of "in_progress", "done", "cancelled". Closing a
+            task is rejected while any direct child is in progress.
         results: replaces the whole field; use note to append instead.
         owner: agent id to reassign to. None means no change — a task always
             has an owner.

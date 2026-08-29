@@ -3,7 +3,7 @@
 GET /api/tasks — the full task list (the registry).
 PATCH /api/tasks/{id} — partial update (status / title / description /
 results / remind_interval_seconds / owner). Closing a parent is rejected while
-any child remains open or in progress.
+any child remains in progress.
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     sets: list[str] = []
     params: list[object] = []
     if body.status is not None:
-        if body.status not in ("open", "in_progress", "done", "cancelled"):
+        if body.status not in ("in_progress", "done", "cancelled"):
             if body.status == "ongoing":
                 raise HTTPException(
                     status_code=422,
@@ -86,7 +86,7 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
                 )
             raise HTTPException(
                 status_code=422,
-                detail=f"Invalid status: {body.status!r}. Must be one of: open, in_progress, done, cancelled.",
+                detail=f"Invalid status: {body.status!r}. Must be one of: in_progress, done, cancelled.",
             )
         sets.append("status = %s")
         params.append(body.status)
@@ -137,7 +137,7 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
     status, priority, title, description, and results are taken when non-null
     (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
     the system root's permanent state, never assignable; a title colliding with
-    another open/in_progress task's is rejected). owner reassigns to another
+    another in_progress task's is rejected). owner reassigns to another
     agent (an explicit null is rejected — a task cannot be released).
     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
     null is rejected — reminders cannot be disabled). Any write resets the
@@ -149,7 +149,7 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
     reassigned, completed, cancelled, or otherwise edited.
 
     A status change to done or cancelled is rejected with 422 while any direct
-    child remains open or in progress. Close or cancel those children first.
+    child remains in progress. Close or cancel those children first.
     """
     sets, params = _collect_updates(body)
     if "parent_id" in body.model_fields_set:
@@ -184,7 +184,7 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
         if body.status in ("done", "cancelled"):
             cur.execute(
                 "SELECT id, count(*) OVER () FROM agent_tasks "
-                "WHERE parent_id = %s AND status IN ('open', 'in_progress') "
+                "WHERE parent_id = %s AND status = 'in_progress' "
                 "ORDER BY id LIMIT 1",
                 (task_id,),
             )
@@ -193,7 +193,7 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
                 child_id, child_count = active_child
                 raise HTTPException(
                     status_code=422,
-                    detail=f"task {task_id} has {child_count} open/in_progress child tasks "
+                    detail=f"task {task_id} has {child_count} in_progress child tasks "
                     f"(e.g. #{child_id}) — close or cancel them first",
                 )
         # Reparenting mirrors the SDK update() checks (shared validation):
@@ -207,12 +207,12 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
                 params[-1] = resolve_reparent(cur, task_id, body.parent_id)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
-        # A rename must keep the SDK create() invariant: no two open/in_progress
+        # A rename must keep the SDK create() invariant: no two in_progress
         # tasks share a title.
         if body.title is not None:
             cur.execute(
                 "SELECT id, status FROM agent_tasks "
-                "WHERE title = %s AND status IN ('open', 'in_progress') AND id != %s LIMIT 1",
+                "WHERE title = %s AND status = 'in_progress' AND id != %s LIMIT 1",
                 (body.title, task_id),
             )
             dup = cur.fetchone()
@@ -220,7 +220,7 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
                 raise HTTPException(
                     status_code=422,
                     detail=f"A task with title {body.title!r} already exists "
-                    f"(task {dup[0]} is {dup[1]}); duplicate open/in_progress "
+                    f"(task {dup[0]} is {dup[1]}); duplicate in_progress "
                     f"titles are not allowed.",
                 )
         cur.execute(

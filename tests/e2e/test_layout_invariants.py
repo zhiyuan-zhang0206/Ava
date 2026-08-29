@@ -113,7 +113,7 @@ _TASKS = {
         for i, (t, s, pr) in enumerate(
             [
                 ("Root", "in_progress", "P2"),
-                ("Open subtask", "open", "P1"),
+                ("In-progress subtask", "in_progress", "P1"),
                 ("Done subtask", "done", "P3"),
             ]
         )
