@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import os
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import BinaryIO
 
 import pytest
 from cryptography.exceptions import InvalidTag
@@ -22,12 +22,8 @@ class FakeStore:
         self.deletes = 0
         self.crash_after_put = False
 
-    def put_stream_if_absent(
-        self,
-        open_source: Callable[[], BinaryIO],
-        size: int,
-        object_name: str,
-        metadata: Mapping[str, str],
+    def put_file_if_absent(
+        self, path: Path, object_name: str, metadata: Mapping[str, str]
     ) -> RemoteObjectAck:
         import base64
 
@@ -36,13 +32,14 @@ class FakeStore:
         self.puts += 1
         existing = self.objects.get(object_name)
         if existing is not None:
-            return existing
-        with open_source() as source:
-            payload = source.read()
+            # A 412 stat is a read, not a create: the caller must see
+            # created=False (the real GCSObjectStore does the same).
+            return replace(existing, created=False)
+        payload = path.read_bytes()
         ack = RemoteObjectAck(
             object_name,
             1,
-            size,
+            len(payload),
             base64.b64encode(google_crc32c.Checksum(payload).digest()).decode(),
             dict(metadata),
             True,
@@ -115,17 +112,34 @@ def test_verified_upload_writes_ack_then_removes_local_files(tmp_path: Path) -> 
 
 
 def test_412_exact_remote_is_idempotent_but_collision_is_critical(tmp_path: Path) -> None:
+    """Baseline-4 412 semantics: idempotency is decided on SOURCE attributes
+    (source sha/size, encryption format, key id), never on ciphertext bytes.
+
+    The second upload runs from a fresh plan (new staging dir -> new nonce ->
+    different ciphertext) yet must still ACK idempotently — re-encrypting the
+    same archive is not a collision. A different key id is."""
     store = FakeStore()
     uploader, source = _uploader(tmp_path, store)
-    store.crash_after_put = True
+    first_ack = uploader.upload_one(source)
+    # Crash recovery (port from #405's gated-service test): the remote write
+    # landed but the process died before the ACK; the retry meets the 412 and
+    # must ACK idempotently from source attributes.
+    store2 = FakeStore()
+    uploader_crash, source_crash = _uploader(tmp_path / "crash", store2)
+    store2.crash_after_put = True
     with pytest.raises(RuntimeError, match="simulated crash"):
-        uploader.upload_one(source)
-    store.crash_after_put = False
-    uploader.upload_one(source)
+        uploader_crash.upload_one(source_crash)
+    store2.crash_after_put = False
+    uploader_crash.upload_one(source_crash)
+    assert store2.puts == 2
+    uploader2, source2 = _uploader(tmp_path / "third", store)
+    second_ack = uploader2.upload_one(source2)
     assert store.puts == 2
+    assert second_ack.source_sha256 == first_ack.source_sha256
 
-    store.objects[next(iter(store.objects))] = replace(
-        next(iter(store.objects.values())), metadata={"ava-key-id": "wrong"}, created=False
+    remote = next(iter(store.objects.values()))
+    store.objects[remote.object_name] = replace(
+        remote, metadata={"ava-key-id": "wrong"}, created=False
     )
     uploader3, source3 = _uploader(tmp_path / "collision", store)
     with pytest.raises(RemoteCollisionError):
@@ -159,3 +173,115 @@ def test_corrupt_plan_fails_closed_before_remote_write(tmp_path: Path) -> None:
         uploader.upload_one(source)
     assert source.exists()
     assert store.puts == 0
+
+
+# ── QA #920 block 1: real >8 MiB payloads must upload (resumable seek/tell) ─
+
+
+class _ResumableFakeBlob:
+    """A storage Blob whose upload mimics the SDK's resumable session: it
+    opens the source and calls tell()/seek() exactly like the transport does
+    past ~8 MiB. A non-seekable source (an in-memory encrypted stream) raises
+    UnsupportedOperation here — the exact QA #920 block-1 failure."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.metadata: dict[str, str] = {}
+        self.generation: int | None = None
+        self.size: int | None = None
+        self.crc32c: str | None = None
+        self.data = b""
+
+    def upload_from_filename(self, filename: str, **kwargs: object) -> None:
+        import base64
+
+        import google_crc32c
+
+        with open(filename, "rb") as source:  # noqa: PTH123 — the SDK opens by path
+            source.seek(0, os.SEEK_END)
+            total = source.tell()
+            source.seek(0)
+            self.data = source.read()
+        self.size = total
+        self.crc32c = base64.b64encode(google_crc32c.Checksum(self.data).digest()).decode()
+        self.generation = 1
+
+    def reload(self, **kwargs) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        return None
+
+
+class _ResumableFakeBucket:
+    def __init__(self) -> None:
+        self.blobs: dict[str, _ResumableFakeBlob] = {}
+
+    def blob(self, name: str) -> _ResumableFakeBlob:
+        blob = _ResumableFakeBlob(name)
+        self.blobs[name] = blob
+        return blob
+
+
+class _ResumableFakeClient:
+    def __init__(self) -> None:
+        self._bucket = _ResumableFakeBucket()
+
+    def bucket(self, _name: str) -> _ResumableFakeBucket:
+        return self._bucket
+
+
+def test_real_16mib_upload_survives_resumable_seek(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QA #920 block 1 regression: a real >8 MiB WAL segment must reach GCS.
+
+    The path under test is the production one end to end: the real streaming
+    encryption (open_encrypted) writes the staging file, and the REAL
+    GCSObjectStore uploads it through a client whose upload_from_filename
+    performs the resumable tell()/seek() dance. A regression back to
+    streamed upload fails here with UnsupportedOperation (the SDK's resumable
+    transport cannot tell() a BufferedReader) even though FakeStore-based
+    tests stay green."""
+    from services.pitr import gcs_store as gcs_store_module
+    from services.pitr.gcs_store import GCSObjectStore
+    from services.pitr.uploader import PitrUploader
+
+    client = _ResumableFakeClient()
+    monkeypatch.setattr(
+        gcs_store_module.storage,
+        "Client",
+        lambda *_a, **_k: client,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(
+        gcs_store_module.service_account.Credentials,
+        "from_service_account_file",
+        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    creds.chmod(0o600)
+    real_store = GCSObjectStore(
+        project="proj", bucket="bucket", credentials_file=creds, timeout_seconds=30
+    )
+
+    spool = tmp_path / "big-spool"
+    ack_dir = tmp_path / "big-ack"
+    staging = tmp_path / "big-staging"
+    for directory in (spool, ack_dir, staging):
+        directory.mkdir(parents=True)
+    source = spool / NAME
+    source.write_bytes(b"w" * (16 * 1024 * 1024))  # 16 MiB — past the 8 MiB resumable floor
+    uploader = PitrUploader(
+        spool=spool,
+        ack_dir=ack_dir,
+        staging=staging,
+        prefix="prod",
+        key=b"k" * 32,
+        key_id="v1",
+        store=real_store,
+    )
+    ack = uploader.upload_one(source)
+    blob = client._bucket.blobs[ack.object_name]
+    assert ack.ciphertext_size == blob.size == len(blob.data)
+    assert ack.ciphertext_crc32c == blob.crc32c
+    assert not source.exists()
+    assert not list(staging.iterdir()), "staging (plan + ciphertext) cleaned after ACK"
+    assert blob.data.startswith(b"AVAPITR1"), "the stored object is the encrypted archive"

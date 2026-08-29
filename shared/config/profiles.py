@@ -49,6 +49,9 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "telegram",
             "feishu",
             "observability",
+            # The PITR uploader daemon reads the physical-backup plane under
+            # the gateway profile (bucket/key/credentials).
+            "physical_backup",
         }
     ),
     # agent processes (the kernel + ava SDK + ava_builtins plugins). daemon is
@@ -66,6 +69,10 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "gateway",
             "services",
             "daemon",
+            # ops/spec.py's pitr-uploader roster gate is reachable from the
+            # agent closure (via the fleet plugin); only gateway/runner
+            # processes read the domain at runtime.
+            "physical_backup",
         }
     ),
     # runner daemons (ops / restarter / watchdog / browser / browser-mcp /
@@ -82,6 +89,8 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "lm",  # ops_lifecycle reads llm_model
             "sandbox",
             "observability",
+            # ops/spec.py gates the pitr-uploader roster entry on AVA_PITR_ENABLED.
+            "physical_backup",
         }
     ),
 }
