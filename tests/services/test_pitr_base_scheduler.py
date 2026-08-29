@@ -23,6 +23,7 @@ from services.pitr.restore_manifest import (
     RestoreObject,
     RestoreProof,
     candidate_sha256,
+    required_archive_names,
 )
 from services.pitr.restore_proof import RestoreSpaceBudget
 from services.pitr.retention_planner import DryRunResult
@@ -51,6 +52,15 @@ def _candidate(chain_id: str) -> CandidateManifest:
         native_manifest_container_object_name="base",
         native_manifest_container_generation=1,
         migration_set_sha256="migrations",
+    )
+
+
+def _required_wal(candidate: CandidateManifest) -> tuple[RestoreObject, ...]:
+    return tuple(
+        RestoreObject(name, "wal", 2 + index, 10, "crc", ())
+        for index, name in enumerate(
+            required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
+        )
     )
 
 
@@ -358,7 +368,7 @@ def test_cold_start_health_degrades_for_invalid_proof_semantics(
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
         base=RestoreObject("base", "base", 1, 10, "crc", ()),
-        wal=(RestoreObject("000000010000000000000000", "wal", 2, 10, "crc", ()),),
+        wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
         proof=RestoreProof(
@@ -399,7 +409,7 @@ def test_cold_start_health_degrades_for_candidate_digest_mismatch(tmp_path: Path
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
         base=RestoreObject("base", "base", 1, 10, "crc", ()),
-        wal=(RestoreObject("000000010000000000000000", "wal", 2, 10, "crc", ()),),
+        wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
         proof=RestoreProof(
@@ -442,7 +452,7 @@ def test_cold_start_health_keeps_valid_proof_when_another_manifest_is_corrupt(
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
         base=RestoreObject("base", "base", 1, 10, "crc", ()),
-        wal=(RestoreObject("000000010000000000000000", "wal", 2, 10, "crc", ()),),
+        wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
         proof=RestoreProof(

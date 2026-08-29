@@ -12,6 +12,7 @@ import pytest
 from cli.commands import _pitr_activation as activation
 from cli.commands import _pitr_activation_config as activation_config
 from ops.pitr_restart import PitrRestartContinuation
+from services.pitr import activation_runtime
 from services.pitr.activation_observability import save_error
 from services.pitr.activation_runtime import (
     _restore_exact_file,
@@ -361,7 +362,7 @@ def test_wal_config_pending_drift_refuses_before_any_config_mutation(
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
     monkeypatch.setattr(activation, "apply_wal_config", mutate)
 
-    with pytest.raises(RuntimeError, match="changed before wal_config_pending"):
+    with pytest.raises(RuntimeError, match=r"changed before (wal_config_pending|PITR mutation)"):
         activation._advance_activation(tmp_path, record, "holder")
     assert called is False
     assert load_record(tmp_path) == record
@@ -500,6 +501,7 @@ def test_env_baseline_restores_exact_raw_presence_and_duplicate_values(
     env = tmp_path / ".env"
     env.write_text("KEEP='unchanged'\nAVA_PITR_ENABLED='false'\nAVA_PITR_ENABLED=false # exact\n")
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(activation_runtime, "ava_home", lambda: tmp_path)
     baseline = activation._pitr_env_baseline()
     env.write_text(
         "KEEP='unchanged'\n"

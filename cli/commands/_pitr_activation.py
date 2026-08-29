@@ -447,7 +447,7 @@ def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> Ac
         before = _archive_settings(_read_pg_state())
         env_b64, env_digest, env_baseline = capture_pitr_env_baseline(home / ".env")
         auto_b64, auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")
-        return _persist_transition(
+        record = _persist_transition(
             home,
             record,
             "wal_config_applying",
