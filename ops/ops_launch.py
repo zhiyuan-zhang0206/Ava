@@ -36,13 +36,8 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     # Task #1999 split) re-export THIS cluster, so a module-level import would
     # be circular in either merge order.
     from ops.ops_lifecycle import publish_inbound_arrived
-
-    # Validate model config before launching — the runner owns the LLM keys and
-    # is authoritative (defense-in-depth on top of the gateway-side check). Off
-    # the event loop: may read provider API keys.
     from shared.lm.factory import validate_model_config
 
-    await asyncio.to_thread(validate_model_config, model=settings.lm.llm_model, config=body.config)
     if runner_mode.is_hosted():
         # Hosted: the row the gateway created IS the agent. No fork, no
         # launch-confirm (there is no pid to wait for — the claim CAS of the
@@ -59,7 +54,14 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
         # marks it terminated (stamped 'launch-confirm', the same class the
         # process-mode launch confirm uses) so a half-launched spawn is a
         # visible dead agent instead of an idling row nothing will ever touch.
+        # Validation runs INSIDE the reclaim for the same reason: the row
+        # exists before validation does, and a failed validation left outside
+        # would leak an idling row the heartbeat pokes into a prompt-less
+        # zombie (no restarter reaper exists in hosted mode).
         try:
+            await asyncio.to_thread(
+                validate_model_config, model=settings.lm.llm_model, config=body.config
+            )
             if body.prompt is not None:
                 assert body.prompt_source is not None  # narrowed by the caller  # noqa: S101
                 prompt = body.prompt
@@ -86,6 +88,12 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
                 source="launch-confirm",
             )
             raise
+    # Process mode: validate model config before launching — the runner owns
+    # the LLM keys and is authoritative (defense-in-depth on top of the
+    # gateway-side check). Off the event loop: may read provider API keys. A
+    # failure here lands before the fork, with no process launched; the
+    # restarter's unclaimed-idling reaper backstops the orphaned row.
+    await asyncio.to_thread(validate_model_config, model=settings.lm.llm_model, config=body.config)
     # _launch_agent_process is synchronous (detached-process launch). Run it off
     # the event loop so a launch never blocks the ops dispatch loop and starves
     # concurrent requests (status probes / other ops) while it runs.
