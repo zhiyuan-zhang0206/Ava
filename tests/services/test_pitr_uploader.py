@@ -503,3 +503,92 @@ def test_real_sdk_resumable_transport_retries_16mib_upload(tmp_path: Path) -> No
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+# ── QA #4681 block 1: local IO failures must back off, not crash the loop ──
+
+
+def test_upload_loop_survives_oserror_enospc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A disk-full ENOSPC (or any OSError) while writing staging/ACK must map
+    to the transient backoff path — escaping upload_loop would crash the
+    daemon and make the watchdog respawn it onto the same full disk (QA
+    #4681 block 1, baseline 7). If OSError escapes, this test fails with the
+    exception propagating out of the loop task."""
+    import asyncio
+    import errno
+
+    from services.pitr import uploader_daemon
+
+    class _EnospcUploader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def pending(self) -> list[Path]:
+            return [Path("000000010000000000000001")]
+
+        def upload_one(self, _source: Path) -> str:
+            self.calls += 1
+            if self.calls == 1:
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return "acked"
+
+    uploader = _EnospcUploader()
+    stop = asyncio.Event()
+
+    async def fake_wait(*_args: object, **_kwargs: object) -> None:
+        # Skip the real backoff sleep; end the loop after the retry succeeds.
+        if uploader.calls >= 2:
+            stop.set()
+
+    monkeypatch.setattr(uploader_daemon, "_wait_with_heartbeat", fake_wait)
+
+    async def drive() -> None:
+        await uploader_daemon.upload_loop(  # pyright: ignore[reportArgumentType]
+            uploader, stop=stop
+        )
+
+    asyncio.run(drive())
+    assert uploader.calls == 2, "first call hit ENOSPC, retry succeeded — loop stayed up"
+
+
+# ── QA #4681 block 3: AVA_PITR_UNACKED_* are live health inputs ──────────
+
+
+def test_unacked_age_drives_health_component(tmp_path: Path) -> None:
+    """The oldest un-ACKed spool entry's age feeds state.py's model against
+    AVA_PITR_UNACKED_WARN/CRITICAL_SECONDS — dead configuration otherwise
+    (QA #4681 block 3)."""
+    import time
+
+    from services.pitr.uploader_daemon import _unacked_components
+
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    # Default warn threshold is 3600s; age the un-ACKed entry past it.
+    old = time.time() - 4000
+    os.utime(source, (old, old))
+    comps = _unacked_components(uploader)
+    assert comps[0]["status"] == "degraded"
+    progress = str(comps[0]["progress"])
+    assert "unacked=1" in progress
+    assert "oldest_unacked=" in progress
+    # Past the critical threshold (7200s default) the detail names the
+    # critical condition; the wire status stays degraded (no restart flap).
+    older = time.time() - 8000
+    os.utime(source, (older, older))
+    comps = _unacked_components(uploader)
+    assert comps[0]["status"] == "degraded"
+    assert "critical" in str(comps[0]["detail"])
+
+
+def test_fully_acked_spool_reports_ok(tmp_path: Path) -> None:
+
+    from services.pitr.uploader_daemon import _unacked_components
+
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    uploader.upload_one(source)  # ACK written, spool removed
+    assert not source.exists()
+    comps = _unacked_components(uploader)
+    assert comps[0]["status"] == "ok"
+    assert "unacked=0" in str(comps[0]["progress"])
