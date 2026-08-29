@@ -147,6 +147,16 @@ def test_alert_exit_is_0_on_test_only_window(daily_scan: Any) -> None:
     assert "3 window agent(s) were TEST- spawns" in rendered
 
 
+def test_alert_exit_stays_2_on_zero_seen_runs(daily_scan: Any) -> None:
+    """The `seen > 0` guard is load-bearing: a truly empty source
+    (seen=0 — the 2026-08-14 outage shape) must stay ALERT, never read as
+    a TEST- only window (0 == 0 without the guard)."""
+    ds = daily_scan
+    assert ds.alert_exit([], {"seen": 0, "excluded_test": 0, "skipped_meta": 0}) == 2
+    rendered = ds.render([], Path("d.jsonl"), 1, {"seen": 0, "excluded_test": 0, "skipped_meta": 0})
+    assert "ALERT — 0 runs collected" in rendered
+
+
 def test_alert_exit_stays_2_when_seen_runs_vanish_without_test_filter(
     daily_scan: Any,
 ) -> None:
