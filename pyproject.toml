@@ -17,6 +17,7 @@ requires-python = ">=3.12"
 dependencies = [
     "argon2-cffi>=23.1.0",
     "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
     "psutil>=5.9.0",
     "langchain-anthropic>=0.3",
     "langgraph>=0.3",

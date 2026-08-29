@@ -22,7 +22,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-${{ runner.os }}-v2
+        key: apt-pg17-redis-${{ runner.os }}-v3
 
     - name: Install (pgdg repo, cached archives, timeout+retry)
       shell: bash
@@ -65,7 +65,7 @@ runs:
           -o APT::Get::List-Cleanup=0
         )
         archives=(-o Dir::Cache::archives=/tmp/apt-archives)
-        pkgs=(postgresql-17 redis-server)
+        pkgs=(postgresql-17 redis-server postgresql-17-pgvector)
 
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
         # Fatal with no weaker tier: without the key every pgdg index is
@@ -130,4 +130,4 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-${{ runner.os }}-v2
+        key: apt-pg17-redis-${{ runner.os }}-v3

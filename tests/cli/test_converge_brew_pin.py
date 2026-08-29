@@ -20,6 +20,7 @@ EXPECTED_PINNED_FORMULAE = frozenset(
         "node",
         "openssl@3",
         "pgbouncer",
+        "pgvector",
         "postgresql@17",
         "redis",
         "redis@8.2",
