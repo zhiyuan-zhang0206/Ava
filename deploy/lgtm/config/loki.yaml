@@ -6,6 +6,10 @@ auth_enabled: false
 
 server:
   http_listen_port: 3100
+  # Default info logs every flush stream per chunk (~100M/day into the
+  # launchd-captured log); warn keeps it small without hiding errors
+  # (task #1978).
+  log_level: warn
   # Querier-to-frontend result messages exceed the gRPC default 4MiB on
   # 10-minute raw-line queries (~5k rows) and drop the client connection
   # (RemoteProtocolError). Both directions need the cap raised: recv bounds

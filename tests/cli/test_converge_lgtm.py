@@ -799,6 +799,10 @@ def test_native_loki_limits_match_the_container_rollback_config() -> None:
     )
 
     assert _without_loki_transport_paths(native) == _without_loki_transport_paths(container)
+    # Both variants must ship the noise-reducing level (task #1978): the
+    # default info writes every flush stream per chunk into the launchd log.
+    assert container["server"]["log_level"] == "warn"
+    assert native["server"]["log_level"] == "warn"
 
 
 def test_native_step_runs_only_for_the_marker_home(
