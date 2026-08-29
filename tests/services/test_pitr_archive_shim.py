@@ -100,6 +100,20 @@ def test_hard_quota_refuses_without_deleting_unacked_files(tmp_path: Path) -> No
     assert not (spool / name).exists()
 
 
+def test_hard_quota_counts_crash_leftover_partial(tmp_path: Path) -> None:
+    name = "000000010000000000000002"
+    source = tmp_path / name
+    source.write_bytes(b"new")
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    stale_partial = spool / ".000000010000000000000001.crash.partial"
+    stale_partial.write_bytes(b"retained")
+
+    assert archive_shim.archive(source, name, spool, len(b"retained")) == archive_shim.EXIT_QUOTA
+    assert stale_partial.read_bytes() == b"retained"
+    assert not (spool / name).exists()
+
+
 def test_failed_publish_removes_partial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     name = "000000010000000000000001"
     source = tmp_path / name

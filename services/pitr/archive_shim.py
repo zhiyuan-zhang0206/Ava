@@ -46,7 +46,7 @@ def _validate(source: Path, name: str, spool: Path) -> None:
 def _spooled_bytes(spool: Path) -> int:
     total = 0
     for entry in spool.iterdir():
-        if entry.name.startswith(".") or entry.name.endswith(".ack"):
+        if entry.name == ".archive.lock":
             continue
         info = entry.lstat()
         if stat.S_ISREG(info.st_mode) and not entry.is_symlink():
