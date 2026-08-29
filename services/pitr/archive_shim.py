@@ -49,8 +49,9 @@ def _spooled_bytes(spool: Path) -> int:
         if entry.name == ".archive.lock":
             continue
         info = entry.lstat()
-        if stat.S_ISREG(info.st_mode) and not entry.is_symlink():
-            total += info.st_size
+        if not stat.S_ISREG(info.st_mode) or entry.is_symlink():
+            raise ValueError("spool contains an unsupported entry")
+        total += info.st_size
     return total
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import os
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,30 @@ def test_hard_quota_counts_crash_leftover_partial(tmp_path: Path) -> None:
 
     assert archive_shim.archive(source, name, spool, len(b"retained")) == archive_shim.EXIT_QUOTA
     assert stale_partial.read_bytes() == b"retained"
+    assert not (spool / name).exists()
+
+
+@pytest.mark.parametrize("entry_kind", ["directory", "symlink", "fifo"])
+def test_spool_refuses_non_regular_entries_fail_closed(tmp_path: Path, entry_kind: str) -> None:
+    name = "000000010000000000000002"
+    source = tmp_path / name
+    source.write_bytes(b"new")
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    entry = spool / "unexpected"
+    if entry_kind == "directory":
+        entry.mkdir()
+    elif entry_kind == "symlink":
+        target = tmp_path / "target"
+        target.write_bytes(b"outside")
+        entry.symlink_to(target)
+    elif entry_kind == "fifo":
+        os.mkfifo(entry)
+    else:
+        raise AssertionError(f"unknown fixture entry kind: {entry_kind}")
+
+    assert archive_shim.archive(source, name, spool, 1024) == archive_shim.EXIT_UNSAFE_PATH
+    assert os.path.lexists(entry)
     assert not (spool / name).exists()
 
 
