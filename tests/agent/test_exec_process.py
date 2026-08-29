@@ -39,6 +39,50 @@ from agent.graph._exec_subprocess import _collect_child, _spawn
 _AGENT_ID = 424242
 
 
+async def _assert_tree_gone(pids: list[int], timeout_s: float = 5.0) -> None:
+    """Assert no live member of the process-ids after teardown.
+
+    A SIGKILLed descendant can remain a zombie until its new parent reaps it,
+    and psutil.pid_exists() still reports those entries — a snapshot check
+    races the OS reaper (same discipline as
+    tests/agent/test_exec_subprocess.py::_assert_tree_gone and
+    tests/services/test_pitr_base_scheduler.py::_assert_tree_gone). A zombie
+    or already-reaped pid counts as gone.
+    """
+    deadline = time.monotonic() + timeout_s
+    remaining = set(pids)
+    while remaining and time.monotonic() < deadline:
+        for pid in list(remaining):
+            try:
+                if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
+                    remaining.discard(pid)
+            except psutil.NoSuchProcess:
+                remaining.discard(pid)
+        if remaining:
+            await asyncio.sleep(0.05)
+    assert not remaining, f"process(es) still alive after exec teardown: {sorted(remaining)}"
+
+
+async def _assert_group_gone(pgid: int, timeout_s: float = 5.0) -> None:
+    """Assert the process group's member table is empty after teardown.
+
+    ``killpg(pgid, 0)`` keeps succeeding while any member — including a
+    zombie awaiting its reaper — remains in the group table, so a one-shot
+    ``ProcessLookupError`` expectation races the OS reaper. Poll until ESRCH;
+    reaping completes well within the bound.
+    """
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"process group {pgid} still present after exec teardown")
+
+
 async def test_grace_expiry_waits_on_popen_once(monkeypatch: pytest.MonkeyPatch) -> None:
     """The reap wait survives the grace timeout; starting a second wait races
     two waitpid calls over the same direct child."""
@@ -433,12 +477,8 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
         assert time.monotonic() - started < 6.0
 
         assert proc.poll() is not None
-        assert not psutil.pid_exists(descendant_pid) or psutil.Process(descendant_pid).status() in {
-            psutil.STATUS_DEAD,
-            psutil.STATUS_ZOMBIE,
-        }
-        with pytest.raises(ProcessLookupError):
-            os.killpg(proc.pid, 0)
+        await _assert_tree_gone([descendant_pid])
+        await _assert_group_gone(proc.pid)
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
