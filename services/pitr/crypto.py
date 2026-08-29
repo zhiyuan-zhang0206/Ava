@@ -81,7 +81,7 @@ class _EncryptedReader(io.RawIOBase):
     def readable(self) -> bool:
         return True
 
-    def readinto(self, target: bytearray) -> int:
+    def readinto(self, target: memoryview) -> int | None:
         if not self._pending and not self._done:
             chunk = self._source.read(max(len(target), 1024 * 1024))
             if chunk:

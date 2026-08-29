@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 from cryptography.exceptions import InvalidTag
@@ -20,7 +22,11 @@ class FakeStore:
         self.deletes = 0
 
     def put_stream_if_absent(
-        self, open_source, size: int, object_name: str, metadata: dict[str, str]
+        self,
+        open_source: Callable[[], BinaryIO],
+        size: int,
+        object_name: str,
+        metadata: Mapping[str, str],
     ) -> RemoteObjectAck:
         import base64
 
@@ -37,7 +43,7 @@ class FakeStore:
             1,
             size,
             base64.b64encode(google_crc32c.Checksum(payload).digest()).decode(),
-            metadata,
+            dict(metadata),
             True,
         )
         self.objects[object_name] = ack

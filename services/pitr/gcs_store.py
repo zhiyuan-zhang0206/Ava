@@ -1,5 +1,7 @@
 """Google Cloud Storage adapter for the owned immutable-object boundary."""
 
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -41,7 +43,7 @@ class GCSObjectStore:
     """One bucket-scoped adapter; credentials never enter process argv."""
 
     def __init__(
-        self, *, project: str, bucket: str, credentials_file: Path, timeout_seconds: float = 30
+        self, *, project: str, bucket: str, credentials_file: Path, timeout_seconds: int = 30
     ) -> None:
         credentials = service_account.Credentials.from_service_account_file(str(credentials_file))
         self._bucket = storage.Client(project=project, credentials=credentials).bucket(bucket)
@@ -52,7 +54,7 @@ class GCSObjectStore:
         if blob.generation is None or blob.size is None or blob.crc32c is None:
             raise TransientObjectStoreError("GCS object omitted verification properties")
         return RemoteObjectAck(
-            object_name=blob.name,
+            object_name=str(blob.name),
             generation=int(blob.generation),
             size=int(blob.size),
             crc32c=blob.crc32c,
@@ -86,7 +88,7 @@ class GCSObjectStore:
                     rewind=False,
                     if_generation_match=0,
                     checksum="crc32c",
-                    retry=DEFAULT_RETRY_IF_GENERATION_SPECIFIED,
+                    retry=DEFAULT_RETRY_IF_GENERATION_SPECIFIED,  # pyright: ignore[reportArgumentType]
                     timeout=self._timeout,
                 )
             blob.reload(retry=DEFAULT_RETRY, timeout=self._timeout)

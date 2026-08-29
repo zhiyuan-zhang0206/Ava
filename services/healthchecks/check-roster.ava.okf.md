@@ -26,7 +26,7 @@ tags:
 | `memory_indexer.py` | Memory-indexer | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `events_maintenance.py` | Events-maintenance | HTTP `/healthz` (identity-verified), per-loop progress with hard deadlines | `respawn_and_verify` | each loop completes bounded work; a timed-out worker wedges its tracker and 503s |
 | `pg_backup.py` | PG-backup scheduler | HTTP `/healthz` (identity-verified), backup last-success age | `respawn_and_verify` | scheduler progress: a fresh dump, boot grace, or running dump; otherwise 503 |
-| `pitr_uploader.py` | PITR | `/healthz` | respawn | loop |
+| `pitr_uploader.py` | PITR | h | r | l |
 | `restarter.py` | Restarter | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify`, **then** a stand-in `RespawnController` pass if the respawn never verifies — see Notes | our daemon's work loop is still ticking; the stand-in path runs the daemon's own dispatch controller (real DB traversal) |
 | `agent_host.py` | Agent host | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `page_server.py` | Page-server supervisor | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
