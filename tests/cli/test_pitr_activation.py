@@ -293,7 +293,11 @@ def test_activate_persists_snapshot_before_wal_pending(
     )
     monkeypatch.setattr("services.backup.activation_snapshot", lambda _operation_id: None)
     monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
-    monkeypatch.setattr(activation, "_validate_secrets", lambda: {"viewer": "separate"})
+    monkeypatch.setattr(
+        activation,
+        "_validate_secrets",
+        lambda: dict(_wal_config_pending_record().pre_activation_credential_evidence or {}),
+    )
     monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
