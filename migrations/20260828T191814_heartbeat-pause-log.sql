@@ -20,3 +20,22 @@ COMMENT ON TABLE heartbeat_pause_log IS
 
 CREATE INDEX IF NOT EXISTS heartbeat_pause_log_agent_created_idx
     ON heartbeat_pause_log (agent_id, created_at DESC, id DESC);
+
+-- ava_runner surface for the pause trail (task #1932): the runner process
+-- (ava.self.pause_heartbeat) SELECTs the previous window and INSERTs the new
+-- row; the BIGSERIAL id draws from the owning sequence. UPDATE/DELETE stay
+-- out — the trail is append-only and no runner path rewrites rows.
+--
+-- Gated on the role's existence: on a fresh bootstrap schema.sql runs (and
+-- the migration smoke replays this file) BEFORE install birth creates
+-- ava_runner — shared/cluster/provision.py's ensure_runner_role owns the
+-- grant at birth (and re-affirms it on every `ava start` that applied a
+-- migration). Existing clusters pick the grant up from the paired
+-- 20260829T043200 migration, which is what trips that refresh.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT ON heartbeat_pause_log TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE heartbeat_pause_log_id_seq TO ava_runner;
+    END IF;
+END $$;

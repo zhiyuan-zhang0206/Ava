@@ -541,6 +541,11 @@ def test_runner_grant_matrix(runner_db: str) -> None:
         # ... and the show-page close at exit (agent_pages UPDATE; the row
         # itself was seeded by the gateway side above)
         conn.execute("UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s", (agent_id,))
+        # ava.self.pause_heartbeat: the pause trail (SELECT the previous
+        # window + INSERT the new row — regression for task #1932, where the
+        # table shipped without a runner grant and every pause_heartbeat
+        # INSERT failed with InsufficientPrivilege)
+        _exercise_pause_grants(conn, agent_id)
         # machine_units register_self (INSERT + UPDATE + SELECT)
         conn.execute("INSERT INTO machine_units (machine_name, home) VALUES ('m1', '/h1')")
         conn.execute("UPDATE machine_units SET url = 'http://m1' WHERE machine_name = 'm1'")
@@ -606,6 +611,28 @@ def test_runner_grant_matrix(runner_db: str) -> None:
             conn.execute("INSERT INTO agents_meta (id, spawner) VALUES (999, 'user')")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("CREATE TABLE runner_must_not_ddl (id int)")
+
+
+def _exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
+    """The pause-trail surface ava.self.pause_heartbeat writes from the runner
+    process: SELECT the previous window (the backoff-reminder lookup) and
+    INSERT the new row; the BIGSERIAL id draws from the owning sequence.
+
+    Regression for task #1932: the table shipped without a runner grant, so
+    every pause_heartbeat INSERT failed with InsufficientPrivilege until prod
+    was patched by hand. UPDATE/DELETE are deliberately NOT granted — the
+    trail is append-only and no runner path rewrites rows.
+    """
+    conn.execute(
+        "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, 1800)",
+        (agent_id,),
+    )
+    row = conn.execute(
+        "SELECT duration_s FROM heartbeat_pause_log"
+        " WHERE agent_id = %s ORDER BY created_at DESC, id DESC LIMIT 1",
+        (agent_id,),
+    ).fetchone()
+    assert row == (1800,)
 
 
 def _exercise_watcher_grants(conn: psycopg.Connection, agent_id: int) -> None:
@@ -676,3 +703,65 @@ def test_read_grant_reaches_a_table_created_after_provisioning(runner_db: str) -
         assert conn.execute("SELECT last_value FROM post_provision_serial_id_seq").fetchone() == (
             1,
         )
+
+
+def test_pause_log_write_grant_reaches_a_cluster_born_before_the_table(
+    runner_db: str,
+) -> None:
+    """Task #1932 regression: a cluster born BEFORE heartbeat_pause_log existed.
+
+    Fresh-birth coverage lives in `test_runner_grant_matrix` (schema.sql +
+    grant layer in birth order). The prod shape is the reverse: the cluster was
+    born, THEN the migration created the table — and the runner's write grant
+    for it is a per-table entry in `ensure_runner_role`, so nothing covers the
+    new table until the start-path refresh re-runs the grant layer (which
+    happens only on a start that applied a migration). Without that entry the
+    fleet-wide `pause_heartbeat` INSERT failed with InsufficientPrivilege.
+
+    The refresh itself is pinned in `tests/cli/test_runner_grant_refresh.py`;
+    here we pin the grant-layer effect: INSERT is denied before the re-run and
+    lands after it.
+    """
+    admin = _admin_url(runner_db)
+    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+
+    # Simulate a cluster born BEFORE the pause table existed: the fixture's
+    # fresh schema already carries it, so drop it first; the "migration" then
+    # creates it AS the main identity (the role the migration applier dials —
+    # the default privileges key on it).
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute("DROP TABLE heartbeat_pause_log")
+    with psycopg.connect(_identity_url(runner_db), autocommit=True) as conn:
+        agent_row = conn.execute(
+            "INSERT INTO agents (label) VALUES ('seed') RETURNING id"
+        ).fetchone()
+        assert agent_row is not None
+        agent_id: int = agent_row[0]
+        conn.execute(
+            "CREATE TABLE heartbeat_pause_log ("
+            "  id BIGSERIAL PRIMARY KEY,"
+            "  agent_id BIGINT NOT NULL REFERENCES agents(id),"
+            "  duration_s DOUBLE PRECISION NOT NULL,"
+            "  created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+        )
+
+    # Before the refresh: SELECT works (default privileges / point-in-time
+    # loop), INSERT is denied — exactly the prod symptom.
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+        conn.execute("SELECT count(*) FROM heartbeat_pause_log")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute(
+                "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, 1800)",
+                (agent_id,),
+            )
+
+    # The start-path refresh (`refresh_runner_grants_after_migration` ->
+    # ensure_runner_role) re-runs the grant layer with the table now present.
+    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, 1800)",
+            (agent_id,),
+        )
+        row = conn.execute("SELECT count(*) FROM heartbeat_pause_log").fetchone()
+    assert row == (1,)
