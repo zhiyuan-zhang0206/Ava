@@ -64,6 +64,36 @@ def test_base_candidates_accept_the_fully_validated_pitr_contract(tmp_path: Path
     assert settings.pitr_base_backup_enabled is True
 
 
+def test_restore_proof_requires_a_distinct_viewer_credential(tmp_path: Path) -> None:
+    key = tmp_path / "backup.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    credentials = tmp_path / "gcs.json"
+    credentials.write_text("{}")
+    credentials.chmod(0o600)
+    values = {
+        "AVA_PITR_ENABLED": True,
+        "AVA_PITR_BASE_BACKUP_ENABLED": True,
+        "AVA_PITR_RESTORE_PROOF_ENABLED": True,
+        "AVA_PITR_GCS_PROJECT": "project",
+        "AVA_PITR_GCS_BUCKET": "bucket",
+        "AVA_PITR_BACKUP_KEY_FILE": key,
+        "AVA_PITR_GCS_CREDENTIALS_FILE": credentials,
+        "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE": credentials,
+        "AVA_PITR_BACKUP_KEY_ID": "prod-v1",
+        "AVA_PITR_REPLICATION_DB_URL": "postgresql://backup:secret@localhost:5433/postgres",
+    }
+    with pytest.raises(ValidationError, match="distinct viewer-only credential"):
+        PhysicalBackupSettings(**values)
+
+    viewer = tmp_path / "viewer.json"
+    viewer.write_text("{}")
+    viewer.chmod(0o600)
+    values["AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE"] = viewer
+    settings = PhysicalBackupSettings(**values)
+    assert settings.pitr_restore_proof_enabled is True
+
+
 def test_enabled_pitr_rejects_empty_or_overexposed_key(tmp_path: Path) -> None:
     key = tmp_path / "backup.key"
     key.touch(mode=0o644)

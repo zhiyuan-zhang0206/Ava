@@ -25,6 +25,7 @@ def _candidate(chain_id: str) -> CandidateManifest:
         protected=False,
         postgres_major=17,
         system_identifier="1",
+        wal_segment_size=16 * 1024 * 1024,
         timeline=1,
         start_lsn="0/100",
         end_lsn="0/200",

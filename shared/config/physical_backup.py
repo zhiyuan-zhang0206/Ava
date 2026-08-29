@@ -14,6 +14,17 @@ from shared.config._base import EnvSettings
 _SAFE_PREFIX_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
+def _require_private_regular_file(path: Path | None, alias: str) -> None:
+    if path is None or not path.is_absolute():
+        raise ValueError(f"{alias} must be an absolute path")
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{alias} must exist") from exc
+    if not stat.S_ISREG(info.st_mode) or path.is_symlink() or stat.S_IMODE(info.st_mode) != 0o600:
+        raise ValueError(f"{alias} must be a non-symlink regular file with mode 0600")
+
+
 class PhysicalBackupSettings(EnvSettings):
     """Cluster-pinned settings for the disabled-by-default physical backup plane."""
 
@@ -32,6 +43,17 @@ class PhysicalBackupSettings(EnvSettings):
         default=False,
         alias="AVA_PITR_BASE_BACKUP_ENABLED",
         description="Enable weekly unprotected physical base-backup candidates.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    pitr_restore_proof_enabled: bool = Field(
+        default=False,
+        alias="AVA_PITR_RESTORE_PROOF_ENABLED",
+        description="Enable generation-pinned isolated restore drills for base candidates.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
@@ -170,6 +192,18 @@ class PhysicalBackupSettings(EnvSettings):
             "remote_writable": False,
         },
     )
+    pitr_restore_gcs_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE",
+        description="0600 viewer-only service-account JSON used by restore drills.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
     pitr_backup_key_id: str = Field(
         default="",
         alias="AVA_PITR_BACKUP_KEY_ID",
@@ -228,6 +262,8 @@ class PhysicalBackupSettings(EnvSettings):
             )
         if self.pitr_base_backup_enabled and not self.pitr_enabled:
             raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_ENABLED")
+        if self.pitr_restore_proof_enabled and not self.pitr_base_backup_enabled:
+            raise ValueError("AVA_PITR_RESTORE_PROOF_ENABLED requires AVA_PITR_BASE_BACKUP_ENABLED")
         if self.pitr_base_backup_enabled and not self.pitr_replication_db_url:
             raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_REPLICATION_DB_URL")
         if self.pitr_replication_db_url:
@@ -260,19 +296,27 @@ class PhysicalBackupSettings(EnvSettings):
                 raise ValueError(
                     "AVA_PITR_BACKUP_KEY_FILE must be a 32-byte, non-symlink regular file with mode 0600"
                 )
-            credentials = self.pitr_gcs_credentials_file
-            if credentials is None or not credentials.is_absolute():
-                raise ValueError("AVA_PITR_GCS_CREDENTIALS_FILE must be an absolute path")
-            try:
-                credentials_info = credentials.lstat()
-            except OSError as exc:
-                raise ValueError("AVA_PITR_GCS_CREDENTIALS_FILE must exist") from exc
-            if (
-                not stat.S_ISREG(credentials_info.st_mode)
-                or credentials.is_symlink()
-                or stat.S_IMODE(credentials_info.st_mode) != 0o600
-            ):
-                raise ValueError(
-                    "AVA_PITR_GCS_CREDENTIALS_FILE must be a non-symlink regular file with mode 0600"
+            _require_private_regular_file(
+                self.pitr_gcs_credentials_file, "AVA_PITR_GCS_CREDENTIALS_FILE"
+            )
+            if self.pitr_restore_proof_enabled:
+                _require_private_regular_file(
+                    self.pitr_restore_gcs_credentials_file,
+                    "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE",
                 )
+                uploader = self.pitr_gcs_credentials_file
+                viewer = self.pitr_restore_gcs_credentials_file
+                if uploader is None or viewer is None:
+                    raise ValueError(
+                        "restore proof requires separate uploader and viewer credentials"
+                    )
+                uploader_info = uploader.stat()
+                viewer_info = viewer.stat()
+                if (uploader_info.st_dev, uploader_info.st_ino) == (
+                    viewer_info.st_dev,
+                    viewer_info.st_ino,
+                ):
+                    raise ValueError(
+                        "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE must be a distinct viewer-only credential"
+                    )
         return self

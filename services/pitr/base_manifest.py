@@ -38,6 +38,7 @@ class CandidateManifest:
     protected: bool
     postgres_major: int
     system_identifier: str
+    wal_segment_size: int
     timeline: int
     start_lsn: str
     end_lsn: str
@@ -54,6 +55,8 @@ class CandidateManifest:
             raise ValueError("unsupported base candidate manifest version")
         if self.protected:
             raise ValueError("base candidate foundation cannot publish protected manifests")
+        if self.wal_segment_size <= 0 or self.wal_segment_size & (self.wal_segment_size - 1):
+            raise ValueError("base candidate WAL segment size must be a positive power of two")
         if not self.wal_ranges:
             raise ValueError("base candidate has no required WAL range")
         if self.wal_ranges[0].start_lsn != self.start_lsn:
