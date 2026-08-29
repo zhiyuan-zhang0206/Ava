@@ -728,7 +728,7 @@ class TestEventLoopIsolation:
 
 # --- a stalled backend must degrade the endpoint, not pin it ---
 
-_SEARCH_PERMITS = 2  # matches gateway.routers.memory._MEMORY_SEARCH_SEMAPHORE
+_SEARCH_PERMITS = 2  # the stub's per-test semaphore size (the knob is a setting)
 _TEST_DEADLINE_S = 0.5
 
 
@@ -742,8 +742,13 @@ async def _never_returns(*_args: object, **_kwargs: object) -> list[str]:
     raise AssertionError("unreachable")
 
 
-def _stub_search_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, search: Any) -> None:
-    """Point the search handler at a stubbed backend and a short deadline."""
+def _stub_search_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, search: Any
+) -> asyncio.Semaphore:
+    """Point the search handler at a stubbed backend and a short deadline.
+
+    Returns the fresh per-test semaphore so tests can assert on permit state.
+    """
     import gateway.routers.memory as _gw_memory
     import services.memory_indexer.backends.factory as _factory
     import services.memory_indexer.embedder as _embedder
@@ -755,8 +760,11 @@ def _stub_search_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, sea
     # A fresh semaphore per test. asyncio.Semaphore binds itself to the event
     # loop of its first *contended* acquire and rejects every other loop after
     # that, and pytest-asyncio hands each test its own loop — so sharing the
-    # module-level object across two contended tests would fail on the second.
-    monkeypatch.setattr(_gw_memory, "_MEMORY_SEARCH_SEMAPHORE", asyncio.Semaphore(_SEARCH_PERMITS))
+    # module-level cached object across two contended tests would fail on the
+    # second. The handler reads it through `_search_semaphore()`, so the stub
+    # replaces that accessor with one returning a single fresh instance.
+    fresh = asyncio.Semaphore(_SEARCH_PERMITS)
+    monkeypatch.setattr(_gw_memory, "_search_semaphore", lambda: fresh)
     monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", _TEST_DEADLINE_S)
 
     async def _fake_embed(_q: str) -> list[float]:
@@ -768,6 +776,7 @@ def _stub_search_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, sea
 
     monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
     monkeypatch.setattr(_factory, "get_backend", _StubBackend)
+    return fresh
 
 
 def _asgi_client() -> httpx.AsyncClient:
@@ -871,16 +880,15 @@ class TestWedgedBackendReleasesPermits:
         a suspended coroutine lives on no thread, so faulthandler cannot see
         which await it stopped at.
         """
-        import gateway.routers.memory as _gw_memory
         import services.memory_indexer.backends.factory as _factory
 
-        _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
+        sem = _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
 
         async with _asgi_client() as client:
             holders = [asyncio.create_task(_search(client)) for _ in range(_SEARCH_PERMITS)]
             # Without this the test could pass vacuously, cancelling requests
             # that had not yet taken a permit.
-            await _assert_semaphore_locked(_gw_memory._MEMORY_SEARCH_SEMAPHORE)
+            await _assert_semaphore_locked(sem)
             for task in holders:
                 task.cancel()
             for task in holders:
@@ -973,3 +981,17 @@ class TestSemaphoreCancelSafety:
 
         sem.release()
         await asyncio.wait_for(sem.acquire(), timeout=1)
+
+
+def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The query-embed concurrency gate reads `memory_search_max_concurrency`
+    (env AVA_MEMORY_SEARCH_MAX_CONCURRENCY) — a knob, not a hardcoded constant."""
+    import gateway.routers.memory as _gw_memory
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "memory_search_max_concurrency", 7)
+    _gw_memory._search_semaphore.cache_clear()
+    try:
+        assert _gw_memory._search_semaphore()._value == 7  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        _gw_memory._search_semaphore.cache_clear()

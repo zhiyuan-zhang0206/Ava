@@ -71,6 +71,8 @@ from __future__ import annotations
 __description__ = "Shared memory pool: ava.memory SDK surface (PATH + search + write) + passive recall hook (auto-surfaces relevant notes) + daily consolidation skill (commit, push, re-index)"
 
 
+import asyncio
+
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -253,6 +255,12 @@ class _PassiveMemoryRecallHook(Hook):
     would replace messages this same turn
     (deferring avoids two before_llm hooks writing `messages` in one pass), or
     when recall finds nothing new to add.
+
+    The whole recall pass runs under `memory_recall_deadline_seconds`: recall
+    is an enhancement sitting in front of the turn's first LLM call, so a
+    congested gateway (a fleet wake queueing searches behind the search
+    endpoint's semaphore) must degrade to "no recall this turn" instead of
+    stalling the turn for the gateway's full queue time. The next turn retries.
     """
 
     async def __call__(
@@ -277,9 +285,23 @@ class _PassiveMemoryRecallHook(Hook):
             )
             return None
 
-        recall = await passive_memory_recall(
-            state.messages, injected_paths=state.memory.injected_paths
-        )
+        deadline = turn_settings.agent.memory_recall_deadline_seconds
+        try:
+            recall = await asyncio.wait_for(
+                passive_memory_recall(state.messages, injected_paths=state.memory.injected_paths),
+                timeout=deadline,
+            )
+        except TimeoutError:
+            logger.info(
+                "[{label}] {body}",
+                label="passive-recall",
+                body=(
+                    f"skip: recall exceeded its {deadline:g}s deadline — "
+                    "proceeding with no recall this turn"
+                ),
+                event="passive_recall",
+            )
+            return None
         if recall is None:
             return None
 

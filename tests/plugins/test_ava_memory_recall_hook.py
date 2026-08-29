@@ -172,6 +172,40 @@ async def test_gateway_error_leaves_the_turn_running(
     assert await hook(state, _runtime(), _config()) is None
 
 
+async def test_recall_deadline_exceeded_skips_recall_this_turn(
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recall pass slower than `memory_recall_deadline_seconds` degrades to
+    no recall instead of stalling the turn's first LLM call.
+
+    The 2026-08-29 first-before_llm 13s shape: a fleet wake queued searches
+    behind the gateway's search endpoint semaphore, the recall pass waited the
+    full queue time, and the agent's first LLM call waited with it. The
+    deadline releases the turn; the next inbound turn retries recall.
+    """
+    import asyncio
+
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
+    monkeypatch.setattr(settings.agent, "memory_recall_deadline_seconds", 0.05)
+    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state: False)  # pyright: ignore[reportUnknownArgumentType]
+
+    async def _slow_recall(_messages: Any, **_kwargs: Any) -> PassiveRecall:
+        await asyncio.sleep(0.5)
+        return PassiveRecall(
+            note=system_note_message(content="late", tag=NoteTag.MEMORY),
+            paths={"late.md"},
+        )
+
+    monkeypatch.setattr(_loaded, "passive_memory_recall", _slow_recall)
+
+    hook = _loaded.passive_memory_recall_before_llm
+    state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])
+
+    assert await hook(state, _runtime(), _config()) is None
+
+
 async def test_no_inbound_tail_is_a_noop(_hook_env: Any) -> None:
     """A silent-idle continue (bare AIMessage tail) carries no inbound at all —
     skipped, and mutually exclusive with hooks that claim that shape."""
