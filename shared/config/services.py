@@ -241,11 +241,37 @@ class ServiceSettings(EnvSettings):
         description=(
             "Wall-clock budget for one POST /api/memory/search, covering the embed and "
             "the milvus round-trip. Must stay below the SDK's gateway HTTP timeout, or "
-            "the caller reads out first and the server-side deadline never bites."
+            "the caller reads out first and the server-side deadline never bites. Also "
+            "the anchor of the SDK client's per-attempt timeout (deadline + 3s) and of "
+            "memory_search_acquire_timeout_seconds, which must stay below this for the "
+            "fast-fail to be the binding constraint on a congested gate."
         ),
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    memory_search_acquire_timeout_seconds: float = Field(
+        default=1.0,
+        alias="AVA_MEMORY_SEARCH_ACQUIRE_TIMEOUT_SECONDS",
+        description=(
+            "How long one POST /api/memory/search may wait for a permit on the "
+            "query-embed concurrency gate before failing fast (503 indexer_unavailable). "
+            "A request parked in acquire behind a congested gate is exactly as stuck as "
+            "one parked in the backend, but waiting there is not waiting for a backend: "
+            "it only re-enters the same queue, so a fleet wake that saturates the gate "
+            "should answer in ~1s and let passive recall's own deadline degrade quickly "
+            "instead of queueing behind the whole gate (2026-08-29 storm). Must stay "
+            "below memory_search_deadline_seconds, or the deadline is the binding "
+            "constraint and this knob never bites."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
             "sensitive": False,
             "scope": "host",
             "remote_writable": False,

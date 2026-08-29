@@ -509,6 +509,55 @@ class TestTransientHttpRetry:
 
     @patch("ava._gateway_client._client")
     @patch("ava._gateway_client._time")
+    def test_memory_search_dedicated_timeout_and_single_retry(
+        self, mock_time: MagicMock, mock_client: MagicMock
+    ):
+        """Memory search carries its own budget (task #2003/A): the
+        per-attempt timeout is the gateway's search deadline + margin (not
+        the global AVA_GATEWAY_HTTP_TIMEOUT_SECONDS), and a persistent 503 is
+        exhausted after ONE retry instead of stacking the default 3 — the
+        gateway's own deadline has already spent that time, so re-sending only
+        re-queues behind the same congestion."""
+        from ava import _gateway_client as gc
+        from shared.agents import IndexerUnavailable
+        from shared.config import settings
+
+        fail = _transient_resp(503, {"reason": "indexer_unavailable", "detail": "busy"})
+        mock_client.post.return_value = fail
+
+        with pytest.raises(IndexerUnavailable, match="busy"):
+            gc.memory_search("query", 5)
+        assert mock_client.post.call_count == 2
+
+        # Per-attempt timeout derives from the gateway deadline + 3s margin.
+        mock_client.post.side_effect = None
+        mock_client.post.return_value = _transient_resp(
+            200, {"results": [{"path": "a.md", "description": "", "tags": []}]}
+        )
+        gc.memory_search("query", 5)
+        passed = mock_client.post.call_args.kwargs["timeout"]
+        assert (
+            passed.read
+            == settings.services.memory_search_deadline_seconds + gc._MEMORY_SEARCH_TIMEOUT_MARGIN_S
+        )
+
+    @patch("ava._gateway_client._client")
+    @patch("ava._gateway_client._time")
+    def test_memory_search_caller_timeout_overrides_default(
+        self, mock_time: MagicMock, mock_client: MagicMock
+    ):
+        """An explicit `timeout` replaces the derived default for that one call."""
+        from ava._gateway_client import memory_search
+
+        mock_client.post.return_value = _transient_resp(
+            200, {"results": [{"path": "a.md", "description": "", "tags": []}]}
+        )
+        memory_search("query", 5, timeout=9.0)
+        passed = mock_client.post.call_args.kwargs["timeout"]
+        assert passed.read == 9.0
+
+    @patch("ava._gateway_client._client")
+    @patch("ava._gateway_client._time")
     def test_transient_5xx_exhausted_surfaces_wire_error(
         self, mock_time: MagicMock, mock_client: MagicMock
     ):

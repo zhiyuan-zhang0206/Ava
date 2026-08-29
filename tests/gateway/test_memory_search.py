@@ -4,6 +4,7 @@ relative-path conversion; wire error propagation."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from pathlib import Path
 from typing import Any
@@ -743,7 +744,11 @@ async def _never_returns(*_args: object, **_kwargs: object) -> list[str]:
 
 
 def _stub_search_backend(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, search: Any
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    search: Any,
+    permits: int = _SEARCH_PERMITS,
 ) -> asyncio.Semaphore:
     """Point the search handler at a stubbed backend and a short deadline.
 
@@ -763,7 +768,7 @@ def _stub_search_backend(
     # module-level cached object across two contended tests would fail on the
     # second. The handler reads it through `_search_semaphore()`, so the stub
     # replaces that accessor with one returning a single fresh instance.
-    fresh = asyncio.Semaphore(_SEARCH_PERMITS)
+    fresh = asyncio.Semaphore(permits)
     monkeypatch.setattr(_gw_memory, "_search_semaphore", lambda: fresh)
     monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", _TEST_DEADLINE_S)
 
@@ -933,6 +938,46 @@ class TestWedgedBackendReleasesPermits:
 
         assert recovered.status_code == 200
         assert recovered.json()["paths"] == ["a.md"]
+
+
+class TestAcquireFastFail:
+    """A congested query-embed gate answers 503 in ~1s, not after the search
+    deadline (task #2003/E): a fleet wake that saturates the gate should fail
+    fast — passive recall's own ~5s deadline then degrades in ~1s, and an
+    explicit search learns immediately instead of queueing behind the gate.
+
+    Before this, a deep acquire queue under the (15s) deadline made endpoint
+    latency scale with queue length: the 2026-08-29 storm queued 18 searches
+    and the recalled agent's first LLM turn waited out the whole queue.
+    """
+
+    async def test_congested_gate_fails_fast_with_503(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """One permit held by a wedged search; the next request 503s on the
+        acquire budget, well before the search deadline."""
+        from shared.config import settings
+
+        sem = _stub_search_backend(monkeypatch, tmp_path, search=_never_returns, permits=1)
+        # A tiny acquire budget so the failure is provably the fast-fail, and a
+        # deadline far above it so the deadline is NOT what answered.
+        monkeypatch.setattr(settings.services, "memory_search_acquire_timeout_seconds", 0.05)
+        monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", 5.0)
+
+        async with _asgi_client() as client:
+            holder = asyncio.create_task(_search(client))
+            await _assert_semaphore_locked(sem)
+            start = time.monotonic()
+            overflow = await asyncio.wait_for(_search(client), timeout=3.0)
+            elapsed = time.monotonic() - start
+            holder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await holder
+
+        assert overflow.status_code == 503
+        assert overflow.json()["reason"] == "indexer_unavailable"
+        assert "gate" in overflow.json()["detail"]
+        assert elapsed < 1.0, f"congested gate answered in {elapsed:.2f}s, expected ~1s"
 
 
 class TestSemaphoreCancelSafety:

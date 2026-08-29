@@ -26,7 +26,7 @@ Two types of memory, each serving different audiences:
 ## Core API
 
 - `PATH: PosixPath` — shared memory pool root directory `~/.ava/memory`
-- `search(query, k=5) → list[tuple[Path, str, list[str]]]` — semantic search, returns `(absolute path, frontmatter description, tags)` tuples for the most relevant notes
+- `search(query, k=5, *, timeout=None) → list[tuple[Path, str, list[str]]]` — semantic search, returns `(absolute path, frontmatter description, tags)` tuples for the most relevant notes; `timeout` bounds one attempt (default = the gateway's own search deadline + 3s, 18s), and a congested index answers 503 (`IndexerUnavailable`) in ~1s instead of queueing the call
 - `write(slug, content, *, title=None, description=None, tags=None, store="personal") → Path` — writes an absolute personal or shared entry with generated frontmatter and upserts its `MEMORY.md` pointer; the canonical writer, immune to `ava.cwd` drift
 - `IndexerUnavailable` — exception when the indexer service is unavailable
 
