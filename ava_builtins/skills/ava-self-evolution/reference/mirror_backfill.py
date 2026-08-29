@@ -21,18 +21,42 @@ mirror day is never silent: backfill() returns the missing days, prints a
 warning and per-day row counts, and the CLI exits non-zero — a partial
 window must not silently become a partial dataset (collect's iron rule).
 
+2026-08-30 (Task #1995): GC-storm fix for dense windows. backfill() used to
+hold every in-window row of every day in memory as parsed dicts until
+collect() ran (08-24: ~1.9GB peak, ~900MB/day of allocation churn, gen0
+collections x35). It now works in two phases:
+  Phase 1 streams each day file once — rows outside the window or outside the
+  two collected categories are dropped before the timestamp is even parsed,
+  and kept rows are written as their ORIGINAL line bytes to per-category temp
+  files plus a (ts, offset) sort index. Memory is O(1) in the window length
+  (chunked release).
+  Phase 2 installs a consumer that streams a category's temp file in ts order
+  (the same deterministic order the in-memory sort produced) and yields row
+  dicts one at a time, so a row's dict dies as soon as collect groups it into
+  (event_name, attributes). Dedup and agent filtering are byte-for-byte the
+  same semantics as before.
+  The cyclic GC is disabled for the whole backfill: every object this
+  pipeline builds (parsed rows, tuples, records) is acyclic, so refcounting
+  frees everything and the collector only added storm (Task #1995 measured
+  gen0 collections 178 -> ~6200 and multi-hundred-MB RSS swings in one dense
+  run). One gc.collect() sweeps any library-created cycles before the CLI
+  exits.
+
 Standalone:  python mirror_backfill.py <days> [week]
 """
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import sys
+import tempfile
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TextIO
 
 # PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
 # it for the sibling import (the reference dir is a script dir, not a package).
@@ -43,13 +67,25 @@ from shared.paths import ava_home
 
 MIRROR_DIR = ava_home() / "logs"
 
+# Categories the collect pipeline consumes. Every other category in the
+# mirror (log rows carry exec stdout payloads — the largest rows) is dropped
+# before timestamp parsing.
+_KEPT_CATEGORIES = ("telemetry", "audit")
+
+# Category -> [(ts string, byte offset)] in file order, built by backfill()
+# phase 1. The consumer sorts it by ts and streams the temp file through the
+# offsets, so rows never need to be held in memory to be ordered.
+SortIndex = dict[str, list[tuple[str, int]]]
+
 
 def _mirror_fetch_factory(
     rows: dict[str, list[dict]],
 ) -> Callable[..., list[dict]]:
-    """Build the consumer the backfill installs in place of
-    collect._fetch_events_window: category lookup + optional agent filter,
-    then id-based dedup against true duplicates.
+    """Build the in-memory consumer backfill() used before Task #1995, and the
+    one the unit tests drive directly: category lookup + optional agent
+    filter, then id-based dedup against true duplicates. Rows are expected
+    pre-sorted by ts (backfill() sorted them; the temp-file consumer sorts
+    itself).
 
     Mirrors the Loki consumer's semantics exactly: rows with an id are
     deduped on it (first occurrence wins, order preserved); rows without an
@@ -81,6 +117,50 @@ def _mirror_fetch_factory(
     return mirror_fetch
 
 
+def _mirror_fetch_factory_from_dir(tmpdir: Path, index: SortIndex) -> Callable[..., Iterator[dict]]:
+    """Build the disk-backed consumer backfill() installs since Task #1995.
+
+    The temp dir holds one file per kept category with the window rows as
+    their original line bytes; `index` maps category -> [(ts, byte offset)]
+    in file order. The consumer streams a category's file in ts order (stable
+    sort over the index — the same deterministic order the in-memory path's
+    sort produced) and YIELDS row dicts one at a time: a row's dict dies as
+    soon as collect groups it, instead of the whole category living in memory
+    at once (the 08-24 GC-storm shape).
+
+    Dedup and agent-filter semantics are identical to _mirror_fetch_factory:
+    rows with an id dedupe first-occurrence-wins, None-id rows pass through,
+    the agent filter applies before dedup, and _from/_to are unused by
+    contract (the rows are pre-filtered by the window).
+    """
+
+    def mirror_fetch(
+        category: str,
+        _from: datetime | None,
+        _to: datetime | None,
+        agent_id: int | None = None,
+    ) -> Iterator[dict]:
+        mf = tmpdir / f"{category}.jsonl"
+        idx = index.get(category)
+        if idx is None or not mf.exists():
+            return
+        seen: set[int] = set()
+        with mf.open() as fh:
+            for _ts, offset in sorted(idx, key=lambda item: item[0]):
+                fh.seek(offset)
+                r = json.loads(fh.readline())
+                if agent_id is not None and r.get("agent_id") != agent_id:
+                    continue
+                rid = r.get("id")
+                if rid is not None:
+                    if rid in seen:
+                        continue
+                    seen.add(rid)
+                yield r
+
+    return mirror_fetch
+
+
 def backfill(days: int, week: str | None = None) -> tuple[Path, list[str]]:
     """Collect [now - days, now) from the local mirror, write daily/<week>.jsonl.
 
@@ -93,56 +173,100 @@ def backfill(days: int, week: str | None = None) -> tuple[Path, list[str]]:
     week = week or datetime.now(UTC).date().isoformat()
     window_to = datetime.now(UTC)
     window_from = window_to - timedelta(days=days)
-    rows: dict[str, list[dict]] = {"telemetry": [], "audit": []}
     local = datetime.now().astimezone().tzinfo
     missing_days: list[str] = []
     per_day: dict[str, int] = {}
-    d = (window_from - timedelta(minutes=1)).date()
-    end_date = window_to.date()
-    while d <= end_date:
-        day = d.strftime("%Y%m%d")
-        mf = MIRROR_DIR / f"events-{day}.jsonl"
-        if not mf.exists():
-            missing_days.append(day)
-            d += timedelta(days=1)
-            continue
-        day_rows = 0
-        with mf.open() as fh:
-            for line in fh:
-                if not line.strip():
+    daily_dir = ava_home() / "self_evolution" / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.TemporaryDirectory(
+        prefix="mirror-backfill-",
+        dir=daily_dir,
+        ignore_cleanup_errors=True,
+    )
+    tmpdir = Path(tmp.name)
+    writers: dict[str, TextIO] = {}
+    counts: dict[str, int] = dict.fromkeys(_KEPT_CATEGORIES, 0)
+    index: SortIndex = {cat: [] for cat in _KEPT_CATEGORIES}
+    gc_was_enabled = gc.isenabled()
+    if gc_was_enabled:
+        # Every object this pipeline builds is acyclic (parsed rows, tuples,
+        # records) — refcounting frees it, and the cyclic collector only
+        # added storm (Task #1995: gen0 collections 178 -> ~6200 in one dense
+        # run, multi-hundred-MB RSS swings). One sweep at the end collects
+        # anything a library created with cycles.
+        gc.disable()
+    try:
+        # Phase 1 — stream each day file once. Rows outside the window or
+        # outside the kept categories are dropped before the timestamp is
+        # parsed; kept rows are written as their ORIGINAL line bytes to a
+        # per-category temp file plus a (ts, offset) index entry. Nothing is
+        # retained across days, so a multi-day window no longer accumulates
+        # every day's rows in memory (chunked release).
+        for cat in _KEPT_CATEGORIES:
+            writers[cat] = (tmpdir / f"{cat}.jsonl").open("w")
+        try:
+            d = (window_from - timedelta(minutes=1)).date()
+            end_date = window_to.date()
+            while d <= end_date:
+                day = d.strftime("%Y%m%d")
+                mf = MIRROR_DIR / f"events-{day}.jsonl"
+                if not mf.exists():
+                    missing_days.append(day)
+                    d += timedelta(days=1)
                     continue
-                ev = json.loads(line)
-                ts = datetime.fromisoformat(ev["ts"])
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=local)
-                if not (window_from <= ts < window_to):
-                    continue
-                cat = ev.get("category")
-                if cat in rows:
-                    rows[cat].append(ev)
-                    day_rows += 1
-        per_day[day] = day_rows
-        d += timedelta(days=1)
-    for day, n in sorted(per_day.items()):
-        print(f"[mirror] {day}: {n} rows in window")
-    if missing_days:
-        print(
-            "warning: mirror file missing for " + ", ".join(missing_days) + " — dataset is partial"
-        )
-    for _cat, cat_rows in rows.items():
-        cat_rows.sort(key=lambda r: r.get("ts", ""))
-    print(f"[mirror] telemetry={len(rows['telemetry'])} audit={len(rows['audit'])} rows in window")
-    collect._fetch_events_window = _mirror_fetch_factory(rows)
-    records = collect.collect(days, week, from_=window_from, to=window_to)
-    out_dir = ava_home() / "self_evolution" / "daily"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{week}.jsonl"
-    with path.open("w", encoding="utf-8") as f:
-        for rec in records:
-            f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
-    counts = Counter(r["label"] for r in records)
-    print(f"[mirror] wrote {path}: {len(records)} runs ({dict(counts)})")
-    return path, missing_days
+                day_rows = 0
+                with mf.open() as fh:
+                    for line in fh:
+                        if not line.strip():
+                            continue
+                        ev = json.loads(line)
+                        cat = ev.get("category")
+                        if cat not in writers:
+                            continue  # log & friends are never collected
+                        ts = datetime.fromisoformat(ev["ts"])
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=local)
+                        if not (window_from <= ts < window_to):
+                            continue
+                        counts[cat] += 1
+                        day_rows += 1
+                        index[cat].append((ev["ts"], writers[cat].tell()))
+                        writers[cat].write(line)
+                per_day[day] = day_rows
+                d += timedelta(days=1)
+        finally:
+            for writer in writers.values():
+                writer.close()
+        for day, n in sorted(per_day.items()):
+            print(f"[mirror] {day}: {n} rows in window")
+        n_telem = counts["telemetry"]
+        n_audit = counts["audit"]
+        print(f"[mirror] telemetry={n_telem} audit={n_audit} rows in window")
+        if missing_days:
+            print(
+                "warning: mirror file missing for "
+                + ", ".join(missing_days)
+                + " — dataset is partial"
+            )
+        # Phase 2 — the consumer streams the staged rows in ts order while
+        # collect() groups and builds records; the temp dir lives until the
+        # output is written.
+        collect._fetch_events_window = _mirror_fetch_factory_from_dir(tmpdir, index)
+        records = collect.collect(days, week, from_=window_from, to=window_to)
+        out_dir = ava_home() / "self_evolution" / "daily"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{week}.jsonl"
+        with path.open("w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+        counts_label = Counter(r["label"] for r in records)
+        print(f"[mirror] wrote {path}: {len(records)} runs ({dict(counts_label)})")
+        return path, missing_days
+    finally:
+        tmp.cleanup()  # temp rows are consumed — release the disk space
+        if gc_was_enabled:
+            gc.enable()
+            gc.collect()  # one sweep for the run's churn, then the storm stops
 
 
 def main() -> None:
