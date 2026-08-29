@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import httpx2
 import psycopg
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
@@ -348,6 +349,28 @@ class TestParent:
             resp = client.patch(f"/api/tasks/{tid}", json={"parent_id": None})
         assert resp.status_code == 200
         assert _parent(db_conn, tid) == root
+
+    @pytest.mark.parametrize("closed_status", ["done", "cancelled"])
+    def test_patch_closed_parent_rejected(
+        self, db_conn: psycopg.Connection, closed_status: str
+    ) -> None:
+        """PATCH mirrors the SDK reparent check: moving a task under a closed
+        (done / cancelled) parent is a 422 — a closed task never gains
+        children (task #1975)."""
+        owner = _make_agent(db_conn)
+        parent = _make_task(
+            db_conn,
+            owner=owner,
+            title=f"closed-parent-{closed_status}",
+            status=closed_status,
+        )
+        tid = _make_task(db_conn, owner=owner, title=f"child-{closed_status}")
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"parent_id": parent})
+        assert resp.status_code == 422
+        assert "closed parent" in resp.json()["detail"]
+        # The tree is unchanged: the child has no parent.
+        assert _parent(db_conn, tid) is None
 
     def test_patch_missing_parent_rejected(self, db_conn: psycopg.Connection) -> None:
         owner = _make_agent(db_conn)
