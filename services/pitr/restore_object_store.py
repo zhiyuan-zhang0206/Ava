@@ -114,7 +114,7 @@ class GCSGenerationPinnedObjectReader:
             with os.fdopen(fd, "wb") as output:
                 sink = _ChecksummedWriter(output, checksum)
                 blob.download_to_file(
-                    sink,
+                    cast(BinaryIO, sink),
                     if_generation_match=expected.generation,
                     checksum="crc32c",
                     retry=DEFAULT_RETRY_IF_GENERATION_SPECIFIED,

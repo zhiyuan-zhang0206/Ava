@@ -13,6 +13,7 @@ def _manifest() -> CandidateManifest:
         chain_id="20260829T000000Z",
         protected=False,
         postgres_major=17,
+        database_name="ava",
         system_identifier="1",
         wal_segment_size=16 * 1024 * 1024,
         timeline=1,

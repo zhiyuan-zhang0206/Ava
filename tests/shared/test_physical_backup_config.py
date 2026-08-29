@@ -6,6 +6,14 @@ from pydantic import ValidationError
 from shared.config.physical_backup import PhysicalBackupSettings
 
 
+def _service_account(email: str) -> str:
+    return (
+        '{"type":"service_account","client_email":"'
+        + email
+        + '","project_id":"project","private_key_id":"key"}'
+    )
+
+
 def test_pitr_is_disabled_without_credentials_or_cluster_secret() -> None:
     settings = PhysicalBackupSettings()
     assert settings.pitr_enabled is False
@@ -18,7 +26,7 @@ def test_enabled_pitr_requires_independent_private_key(tmp_path: Path) -> None:
     key.write_bytes(b"k" * 32)
     key.chmod(0o600)
     credentials = tmp_path / "gcs.json"
-    credentials.write_text("{}")
+    credentials.write_text(_service_account("uploader@example.com"))
     credentials.chmod(0o600)
     settings = PhysicalBackupSettings(
         AVA_PITR_ENABLED=True,
@@ -69,28 +77,37 @@ def test_restore_proof_requires_a_distinct_viewer_credential(tmp_path: Path) -> 
     key.write_bytes(b"k" * 32)
     key.chmod(0o600)
     credentials = tmp_path / "gcs.json"
-    credentials.write_text("{}")
+    credentials.write_text(_service_account("uploader@example.com"))
     credentials.chmod(0o600)
-    values = {
-        "AVA_PITR_ENABLED": True,
-        "AVA_PITR_BASE_BACKUP_ENABLED": True,
-        "AVA_PITR_RESTORE_PROOF_ENABLED": True,
-        "AVA_PITR_GCS_PROJECT": "project",
-        "AVA_PITR_GCS_BUCKET": "bucket",
-        "AVA_PITR_BACKUP_KEY_FILE": key,
-        "AVA_PITR_GCS_CREDENTIALS_FILE": credentials,
-        "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE": credentials,
-        "AVA_PITR_BACKUP_KEY_ID": "prod-v1",
-        "AVA_PITR_REPLICATION_DB_URL": "postgresql://backup:secret@localhost:5433/postgres",
-    }
     with pytest.raises(ValidationError, match="distinct viewer-only credential"):
-        PhysicalBackupSettings(**values)
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_BASE_BACKUP_ENABLED=True,
+            AVA_PITR_RESTORE_PROOF_ENABLED=True,
+            AVA_PITR_GCS_PROJECT="project",
+            AVA_PITR_GCS_BUCKET="bucket",
+            AVA_PITR_BACKUP_KEY_FILE=key,
+            AVA_PITR_GCS_CREDENTIALS_FILE=credentials,
+            AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE=credentials,
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_REPLICATION_DB_URL=("postgresql://backup:secret@localhost:5433/postgres"),
+        )
 
     viewer = tmp_path / "viewer.json"
-    viewer.write_text("{}")
+    viewer.write_text(_service_account("viewer@example.com"))
     viewer.chmod(0o600)
-    values["AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE"] = viewer
-    settings = PhysicalBackupSettings(**values)
+    settings = PhysicalBackupSettings(
+        AVA_PITR_ENABLED=True,
+        AVA_PITR_BASE_BACKUP_ENABLED=True,
+        AVA_PITR_RESTORE_PROOF_ENABLED=True,
+        AVA_PITR_GCS_PROJECT="project",
+        AVA_PITR_GCS_BUCKET="bucket",
+        AVA_PITR_BACKUP_KEY_FILE=key,
+        AVA_PITR_GCS_CREDENTIALS_FILE=credentials,
+        AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE=viewer,
+        AVA_PITR_BACKUP_KEY_ID="prod-v1",
+        AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
+    )
     assert settings.pitr_restore_proof_enabled is True
 
 

@@ -10,10 +10,11 @@ import signal
 import struct
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import psutil
 
@@ -34,6 +35,7 @@ from services.pitr.restore_manifest import (
     wal_objects_from_acks,
 )
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
+from services.pitr.wal_validate import validate_wal_file
 
 
 class RestoreProofError(RuntimeError):
@@ -60,10 +62,9 @@ class LivePostgresIdentity:
 @dataclass(frozen=True)
 class DrillResult:
     achieved_lsn: str
-    verify_before_restore_seconds: float
     replay_seconds: float
     smoke_seconds: float
-    second_verify_seconds: float
+    restored_verify_seconds: float
     restored_fingerprint_sha256: str
 
 
@@ -145,6 +146,7 @@ def _download_wal(
     encrypted_dir: Path,
     wal_dir: Path,
     key: bytes,
+    candidate: CandidateManifest,
 ) -> None:
     encrypted_dir.mkdir(mode=0o700)
     wal_dir.mkdir(mode=0o700)
@@ -161,6 +163,7 @@ def _download_wal(
             or source_sha256 != metadata["ava-source-sha256"]
         ):
             raise RestoreProofError("restored WAL plaintext differs from protected evidence")
+        validate_wal_file(destination, candidate)
         ciphertext.unlink()
 
 
@@ -237,11 +240,9 @@ def update_restore_owner(path: Path, **changes: object) -> None:
     """Durably extend restore ownership without weakening prior evidence."""
 
     try:
-        evidence = json.loads(path.read_text())
+        evidence = _require_owner_object(json.loads(path.read_text()))
     except (OSError, json.JSONDecodeError) as exc:
         raise RestoreProofError("restore owner evidence is unreadable") from exc
-    if not isinstance(evidence, dict):
-        raise RestoreProofError("restore owner evidence is not an object")
     evidence.update(changes)
     _atomic_owner(path, evidence)
 
@@ -300,7 +301,7 @@ def _sandbox_is_live(evidence: dict[str, object]) -> bool:
         return False
     if raw_pid is None or raw_created_at is None:
         raise RestoreProofError("restore owner has incomplete sandbox identity")
-    return _matching_process(int(raw_pid), float(raw_created_at)) is not None
+    return _matching_process(_owner_int(raw_pid), _owner_float(raw_created_at)) is not None
 
 
 def _stop_owned_sandbox(evidence: dict[str, object], pgid: int) -> None:
@@ -308,10 +309,13 @@ def _stop_owned_sandbox(evidence: dict[str, object], pgid: int) -> None:
     raw_created_at = evidence.get("sandbox_created_at")
     raw_pgid = evidence.get("sandbox_pgid")
     if raw_pid is None or raw_created_at is None or raw_pgid is None:
+        if evidence.get("state") == "postgres_starting" and pgid == _owner_int(evidence["pid"]):
+            _stop_ownerless_job_group(pgid)
+            return
         raise RestoreProofError("orphaned restore group lacks sandbox ownership evidence")
-    if int(raw_pgid) != pgid:
+    if _owner_int(raw_pgid) != pgid:
         raise RestoreProofError("sandbox PostgreSQL escaped its restore process group")
-    leader = _matching_process(int(raw_pid), float(raw_created_at))
+    leader = _matching_process(_owner_int(raw_pid), _owner_float(raw_created_at))
     if leader is None:
         raise RestoreProofError("restore group survives without its recorded sandbox postmaster")
     deadline = time.monotonic() + 20
@@ -332,6 +336,23 @@ def _stop_owned_sandbox(evidence: dict[str, object], pgid: int) -> None:
         raise RestoreProofError("orphaned restore process group could not be emptied")
 
 
+def _stop_ownerless_job_group(pgid: int) -> None:
+    if pgid == os.getpgrp():
+        raise RestoreProofError("refusing to signal the current restore process group")
+    deadline = time.monotonic() + 20
+    with suppress(ProcessLookupError):
+        os.killpg(pgid, signal.SIGTERM)
+    grace = min(deadline, time.monotonic() + 5)
+    while _group_members(pgid) and time.monotonic() < grace:
+        time.sleep(0.1)
+    while _group_members(pgid) and time.monotonic() < deadline:
+        with suppress(ProcessLookupError):
+            os.killpg(pgid, signal.SIGKILL)
+        time.sleep(0.1)
+    if _group_members(pgid):
+        raise RestoreProofError("restore job group could not be emptied")
+
+
 def _remove_owned_restore(partial: Path, owner: Path, evidence: dict[str, object]) -> None:
     if partial.is_symlink() or not partial.is_dir():
         raise RestoreProofError("refusing to remove an unexpected restore path")
@@ -348,7 +369,19 @@ def _remove_owned_restore(partial: Path, owner: Path, evidence: dict[str, object
 def _require_owner_object(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise RestoreProofError("restore owner evidence is not an object")
+    return cast(dict[str, object], value)
+
+
+def _owner_int(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RestoreProofError("restore owner integer field is invalid")
     return value
+
+
+def _owner_float(value: object) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise RestoreProofError("restore owner numeric field is invalid")
+    return float(value)
 
 
 def reconcile_restore_runtime(root: Path) -> None:  # noqa: PLR0915
@@ -356,16 +389,16 @@ def reconcile_restore_runtime(root: Path) -> None:  # noqa: PLR0915
 
     restore_root = root / "restore"
     owners = root / "restore-owners"
-    partials = set(restore_root.glob(".*.partial")) if restore_root.exists() else set()
-    owner_paths = set(owners.glob("*.owner.json")) if owners.exists() else set()
+    partials: set[Path] = set(restore_root.glob(".*.partial")) if restore_root.exists() else set()
+    owner_paths: set[Path] = set(owners.glob("*.owner.json")) if owners.exists() else set()
     for owner in sorted(owner_paths):
         try:
             evidence = _require_owner_object(json.loads(owner.read_text()))
             partial = Path(str(evidence["partial"]))
-            pid = int(evidence["pid"])
-            created_at = float(evidence["created_at"])
-            pgid = int(evidence["pgid"])
-            deadline = float(evidence["deadline"])
+            pid = _owner_int(evidence["pid"])
+            created_at = _owner_float(evidence["created_at"])
+            pgid = _owner_int(evidence["pgid"])
+            deadline = _owner_float(evidence["deadline"])
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise RestoreProofError("invalid restore owner evidence") from exc
         if partial.parent != restore_root:
@@ -548,6 +581,7 @@ def prove_candidate(  # noqa: PLR0915
             encrypted_dir=encrypted_wal,
             wal_dir=wal_dir,
             key=key,
+            candidate=candidate,
         )
         result = executor.run(
             pgdata=pgdata,
@@ -567,10 +601,10 @@ def prove_candidate(  # noqa: PLR0915
             result.achieved_lsn,
             before.pid,
             before.probe_sha256,
-            result.verify_before_restore_seconds,
+            candidate.native_manifest_sha256,
             result.replay_seconds,
             result.smoke_seconds,
-            result.second_verify_seconds,
+            result.restored_verify_seconds,
             base.size + sum(item.size for item in wal),
             result.restored_fingerprint_sha256,
         )
