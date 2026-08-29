@@ -97,6 +97,98 @@ def _status(conn: psycopg.Connection, sid: int) -> str:
     return row[0]
 
 
+def _insert_null_run(conn: psycopg.Connection, sid: int) -> int:
+    """A run-history row left in-progress (ok IS NULL) by a process."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO schedule_runs (schedule_id) VALUES (%s) RETURNING id",
+            (sid,),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    assert row is not None
+    return row[0]
+
+
+def _run_row(conn: psycopg.Connection, rid: int) -> tuple[bool | None, str | None]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT ok, note FROM schedule_runs WHERE id = %s", (rid,))
+        row = cur.fetchone()
+    assert row is not None
+    return row[0], row[1]
+
+
+def test_reconcile_closes_orphan_null_rows(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    # QA P2-2: a run row left in-progress by a dead process (SIGKILLed stop /
+    # external kill / gateway-restart reap) must be closed, or the run drawer
+    # shows a permanent in-progress "…". A disabled schedule with no session
+    # and a NULL row is swept on the next reconcile.
+    _backend, launched = fake_session
+    sid = _insert(db_conn, "orphan-a", enabled=False)
+    rid = _insert_null_run(db_conn, sid)
+
+    sm.ScheduleManager(pool)._reconcile()
+
+    assert launched == []
+    assert _run_row(db_conn, rid) == (False, "interrupted")
+
+
+def test_reconcile_keeps_null_row_for_live_session(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    # A NULL row for a schedule WITH a live session is a genuinely running
+    # process — the sweep must not touch it (a resident schedule's row stays
+    # in-progress for its whole lifetime).
+    backend, launched = fake_session
+    sid = _insert(db_conn, "orphan-b")
+    rid = _insert_null_run(db_conn, sid)
+    backend.live.append(session_name(f"schedule-{sid}"))
+
+    sm.ScheduleManager(pool)._reconcile()
+
+    assert launched == []
+    assert _run_row(db_conn, rid) == (None, None)
+
+
+def test_launch_closes_null_rows_of_dead_predecessor(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    # Restart/edit-save shape: an enabled schedule whose old process was
+    # SIGKILLed (NULL row, no live session) is relaunched — the old row must
+    # close so the drawer does not show it beside the new run's row.
+    _backend, launched = fake_session
+    sid = _insert(db_conn, "orphan-c")
+    rid = _insert_null_run(db_conn, sid)
+
+    sm.ScheduleManager(pool)._reconcile()
+
+    assert launched == [sid]
+    assert _run_row(db_conn, rid) == (False, "interrupted")
+
+
+def test_sync_stop_closes_orphan_rows_immediately(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    # The explicit stop path (API stop) kills the session directly — the
+    # killed process's in-progress row closes right away, not at the next
+    # reconcile tick.
+    backend, launched = fake_session
+    sid = _insert(db_conn, "orphan-d", enabled=True)
+    rid = _insert_null_run(db_conn, sid)
+    backend.live.append(session_name(f"schedule-{sid}"))
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE schedules SET enabled = false WHERE id = %s", (sid,))
+    db_conn.commit()
+
+    sm.ScheduleManager(pool)._sync_blocking(sid)
+
+    assert session_name(f"schedule-{sid}") in backend.killed
+    assert launched == []  # disabled — not relaunched
+    assert _run_row(db_conn, rid) == (False, "interrupted")
+
+
 def test_launches_enabled_missing_session(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:

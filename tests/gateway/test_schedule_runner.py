@@ -154,6 +154,71 @@ def test_run_records_nonzero_command(db_conn: psycopg.Connection, unit_home: Pat
     assert _runs(db_conn, sid) == [(False, "command exited 3")]
 
 
+def test_run_records_py_sys_exit_zero(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    # A .py script that calls sys.exit(0) exits deliberately — a finish like a
+    # clean return, not a crash and not an eternal in-progress row (QA P3-3).
+    sid = _insert_schedule(db_conn, script="raise SystemExit(0)\n")
+
+    assert run(sid) == 0
+    status, last_error = _status_and_error(db_conn, sid)
+    assert status == "completed"
+    assert last_error is None
+    assert _runs(db_conn, sid) == [(True, None)]
+
+
+def test_run_records_py_sys_exit_nonzero(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    # A .py script that calls sys.exit(3) is recorded like a command's nonzero
+    # exit — the row closes ok=false and the manager's crash path relaunches.
+    sid = _insert_schedule(db_conn, script="raise SystemExit(3)\n")
+
+    assert run(sid) == 3
+    status, last_error = _status_and_error(db_conn, sid)
+    assert status != "completed"
+    assert last_error is not None and "script exited 3" in last_error
+    assert _runs(db_conn, sid) == [(False, "script exited 3")]
+
+
+@pytest.mark.parametrize(
+    ("exit_expr", "expected_note"),
+    [
+        # A non-int code is a message the interpreter would print to stderr —
+        # it rides the run note instead of being swallowed (QA N1).
+        ("'done early'", "script exited 1: done early"),
+        ("3.7", "script exited 1: 3.7"),
+    ],
+)
+def test_run_records_py_sys_exit_message(
+    db_conn: psycopg.Connection, unit_home: Path, exit_expr: str, expected_note: str
+) -> None:
+    sid = _insert_schedule(db_conn, script=f"raise SystemExit({exit_expr})\n")
+
+    assert run(sid) == 1
+    assert _runs(db_conn, sid) == [(False, expected_note)]
+
+
+@pytest.mark.parametrize(
+    ("exit_expr", "expected_rc", "expected_rows"),
+    [
+        # bool is an int subclass — the interpreter treats it as an exit code:
+        # True -> 1 (failure), False -> 0 (clean finish). int() normalization
+        # keeps the note wording honest ("script exited 1", not "True").
+        ("True", 1, [(False, "script exited 1")]),
+        ("False", 0, [(True, None)]),
+    ],
+)
+def test_run_records_py_sys_exit_bool(
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    exit_expr: str,
+    expected_rc: int,
+    expected_rows: list[tuple[bool | None, str | None]],
+) -> None:
+    sid = _insert_schedule(db_conn, script=f"raise SystemExit({exit_expr})\n")
+
+    assert run(sid) == expected_rc
+    assert _runs(db_conn, sid) == expected_rows
+
+
 def test_run_records_stall_timeout(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -277,6 +342,77 @@ def test_run_record_failure_does_not_break_the_run(
     assert run(sid) == 0
     status, _ = _status_and_error(db_conn, sid)
     assert status == "completed"
+
+
+def test_run_completed_marker_failure_keeps_run_row_honest(
+    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # QA P3-5: a failure writing the 'completed' status marker must not record
+    # the run as 'crashed: OperationalError' — the script finished fine, only
+    # the bookkeeping lost a write. The run row reads ok=true with a note;
+    # the manager still relaunches (status is not 'completed'), which is the
+    # same safe side as before, just without a false crash record.
+    import gateway.schedule_runner as sr
+
+    real_connect = sr.shared.db.connect
+
+    class _FlakyCursor:
+        """Cursor proxy that fails only the completed-marker statement."""
+
+        def __init__(self, cur: Any) -> None:
+            self._cur = cur
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._cur, name)
+
+        def __enter__(self) -> _FlakyCursor:
+            self._cur.__enter__()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: Any,
+        ) -> None:
+            self._cur.__exit__(exc_type, exc_val, exc_tb)
+
+        def execute(self, sql: str, params: Any = None) -> Any:
+            if "status = 'completed'" in sql:
+                raise RuntimeError("db down on completed marker")
+            return self._cur.execute(sql, params)
+
+    class _Flaky:
+        """Connection proxy whose cursor fails the completed-marker statement."""
+
+        def __init__(self, conn: psycopg.Connection) -> None:
+            self._conn = conn
+
+        def __enter__(self) -> _Flaky:
+            self._inner = self._conn.__enter__()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: Any,
+        ) -> None:
+            self._conn.__exit__(exc_type, exc_val, exc_tb)
+
+        def cursor(self) -> _FlakyCursor:
+            return _FlakyCursor(self._inner.cursor())
+
+    def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
+        return _Flaky(real_connect(*args, **kwargs))  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(sr.shared.db, "connect", _flaky_connect)
+    sid = _insert_schedule(db_conn, script="x = 1\n")
+
+    assert run(sid) == 0
+    status, _ = _status_and_error(db_conn, sid)
+    assert status != "completed"  # the marker write failed — manager will relaunch
+    assert _runs(db_conn, sid) == [(True, "completed-marker write failed")]
 
 
 @pytest.mark.parametrize(

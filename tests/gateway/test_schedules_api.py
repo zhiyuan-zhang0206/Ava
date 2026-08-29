@@ -220,6 +220,46 @@ class TestLogsRunsDraft:
         with TestClient(app) as client:
             assert client.get("/api/schedules/9999/runs").status_code == 404
 
+    def test_runs_shows_in_progress_null_row(self, db_conn: psycopg.Connection) -> None:
+        # QA P3-6: a run in progress (ok IS NULL) is visible in the run
+        # history — the "…" row the drawer renders for a live run.
+        with TestClient(app) as client:
+            sid = _create(client, name="r2").json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute("INSERT INTO schedule_runs (schedule_id) VALUES (%s)", (sid,))
+            db_conn.commit()
+            body = client.get(f"/api/schedules/{sid}/runs").json()
+        assert len(body) == 1
+        assert body[0]["ok"] is None
+        assert body[0]["note"] is None
+
+    def test_runs_orders_newest_first_with_id_tiebreak(self, db_conn: psycopg.Connection) -> None:
+        # QA P3-4: ORDER BY ran_at DESC needs a secondary key — two rows with
+        # the same ran_at (same transaction timestamp here) must still come
+        # back newest-id-first, deterministically.
+        with TestClient(app) as client:
+            sid = _create(client, name="r3").json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO schedule_runs (schedule_id, ran_at) "
+                    "VALUES (%s, now() - interval '1 hour') RETURNING id",
+                    (sid,),
+                )
+                row = cur.fetchone()
+                assert row is not None
+                rid_old = row[0]
+                cur.execute(
+                    "INSERT INTO schedule_runs (schedule_id, ran_at) "
+                    "VALUES (%s, now() - interval '1 hour') RETURNING id",
+                    (sid,),
+                )
+                row = cur.fetchone()
+                assert row is not None
+                rid_new = row[0]
+            db_conn.commit()
+            body = client.get(f"/api/schedules/{sid}/runs").json()
+        assert [r["id"] for r in body] == [rid_new, rid_old]
+
     def test_draft_spawns_writer_agent(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:

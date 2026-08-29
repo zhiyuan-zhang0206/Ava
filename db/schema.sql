@@ -1051,7 +1051,7 @@ CREATE TABLE schedule_runs (
     schedule_id BIGINT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
     ran_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     ok          BOOLEAN,
-    agent_id    BIGINT REFERENCES agents(id),  -- the agent a run spawned, if any (FK since 20260810T224356; NULL = no agent involved)
+    agent_id    BIGINT REFERENCES agents(id),  -- reserved: a future script self-report could set it; the runner never does, so NULL today (FK since 20260810T224356)
     note        TEXT
 );
 CREATE INDEX ON schedule_runs (schedule_id, ran_at DESC);

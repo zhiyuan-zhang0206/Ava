@@ -15,8 +15,10 @@ drawer's data source): opened with ``ok = NULL`` (in-progress) when the runner
 starts, closed with the outcome when it exits. This is process-level history —
 one row per process lifetime, not per fire — and it is severable observability:
 a run-record write failure never affects the schedule itself. A run the runner
-cannot close (a SIGTERM/SIGHUP kill) stays ``ok = NULL``, which the UI renders
-as in-progress/interrupted; a stall-guard hard exit closes it ``ok = false``
+cannot close (a SIGTERM/SIGHUP kill, a manager SIGKILL on stop/restart/
+edited-script save) stays ``ok = NULL`` until the ScheduleManager's reconcile
+sweep closes it as ``interrupted`` — a NULL row is legitimate only while the
+schedule has a live session; a stall-guard hard exit closes it ``ok = false``
 before dying.
 
 The ScheduleManager launches this inside a session named
@@ -119,6 +121,22 @@ def _mark_completed(schedule_id: int) -> None:
             "UPDATE schedules SET status = 'completed', updated_at = now() WHERE id = %s",
             (schedule_id,),
         )
+
+
+def _finish_completed(schedule_id: int, run_id: int | None) -> None:
+    """Record a clean finish: mark the schedule completed and close the run
+    row ok=true. The completed-marker write is best-effort — if it fails, the
+    manager's liveness-before-status rule makes it relaunch the schedule (the
+    safe side), but the run row must still read as a success: the run itself
+    finished, only the bookkeeping lost a write (QA P3-5 — it must not be
+    recorded as 'crashed: OperationalError')."""
+    try:
+        _mark_completed(schedule_id)
+    except Exception:
+        logger.exception("schedule {} completed-marker write failed", schedule_id)
+        _record_run_end(run_id, ok=True, note="completed-marker write failed")
+    else:
+        _record_run_end(run_id, ok=True, note=None)
 
 
 def _record_run_start(schedule_id: int) -> int | None:
@@ -255,6 +273,23 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     return stop
 
 
+def _record_script_exit(schedule_id: int, run_id: int | None, exc: SystemExit) -> int:
+    """Record a .py script's deliberate sys.exit() like a command's exit code
+    (QA P3-3 — it must not leave the run row in-progress forever). A None code
+    is 0; a non-int code (a message string) is 1. int() normalizes bools (the
+    interpreter treats them as exit codes: True -> 1, False -> 0); a non-int
+    code is a message the interpreter would print to stderr, so it rides the
+    note instead of being swallowed (QA N1)."""
+    code = int(exc.code) if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    if code == 0:
+        _finish_completed(schedule_id, run_id)
+    else:
+        message = "" if isinstance(exc.code, int) else f": {exc.code}"
+        _record_error(schedule_id, f"script exited {code}{message}")
+        _record_run_end(run_id, ok=False, note=f"script exited {code}{message}")
+    return code
+
+
 def run(schedule_id: int) -> int:
     """Materialize + run the schedule. Returns a process exit code."""
     loaded = _load(schedule_id)
@@ -278,8 +313,9 @@ def run(schedule_id: int) -> int:
     # Run history: one row per process execution, opened in-progress (ok=NULL)
     # here and closed with the outcome on every exit path below — including the
     # stall guard, which receives run_id and closes the row ok=false before its
-    # hard exit. Only a SIGTERM/SIGHUP kill leaves the row in-progress (the run
-    # was interrupted mid-flight; there is no code path to close it).
+    # hard exit. Only a kill that leaves no code path to close (SIGTERM/SIGHUP/
+    # SIGKILL) leaves the row in-progress; the manager's reconcile sweep closes
+    # it as 'interrupted' once the process is gone.
     run_id = _record_run_start(schedule_id)
 
     try:
@@ -310,8 +346,7 @@ def run(schedule_id: int) -> int:
                 # is over, so restore the stdlib sleep — it must not leak into
                 # the rest of this process.
                 _restore_park_detection()
-            _mark_completed(schedule_id)  # returned cleanly => finished, not crashed
-            _record_run_end(run_id, ok=True, note=None)
+            _finish_completed(schedule_id, run_id)  # clean return => finished, not crashed
             return 0
         # A non-.py command runs as a child process — the stall guard's main-
         # thread frame watch cannot see inside it, and the runner parked in
@@ -344,9 +379,10 @@ def run(schedule_id: int) -> int:
             _record_error(schedule_id, f"command exited {result.returncode}: {command!r}")
             _record_run_end(run_id, ok=False, note=f"command exited {result.returncode}")
         else:
-            _mark_completed(schedule_id)
-            _record_run_end(run_id, ok=True, note=None)
+            _finish_completed(schedule_id, run_id)
         return result.returncode
+    except SystemExit as exc:
+        return _record_script_exit(schedule_id, run_id, exc)
     except Exception as exc:
         tb = traceback.format_exc()
         _record_error(schedule_id, tb)

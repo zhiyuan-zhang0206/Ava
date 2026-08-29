@@ -27,6 +27,14 @@ instead of respawning them. Why a session vanished decides what happens next:
 
 The manager reads liveness before status each tick, so a session seen dead is
 guaranteed to already carry the runner's terminal write (completed / last_error).
+
+Each tick also closes run-history rows the runner could not close itself: a
+NULL (in-progress) row whose schedule has no live session belongs to a dead
+process (a SIGKILLed stop/restart/edited-script save, an external kill, a
+stale-session reap) and is closed as ``interrupted`` — a NULL row is
+legitimate only while the schedule has a live session, so the run drawer
+shows a permanent in-progress "…" only for a run that is actually running
+(QA P2-2).
 """
 
 from __future__ import annotations
@@ -196,6 +204,13 @@ class ScheduleManager:
             if count > 0 and now > deadline + _STABLE_S:
                 self._backoff.pop(sid, None)
 
+        # Close run rows the runner could not close: a NULL row is legitimate
+        # only while the schedule has a live session (QA P2-2). Launches above
+        # already closed their dead predecessors; this catches every other
+        # orphan (disabled/terminal schedules, backing-off relaunches, legacy
+        # rows from before this sweep existed).
+        self._close_orphan_runs()
+
     def _live_ids(self) -> set[int]:
         live: set[int] = set()
         backend = get_shell_backend()
@@ -214,6 +229,40 @@ class ScheduleManager:
                 live.add(int(tail))
         return live
 
+    def _close_null_runs(self, schedule_id: int) -> None:
+        """Close a schedule's in-progress run-history rows (ok IS NULL) as
+        'interrupted' — the runner that opened them is gone. Best-effort (run
+        history is severable observability) and idempotent (WHERE ok IS NULL):
+        a row the runner closed itself, or one already swept, is untouched."""
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE schedule_runs SET ok = false, note = 'interrupted' "
+                "WHERE schedule_id = %s AND ok IS NULL",
+                (schedule_id,),
+            )
+
+    def _close_orphan_runs(self) -> None:
+        """Close every in-progress run row whose schedule has no live session.
+
+        The runner closes its row on every exit path it can reach; a row still
+        NULL after its process died — the manager's own stop/restart/edited-
+        script save kills with SIGKILL, an external kill, a gateway restart's
+        stale-session reap, a crash between the row open and any close — would
+        otherwise render as in-progress forever (QA P2-2). The manager owns
+        session liveness, so it closes them: history is preserved as a visible
+        ✗ interrupted row instead of an eternal "…". Schedules launched in
+        this tick already had their rows closed at launch; this catches the
+        rest (disabled, terminal, backing off, never launched)."""
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT schedule_id FROM schedule_runs WHERE ok IS NULL")
+            ids = [r[0] for r in cur.fetchall()]
+        if not ids:
+            return
+        live = self._live_ids()
+        for sid in ids:
+            if sid not in live:
+                self._close_null_runs(sid)
+
     def _launch(self, schedule_id: int) -> None:
         name = session_name(f"schedule-{schedule_id}")
         backend = get_shell_backend()
@@ -229,6 +278,13 @@ class ScheduleManager:
         if name in backend.list_sessions():
             _log.warning("schedule %s: reaping stale session %s", schedule_id, name)
             backend.kill_session(name)
+        # _launch is only reached for a schedule with no live session, so any
+        # in-progress run row at this point belongs to a dead process (the
+        # reaped survivor, an externally killed runner, a crash that skipped
+        # its own close). Close those rows now — the new process opens a fresh
+        # row, and without this the old one would render as in-progress beside
+        # it forever (QA P2-2).
+        self._close_null_runs(schedule_id)
         # The unit's config + this run's schedule id ride a 0600 env file the
         # session sources; the backend writes it from the env dict (never argv
         # — issue #974). The backend hands the command to the PTY daemon, which
@@ -282,6 +338,12 @@ class ScheduleManager:
     def _kill(self, schedule_id: int) -> None:
         get_shell_backend().kill_session(session_name(f"schedule-{schedule_id}"))
         self._set_status(schedule_id, "stopped")
+        # The killed process can never close its own run rows (the kill chain
+        # is SIGKILL — no handler runs); close them now so a stop/restart/
+        # edited-script save does not leave an in-progress "…" row behind (QA
+        # P2-2). The next reconcile sweep is the backstop for kills that do
+        # not route through here.
+        self._close_null_runs(schedule_id)
 
     def _trip_breaker(self, schedule_id: int, count: int) -> None:
         # Only write once per trip: flip to error the first time we cross the ceiling.

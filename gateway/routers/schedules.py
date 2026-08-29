@@ -351,7 +351,7 @@ def _runs_blocking(
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, ran_at, ok, agent_id, note FROM schedule_runs "
-            "WHERE schedule_id = %s ORDER BY ran_at DESC LIMIT %s",
+            "WHERE schedule_id = %s ORDER BY ran_at DESC, id DESC LIMIT %s",
             (schedule_id, limit),
         )
         return [
