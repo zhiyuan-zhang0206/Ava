@@ -252,18 +252,24 @@ const COMPACT_ENVELOPE_KINDS: ReadonlySet<string> = new Set([
  * Whether `incoming` carries a compact envelope the local items never folded
  * — the history was rewritten by a compact the local state missed (an SSE
  * gap: the re-key/reconnect window dropped compact_done + the post-compact
- * snapshot). The envelope row is the durable fingerprint: it is INSERTed at
- * enqueue and survives the rewrite, so a snapshot that shows it at a
- * position (or with an identity) the local items don't share is post-compact
- * relative to them. Keep-all merging the two would resurrect the
- * compacted-away items, so callers replace wholesale when this is true.
+ * snapshot). The envelope item is rendered only by the rewrite itself
+ * (shared/timeline.py `_compact_item`), so a snapshot that shows one the
+ * local items don't share is post-compact relative to them. Keep-all merging
+ * the two would resurrect the compacted-away items, so callers replace
+ * wholesale when this is true.
  *
- * The comparison is by item_id + inbound_id (the row's stable identity): a
- * same-id envelope with a DIFFERENT inbound_id is a newer compact that
- * reused the wiped slot; a missing item_id means the envelope moved (the
- * rewrite re-positioned it). Legacy rows without inbound_id fall back to
- * kind + payload — the envelope content is never rewritten in place, so a
- * payload change at the same id is likewise a newer compact.
+ * Identity = item_id + kind + created_at. created_at is the message's real
+ * `ava_created_at` — stamped by the producing node at creation and
+ * render-stable on both the SSE-snapshot and REST paths (shared/timeline.py
+ * `next_ts` returns the stamped value verbatim). Neither payload nor
+ * inbound_id is part of the identity: `message_timestamps` prefixes the
+ * payload with a render-time `now_timestamp()`, so the same compact
+ * re-rendered has a different payload and comparing it would fire the
+ * replace on every post-compact snapshot; `_compact_item` hardcodes
+ * inbound_id=None, so that comparison could never engage either. A missing
+ * item_id means the envelope moved (the rewrite re-positioned it); a
+ * same-slot envelope with a different created_at is a newer compact that
+ * reused the wiped slot.
  */
 function crossedUnseenCompact(
   local: BackendTimelineItem[],
@@ -273,8 +279,7 @@ function crossedUnseenCompact(
     if (!COMPACT_ENVELOPE_KINDS.has(env.kind)) return false;
     const localEnv = local.find((it) => it.item_id === env.item_id);
     if (localEnv === undefined) return true;
-    if (env.inbound_id != null) return localEnv.inbound_id !== env.inbound_id;
-    return localEnv.kind !== env.kind || localEnv.payload !== env.payload;
+    return localEnv.kind !== env.kind || localEnv.created_at !== env.created_at;
   });
 }
 
@@ -538,17 +543,17 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   reloadSnapshot: (snapshot, msg_count, hasMoreOlder) => {
     set((s) => {
       // A fetched snapshot that crossed a compact the local items never
-      // folded (its envelope row is one the local state doesn't share — the
+      // folded (its envelope item is one the local state doesn't share — the
       // compact_done + post-compact snapshot were lost in an SSE gap):
       // keep-all merging would resurrect the compacted-away history. Replace
-      // wholesale instead; still-streaming partials survive through the same
-      // merge rule the reset window relies on. This also satisfies an armed
-      // reset window (a crossed snapshot IS the post-compact state), while a
-      // non-crossed GET inside the window keeps being dropped: it may read a
-      // lagging pre-compact checkpoint (compact commits asynchronously;
-      // compact_done fires before the commit lands) — keep-all would
-      // resurrect the old history. hasMoreOlder refreshes either way — the
-      // truncation is real.
+      // wholesale instead — the local items, in-flight partials included,
+      // are dropped: the compact wiped that whole generation, so nothing of
+      // it can be right. This also satisfies an armed reset window (a crossed
+      // snapshot IS the post-compact state), while a non-crossed GET inside
+      // the window keeps being dropped: it may read a lagging pre-compact
+      // checkpoint (compact commits asynchronously; compact_done fires before
+      // the commit lands) — keep-all would resurrect the old history.
+      // hasMoreOlder refreshes either way — the truncation is real.
       const crossedCompact = crossedUnseenCompact(s.items, snapshot);
       if (s.resetPending && !crossedCompact) {
         return { hasMoreOlder };
