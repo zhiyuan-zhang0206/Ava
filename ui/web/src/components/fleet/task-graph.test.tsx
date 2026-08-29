@@ -6,7 +6,7 @@
 //
 // useTasks is mocked so the view is fed a fixed task list.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskRow } from "@/lib/types";
@@ -406,17 +406,33 @@ describe("TaskGraph hover detail card", () => {
     expect(text).toContain("Double-click the node to open the owner");
   });
 
-  it("hides the card on mouseleave", async () => {
+  it("hides the card on mouseleave (non-capped card hides immediately)", async () => {
+    // A roomy canvas puts the card in the beside-node state (not height
+    // capped) — the non-interactive card must hide the moment the pointer
+    // leaves the node (the capped card instead gets a grace window so its
+    // scroll stays reachable; covered by its own test below).
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(
+    const { container } = render(
       <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
-
-    fireEvent.mouseEnter(texts[0].closest("g")!);
-    expect(screen.getByRole("tooltip")).toBeTruthy();
-    fireEvent.mouseLeave(texts[0].closest("g")!);
-    expect(screen.queryByRole("tooltip")).toBeNull();
+    const group = texts[0].closest("g")!;
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 600, height: 400 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 100, y: 100, width: 36, height: 36 }),
+    );
+    const restore = mockCardSize(200, 100);
+    try {
+      fireEvent.mouseEnter(group);
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+      fireEvent.mouseLeave(group);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      restore();
+    }
   });
 
   it("keeps the card anchored to the node while the cursor moves (no following)", async () => {
@@ -473,6 +489,9 @@ describe("TaskGraph hover detail card", () => {
       // covered the node's right two-thirds.)
       expect(card.style.left).toBe("36px");
       expect(card.style.top).toBe("114px"); // 100 + 14, no vertical flip
+      // Not height-capped: the card stays pointer-events-none so it never
+      // steals the cursor from the nodes beneath it.
+      expect(card.className).toContain("pointer-events-none");
     } finally {
       restore();
     }
@@ -532,11 +551,117 @@ describe("TaskGraph hover detail card", () => {
       const card = screen.getByRole("tooltip");
       // Pinned to the roomier side (above: 162px) with the height capped so
       // the card still clears the node: top = 4, bottom = 166 = node top −
-      // gap. The body scrolls instead of covering the node.
+      // gap. The body scrolls instead of covering the node — and the cap
+      // state flips the card to pointer-events-auto so the scroll is
+      // actually reachable (QA #990 delta2).
       expect(card.style.top).toBe("4px");
       expect(card.style.maxHeight).toBe("162px");
       expect(card.style.overflowY).toBe("auto");
+      expect(card.className).toContain("pointer-events-auto");
     } finally {
+      restore();
+    }
+  });
+
+  it("keeps the capped card open when the pointer moves from the node onto it", async () => {
+    // QA #990 delta2: crossing the 14px gap between node and card must not
+    // unmount the card before the pointer reaches it — the leave handler
+    // checks relatedTarget and keeps the hover when the pointer lands inside
+    // the card.
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 320, height: 390 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 130, y: 180, width: 36, height: 36 }),
+    );
+    const restore = mockCardSize(200, 300);
+    try {
+      fireEvent.mouseEnter(group);
+      const card = screen.getByRole("tooltip");
+      // The leave lands INSIDE the card (relatedTarget = a card child) — the
+      // hover must survive so the user can scroll the clipped content.
+      fireEvent.mouseLeave(group, { relatedTarget: card.firstElementChild });
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+      // A plain leave from the card itself hides it.
+      fireEvent.mouseLeave(card);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("gives the pointer a grace window to reach the capped card, then hides", async () => {
+    // When the leave lands mid-gap (not on the card), the card must not
+    // vanish instantly — a 200ms grace window covers the crossing, and the
+    // card's own mouseenter cancels the pending hide.
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 320, height: 390 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 130, y: 180, width: 36, height: 36 }),
+    );
+    const restore = mockCardSize(200, 300);
+    vi.useFakeTimers();
+    try {
+      fireEvent.mouseEnter(group);
+      const card = screen.getByRole("tooltip");
+      fireEvent.mouseLeave(group); // relatedTarget null → grace timer armed
+      expect(screen.getByRole("tooltip")).toBeTruthy(); // not hidden yet
+      // Entering the card within the grace window cancels the hide.
+      fireEvent.mouseEnter(card);
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+      // Leaving the card hides it immediately.
+      fireEvent.mouseLeave(card);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      restore();
+    }
+  });
+
+  it("hides the capped card when the grace window expires without reaching it", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 320, height: 390 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 130, y: 180, width: 36, height: 36 }),
+    );
+    const restore = mockCardSize(200, 300);
+    vi.useFakeTimers();
+    try {
+      fireEvent.mouseEnter(group);
+      fireEvent.mouseLeave(group); // grace timer armed
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      vi.useRealTimers();
       restore();
     }
   });
