@@ -200,7 +200,10 @@ class ServiceSettings(EnvSettings):
         alias="AVA_MEMORY_SEARCH_BACKEND",
         description=(
             "Storage backend for the memory embedding index — 'milvus' (default) | "
-            "'numpy' (the local exact-search service). The "
+            "'numpy' (the local exact-search service) | 'pgvector' (v2 / fallback-only: "
+            "the provisioning for the vendored runtime Postgres is not landed yet, so "
+            "the startup preflight fails fast with the actionable fix instead of a "
+            "runtime 503 storm). New backends land behind the same switch. The "
             "indexer daemon and the gateway search endpoint both read it — switching "
             "is one env var + a restart, the cold-start scan rebuilds the index."
         ),

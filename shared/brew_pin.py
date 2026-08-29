@@ -13,6 +13,7 @@ PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
         "node",
         "openssl@3",
         "pgbouncer",
+        "pgvector",
         "postgresql@17",
         "redis",
         "redis@8.2",

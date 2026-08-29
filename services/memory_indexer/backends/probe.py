@@ -16,7 +16,8 @@ retry loop. Two outcomes matter:
   retries exhaust.
 
 Probes traverse what they certify: a real RPC for milvus, a real GET
-/meta for the numpy service — not a bare TCP connect
+/meta for the numpy service, a read-only `pg_available_extensions` check
+for pgvector — not a bare TCP connect
 (`conventions/defensive-patterns.md`).
 """
 
@@ -91,9 +92,62 @@ def _probe_numpy() -> ProbeResult:
         )
 
 
+def _probe_pgvector() -> ProbeResult:
+    """The cluster Postgres must carry the pgvector extension binaries.
+
+    Missing extension = permanent (fatal): no amount of retrying installs
+    binaries, and pgvector is v2 / fallback-only until the vendored-runtime
+    provisioning lands (2026-08-29 decision) — the message names the fix and
+    the backends that work today. Postgres unreachable = transient (the
+    retry loop owns the wait, like milvus / numpy booting). Read-only —
+    `pg_available_extensions`, never CREATE EXTENSION (a probe must not
+    mutate)."""
+    import psycopg
+
+    import shared.db
+
+    try:
+        with shared.db.connect() as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"
+            ).fetchone()
+        if row is not None and int(row[0]) > 0:
+            return ProbeResult(message=None)
+        return ProbeResult(
+            message=(
+                "pgvector is not installed in the cluster Postgres — the runtime "
+                "Postgres is the vendored relocatable build (~/.ava/runtime/pg/<ver>), "
+                "which scripts/provision/database.sh and CI's install-pg-redis do not "
+                "cover yet. pgvector is fallback-only / v2 until that provisioning "
+                "lands. Use AVA_MEMORY_SEARCH_BACKEND=milvus (default) or numpy "
+                "instead"
+            ),
+            fatal=True,
+        )
+    except psycopg.OperationalError as exc:
+        return ProbeResult(
+            message=(
+                f"cluster Postgres is not reachable ({type(exc).__name__}: {exc}) — it "
+                "may still be booting (`ava start` starts it before the indexer); if it "
+                "stays down, check the cluster DB session, or set "
+                "AVA_MEMORY_SEARCH_BACKEND=milvus or numpy"
+            )
+        )
+    except Exception as exc:
+        return ProbeResult(
+            message=(
+                f"pgvector preflight could not run against the cluster Postgres "
+                f"({type(exc).__name__}: {exc}) — pgvector is fallback-only / v2; set "
+                "AVA_MEMORY_SEARCH_BACKEND=milvus or numpy"
+            ),
+            fatal=True,
+        )
+
+
 _PROBES: dict[str, Callable[[], ProbeResult]] = {
     "milvus": _probe_milvus,
     "numpy": _probe_numpy,
+    "pgvector": _probe_pgvector,
 }
 
 

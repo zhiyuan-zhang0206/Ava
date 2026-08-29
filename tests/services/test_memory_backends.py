@@ -52,6 +52,15 @@ def test_factory_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(factory.get_backend(), NumPyBackend)
 
 
+def test_factory_pgvector_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AVA_MEMORY_SEARCH_BACKEND=pgvector yields the PGVectorBackend."""
+    from services.memory_indexer.backends.pgvector import PGVectorBackend
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
+    assert isinstance(factory.get_backend(), PGVectorBackend)
+
+
 def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unrecognized AVA_MEMORY_SEARCH_BACKEND must not silently fall
     back to milvus — a typo would keep the old storage while the operator

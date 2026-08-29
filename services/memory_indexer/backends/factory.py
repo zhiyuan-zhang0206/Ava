@@ -19,11 +19,13 @@ from collections.abc import Callable
 from services.memory_indexer.backends.base import MemorySearchBackend
 from services.memory_indexer.backends.milvus import MilvusBackend
 from services.memory_indexer.backends.numpy import NumPyBackend
+from services.memory_indexer.backends.pgvector import PGVectorBackend
 from shared.config import settings
 
 _BACKENDS: dict[str, Callable[[], MemorySearchBackend]] = {
     MilvusBackend.name: MilvusBackend,
     NumPyBackend.name: NumPyBackend,
+    PGVectorBackend.name: PGVectorBackend,
 }
 
 
