@@ -253,7 +253,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "ava_resolution_status_unresolved_warnings",
+     "expr": "ava_resolution_status_unresolved_warnings_ratio",
      "instant": true,
      "range": false,
      "refId": "A",
@@ -315,7 +315,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "ava_resolution_status_unresolved_errors",
+     "expr": "ava_resolution_status_unresolved_errors_ratio",
      "instant": true,
      "range": false,
      "refId": "A",
@@ -803,7 +803,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "ava_resolution_status_dismissed_warnings",
+     "expr": "ava_resolution_status_dismissed_warnings_ratio",
      "instant": true,
      "range": false,
      "refId": "A",
@@ -865,7 +865,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "ava_resolution_status_dismissed_errors",
+     "expr": "ava_resolution_status_dismissed_errors_ratio",
      "instant": true,
      "range": false,
      "refId": "A",
