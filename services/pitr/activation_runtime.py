@@ -113,6 +113,14 @@ def _restore_exact_file(
         staged.unlink(missing_ok=True)
 
 
+def _shadow_pg_gate(current: dict[str, str]) -> bool:
+    """archive_command displays '(disabled)' under PG17 archive_mode=off."""
+    return current["archive_mode"] == "off" and current["archive_command"].strip() in (
+        "",
+        "(disabled)",
+    )
+
+
 def _desired_archive_settings(home: Path) -> dict[str, str]:
     config = settings.physical_backup
     shim = home / "runtime" / "pg-archive" / "archive-shim"
