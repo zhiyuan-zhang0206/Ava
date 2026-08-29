@@ -8,7 +8,7 @@
 // visual difference between the two views is node shape — "circle" for agents,
 // "square" for tasks — everything else is this one component.
 //
-// Display data (status color, score, badge) is always read from the latest
+// Display data (status color, score, ghost flag) is always read from the latest
 // props on render — the simulation only owns positions, so live SSE updates
 // recolor/resize nodes in place without disturbing the layout.
 
@@ -35,8 +35,9 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout";
 // `score` is the node-size driver, normalized against the graph's max so the
 // band always spreads across the panel (agents: recent-work score; tasks:
 // uniform — every task node passes score 0 per user ruling 2026-08-09 #1070,
-// so the band collapses to the minimum radius). `badge` is the needs-you
-// overlay (tasks only). `dashed` marks fork lineage edges in the agent graph.
+// so the band collapses to the minimum radius). `ghost` marks structurally
+// required hidden parents (tasks only) — rendered dimmed with a dashed
+// outline. `dashed` marks fork lineage edges in the agent graph.
 
 export interface ForceGraphNode {
   readonly id: number;
@@ -47,8 +48,10 @@ export interface ForceGraphNode {
   /** Node-size driver; normalized against the graph max (0 → min size). */
   readonly score: number;
   readonly pulse?: boolean;
-  /** Needs-you overlay badge (count + priority tone class). */
-  readonly badge?: { count: number; tone: string } | null;
+  /** Structural ghost node: a hidden parent kept on the canvas to connect
+      the tree (e.g. a done parent whose child is still visible). Rendered
+      dimmed with a dashed outline. */
+  readonly ghost?: boolean;
   /** Native SVG hover title — full detail without cluttering the node. */
   readonly nodeTitle?: string | null;
 }
@@ -58,9 +61,9 @@ export interface ForceGraphNode {
  * a node (no delay). Replaces the native SVG <title>, whose appearance the
  * browser defers (typically ~0.5–1s) — the perceived "hover lag" of the old
  * tooltip. The card must return content for every node it is offered (null
- * leaves the node with no hover surface); it is positioned beside the cursor
- * and flips to stay inside the canvas. Views without a card keep the native
- * title as their fallback.
+ * leaves the node with no hover surface); it is anchored statically to the
+ * hovered node's on-screen box (no cursor following) and flips to stay inside
+ * the canvas. Views without a card keep the native title as their fallback.
  */
 export type HoverCard = (node: ForceGraphNode) => ReactNode | null;
 
@@ -251,10 +254,10 @@ export const ForceGraph = memo(function ForceGraph({
   );
   const { positions, layout } = useForceLayout(simNodes, simLinks, params);
 
+  // Hover anchor: the node id plus a viewport-coordinate point captured at
+  // mouseenter. The card is pinned there for the whole hover — it never
+  // follows the cursor (user ruling 2026-08-29) — and clears on mouseleave.
   const [hovered, setHovered] = useState<{ id: number; x: number; y: number } | null>(null);
-  // Throttle onMouseMove → React setState to ~20 Hz so rapid cursor movement
-  // doesn't trigger per-pixel re-renders just for hover opacity.
-  const hoverThrottleRef = useRef(0);
 
   // The instant hover card. Content is computed only for the hovered node
   // (never per node per layout tick); when the view supplies no card the
@@ -265,9 +268,10 @@ export const ForceGraph = memo(function ForceGraph({
     return node ? hoverCard(node) : null;
   }, [hovered, hoverCard, nodeById]);
 
-  // Card placement: anchored at the cursor (14px gap), flipped to the cursor's
-  // other side when it would clip the canvas edge. Done in a layout effect
-  // with direct style writes — before paint, no extra render per mousemove.
+  // Card placement: anchored at the hovered node's box (14px gap), flipped to
+  // the node's other side when it would clip the canvas edge. Done in a
+  // layout effect with direct style writes — before paint, and never
+  // re-run while the cursor moves (the anchor is static).
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hoverCardRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
@@ -564,17 +568,20 @@ export const ForceGraph = memo(function ForceGraph({
               const r = radiusOf(n.score, maxScore, params.nodeSizeMin, params.nodeSizeMax);
               const isHovered = hovered?.id === n.id;
               const isRinged = selectedId === n.id;
+              const isGhost = n.ghost === true;
               const fill = statusText[n.status] ?? "text-slate-400";
               const showLabel = transform.k >= LABEL_MIN_ZOOM;
               const labelLines = showLabel && n.label ? wrapLabel(n.label, r) : [];
               const totalTextLines = 1 + labelLines.length;
               const firstTextLineY = -((totalTextLines - 1) * LABEL_LINE_HEIGHT) / 2;
-              const badgeR = Math.max(5, r * 0.4);
               return (
                 <g
                   key={n.id}
                   transform={`translate(${p.x},${p.y})`}
-                  className="cursor-pointer"
+                  // Ghost nodes (structurally required hidden parents) render
+                  // dimmed until hovered, so the tree stays readable while the
+                  // real nodes keep full contrast.
+                  className={cn("cursor-pointer", isGhost && !isHovered && "opacity-40")}
                   onPointerDown={(ev) => {
                     // Prevent d3-zoom from capturing the pointer; a flicker
                     // occurs when d3-zoom starts a drag gesture on a node
@@ -594,12 +601,12 @@ export const ForceGraph = memo(function ForceGraph({
                     ev.stopPropagation();
                     onOpen(n.id);
                   }}
-                  onMouseEnter={(ev) => setHovered({ id: n.id, x: ev.clientX, y: ev.clientY })}
-                  onMouseMove={(ev) => {
-                    const now = Date.now();
-                    if (now - hoverThrottleRef.current < 50) return;
-                    hoverThrottleRef.current = now;
-                    setHovered({ id: n.id, x: ev.clientX, y: ev.clientY });
+                  onMouseEnter={(ev) => {
+                    // Static anchor: the card is pinned to the node's own
+                    // on-screen box (top-right corner, viewport coords) and
+                    // stays put until mouseleave — no cursor chasing.
+                    const box = ev.currentTarget.getBoundingClientRect();
+                    setHovered({ id: n.id, x: box.right, y: box.top });
                   }}
                   onMouseLeave={() => setHovered((cur) => (cur?.id === n.id ? null : cur))}
                 >
@@ -640,6 +647,7 @@ export const ForceGraph = memo(function ForceGraph({
                       fill="currentColor"
                       stroke="var(--background)"
                       strokeWidth={1.5}
+                      strokeDasharray={isGhost ? "3 2" : undefined}
                       opacity={isHovered ? 1 : 0.92}
                     />
                   ) : (
@@ -653,6 +661,7 @@ export const ForceGraph = memo(function ForceGraph({
                       fill="currentColor"
                       stroke="var(--background)"
                       strokeWidth={1.5}
+                      strokeDasharray={isGhost ? "3 2" : undefined}
                       opacity={isHovered ? 1 : 0.92}
                     />
                   )}
@@ -675,28 +684,6 @@ export const ForceGraph = memo(function ForceGraph({
                         </tspan>
                       ))}
                     </text>
-                  ) : null}
-                  {/* Needs-you badge — pending require_response notices on this
-                      node's owner, colored by top priority (tasks only). */}
-                  {n.badge != null && n.badge.count > 0 ? (
-                    <g aria-label={`${n.badge.count} waiting on you`}>
-                      <circle
-                        cx={r - 1}
-                        cy={-(r - 1)}
-                        r={badgeR}
-                        className={n.badge.tone}
-                        style={{ fill: "currentColor" }}
-                      />
-                      <text
-                        x={r - 1}
-                        y={-(r - 1)}
-                        textAnchor="middle"
-                        dy={3}
-                        className="fill-white text-[9px] font-bold tabular-nums"
-                      >
-                        {n.badge.count}
-                      </text>
-                    </g>
                   ) : null}
                 </g>
               );
