@@ -200,11 +200,12 @@ def _restore_pitr_env(baseline: dict[str, str]) -> None:
         kept = [line for line in lines if line.split("=", 1)[0].strip() not in aliases]
         for encoded in baseline.values():
             restored = json.loads(encoded)
-            if not isinstance(restored, list) or not all(
-                isinstance(line, str) for line in restored
-            ):
+            if not isinstance(restored, list):
+                raise TypeError("PITR environment baseline is invalid")
+            restored_items = cast(list[object], restored)
+            if not all(isinstance(item, str) for item in restored_items):
                 raise RuntimeError("PITR environment baseline is invalid")
-            kept.extend(cast(list[str], restored))
+            kept.extend(cast(list[str], restored_items))
         write_private_bytes(path, ("\n".join(kept) + "\n").encode())
 
 
