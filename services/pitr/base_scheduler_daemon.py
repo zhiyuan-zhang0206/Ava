@@ -112,6 +112,12 @@ def _components(state: BaseCandidateState) -> list[dict[str, object]]:
         progress = "idle"
     else:
         status, detail, progress = OK, None, "idle"
+    # The candidate's state is a domain condition (cleanup pending, GCS
+    # credentials, replication contract, staleness) that a restart cannot
+    # fix; gating readiness would make the watchdog respawn a healthy daemon
+    # every 60s onto the same condition (QA #931 R3, #927 arbitration A).
+    # Readiness follows process liveness only — /healthz 503 means the
+    # daemon is dead.
     record = component(
         "pitr_base_candidate",
         status,
@@ -119,6 +125,7 @@ def _components(state: BaseCandidateState) -> list[dict[str, object]]:
         progress=progress,
         detail=detail,
         now=time.time() if state.last_success else None,
+        gate_readiness=False,
     )
     record["protected"] = False
     record["deferred_for_logical_backup"] = state.deferred_for_logical_backup
