@@ -740,6 +740,84 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
     assert failed.error == "RuntimeError"
 
 
+def test_alter_system_accepts_only_literal_values_on_real_pg17(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """ALTER SYSTEM rejects bound parameters on real PostgreSQL 17, so _alter
+    and _alter_restore must interpolate the value as a quoted literal. The CI
+    mocks previously hid this: the 2026-08-30 activation failed at
+    wal_config_applying with a psycopg SyntaxError on `$1`."""
+    import subprocess
+    from types import SimpleNamespace
+
+    from shared.pg_tools import pg_tool
+
+    port = 39617
+    data = tmp_path / "pg"
+    log = tmp_path / "pg.log"
+    subprocess.run(  # noqa: S603 — resolved pg binaries + static flags
+        [pg_tool("initdb"), "-D", str(data), "-U", "ava", "-A", "trust"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(  # noqa: S603
+        [
+            pg_tool("pg_ctl"),
+            "-D",
+            str(data),
+            "-l",
+            str(log),
+            "-w",
+            "-t",
+            "30",
+            "start",
+            "-o",
+            f"-p {port} -c listen_addresses='' -c unix_socket_directories={tmp_path} "
+            "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        monkeypatch.setattr(activation_config, "ava_home", lambda: tmp_path)
+        monkeypatch.setattr(
+            activation_config,
+            "get_record",
+            lambda _home: SimpleNamespace(ports={"postgres": port}, db_name="ava"),
+        )
+        monkeypatch.setattr(
+            activation_config,
+            "pg_admin_url",
+            lambda _pg_port: f"postgresql://ava@/postgres?host={tmp_path}&port={port}",
+        )
+
+        value = "cp %p /spool/%f --hard-bytes 123"
+        activation_config._alter("archive_command", value)
+        activation_config._alter("archive_timeout", "300")
+        # ALTER SYSTEM only writes postgresql.auto.conf — the running server's
+        # SHOW values change on reload/restart — so the file-level view read
+        # through pg_file_settings is the ground truth here.
+        persistent = activation_config._persistent_archive_settings(tmp_path)
+        assert persistent["archive_command"] == value
+        assert persistent["archive_timeout"] == "300"
+        assert persistent["archive_mode"] == "__ABSENT__"
+
+        activation_config._alter_restore("archive_command", "__ABSENT__")
+        activation_config._alter_restore("archive_timeout", "__ABSENT__")
+        assert activation_config._persistent_archive_settings(tmp_path) == {
+            "archive_mode": "__ABSENT__",
+            "archive_command": "__ABSENT__",
+            "archive_timeout": "__ABSENT__",
+            "wal_compression": "__ABSENT__",
+        }
+    finally:
+        subprocess.run(  # noqa: S603
+            [pg_tool("pg_ctl"), "-D", str(data), "stop", "-m", "fast"],
+            check=False,
+            capture_output=True,
+        )
+
+
 def test_frozen_pg_state_contract_with_real_reader(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

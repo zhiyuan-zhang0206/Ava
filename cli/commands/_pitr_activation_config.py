@@ -38,8 +38,12 @@ def _archive_value(name: str) -> str:
 
 
 def _alter(name: str, value: str) -> None:
+    """ALTER SYSTEM rejects bound parameters ($1) — the value must ride as a
+    quoted literal in the statement text (real PG17, 2026-08-30 activation)."""
     with _pg_connection() as conn:
-        conn.execute(sql.SQL("ALTER SYSTEM SET {} = %s").format(sql.Identifier(name)), (value,))
+        conn.execute(
+            sql.SQL("ALTER SYSTEM SET {} = {}").format(sql.Identifier(name), sql.Literal(value))
+        )
 
 
 def _persistent_archive_settings(home: Path) -> dict[str, str]:
@@ -63,9 +67,11 @@ def _alter_restore(name: str, value: str) -> None:
         query = (
             sql.SQL("ALTER SYSTEM RESET {}").format(sql.Identifier(name))
             if value == "__ABSENT__"
-            else sql.SQL("ALTER SYSTEM SET {} = %s").format(sql.Identifier(name))
+            else sql.SQL("ALTER SYSTEM SET {} = {}").format(
+                sql.Identifier(name), sql.Literal(value)
+            )
         )
-        conn.execute(query, () if value == "__ABSENT__" else (value,))
+        conn.execute(query)
 
 
 def _journal_rollback(home: Path, record: ActivationRecord, **changes: object) -> ActivationRecord:
