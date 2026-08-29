@@ -32,6 +32,10 @@ detector and the fixer can never disagree about what is legal.
   source-integrity guard compares). Alert-only, same placement as checks 5-7:
   it fails the probe and wakes the owner, but never feeds the auto-rollback
   counter — rollback does not undo an on-disk edit. The probe never writes.
+  A checkout the guard cannot evaluate (not a git checkout, or a git command
+  failed) reports a distinct **"guard skipped"** alert instead of a clean
+  pass: a broken git is exactly the state in which tampering becomes
+  invisible, so the guard names itself as failing rather than looking clean.
 - **Repair** — `_converge` registers the "source tree reset + clean"
   host-global step as the first converge step: `git reset --hard` to
   `installed_sha` and `git clean -fd` of untracked files outside the
@@ -75,6 +79,13 @@ the detector and `git clean -fd`, so they need no whitelist entry.
   against) but not the untracked cleanup.
 - A git failure during repair is reported (printed + left for the probe to
   keep alerting on), never raised — repair must not block a start.
+- The whitelist validates itself at import: non-empty and free of
+  catch-all patterns (anything that would whitelist arbitrary paths). An
+  empty or catch-all whitelist silently disables detection on one side or
+  false-alarms on the other, so it raises instead of running. Tests lock the
+  shipped entries against the same misconfigurations.
+- Detection is never silently blind: `() `means the guard saw a clean tree;
+  a checkout it could not evaluate carries a `guard skipped:` marker.
 
 ## Key dependencies
 

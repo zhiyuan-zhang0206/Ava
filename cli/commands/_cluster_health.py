@@ -529,6 +529,11 @@ def _source_tree_failure() -> str | None:
     public read-only twin of the converge guard's repair primitive — with the
     same whitelist, so the detector and the fixer can never disagree about
     what is legal.
+
+    A checkout the guard could NOT evaluate (not a git checkout, or a git
+    command failed) yields a distinct "guard skipped" alert instead of a
+    clean pass: a broken git is the state in which tampering becomes
+    invisible, so the probe must name the guard itself as failing.
     """
     import shared.cluster_drift
     import shared.source_tree_guard as stg
@@ -539,6 +544,9 @@ def _source_tree_failure() -> str | None:
     violations = stg.source_tree_violations(source_root)
     if not violations:
         return None
+    if any(v.startswith(stg.GUARD_SKIPPED_PREFIX) for v in violations):
+        detail = "; ".join(v.removeprefix(stg.GUARD_SKIPPED_PREFIX).strip() for v in violations)
+        return f"prod source tree guard skipped: {detail}"
     return "prod source tree tampered: " + "; ".join(violations)
 
 

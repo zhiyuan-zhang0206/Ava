@@ -306,6 +306,11 @@ def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
+    # Check 8 (source tree) is environment-dependent by construction: it reads
+    # the real prod checkout, which a tmp-patched `ava_home` resolves to a
+    # non-git path. Every pass-all fixture stubs it; the source-tree tests
+    # below stub it themselves with specific outcomes.
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda: None)
 
 
 @pytest.fixture
@@ -314,6 +319,14 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     import shared.paths
 
     monkeypatch.setattr(shared.paths, "ava_home", lambda: tmp_path)
+    # Check 8 (source tree) derives its checkout from ava_home() and, on a
+    # runner with no prod tree, resolves it to a non-git path — the guard
+    # (correctly) reports that as "guard skipped" and fails the probe. Unit
+    # tests have no prod tree by construction, so stub the lookup itself;
+    # check 8's own behavior is pinned by the dedicated tests below.
+    import shared.cluster_drift
+
+    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: None)
     return tmp_path
 
 
@@ -608,6 +621,26 @@ def test_source_tree_clean_passes(
     rc = _cluster_health.run_health_probe()
 
     assert rc == 0
+
+
+def test_source_tree_guard_skipped_is_a_distinct_alert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blind guard must not look like a clean tree: when
+    ``source_tree_violations`` reports the guard as skipped, the probe names
+    the failure 'guard skipped' (with the reason), never 'tampered'."""
+    import shared.cluster_drift
+    import shared.source_tree_guard
+
+    def _violations_skipped(_repo: Path) -> tuple[str, ...]:
+        return ("guard skipped: git unavailable",)
+
+    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(shared.source_tree_guard, "source_tree_violations", _violations_skipped)
+
+    failure = _cluster_health._source_tree_failure()
+
+    assert failure == "prod source tree guard skipped: git unavailable"
 
 
 def test_service_probe_failure_resets_stale_counter_before_alerting(
@@ -1845,6 +1878,10 @@ def test_run_health_probe_allowed_from_prod_checkout(
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
+    # Check 8 reads the real anchored checkout — whose git state varies by
+    # host (the CI runner has no prod tree). Stub it like the other checks;
+    # the source-tree behavior is pinned by the dedicated tests below.
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda: None)
 
     rc = _cluster_health.run_health_probe()
 
@@ -2113,5 +2150,9 @@ def test_editable_install_healthy_records_keep_probe_green(
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
+    # The throwaway `_prod_source` is not a git checkout; check 8 is not this
+    # test's subject (the editable-install check is), so stub it rather than
+    # depend on the host's real prod tree.
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda: None)
 
     assert _cluster_health.run_health_probe() == 0
