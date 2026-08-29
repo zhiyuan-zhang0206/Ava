@@ -138,6 +138,65 @@ def test_register_self_agent_runner_stores_null(_machine_setup) -> None:  # pyri
         machines.lookup("test-agent-runner")
 
 
+def test_register_self_station_only_composes_row(_machine_setup) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """A pure observability-station unit (neither gateway nor agent-runner) must
+    compose a machines row carrying its capability — otherwise the station host
+    is invisible to `ava cluster status`. The composed row keeps gateway_url
+    NULL (nothing dials a station for ops) and stopped_at NULL (the unit is
+    live)."""
+    _machine_setup(name="station-a", role="observability-station")
+    machines.register_self(url=None)
+    gateway_url, role, _desc, stopped_at = _read_machine("station-a")  # pyright: ignore[reportUnknownVariableType]
+    assert gateway_url is None
+    assert role == ["observability-station"]
+    assert stopped_at is None
+
+
+def test_register_self_co_located_station_composes_with_gateway(_machine_setup) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """Two co-located units (a gateway unit + a station unit on the same host)
+    compose into ONE machines row whose role is the union — the station
+    capability joins the gateway's, exactly like the gateway/agent-runner
+    composition."""
+    _machine_setup(name="combo", role="gateway", home="~/.ava_gateway")
+    machines.register_self(url="http://gw:8000")
+    _machine_setup(name="combo", role="observability-station", home="~/.ava_station")
+    machines.register_self(url=None)
+    gateway_url, role, _desc, stopped_at = _read_machine("combo")  # pyright: ignore[reportUnknownVariableType]
+    assert role == ["gateway", "observability-station"]
+    # the composed dial URL stays the gateway unit's (the station adds no target)
+    assert gateway_url == "http://gw:8000"
+    assert stopped_at is None
+
+
+def test_unit_dial_url_pure_station_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pure station advertises no dial target: unit_dial_url returns None
+    instead of falling back to the gateway URL (which a station host does not
+    have — setup does not require gateway_url for it)."""
+    monkeypatch.setattr(settings.gateway, "gateway_url", "")
+    assert machines.unit_dial_url(frozenset({"observability-station"})) is None
+
+
+def test_unit_dial_url_gateway_station_is_gateway_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gateway + station (no runner) keeps the historical gateway-URL dial —
+    the station capability must not change the gateway unit's advertised
+    address."""
+    monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw:8000")
+    assert machines.unit_dial_url(frozenset({"gateway", "observability-station"})) == (
+        "http://gw:8000"
+    )
+
+
+def test_unit_dial_url_runner_station_is_ops_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """agent-runner + station keeps the ops-URL dial — the station capability
+    must not change the runner unit's advertised address."""
+    monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw:8000")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.5")
+    url = machines.unit_dial_url(frozenset({"agent-runner", "observability-station"}))
+    assert url is not None and url.startswith("http://10.0.0.5:")
+
+
 def _read_stopped_at(name: str):
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT stopped_at FROM machines WHERE name = %s", (name,))
