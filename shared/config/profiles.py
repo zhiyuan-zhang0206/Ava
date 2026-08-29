@@ -40,6 +40,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
     "gateway": frozenset(
         {
             "data_plane",
+            "physical_backup",
             "gateway",
             "general",
             "services",

@@ -45,6 +45,18 @@
 
 ## Future work
 
+### Physical PITR delivery
+
+The foundation is source-controlled in `services/pitr/`: per-`AVA_HOME` private
+layout, a stable stdlib-only archive shim, strong disabled-by-default config,
+and a health-state contract that never equates local archive with remote ACK.
+It deliberately does not enable PostgreSQL archiving. Follow-up delivery order:
+GCS uploader + verified ACK, PostgreSQL archive-mode rollout, weekly verified
+base chains with chain-aware retention, then isolated restore drills and the
+migration restore-point gate. The first rollout cannot protect itself; existing
+verified pre-update `pg_dump` remains mandatory until the first remote physical
+chain is proven recoverable.
+
 1. **Off-site encrypted copy — delivered.** After encryption and before local
    pruning, the gateway copies the published artifact to the existing writable
    Google Drive sync folder in a cluster-scoped backup directory, verifies its

@@ -28,6 +28,7 @@ from cli.commands._converge_os_jobs import (
     ensure_watchdog_probe,
     reap_stale_schtasks,
 )
+from cli.commands._converge_pitr import converge_pitr_foundation
 from cli.commands._converge_source_tree import ensure_source_tree_integrity
 
 # The step contract lives in _converge_spec so step implementations can span
@@ -523,6 +524,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "vendored Postgres binaries",
         _ensure_pg_binaries_step,
+        roles=frozenset({"gateway"}),
+    ),
+    ConvergeStep(
+        "physical backup foundation",
+        converge_pitr_foundation,
         roles=frozenset({"gateway"}),
     ),
     # Reconcile the one DB URL (AVA_DB_URL) with the pooler toggle + preflight the
