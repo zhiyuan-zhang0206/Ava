@@ -34,7 +34,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 - `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
-- `services/pitr/retention_planner.py` — default-off local dry-run planner; atomically records a canonical fail-closed N=2 chain plan and exposes counts/bytes through scheduler health, with no remote-delete boundary
+- `services/pitr/retention_planner.py` — default-off local dry-run planner; strictly joins local ACK and viewer-only remote immutable identities, atomically records a canonical fail-closed N=2 plan, and exposes only fresh counts/bytes through scheduler health, with no remote-delete boundary; unprotected or cross-timeline evidence blocks eligibility
 - `cli/commands/pitr.py` — read-only `ava pitr retention inspect` view of the latest durable local plan
 
 ## Notes

@@ -17,12 +17,16 @@ class RetentionObject:
     size: int
     archive_name: str | None
     kind: str
+    crc32c: str
+    metadata: tuple[tuple[str, str], ...]
 
     def __post_init__(self) -> None:
-        if not self.object_name or self.generation <= 0 or self.size <= 0:
+        if not self.object_name or self.generation <= 0 or self.size <= 0 or not self.crc32c:
             raise ValueError("retention object lacks an exact immutable identity")
         if self.kind not in {"base", "wal", "history"}:
             raise ValueError("retention object kind is unsupported")
+        if tuple(sorted(self.metadata)) != self.metadata:
+            raise ValueError("retention object metadata must be canonical")
 
 
 @dataclass(frozen=True)

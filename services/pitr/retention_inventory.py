@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Protocol, cast
 from google.cloud import storage
 from google.oauth2 import service_account
 
+from services.pitr.archive_shim import archive_name_is_valid
 from services.pitr.retention_manifest import RetentionObject
 
 
@@ -29,6 +31,7 @@ class _Blob(Protocol):
     name: str
     generation: int | str | None
     size: int | str | None
+    crc32c: str | None
     metadata: Mapping[str, str] | None
 
 
@@ -55,25 +58,41 @@ class GCSRetentionInventoryReader:
                 unknown.append(raw.name)
                 continue
             if raw.name.startswith(f"{self._prefix}/base/"):
+                base_pattern = (
+                    rf"{re.escape(self._prefix)}/base/"
+                    r"[0-9]{8}T[0-9]{6}Z/[0-9a-f]{64}/base\.tar\.zst\.enc"
+                )
+                if re.fullmatch(base_pattern, raw.name) is None:
+                    unknown.append(raw.name)
+                    continue
                 kind, archive_name = "base", None
             elif raw.name.startswith(f"{self._prefix}/wal/"):
                 archive_name = metadata.get("ava-archive-name")
-                if archive_name is None:
+                if archive_name is None or not archive_name_is_valid(archive_name):
                     unknown.append(raw.name)
                     continue
                 kind = "history" if archive_name.endswith(".history") else "wal"
+                expected_name = f"{self._prefix}/wal/{archive_name[:8]}/{archive_name}.enc"
+                if raw.name != expected_name:
+                    unknown.append(raw.name)
+                    continue
             elif raw.name.startswith(f"{self._prefix}/protected/"):
                 continue
             else:
                 unknown.append(raw.name)
                 continue
-            objects.append(
-                RetentionObject(
-                    raw.name,
-                    int(raw.generation),
-                    int(raw.size),
-                    archive_name,
-                    kind,
+            try:
+                objects.append(
+                    RetentionObject(
+                        raw.name,
+                        int(raw.generation),
+                        int(raw.size),
+                        archive_name,
+                        kind,
+                        str(raw.crc32c or ""),
+                        tuple(sorted(metadata.items())),
+                    )
                 )
-            )
+            except (TypeError, ValueError):
+                unknown.append(raw.name)
         return InventorySnapshot(tuple(sorted(objects)), tuple(sorted(unknown)))

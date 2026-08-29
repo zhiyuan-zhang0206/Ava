@@ -622,7 +622,13 @@ ava pitr retention inspect
 
 A blocked plan exits 2 and always has zero eligible objects. The flag grants no
 delete credential, calls no remote delete API, does not alter Cloud Storage soft
-delete, and leaves daily/pre-update `pg_dump` retention unchanged.
+delete, and leaves daily/pre-update `pg_dump` retention unchanged. Eligibility
+also remains zero while any candidate is unprotected, while the plan is stale,
+or while timeline history ancestry has not been authenticated. A WAL/history
+object is continuous only after its local ACK and viewer-only remote inventory
+entry match exactly on canonical archive/object path, generation, size, CRC32C,
+and immutable metadata; any missing, extra, duplicate, or conflicting entry
+blocks the complete plan.
 
 All sessions have cwd set to the prod path `~/.ava/source/` (see "Prod and dev clone paths" above).
 Session commands run under `bash -lc` (#476) — the login-shell flag pulls in the user's
