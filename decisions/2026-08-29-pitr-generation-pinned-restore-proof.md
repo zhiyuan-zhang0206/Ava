@@ -7,6 +7,12 @@ input by exact GCS object name and generation, verifies size, CRC32C and the
 complete immutable metadata map, and restores it in an owned sibling directory.
 The restore reader has a viewer-only credential distinct from the uploader
 credential and exposes no write, list-latest, or delete operation.
+The spawned restore worker receives only viewer authority: it downloads,
+verifies, restores, and durably writes a deterministic pending proof, then is
+fully reaped. Only the parent controller subsequently reads the uploader
+credential, revalidates the pending candidate and exact object generations,
+and publishes the immutable protected manifest. A controller crash resumes the
+same pending payload, keeping create-only retries byte-for-byte equivalent.
 
 The multi-GiB base ciphertext is downloaded once into a 0700 quarantine after
 a same-filesystem capacity preflight. Ava authenticates the local ciphertext in

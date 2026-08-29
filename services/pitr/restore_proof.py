@@ -512,22 +512,21 @@ def prove_candidate(  # noqa: PLR0915
     candidate: CandidateManifest,
     root: Path,
     ack_dir: Path,
-    prefix: str,
     key: bytes,
     reader: GenerationPinnedObjectReader,
-    publisher: ProtectedManifestPublisher,
     executor: RestoreDrillExecutor,
     budget: RestoreSpaceBudget,
     now: datetime | None = None,
 ) -> ProtectedManifest:
-    """Publish protected=true only after a real isolated restore succeeds."""
+    """Create durable proof evidence without possessing publication authority."""
 
     reconcile_restore_runtime(root)
-    resumed = _resume_protected_publish(
-        root=root, candidate=candidate, prefix=prefix, publisher=publisher
-    )
-    if resumed is not None:
-        return resumed
+    pending = root / "protected-pending" / f"{candidate.chain_id}.json"
+    if pending.is_file():
+        protected = ProtectedManifest.from_json(pending.read_text())
+        if protected.candidate_sha256 != candidate_sha256(candidate):
+            raise RestoreProofError("durable pending proof differs from its candidate")
+        return protected
     archive_names = required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
     wal = wal_objects_from_acks(ack_dir=ack_dir, archive_names=archive_names)
     base = _base_restore_object(candidate)
@@ -621,18 +620,8 @@ def prove_candidate(  # noqa: PLR0915
             proof=proof,
         )
         payload = protected.to_json().encode()
-        pending = root / "protected-pending" / f"{candidate.chain_id}.json"
         _write_local_manifest(pending, payload)
-        update_restore_owner(owner, state="publishing", pending=str(pending))
-        _publish_protected(
-            root=root,
-            candidate=candidate,
-            prefix=prefix,
-            payload=payload,
-            publisher=publisher,
-        )
-        pending.unlink()
-        _fsync_dir(pending.parent)
+        update_restore_owner(owner, state="proof_durable", pending=str(pending))
         return protected
     finally:
         if owner.is_file():
@@ -642,3 +631,20 @@ def prove_candidate(  # noqa: PLR0915
             else:
                 owner.unlink()
                 _fsync_dir(owner.parent)
+
+
+def publish_candidate_proof(
+    *,
+    candidate: CandidateManifest,
+    root: Path,
+    prefix: str,
+    publisher: ProtectedManifestPublisher,
+) -> ProtectedManifest:
+    """Publish an already-durable proof from the controller process only."""
+
+    protected = _resume_protected_publish(
+        root=root, candidate=candidate, prefix=prefix, publisher=publisher
+    )
+    if protected is None:
+        raise RestoreProofError("protected publication has no durable pending proof")
+    return protected

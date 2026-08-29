@@ -16,6 +16,7 @@ from services.pitr.restore_proof import (
     LivePostgresIdentity,
     RestoreSpaceBudget,
     prove_candidate,
+    publish_candidate_proof,
 )
 
 
@@ -189,16 +190,24 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
     monkeypatch.setattr(restore_proof.psutil, "Process", Process)
     monkeypatch.setattr(restore_proof.os, "getpgrp", lambda: 1234)
 
-    protected = prove_candidate(
+    pending = prove_candidate(
         candidate=candidate,
         root=tmp_path,
         ack_dir=tmp_path / "ack",
-        prefix="pitr",
         key=b"k" * 32,
         reader=Reader(),
-        publisher=Publisher(),
         executor=Executor(),
         budget=RestoreSpaceBudget(0, 0, 0),
+    )
+
+    assert pending.protected is True
+    assert calls == ["live", "download", "restore", "live"]
+    assert not (tmp_path / "protected-manifests" / f"{candidate.chain_id}.json").exists()
+    protected = publish_candidate_proof(
+        candidate=candidate,
+        root=tmp_path,
+        prefix="pitr",
+        publisher=Publisher(),
     )
 
     assert protected.protected is True
