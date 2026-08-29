@@ -11,7 +11,9 @@ PR #356 (``shared/telemetry.event_id``), matching
 
 import importlib.util
 import json
+import os
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -368,3 +370,55 @@ def test_backfill_merges_days_and_cleans_up(
     leftovers = [p for p in daily.iterdir() if p.name.startswith("mirror-backfill-")]
     assert leftovers == [], f"temp dir not cleaned: {leftovers}"
     assert backfill_mod.gc.isenabled(), "cyclic GC must be re-enabled after backfill"
+
+
+def test_backfill_restores_fetch_events_window(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA #1010 nit: backfill() replaces collect._fetch_events_window for the
+    duration of collect() only — a same-process caller that collects again
+    must go back to the original path, not silently read a consumed temp dir."""
+    now = datetime.now(UTC)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for day in _window_days(now, 1):
+        _write_mirror_day(logs, day, [])
+    monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    sentinel = object()
+    monkeypatch.setattr(backfill_mod.collect, "_fetch_events_window", sentinel)
+
+    backfill_mod.backfill(1, "test-week")
+
+    assert backfill_mod.collect._fetch_events_window is sentinel
+
+
+def test_backfill_sweeps_stale_orphan_temp_dirs(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA #1010 nit: a SIGKILLed run leaves mirror-backfill-* staging dirs;
+    backfill() sweeps orphans older than an hour so a crashed dense run does
+    not leak hundreds of MB, while a live run's young dir is left alone."""
+    now = datetime.now(UTC)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for day in _window_days(now, 1):
+        _write_mirror_day(logs, day, [])
+    monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    daily = tmp_path / "self_evolution" / "daily"
+    daily.mkdir(parents=True)
+    stale = daily / "mirror-backfill-deadbeef"
+    stale.mkdir()
+    (stale / "telemetry.jsonl").write_text("{}")
+    old = time.time() - 7200
+    os.utime(stale, (old, old))
+    fresh = daily / "mirror-backfill-cafebabe"
+    fresh.mkdir()
+
+    backfill_mod.backfill(1, "test-week")
+
+    assert not stale.exists(), "stale orphan must be swept"
+    assert fresh.exists(), "young dir must survive"
