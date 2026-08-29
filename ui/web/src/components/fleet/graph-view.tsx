@@ -18,6 +18,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { WindowSelect } from "@/components/window-select";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
 import type { PublicAgentStatus } from "@/lib/types";
 import { useFleetGraph } from "@/lib/use-fleet-graph";
@@ -259,18 +260,13 @@ export function GraphView({
         }
         ariaLabel="Fleet relationship graph"
         overlayLeft={
-          <select
-            value={windowHours}
-            onChange={(e) => setWindowHours(Number(e.target.value) as StatsWindowHours)}
-            aria-label="Graph window"
+          <WindowSelect
+            value={String(windowHours)}
+            options={STATS_WINDOWS.map((h) => ({ value: String(h), label: STATS_WINDOW_LABELS[h] }))}
+            onChange={(v) => setWindowHours(Number(v) as StatsWindowHours)}
+            ariaLabel="Graph window"
             className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            {STATS_WINDOWS.map((h) => (
-              <option key={h} value={h}>
-                {STATS_WINDOW_LABELS[h]}
-              </option>
-            ))}
-          </select>
+          />
         }
       />
       {graph.stale ? (

@@ -25,7 +25,7 @@ export interface TasksResult {
 /** Last-activity window for the task list — the task graph's time filter.
  *  "all" (the default) keeps the unfiltered full registry; other consumers
  *  (the inbox queue) rely on that default. */
-export type TaskWindow = "7d" | "30d" | "all";
+export type TaskWindow = "24h" | "7d" | "30d" | "all";
 
 export function useTasks(window: TaskWindow = "all"): TasksResult {
   const { data, isError, isLoading } = useQuery({

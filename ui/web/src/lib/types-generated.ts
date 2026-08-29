@@ -3414,7 +3414,7 @@ export interface paths {
          * Get Tasks
          * @description Return the task registry, newest first.
          *
-         *     `window` (7d / 30d / all, default all) narrows the list by last activity
+         *     `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
          *     (updated_at) on the backend, so the task graph's default 7-day view never
          *     pulls the full registry. A windowed list still carries every kept task's
          *     out-of-window ancestors flagged ghost=True (see _windowed_tasks); without

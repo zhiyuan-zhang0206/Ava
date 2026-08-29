@@ -25,8 +25,12 @@ router = APIRouter()
 _MAX_REMIND_INTERVAL_SECONDS = 86400
 
 # Last-activity windows for GET /api/tasks (the task graph's time filter).
-# Values are days; "all" disables the filter entirely.
-_TASK_WINDOW_DAYS = {"7d": 7, "30d": 30}
+# "all" disables the filter entirely.
+_TASK_WINDOWS = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
 
 _TASK_COLS = (
     "t.id, t.parent_id, t.title, t.description, t.results, t.status, t.owner, "
@@ -68,7 +72,7 @@ def _windowed_tasks(tasks: list[TaskRow], window: str) -> list[TaskRow]:
     toggle-hidden parents the same way). done/cancelled tasks outside the
     window with no kept descendant are omitted. Order preserved.
     """
-    cutoff = datetime.now(UTC) - timedelta(days=_TASK_WINDOW_DAYS[window])
+    cutoff = datetime.now(UTC) - _TASK_WINDOWS[window]
     kept: set[int] = set()
     for t in tasks:
         if (
@@ -102,11 +106,11 @@ def _windowed_tasks(tasks: list[TaskRow], window: str) -> list[TaskRow]:
 @router.get("/api/tasks", dependencies=[Depends(deny_isolated_result_read)])
 def get_tasks(
     request: Request,
-    window: str = Query("all", pattern="^(7d|30d|all)$"),
+    window: str = Query("all", pattern="^(24h|7d|30d|all)$"),
 ) -> TaskListResponse:
     """Return the task registry, newest first.
 
-    `window` (7d / 30d / all, default all) narrows the list by last activity
+    `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
     (updated_at) on the backend, so the task graph's default 7-day view never
     pulls the full registry. A windowed list still carries every kept task's
     out-of-window ancestors flagged ghost=True (see _windowed_tasks); without
