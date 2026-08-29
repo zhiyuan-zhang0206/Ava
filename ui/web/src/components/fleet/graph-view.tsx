@@ -16,7 +16,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
 import type { PublicAgentStatus } from "@/lib/types";
@@ -51,6 +51,14 @@ const STATUS_PULSE: Record<PublicAgentStatus, boolean> = {
   running: false,
   idling: false,
   terminated: false,
+};
+// Hover card status wording (the color map above stays the single source for
+// the swatch; this map only spells the status out for the card's text row).
+const STATUS_LABEL: Record<GraphDisplayStatus, string> = {
+  running: "Running",
+  idling: "Idling",
+  terminated: "Terminated",
+  offline: "Offline",
 };
 
 // Per-day decay constant for the edge weight (see the backend formula). Held as a
@@ -144,9 +152,36 @@ export function GraphView({
         status: n.liveness_state === "offline" ? OFFLINE_STATUS : n.status,
         score: n.node_score,
         pulse: STATUS_PULSE[n.status],
-        nodeTitle: n.liveness_state === "offline" ? "Offline" : null,
       })),
     [liveNodes],
+  );
+
+  // Instant hover card — the shared canvas shows it the moment the cursor
+  // enters a node (replacing the delayed native <title>): identity, status
+  // and the activity score that drives node size.
+  const agentHoverCard = useCallback(
+    (node: ForceGraphNode) => (
+      <div className="w-52 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
+        <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
+          {node.label ?? "Unlabeled agent"}
+        </p>
+        <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+          Agent #{node.id}
+        </p>
+        <div className="mt-2 space-y-1 text-[11px]">
+          <p className={cn("items-center gap-1.5", FLEX)}>
+            <span
+              className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as GraphDisplayStatus])}
+            />
+            {STATUS_LABEL[node.status as GraphDisplayStatus]}
+          </p>
+          <p className="text-muted-foreground">
+            Activity score: {Math.round(node.score).toLocaleString()}
+          </p>
+        </div>
+      </div>
+    ),
+    [],
   );
   // The backend returns one edge per event kind (spawn / fork / resurrect /
   // message), and every non-message kind collapses to "lineage" here — so a
@@ -202,6 +237,7 @@ export function GraphView({
         params={forceParams}
         setParams={setForceParams}
         resetParams={resetForceParams}
+        hoverCard={agentHoverCard}
         statsText={`${nodes.length} nodes · ${edges.length} edges`}
         legend={
           <div aria-label="Agent graph legend" className="space-y-1">

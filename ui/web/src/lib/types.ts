@@ -633,6 +633,12 @@ export interface TaskRow {
   readonly created_by: string;
   readonly created_at: string;
   readonly updated_at: string;
+  // Reminder fields — the gateway always emits them (Pydantic defaults), so
+  // they match the generated schema's optionality exactly (mirrored here so
+  // the hover detail card can show them).
+  readonly remind_interval_seconds?: number | null;
+  readonly last_reminded_at?: string | null;
+  readonly reminder_count: number;
 }
 
 export interface TaskListResponse {

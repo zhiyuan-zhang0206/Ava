@@ -21,9 +21,11 @@ import { CheckCheck, CircleAlert, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 
-import { PRIORITY_TEXT } from "@/lib/notices";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { PRIORITY_BG, PRIORITY_TEXT } from "@/lib/notices";
 import { needsYouByTask, rollupNeedsYou } from "@/lib/task-notify";
-import type { AgentRow } from "@/lib/types";
+import { formatRelative, formatUptime } from "@/lib/time";
+import type { AgentRow, TaskRow } from "@/lib/types";
 import { useTasks } from "@/lib/use-tasks";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
@@ -39,7 +41,6 @@ import {
   type ForceGraphNode,
 } from "./force-graph";
 import { TaskKanban } from "./task-kanban";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
 
 // Task status → color class for the node's fill (and the Kanban left strip).
 // 'ongoing' is the system root task's permanent state (never assignable to a
@@ -62,6 +63,127 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: "Canceled",
   ongoing: "Root",
 };
+
+// ── Hover detail card ──
+//
+// The instant, cursor-following replacement for the old native SVG <title>
+// (whose appearance the browser deferred ~0.5–1s — the perceived hover lag).
+// Renders the task like a real detail page: every registry field the wire
+// carries, grouped under labeled rows, with empty states for unset fields
+// instead of a bare text dump. Rendered through the shared ForceGraph's
+// hoverCard slot; the card itself is pointer-events-none, so it never steals
+// the cursor from the canvas.
+
+// `created_by` is an agent id as text, or 'system'/'user' for non-agent rows
+// (schema CHECK) — spelled out for the card's "Created by" row.
+function formatCreator(createdBy: string): string {
+  if (createdBy === "user") return "User";
+  if (createdBy === "system") return "System";
+  return `Agent #${createdBy}`;
+}
+
+// Reminder cadence from the registry's seconds field: 7200 → "every 2h".
+function formatRemindInterval(seconds: number | null | undefined): string {
+  return seconds == null ? "—" : `every ${formatUptime(seconds)}`;
+}
+
+// One labeled meta row of the detail grid.
+function MetaRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className={MIN_W_0}>
+      <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+        {label}
+      </p>
+      <p className="truncate text-[11px] text-popover-foreground">{children}</p>
+    </div>
+  );
+}
+
+function TaskHoverCard({
+  task,
+  ownerLabel,
+  parentTitle,
+}: {
+  task: TaskRow;
+  /** Resolved owner display ("label #id" / "Agent #id" / "Unowned"). */
+  ownerLabel: string;
+  /** Parent display ("title (#id)") or null when the task has no parent. */
+  parentTitle: string | null;
+}) {
+  return (
+    <div className="w-80 max-w-[80vw] rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
+      {/* Header — status dot + title + id, priority badge on the right. */}
+      <div className={cn(FLEX, "items-start gap-2")}>
+        <span
+          className={cn("mt-1 size-2 shrink-0 rounded-full bg-current", STATUS_FILL[task.status] ?? "text-slate-400")}
+        />
+        <div className={cn(MIN_W_0, FLEX_1)}>
+          <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
+            {task.title}
+          </p>
+          <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+            Task #{task.id}
+          </p>
+        </div>
+        <span
+          className={cn(
+            "shrink-0 self-start rounded px-1 py-0.5 text-[9px] font-bold leading-none text-white",
+            PRIORITY_BG[task.priority],
+          )}
+        >
+          {task.priority}
+        </span>
+      </div>
+
+      {/* Meta grid — the registry's key fields, labeled like a detail page. */}
+      <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
+        <MetaRow label="Status">{STATUS_LABEL[task.status] ?? task.status}</MetaRow>
+        <MetaRow label="Priority">{task.priority}</MetaRow>
+        <MetaRow label="Owner">{ownerLabel}</MetaRow>
+        <MetaRow label="Created by">{formatCreator(task.created_by)}</MetaRow>
+        <MetaRow label="Parent">{parentTitle ?? "—"}</MetaRow>
+        <MetaRow label="Reminder">{formatRemindInterval(task.remind_interval_seconds)}</MetaRow>
+        <MetaRow label="Created">{formatRelative(task.created_at)}</MetaRow>
+        <MetaRow label="Updated">{formatRelative(task.updated_at)}</MetaRow>
+      </div>
+
+      {/* Reminder extras — only when the task actually has a reminder history. */}
+      {task.reminder_count > 0 || task.last_reminded_at != null ? (
+        <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+          {task.reminder_count} reminder{task.reminder_count === 1 ? "" : "s"}
+          {task.last_reminded_at != null ? ` · last ${formatRelative(task.last_reminded_at)}` : ""}
+        </p>
+      ) : null}
+
+      {/* Long text — clamped so the card stays a hover preview; the full text
+          lives in the task registry. */}
+      {task.description ? (
+        <div className="mt-2 border-t border-border pt-2">
+          <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            Description
+          </p>
+          <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
+            {task.description}
+          </p>
+        </div>
+      ) : null}
+      {task.results ? (
+        <div className="mt-2 border-t border-border pt-2">
+          <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            Result
+          </p>
+          <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
+            {task.results}
+          </p>
+        </div>
+      ) : null}
+
+      <p className="mt-2 border-t border-border pt-1.5 text-[9px] text-muted-foreground/60">
+        Double-click the node to open the owner&apos;s conversation
+      </p>
+    </div>
+  );
+}
 
 // The task graph is an independent UI from the Agent Graph (user ruling
 // 2026-08-10 #1127): it keeps its OWN tuning key, so adjusting one graph
@@ -203,6 +325,34 @@ export function TaskGraph({
   const hiddenDoneCount = useMemo(() => tasks.filter((t) => t.status === "done").length, [tasks]);
   const hiddenCanceledCount = useMemo(() => tasks.filter((t) => t.status === "cancelled").length, [tasks]);
 
+  // Id → task lookup for the hover card's parent/owner resolution.
+  const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+
+  // Instant hover detail card (see TaskHoverCard) — the shared canvas shows it
+  // the moment the cursor enters a node, replacing the delayed native <title>.
+  const taskHoverCard = useCallback(
+    (node: ForceGraphNode) => {
+      const task = taskById.get(node.id);
+      if (!task) return null;
+      const owner = task.owner;
+      const ownerLabel =
+        owner != null
+          ? task.owner_label != null
+            ? `${task.owner_label} #${owner}`
+            : `Agent #${owner}`
+          : "Unowned";
+      const parent = task.parent_id != null ? taskById.get(task.parent_id) : null;
+      const parentTitle =
+        parent != null
+          ? `${parent.title} (#${parent.id})`
+          : task.parent_id != null
+            ? `#${task.parent_id}`
+            : null;
+      return <TaskHoverCard task={task} ownerLabel={ownerLabel} parentTitle={parentTitle} />;
+    },
+    [taskById],
+  );
+
   // Everything except the system root — match the kanban view. Post
   // root-anchoring the root is the sole parent-less row (every other task
   // descends from it), so `parent_id !== null` selects all real tasks and hides
@@ -266,7 +416,6 @@ export function TaskGraph({
           // the square. The Agent Graph keeps its score-driven sizing.
           score: 0,
           badge: ny != null ? { count: ny.count, tone: PRIORITY_TEXT[ny.top] } : null,
-          nodeTitle: `#${t.id} ${t.title}${t.description ? ` — ${t.description}` : ""}`,
         };
       }),
     [graphTasks, needsYou],
@@ -452,6 +601,7 @@ export function TaskGraph({
           setParams={setParams}
           resetParams={reset}
           groups={TASK_FORCE_GROUPS}
+          hoverCard={taskHoverCard}
           legend={
             <div aria-label="Task graph legend" className="space-y-1">
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">

@@ -183,18 +183,21 @@ describe("GraphView", () => {
     expect(legend.textContent).toContain("size = activity score (24h window)");
   });
 
-  it("keeps full node identities in native titles when zoom hides labels", async () => {
+  it("shows the hover card with full node identity even when zoom hides labels", async () => {
+    // The old native <title> tooltip (whose appearance the browser deferred)
+    // is gone; the instant hover card carries the identity instead — visible
+    // at any zoom level.
     useFleetGraph.mockReturnValue(
       ok({ nodes: [node(1, { label: "alpha" }), node(2)], edges: [] }),
     );
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
-    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
+    const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
+    const group = label.closest("g")!;
 
-    const titles = () =>
-      Array.from(container.querySelectorAll("svg title"), (title) => title.textContent);
-    expect(titles()).toEqual(expect.arrayContaining(["alpha (#1)", "#2"]));
+    // No native <title> remains in the SVG — the delayed tooltip is gone.
+    expect(container.querySelectorAll("svg title").length).toBe(0);
 
     const svg = container.querySelector("svg")!;
     Object.defineProperty(svg, "createSVGPoint", {
@@ -205,7 +208,11 @@ describe("GraphView", () => {
     }
 
     await waitFor(() => expect(queryNodeLabel(1)).toBeNull());
-    expect(titles()).toEqual(expect.arrayContaining(["alpha (#1)", "#2"]));
+
+    fireEvent.mouseEnter(group);
+    const card = await screen.findByRole("tooltip");
+    expect(card.textContent).toContain("alpha");
+    expect(card.textContent).toContain("#1");
   });
 
   it("selecting a node focuses it (non-identity transform); reset restores identity", async () => {
@@ -391,7 +398,11 @@ describe("GraphView", () => {
     expect(nodeGroup.querySelector("circle")?.getAttribute("class")).toContain(
       "text-muted-foreground",
     );
-    expect(container.querySelector("title")?.textContent).toContain("Offline");
+    // The hover card spells the projected transition out as "Offline".
+    fireEvent.mouseEnter(nodeGroup);
+    const card = await screen.findByRole("tooltip");
+    expect(card.textContent).toContain("Offline");
+    expect(container.querySelectorAll("svg title").length).toBe(0);
   });
 
   it("shows the stale snapshot age for a non-empty fallback graph", () => {
@@ -469,6 +480,29 @@ describe("GraphView", () => {
     expect(lines.length).toBe(2);
     // The spawn+fork pair keeps fork styling; the spawn+resurrect pair does not.
     expect(svg.querySelectorAll('line[stroke-dasharray="4 3"]').length).toBe(1);
+  });
+
+  it("shows the hover card instantly on mouseenter and hides it on mouseleave", async () => {
+    useFleetGraph.mockReturnValue(
+      ok({ nodes: [node(1, { label: "alpha", node_score: 12_345 })], edges: [] }),
+    );
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
+    const group = label.closest("g")!;
+
+    // The card is present synchronously — no delay timer, no debounce
+    // (the old native title waited on the browser's tooltip timer).
+    fireEvent.mouseEnter(group);
+    expect(screen.queryByRole("tooltip")).not.toBeNull();
+    const card = screen.getByRole("tooltip");
+    expect(card.textContent).toContain("alpha");
+    expect(card.textContent).toContain("Agent #1");
+    expect(card.textContent).toContain("Running");
+    expect(card.textContent).toContain("Activity score: 12,345");
+
+    // Leaving the node dismisses the card.
+    fireEvent.mouseLeave(group);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("empty graph (not loading, no error) shows the empty placeholder", () => {
