@@ -172,10 +172,15 @@ def _apply_per_agent_framework_config(
 
 
 def init_process_scope() -> None:
-    """Process-scope boot: initialize OTLP trace export.
+    """Process-scope boot: start OTLP trace init.
 
-    Must run before `build_chat_model` so OpenLLMetry can auto-instrument the
-    LangChain `BaseChatModel` + LangGraph `CompiledGraph` at construction time.
+    Only the cheap decisions (disk guards + collector preflight) run here;
+    the heavy traceloop import + init proceeds on a daemon thread, so the boot
+    path stays sub-second. OpenLLMetry must still be installed before the
+    first turn (the LangChain callback-manager wrap and the SDK instrumentors
+    are call-time, and the turn root span needs the provider set) — that
+    ordering is enforced by `shared.trace.ensure_init_resolved` inside
+    `turn_span`, which is what the first graph invocation waits on.
 
     Process scope, not agent scope: `initialize_tracing` installs the global
     tracer provider, and the span attribution that distinguishes agents is the
@@ -276,6 +281,13 @@ async def boot_agent_scope(agent_id: int) -> BaseChatModel:
     have this agent's framework-scope config in effect first — the singleton
     write in process mode (`_apply_per_agent_framework_config`), the contextvar
     bind in hosted mode (`shared.config.turn_view.bind_agent_config`).
+
+    Building it eagerly is safe even though the trace init is still in flight:
+    traceloop's LangChain wrap injects its callback handler into every
+    callback manager at CONFIGURATION time (per run / per call), so a model
+    constructed before the init completes still produces spans on its first
+    call — and that first call happens inside a turn, after turn_span has
+    waited for the init.
 
     Returns:
         This agent's chat model.
