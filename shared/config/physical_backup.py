@@ -146,6 +146,29 @@ class PhysicalBackupSettings(EnvSettings):
             "remote_writable": False,
         },
     )
+    pitr_gcs_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_GCS_CREDENTIALS_FILE",
+        description="0600 service-account JSON used only by the PITR uploader.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+    pitr_backup_key_id: str = Field(
+        default="",
+        alias="AVA_PITR_BACKUP_KEY_ID",
+        description="Non-secret identifier embedded in encrypted object metadata.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
 
     @model_validator(mode="after")
     def _validate_contract(self) -> PhysicalBackupSettings:
@@ -169,11 +192,15 @@ class PhysicalBackupSettings(EnvSettings):
                 "AVA_PITR_UNACKED_WARN_SECONDS must be below AVA_PITR_UNACKED_CRITICAL_SECONDS"
             )
         if self.pitr_enabled and not (
-            self.pitr_gcs_project and self.pitr_gcs_bucket and self.pitr_backup_key_file
+            self.pitr_gcs_project
+            and self.pitr_gcs_bucket
+            and self.pitr_backup_key_file
+            and self.pitr_gcs_credentials_file
+            and self.pitr_backup_key_id
         ):
             raise ValueError(
                 "PITR enabled requires AVA_PITR_GCS_PROJECT, AVA_PITR_GCS_BUCKET, "
-                "and AVA_PITR_BACKUP_KEY_FILE"
+                "AVA_PITR_BACKUP_KEY_FILE, AVA_PITR_GCS_CREDENTIALS_FILE, and AVA_PITR_BACKUP_KEY_ID"
             )
         if self.pitr_enabled:
             key_file = self.pitr_backup_key_file
@@ -189,9 +216,24 @@ class PhysicalBackupSettings(EnvSettings):
                 not stat.S_ISREG(info.st_mode)
                 or key_file.is_symlink()
                 or stat.S_IMODE(info.st_mode) != 0o600
-                or info.st_size == 0
+                or info.st_size != 32
             ):
                 raise ValueError(
-                    "AVA_PITR_BACKUP_KEY_FILE must be a non-empty, non-symlink regular file with mode 0600"
+                    "AVA_PITR_BACKUP_KEY_FILE must be a 32-byte, non-symlink regular file with mode 0600"
+                )
+            credentials = self.pitr_gcs_credentials_file
+            if credentials is None or not credentials.is_absolute():
+                raise ValueError("AVA_PITR_GCS_CREDENTIALS_FILE must be an absolute path")
+            try:
+                credentials_info = credentials.lstat()
+            except OSError as exc:
+                raise ValueError("AVA_PITR_GCS_CREDENTIALS_FILE must exist") from exc
+            if (
+                not stat.S_ISREG(credentials_info.st_mode)
+                or credentials.is_symlink()
+                or stat.S_IMODE(credentials_info.st_mode) != 0o600
+            ):
+                raise ValueError(
+                    "AVA_PITR_GCS_CREDENTIALS_FILE must be a non-symlink regular file with mode 0600"
                 )
         return self

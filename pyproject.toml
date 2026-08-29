@@ -33,6 +33,10 @@ dependencies = [
     "langchain-moonshot>=0.1.0",
     "croniter>=6.2.2",
     "google-genai>=2.0",
+    # Official GCS client: credential-safe conditional creates, CRC32C, and
+    # generation-aware retries. A gcloud subprocess leaks operational coupling;
+    # handwritten REST would duplicate auth, resumable upload, and retry logic.
+    "google-cloud-storage>=3.4.0",
     "watchdog>=6.0.0",
     "numpy>=2.4.4",
     "pymilvus[milvus-lite]>=3.0.0",
