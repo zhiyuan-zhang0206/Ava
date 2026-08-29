@@ -577,6 +577,20 @@ class LokiQueryFailed(TypedDict):
     query: str
 
 
+class ArchiveFetchDegraded(TypedDict):
+    """`archive_fetch_degraded` payload — frozen-archive read degradation.
+
+    One row per degraded frozen-archive read (lock-wait skip or failed scan)
+    with the owning route, so a saturated Loki's effect on the tie/edge
+    graphs is attributable in the event stream even though the routes now
+    answer fast (fail-open) instead of surfacing the stall as slow-route
+    latency (2026-08-29/30 incident — task #2004).
+    """
+
+    route: str
+    reason: str
+
+
 class PromQueryFailed(TypedDict):
     """`prom_query_failed` payload — gateway/prom_metrics.py transport failure."""
 
@@ -1238,6 +1252,12 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         payload=LokiQueryFailed,
         doc="a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
+    ),
+    "archive_fetch_degraded": _telemetry(
+        "archive_fetch_degraded",
+        "frozen Loki archive read degraded (lock-wait skip or failed scan)",
+        payload=ArchiveFetchDegraded,
+        tier="anomaly",
     ),
     "prom_query_failed": EventSpec(
         name="prom_query_failed",

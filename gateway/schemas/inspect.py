@@ -261,6 +261,10 @@ class NeighborsResponse(BaseModel):
     neighbors: list[NeighborRow]
     # The spawn/fork chain above the queried agent, nearest ancestor first.
     ancestors: list[NeighborRow]
+    # True when the frozen-archive read degraded this request (lock-wait skip
+    # or failed scan): the tie/lineage set is live-only and must not be read
+    # as the complete graph. Defaults False so older clients ignore it.
+    degraded: bool = False
 
 
 class MetricPoint(BaseModel):

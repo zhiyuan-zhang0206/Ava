@@ -33,12 +33,14 @@ class _FakeRedis:
 
     def __init__(self) -> None:
         self.store: dict[str, str] = {}
+        self.writes: list[tuple[str, str, int | None]] = []
 
     def get(self, key: str) -> str | None:
         return self.store.get(key)
 
     def set(self, key: str, value: str, ex: int | None = None) -> None:
         self.store[key] = value
+        self.writes.append((key, value, ex))
 
     def __enter__(self) -> "_FakeRedis":
         return self
@@ -576,15 +578,21 @@ def test_archive_refresh_failure_degrades_to_live_only_and_heals(
     monkeypatch.setattr(loki_events, "query_events", counting_flaky_query)
 
     with TestClient(app) as client:
-        degraded = _neighbors(client, a, depth=1)
-        # live-only: the archive tie is absent, but the route answers instead of 500ing
-        assert degraded == []  # pyright: ignore[reportUnknownArgumentType]
-        # the failed fetch wrote the short negative cache, not nothing
+        degraded_resp = client.get(f"/api/agents/{a}/neighbors")
+        assert degraded_resp.status_code == 200
+        degraded_body = degraded_resp.json()
+        # live-only: the archive tie is absent, the route answers instead of
+        # 500ing, and the response says the archive read degraded
+        assert degraded_body["neighbors"] == []
+        assert degraded_body["degraded"] is True
+        # the failed fetch wrote the short negative cache (degraded marker + 60s TTL)
         cached = _json.loads(frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY])
-        assert cached == {"rows": [], "has_more": False}
+        assert cached == {"rows": [], "has_more": False, "degraded": True}
+        assert frozen_cache.writes[-1][2] == neighbors._NEGATIVE_CACHE_TTL_SECONDS
         # within the negative window every request hits the cache — no re-fetch
-        again = _neighbors(client, a, depth=1)
-        assert again == []  # pyright: ignore[reportUnknownArgumentType]
+        again = client.get(f"/api/agents/{a}/neighbors")
+        assert again.json()["neighbors"] == []
+        assert again.json()["degraded"] is True
         assert archive_calls == 1
         # once the negative entry expires (simulated), the next request
         # refetches and repopulates the real rows
@@ -593,7 +601,9 @@ def test_archive_refresh_failure_degrades_to_live_only_and_heals(
 
     assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
     assert archive_calls == 2
-    assert _json.loads(frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY])["rows"]
+    healed = _json.loads(frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY])
+    assert healed["rows"] and "degraded" not in healed
+    assert frozen_cache.writes[-1][2] == neighbors._FROZEN_CACHE_TTL_SECONDS
 
 
 def test_archive_fetch_single_flight_concurrent_misses_run_one_scan(
@@ -618,7 +628,7 @@ def test_archive_fetch_single_flight_concurrent_misses_run_one_scan(
 
     monkeypatch.setattr(loki_events, "query_events", slow_archive_query)
 
-    results: list[list[dict[str, Any]]] = []
+    results: list[tuple[list[dict[str, Any]], bool]] = []
     errors: list[BaseException] = []
 
     def worker() -> None:
@@ -638,8 +648,10 @@ def test_archive_fetch_single_flight_concurrent_misses_run_one_scan(
     first.join(timeout=10)
     assert not errors
     assert archive_calls == 1  # one scan for two concurrent misses
-    assert len(results) == 2
-    assert results[0] == results[1] == []  # pyright: ignore[reportUnknownArgumentType]
+    # completion order is not deterministic (the waiter finishes first), so
+    # compare as a set: one holder ran the (empty-archive) scan, one waiter
+    # degraded after the bounded wait
+    assert sorted(results, key=lambda t: t[1]) == [([], False), ([], True)]
 
 
 def test_corrupt_archive_cache_entry_refetches_from_loki(
