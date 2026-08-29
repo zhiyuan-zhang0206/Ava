@@ -60,6 +60,36 @@ _PERMANENT_STATUSES: frozenset[int] = frozenset({400, 401, 402, 403, 404, 422})
 # conflict, 425 too-early). 5xx is caught by the `>= 500` range, not this set.
 _TRANSIENT_STATUSES: frozenset[int] = frozenset({408, 409, 425, 429})
 
+_CONTEXT_OVERFLOW_STATUS = 400
+# Provider wording for "the request exceeds the model's context window". Each
+# entry is matched case-folded against the error body's `type` / `code` /
+# `message` fields. Sources: anthropic-protocol endpoints (DeepSeek included —
+# "This model's maximum context length is N tokens... Please reduce the length
+# of the messages or completion"), OpenAI (`context_length_exceeded`,
+# "This model's maximum context length is N tokens"), Gemini ("the maximum
+# input token limit"), and the OpenAI-compatible CN endpoints (Kimi /
+# Moonshot "too many tokens").
+_CONTEXT_OVERFLOW_VOCABULARY: frozenset[str] = frozenset(
+    entry.lower()
+    for entry in (
+        "context length",
+        "context_length",
+        "maximum context",
+        "max context",
+        "context window",
+        "context_window",
+        "token limit",
+        "too many tokens",
+        "prompt is too long",
+        "prompt_is_too_long",
+        "prompt_too_long",
+        "input_too_long",
+        "prompt too large",
+        "request too large",
+        "reduce the length",
+    )
+)
+
 # "The key is out of credit / its quota is exhausted" — a cross-cutting FACT
 # about a failure, not a fourth ErrorClass: it is orthogonal to retryability
 # (DeepSeek says it with a PERMANENT 402, OpenAI with a TRANSIENT 429), and it
@@ -161,6 +191,9 @@ class ErrorClassification(NamedTuple):
     status: int | None  # HTTP status_code when the SDK carries one, else None
     error_type: str | None  # provider body `error.type` (e.g. engine_overloaded_error), else None
     error_code: str | None  # provider body `error.code` — read by `billing` only, never logged
+    error_message: str | None = (
+        None  # provider body `error.message` — read by `context_overflow` only
+    )
 
     @property
     def billing(self) -> bool:
@@ -182,6 +215,34 @@ class ErrorClassification(NamedTuple):
             field is not None and field.lower() in _BILLING_ERROR_VOCABULARY
             for field in (self.error_type, self.error_code)
         )
+
+    @property
+    def context_overflow(self) -> bool:
+        """True when the provider rejected the request for exceeding its context
+        window — a context-overflow 400 (``"This model's maximum context length
+        is N tokens..."`` / ``context_length_exceeded``), the failure shape of
+        the 3962 incident.
+
+        Drives the heartbeat circuit breaker: an overflow is the one permanent
+        rejection an agent can self-rescue from (compaction shrinks the
+        context), unlike auth / billing / schema — so it must be
+        distinguishable without scraping the message. A 400 whose body
+        carries context-length vocabulary in any of the three body fields
+        (`type` / `code` / `message`) counts, plus the `context_length_exceeded`
+        type on its own (some providers say it without the generic wording).
+        Status-gated to 400 so a rate-limit 429 that happens to mention
+        "tokens" is never misread as overflow.
+
+        The vocabulary is deliberately conservative (a wrong match routes an
+        agent into a compaction, which is harmless; a missed match just means
+        the breaker opens with the generic `bad_request` reason and the
+        heartbeat stops re-firing — never a wrong destructive action)."""
+        if self.status != _CONTEXT_OVERFLOW_STATUS and self.error_type != "context_length_exceeded":
+            return False
+        haystack = " ".join(
+            s for s in (self.error_type, self.error_code, self.error_message) if s
+        ).lower()
+        return any(v in haystack for v in _CONTEXT_OVERFLOW_VOCABULARY)
 
 
 def _provider_of(exc: BaseException) -> str:
@@ -230,6 +291,7 @@ def classify_error(exc: BaseException) -> ErrorClassification:
     provider = _provider_of(exc)
     error_type = _error_field_of(exc, "type")
     error_code = _error_field_of(exc, "code")
+    error_message = _error_field_of(exc, "message")
     status = _status_of(exc)
     if status is not None:
         if status in _PERMANENT_STATUSES:
@@ -238,7 +300,13 @@ def classify_error(exc: BaseException) -> ErrorClassification:
             error_class = ErrorClass.TRANSIENT
         else:
             error_class = ErrorClass.UNKNOWN
-        return ErrorClassification(error_class, provider, status, error_type, error_code)
+        return ErrorClassification(
+            error_class, provider, status, error_type, error_code, error_message
+        )
     if _is_transport_error(exc):
-        return ErrorClassification(ErrorClass.TRANSIENT, provider, None, error_type, error_code)
-    return ErrorClassification(ErrorClass.UNKNOWN, provider, None, error_type, error_code)
+        return ErrorClassification(
+            ErrorClass.TRANSIENT, provider, None, error_type, error_code, error_message
+        )
+    return ErrorClassification(
+        ErrorClass.UNKNOWN, provider, None, error_type, error_code, error_message
+    )

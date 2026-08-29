@@ -25,6 +25,7 @@ import contextlib
 import logging
 import os
 import sys
+import time
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -84,6 +85,24 @@ _JITTER_SPAN_S = 300.0
 _STALE_PENDING_S = 900.0
 _MAX_CHECKINS_PER_STEP = 25
 
+# Consecutive-failed-check-in backoff (Task #1928): a check-in that produces no
+# LLM turn is a failed check-in — the agent is wedged (the 3962 context-overflow
+# case: 1146 nudges against a permanently-rejecting provider, evidence #1289)
+# and every nudge just re-fires the doomed call. The daemon tracks the streak
+# per agent in-process and spaces the next check-in by `2^streak` idle windows,
+# so a broken agent stops being poked on the normal cadence while staying
+# recoverable: the first check-in after the backoff window is a probe, and a
+# real turn (last_active_at advancing, or fresh activity from a real wake)
+# resets the streak. In-process state only: a daemon restart re-probes at the
+# normal cadence, and the agent-side circuit breaker (open = check-ins consumed
+# without an LLM call) keeps the doomed calls off meanwhile.
+# streak=1 -> next check-in after 2 idle windows; the cap bounds the longest
+# silence (~5.3h at a 5min idle threshold).
+_BACKOFF_MAX_WINDOWS = 64
+# An idle_minutes reading this much below the value recorded at check-in time
+# counts as "the check-in produced a turn" (slack absorbs clock skew).
+_ADVANCE_SLACK_MINUTES = 0.5
+
 # Heartbeat note delivered as a system note (kind='heartbeat') so the
 # agent sees it as a framework-level marker, not an ordinary chat message.
 # The claim node wraps it via system_note_message(tag=NoteTag.HEARTBEAT).
@@ -95,6 +114,7 @@ def _select_idle_agents_needing_heartbeat(
     *,
     jitter_span_s: float = 0.0,
     limit: int | None = None,
+    backoff_until: dict[int, float] | None = None,
 ) -> list[tuple[int, float]]:
     """Cluster-wide idle agents due for a heartbeat check-in, each as
     `(agent_id, idle_minutes)`, oldest-idle first.
@@ -165,12 +185,20 @@ def _select_idle_agents_needing_heartbeat(
         "ORDER BY last_active_at ASC"
     )
     params: list[object] = [idle_threshold_s, jitter_span_s, _STALE_PENDING_S]
-    if limit is not None:
-        sql += " LIMIT %s"
-        params.append(limit)
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
-        return cur.fetchall()
+        rows = cur.fetchall()
+    # Consecutive-failure backoff: skip agents whose backoff deadline (monotonic
+    # wall clock) has not arrived — a wedged agent must not be poked on the
+    # normal cadence. The deadline dict is empty in the common case, so the
+    # filter is a fast no-op. The limit is applied AFTER the backoff filter so
+    # backed-off agents never consume the per-step wake-rate slots.
+    if backoff_until:
+        now = time.time()
+        rows = [r for r in rows if now >= backoff_until.get(r[0], 0.0)]
+    if limit is not None:
+        rows = rows[:limit]
+    return rows
 
 
 def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: float) -> None:
@@ -209,6 +237,77 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
     # shared.db.publish_inbound_wake); heartbeat carries no user-facing inbound
     # id, so "0".
     shared.db.publish_inbound_wake(agent_id, "0")
+
+
+def _reconcile_checkin_outcomes(
+    pool: ConnectionPool,
+    *,
+    pending_checkin: dict[int, float],
+    failure_streak: dict[int, int],
+    idle_threshold_s: float,
+) -> None:
+    """Judge the previous cycle's check-ins and detect recovery, updating the
+    per-agent failure streak.
+
+    For every tracked agent (a check-in sent last cycle, or already on a
+    streak):
+
+    - the check-in advanced `last_active_at` (the agent ran a real turn) →
+      streak reset;
+    - `last_active_at` is now fresh (a real wake produced a turn without this
+      daemon's nudge — the agent recovered on its own) → streak reset;
+    - a sent check-in produced no turn → streak += 1 (the next check-in is
+      spaced by `2^streak` idle windows);
+    - the agent left the daemon's lanes (terminated / missing) → stop tracking.
+
+    `pending_checkin` maps agent_id → the `idle_minutes` observed when its
+    check-in was sent; comparing `idle_minutes` readings (both derived from the
+    DB clock) avoids wall-clock drift between this process and Postgres.
+    """
+    tracked = set(pending_checkin) | set(failure_streak)
+    if not tracked:
+        return
+    with pool.connection() as conn, conn.cursor() as cur:
+        for agent_id in tracked:
+            cur.execute(
+                "SELECT status, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 "
+                "FROM agents_meta WHERE id = %s",
+                (agent_id,),
+            )
+            row = cur.fetchone()
+            sent_at = pending_checkin.pop(agent_id, None)
+            if row is None or row[0] not in ("idling", "hibernating", "running"):
+                # Gone, or parked outside the daemon's lanes — stop tracking.
+                failure_streak.pop(agent_id, None)
+                continue
+            idle_minutes = row[1]
+            advanced = (
+                sent_at is not None
+                and idle_minutes is not None
+                and idle_minutes < sent_at - _ADVANCE_SLACK_MINUTES
+            )
+            recovered = advanced or (
+                idle_minutes is not None and idle_minutes < idle_threshold_s / 60.0
+            )
+            if recovered:
+                failure_streak.pop(agent_id, None)
+            elif sent_at is not None:
+                failure_streak[agent_id] = failure_streak.get(agent_id, 0) + 1
+            # Not pending and not recovered: keep the existing streak — the
+            # backoff deadline just extends by another window.
+
+
+def _backoff_deadlines(failure_streak: dict[int, int], idle_threshold_s: float) -> dict[int, float]:
+    """Monotonic-wall-clock deadline (seconds) before which each streaking agent
+    must not be checked in on: `now + min(2^streak, _BACKOFF_MAX_WINDOWS) *
+    idle_threshold`. A streak of 1 doubles the normal interval; the cap bounds
+    the longest silence (~5.3h at a 5min threshold) so the daemon still probes
+    a wedged agent occasionally."""
+    now = time.time()
+    return {
+        agent_id: now + min(2**streak, _BACKOFF_MAX_WINDOWS) * idle_threshold_s
+        for agent_id, streak in failure_streak.items()
+    }
 
 
 def _write_pidfile() -> None:
@@ -269,18 +368,31 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
         _MAX_CHECKINS_PER_STEP,
         _MAX_CHECKINS_PER_STEP / step,
     )
+    # Consecutive-failure backoff state (Task #1928): per-agent failure streaks
+    # and the idle_minutes observed at each sent check-in. In-process only — a
+    # daemon restart re-probes everyone at the normal cadence.
+    pending_checkin: dict[int, float] = {}
+    failure_streak: dict[int, int] = {}
     while True:
         try:
             await _sleep_with_liveness(liveness, step)
+            _reconcile_checkin_outcomes(
+                pool,
+                pending_checkin=pending_checkin,
+                failure_streak=failure_streak,
+                idle_threshold_s=idle_threshold,
+            )
             rows = _select_idle_agents_needing_heartbeat(
                 pool,
                 idle_threshold,
                 jitter_span_s=_JITTER_SPAN_S,
                 limit=_MAX_CHECKINS_PER_STEP,
+                backoff_until=_backoff_deadlines(failure_streak, idle_threshold),
             )
             for agent_id, idle_minutes in rows:
                 try:
                     _send_heartbeat_checkin(pool, agent_id, idle_minutes)
+                    pending_checkin[agent_id] = idle_minutes
                     _log.info(
                         "[heartbeat] checked in on idle agent %s (idle %.0f min)",
                         agent_id,

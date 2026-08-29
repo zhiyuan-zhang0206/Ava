@@ -132,10 +132,71 @@ class ContextReset(BaseModel):
     resume: NodeName = CLAIM
 
 
+# Circuit-breaker reason vocabulary — the one field of `CircuitState.reason`.
+# A permanent provider rejection opens the breaker with one of these; the
+# overflow reason is the self-rescuable case (compaction), every other reason
+# just stops heartbeat re-fires until a real wake succeeds.
+CIRCUIT_REASON_CONTEXT_OVERFLOW = "context_overflow"
+CIRCUIT_REASON_AUTH = "auth"
+CIRCUIT_REASON_BILLING = "billing"
+CIRCUIT_REASON_FORBIDDEN = "forbidden"
+CIRCUIT_REASON_MODEL_NOT_FOUND = "model_not_found"
+CIRCUIT_REASON_SCHEMA = "schema"
+CIRCUIT_REASON_BAD_REQUEST = "bad_request"
+CIRCUIT_REASON_PERMANENT = "permanent"
+
+
+class CircuitState(BaseModel):
+    """Heartbeat circuit breaker, nested under `BaseAgentState.circuit`.
+
+    Opened by the runloop when a `FatalProviderError` (a PERMANENT provider
+    rejection) aborts a turn: the next heartbeat would re-fire the same doomed
+    LLM call (the 3962 incident — 80 heartbeat cycles against a permanent
+    context-overflow 400, no self-rescue). While open:
+
+    - a heartbeat check-in is consumed without appending its note or routing
+      to the LLM (no doomed call, no context growth);
+    - with `reason == CIRCUIT_REASON_CONTEXT_OVERFLOW`, any wake routes to a
+      forced compaction instead — the overflow self-rescue (see
+      `agent/hooks/compact.py:emergency_compact_summary` for the no-LLM
+      fallback when the compact request itself is rejected).
+
+    The breaker closes on the first successful LLM call (`llm_node`) — the
+    provider accepting a request again is the healed signal. Last-value
+    channel (no reducer), same discipline as `compact`: a writer reads the
+    current value and `model_copy(update=...)`'s only the fields it changes.
+
+    `reason` is a `CIRCUIT_REASON_*` value; `opened_at` is the ISO-8601 UTC
+    timestamp of the rejection that opened it. Both are informational /
+    queryable — the behaviour keys off `open` + `reason == ..._CONTEXT_OVERFLOW`.
+    """
+
+    open: bool = False
+    reason: str | None = None
+    opened_at: str | None = None
+
+    @property
+    def parks_idle(self) -> bool:
+        """Whether an open breaker parks the agent idle instead of routing work
+        to the LLM: open with any reason EXCEPT `context_overflow` — the
+        overflow reason routes to the forced-compact self-rescue instead, so
+        it must keep flowing to decide()'s compact arm."""
+        return self.open and self.reason != CIRCUIT_REASON_CONTEXT_OVERFLOW
+
+
 __all__ = [
+    "CIRCUIT_REASON_AUTH",
+    "CIRCUIT_REASON_BAD_REQUEST",
+    "CIRCUIT_REASON_BILLING",
+    "CIRCUIT_REASON_CONTEXT_OVERFLOW",
+    "CIRCUIT_REASON_FORBIDDEN",
+    "CIRCUIT_REASON_MODEL_NOT_FOUND",
+    "CIRCUIT_REASON_PERMANENT",
+    "CIRCUIT_REASON_SCHEMA",
     "AttachEntry",
     "AttachState",
     "CapabilitiesState",
+    "CircuitState",
     "CompactState",
     "ContextReset",
     "MemoryState",

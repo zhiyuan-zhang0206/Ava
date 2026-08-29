@@ -696,6 +696,11 @@ EVENTS: dict[str, EventSpec] = {
     "resurrect": _audit("resurrect", "terminated agent woken"),
     "restart_completed": _audit("restart_completed", "restart finished"),
     "compact": _audit("compact", "agent context compacted"),
+    "circuit_breaker": _audit(
+        "circuit_breaker",
+        "heartbeat circuit breaker opened — a permanent provider rejection stopped "
+        "heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue)",
+    ),
     "report_activity": _audit("report_activity", "activity report"),
     "status_change": _telemetry_audit(
         "status_change",
