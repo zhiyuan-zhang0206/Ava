@@ -29,6 +29,7 @@ def _rec(tmp_path: Path):
             "im_bridge": 18017,
             "agent_host": 18019,
             "pg_backup": 18021,
+            "pitr_uploader": 18022,
         },
         gateway_home=str(tmp_path / ".ava-t1"),
         created_at="x",
@@ -45,6 +46,7 @@ def _old_rec(tmp_path: Path):
     del ports["im_bridge"]
     del ports["agent_host"]
     del ports["pg_backup"]
+    del ports["pitr_uploader"]
     return cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports),
         gateway_home=str(tmp_path / ".ava-t1"),
