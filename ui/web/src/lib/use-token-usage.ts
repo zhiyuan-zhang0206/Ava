@@ -100,6 +100,15 @@ export function useTokenUsage(
         cached.soft_compact_tokens,
         cached.hard_compact_tokens,
       );
+      // Force the background refresh the line above promises: within
+      // staleTime (30s) a key change on an already-mounted observer does NOT
+      // refetch (TanStack gates that path on staleness), and an idle agent
+      // emits no SSE token_usage event to repair the value — so without this
+      // invalidate the context bar would keep the previous visit's snapshot
+      // until the next switch. Mirrors useTimeline's invalidate-on-switch-back;
+      // a cold key is skipped (the enabled observer fetches on its own), and a
+      // fetch already in flight is deduped by the query cache.
+      void queryClient.invalidateQueries({ queryKey: ["token-usage", agentId] });
     } else {
       // Cold cache: reset to 0; React Query is fetching
       applyTokenUsage(0, 0, 0, 0, 0);
