@@ -28,8 +28,10 @@ collections x35). It now works in two phases:
   Phase 1 streams each day file once — rows outside the window or outside the
   two collected categories are dropped before the timestamp is even parsed,
   and kept rows are written as their ORIGINAL line bytes to per-category temp
-  files plus a (ts, offset) sort index. Memory is O(1) in the window length
-  (chunked release).
+  files plus a (ts, offset) sort index. Phase 1 retains only that index —
+  O(kept rows) at ~157B/row — instead of the full parsed row dicts (~3.5KB/row)
+  the old path held, so a multi-day window no longer accumulates its rows
+  (chunked release; the row payload itself is O(1) per day).
   Phase 2 installs a consumer that streams a category's temp file in ts order
   (the same deterministic order the in-memory sort produced) and yields row
   dicts one at a time, so a row's dict dies as soon as collect groups it into
@@ -50,8 +52,10 @@ from __future__ import annotations
 import gc
 import json
 import os
+import shutil
 import sys
 import tempfile
+import time
 from collections import Counter
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -178,11 +182,17 @@ def backfill(days: int, week: str | None = None) -> tuple[Path, list[str]]:
     per_day: dict[str, int] = {}
     daily_dir = ava_home() / "self_evolution" / "daily"
     daily_dir.mkdir(parents=True, exist_ok=True)
-    tmp = tempfile.TemporaryDirectory(
-        prefix="mirror-backfill-",
-        dir=daily_dir,
-        ignore_cleanup_errors=True,
-    )
+    # A SIGKILLed run leaves its staging dir behind (nothing can clean up
+    # after SIGKILL); sweep orphans older than an hour so a crashed dense
+    # backfill does not leak hundreds of MB of staged rows. A live run's
+    # dir is younger than that (QA #1010 nit).
+    for stale in daily_dir.glob("mirror-backfill-*"):
+        try:
+            if time.time() - stale.stat().st_mtime > 3600:
+                shutil.rmtree(stale, ignore_errors=True)
+        except OSError:
+            pass
+    tmp = tempfile.TemporaryDirectory(prefix="mirror-backfill-", dir=daily_dir)
     tmpdir = Path(tmp.name)
     writers: dict[str, TextIO] = {}
     counts: dict[str, int] = dict.fromkeys(_KEPT_CATEGORIES, 0)
@@ -250,9 +260,15 @@ def backfill(days: int, week: str | None = None) -> tuple[Path, list[str]]:
             )
         # Phase 2 — the consumer streams the staged rows in ts order while
         # collect() groups and builds records; the temp dir lives until the
-        # output is written.
+        # output is written. The replacement is restored afterwards: a
+        # same-process caller that collects again must go back to the Loki
+        # path, not silently read a consumed temp dir (QA #1010 nit).
+        original_fetch = collect._fetch_events_window
         collect._fetch_events_window = _mirror_fetch_factory_from_dir(tmpdir, index)
-        records = collect.collect(days, week, from_=window_from, to=window_to)
+        try:
+            records = collect.collect(days, week, from_=window_from, to=window_to)
+        finally:
+            collect._fetch_events_window = original_fetch
         out_dir = ava_home() / "self_evolution" / "daily"
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"{week}.jsonl"
