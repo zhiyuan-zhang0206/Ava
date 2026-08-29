@@ -6,7 +6,6 @@ import asyncio
 import logging
 import multiprocessing
 import queue
-import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -14,8 +13,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
-
-import psutil
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.activation_state import load_record as load_activation_record
@@ -95,6 +92,8 @@ BASE_BACKUP_RETRY_INTERVAL_S = 1800
 BASE_BACKUP_STALE_AFTER_S = 8 * 24 * 3600
 _SLEEP_CHUNK_S = 30
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
+
+
 @dataclass
 class BaseCandidateState:
     started_at: float = field(default_factory=time.monotonic)
