@@ -173,7 +173,7 @@ export function GraphView({
             <span
               className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as GraphDisplayStatus])}
             />
-            {STATUS_LABEL[node.status as GraphDisplayStatus] ?? node.status}
+            {STATUS_LABEL[node.status as GraphDisplayStatus]}
           </p>
           <p className="text-muted-foreground">
             Activity score: {Math.round(node.score).toLocaleString()}
