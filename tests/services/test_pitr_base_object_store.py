@@ -95,6 +95,26 @@ def test_stream_upload_verifies_exact_remote_identity() -> None:
     assert source.opens == 1
 
 
+def test_stream_upload_stops_at_chunk_boundary_after_lease_loss() -> None:
+    source = Source(b"ciphertext")
+    blob = Blob("base/object")
+    store = GCSRestartableStreamingObjectStore.from_bucket_client(cast(Any, Bucket(blob)))
+    checks = 0
+
+    def cancelled() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks >= 3
+
+    with pytest.raises(RuntimeError, match="chunk boundary"):
+        store.put_base_if_absent(
+            source=source,
+            object_name="base/object",
+            metadata={"candidate": "sha"},
+            cancelled=cancelled,
+        )
+
+
 def test_412_accepts_only_exact_existing_generation() -> None:
     source = Source(b"ciphertext")
     attempted = Blob("base/object", fail_precondition=True)

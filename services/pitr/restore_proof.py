@@ -10,6 +10,7 @@ import signal
 import struct
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -449,6 +450,7 @@ def _publish_protected(
     prefix: str,
     payload: bytes,
     publisher: ProtectedManifestPublisher,
+    require_ownership: Callable[[], None] = lambda: None,
 ) -> None:
     object_name = f"{prefix.rstrip('/')}/protected/{candidate.chain_id}.json"
     metadata = {
@@ -457,9 +459,11 @@ def _publish_protected(
         "ava-manifest-sha256": hashlib.sha256(payload).hexdigest(),
         "ava-protected": "true",
     }
+    require_ownership()
     ack = publisher.put_manifest_if_absent(
         payload=payload, object_name=object_name, metadata=metadata
     )
+    require_ownership()
     if (
         ack.object_name != object_name
         or ack.generation <= 0
@@ -468,6 +472,7 @@ def _publish_protected(
     ):
         raise RestoreProofError("protected manifest remote ACK differs")
     local = root / "protected-manifests" / f"{candidate.chain_id}.json"
+    require_ownership()
     _write_local_manifest(local, payload)
 
 
@@ -663,6 +668,7 @@ def publish_candidate_proof(
     prefix: str,
     verified: ProtectedManifest,
     publisher: ProtectedManifestPublisher,
+    require_ownership: Callable[[], None] = lambda: None,
 ) -> ProtectedManifest:
     """Publish bytes already verified before publisher authority was constructed."""
 
@@ -679,7 +685,9 @@ def publish_candidate_proof(
             prefix=prefix,
             payload=payload,
             publisher=publisher,
+            require_ownership=require_ownership,
         )
+        require_ownership()
         pending.unlink()
         _fsync_dir(pending.parent)
     return verified

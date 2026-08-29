@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
 from typing import BinaryIO, Protocol, cast
 
@@ -44,6 +44,7 @@ class RestartableStreamingObjectStore(Protocol):
         source: RestartableEncryptedSource,
         object_name: str,
         metadata: Mapping[str, str],
+        cancelled: Callable[[], bool] = lambda: False,
     ) -> RemoteObjectAck: ...
 
 
@@ -129,10 +130,13 @@ class GCSRestartableStreamingObjectStore:
         source: RestartableEncryptedSource,
         object_name: str,
         metadata: Mapping[str, str],
+        cancelled: Callable[[], bool] = lambda: False,
     ) -> RemoteObjectAck:
         blob = self._bucket.blob(object_name)
         blob.metadata = dict(metadata)
         try:
+            if cancelled():
+                raise RuntimeError("GCS base upload cancelled before publication")
             with blob.open(
                 "wb",
                 chunk_size=8 * 1024 * 1024,
@@ -142,7 +146,13 @@ class GCSRestartableStreamingObjectStore:
                 timeout=self._timeout,
             ) as writer:
                 for chunk in source.iter_chunks():
+                    if cancelled():
+                        raise RuntimeError("GCS base upload cancelled at chunk boundary")
                     writer.write(chunk)
+                    if cancelled():
+                        raise RuntimeError("GCS base upload cancelled at chunk boundary")
+            if cancelled():
+                raise RuntimeError("GCS base upload cancelled before ACK verification")
             blob.reload(timeout=self._timeout)
             ack = self._ack(blob, created=True)
         except PreconditionFailed:
@@ -156,6 +166,8 @@ class GCSRestartableStreamingObjectStore:
             raise TransientObjectStoreError("GCS base upload temporarily failed") from exc
         except _PERMANENT as exc:
             raise PermanentObjectStoreError("GCS base upload was rejected") from exc
+        if cancelled():
+            raise RuntimeError("GCS base upload lost ownership before local publication")
         if (
             ack.object_name != object_name
             or ack.generation <= 0

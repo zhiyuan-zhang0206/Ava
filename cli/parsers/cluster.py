@@ -72,10 +72,10 @@ def _h_cluster_pitr_status(_args: argparse.Namespace) -> int:
     return cmd_pitr_status()
 
 
-def _h_cluster_pitr_rollback(_args: argparse.Namespace) -> int:
+def _h_cluster_pitr_rollback(args: argparse.Namespace) -> int:
     from cli.commands import cmd_pitr_rollback
 
-    return cmd_pitr_rollback()
+    return cmd_pitr_rollback(continuation=args.continuation)
 
 
 def _h_cluster_ls(_args: argparse.Namespace) -> int:
@@ -207,15 +207,23 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     pitr_status_p.set_defaults(func=_h_cluster_pitr_status)
     pitr_activate_p = pitr_sub.add_parser(
         "activate",
-        help="validate shadow readiness and create the mandatory first-rollout logical snapshot",
+        help=(
+            "journal env + ALTER SYSTEM archive settings, restart the cluster, prove WAL, "
+            "then force and restore one exact base chain (default off)"
+        ),
     )
     pitr_activate_p.add_argument(
         "--origin", default="cli", help="operator/agent identity recorded in the durable operation"
     )
     pitr_activate_p.set_defaults(func=_h_cluster_pitr_activate)
     pitr_rollback_p = pitr_sub.add_parser(
-        "rollback", help="roll back activation without deleting any backup object"
+        "rollback",
+        help=(
+            "restore Ava-owned env/ALTER SYSTEM settings through the same cluster restart; "
+            "never delete backup objects"
+        ),
     )
+    pitr_rollback_p.add_argument("--continuation", help=argparse.SUPPRESS)
     pitr_rollback_p.set_defaults(func=_h_cluster_pitr_rollback)
     for flag, help_text in (
         (

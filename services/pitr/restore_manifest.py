@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,17 @@ class RestoreProof:
     downloaded_bytes: int
     restored_fingerprint_sha256: str
 
+    def __post_init__(self) -> None:
+        try:
+            started = datetime.fromisoformat(self.started_at)
+            completed = datetime.fromisoformat(self.completed_at)
+        except ValueError as exc:
+            raise ValueError("restore proof timestamps must be ISO 8601") from exc
+        if started.tzinfo is None or completed.tzinfo is None:
+            raise ValueError("restore proof timestamps must be timezone-aware")
+        if completed < started:
+            raise ValueError("restore proof completion precedes its start")
+
 
 @dataclass(frozen=True)
 class ProtectedManifest:
@@ -65,6 +77,8 @@ class ProtectedManifest:
             raise ValueError("protected manifest must use the supported protected schema")
         if self.candidate.protected or self.chain_id != self.candidate.chain_id:
             raise ValueError("protected proof must reference an immutable candidate")
+        if self.candidate_sha256 != candidate_sha256(self.candidate):
+            raise ValueError("protected candidate digest differs from the candidate")
         if self.base.object_name != self.candidate.base_object.object_name:
             raise ValueError("protected base differs from the candidate")
         if self.base.generation != self.candidate.base_object.generation:
