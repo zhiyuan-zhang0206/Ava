@@ -67,6 +67,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import shared.db
+from gateway import _agent_max_id as _agent_max_id_module
 from gateway import _auth401_log as _auth401_log_module
 from gateway import (
     _idempotency,
@@ -236,6 +237,21 @@ from shared.os_cron import register_os_cron
 _log = logging.getLogger(__name__)
 
 
+def _start_periodic_flushers(app: FastAPI) -> None:
+    """Start the gateway's periodic telemetry flushers as app.state tasks.
+
+    Three loops, one lifecycle group: gateway latency aggregates (Task
+    #1091), the auth-401 aggregate counter (Task #1712) and the agent-registry
+    max-id gauge (Task #2010). Each loop emits ONE bounded event per 60s and
+    never raises out of its loop; the lifespan teardown cancels all three.
+    """
+    app.state.latency_flusher = asyncio.create_task(_latency.latency_flusher())
+    app.state.auth401_flusher = asyncio.create_task(_auth401_log_module.auth401_flusher())
+    app.state.agent_max_id_flusher = asyncio.create_task(
+        _agent_max_id_module.max_agent_id_flusher(app.state.db_pool)
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """App-level resources: data-plane and control-plane DB pools.
@@ -337,14 +353,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # phase before the gateway process starts, so by the time this Settings is
     # built the .env is already complete; nothing to do at lifespan startup.
 
-    # Gateway endpoint latency metering (Task #1091): drain the middleware
-    # accumulator every 60s and emit one aggregate event per route.
-    app.state.latency_flusher = asyncio.create_task(_latency.latency_flusher())
-
-    # Auth-401 count metering (Task #1712): one aggregate event per 60s
-    # window, restoring the central counter the per-request DEBUG/throttled
-    # log (PR #665) removed from observability.
-    app.state.auth401_flusher = asyncio.create_task(_auth401_log_module.auth401_flusher())
+    # Periodic telemetry flushers (latency / auth-401 / agent max-id): each
+    # drains its accumulator or DB sample once per 60s and emits ONE bounded
+    # event; owned as app.state tasks so the lifespan teardown cancels them.
+    _start_periodic_flushers(app)
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
     # lifespan — StreamableHTTPSessionManager.run() can only be entered once
@@ -366,12 +378,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await ttl_reaper.stop_ttl_reaper(app.state.ttl_reaper)
         await alert_reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
         await app.state.grafana_client.aclose()
-        app.state.latency_flusher.cancel()
-        with suppress(asyncio.CancelledError):
-            await app.state.latency_flusher
-        app.state.auth401_flusher.cancel()
-        with suppress(asyncio.CancelledError):
-            await app.state.auth401_flusher
+        for flusher in (
+            app.state.latency_flusher,
+            app.state.auth401_flusher,
+            app.state.agent_max_id_flusher,
+        ):
+            flusher.cancel()
+            with suppress(asyncio.CancelledError):
+                await flusher
         await app.state.schedule_manager.stop()
         app.state.db_pool.close()
         app.state.control_db_pool.close()

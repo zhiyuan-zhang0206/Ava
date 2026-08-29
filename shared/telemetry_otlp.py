@@ -161,6 +161,10 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("resolution_status", "unresolved_errors"): "gauge",
     ("resolution_status", "dismissed_warnings"): "gauge",
     ("resolution_status", "dismissed_errors"): "gauge",
+    # The agent registry max id is an absolute high-water mark, not a sum —
+    # as an int it would default to a Counter and accrue value on every
+    # sample. A gauge holds the latest sample (task #2010).
+    ("agent_registry", "max_id"): "gauge",
     # The hourly maintenance pass refreshes these table high-water marks; a
     # gauge preserves the latest measurement between samples. The *_live
     # fields are the live tuple counts, emitted alongside so physical size can

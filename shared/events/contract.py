@@ -493,6 +493,19 @@ class Auth401Rejected(TypedDict):
     count: int
 
 
+class AgentRegistry(TypedDict):
+    """`agent_registry` payload — gateway/_agent_max_id.py 60s flusher.
+
+    One event per 60s window carrying the ``agents`` table high-water mark
+    (max id) — the fleet's growth curve (task #2010). Absolute state, never
+    a sum: the OTLP disposition override records it as an ObservableGauge
+    (``ava_agent_registry_max_id_ratio``), so a flat fleet does not accrue
+    value the way a Counter would.
+    """
+
+    max_id: int
+
+
 class TelemetryReadStale(TypedDict):
     """`telemetry_read_stale` payload — gateway/telemetry_staleness.py."""
 
@@ -1095,6 +1108,14 @@ EVENTS: dict[str, EventSpec] = {
         "auth401_rejected",
         "gateway auth-401 rejections in the 60s window (aggregate count)",
         payload=Auth401Rejected,
+        tier="noise",
+    ),
+    # agent registry max id (task #2010) — one absolute gauge sample per 60s
+    # window, never a counter: the registry high-water mark is state, not a sum.
+    "agent_registry": _telemetry(
+        "agent_registry",
+        "agent registry max id — the agents-table high-water mark (absolute state, 60s sample)",
+        payload=AgentRegistry,
         tier="noise",
     ),
     "telemetry_read_stale": _telemetry(
