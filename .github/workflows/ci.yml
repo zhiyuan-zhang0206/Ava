@@ -523,17 +523,86 @@ jobs:
           name: e2e-logs-shard-${{ matrix.group }}
           path: tmp/e2e-logs/
 
+  e2e-hosted:
+    name: e2e hosted (agent-runner-as-server happy path)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [classify]
+    # The hosted variant of the e2e net: the same three lifecycle scenarios
+    # (message flow / self-restart / self-terminate), but every agent runs as a
+    # turn task inside the agent-host daemon instead of one process each — the
+    # ratified acceptance items for AVA_RUNNER_MODE=hosted.
+    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    env:
+      AVA_RUNNER_MODE: hosted
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install Python deps
+        run: uv sync --frozen
+      - name: Install frontend deps
+        working-directory: ui/web
+        run: npm ci
+
+      - name: Cache Playwright chromium
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+      - name: Install Playwright chromium
+        # Same bounded-install reasoning as the e2e-shard job.
+        timeout-minutes: 10
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run hosted e2e tests
+        # Three tests, one worker: each test starts its own function-scoped
+        # gateway + ops + agent-host, so serial keeps the run simple and the
+        # logs unambiguous.
+        run: >
+          uv run pytest
+          tests/e2e/test_message_flow.py
+          tests/e2e/test_self_restart.py
+          tests/e2e/test_self_terminate.py
+          -v -n 1
+
+      - name: Upload e2e logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-logs-hosted
+          path: tmp/e2e-logs/
+
   e2e:
     # Aggregator carrying the branch-protection / Mergify check name; skipped
     # (= satisfied) on docs-only diffs.
     name: e2e (Playwright happy path)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [classify, e2e-shard]
+    needs: [classify, e2e-shard, e2e-hosted]
     if: ${{ always() && needs.classify.result == 'success' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') }}
     steps:
       - name: Verify shard results
         run: |
           result="${{ needs.e2e-shard.result }}"
-          echo "e2e shards: $result"
+          hosted="${{ needs.e2e-hosted.result }}"
+          echo "e2e shards: $result; hosted: $hosted"
           [ "$result" = "success" ] || exit 1
+          [ "$hosted" = "success" ] || exit 1
