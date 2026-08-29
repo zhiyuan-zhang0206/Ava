@@ -22,7 +22,7 @@ Constraint: a child is always created after its parent (`created_at` monotonical
 
 ## `title` / `description`
 
-- `title`: Short one-line name shown in `list` results and notifications. Renamable via `update(title=...)`; must be unique among `open`/`in_progress` tasks (same check as `create`).
+- `title`: Short one-line name shown in `list` results and notifications. Renamable via `update(title=...)`; must be unique among `in_progress` tasks (same check as `create`).
 - `description`: Full description — what and why, the first read for the assignee. Set at `create`, revisable via `update(description=...)`.
 
 Old field name `brief` is a deprecated alias (Task attribute + `create` parameter), to be removed.
@@ -35,7 +35,7 @@ Old field name `content` is a deprecated alias (Task attribute + `update` parame
 
 ## `status`
 
-One of four values an agent can assign (`CHECK` constraint): `"open"`, `"in_progress"`, `"done"`, `"cancelled"`. The `CHECK` also admits `"ongoing"` — the system root task's permanent state, never assignable via `create()`/`update()`/PATCH and pinned by the `agent_tasks_root_status_ongoing` DB constraint. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
+One of three values an agent can assign (`CHECK` constraint): `"in_progress"`, `"done"`, `"cancelled"`. A task is born `"in_progress"` (DB default — the `"open"` state was dropped by user ruling 2026-08-29: creation starts the work immediately). The `CHECK` also admits `"ongoing"` — the system root task's permanent state, never assignable via `create()`/`update()`/PATCH and pinned by the `agent_tasks_root_status_ongoing` DB constraint. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
 
 ## `owner`
 

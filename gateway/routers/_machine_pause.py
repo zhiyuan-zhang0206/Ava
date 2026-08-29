@@ -31,7 +31,7 @@ from shared.task_notes import task_note_line
 
 router = APIRouter()
 
-# The drain owner every open/in_progress task of a paused machine's agents is
+# The drain owner every in_progress task of a paused machine's agents is
 # reassigned to. #405 is the Ava P0 lead — the role that redistributes work when
 # an owner disappears (2026-08-14 Task #1283 ruling: drain reassigns, with a
 # note on each task; the reminder daemon surfaces the reassignment to the new
@@ -52,7 +52,7 @@ def _read_machine_row(pool: ConnectionPool, name: str) -> tuple[bool, datetime |
 
 
 def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
-    """Reassign every open/in_progress task owned by a LIVE agent on `name`
+    """Reassign every in_progress task owned by a LIVE agent on `name`
     to the drain owner (#405), appending a note on each so the new owner knows
     why it landed on their board.
 
@@ -69,7 +69,7 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
                 "SELECT t.id, a.id FROM agent_tasks t "
                 "JOIN agents_meta a ON t.owner = a.id "
                 "WHERE a.machine = %s AND a.status != 'terminated' "
-                "AND t.status IN ('open', 'in_progress')",
+                "AND t.status = 'in_progress'",
                 (name,),
             )
             rows = cur.fetchall()
@@ -170,7 +170,7 @@ async def pause_cluster_machine(
        transaction (explicit, pending-work, controller, and retry) locks and
        checks this latch before its agent row, so stale resurrection cannot
        escape the sweep.
-    2. **Drain** — every open/in_progress task owned by a live agent on this
+    2. **Drain** — every in_progress task owned by a live agent on this
        machine is reassigned to the drain owner (#405) with a note; the
        reminder daemon then surfaces it.
     3. **Final sweep** — every agent row on the machine, including an already

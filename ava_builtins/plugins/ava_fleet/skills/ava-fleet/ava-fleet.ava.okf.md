@@ -30,7 +30,7 @@ The task registry is the durable record of work; the spawn graph is the transien
 - **done** → notify the delegator: task id + result location (file/PR/page) + a one-line summary, then end your own process (`ava.self.terminate()`) — the notification plus recorded results is the handoff, and a follow-up message from the delegator resurrects you with context intact; if the delegator is unknown (no owning task), record the completion in the task's results.
 - **blocked** → there is no blocked status: stay `in_progress`, record the blocker in `content`, escalate to the delegator; exceptions requiring user decision reach `ava.ui.notify(require_response=True)` directly.
 - **reassign** → `ava.tasks.update(owner=)` automatically notifies both old and new owners (see [[ava_builtins/plugins/ava_fleet/tasks/task_notification.ava.okf.md|Task Notification]]).
-- **cancelled** → clean up open child tasks, notify the working agent.
+- **cancelled** → clean up active child tasks, notify the working agent.
 - **remind_interval_seconds** (default 30min) overdue without update → daemon nags the owner; after 3 unanswered escalations: if there is a parent task owner, notify them; if no parent owner (top-level task whose parent is the ownerless system root), insert a require_response reminder into the human queue, hung on the stuck owner, grouped by task, inheriting its priority (#663).
 
 ## Autonomous Batch Work (Autonomy Dial Implementation)

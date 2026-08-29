@@ -59,7 +59,7 @@ This is handled automatically by `ava.tasks.update()` — the caller only needs 
 ### Task Cancelled → Clean Up Dependencies
 
 When a task is cancelled:
-1. The canceller should check for open subtasks (`ava.tasks.list(parent=task_id, status="open")`) and cancel or reassign them — orphaned subtasks with a cancelled parent are ambiguous.
+1. The canceller should check for active subtasks (`ava.tasks.list(parent=task_id, status="in_progress")`) and cancel or reassign them — orphaned subtasks with a cancelled parent are ambiguous.
 2. Any agent actively working on a now-cancelled task should be messaged so it can stop or pivot.
 
 ### Reminder Mechanism
