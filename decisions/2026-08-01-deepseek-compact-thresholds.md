@@ -1,5 +1,7 @@
-> **Superseded 2026-08-27** — the deepseek pin moved to soft 600k / hard 700k; see
-> [`2026-08-27-deepseek-compact-thresholds-600k-700k.md`](2026-08-27-deepseek-compact-thresholds-600k-700k.md).
+> **Superseded 2026-08-29** — the deepseek pin returned to these same values by
+> user decision; the live reference is
+> [`2026-08-29-deepseek-compact-thresholds-374k-512k.md`](2026-08-29-deepseek-compact-thresholds-374k-512k.md)
+> (the 2026-08-27 600k/700k pin is superseded).
 
 # DeepSeek compact thresholds: 374k soft / 512k hard (per-model exception)
 

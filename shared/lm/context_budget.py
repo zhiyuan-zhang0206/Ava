@@ -17,10 +17,10 @@ own and every model's thresholds are those two percentages of its own
 ``context_window`` (``decisions/2026-07-31-flat-compact-thresholds.md``; the
 per-model evidence the earlier tiers were built from is kept in
 ``decisions/2026-07-25-per-model-tuning-values.md``). The deepseek
-entries are the exception: a user decision (2026-08-27) pins them at soft 600k /
-hard 700k (0.6 / 0.7 of their 1M window — see
-``decisions/2026-08-27-deepseek-compact-thresholds-600k-700k.md``; the earlier
-task #581 374k/512k pin is superseded).
+entries are the exception: a user decision (2026-08-29) pins them at soft 374k /
+hard 512k (0.374 / 0.512 of their 1M window — see
+``decisions/2026-08-29-deepseek-compact-thresholds-374k-512k.md``; the
+2026-08-27 600k/700k pin is superseded).
 
 **Why the ceiling knob still exists.** A fraction tracks the ADVERTISED window,
 and advertised windows grew roughly 8x (128K -> 1M) while measured effective
