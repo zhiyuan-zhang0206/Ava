@@ -15,6 +15,24 @@ critical (interval is minutes), so it rides that recheck rather than publishing
 a Redis wake. Runs once per cluster, on the gateway.
 
 Provides:
-- `daemon.py` — main loop, polls every `AVA_HEARTBEAT_INTERVAL_SECONDS` (default 15 min)
+- `daemon.py` — main loop, polls every `AVA_HEARTBEAT_INTERVAL_SECONDS` (default 5 min)
 - `services/healthchecks/heartbeat.py` — watchdog keepalive (re-spawn on death)
 """
+
+# ── Dispatch semantics (single source of truth) ──
+# The daemon de-phases each agent's due-time by a deterministic per-agent
+# jitter, `(id mod JITTER_SPAN_S)` seconds added to the idle-clock term
+# (`last_active_at + idle_threshold`), spreading a fleet that went idle
+# together across a JITTER_SPAN_S-wide window so it does not come due (and
+# wake) in one batch. The inspector projection reads the same constant so its
+# `next_at` matches the daemon's due-time exactly.
+JITTER_SPAN_S = 300.0
+
+# Freshness window for the daemon's "no pending inbound" guard (seconds): a
+# pending inbound older than this no longer counts as "about to wake" — the
+# check-in goes out anyway. Same value as `ops.controllers.hibernate`'s
+# _PENDING_FRESH_WINDOW_S (the two guards are two sides of the same
+# wake/swap decision); deliberately NOT shared.deploy_timing.NO_PROGRESS_TIMEOUT_S,
+# which is a deployment-progress judgment (2026-08-08 audit, P3-5).
+# The inspector's `heartbeat_pending` mirrors the same window.
+STALE_PENDING_S = 900.0
