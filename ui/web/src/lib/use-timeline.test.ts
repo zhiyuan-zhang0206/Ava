@@ -818,6 +818,46 @@ describe("useTimeline agentId switch", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(api.getTimeline).toHaveBeenCalledTimes(2);
   });
+
+  it("the post-compact snapshot also invalidates the agent's inspect / pending / token-usage caches (task #1959)", async () => {
+    // A compact rewrites per-agent data beyond the timeline — the inspector's
+    // live + windowed aggregates, the pending strip, and the token-usage
+    // context bar all cache under staleTime, and a compact that happens while
+    // the agent is parked reaches the frontend through the widened all-events
+    // filter. The deferred (commit-safe) invalidation point must mark all of
+    // them so a later switch-back refetches post-compact data even within
+    // staleTime (inactive entries) and the active viewer refreshes right away.
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const showError = vi.fn();
+    vi.mocked(api.getTimeline).mockResolvedValue(tlResp([]));
+    renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(1));
+    invalidateSpy.mockClear();
+
+    // compact_done for a parked thread — the hook's handler must mark it.
+    pushEvent({ role: "compact_done", agent_id: 99 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(invalidateSpy).not.toHaveBeenCalled();
+
+    // The first non-empty post-compact snapshot fires the whole family set.
+    pushEvent({
+      role: "timeline_snapshot",
+      agent_id: 99,
+      msg_count: 2,
+      items: [snapshotItem({ item_id: "1.0", payload: "[summary]" })],
+    });
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
+    const keys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        ["timeline", 99],
+        ["agent-inspect-live", 99],
+        ["agent-inspect", 99],
+        ["pending", 99],
+        ["token-usage", 99],
+      ]),
+    );
+  });
 });
 
 describe("useTimeline SSE inbound flow", () => {

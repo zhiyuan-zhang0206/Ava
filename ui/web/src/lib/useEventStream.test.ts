@@ -20,6 +20,8 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "./store";
+import { useTimelineStore } from "./timeline-store";
+import type { ThreadTimelineState } from "./fold/timeline";
 import { AuthProvider, useAuth } from "./auth-context";
 import { RECONNECT_QUERY_KEYS } from "./fold";
 import { useFoldOwner } from "./fold/owner";
@@ -95,6 +97,10 @@ beforeEach(() => {
   // The Providers read reconnectNonce + activeId from the store and list them
   // in effect deps — reset both so each test starts from a known baseline.
   useStore.setState({ reconnectNonce: 0, activeId: null });
+  // AgentEventStreamProvider also selects parked/compacted thread ids from the
+  // timeline store — reset them so a prior test's buckets don't leak into the
+  // URL filter assertions.
+  useTimelineStore.setState({ threads: new Map(), compactedThreadIds: new Set() });
 });
 
 afterEach(() => {
@@ -698,6 +704,67 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     await waitForInstance();
     expect(lastInstance).not.toBeNull();
     expect(expectInstance().url).toBe("/api/system/all");
+  });
+
+  function parkedThread(): ThreadTimelineState {
+    return {
+      items: [],
+      streamingIds: new Set(),
+      streamingCode: false,
+      turnActive: false,
+      hasMoreOlder: false,
+      olderFetchCount: 0,
+      resetPending: false,
+    };
+  }
+
+  it("parked threads join the agents filter (task #1959 — parked compacts must reach the store)", async () => {
+    act(() => useStore.setState({ activeId: 1 }));
+    act(() =>
+      useTimelineStore.setState({
+        threads: new Map([
+          [7, parkedThread()],
+          [3, parkedThread()],
+        ]),
+      }),
+    );
+    void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
+      wrapper: withAgentProvider(),
+    });
+    await waitForInstance();
+    // Active + parked ids, numerically sorted (the URL is re-keyed per set).
+    expect(expectInstance().url).toBe("/api/system/all?agents=1,3,7");
+  });
+
+  it("a compact-marker id joins the filter even without a parked bucket", async () => {
+    act(() => useStore.setState({ activeId: 4 }));
+    act(() => useTimelineStore.setState({ compactedThreadIds: new Set([9]) }));
+    void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
+      wrapper: withAgentProvider(),
+    });
+    await waitForInstance();
+    expect(expectInstance().url).toBe("/api/system/all?agents=4,9");
+  });
+
+  it("parking a thread re-keys the connection so parked events keep flowing", async () => {
+    act(() => useStore.setState({ activeId: 1 }));
+    void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
+      wrapper: withAgentProvider(),
+    });
+    await waitForInstance();
+    const first = expectInstance();
+    expect(first.url).toBe("/api/system/all?agents=1");
+
+    // The user switches away from 1 → 1 parks; the stream must now carry it.
+    act(() => useStore.setState({ activeId: 2 }));
+    act(() =>
+      useTimelineStore.setState({
+        threads: new Map([[1, parkedThread()]]),
+      }),
+    );
+    await waitFor(() => expect(expectInstance()).not.toBe(first));
+    expect(first.readyState).toBe(MockEventSource.CLOSED);
+    expect(expectInstance().url).toBe("/api/system/all?agents=1,2");
   });
 
   it("agent switch → closes and reopens with the new filter", async () => {
