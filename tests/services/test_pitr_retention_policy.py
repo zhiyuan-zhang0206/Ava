@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.restore_manifest import (
@@ -11,6 +12,7 @@ from services.pitr.restore_manifest import (
     required_archive_names,
 )
 from services.pitr.retention_manifest import RetentionObject, RetentionPlan
+from services.pitr.retention_planner import build_local_evidence
 from services.pitr.retention_policy import RetentionEvidence, plan_retention
 
 SEGMENT = 16 * 1024 * 1024
@@ -362,6 +364,48 @@ def test_chain_capture_identity_is_strict_and_plan_digest_ignores_snapshot_mtime
     blocked = plan_retention(_evidence((invalid, second), (), _inventory(first, second)))
     assert blocked.eligible == ()
     assert "candidate chain identity is not a canonical UTC capture time" in blocked.blocked_reasons
+
+
+def test_local_manifests_require_chain_owned_canonical_filenames(tmp_path: Path) -> None:
+    candidate = _candidate("20260801T000001Z", SEGMENT, 2 * SEGMENT)
+    proof = _proof(candidate)
+    candidate_dir = tmp_path / "base-manifests"
+    protected_dir = tmp_path / "protected-manifests"
+    candidate_dir.mkdir()
+    protected_dir.mkdir()
+    (candidate_dir / "wrong.candidate.json").write_text(candidate.to_json())
+    (protected_dir / "wrong.json").write_text(proof.to_json())
+
+    evidence = build_local_evidence(tmp_path)
+    plan = plan_retention(evidence)
+
+    assert evidence.candidates == ()
+    assert evidence.protected == ()
+    assert len(evidence.malformed) == 2
+    assert "unknown or malformed evidence exists" in plan.blocked_reasons
+    assert plan.eligible == ()
+
+
+def test_duplicate_chain_manifests_block_even_when_contents_match(tmp_path: Path) -> None:
+    candidate = _candidate("20260801T000001Z", SEGMENT, 2 * SEGMENT)
+    proof = _proof(candidate)
+    candidate_dir = tmp_path / "base-manifests"
+    protected_dir = tmp_path / "protected-manifests"
+    candidate_dir.mkdir()
+    protected_dir.mkdir()
+    (candidate_dir / f"{candidate.chain_id}.candidate.json").write_text(candidate.to_json())
+    (candidate_dir / "duplicate.candidate.json").write_text(candidate.to_json())
+    (protected_dir / f"{candidate.chain_id}.json").write_text(proof.to_json())
+    (protected_dir / "duplicate.json").write_text(proof.to_json())
+
+    evidence = build_local_evidence(tmp_path)
+    plan = plan_retention(evidence)
+
+    assert evidence.candidates == ()
+    assert evidence.protected == ()
+    assert len(evidence.malformed) == 4
+    assert "unknown or malformed evidence exists" in plan.blocked_reasons
+    assert plan.eligible == ()
 
 
 def test_retention_modules_expose_no_delete_surface() -> None:

@@ -62,11 +62,9 @@ def health_component(state: RetentionDryRunState) -> dict[str, object]:
     record["last_attempt"] = state.last_attempt
     record["plan_digest"] = plan.digest if plan is not None and current else None
     record["retained_objects"] = plan.retained_objects if plan is not None and current else 0
-    record["eligible_objects"] = (
-        plan.eligible_objects if plan is not None and not unavailable else 0
-    )
+    record["eligible_objects"] = plan.eligible_objects if plan is not None and current else 0
     record["retained_bytes"] = plan.retained_bytes if plan is not None and current else 0
-    record["eligible_bytes"] = plan.eligible_bytes if plan is not None and not unavailable else 0
+    record["eligible_bytes"] = plan.eligible_bytes if plan is not None and current else 0
     return record
 
 
