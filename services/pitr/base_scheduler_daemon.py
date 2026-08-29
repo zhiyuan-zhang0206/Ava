@@ -46,6 +46,7 @@ from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 from shared.platform import LockTimeoutError
+from shared.process_env import remove_process_env
 
 _log = logging.getLogger("services.pitr.base_scheduler_daemon")
 
@@ -85,6 +86,8 @@ class BaseCandidateState:
     last_error: str | None = None
     deferred_for_logical_backup: bool = False
     cleanup_pending: bool = False
+    restore_running: bool = False
+    last_protected: float | None = None
 
 
 @dataclass(frozen=True)
@@ -97,8 +100,6 @@ class _RestoreWorkerInput:
     bucket: str
     viewer_credentials: Path
     budget: RestoreSpaceBudget
-    restore_running: bool = False
-    last_protected: float | None = None
 
 
 def _candidate_manifests(root: Path) -> list[CandidateManifest]:
@@ -322,7 +323,7 @@ def _proof_worker_entry(
     inputs: _RestoreWorkerInput, stop: StopSignal, output: _WorkerQueue
 ) -> None:
     try:
-        os.environ.pop("AVA_PITR_GCS_CREDENTIALS_FILE", None)
+        remove_process_env(("AVA_PITR_GCS_CREDENTIALS_FILE",))
         output.put((True, _build_restore_proof(inputs, stop).to_json()))
     except BaseException as exc:
         output.put((False, f"{type(exc).__name__}: {exc}"))
