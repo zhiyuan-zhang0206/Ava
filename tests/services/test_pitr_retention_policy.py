@@ -290,7 +290,8 @@ def test_later_timeline_history_is_always_ancestry_pinned() -> None:
     assert "cross-timeline ancestry is not authenticated by this planner" in plan.blocked_reasons
     assert plan.eligible == ()
     assert any(
-        item.object == history and item.reason == "timeline ancestry" for item in plan.retained
+        item.object == history and item.reason == "cross-timeline ancestry pinned fail closed"
+        for item in plan.retained
     )
 
 
