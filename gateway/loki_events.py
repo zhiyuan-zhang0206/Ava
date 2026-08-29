@@ -37,6 +37,7 @@ from typing import Any, cast, overload
 import httpx
 
 from gateway import loki_events_cache, loki_query_budget
+from services.events_maintenance import resolution as _event_resolution
 from shared import telemetry
 from shared.config import settings
 from shared.events.contract import TIER_BY_EVENT, EventTier
@@ -1597,6 +1598,48 @@ def count_grouped(
                 continue
             out[k] = out.get(k, 0) + int(value)
     return out
+
+
+def count_event_classes(
+    *,
+    from_: datetime,
+    to: datetime,
+    cluster: str | None = None,
+    timeout_s: float | None = None,
+) -> dict[_event_resolution.EventClass, int]:
+    """Per-class warning/error counts over ``[from_, to]`` — the input to the
+    class-resolution arithmetic (task #1935).
+
+    Runs the events-maintenance daemon's grouped query
+    (``services.events_maintenance.resolution.grouped_count_query``) through
+    the gateway's own Loki budget, so the dashboard's three-way split
+    (total / dismissed / net) subtracts exactly the classes the daemon's
+    gauges subtract — one query shape, two windows. ``cluster`` scopes the
+    raw counts to the current home like every other dashboard Loki read
+    (unlabeled pre-labeling rows stay accepted); the dismissal set itself is
+    global, so the cancellation matches the daemon either way. Keys are
+    ``_event_resolution.EventClass`` values; ``critical`` rows carry their own level
+    and fold into the error bucket in the arithmetic, not here.
+
+    Transport and budget failures surface exactly like every other gateway
+    Loki read (httpx.HTTPError / LokiQueryBudgetError -> 503 by the router).
+    """
+    window_s = int((to - from_).total_seconds())
+    logql = _event_resolution.grouped_count_query(f"{window_s}s", cluster=cluster)
+    counts: dict[_event_resolution.EventClass, int] = {}
+    for series in _query_instant(logql, to, timeout_s=timeout_s):
+        value = _result_value(series)
+        if value is None:
+            continue
+        metric = series.get("metric", {})
+        event_class = _event_resolution.EventClass(
+            category=str(metric.get("category", "")),
+            level=str(metric.get("level", "")),
+            event_name=str(metric.get("event_name", "")),
+            source=str(metric.get("source", "")),
+        )
+        counts[event_class] = counts.get(event_class, 0) + int(value)
+    return counts
 
 
 def count_events_series(

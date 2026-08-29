@@ -17,33 +17,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel, InspectorToggle } from "./inspector-panel";
 import { formatAbsolute, formatRelative } from "@/lib/time";
-import type { AgentInspect, AgentInspectLive, PageRow } from "@/lib/types";
+import type { AgentInspect, AgentInspectLive, PageRow, StatsDashboard } from "@/lib/types";
 
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
 // runs (the factory fires during the InspectorPanel import, before module-body
 // consts would otherwise initialize).
-const { getAgentInspect, getAgentInspectLive, listPages, resolveNotice } = vi.hoisted(() => ({
-  getAgentInspect:
-    vi.fn<
-      (
-        agentId: number,
-        hours?: number | null,
-        sinceCompact?: boolean,
-        signal?: AbortSignal,
-      ) => Promise<AgentInspect>
-    >(),
-  getAgentInspectLive:
-    vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
-  // useAgentPages fetches the open-pages list; default to none so the Page
-  // section renders its empty state and these render tests stay focused on the
-  // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
-  // SSE fold.
-  listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
-  // Notice resolve — default to success; the notice-reply tests drive it.
-  resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
-}));
+const { getAgentInspect, getAgentInspectLive, listPages, resolveNotice, getStatsDashboard } =
+  vi.hoisted(() => ({
+    getAgentInspect:
+      vi.fn<
+        (
+          agentId: number,
+          hours?: number | null,
+          sinceCompact?: boolean,
+          signal?: AbortSignal,
+        ) => Promise<AgentInspect>
+      >(),
+    getAgentInspectLive:
+      vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
+    // useAgentPages fetches the open-pages list; default to none so the Page
+    // section renders its empty state and these render tests stay focused on the
+    // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
+    // SSE fold.
+    listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
+    // Notice resolve — default to success; the notice-reply tests drive it.
+    resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
+    // Fleet warning/error three-way status for the Alerts section.
+    getStatsDashboard: vi.fn<(hours: number, signal?: AbortSignal) => Promise<StatsDashboard>>(),
+  }));
 vi.mock("@/lib/api", () => ({
-  api: { getAgentInspect, getAgentInspectLive, listPages, resolveNotice },
+  api: { getAgentInspect, getAgentInspectLive, listPages, resolveNotice, getStatsDashboard },
 }));
 
 // useAgentPages subscribes to the global SSE stream; stub it to a no-op so the
@@ -99,9 +102,27 @@ vi.mock("@/lib/breakpoint", () => ({
   }),
 }));
 
+function statsFixture(): StatsDashboard {
+  return {
+    live_count: 5,
+    window_hours: 24,
+    tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
+    cost_usd: 1,
+    avg_turn_seconds: 3,
+    warnings: 2,
+    errors: 1,
+    warnings_dismissed: 1,
+    warnings_net: 1,
+    errors_dismissed: 1,
+    errors_net: 0,
+    total_events: 100,
+  };
+}
+
 beforeEach(() => {
   getAgentInspect.mockResolvedValue(fixture());
   getAgentInspectLive.mockResolvedValue(liveFixture());
+  getStatsDashboard.mockResolvedValue(statsFixture());
 });
 
 afterEach(() => {
@@ -109,6 +130,7 @@ afterEach(() => {
   cleanup();
   getAgentInspect.mockReset();
   getAgentInspectLive.mockReset();
+  getStatsDashboard.mockReset();
   resolveNotice.mockClear();
   toggle.mockReset();
   panelState.open = true;
@@ -361,6 +383,23 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("State")).toBeNull();
     expect(screen.queryByText("every 5m")).toBeNull();
     expect(screen.getByText("never paused")).toBeTruthy();
+  });
+
+  it("renders the fleet Alerts three-way split (total / resolved / remaining)", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    getAgentInspectLive.mockResolvedValue(liveFixture());
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Alerts")).toBeTruthy());
+    // badge shows the effective stats window (24h default from the selector)
+    const alertsSection = screen.getByText("Alerts").closest("section");
+    expect(within(alertsSection!).getByText("24h")).toBeTruthy();
+    // warning row: total 2 / dismissed 1 / remaining 1
+    expect(within(alertsSection!).getByText("Total 2")).toBeTruthy();
+    expect(within(alertsSection!).getAllByText(/Resolved 1/)).toHaveLength(2);
+    expect(within(alertsSection!).getByText(/Remaining 1/)).toBeTruthy();
+    // error row is fully dismissed -> positive all-clear state
+    expect(within(alertsSection!).getByText("All clear")).toBeTruthy();
   });
 
   it("links the active agent to its run timeline", async () => {
@@ -854,6 +893,23 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
+  it("renders the fleet Alerts three-way split (total / resolved / remaining)", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    getAgentInspectLive.mockResolvedValue(liveFixture());
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Alerts")).toBeTruthy());
+    // badge shows the effective stats window (24h default from the selector)
+    const alertsSection = screen.getByText("Alerts").closest("section");
+    expect(within(alertsSection!).getByText("24h")).toBeTruthy();
+    // warning row: total 2 / dismissed 1 / remaining 1
+    expect(within(alertsSection!).getByText("Total 2")).toBeTruthy();
+    expect(within(alertsSection!).getAllByText(/Resolved 1/)).toHaveLength(2);
+    expect(within(alertsSection!).getByText(/Remaining 1/)).toBeTruthy();
+    // error row is fully dismissed -> positive all-clear state
+    expect(within(alertsSection!).getByText("All clear")).toBeTruthy();
+  });
+
   it("shows the active pause window when paused", async () => {
     const pausedUntil = new Date(Date.now() + 720_000).toISOString(); // 12m
     getAgentInspectLive.mockResolvedValue(
@@ -880,6 +936,23 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
     expect(screen.getByText("pending")).toBeTruthy();
     expect(screen.getByText("never paused")).toBeTruthy();
+  });
+
+  it("renders the fleet Alerts three-way split (total / resolved / remaining)", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    getAgentInspectLive.mockResolvedValue(liveFixture());
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Alerts")).toBeTruthy());
+    // badge shows the effective stats window (24h default from the selector)
+    const alertsSection = screen.getByText("Alerts").closest("section");
+    expect(within(alertsSection!).getByText("24h")).toBeTruthy();
+    // warning row: total 2 / dismissed 1 / remaining 1
+    expect(within(alertsSection!).getByText("Total 2")).toBeTruthy();
+    expect(within(alertsSection!).getAllByText(/Resolved 1/)).toHaveLength(2);
+    expect(within(alertsSection!).getByText(/Remaining 1/)).toBeTruthy();
+    // error row is fully dismissed -> positive all-clear state
+    expect(within(alertsSection!).getByText("All clear")).toBeTruthy();
   });
 
   it("shows 'due' when the projected check-in is in the past", async () => {

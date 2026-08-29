@@ -5392,7 +5392,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)\n- `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail\n- average turn duration: Loki's unified event stream in 12-hour shards\n- warning/error counts: one grouped Loki query per 12-hour shard\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data\nscenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend\nshows \"—\"). Until the unlabeled legacy slice expires on 2026-08-30,\nthe ledger removes the fixed-cost full-window token scans; afterward the\nindexed Loki tail keeps the same self-healing late-write behavior.",
+        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)\n- `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail\n- average turn duration: Loki's unified event stream in 12-hour shards\n- warning/error counts: per-class counts via the resolution daemon's\n  grouped query (12h shards), split into total / dismissed / net with\n  the daemon's class arithmetic over the SELECTED window (task #1935)\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data\nscenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend\nshows \"—\"). Until the unlabeled legacy slice expires on 2026-08-30,\nthe ledger removes the fixed-cost full-window token scans; afterward the\nindexed Loki tail keeps the same self-healing late-write behavior.",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -13045,6 +13045,26 @@
             "minimum": 0.0,
             "title": "Errors"
           },
+          "warnings_dismissed": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Warnings Dismissed"
+          },
+          "warnings_net": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Warnings Net"
+          },
+          "errors_dismissed": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Errors Dismissed"
+          },
+          "errors_net": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Errors Net"
+          },
           "total_events": {
             "type": "integer",
             "minimum": 0.0,
@@ -13060,10 +13080,14 @@
           "avg_turn_seconds",
           "warnings",
           "errors",
+          "warnings_dismissed",
+          "warnings_net",
+          "errors_dismissed",
+          "errors_net",
           "total_events"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the selected `window_hours` value —\n`0` means five minutes; all other values are hours.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage (cached for at most 60s)\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;\n  events that pre-date the snapshot field contribute 0 (cached for at\n  most 60s with `tokens`)\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: level counts. Agent trial-and-error\n  (exec_failed) logs at INFO and is deliberately NOT counted — these\n  numbers are operator-facing alerts, not agent activity.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\"."
+        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the selected `window_hours` value —\n`0` means five minutes; all other values are hours.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage (cached for at most 60s)\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;\n  events that pre-date the snapshot field contribute 0 (cached for at\n  most 60s with `tokens`)\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw level totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `warnings_dismissed` / `warnings_net` / `errors_dismissed` /\n  `errors_net`: the three-way resolution split (task #1935). The\n  arithmetic is the events-maintenance daemon's class subtraction\n  (`services.events_maintenance.resolution.level_splits`) applied to the\n  SELECTED window instead of the daemon's fixed six hours: events whose\n  (category, level, event_name, source) class has an active dismissal in\n  `event_dismissals` count as dismissed, the rest as net, and\n  dismissed + net == the raw total by construction.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\"."
       },
       "StatsTokens": {
         "properties": {

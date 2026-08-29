@@ -133,6 +133,28 @@ class FakeLoki:
             counts[k] = counts.get(k, 0) + 1
         return counts
 
+    def count_event_classes(self, **kwargs: Any) -> dict[Any, int]:
+        """Per-class counts over [from_, to], mirroring
+        gateway.loki_events.count_event_classes: keys are resolution
+        EventClass values, warning/error/critical levels only."""
+        from services.events_maintenance import resolution
+
+        from_: Any = kwargs.get("from_")
+        to: Any = kwargs.get("to")
+        cluster: Any = kwargs.get("cluster")
+        counts: dict[Any, int] = {}
+        for r in self._match(categories=["telemetry", "log"], from_=from_, to=to, cluster=cluster):
+            if r["level"] not in ("warning", "error", "critical"):
+                continue
+            event_class = resolution.EventClass(
+                category=r["category"],
+                level=r["level"],
+                event_name=r["event_name"],
+                source=r["source"],
+            )
+            counts[event_class] = counts.get(event_class, 0) + 1
+        return counts
+
     def count_events_series(self, **kwargs: Any) -> dict[str, list[tuple[int, int]]]:
         """Per-step event counts on the caller's step grid (bucket END
         times aligned to `from_`), grouped like count_grouped."""

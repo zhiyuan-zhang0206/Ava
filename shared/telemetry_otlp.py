@@ -154,10 +154,13 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("llm_usage", "price_hit"): None,
     ("llm_usage", "price_out"): None,
     ("llm_usage", "cost_usd"): "counter",
-    # Absolute unresolved counts are non-monotonic. An ObservableGauge holds
-    # the last value rather than adding each five-minute sample forever.
+    # Absolute unresolved/dismissed counts are non-monotonic. An
+    # ObservableGauge holds the last value rather than adding each
+    # five-minute sample forever.
     ("resolution_status", "unresolved_warnings"): "gauge",
     ("resolution_status", "unresolved_errors"): "gauge",
+    ("resolution_status", "dismissed_warnings"): "gauge",
+    ("resolution_status", "dismissed_errors"): "gauge",
     # The hourly maintenance pass refreshes these table high-water marks; a
     # gauge preserves the latest measurement between samples. The *_live
     # fields are the live tuple counts, emitted alongside so physical size can

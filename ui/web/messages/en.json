@@ -72,7 +72,14 @@
     "loading": "Loading run timeline…",
     "loadFailed": "Could not load the run timeline.",
     "retry": "Retry",
-    "invalidAgent": "The agent id in this URL is invalid."
+    "invalidAgent": "The agent id in this URL is invalid.",
+    "alerts": "Alerts",
+    "alertWarning": "WARN",
+    "alertError": "ERR",
+    "alertTotal": "Total",
+    "alertDismissed": "Resolved",
+    "alertNet": "Remaining",
+    "alertAllClear": "All clear"
   },
   "nav": {
     "openSidebar": "Open sidebar",
@@ -125,11 +132,17 @@
     "costTitle": "Estimated LLM spend over the past {win} (current per-model pricing)",
     "costTitleDetail": "Estimated LLM spend over the past {win} at current per-model pricing: ${amount}",
     "avgTurnTitle": "Avg LLM call wall time over the past {win} (filters ok=true to exclude failed turns)",
-    "warningsTitle": "Number of WARNING / ERROR events over the past {win}",
+    "warningsTitle": "WARNING / ERROR over the past {win}: total / resolved / remaining (0 remaining = all clear)",
     "expandStatistics": "Expand statistics",
     "collapseStatistics": "Collapse statistics",
     "noMatch": "No agents match “{query}”",
-    "searchAgent": "Search agent"
+    "searchAgent": "Search agent",
+    "warningLevel": "WARN",
+    "errorLevel": "ERR",
+    "statsTotal": "Total",
+    "statsDismissed": "Resolved",
+    "statsNet": "Remaining",
+    "statsAllClear": "All clear"
   },
   "spawn": {
     "models": "Models",

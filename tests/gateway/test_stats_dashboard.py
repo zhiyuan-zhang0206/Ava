@@ -39,6 +39,7 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     monkeypatch.setattr(loki_events, "query_events", fake.query_events)
     monkeypatch.setattr(loki_events, "count_events", fake.count_events)
     monkeypatch.setattr(loki_events, "count_grouped", fake.count_grouped)
+    monkeypatch.setattr(loki_events, "count_event_classes", fake.count_event_classes)
     monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
     return fake
 
@@ -103,11 +104,15 @@ def test_dashboard_does_not_hold_db_connection_during_loki_queries(
         def __exit__(self, *args: object) -> None:
             return None
 
-        def execute(self, query: str) -> None:
+        def execute(self, query: str, params: object | None = None) -> None:
             return None
 
         def fetchone(self) -> tuple[int]:
             return self.rows.pop(0)
+
+        def fetchall(self) -> list[tuple[int]]:
+            # active dismissals read: no dismissal rows in the fake DB.
+            return []
 
     class FakeConnection:
         def __init__(self) -> None:
@@ -120,7 +125,7 @@ def test_dashboard_does_not_hold_db_connection_during_loki_queries(
         def __exit__(self, *args: object) -> None:
             pool.active = False
 
-        def cursor(self) -> FakeCursor:
+        def cursor(self, *args: object, **kwargs: object) -> FakeCursor:
             return self.cursor_value
 
     class FakePool:
@@ -143,13 +148,20 @@ def test_dashboard_does_not_hold_db_connection_during_loki_queries(
         clusters.append(kwargs.get("cluster"))
         return {}
 
+    def assert_db_released_classes(*args: Any, **kwargs: Any) -> dict[object, int]:
+        assert pool.active is False
+        return {}
+
     monkeypatch.setattr(loki_events, "attribute_aggregate", assert_db_released)
     monkeypatch.setattr(loki_events, "count_events", assert_db_released)
     monkeypatch.setattr(loki_events, "count_grouped", assert_db_released_grouped)
+    monkeypatch.setattr(loki_events, "count_event_classes", assert_db_released_classes)
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=pool)))
     result = status.get_stats_dashboard(request, StatsWindowHours.H24)  # type: ignore[arg-type]
     assert result.live_count == 2
     assert result.total_events == status.ARCHIVE_TOTAL_ROWS
+    assert result.warnings == 0
+    assert result.warnings_dismissed == 0
     assert clusters
     assert set(clusters) == {home_label(ava_home())}
 
@@ -261,10 +273,10 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     llm_usage_windows: list[tuple[datetime, datetime]] = []
     sharded_aggregate_spans: list[tuple[datetime, datetime]] = []
     count_spans: list[tuple[datetime, datetime]] = []
-    grouped_spans: list[tuple[datetime, datetime]] = []
+    class_spans: list[tuple[datetime, datetime]] = []
     real_aggregate = fake_loki.attribute_aggregate
     real_count = fake_loki.count_events
-    real_grouped = fake_loki.count_grouped
+    real_classes = fake_loki.count_event_classes
 
     def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
         spans = (
@@ -279,20 +291,24 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
         count_spans.append((kwargs["from_"], kwargs["to"]))
         return real_count(**kwargs)
 
-    def spy_grouped(**kwargs: Any) -> dict[str, int]:
-        grouped_spans.append((kwargs["from_"], kwargs["to"]))
-        return real_grouped(**kwargs)
+    def spy_classes(**kwargs: Any) -> dict[object, int]:
+        class_spans.append((kwargs["from_"], kwargs["to"]))
+        return real_classes(**kwargs)
 
     monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
     monkeypatch.setattr(loki_events, "count_events", spy_count)
-    monkeypatch.setattr(loki_events, "count_grouped", spy_grouped)
+    monkeypatch.setattr(loki_events, "count_event_classes", spy_classes)
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard", params={"hours": 24}).json()
 
     assert body["avg_turn_seconds"] == 6.0
     assert body["warnings"] == 1
+    assert body["warnings_dismissed"] == 0
+    assert body["warnings_net"] == 1
     assert body["errors"] == 1
+    assert body["errors_dismissed"] == 0
+    assert body["errors_net"] == 1
     assert body["tokens"] == {"input": 110, "output": 22, "cache_read": 55, "cache_hit_pct": 50}
     assert body["cost_usd"] == 2.0
     assert len(llm_usage_windows) == 4
@@ -306,7 +322,8 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     assert all(end == next_start for (_, end), (next_start, _) in pairwise(spans))
     assert set(aggregate_counts.values()) == {1}
     assert Counter(count_spans) == aggregate_counts
-    assert Counter(grouped_spans) == aggregate_counts
+    # The W/E class read shares the same 12-hour shard grid as turn/exec.
+    assert Counter(class_spans) == aggregate_counts
 
 
 def test_dashboard_168h_reads_tokens_from_ledger(
@@ -482,6 +499,116 @@ def test_dashboard_warn_error_folds_critical(
         body = client.get("/api/stats/dashboard").json()
     assert body["warnings"] == 1
     assert body["errors"] == 2  # error + critical folded
+
+
+def _insert_dismissal(
+    db: psycopg.Connection,
+    *,
+    level: str,
+    event_name: str,
+    category: str = "telemetry",
+    source: str = "test",
+) -> None:
+    """Insert one active class-wide dismissal (the event_dismissals row the
+    resolution daemon and the dashboard both subtract)."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO event_dismissals (category, level, event_name, source, dismissed_by) "
+            "VALUES (%s, %s, %s, %s, 0)",
+            (category, level, event_name, source),
+        )
+    db.commit()
+
+
+def test_dashboard_three_way_resolution_split(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """The dashboard carries total / dismissed / net per level; dismissed
+    classes are cancelled from net exactly like the resolution daemon's
+    gauges (task #1935)."""
+    _insert_dismissal(db_conn, level="warning", event_name="dismissed_warning")
+    _insert_dismissal(db_conn, level="error", event_name="dismissed_error")
+    fake_loki.add(event="dismissed_warning", level="warning")
+    fake_loki.add(event="dismissed_warning", level="warning")
+    fake_loki.add(event="remaining_warning", level="warning")
+    fake_loki.add(event="dismissed_error", level="error")
+    fake_loki.add(event="remaining_critical", level="critical")
+    db_conn.commit()
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard").json()
+    assert body["warnings"] == 3
+    assert body["warnings_dismissed"] == 2
+    assert body["warnings_net"] == 1
+    # critical folds into error for both the total and the split.
+    assert body["errors"] == 2
+    assert body["errors_dismissed"] == 1
+    assert body["errors_net"] == 1
+    # The three-way split sums back to the raw totals by construction.
+    assert body["warnings_dismissed"] + body["warnings_net"] == body["warnings"]
+    assert body["errors_dismissed"] + body["errors_net"] == body["errors"]
+
+
+def test_dashboard_all_dismissed_level_reports_zero_net(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """Every in-window warning class dismissed -> warnings_net 0 (the
+    frontend's all-clear state); error side stays untouched."""
+    _insert_dismissal(db_conn, level="warning", event_name="only_warning")
+    fake_loki.add(event="only_warning", level="warning")
+    fake_loki.add(event="only_warning", level="warning")
+    fake_loki.add(event="only_error", level="error")
+    db_conn.commit()
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard").json()
+    assert body["warnings"] == 2
+    assert body["warnings_dismissed"] == 2
+    assert body["warnings_net"] == 0
+    assert body["errors"] == 1
+    assert body["errors_dismissed"] == 0
+    assert body["errors_net"] == 1
+
+
+def test_dashboard_reopened_dismissal_counts_as_net(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """A dismissal flipped to reopened (burst safety valve) no longer
+    cancels its class — same active-set semantics as the daemon."""
+    _insert_dismissal(db_conn, level="warning", event_name="burst_warning")
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE event_dismissals SET status = 'reopened', reopened_at = now() "
+            "WHERE event_name = 'burst_warning'"
+        )
+    db_conn.commit()
+    fake_loki.add(event="burst_warning", level="warning")
+    db_conn.commit()
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard").json()
+    assert body["warnings"] == 1
+    assert body["warnings_dismissed"] == 0
+    assert body["warnings_net"] == 1
+
+
+def test_dashboard_per_agent_dismissal_has_no_arithmetic_effect(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """v1 rejects per-agent dismissals; a manually inserted agent-scoped row
+    must not subtract from the class-wide aggregate (resolution daemon
+    contract)."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO event_dismissals "
+            "(category, level, event_name, source, agent_id, dismissed_by) "
+            "VALUES ('telemetry', 'warning', 'agent_warning', 'test', 7, 0)"
+        )
+    db_conn.commit()
+    fake_loki.add(event="agent_warning", level="warning")
+    db_conn.commit()
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard").json()
+    assert body["warnings"] == 1
+    assert body["warnings_dismissed"] == 0
+    assert body["warnings_net"] == 1
 
 
 def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -> None:
