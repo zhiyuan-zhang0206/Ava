@@ -131,7 +131,26 @@ def _quiesce_all_agents(timeout_s: float) -> bool:
 
     Args:
         timeout_s: max seconds to wait for all agents to quiesce.
+
+    Hosted mode is a no-op returning True: hosted rows stay `idling` for life
+    (D1 zero-state-write) so the poll has no drain to converge on — it would
+    burn its whole window and still report stragglers. The hosted
+    stop-the-world is the fleet's agent-host service stops (Phase B per host),
+    whose scheduler checkpoints every in-flight turn on SIGTERM; signalling
+    here would restart every agent mid-work for nothing. Returning True also
+    keeps the orchestration from computing force_reap, which hosted rows must
+    never see (no restarter exists to respawn a CAS-marked 'restarting' row).
     """
+    from ops.runner_mode import is_hosted
+
+    if is_hosted():
+        print(
+            "  · hosted runner: agents run inside the agent-host and their rows "
+            "stay idling — no per-agent drain to converge on; the fleet's "
+            "agent-host service stops are the stop-the-world (skipping the "
+            "signal would otherwise restart every agent for nothing)"
+        )
+        return True
     import shared.db
     from cli.commands import update as _up_mod
 
@@ -179,7 +198,25 @@ def _force_reap_local_agents(*, defer_process_stop: bool = False) -> list[int]:
 
     Returns the ids that were marked (an agent that exited cleanly meanwhile is
     left untouched and its dead process is a noop kill).
+
+    Hosted mode is a no-op returning []: hosted rows stay `idling` for life and
+    carry no pid, so "live" is not a straggler signal, and CAS-marking them
+    'restarting' would orphan them permanently once the restarter is gated
+    out of the hosted roster (PR #1029 — until that gate lands, the
+    restarter's hosted branch self-heals a marked row back to idling at the
+    cost of one spurious restart_completed per agent, which is why #1029 must
+    land before hosted goes live). A hosted force-reap is the one operation
+    that can turn a fleet of reachable agents into unreachable ones.
     """
+    from ops.runner_mode import is_hosted
+
+    if is_hosted():
+        print(
+            "  · hosted runner: no per-agent processes to reap — skipping "
+            "(CAS-marking rows 'restarting' here would orphan them forever: "
+            "the restarter that respawns them is gated out of the hosted roster)"
+        )
+        return []
     import cli.commands as _ns
     import shared.db
     from shared.machine import machine_name
@@ -211,12 +248,32 @@ def _quiesce_local_agents(mode: str) -> bool:
     held by standalone self-heals.
 
     Returns True when every agent quiesced (or none were live).
+
+    Hosted mode is a no-op returning True: agents run inside the agent-host
+    and their rows stay `idling` for life, so there are no per-agent processes
+    to signal and no drain to poll. The hosted quiesce IS the service stop
+    that follows this function — the update flow's graceful stop SIGTERMs the
+    agent-host, whose dispatcher unwinds into `scheduler.aclose()` and
+    checkpoints every in-flight turn before exit; `ava restart`'s non-graceful
+    kill cuts in-flight turns at their last step checkpoint instead (the same
+    accepted degradation as a process-mode force-reap). Signalling here would
+    insert one restart inbound per agent for nothing, and the timeout reap
+    would CAS-mark rows 'restarting' that no restarter will ever respawn.
     """
     import shared.db
     from cli.commands import update as _up_mod
     from shared.machine import machine_name
 
     if mode == "none":
+        return True
+    from ops.runner_mode import is_hosted
+
+    if is_hosted():
+        print(
+            "  · hosted runner: agents run inside the agent-host — no per-agent "
+            "processes to signal and no drain to poll; the service stop that "
+            "follows is the hosted quiesce"
+        )
         return True
     timeout_s = _up_mod._quiesce_timeout_s(mode)
     signalled = shared.db.signal_live_agents_restart(source="system:update", machine=machine_name())
