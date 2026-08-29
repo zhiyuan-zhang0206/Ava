@@ -6,7 +6,10 @@ and the settings-free `cli.enroll` can use one copy.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +37,13 @@ def env_lock_path(env_path: Path) -> Path:
     secrets outright.
     """
     return env_path.with_name(env_path.name + ".lock")
+
+
+def capture_env_bytes(path: Path) -> bytes:
+    """Return one exact `.env` image under the lock shared by every writer."""
+
+    with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
+        return path.read_bytes() if path.exists() else b""
 
 
 def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
@@ -130,3 +140,36 @@ def remove_env(path: Path, keys: set[str]) -> None:
             return  # nothing to remove — no snapshot churn
         snapshot_env(path)
         write_private_bytes(path, ("\n".join(out) + "\n").encode())
+
+
+def replace_env_bytes_cas(
+    path: Path, *, payload: bytes, expected_digest: str, target_digest: str
+) -> None:
+    """Restore exact env bytes while holding the shared cross-process lock."""
+
+    if hashlib.sha256(payload).hexdigest() != target_digest:
+        raise RuntimeError(".env rollback payload differs from durable digest")
+    with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
+        current = path.read_bytes()
+        digest = hashlib.sha256(current).hexdigest()
+        if digest == target_digest:
+            return
+        if digest != expected_digest:
+            raise RuntimeError(".env changed concurrently before rollback")
+        snapshot_env(path)
+        fd, raw = tempfile.mkstemp(prefix="..env.rollback-", dir=path.parent)
+        staged = Path(raw)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as output:
+                output.write(payload)
+                output.flush()
+                os.fsync(output.fileno())
+            staged.replace(path)
+            directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            staged.unlink(missing_ok=True)
