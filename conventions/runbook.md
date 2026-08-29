@@ -909,13 +909,15 @@ Differences between `ava cluster update` and `ava stop && ava start`:
 
 ## Private-network deployment (phone / multi-device access)
 
-Both the gateway and frontend bind all interfaces on the **gateway host**
-(the gateway both address families, the frontend `-H ::`); any
-private-network device (laptop, phone, other agent-runners) hits them directly at the
-gateway's private-network address — gateway on `:8000`, frontend on
-`:3000`. The exact host is whichever node holds the gateway role (a single-box
-deployment's only host). The access model below is the authoritative
-description of ports and trust boundary.
+The gateway binds all interfaces on the **gateway host** (both address
+families); the Next.js app binds loopback only and is reachable **only through
+the fleet UI gate** — the always-up entry on `:3000`, which itself binds all
+interfaces and proxies the app (`services/gate`). Any private-network device
+(laptop, phone, other agent-runners) hits them directly at the gateway's
+private-network address — gateway on `:8000`, UI entry on `:3000`. The exact
+host is whichever node holds the gateway role (a single-box deployment's only
+host). The access model below is the authoritative description of ports and
+trust boundary.
 
 ### Access model — private-network reachability + always-on cluster-secret auth
 

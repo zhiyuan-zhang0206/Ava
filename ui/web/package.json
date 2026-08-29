@@ -4,9 +4,9 @@
   "private": true,
   "license": "Apache-2.0",
   "scripts": {
-    "dev": "next dev -H ::",
+    "dev": "next dev -H 127.0.0.1",
     "build": "next build",
-    "start": "next start -H ::",
+    "start": "next start -H 127.0.0.1",
     "test": "vitest run",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
