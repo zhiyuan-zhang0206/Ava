@@ -17,10 +17,10 @@ def test_enabled_pitr_requires_independent_private_key(tmp_path: Path) -> None:
     key.write_text("independent")
     key.chmod(0o600)
     settings = PhysicalBackupSettings(
-        AVA_PITR_ENABLED="true",
+        AVA_PITR_ENABLED=True,
         AVA_PITR_GCS_PROJECT="project",
         AVA_PITR_GCS_BUCKET="bucket",
-        AVA_PITR_BACKUP_KEY_FILE=str(key),
+        AVA_PITR_BACKUP_KEY_FILE=key,
     )
     assert settings.pitr_backup_key_file == key
 
@@ -30,20 +30,20 @@ def test_enabled_pitr_rejects_empty_or_overexposed_key(tmp_path: Path) -> None:
     key.touch(mode=0o644)
     with pytest.raises(ValidationError, match="non-empty, non-symlink regular file with mode 0600"):
         PhysicalBackupSettings(
-            AVA_PITR_ENABLED="true",
+            AVA_PITR_ENABLED=True,
             AVA_PITR_GCS_PROJECT="project",
             AVA_PITR_GCS_BUCKET="bucket",
-            AVA_PITR_BACKUP_KEY_FILE=str(key),
+            AVA_PITR_BACKUP_KEY_FILE=key,
         )
 
 
 def test_enabled_pitr_rejects_relative_key_path() -> None:
     with pytest.raises(ValidationError, match="must be an absolute path"):
         PhysicalBackupSettings(
-            AVA_PITR_ENABLED="true",
+            AVA_PITR_ENABLED=True,
             AVA_PITR_GCS_PROJECT="project",
             AVA_PITR_GCS_BUCKET="bucket",
-            AVA_PITR_BACKUP_KEY_FILE="backup.key",
+            AVA_PITR_BACKUP_KEY_FILE=Path("backup.key"),
         )
 
 

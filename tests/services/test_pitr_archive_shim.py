@@ -77,10 +77,12 @@ def test_concurrent_publishers_never_replace(tmp_path: Path) -> None:
     source.write_bytes(b"wal")
     spool = tmp_path / "spool"
     spool.mkdir()
+
+    def publish(_: int) -> int:
+        return archive_shim.archive(source, name, spool, 1024)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(
-            pool.map(lambda _: archive_shim.archive(source, name, spool, 1024), range(16))
-        )
+        results = list(pool.map(publish, range(16)))
     assert results == [0] * 16
     assert (spool / name).read_bytes() == b"wal"
 
@@ -104,8 +106,10 @@ def test_failed_publish_removes_partial(tmp_path: Path, monkeypatch: pytest.Monk
     source.write_bytes(b"wal")
     spool = tmp_path / "spool"
     spool.mkdir()
-    monkeypatch.setattr(
-        archive_shim.os, "link", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk"))
-    )
+
+    def fail_link(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk")
+
+    monkeypatch.setattr(archive_shim.os, "link", fail_link)
     assert archive_shim.archive(source, name, spool, 1024) == archive_shim.EXIT_IO
     assert not list(spool.glob("*.partial"))
