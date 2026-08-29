@@ -9,7 +9,6 @@ import time
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import cast
 
 import psutil
 import pytest
@@ -17,6 +16,7 @@ import pytest
 import services.pitr.base_scheduler_daemon as daemon
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
+from shared.process_env import restricted_process_env
 
 
 def _candidate(chain_id: str) -> CandidateManifest:
@@ -41,51 +41,37 @@ def _candidate(chain_id: str) -> CandidateManifest:
     )
 
 
-def test_restore_worker_never_opens_or_inherits_uploader_credential(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_path: Path) -> None:
     uploader = tmp_path / "uploader.json"
     uploader.write_text("publisher-only")
-    original_read_bytes = Path.read_bytes
-    messages: list[object] = []
-
-    class Queue:
-        def put(self, item: object) -> None:
-            messages.append(item)
-
-    def audited_read_bytes(path: Path) -> bytes:
-        if path == uploader:
-            raise AssertionError("restore worker opened the uploader credential")
-        return original_read_bytes(path)
-
     inputs = daemon._RestoreWorkerInput(
         _candidate("viewer-only").to_json(),
         tmp_path,
         tmp_path / "ack",
-        b"key",
+        tmp_path / "backup.key",
         "project",
         "bucket",
         tmp_path / "viewer.json",
         daemon.RestoreSpaceBudget(0, 0, 0),
+        "postgresql://viewer@127.0.0.1:5433/ava",
+        Path("/usr/bin/true"),
+        Path("/usr/bin/true"),
     )
     assert str(uploader) not in repr(inputs)
-
-    def viewer_only_build(
-        received: daemon._RestoreWorkerInput, _stop: daemon.StopSignal
-    ) -> CandidateManifest:
-        assert received == inputs
-        return _candidate("viewer-only")
-
-    monkeypatch.setattr(Path, "read_bytes", audited_read_bytes)
-    monkeypatch.setattr(daemon, "_build_restore_proof", viewer_only_build)
-
-    daemon._proof_worker_entry(
-        inputs,
-        cast(daemon.StopSignal, object()),
-        cast(daemon._WorkerQueue, Queue()),
+    environment = restricted_process_env()
+    assert not any(name.startswith(("AVA_", "GOOGLE_", "PG")) for name in environment)
+    script = (
+        "import sys; import services.pitr.restore_worker; "
+        "forbidden={'shared.config','services.pitr.restore_publish_store'}; "
+        "raise SystemExit(1 if forbidden & set(sys.modules) else 0)"
     )
-
-    assert messages == [(True, _candidate("viewer-only").to_json())]
+    completed = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[2],
+        env=environment,
+        check=False,
+    )
+    assert completed.returncode == 0
 
 
 def _blocking_worker(
