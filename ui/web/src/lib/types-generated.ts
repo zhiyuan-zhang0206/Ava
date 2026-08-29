@@ -3099,14 +3099,14 @@ export interface paths {
          *     reconstruct the absolute path. fs-neutral so gateway fs (e.g.
          *     /Users/x) and agent-runner fs (/home/y) being different still works.
          *
-         *     Only the gateway hosts the milvus instance, so this endpoint
-         *     always runs on the gateway; agent-runner SDK calls reach this
+         *     Only the gateway hosts the search backend (milvus by default), so
+         *     this endpoint always runs on the gateway; agent-runner SDK calls reach this
          *     handler via the gateway URL they were configured with (CF Tunnel /
          *     private network) and never enter via a local agent-runner gateway
          *     (agent-runners run no gateway process).
          *
          *     Raises:
-         *         IndexerUnavailable: embedder API / milvus backend unreachable, or the
+         *         IndexerUnavailable: embedder API / search backend unreachable, or the
          *             search exceeded its deadline (wire 503)
          */
         post: operations["post_memory_search_api_memory_search_post"];

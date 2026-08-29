@@ -32,33 +32,26 @@ class TestPrimaryPath:
         (tmp_path / "notes" / "foo.md").write_text("x")
         (tmp_path / "bar.md").write_text("y")
 
-        # stub embedder/index to avoid real Gemini / milvus calls
+        # stub embedder/backend to avoid real Gemini / milvus calls
+        import services.memory_indexer.backends.factory as _factory
         import services.memory_indexer.embedder as _embedder
-        import services.memory_indexer.index as _index
 
         async def _fake_embed(_q: str) -> list[float]:
             return [0.0] * 768
 
         monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
 
-        class _FakeClient:
-            async def close(self) -> None:
-                pass
+        class _FakeBackend:
+            async def search_topk_async(
+                self, _vec: object, _k: int, *, timeout: float
+            ) -> list[str]:
+                assert timeout > 0  # the handler must hand the backend a real deadline
+                return [
+                    str(tmp_path / "notes" / "foo.md"),
+                    str(tmp_path / "bar.md"),
+                ]
 
-        async def _fake_connect(*, timeout: float) -> _FakeClient:
-            assert timeout > 0  # the handler must hand milvus a real deadline
-            return _FakeClient()
-
-        async def _fake_search(
-            _client: object, _vec: object, _k: int, *, timeout: float
-        ) -> list[str]:
-            return [
-                str(tmp_path / "notes" / "foo.md"),
-                str(tmp_path / "bar.md"),
-            ]
-
-        monkeypatch.setattr(_index, "connect_async", _fake_connect)
-        monkeypatch.setattr(_index, "search_topk_async", _fake_search)
+        monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
         with TestClient(app) as client:
             resp = client.post("/api/memory/search", json={"query": "test", "k": 5})
@@ -105,33 +98,26 @@ title: No Description
         )
         (tmp_path / "no_frontmatter.md").write_text("# Just a heading\n\nNo YAML.")
 
+        import services.memory_indexer.backends.factory as _factory
         import services.memory_indexer.embedder as _embedder
-        import services.memory_indexer.index as _index
 
         async def _fake_embed(_q: str) -> list[float]:
             return [0.0] * 768
 
         monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
 
-        class _FakeClient:
-            async def close(self) -> None:
-                pass
+        class _FakeBackend:
+            async def search_topk_async(
+                self, _vec: object, _k: int, *, timeout: float
+            ) -> list[str]:
+                assert timeout > 0  # the handler must hand the backend a real deadline
+                return [
+                    str(tmp_path / "with_desc.md"),
+                    str(tmp_path / "no_desc.md"),
+                    str(tmp_path / "no_frontmatter.md"),
+                ]
 
-        async def _fake_connect(*, timeout: float) -> _FakeClient:
-            assert timeout > 0  # the handler must hand milvus a real deadline
-            return _FakeClient()
-
-        async def _fake_search(
-            _client: object, _vec: object, _k: int, *, timeout: float
-        ) -> list[str]:
-            return [
-                str(tmp_path / "with_desc.md"),
-                str(tmp_path / "no_desc.md"),
-                str(tmp_path / "no_frontmatter.md"),
-            ]
-
-        monkeypatch.setattr(_index, "connect_async", _fake_connect)
-        monkeypatch.setattr(_index, "search_topk_async", _fake_search)
+        monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
         with TestClient(app) as client:
             resp = client.post("/api/memory/search", json={"query": "test", "k": 3})
@@ -193,23 +179,25 @@ title: No Description
         assert resp.status_code == 503
         assert resp.json()["reason"] == "indexer_unavailable"
 
-    def test_primary_milvus_connect_failure_raises_indexer_unavailable(
+    def test_primary_backend_failure_raises_indexer_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """milvus connect() raises → IndexerUnavailable (wire 503)."""
+        """backend raises (e.g. milvus connect refused) → IndexerUnavailable (wire 503)."""
+        import services.memory_indexer.backends.factory as _factory
         import services.memory_indexer.embedder as _embedder
-        import services.memory_indexer.index as _index
 
         async def _fake_embed(_q: str) -> list[float]:
             return [0.0] * 768
 
         monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
 
-        async def _connect_fails(*, timeout: float) -> Any:
-            raise RuntimeError("connection refused 19530")
+        class _BoomBackend:
+            async def search_topk_async(
+                self, _vec: object, _k: int, *, timeout: float
+            ) -> list[str]:
+                raise RuntimeError("connection refused 19530")
 
-        monkeypatch.setattr(_index, "connect_async", _connect_fails)
-        monkeypatch.setattr(_index, "server_uri", lambda: "http://127.0.0.1:19530")
+        monkeypatch.setattr(_factory, "get_backend", _BoomBackend)
 
         with TestClient(app) as client:
             resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
@@ -690,8 +678,8 @@ class TestEventLoopIsolation:
         import time
 
         import gateway.routers.memory as _gw_memory
+        import services.memory_indexer.backends.factory as _factory
         import services.memory_indexer.embedder as _embedder
-        import services.memory_indexer.index as _index
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
         (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n")
@@ -705,19 +693,12 @@ class TestEventLoopIsolation:
 
         monkeypatch.setattr(_embedder, "embed_query_async", _slow_embed)
 
-        class _FakeClient:
-            async def close(self) -> None:
-                pass
+        class _FakeBackend:
+            async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[str]:
+                assert timeout > 0  # the handler must hand the backend a real deadline
+                return [str(tmp_path / "a.md")]
 
-        async def _fake_connect(*, timeout: float) -> _FakeClient:
-            assert timeout > 0  # the handler must hand milvus a real deadline
-            return _FakeClient()
-
-        async def _fake_search(_c: object, _v: object, _k: int, *, timeout: float) -> list[str]:
-            return [str(tmp_path / "a.md")]
-
-        monkeypatch.setattr(_index, "connect_async", _fake_connect)
-        monkeypatch.setattr(_index, "search_topk_async", _fake_search)
+        monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
         with TestClient(app) as client:
             outcome: dict[str, object] = {}
@@ -764,8 +745,8 @@ async def _never_returns(*_args: object, **_kwargs: object) -> list[str]:
 def _stub_search_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, search: Any) -> None:
     """Point the search handler at a stubbed backend and a short deadline."""
     import gateway.routers.memory as _gw_memory
+    import services.memory_indexer.backends.factory as _factory
     import services.memory_indexer.embedder as _embedder
-    import services.memory_indexer.index as _index
     from shared.config import settings
 
     monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
@@ -781,16 +762,12 @@ def _stub_search_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, sea
     async def _fake_embed(_q: str) -> list[float]:
         return [0.0] * 768
 
-    class _FakeClient:
-        async def close(self) -> None:
-            pass
-
-    async def _fake_connect(**_kwargs: object) -> _FakeClient:
-        return _FakeClient()
+    class _StubBackend:
+        async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[str]:
+            return await search(_v, _k, timeout=timeout)
 
     monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
-    monkeypatch.setattr(_index, "connect_async", _fake_connect)
-    monkeypatch.setattr(_index, "search_topk_async", search)
+    monkeypatch.setattr(_factory, "get_backend", _StubBackend)
 
 
 def _asgi_client() -> httpx.AsyncClient:
@@ -895,7 +872,7 @@ class TestWedgedBackendReleasesPermits:
         which await it stopped at.
         """
         import gateway.routers.memory as _gw_memory
-        import services.memory_indexer.index as _index
+        import services.memory_indexer.backends.factory as _factory
 
         _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
 
@@ -910,10 +887,13 @@ class TestWedgedBackendReleasesPermits:
                 with pytest.raises(asyncio.CancelledError):
                     await task
 
-            async def _healthy(*_args: object, **_kwargs: object) -> list[str]:
-                return [str(tmp_path / "a.md")]
+            class _Healthy:
+                async def search_topk_async(
+                    self, _v: object, _k: int, *, timeout: float
+                ) -> list[str]:
+                    return [str(tmp_path / "a.md")]
 
-            monkeypatch.setattr(_index, "search_topk_async", _healthy)
+            monkeypatch.setattr(_factory, "get_backend", _Healthy)
             recovered = await asyncio.wait_for(_search(client), timeout=10)
 
         # A 503 here would mean the permits never came back and this request
@@ -924,7 +904,7 @@ class TestWedgedBackendReleasesPermits:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Enough wedged requests to pin every permit, then a healthy one."""
-        import services.memory_indexer.index as _index
+        import services.memory_indexer.backends.factory as _factory
 
         _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
 
@@ -934,10 +914,13 @@ class TestWedgedBackendReleasesPermits:
                 timeout=10,
             )
 
-            async def _healthy(*_args: object, **_kwargs: object) -> list[str]:
-                return [str(tmp_path / "a.md")]
+            class _Healthy:
+                async def search_topk_async(
+                    self, _v: object, _k: int, *, timeout: float
+                ) -> list[str]:
+                    return [str(tmp_path / "a.md")]
 
-            monkeypatch.setattr(_index, "search_topk_async", _healthy)
+            monkeypatch.setattr(_factory, "get_backend", _Healthy)
             recovered = await asyncio.wait_for(_search(client), timeout=10)
 
         assert recovered.status_code == 200

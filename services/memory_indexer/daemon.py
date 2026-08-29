@@ -1,21 +1,25 @@
-"""Memory indexer daemon — `watchdog` Observer + Gemini embed + Milvus upsert.
+"""Memory indexer daemon — `watchdog` Observer + Gemini embed + backend upsert.
 
 After startup:
-  1. Cold start: full scan `~/.ava/memory/**/*.md`, diff against milvus
-     index, embed missing / changed files, prune deleted entries.
+  1. Cold start: full scan `~/.ava/memory/**/*.md`, diff against the
+     backend index, embed missing / changed files, prune deleted entries.
   2. Start watchdog Observer to monitor fs events, push dirty paths to
      a queue.
   3. Main loop drains the queue every second (set dedup), batch
      embed + upsert / delete.
 
-Backed by the standalone milvus-lite server in the `services/milvus/`
-session; URI `AVA_MILVUS_URI` (default `http://127.0.0.1:19530`).
+Backed by the configured memory search backend
+(`AVA_MEMORY_SEARCH_BACKEND`, default `milvus` — the standalone
+milvus-lite server in the `services/milvus/` session, URI
+`AVA_MILVUS_URI` = `http://127.0.0.1:19530`). Switching backends is one
+env var + a restart; the cold-start scan rebuilds the index on the new
+backend.
 
 Each file indexes as 0-or-1 description row (frontmatter `description`,
 embedded on its own so short entity-bearing lines are not diluted by a
 long body) + N body-chunk rows (~1800 chars each, ~200-char overlap,
-paragraph-boundary aware). `index.search_topk` aggregates chunk hits back
-to paths, so search callers see no difference.
+paragraph-boundary aware). The backend's `search_topk` aggregates chunk
+hits back to paths, so search callers see no difference.
 
 API key comes from env `GEMINI_API_KEY`. `~/.ava/.env` is already the
 single source of secrets.
@@ -49,12 +53,18 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
-from pymilvus import MilvusClient
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.memory_indexer import embedder, index
+from services.memory_indexer import embedder
+from services.memory_indexer.backends.base import (
+    KIND_BODY,
+    KIND_DESC,
+    MemorySearchBackend,
+    content_hash,
+)
+from services.memory_indexer.backends.factory import get_backend
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -248,13 +258,13 @@ def _file_rows(content: str) -> list[tuple[str, int, str]]:
     description, body = _split_note(content)
     rows: list[tuple[str, int, str]] = []
     if description:
-        rows.append((index.KIND_DESC, 0, description))
+        rows.append((KIND_DESC, 0, description))
     for i, chunk in enumerate(_chunk_body(body)):
-        rows.append((index.KIND_BODY, i, chunk))
+        rows.append((KIND_BODY, i, chunk))
     return rows
 
 
-def _process_paths(client: MilvusClient, paths: set[Path]) -> None:
+def _process_paths(backend: MemorySearchBackend, paths: set[Path]) -> None:
     """Process a batch of dirty paths: missing/foreign -> delete; else embed+upsert.
 
     A path is deleted when it is missing on disk OR when it lies outside the
@@ -270,12 +280,12 @@ def _process_paths(client: MilvusClient, paths: set[Path]) -> None:
 
     Sync function — the caller uses ``asyncio.to_thread`` so the event
     loop is not blocked from serving the health probe (`/healthz`).
-    The pymilvus client uses gRPC internally and is cross-thread safe.
+    Backends must be cross-thread safe (the milvus gRPC client is).
     """
     root = _MEMORY_ROOT.resolve()
     to_delete: list[Path] = []
     to_embed: list[tuple[Path, float, str, str]] = []  # (path, mtime, hash, content)
-    existing_meta = index.all_meta(client)
+    existing_meta = backend.all_meta()
     for p in paths:
         if not p.exists() or not p.is_file() or not p.is_relative_to(root):
             to_delete.append(p)
@@ -286,14 +296,14 @@ def _process_paths(client: MilvusClient, paths: set[Path]) -> None:
             _log.warning("[indexer] skip %s: %r", p, exc)
             continue
         mtime = p.stat().st_mtime
-        hash_ = index.content_hash(content)
+        hash_ = content_hash(content)
         prev = existing_meta.get(str(p))
         if prev is not None and prev[1] == hash_:
             continue  # content unchanged, mtime touch only
         to_embed.append((p, mtime, hash_, content))
 
     for p in to_delete:
-        index.delete(client, str(p))
+        backend.delete(str(p))
         _log.info("[indexer] deleted %s", p)
 
     # Flatten each dirty file into its chunk rows (desc + body chunks);
@@ -313,13 +323,13 @@ def _process_paths(client: MilvusClient, paths: set[Path]) -> None:
         vectors = embedder.embed_documents(texts)
         last_path: str | None = None
         for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(batch, vectors, strict=True):
-            index.upsert(client, str(path), mtime, hash_, vector, kind=kind, chunk_idx=chunk_idx)
+            backend.upsert(str(path), mtime, hash_, vector, kind=kind, chunk_idx=chunk_idx)
             if str(path) != last_path:
                 _log.info("[indexer] indexed %s", path)
                 last_path = str(path)
 
 
-def _cold_start_reconcile(client: MilvusClient) -> None:
+def _cold_start_reconcile(backend: MemorySearchBackend) -> None:
     """Diff disk vs index db; fill in gaps. Runs once on daemon start (in a thread executor).
 
     Rows whose path is outside the watched root are pruned even though the
@@ -328,7 +338,7 @@ def _cold_start_reconcile(client: MilvusClient) -> None:
     surface as stale duplicates in search results.
     """
     disk = _scan_disk(_MEMORY_ROOT)
-    indexed = index.all_meta(client)
+    indexed = backend.all_meta()
     indexed_paths = {Path(p) for p in indexed}
     disk_paths = set(disk.keys())
     root = _MEMORY_ROOT.resolve()
@@ -352,7 +362,7 @@ def _cold_start_reconcile(client: MilvusClient) -> None:
     if dirty:
         _log.info("[indexer] cold-start reconcile: %d dirty paths", len(dirty))
         try:
-            _process_paths(client, dirty)
+            _process_paths(backend, dirty)
         except embedder.EmbeddingAPIError as exc:
             _log.error(
                 "[indexer] cold-start embed failed: %r — daemon continues; watchdog re-triggers later",
@@ -398,11 +408,11 @@ def _refresh_gateway_checkout() -> None:
 
 
 async def _drain_loop(
-    client: MilvusClient, dirty_queue: queue.Queue[Path], liveness: Liveness
+    backend: MemorySearchBackend, dirty_queue: queue.Queue[Path], liveness: Liveness
 ) -> None:
     """Main loop: every _LOOP_INTERVAL_S drain queue, dedup, batch process.
 
-    `_process_paths` blocks (network embed + milvus gRPC); use
+    `_process_paths` blocks (network embed + backend write calls); use
     ``asyncio.to_thread`` so the event loop can still serve the health
     probe during embedding. Every `_CHECKOUT_REFRESH_INTERVAL_S` the loop
     also runs the gateway-checkout refresh safety net.
@@ -424,7 +434,7 @@ async def _drain_loop(
         if not batch:
             continue
         try:
-            await asyncio.to_thread(_process_paths, client, batch)
+            await asyncio.to_thread(_process_paths, backend, batch)
             liveness.beat()  # embed batch returned -> loop is making progress
         except embedder.EmbeddingAPIError as exc:
             # Name the blast radius: which/how many paths lost this round.
@@ -437,31 +447,39 @@ async def _drain_loop(
             )
 
 
-async def _connect_milvus_with_retry(deadline_s: float = 30.0) -> MilvusClient:
-    """Connect to milvus at daemon startup — `ava start` spawns the
-    milvus session and the memory_indexer session in order; milvus-lite
-    server initialization takes ~1-3s, and within that race window
-    `index.connect()` may hit connection refused. This function retries
-    every 2s up to deadline to give milvus time to come up.
+async def _connect_backend_with_retry(deadline_s: float = 30.0) -> MemorySearchBackend:
+    """Connect to the configured backend at daemon startup — `ava start`
+    spawns the storage service (e.g. the milvus session) and the
+    memory_indexer session in order; server initialization takes a few
+    seconds, and within that race window connect may hit connection
+    refused. This function retries every 2s up to deadline to give the
+    backend time to come up.
 
-    Runtime milvus calls (`_process_paths` etc.) do **not** use this
-    retry — those are watchdog's responsibility (if milvus dies, the
-    healthcheck restarts it; if memory_indexer itself crashes and
-    exits, the healthcheck spawns a fresh process that goes through
+    Runtime backend calls (`_process_paths` etc.) do **not** use this
+    retry — those are the healthcheck's responsibility (if the backend
+    dies, the healthcheck restarts it; if memory_indexer itself crashes
+    and exits, the healthcheck spawns a fresh process that goes through
     this retry).
     """
+    backend = get_backend()
     start = time.time()
     last_exc: Exception | None = None
     while time.time() - start < deadline_s:
         try:
-            return await asyncio.to_thread(index.connect)
+            await asyncio.to_thread(backend.connect)
+            return backend
         except Exception as exc:
             last_exc = exc
             _log.info(
-                "[indexer] milvus not ready (%s: %s), retry in 2s...", type(exc).__name__, exc
+                "[indexer] %s backend not ready (%s: %s), retry in 2s...",
+                backend.name,
+                type(exc).__name__,
+                exc,
             )
             await asyncio.sleep(2.0)
-    raise RuntimeError(f"milvus unreachable after {deadline_s}s: {last_exc}") from last_exc
+    raise RuntimeError(
+        f"{backend.name} backend unreachable after {deadline_s}s: {last_exc}"
+    ) from last_exc
 
 
 async def run() -> None:
@@ -484,8 +502,8 @@ async def run() -> None:
     _log.info("[indexer] healthz listening on :%s", health_port("memory_indexer"))
 
     _MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
-    client = await _connect_milvus_with_retry()
-    _log.info("[indexer] connected to milvus %s", index.server_uri())
+    backend = await _connect_backend_with_retry()
+    _log.info("[indexer] connected to %s backend", backend.name)
     dirty_queue: queue.Queue[Path] = queue.Queue()
     handler = _MarkdownEventHandler(dirty_queue)
     observer = Observer()
@@ -494,13 +512,13 @@ async def run() -> None:
     _log.info("[indexer] watching %s", _MEMORY_ROOT)
 
     try:
-        await asyncio.to_thread(_cold_start_reconcile, client)
-        await _drain_loop(client, dirty_queue, liveness)
+        await asyncio.to_thread(_cold_start_reconcile, backend)
+        await _drain_loop(backend, dirty_queue, liveness)
     finally:
         observer.stop()
         observer.join(timeout=5.0)
         with suppress(Exception):
-            client.close()
+            backend.close()
         await stop_health_server(health)
         _remove_pidfile()
         _log.info("[indexer] daemon stopped")
@@ -510,7 +528,7 @@ def main() -> None:
     """Entry point: log init + install the graceful-stop signal + run asyncio.
 
     Does not call `assert_schema_current` — memory_indexer does not
-    read the main DB (only via milvus gRPC); there is no main-DB
+    read the main DB (only via the search backend); there is no main-DB
     schema-drift surface.
     """
     init_gateway_process(name="memory_indexer")

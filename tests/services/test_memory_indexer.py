@@ -17,6 +17,14 @@ import numpy as np
 import pytest
 
 from services.memory_indexer import daemon, embedder, index
+from services.memory_indexer.backends.milvus import MilvusBackend
+
+
+def _backend(client: Any) -> MilvusBackend:
+    """Wrap the raw milvus fixture client in the backend adapter — the
+    daemon now talks to backends, not raw clients."""
+    return MilvusBackend(client=client)  # pyright: ignore[reportArgumentType]
+
 
 # ── embedder (httpx REST mock) ───────────────────────────────────────────
 
@@ -401,7 +409,7 @@ def test_process_paths_embeds_new_files(
         return np.array([[float(len(t))] * embedder.DIM for t in texts], dtype=np.float32)
 
     monkeypatch.setattr(embedder, "embed_documents", fake_embed)
-    daemon._process_paths(milvus_client, {f1.resolve(), f2.resolve()})  # pyright: ignore[reportUnknownArgumentType]
+    daemon._process_paths(_backend(milvus_client), {f1.resolve(), f2.resolve()})
     meta = index.all_meta(milvus_client)  # pyright: ignore[reportUnknownArgumentType]
     assert str(f1.resolve()) in meta
     assert str(f2.resolve()) in meta
@@ -423,10 +431,10 @@ def test_process_paths_skips_unchanged_hash(
         return np.array([[1.0] * embedder.DIM for _ in texts], dtype=np.float32)
 
     monkeypatch.setattr(embedder, "embed_documents", fake_embed)
-    daemon._process_paths(milvus_client, {f.resolve()})  # pyright: ignore[reportUnknownArgumentType]
+    daemon._process_paths(_backend(milvus_client), {f.resolve()})
     assert call_count == 1
 
-    daemon._process_paths(milvus_client, {f.resolve()})  # pyright: ignore[reportUnknownArgumentType]
+    daemon._process_paths(_backend(milvus_client), {f.resolve()})
     assert call_count == 1  # hash unchanged, no re-embed
 
 
@@ -436,7 +444,7 @@ def test_process_paths_deletes_missing_files(tmp_path: Path, milvus_client) -> N
         tmp_path / "ghost_nonexistent.md"
     )  # under tmp_path, definitely does not exist (never written)
     index.upsert(milvus_client, ghost, 1.0, "h", _vec(0))  # pyright: ignore[reportUnknownArgumentType]
-    daemon._process_paths(milvus_client, {Path(ghost)})  # pyright: ignore[reportUnknownArgumentType]
+    daemon._process_paths(_backend(milvus_client), {Path(ghost)})
     assert index.all_meta(milvus_client) == {}  # pyright: ignore[reportUnknownArgumentType]
 
 
@@ -498,7 +506,7 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     foreign.write_text("content")
 
     index.upsert(milvus_client, str(foreign), 1.0, "h", _vec(0))  # pyright: ignore[reportUnknownArgumentType]
-    daemon._process_paths(milvus_client, {foreign})  # pyright: ignore[reportUnknownArgumentType]
+    daemon._process_paths(_backend(milvus_client), {foreign})
     assert index.all_meta(milvus_client) == {}  # pyright: ignore[reportUnknownArgumentType]
 
 
@@ -526,7 +534,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
         return np.array([[1.0] * embedder.DIM for _ in texts], dtype=np.float32)
 
     monkeypatch.setattr(embedder, "embed_documents", fake_embed)
-    daemon._cold_start_reconcile(milvus_client)  # pyright: ignore[reportUnknownArgumentType]
+    daemon._cold_start_reconcile(_backend(milvus_client))
     meta = index.all_meta(milvus_client)  # pyright: ignore[reportUnknownArgumentType]
     assert str(foreign.resolve()) not in meta
     assert str(watched.resolve()) in meta
@@ -681,7 +689,7 @@ def test_process_paths_indexes_desc_and_body_chunks(
         return np.array([[float(len(t))] * embedder.DIM for t in texts], dtype=np.float32)
 
     monkeypatch.setattr(embedder, "embed_documents", fake_embed)
-    daemon._process_paths(milvus_client, {f.resolve()})  # pyright: ignore[reportUnknownArgumentType]
+    daemon._process_paths(_backend(milvus_client), {f.resolve()})
     assert str(f.resolve()) in index.all_meta(milvus_client)  # pyright: ignore[reportUnknownArgumentType]
     rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         collection_name=index._COLLECTION,
