@@ -85,7 +85,7 @@ def _insert_heartbeat_inbound(agent_id: int) -> None:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, 'Heartbeat.', 'heartbeat', 'system')",
+            "VALUES (%s, 'Heartbeat. Find something to do, or pause your heartbeat for some time.', 'heartbeat', 'system')",
             (agent_id,),
         )
         conn.commit()
