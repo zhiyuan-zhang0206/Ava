@@ -359,6 +359,20 @@ def test_prune_with_snapshot_alone_keeps_newest_snapshot(bdir: Path) -> None:
     assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
 
 
+def test_prune_bounds_terminal_pitr_activation_snapshots(bdir: Path) -> None:
+    activations = [
+        _touch(
+            bdir,
+            f"ava-2026060{day}T100000Z.pitr-activation-"
+            f"00000000-0000-0000-0000-00000000000{day}.dump.enc",
+        )
+        for day in range(1, backup.ACTIVATION_KEEP + 2)
+    ]
+    backup._prune(bdir)
+    assert not activations[0].exists()
+    assert all(path.exists() for path in activations[-backup.ACTIVATION_KEEP :])
+
+
 def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A pre-update snapshot carries the kind segment so prune can classify it."""
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
@@ -383,6 +397,32 @@ def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.Mo
     assert path.name == "ava-20260609T190000Z.pre-update.dump.enc"
     assert backup._is_pre_update(path)
     assert backup._is_pre_update(_touch(bdir, "ava-20260609T190000Z.dump.gz.enc")) is False
+
+
+def test_run_backup_pitr_activation_has_independent_kind(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
+        output_flag = "--file" if cmd[0].endswith("pg_dump") else "-out"
+        Path(cmd[cmd.index(output_flag) + 1]).write_bytes(b"backup")
+        return _Ok()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+    path = backup.run_backup(
+        datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        db_url="dbname=ava",
+        pitr_activation="11111111-1111-1111-1111-111111111111",
+    )
+    assert path.name == (
+        "ava-20260609T190000Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc"
+    )
+    assert backup._is_activation(path)
 
 
 def test_run_backup_failure_leaves_no_files(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:

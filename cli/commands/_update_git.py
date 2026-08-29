@@ -584,7 +584,10 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     # the same-second target between creation and verification.
     with backup_lock(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S):
         try:
-            dump_path = run_backup(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S, pre_update=True)
+            dump_path = run_backup(
+                timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
+                pre_update=True,
+            )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 "could not create pre-update data snapshot: pg_dump timed out after "
@@ -602,6 +605,36 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
         # is invisible in the log (run_backup writes to its own daemon stream)
         # and an operator can mistake it for an unscheduled backup.
         print(f"→ pre-update data snapshot: {dump_path} (verified)")
+        return dump_path
+
+
+def snapshot_pre_activation_data(*, operation_id: str, db_url: str) -> Path:
+    """Create the mandatory logical recovery floor before first PITR activation.
+
+    Unlike the rollout helper above this is intentionally unconditional: the
+    activation rollout cannot be protected by WAL archiving that is still off.
+    """
+    from services.backup import backup_lock, run_backup
+
+    with backup_lock(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S):
+        try:
+            dump_path = run_backup(
+                timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
+                db_url=db_url,
+                pitr_activation=operation_id,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                "could not create pre-activation data snapshot: pg_dump timed out after "
+                f"{_PRE_UPDATE_DUMP_TIMEOUT_S:.0f}s"
+            ) from None
+        except Exception as exc:
+            raise RuntimeError(
+                "could not create pre-activation data snapshot: "
+                f"pg_dump failed ({type(exc).__name__})"
+            ) from None
+        _verify_snapshot_artifact(dump_path)
+        print(f"→ pre-activation data snapshot: {dump_path} (verified)")
         return dump_path
 
 

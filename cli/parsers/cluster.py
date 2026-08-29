@@ -60,6 +60,24 @@ def _h_cluster_recover(_args: argparse.Namespace) -> int:
     return cmd_cluster_recover()
 
 
+def _h_cluster_pitr_activate(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_activate
+
+    return cmd_pitr_activate(origin=args.origin)
+
+
+def _h_cluster_pitr_status(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_status
+
+    return cmd_pitr_status()
+
+
+def _h_cluster_pitr_rollback(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_rollback
+
+    return cmd_pitr_rollback()
+
+
 def _h_cluster_ls(_args: argparse.Namespace) -> int:
     from cli.commands import cmd_cluster_ls
 
@@ -152,6 +170,9 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         _h_cluster_health_probe_unregister,
         _h_cluster_ls,
         _h_cluster_pause,
+        _h_cluster_pitr_activate,
+        _h_cluster_pitr_rollback,
+        _h_cluster_pitr_status,
         _h_cluster_recover,
         _h_cluster_restart,
         _h_cluster_resume,
@@ -175,6 +196,27 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "gateway assembles it + probes each agent-runner server-side)",
     )
     cluster_status_p.set_defaults(func=_h_cluster_status)
+    pitr_p = cluster_sub.add_parser(
+        "pitr",
+        help="[cluster] explicit physical-backup activation lifecycle",
+    )
+    pitr_sub = pitr_p.add_subparsers(dest="pitr_cmd", required=True)
+    pitr_status_p = pitr_sub.add_parser(
+        "status", help="show the durable activation phase and original start time"
+    )
+    pitr_status_p.set_defaults(func=_h_cluster_pitr_status)
+    pitr_activate_p = pitr_sub.add_parser(
+        "activate",
+        help="validate shadow readiness and create the mandatory first-rollout logical snapshot",
+    )
+    pitr_activate_p.add_argument(
+        "--origin", default="cli", help="operator/agent identity recorded in the durable operation"
+    )
+    pitr_activate_p.set_defaults(func=_h_cluster_pitr_activate)
+    pitr_rollback_p = pitr_sub.add_parser(
+        "rollback", help="roll back activation without deleting any backup object"
+    )
+    pitr_rollback_p.set_defaults(func=_h_cluster_pitr_rollback)
     for flag, help_text in (
         (
             "mark-staging",

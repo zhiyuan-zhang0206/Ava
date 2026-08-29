@@ -33,6 +33,7 @@ A cluster's identity **is** its home path, so every verb that names one takes
 | `recover` | clear a stranded update lock + pause; refuses while the holder pid lives |
 | `health-probe-register` / `health-probe-unregister` | cluster-level cron |
 | `watchdog-probe --role <cap>` | 60s OS job respawning that capability's dead watchdog — ends the who-watches-the-watchdog recursion (`-register` / `-unregister` variants) |
+| `pitr status\|activate\|rollback` | durable physical-backup activation lifecycle; the first delivery validates shadow readiness and creates the mandatory logical recovery floor, then stops before PostgreSQL mutation |
 
 ## Notes
 

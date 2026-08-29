@@ -249,3 +249,38 @@ def test_pre_update_data_snapshot_propagates_pre_cutover_target_error(
 
     with pytest.raises(ValueError, match="pre-cutover target"):
         _git.snapshot_pre_update_data("TARGETSHA")
+
+
+def test_pre_activation_snapshot_uses_activation_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The pre-activation logical floor carries the PITR-activation kind — the
+    marker prune exempts from rotation. QA #944 block: the kind markers were
+    swapped between the rollout and activation helpers; the strict fake
+    signature trips (TypeError) if `pitr_activation` is ever replaced by the
+    pre-update marker again."""
+    dump = tmp_path / "pitr-activation.dump"
+    dump.write_bytes(b"custom-pg-dump")
+    calls: list[float] = []
+    verified: list[Path] = []
+
+    def _run_backup(*, timeout_s: float, pitr_activation: str, db_url: str) -> Path:
+        calls.append(timeout_s)
+        assert pitr_activation == "11111111-1111-1111-1111-111111111111"
+        assert db_url == "dbname=ava"
+        return dump
+
+    monkeypatch.setattr(backup, "run_backup", _run_backup)
+    monkeypatch.setattr(_git, "_verify_snapshot_artifact", verified.append)
+
+    assert (
+        _git.snapshot_pre_activation_data(
+            operation_id="11111111-1111-1111-1111-111111111111",
+            db_url="dbname=ava",
+        )
+        == dump
+    )
+    assert calls == [_git._PRE_UPDATE_DUMP_TIMEOUT_S]
+    assert verified == [dump]
+    out = capsys.readouterr().out
+    assert f"→ pre-activation data snapshot: {dump} (verified)" in out
