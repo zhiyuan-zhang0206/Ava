@@ -51,15 +51,16 @@ def test_generate_config_bakes_settings(monkeypatch: pytest.MonkeyPatch, tmp_pat
         "ava_home: $AVA_HOME\ntempo: $TEMPO_ENDPOINT\nloki: $LOKI_BASE\nprom: $PROM_BASE\nret: $RETENTION_DAYS\n",
         encoding="utf-8",
     )
-    obs = pytest.MonkeyPatch()
-    obs.setattr(
+    monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://10.0.0.2:14318"
     )
-    obs.setattr("shared.config.settings.observability.telemetry_loki_url", "http://10.0.0.2:3100")
-    obs.setattr(
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_loki_url", "http://10.0.0.2:3100"
+    )
+    monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.2:9090"
     )
-    obs.setattr("shared.config.settings.observability.trace_retention_days", 7)
+    monkeypatch.setattr("shared.config.settings.observability.trace_retention_days", 7)
 
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
     assert "ava_home: /home/u/.ava" in out
@@ -82,22 +83,25 @@ def test_generate_config_two_state_observability_url(
         "ava_home: $AVA_HOME\ntempo: $TEMPO_ENDPOINT\nloki: $LOKI_BASE\nprom: $PROM_BASE\n",
         encoding="utf-8",
     )
-    obs = pytest.MonkeyPatch()
-    obs.setattr(
+    monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
-    obs.setattr("shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100")
-    obs.setattr(
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+    )
+    monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    obs.setattr("shared.config.settings.observability.observability_url", "http://100.78.137.46")
+    monkeypatch.setattr(
+        "shared.config.settings.observability.observability_url", "http://100.78.137.46"
+    )
 
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
     assert "loki: http://100.78.137.46:3100/otlp" in out
     assert "prom: http://100.78.137.46:9090/api/v1/otlp" in out
     assert "tempo: http://127.0.0.1:14318" in out
 
-    obs.setattr("shared.config.settings.observability.observability_url", "")
+    monkeypatch.setattr("shared.config.settings.observability.observability_url", "")
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
     assert "loki: http://127.0.0.1:3100/otlp" in out
     assert "prom: http://127.0.0.1:9090/api/v1/otlp" in out
@@ -157,15 +161,16 @@ def test_ensure_skips_download_when_version_matches(
         lambda _tag, _dir: downloaded.append(_tag),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
     )
 
-    obs = pytest.MonkeyPatch()
-    obs.setattr(
+    monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
-    obs.setattr("shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100")
-    obs.setattr(
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+    )
+    monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    obs.setattr("shared.config.settings.observability.trace_retention_days", 3)
+    monkeypatch.setattr("shared.config.settings.observability.trace_retention_days", 3)
 
     oc.ensure_otel_collector(repo, tmp_path, roles=None)
     assert downloaded == []
@@ -188,15 +193,16 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
         lambda tag, _d: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
     )
 
-    obs = pytest.MonkeyPatch()
-    obs.setattr(
+    monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
-    obs.setattr("shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100")
-    obs.setattr(
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+    )
+    monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    obs.setattr("shared.config.settings.observability.trace_retention_days", 3)
+    monkeypatch.setattr("shared.config.settings.observability.trace_retention_days", 3)
 
     oc.ensure_otel_collector(repo, tmp_path, roles=None)
     assert len(downloaded) == 1
