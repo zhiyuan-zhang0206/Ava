@@ -94,7 +94,7 @@ def _add_pending_inbound(db: psycopg.Connection, aid: int, kind: str = "heartbea
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, %s, %s, 'system')",
-            (aid, "Heartbeat. Find something to do, or pause your heartbeat for some time.", kind),
+            (aid, "Heartbeat.", kind),
         )
     db.commit()
 
