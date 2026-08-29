@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
+from ops.runner_mode import runner_mode
 from shared.cluster import frontend_service_cmd
 from shared.config import settings
 from shared.daemon_health import DaemonProbe, health_port, probe_daemon, probe_home
@@ -712,43 +713,9 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return "disabled (AVA_PITR_ENABLED off)"
     if session == "im-bridge" and not settings.services.im_bridge_enabled:
         return "disabled (AVA_IM_BRIDGE_ENABLED off)"
-    if session == "agent-host" and _runner_mode() != "hosted":
+    if session == "agent-host" and runner_mode() != "hosted":
         return "disabled (AVA_RUNNER_MODE is process)"
     return None
-
-
-def _runner_mode() -> str:
-    """The cluster's runner mode, read so that it CANNOT raise.
-
-    Every other gate above rides `_gate_reason`'s fail-open `except`, which is
-    right for the incident that installed it (2026-08-08: a plugin gate read a
-    config domain its process profile had popped, raised, and killed the whole
-    watchdog on its first tick — no healthchecks ran until a respawn). Failing
-    open there means "run the service", and running one service too many is a
-    smaller harm than a supervisor that runs none.
-
-    Here the direction is inverted. Failing open would START the hosted runner on
-    a cluster that never opted in, where every agent already has its own process:
-    the host would become a second claimant for the same inbound rows, and the
-    claim CAS would hide the duplication as ordinary contention rather than
-    surface it. So this gate must fail CLOSED — and rather than trust an
-    `except` to be written correctly at every future call site, it is made
-    structurally unable to raise: any failure to read the setting resolves to
-    `"process"`, which gates the service out. `_gate_reason`'s own fail-open
-    wrapper then never has anything to catch from this branch.
-
-    `services/agent_host/daemon.py` carries a byte-identical copy rather than
-    importing this one, and the duplication is the point: an import is itself a
-    thing that can fail, and a failed `from ops.spec import ...` inside
-    `_gate_reason` would be caught by the fail-OPEN wrapper and start the
-    service — reintroducing exactly the hazard this function exists to remove.
-    Four lines with no dependencies cannot fail that way. Both copies are locked
-    by tests.
-    """
-    try:
-        return str(settings.daemon.runner_mode)
-    except Exception:  # see the docstring: unreadable means process, always
-        return "process"
 
 
 def services_for_capabilities_annotated(
