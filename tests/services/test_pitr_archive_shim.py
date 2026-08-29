@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -116,12 +117,18 @@ def test_hard_quota_counts_crash_leftover_partial(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("entry_kind", ["directory", "symlink", "fifo"])
-def test_spool_refuses_non_regular_entries_fail_closed(tmp_path: Path, entry_kind: str) -> None:
+@pytest.mark.parametrize("existing_target", [False, True])
+def test_spool_refuses_non_regular_entries_fail_closed(
+    tmp_path: Path, entry_kind: str, existing_target: bool
+) -> None:
     name = "000000010000000000000002"
     source = tmp_path / name
     source.write_bytes(b"new")
     spool = tmp_path / "spool"
     spool.mkdir()
+    target = spool / name
+    if existing_target:
+        target.write_bytes(source.read_bytes())
     entry = spool / "unexpected"
     if entry_kind == "directory":
         entry.mkdir()
@@ -136,6 +143,20 @@ def test_spool_refuses_non_regular_entries_fail_closed(tmp_path: Path, entry_kin
 
     assert archive_shim.archive(source, name, spool, 1024) == archive_shim.EXIT_UNSAFE_PATH
     assert os.path.lexists(entry)
+    assert target.exists() is existing_target
+
+
+def test_spool_refuses_fifo_archive_lock(tmp_path: Path) -> None:
+    name = "000000010000000000000002"
+    source = tmp_path / name
+    source.write_bytes(b"new")
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    lock = spool / ".archive.lock"
+    os.mkfifo(lock)
+
+    assert archive_shim.archive(source, name, spool, 1024) == archive_shim.EXIT_UNSAFE_PATH
+    assert stat.S_ISFIFO(lock.lstat().st_mode)
     assert not (spool / name).exists()
 
 
