@@ -235,16 +235,14 @@ def test_frozen_pg_state_contract_with_real_reader(
     shape the old `current.update(credential_evidence)` merge produced — must
     FAIL the same comparison, so a re-merge is caught instead of hidden by a
     mock that copies the defect."""
-    import socket
     import subprocess
-    from contextlib import closing
     from types import SimpleNamespace
 
     from shared.pg_tools import pg_tool
 
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
+    # TCP-free and isolated by this test's private socket directory. Releasing
+    # an ephemeral TCP socket before pg_ctl binds it races every xdist worker.
+    port = 39613
     data = tmp_path / "pg"
     log = tmp_path / "pg.log"
     subprocess.run(  # noqa: S603 — resolved pg binaries + static flags
@@ -264,7 +262,7 @@ def test_frozen_pg_state_contract_with_real_reader(
             "30",
             "start",
             "-o",
-            f"-p {port} -c listen_addresses=127.0.0.1 "
+            f"-p {port} -c listen_addresses='' -c unix_socket_directories={tmp_path} "
             "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
         ],
         check=True,
@@ -272,7 +270,7 @@ def test_frozen_pg_state_contract_with_real_reader(
     )
     try:
         subprocess.run(  # noqa: S603
-            [pg_tool("createdb"), "-h", "127.0.0.1", "-p", str(port), "-U", "ava", "ava"],
+            [pg_tool("createdb"), "-h", str(tmp_path), "-p", str(port), "-U", "ava", "ava"],
             check=True,
             capture_output=True,
         )
@@ -284,7 +282,7 @@ def test_frozen_pg_state_contract_with_real_reader(
         )
         monkeypatch.setattr(
             "cli.commands._cluster_instance.pg_admin_url",
-            lambda _pg_port: f"postgresql://ava@127.0.0.1:{port}/postgres",
+            lambda _pg_port: f"postgresql://ava@/postgres?host={tmp_path}&port={port}",
         )
 
         frozen = activation._read_pg_state()
