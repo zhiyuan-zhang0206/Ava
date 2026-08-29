@@ -26,7 +26,7 @@ The **lease half of the registry × lease frame** ([[okf/design/r1-state-livenes
 
 - **Claim**: `agent/_starting.py:claim_agent_row` writes `lease_expires_at = now() + AGENT_LEASE_TTL_S` (600 s) in the same UPDATE as `status='running'` — every spawn / resurrect / respawn path converges here, so a row is never alive without a lease.
 - **Renewal**: `agent/loop.py:_renew_agent_lease_loop` — a background task re-arming the lease every `AGENT_LEASE_RENEW_INTERVAL_S` (60 s) for the whole graph lifetime, idle included. A failed renewal logs and retries; the TTL is 10x the interval, so a transient DB blip never reads as death. Scoped `status = ANY(ALIVE_STATUSES)`: a concurrent transition to restarting/terminated makes the renewal a no-op — the process is being replaced and must not renew a row that is no longer its own. The UPDATE is `agent/db.py:renew_agent_lease`.
-- **Clear** (hygiene — the lease dies with the process): exit (`ops/ops_lifecycle.py:_mark_exited_blocking`), hibernation (`_mark_hibernating_blocking`), resurrect / respawn / swap-in (`ops/agent_wake.py` — the row returns to unclaimed `idling` with no lease; the next claim re-grants), and integrity-terminate all drop `lease_expires_at`.
+- **Clear** (hygiene — the lease dies with the process): exit (`ops/ops_exit.py:_mark_exited_blocking`), hibernation (`_mark_hibernating_blocking`), resurrect / respawn / swap-in (`ops/agent_wake.py` — the row returns to unclaimed `idling` with no lease; the next claim re-grants), and integrity-terminate all drop `lease_expires_at`.
 
 ### Observers
 

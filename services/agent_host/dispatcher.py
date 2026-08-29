@@ -186,6 +186,28 @@ class TurnScheduler:
         finally:
             self._tasks.pop(agent_id, None)
 
+    async def cancel_agent(self, agent_id: int) -> bool:
+        """Cancel ONE agent's turn task, with the same bounded unwind as `aclose`.
+
+        The hosted replacement for force-terminating a wedged agent's process:
+        `Task.cancel()` lands at the task's next await point, the same
+        `CANCEL_UNWIND_TIMEOUT_S` bound applies, and a task that refuses to
+        unwind produces the same `host_turn_uncancellable` report — while
+        staying in the registry, so a later wake for that agent does not
+        double-schedule (the turn it is stuck in is still the turn it owns).
+
+        Returns True when a task existed for `agent_id` (it was cancelled, or
+        finished on its own before the cancel landed), False when no task was
+        running — the ops caller treats False as "nothing to accelerate", never
+        as an error.
+        """
+        task = self._tasks.get(agent_id)
+        if task is None:
+            return False
+        task.cancel()
+        await self._await_unwind({agent_id: task})
+        return True
+
     async def aclose(self) -> None:
         """Cancel every turn task and wait, BOUNDED, for them to unwind.
 

@@ -1161,3 +1161,84 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     assert result.id == 8
     assert inserted == []  # fork prompt is delivered pre-launch, never here
     assert wakes == [(8, "0")]
+
+
+async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
+    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+) -> None:
+    """Hosted force-terminate: no process to SIGKILL — the DB fence runs with
+    kill_process=False and the turn-cancel acceleration fires after the
+    transaction. The durable terminate inbound inserted by the fence is the
+    correctness mechanism; the cancel only accelerates a wedged turn."""
+    from shared.agents import AgentStatus
+
+    monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: True)
+    captured: dict[str, object] = {}
+
+    def _fake_force_blocking(  # pyright: ignore[reportUnknownParameterType]
+        aid: int, _body: object, _pool: object, *, kill_process: bool
+    ) -> tuple[AgentStatus, int | None, list[str]]:
+        captured["agent_id"] = aid
+        captured["kill_process"] = kill_process
+        return AgentStatus.RUNNING, None, []
+
+    monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
+    cancelled: list[int] = []
+
+    async def _fake_cancel(aid: int) -> None:
+        cancelled.append(aid)
+
+    monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
+
+    async def _fake_page_closed(*_a: object, **_k: object) -> None:
+        return None
+
+    monkeypatch.setattr(ops_lifecycle, "publish_page_closed", _fake_page_closed)
+
+    resp = await ops_lifecycle.terminate_agent_op(
+        9,
+        TerminateAgentRequest(force=True),
+        stub_pool,  # type: ignore[arg-type]
+    )
+    assert resp.status == "force_killed"
+    assert captured == {"agent_id": 9, "kill_process": False}
+    assert cancelled == [9]
+
+
+@pytest.mark.asyncio
+async def test_force_terminate_process_mode_still_kills_the_process(
+    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+) -> None:
+    """The regression guard: process mode keeps kill_process=True (the session
+    kill + SIGKILL path) and never calls the hosted turn-cancel acceleration."""
+    from shared.agents import AgentStatus
+
+    monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: False)
+    captured: dict[str, object] = {}
+
+    def _fake_force_blocking(  # pyright: ignore[reportUnknownParameterType]
+        aid: int, _body: object, _pool: object, *, kill_process: bool
+    ) -> tuple[AgentStatus, int | None, list[str]]:
+        captured["agent_id"] = aid
+        captured["kill_process"] = kill_process
+        return AgentStatus.RUNNING, 1234, []
+
+    monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
+
+    async def _fake_cancel(_aid: int) -> None:
+        raise AssertionError("process mode must not call the hosted cancel")
+
+    monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
+
+    async def _fake_page_closed(*_a: object, **_k: object) -> None:
+        return None
+
+    monkeypatch.setattr(ops_lifecycle, "publish_page_closed", _fake_page_closed)
+
+    resp = await ops_lifecycle.terminate_agent_op(
+        9,
+        TerminateAgentRequest(force=True),
+        stub_pool,  # type: ignore[arg-type]
+    )
+    assert resp.status == "force_killed"
+    assert captured == {"agent_id": 9, "kill_process": True}

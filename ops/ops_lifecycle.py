@@ -26,7 +26,7 @@ from psycopg_pool import ConnectionPool
 
 from ops import agent_launch, runner_mode
 from ops import cluster_rpc as _cluster_rpc
-from ops.agent_identity import RESIDENT_IDENTITIES, AgentProcessIdentity, probe_agent_process
+from ops.agent_identity import RESIDENT_IDENTITIES, probe_agent_process
 from ops.agent_wake import ResurrectTriggerStaleError
 from ops.agents import (
     get_agent_machine,
@@ -34,7 +34,38 @@ from ops.agents import (
     latest_checkpoint_id,
     resurrect_agent,
 )
-from ops.pages import list_open_page_names
+
+# Re-exported (explicit-alias form) so the module-qualified callers —
+# gateway/routers/notices.py, the ops server, tests — keep their call sites
+# unchanged after the Task #1999 split: these helpers now live in
+# `ops/ops_events.py`.
+from ops.ops_events import (
+    publish_inbound_arrived as publish_inbound_arrived,
+)
+from ops.ops_events import (
+    publish_notice_posted as publish_notice_posted,
+)
+from ops.ops_events import (
+    publish_notice_resolved as publish_notice_resolved,
+)
+from ops.ops_events import (
+    publish_page_closed as publish_page_closed,
+)
+from ops.ops_exit import (
+    _force_mark_terminated as _force_mark_terminated,
+)
+from ops.ops_exit import (
+    _force_terminate_transaction as _force_terminate_transaction,
+)
+from ops.ops_exit import (
+    _publish_force_terminate_inbound as _publish_force_terminate_inbound,
+)
+from ops.ops_exit import (
+    mark_agent_exited_op as mark_agent_exited_op,
+)
+from ops.ops_exit import (
+    mark_agent_hibernating_op as mark_agent_hibernating_op,
+)
 from ops.rpc_schemas import (
     CancelRequested,
     LaunchAgentRequest,
@@ -48,335 +79,16 @@ from ops.rpc_schemas import (
     TerminateAgentResponse,
 )
 from shared.agents import (
-    AgentNotFound,
     AgentStatus,
     ForkSourceEmpty,
     ResurrectAlreadyAlive,
 )
-from shared.audit_events import insert_event_log
-from shared.cluster import session_name
 from shared.config import settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.live_announce import publish_agent_updated_sync
-from shared.live_events import (
-    InboundArrived,
-    NoticePosted,
-    NoticeResolved,
-    PageClosed,
-)
-from shared.log import logger
 from shared.machine import machine_name
-from shared.proc import force_kill
-from shared.redis_client import publish_best_effort
-from shared.session_backend import native_proc
 
 _log = logging.getLogger(__name__)
-
-
-async def publish_inbound_arrived(
-    agent_id: int, inbound_id: int, kind: str, source: str, content: str
-) -> None:
-    """Publish InboundArrived to the events channel — frontend live updates."""
-    ev = InboundArrived(
-        agent_id=agent_id,
-        inbound_id=inbound_id,
-        kind=kind,
-        source=source,
-        content=content,
-    )
-    await publish_best_effort(
-        settings.data_plane.events_channel, ev.model_dump_json(), context="inbound_arrived"
-    )
-
-
-async def publish_page_closed(agent_id: int, name: str) -> None:
-    """Publish PageClosed to the events channel — frontend popover removes the entry.
-    Best-effort, never raises."""
-    ev = PageClosed(agent_id=agent_id, name=name)
-    await publish_best_effort(
-        settings.data_plane.events_channel, ev.model_dump_json(), context="page_closed"
-    )
-
-
-async def publish_notice_resolved(agent_id: int, notice_id: int) -> None:
-    """Publish NoticeResolved to the events channel — frontend drops it from the
-    unread FYI feed and decrements the agent's unread badge. Best-effort, never raises."""
-    ev = NoticeResolved(agent_id=agent_id, notice_id=notice_id)
-    await publish_best_effort(
-        settings.data_plane.events_channel, ev.model_dump_json(), context="notice_resolved"
-    )
-
-
-async def publish_notice_posted(
-    agent_id: int, notice_id: int, priority: str, title: str, task_id: int | None = None
-) -> None:
-    """Publish NoticePosted to the events channel — frontend adds the notice to
-    the unread FYI feed. Best-effort, never raises. `task_id` groups the feed by
-    task without a refetch."""
-    ev = NoticePosted(
-        agent_id=agent_id, notice_id=notice_id, priority=priority, title=title, task_id=task_id
-    )
-    await publish_best_effort(
-        settings.data_plane.events_channel, ev.model_dump_json(), context="notice_posted"
-    )
-
-
-def _force_terminate_transaction(
-    agent_id: int,
-    db_pool: ConnectionPool,
-    *,
-    source: str,
-    kill_process: bool,
-) -> tuple[AgentStatus, int | None, list[str], int]:
-    """Fence and mark one explicit kill while holding the agent row lock.
-
-    The newly inserted terminate inbound id is the monotonic intent fence. A
-    guarded chat resurrection competing for this row either commits first (and
-    this kill follows it) or waits, then observes a fence greater than its
-    trigger. When a process should be killed, keep the row lock through the OS
-    kill so a post-force chat cannot create a new session in the gap between DB
-    intent and session cleanup. The transaction commits on context exit.
-    """
-    with db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT status, pid FROM agents_meta WHERE id = %s FOR UPDATE",
-            (agent_id,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            raise AgentNotFound(f"agent {agent_id} does not exist")
-        old_status = AgentStatus(row[0])
-        pid = row[1]
-        page_names = list_open_page_names(conn, agent_id)
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'terminate', %s) RETURNING id",
-            (agent_id, source),
-        )
-        inbound_row = cur.fetchone()
-        if inbound_row is None:
-            raise RuntimeError("force terminate inbound INSERT returned no id")
-        terminate_inbound_id = inbound_row[0]
-        cur.execute(
-            # termination_source='user': force-kill / a terminate that found the
-            # pid already dead. Both are the user's will to end the agent, so it
-            # is NOT crash-auto-resurrect-eligible even with a queued inbound.
-            "UPDATE agents_meta SET status='terminated', termination_source='user', "
-            "heartbeat_paused_until = NULL, last_force_terminate_inbound_id = %s "
-            "WHERE id = %s",
-            (terminate_inbound_id, agent_id),
-        )
-        if kill_process:
-            agent_session = session_name(f"agent-{agent_id}")
-            native_proc().kill_session(agent_session, graceful=False)
-            # The exact session name is safe to clear repeatedly. A raw
-            # pid can be recycled even while a stale row still says live,
-            # so only positive argv identity evidence licenses SIGKILL.
-            if (
-                pid is not None
-                and old_status is not AgentStatus.TERMINATED
-                and probe_agent_process(pid, agent_id) is AgentProcessIdentity.OWNED
-            ):
-                force_kill(pid)
-    return old_status, pid, page_names, terminate_inbound_id
-
-
-def _publish_force_terminate_inbound(agent_id: int, inbound_id: int, source: str) -> None:
-    """Emit the non-transactional audit/wake side effects after fence commit."""
-    insert_event_log(
-        event_type="terminate",
-        agent_id=agent_id,
-        source=source,
-        payload={"inbound_id": inbound_id},
-    )
-    publish_inbound_wake(agent_id, str(inbound_id))
-
-
-def _force_mark_terminated(
-    agent_id: int, db_pool: ConnectionPool, *, source: str = "user"
-) -> list[str]:
-    """Fence an explicit zombie kill and return cascade-closed page names."""
-    _, _, page_names, inbound_id = _force_terminate_transaction(
-        agent_id,
-        db_pool,
-        source=source,
-        kill_process=False,
-    )
-    _publish_force_terminate_inbound(agent_id, inbound_id, source)
-    return page_names
-
-
-async def mark_agent_exited_op(agent_id: int, db_pool: ConnectionPool) -> list[str]:
-    """Finalize a self-exiting agent process: guarded status flip + events.
-
-    POST /api/agents/{id}/exited calls this when an agent reaches its own
-    process-exit finally block (graceful terminate or silent death from a
-    SIGHUP/SIGTERM). The agent used to do this inline; it now notifies the
-    gateway so it never writes agents_meta or reads the pages table itself.
-
-    Guarded `WHERE status IN ('running','idling')` — the same
-    invariant the inline version held:
-    - 'restarting' is left untouched (reserved for the restarter daemon; a
-      restart goes claim -> 'restarting' -> END -> process exit -> this call,
-      and clobbering it to 'terminated' would strand the restart).
-    - an unclaimed 'idling' row has no process to send this callback; a normal
-      pre-claim death is instead handled by the dead-birth reaper.
-    - already 'terminated' -> rowcount 0, idempotent (finally may run twice).
-
-    Differs from `_force_mark_terminated` (used by the force-kill / zombie-reap
-    paths), which overwrites status unconditionally — that is wrong here
-    because the self-exit path must respect an in-flight restart.
-
-    rowcount==1: really transitioned — publish AgentUpdated + the
-    agent_terminated event + PageClosed for each cascade-closed page; returns
-    those page names.
-    rowcount==0: benign skip; debug-log the actual status to tell
-    restarting / already-terminated / idling apart.
-    other: the PK guarantees <=1 row; anything else is table corruption -> raise.
-    """
-    rowcount, page_names, actual_status = await asyncio.to_thread(
-        _mark_exited_blocking, agent_id, db_pool
-    )
-    if rowcount == 1:
-        logger.info(
-            "agent {agent_id} terminated",
-            event="agent_terminated",
-            agent_id=agent_id,
-        )
-        for page_name in page_names:
-            await publish_page_closed(agent_id, page_name)
-        return page_names
-    if rowcount == 0:
-        logger.debug(
-            "agent {agent_id} mark_agent_exited_op noop (actual status={actual_status!r})",
-            agent_id=agent_id,
-            actual_status=actual_status,
-        )
-        return []
-    raise RuntimeError(
-        f"mark_agent_exited_op agent_id={agent_id} rowcount={rowcount} — "
-        f"PK invariant violated; agents_meta table integrity broken"
-    )
-
-
-def _mark_exited_blocking(
-    agent_id: int, db_pool: ConnectionPool
-) -> tuple[int, list[str], str | None]:
-    """Sync DB section of mark_agent_exited_op — via to_thread (the status flip,
-    the exit event_log row, the AgentUpdated publish). Returns
-    (rowcount, page_names, actual_status)."""
-    with db_pool.connection() as conn:
-        # SELECT cascade-closable show() pages before UPDATE; daemon-supervised
-        # serve() pages stay open and must not emit PageClosed.
-        page_names = list_open_page_names(conn, agent_id)
-        with conn.cursor() as cur:
-            cur.execute(
-                # termination_source='exit': the agent's own graceful process-exit
-                # finalize (self-terminate, or a caught SIGTERM/SIGHUP that ran the
-                # exit finally). Intentional — NOT crash-auto-resurrect-eligible. A
-                # SIGKILL/OOM leaves no finally, so it never reaches here; the reaper
-                # catches that dead pid and stamps 'reaper' instead.
-                "UPDATE agents_meta SET status = %s, termination_source = 'exit', "
-                "heartbeat_paused_until = NULL, lease_expires_at = NULL "
-                "WHERE id = %s AND status IN (%s, %s)",
-                (
-                    AgentStatus.TERMINATED,
-                    agent_id,
-                    AgentStatus.RUNNING,
-                    AgentStatus.IDLING,
-                ),
-            )
-            rowcount = cur.rowcount
-            if rowcount == 1:
-                from shared.audit_events import insert_event_log
-
-                insert_event_log(
-                    event_type="exit",
-                    agent_id=agent_id,
-                    source="system",
-                )
-            actual_status: str | None = None
-            if rowcount == 0:
-                cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-                row = cur.fetchone()
-                actual_status = row[0] if row is not None else None
-    if rowcount == 1:
-        with db_pool.connection() as conn:
-            publish_agent_updated_sync(conn, agent_id)
-    return rowcount, page_names, actual_status
-
-
-async def mark_agent_hibernating_op(agent_id: int, db_pool: ConnectionPool) -> None:
-    """Finalize a hibernating agent process: guarded park to 'hibernating'.
-
-    POST /api/agents/{id}/hibernating calls this when an agent's process reaches
-    its exit finally block after the hibernation swap-out signal (SIGUSR1). It is
-    the swap-out twin of `mark_agent_exited_op`, differing in three deliberate
-    ways: the row lands 'hibernating' not 'terminated'; the agent's pages stay
-    OPEN (the cascade_close_agent_pages trigger fires only on 'terminated', so a
-    hibernating flip leaves them); and NO exit event_log is written (the agent is
-    not dying, just swapped out). `heartbeat_paused_until` is deliberately left
-    untouched — hibernation (free RAM) is orthogonal to a self-requested pause
-    (do-not-nudge); the pause window must survive a swap-out.
-
-    Guarded `WHERE status IN ('running','idling')`:
-    - 'idling' is the state the swap-out controller selects; the process was
-      parked in the inbound wait when SIGUSR1 landed.
-    - 'running' covers the phantom-running the idle-wait's own finally leaves:
-      SIGUSR1 delivered during `_wait_for_batch`'s inbound wait unwinds through
-      that finally, which flips IDLING->RUNNING before main()'s finally reaches
-      here — the same reason `mark_agent_exited_op` accepts 'running'.
-    - 'restarting' / 'terminated' / already-'hibernating' -> rowcount 0, benign
-      no-op (a concurrent restart / terminate / double-finalize won). An
-      unclaimed `idling` row cannot normally send this process callback.
-
-    rowcount==1: publish AgentUpdated so ops/frontend SSE reflect the parked row
-    (the frontend projects 'hibernating' -> 'idling', so no visible change). No
-    agent_terminated event, no PageClosed. rowcount==0: benign skip. other: the
-    PK guarantees <=1 row; anything else is table corruption -> raise.
-    """
-    rowcount = await asyncio.to_thread(_mark_hibernating_blocking, agent_id, db_pool)
-    if rowcount == 1:
-        logger.info(
-            "agent {agent_id} hibernating",
-            event="agent_hibernating",
-            agent_id=agent_id,
-        )
-        return
-    if rowcount == 0:
-        logger.debug(
-            "agent {agent_id} mark_agent_hibernating_op noop (not running/idling)",
-            agent_id=agent_id,
-        )
-        return
-    raise RuntimeError(
-        f"mark_agent_hibernating_op agent_id={agent_id} rowcount={rowcount} — "
-        f"PK invariant violated; agents_meta table integrity broken"
-    )
-
-
-def _mark_hibernating_blocking(agent_id: int, db_pool: ConnectionPool) -> int:
-    """Sync DB section of mark_agent_hibernating_op — via to_thread (guarded
-    park UPDATE + AgentUpdated publish). Returns the rowcount."""
-    with db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET status = %s, lease_expires_at = NULL "
-            "WHERE id = %s AND status IN (%s, %s)",
-            (
-                AgentStatus.HIBERNATING,
-                agent_id,
-                AgentStatus.RUNNING,
-                AgentStatus.IDLING,
-            ),
-        )
-        rowcount = cur.rowcount
-    if rowcount == 1:
-        with db_pool.connection() as conn:
-            publish_agent_updated_sync(conn, agent_id)
-    return rowcount
-
-
-# ─── spawn ─────────────────────────────────────────────────────────────────
 
 
 async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> SpawnedAgent:
@@ -505,11 +217,21 @@ async def terminate_agent_op(
 ) -> TerminateAgentResponse:
     """Local-target graceful or force terminate. Caller handles cross-machine."""
     if body.force:
+        hosted = runner_mode.is_hosted()
         old_status, pid, killed_page_names = await asyncio.to_thread(
-            _terminate_force_blocking, agent_id, body, db_pool
+            _terminate_force_blocking, agent_id, body, db_pool, kill_process=not hosted
         )
         if old_status is AgentStatus.TERMINATED:
             return TerminateAgentResponse(status="already_terminated")
+        if hosted:
+            # No process to SIGKILL — the row is terminated and the durable
+            # terminate inbound (inserted inside the force transaction) is the
+            # correctness mechanism: a running turn claims it and exits. This
+            # call only ACCELERATES a turn wedged inside a long await, and it
+            # is best-effort by construction: a host that is down or
+            # restarting means the turn is already gone (checkpointed, and no
+            # wake will resurrect a terminated row).
+            await _cancel_hosted_turn_best_effort(agent_id)
         for page_name in killed_page_names:
             await publish_page_closed(agent_id, page_name)
         _log.info(
@@ -536,16 +258,56 @@ async def terminate_agent_op(
     return TerminateAgentResponse(status="enqueued")
 
 
+async def _cancel_hosted_turn_best_effort(agent_id: int) -> None:
+    """Accelerate a hosted force-terminate by cancelling the agent's turn task.
+
+    Dials the local agent-host's loopback health port (`POST /cancel-turn`);
+    the host cancels the turn with its bounded unwind and reports a
+    C-call-blocked straggler instead of hanging. Every failure is swallowed at
+    INFO with the exception — the durable terminate inbound already inserted by
+    the force transaction is what makes the row dead; this hop only shortens
+    the window for a turn stuck inside a long await, and a host that is down /
+    restarting means the turn is already gone.
+    """
+    import httpx
+
+    from shared.daemon_health import health_port
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{health_port('agent_host')}/cancel-turn",
+                json={"agent_id": agent_id},
+            )
+            resp.raise_for_status()
+    except Exception:
+        _log.info(
+            "hosted turn-cancel call for agent %s failed (non-fatal; the durable "
+            "terminate inbound already finalized the row)",
+            agent_id,
+            exc_info=True,
+        )
+
+
 def _terminate_force_blocking(
-    agent_id: int, body: TerminateAgentRequest, db_pool: ConnectionPool
+    agent_id: int,
+    body: TerminateAgentRequest,
+    db_pool: ConnectionPool,
+    *,
+    kill_process: bool,
 ) -> tuple[AgentStatus, int | None, list[str]]:
     """Sync force-kill section — via to_thread: session kill + SIGKILL + status
-    flip + AgentUpdated + terminate inbound. Returns (old status, pid, page names)."""
+    flip + AgentUpdated + terminate inbound. Returns (old status, pid, page names).
+
+    `kill_process` is False in hosted mode: there is no process to kill, and
+    the turn-cancel acceleration happens asynchronously after the transaction
+    (the DB fence must commit first so a post-force chat cannot resurrect the
+    row between the kill and the cancel)."""
     old_status, pid, killed_page_names, inbound_id = _force_terminate_transaction(
         agent_id,
         db_pool,
         source=body.source,
-        kill_process=True,
+        kill_process=kill_process,
     )
     _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
     with db_pool.connection() as conn:
