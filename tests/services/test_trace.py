@@ -31,6 +31,8 @@ def _reset_init_flag():
         initialized=False,
         collector_offline_reported=False,
         retry_thread=None,
+        arm_thread=None,
+        init_resolved=threading.Event(),
     )
     if gate is not None:
         gate.cache_clear()
@@ -39,12 +41,26 @@ def _reset_init_flag():
     retry_thread = trace_mod._state["retry_thread"]
     if isinstance(retry_thread, threading.Thread):
         retry_thread.join(timeout=0.25)
+    arm_thread = trace_mod._state["arm_thread"]
+    if isinstance(arm_thread, threading.Thread):
+        arm_thread.join(timeout=0.25)
     trace_mod._state.clear()
     trace_mod._state.update(
         initialized=False,
         collector_offline_reported=False,
         retry_thread=None,
+        arm_thread=None,
+        init_resolved=threading.Event(),
     )
+
+
+def _wait_init_resolved(timeout: float = 5.0) -> None:
+    """Join the background arming pass: the armed-path tests assert on state
+    the arm thread writes, so they must wait for it (deterministic, not a
+    sleep — the event is set in the thread's finally)."""
+    resolved = trace_mod._state.get("init_resolved")
+    assert isinstance(resolved, threading.Event)
+    assert resolved.wait(timeout=timeout), "background trace arming did not resolve"
 
 
 @pytest.fixture(autouse=True)
@@ -92,6 +108,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
 
     initialize_tracing()
+    _wait_init_resolved()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
     kw = calls[0]  # pyright: ignore[reportUnknownVariableType]
@@ -161,16 +178,18 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
 
     initialize_tracing()
+    _wait_init_resolved()
 
     assert len(calls) == 1
     assert calls[0]["resource_attributes"] == {"cluster": ".ava"}
 
 
-def test_sdk_initialize_raises_propagates_and_state_unchanged(
+def test_sdk_initialize_failure_logs_and_state_unchanged(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """If Traceloop.init() itself raises, the error propagates and _initialized stays
-    False so a later retry can succeed."""
+    """If Traceloop.init() itself raises on the arm thread, the failure is
+    logged (not propagated — tracing is observability, not a boot blocker),
+    _initialized stays False, and the wait resolves so turns still run."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
@@ -179,10 +198,19 @@ def test_sdk_initialize_raises_propagates_and_state_unchanged(
         raise RuntimeError("boom: init failed")
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _raise)  # pyright: ignore[reportUnknownArgumentType]
+    warnings: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    monkeypatch.setattr(
+        "shared.trace.logger.warning",
+        lambda *a, **kw: warnings.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    )
 
-    with pytest.raises(RuntimeError, match="boom"):
-        initialize_tracing()
+    initialize_tracing()  # must not raise: the failure is the arm thread's
+    _wait_init_resolved()
+
     assert trace_mod._state["initialized"] is False
+    assert warnings
+    attrs = warnings[0][1]  # pyright: ignore[reportUnknownVariableType]
+    assert attrs.get("action") == "recording_init_failed"  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -195,6 +223,7 @@ def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     initialize_tracing()
     initialize_tracing()
+    _wait_init_resolved()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
 
@@ -239,12 +268,61 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     assert trace_mod._state["retry_thread"] is retry_thread
     assert initialized.wait(timeout=1.0)
     retry_thread.join(timeout=0.5)
+    _wait_init_resolved()
 
     assert attempts == [False, False, True]
     assert warnings == ["trace recording disabled — local OTel collector not answering"]
     assert trace_mod._state["initialized"] is True
     assert trace_mod._state["collector_offline_reported"] is False
     assert not retry_thread.is_alive()
+
+
+def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The heavy part never blocks the boot path: initialize_tracing returns
+    while Traceloop.init is still pending (the mock blocks until released),
+    and ensure_init_resolved() is what the use sites wait on."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    _under_watermark(monkeypatch)
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def _slow_init(**_kw: object) -> None:
+        entered.set()
+        assert release.wait(timeout=5.0), "test released the arm thread"
+
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)  # pyright: ignore[reportUnknownArgumentType]
+
+    initialize_tracing()  # returns immediately — the mock is still blocked
+    assert entered.wait(timeout=5.0), "arm thread must have started"
+    assert trace_mod._state["initialized"] is False  # boot already returned; init pending
+
+    release.set()
+    _wait_init_resolved()
+    assert trace_mod._state["initialized"] is True
+
+
+def test_ensure_init_resolved_instant_without_arming(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """No wait when tracing was declined or never requested — the event is
+    only consulted after an arm thread was actually spawned."""
+    from shared.trace import ensure_init_resolved
+
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    _under_watermark(monkeypatch)
+    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        "shared.trace.endpoint_reachable",
+        lambda _e: False,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+
+    initialize_tracing()  # declined: collector unreachable, no arm thread
+    ensure_init_resolved()  # must return at once, not hang on an unset event
+
+    assert trace_mod._state["arm_thread"] is None
+    assert trace_mod._state["initialized"] is False
 
 
 # --- OtlpJsonHttpSpanExporter ---------------------------------------------------
@@ -905,6 +983,7 @@ def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
 
     initialize_tracing()
+    _wait_init_resolved()
 
     assert os.environ["TRACELOOP_TRACE_CONTENT"] == "false"
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
