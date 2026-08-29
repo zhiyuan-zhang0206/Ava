@@ -433,7 +433,7 @@ def test_real_sdk_resumable_transport_retries_16mib_upload(tmp_path: Path) -> No
         object_metadata: ClassVar[dict[str, str]] = {}
         object_name = ""
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
         def _json(self, status: int, body: dict[str, object]) -> None:
@@ -491,9 +491,8 @@ def test_real_sdk_resumable_transport_retries_16mib_upload(tmp_path: Path) -> No
             credentials=AnonymousCredentials(),
             client_options=ClientOptions(api_endpoint=endpoint),
         )
-        store = GCSObjectStore.from_bucket_client(
-            cast(BucketClient, client.bucket("bucket")), timeout_seconds=5
-        )
+        bucket = client.bucket("bucket")  # pyright: ignore[reportUnknownMemberType]
+        store = GCSObjectStore.from_bucket_client(cast(BucketClient, bucket), timeout_seconds=5)
         uploader, source = _uploader(tmp_path, store)
         source.write_bytes(b"w" * (16 * 1024 * 1024))
         ack = uploader.upload_one(source)
