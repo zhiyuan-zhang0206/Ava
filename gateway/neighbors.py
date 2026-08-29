@@ -123,14 +123,21 @@ def _fetch_archive_rows() -> list[dict[str, Any]]:
     would. The archive stream holds only pre-cutover rows, so the query is
     bounded to the archive's own span (within Loki's 90d max_query_length).
     The rows are immutable and cached in Redis for a day; a miss runs the
-    bounded Loki query and repopulates the cache."""
+    Loki query and repopulates the cache. The fetch keeps the shared client's
+    45s default timeout (NOT the 8s live-read bound): it is a once-a-day
+    refresh whose measured range is 5-28s, so an 8s bound would time it out
+    on a cold Loki, leave the cache empty, and turn every request in that
+    window into a failure — worse than the slowness the cache exists to fix.
+    The fetch's `has_more` flag is persisted with the rows, so a cache hit
+    reports truncation exactly as the originating fetch did (no masking)."""
     cached = _read_frozen_json(_ARCHIVE_CACHE_KEY, cache_name="Loki archive")
     if cached is not None:
         rows = _rows_from_cache_payload(cached, cache_name="Loki archive")
         if rows is not None:
-            # The cached page carries rows only, so a full page conservatively
-            # preserves the possibility of truncation (fleet_graph convention).
-            if len(rows) >= _LOKI_EDGE_LIMIT:
+            # The payload persists the originating fetch's has_more (entries
+            # without it predate that shape — a full page then conservatively
+            # counts as truncated).
+            if cached.get("has_more", len(rows) >= _LOKI_EDGE_LIMIT):
                 logger.warning(
                     "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
                     _LOKI_EDGE_LIMIT,
@@ -144,7 +151,6 @@ def _fetch_archive_rows() -> list[dict[str, Any]]:
         limit=_LOKI_EDGE_LIMIT,
         direction="forward",
         archive=True,
-        timeout_s=_LIVE_READ_TIMEOUT_S,
     )
     if has_more:
         logger.warning(
@@ -157,7 +163,8 @@ def _fetch_archive_rows() -> list[dict[str, Any]]:
             "rows": [
                 [row["agent_id"], row["target_agent_id"], row["event_name"], row["ts"].isoformat()]
                 for row in rows
-            ]
+            ],
+            "has_more": has_more,
         },
         cache_name="Loki archive",
     )
