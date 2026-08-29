@@ -10,6 +10,15 @@ from pydantic import Field
 
 from shared.config._base import EnvSettings
 
+# The standard OTLP/HTTP ingress port. Single source for every hardcoded 4318
+# in the telemetry path: the sidecar receiver endpoint, the gateway's
+# authenticated remote receiver + runner relay endpoint, and the roster /
+# healthcheck port probes all derive from `telemetry_otlp_port`; the
+# `telemetry_otlp_endpoint` default is rendered from the same constant so the
+# agent-side export target and the sidecar listener can never drift apart at
+# their defaults (WP3 parameterization, task #1945).
+_OTLP_INGRESS_PORT_DEFAULT = 4318
+
 
 class ObservabilitySettings(EnvSettings):
     trace_tags: str = Field(
@@ -131,11 +140,12 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_otlp_endpoint: str = Field(
-        default="http://127.0.0.1:4318",
+        default=f"http://127.0.0.1:{_OTLP_INGRESS_PORT_DEFAULT}",
         alias="AVA_TELEMETRY_OTLP_ENDPOINT",
         description=(
             "Base OTLP/HTTP endpoint of the LOCAL OTel Collector sidecar "
-            "(standard OTLP port 4318, one sidecar per machine — task #1266). "
+            "(standard OTLP port, one sidecar per machine — task #1266; the "
+            "default port follows `telemetry_otlp_port`). "
             "The live exporter appends /v1/logs + /v1/metrics and the trace "
             "exporter appends /v1/traces. Always points at the local sidecar, "
             "on every machine — agents never dial a backend directly; the "
@@ -148,6 +158,29 @@ class ObservabilitySettings(EnvSettings):
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
+        },
+    )
+
+    telemetry_otlp_port: int = Field(
+        default=_OTLP_INGRESS_PORT_DEFAULT,
+        alias="AVA_TELEMETRY_OTLP_PORT",
+        description=(
+            "TCP port of the OTLP/HTTP ingress (standard OTLP port 4318). "
+            "Single source for the sidecar receiver endpoint, the gateway's "
+            "authenticated remote receiver and the pure-runner relay endpoint, "
+            "and the roster/healthcheck port probes — change it here, not in "
+            "the renderers. Two Ava units on one machine must use different "
+            "ports or the second sidecar cannot bind. The agent-side export "
+            "target AVA_TELEMETRY_OTLP_ENDPOINT is a separate full-URL setting "
+            "whose default follows this port; an operator deviating from 4318 "
+            "sets both together."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
         },
     )
 

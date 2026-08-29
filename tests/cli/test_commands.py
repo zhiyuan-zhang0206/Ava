@@ -1698,6 +1698,12 @@ def test_cmd_cluster_status_role_column_shows_observability_station(
             serve_agent_runner=False,
             serve_observability_station=True,
         ),
+        _machine_row(
+            name="runner-a",
+            serve_gateway=False,
+            serve_agent_runner=True,
+            serve_observability_station=False,
+        ),
     ]
     _patch_roster_get(monkeypatch, roster)
     rc = _cli.cmd_cluster_status()
@@ -1705,8 +1711,12 @@ def test_cmd_cluster_status_role_column_shows_observability_station(
     out = capsys.readouterr().out
     station_line = next(line for line in out.splitlines() if line.startswith("station-a"))
     combo_line = next(line for line in out.splitlines() if line.startswith("combo"))
+    runner_line = next(line for line in out.splitlines() if line.startswith("runner-a"))
     assert "observability-station" in station_line and "gateway" not in station_line
     assert "gateway + observability-station" in combo_line
+    # Zero regression: a pure runner row never picks up the station token.
+    assert "agent-runner" in runner_line
+    assert "observability-station" not in runner_line
 
 
 def test_cmd_status_gateway_cluster_serves_line_shows_station(

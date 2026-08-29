@@ -184,3 +184,31 @@ The "What it deletes" list above describes the end state, now reached in slices 
   a per-host shared 1000.
 - Migrations are unaffected in shape (each cluster still runs the same schema);
   only *where* they run (per-cluster instance) changes.
+
+## redis-bridge external-migration registration (task #1945, WP3 — documentation only, bridge behavior unchanged)
+
+The `com.ava.redis-bridge` relay (`/usr/bin/python3 relay.py`, per host) is
+the off-loopback Redis inbound mechanism: Redis always binds loopback-only
+(see `docs/history/2026-08-24/redis-loopback-only.md`), and the bridge
+forwards the host's private-network address + Redis port to `127.0.0.1`, so a
+split deployment's runners reach the gateway's Redis over the tailnet without
+Redis ever listening off-loopback. Facts registered here:
+
+- **Station scenario (observatory on another machine)** — the bridge is
+  independent of the observatory: Redis stays on the gateway host with the
+  data plane; moving the LGTM backends (stage C) does not move Redis, so the
+  bridge keeps its exact role (gateway-host relay for off-box consumers). The
+  station's Grafana never dials Redis; its PG datasource comes from the
+  data-plane URL (see `_observatory_urls._pg_datasource_host_port`), not the
+  bridge.
+- **Tailnet semantics** — the relay target is the host's reachable private
+  (tailnet) address, so the bridge is what makes `redis://<tailnet-ip>:6380`
+  work for runners; it is per-cluster-port and per-host, never a shared
+  listener.
+- **Future external-migration direction** — when Redis is externalized (a
+  SaaS or a foreign host named by the data-plane `redis_url`), the cluster
+  treats the data plane as remote-managed: local bring-up, ACL provisioning,
+  and the loopback bind are skipped, so the bridge is bypassed by the URL
+  swap, not by changing the bridge. Its retirement is then per-host cleanup
+  (stop the OS job on hosts whose clusters all name a foreign Redis). No
+  code change to the bridge is planned; the migration surface is the URL.

@@ -107,7 +107,10 @@ def test_get_config_exposes_target_machine_capabilities() -> None:
     assert resp.status_code == 200
     caps = resp.json()["machine_capabilities"]
     assert isinstance(caps, list)
-    assert set(caps) <= {"gateway", "agent-runner"}  # pyright: ignore[reportUnknownArgumentType]
+    # The projection carries the full capability set incl. observability-station
+    # (WP1/WP2; a station-capable gateway projects its station token to the
+    # panel — task #1945 WP3 verification).
+    assert set(caps) <= {"gateway", "agent-runner", "observability-station"}  # pyright: ignore[reportUnknownArgumentType]
     assert set(caps) == set(machine_role())  # pyright: ignore[reportUnknownArgumentType]
 
 

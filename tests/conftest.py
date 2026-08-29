@@ -229,6 +229,11 @@ os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 # (tests/shared/test_machine.py does for machine_host).
 os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] = "http://127.0.0.1:3200"
 os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] = "http://127.0.0.1:14318"
+# The OTLP ingress port is rendered into the collector config, the roster gate
+# and the healthcheck probe ports; an ambient AVA_TELEMETRY_OTLP_PORT from the
+# operator's .env would move every rendered endpoint off the pinned 4318 the
+# render tests assert. Pinned for the same leak class as the Tempo URLs.
+os.environ["AVA_TELEMETRY_OTLP_PORT"] = "4318"
 os.environ["AVA_MACHINE_HOST"] = "localhost"
 
 # ── Grafana admin credential: the suite never carries a live one ──
@@ -363,10 +368,13 @@ from shared.daemon_health import _HEALTH_PORT_OVERRIDES
 # override, so the LGTM test alone would stay green).
 assert os.environ.get("AVA_TELEMETRY_TEMPO_QUERY_URL") == "http://127.0.0.1:3200"
 assert os.environ.get("AVA_TELEMETRY_TEMPO_ENDPOINT") == "http://127.0.0.1:14318"
+assert os.environ.get("AVA_TELEMETRY_OTLP_PORT") == "4318"
 assert os.environ.get("AVA_MACHINE_HOST") == "localhost"
 assert os.environ.get("GRAFANA_ADMIN_PASSWORD") == ""
 assert settings.observability.telemetry_tempo_query_url == "http://127.0.0.1:3200"
 assert settings.observability.telemetry_tempo_endpoint == "http://127.0.0.1:14318"
+assert settings.observability.telemetry_otlp_port == 4318
+assert settings.observability.telemetry_otlp_endpoint == "http://127.0.0.1:4318"
 assert settings.general.machine_host == "localhost"
 assert settings.alerts.grafana_admin_password is None or (
     settings.alerts.grafana_admin_password.get_secret_value() == ""

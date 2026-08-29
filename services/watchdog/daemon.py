@@ -73,8 +73,9 @@ from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidf
 
 # The statically imported healthchecks are the ones with NO ServiceSpec in
 # build_services(): brew-pin asserts host package policy, redis/pgbouncer are
-# native per-cluster processes (not sessions), and the LGTM stack is a docker
-# compose project, so they are not part of the build_services-derived roster.
+# native per-cluster processes (not sessions), and the LGTM stack is native
+# launchd jobs (deploy/lgtm), so they are not part of the
+# build_services-derived roster.
 # Every other healthcheck is resolved from its ServiceSpec.healthcheck_module via
 # importlib (see _checks_for_capability), so build_services() stays the single
 # source of the keepalive roster.
@@ -133,6 +134,22 @@ def _resolve_healthcheck(module: str) -> Callable[[], None]:
     ``importlib.import_module`` returns the already-loaded module from ``sys.modules``
     after the first tick, so re-resolution each round is cheap."""
     return importlib.import_module(module).main
+
+
+def _runner_watchdog_owns_lgtm() -> bool:
+    """Whether the agent-runner watchdog must keep the native LGTM stack alive.
+
+    The same single provider-identity decision the lgtm healthcheck itself
+    gates on (`home_is_observability_station`: lgtm-host marker OR
+    observability-station capability, shared/observability.py) — a station on
+    a non-gateway machine is brought up by converge and must be repaired by
+    this watchdog, not left to die silently. Marker absent + no capability =
+    False, so a pure runner's roster is byte-for-byte unchanged.
+    """
+    from shared.observability import home_is_observability_station
+    from shared.paths import ava_home
+
+    return home_is_observability_station(ava_home())
 
 
 def _checks_for_capability(role: MachineRole) -> list[_Check]:
@@ -210,12 +227,20 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
             )
         )
     if role == "gateway":
-        # lgtm: the observability-backend compose stack (deploy/lgtm) — no
-        # ServiceSpec (docker containers, not a session). The check gates itself
+        # lgtm: the observability-backend native stack (deploy/lgtm) — no
+        # ServiceSpec (launchd jobs, not a session). The check gates itself
         # on the $AVA_HOME/lgtm-host marker OR the observability-station
         # capability, so on every non-station host it is a no-op. The stack
         # needs no Postgres: `requires_db=False` — the observability read path
         # must not be held hostage by a DB outage.
+        checks.append(_Check("lgtm", lgtm_healthcheck, requires_db=False))
+    elif _runner_watchdog_owns_lgtm():
+        # A station-capable agent-runner (marker OR observability-station
+        # capability, no gateway) also owns the host's native backends: its
+        # converge brings the stack up, so this capability's watchdog must keep
+        # it alive — same self-gating check, same require_db=False. A pure
+        # runner (no station identity) stays untouched: no check, zero
+        # regression (task #1945, WP3).
         checks.append(_Check("lgtm", lgtm_healthcheck, requires_db=False))
 
     # Honor an operator's durable `ava start --disable-service X`: `_gate_reason`

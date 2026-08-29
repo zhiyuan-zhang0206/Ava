@@ -1112,7 +1112,10 @@ The observability stack (user decision 2026-08-11, architecture task #1266):
 `$AVA_HOME/lgtm-host` and every pure runner run an **OTel Collector sidecar**
 (`ava-otel-collector`, supervised by the watchdog and installed by converge
 from `deploy/otel-collector/`). Producers export OTLP/HTTP to their local
-sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`). An
+sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`; the
+ingress port is one setting, `AVA_TELEMETRY_OTLP_PORT` — single source for the
+sidecar receiver, the gateway's remote receiver and the port probes,
+task #1945). An
 unmarked gateway skips the collector and the default producer export, keeping
 the JSONL event mirror only; an explicitly configured OTLP endpoint opts the
 producer into that external collector. Delivery is role-specific: the marked
