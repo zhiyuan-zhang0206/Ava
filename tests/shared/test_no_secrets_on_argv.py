@@ -219,8 +219,11 @@ def test_schedule_launch(
     id rides the envfile, not the argv."""
     from gateway.schedule_manager import ScheduleManager
 
-    manager = ScheduleManager(None)  # type: ignore[arg-type] — _launch never touches the pool
+    manager = ScheduleManager(None)  # type: ignore[arg-type] — _launch's pool-touching writes are stubbed below
     monkeypatch.setattr(ScheduleManager, "_set_status", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    # The orphan-run close is a pool write like _set_status — stubbed the same
+    # way; this test asserts argv cleanliness, not DB behavior.
+    monkeypatch.setattr(ScheduleManager, "_close_null_runs", lambda _self, _sid: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     manager._launch(7)
     launches = [
         a
