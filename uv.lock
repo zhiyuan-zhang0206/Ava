@@ -299,6 +299,7 @@ dependencies = [
     { name = "websockets" },
     { name = "xlsxwriter" },
     { name = "yt-dlp" },
+    { name = "zstandard" },
 ]
 
 [package.dev-dependencies]
@@ -374,6 +375,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=15.0.1" },
     { name = "xlsxwriter", specifier = ">=3.2.0" },
     { name = "yt-dlp", specifier = ">=2026.3.17" },
+    { name = "zstandard", specifier = ">=0.25.0" },
 ]
 
 [package.metadata.requires-dev]

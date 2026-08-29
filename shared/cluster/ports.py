@@ -66,6 +66,7 @@ class ClusterPorts(TypedDict):
     # Added after the prior block growth; legacy records derive its fixed port.
     pg_backup: NotRequired[int]
     pitr_uploader: NotRequired[int]
+    pitr_base_backup: NotRequired[int]
 
 
 def _port_free(port: int) -> bool:
@@ -180,7 +181,14 @@ def record_redis_port(rec: cluster.ClusterRecord) -> int:
 # Deriving the legacy value keeps every answer inside the ports the record was
 # born with, so growing the block can never rename a running neighbour's port.
 _LATE_HEALTH_SLOTS = frozenset(
-    {"im_bridge", "delivery_watchdog", "agent_host", "pg_backup", "pitr_uploader"}
+    {
+        "im_bridge",
+        "delivery_watchdog",
+        "agent_host",
+        "pg_backup",
+        "pitr_uploader",
+        "pitr_base_backup",
+    }
 )
 
 
