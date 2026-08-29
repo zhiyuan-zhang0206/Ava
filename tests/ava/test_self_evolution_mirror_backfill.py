@@ -11,7 +11,9 @@ PR #356 (``shared/telemetry.event_id``), matching
 
 import importlib.util
 import json
+import os
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -182,8 +184,13 @@ def test_backfill_wires_dedup_into_collect(
 
     def fake_collect(days: int, week: str, **kw: Any) -> list[dict[str, Any]]:
         frm, to = kw.get("from_"), kw.get("to")
-        captured["telemetry"] = backfill_mod.collect._fetch_events_window("telemetry", frm, to)
-        captured["audit"] = backfill_mod.collect._fetch_events_window("audit", frm, to)
+        # Consume the installed consumer inside collect() — the exact point the
+        # real pipeline consumes it, while the temp rows still exist (Task
+        # #1995: the disk-backed consumer streams and is valid during collect).
+        captured["telemetry"] = list(
+            backfill_mod.collect._fetch_events_window("telemetry", frm, to)
+        )
+        captured["audit"] = list(backfill_mod.collect._fetch_events_window("audit", frm, to))
         return []
 
     monkeypatch.setattr(backfill_mod.collect, "collect", fake_collect)
@@ -246,3 +253,172 @@ def test_main_exits_zero_when_all_days_present(
     with pytest.raises(SystemExit) as exc:
         backfill_mod.main()
     assert exc.value.code == 0
+
+
+# ── Task #1995: disk-backed consumer + two-phase backfill (GC-storm fix) ──
+
+
+def _write_staged(
+    tmp_path: Path, per_category: dict[str, list[dict[str, Any]]]
+) -> tuple[Path, dict[str, list[tuple[str, int]]]]:
+    """Replicate backfill() phase 1 on a small scale: per-category temp files
+    holding the rows' original line bytes, plus a (ts, byte offset) index in
+    file order — exactly the layout the disk-backed consumer streams."""
+    tmpdir = tmp_path / "staged"
+    tmpdir.mkdir()
+    index: dict[str, list[tuple[str, int]]] = {}
+    for cat, rows in per_category.items():
+        p = tmpdir / f"{cat}.jsonl"
+        idx: list[tuple[str, int]] = []
+        with p.open("w") as f:
+            for r in rows:
+                idx.append((r["ts"], f.tell()))
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        index[cat] = idx
+    return tmpdir, index
+
+
+def _dir_consumer(backfill_mod: Any, tmpdir: Path, index: dict[str, list[tuple[str, int]]]) -> Any:
+    return backfill_mod._mirror_fetch_factory_from_dir(tmpdir, index)
+
+
+def test_dir_consumer_dedupes_and_filters_like_memory_consumer(
+    backfill_mod: Any, tmp_path: Path
+) -> None:
+    """The disk-backed consumer must be semantics-identical to the in-memory
+    one: id dedup (first wins), None-id passthrough, agent filter before
+    dedup, unknown category empty (Task #1995 rewired backfill() to it)."""
+    ts = datetime.now(UTC).isoformat()
+    tmpdir, index = _write_staged(
+        tmp_path,
+        {
+            "telemetry": [
+                _row(1, ts, agent_id=7),
+                _row(1, ts, agent_id=7),  # true duplicate
+                _row(2, ts, agent_id=8),
+                {"id": None, "ts": ts, "agent_id": 7, "event_name": "a", "attributes": {}},
+                {"id": None, "ts": ts, "agent_id": 7, "event_name": "a", "attributes": {}},
+            ]
+        },
+    )
+    consumer = _dir_consumer(backfill_mod, tmpdir, index)
+
+    assert [r["id"] for r in consumer("telemetry", None, None)] == [1, 2, None, None]
+    assert [r["id"] for r in consumer("telemetry", None, None, agent_id=7)] == [1, None, None]
+    assert [r["id"] for r in consumer("audit", None, None)] == []
+    assert [r["id"] for r in consumer("log", None, None)] == []
+
+
+def test_dir_consumer_streams_in_ts_order(backfill_mod: Any, tmp_path: Path) -> None:
+    """The consumer sorts by ts (stable, file order on ties) — the same
+    deterministic order the old in-memory path sorted before deduping, so
+    last_exec_failed-style order-sensitive signals see identical rows."""
+    ts_early = datetime.now(UTC).isoformat()
+    ts_late = (datetime.now(UTC) + timedelta(seconds=5)).isoformat()
+    tmpdir, index = _write_staged(
+        tmp_path,
+        {
+            "telemetry": [
+                _row(3, ts_late),
+                _row(1, ts_early),
+                _row(2, ts_early),
+                _row(3, ts_late),  # duplicate of the first — first in ts order wins
+            ]
+        },
+    )
+    consumer = _dir_consumer(backfill_mod, tmpdir, index)
+
+    assert [r["id"] for r in consumer("telemetry", None, None)] == [1, 2, 3]
+
+
+def test_backfill_merges_days_and_cleans_up(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Task #1995 two-phase backfill: rows from every window day land in the
+    same per-category temp file (dedup across days still applies), the temp
+    dir is removed after collect, and the cyclic GC is left enabled."""
+    now = datetime.now(UTC)
+    window_from = now - timedelta(days=2)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    days = _window_days(now, 2)
+    ts_day0 = (window_from + timedelta(minutes=5)).isoformat()
+    ts_day1 = (window_from + timedelta(days=1, minutes=5)).isoformat()
+    _write_mirror_day(logs, days[0], [_row(1, ts_day0)])
+    _write_mirror_day(logs, days[1], [_row(1, ts_day1), _row(2, ts_day1)])  # id 1 dup across days
+    _write_mirror_day(logs, days[2], [])  # today's (still-open) file must exist too
+
+    monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    captured: dict[str, list[dict[str, Any]]] = {}
+
+    def fake_collect(days: int, week: str, **kw: Any) -> list[dict[str, Any]]:
+        frm, to = kw.get("from_"), kw.get("to")
+        captured["telemetry"] = list(
+            backfill_mod.collect._fetch_events_window("telemetry", frm, to)
+        )
+        return []
+
+    monkeypatch.setattr(backfill_mod.collect, "collect", fake_collect)
+
+    path, missing = backfill_mod.backfill(2, "test-week")
+
+    assert [r["id"] for r in captured["telemetry"]] == [1, 2]
+    assert missing == []
+    assert path.exists()
+    daily = tmp_path / "self_evolution" / "daily"
+    leftovers = [p for p in daily.iterdir() if p.name.startswith("mirror-backfill-")]
+    assert leftovers == [], f"temp dir not cleaned: {leftovers}"
+    assert backfill_mod.gc.isenabled(), "cyclic GC must be re-enabled after backfill"
+
+
+def test_backfill_restores_fetch_events_window(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA #1010 nit: backfill() replaces collect._fetch_events_window for the
+    duration of collect() only — a same-process caller that collects again
+    must go back to the original path, not silently read a consumed temp dir."""
+    now = datetime.now(UTC)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for day in _window_days(now, 1):
+        _write_mirror_day(logs, day, [])
+    monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    sentinel = object()
+    monkeypatch.setattr(backfill_mod.collect, "_fetch_events_window", sentinel)
+
+    backfill_mod.backfill(1, "test-week")
+
+    assert backfill_mod.collect._fetch_events_window is sentinel
+
+
+def test_backfill_sweeps_stale_orphan_temp_dirs(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA #1010 nit: a SIGKILLed run leaves mirror-backfill-* staging dirs;
+    backfill() sweeps orphans older than an hour so a crashed dense run does
+    not leak hundreds of MB, while a live run's young dir is left alone."""
+    now = datetime.now(UTC)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for day in _window_days(now, 1):
+        _write_mirror_day(logs, day, [])
+    monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    daily = tmp_path / "self_evolution" / "daily"
+    daily.mkdir(parents=True)
+    stale = daily / "mirror-backfill-deadbeef"
+    stale.mkdir()
+    (stale / "telemetry.jsonl").write_text("{}")
+    old = time.time() - 7200
+    os.utime(stale, (old, old))
+    fresh = daily / "mirror-backfill-cafebabe"
+    fresh.mkdir()
+
+    backfill_mod.backfill(1, "test-week")
+
+    assert not stale.exists(), "stale orphan must be swept"
+    assert fresh.exists(), "young dir must survive"
