@@ -63,7 +63,10 @@ The observation data volume is a per-machine knob: `AVA_LGTM_STORAGE_DIR`
 (empty default = `$AVA_HOME/lgtm/native/data`, byte-identical to the historical
 layout) moves the Loki filesystem store and the Prometheus TSDB to a configured
 path — e.g. a dedicated data volume on a station host. Grafana's own data and
-the native logs stay under `$AVA_HOME/lgtm/native` regardless.
+the native logs stay under `$AVA_HOME/lgtm/native` regardless. Switching the
+knob does NOT migrate existing data: the new path starts empty, so move the old
+store yourself (`rsync` the previous data dir to the new location before the
+first start on the new path) or accept the history loss.
 
 ## Why this stack
 

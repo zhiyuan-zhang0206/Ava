@@ -24,7 +24,7 @@ from ops.cluster_session import OrchestrationKind
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 from ops.updater_outcome import UpdaterOutcome, last_updater_outcome
 from shared.config import cluster_tz
-from shared.machine import is_agent_runner, is_gateway, machine_name
+from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.proc import process_alive
 from shared.resource_sample import ResourceSample
 
@@ -40,10 +40,13 @@ class ClusterStatus(BaseModel):
     """
 
     machine_name: str
-    # Two orthogonal capability flags (both true on a single-box host) — never a
-    # single categorical "role". See shared/machine.py.
+    # Three orthogonal capability flags (any combination on a single host) —
+    # never a single categorical "role". See shared/machine.py.
+    # serve_observability_station defaults False so a client on pre-station
+    # code still parses a station host's snapshot.
     serve_gateway: bool
     serve_agent_runner: bool
+    serve_observability_station: bool = False
     paused: bool
     # The whole-cluster orchestration alive on this host ('rollout' / 'restart' /
     # 'update'), or None when idle. This endpoint bypasses the cluster-paused 503
@@ -409,6 +412,7 @@ def status_snapshot() -> ClusterStatus:
         machine_name=machine_name(),
         serve_gateway=is_gateway(),
         serve_agent_runner=is_agent_runner(),
+        serve_observability_station=is_observability_station(),
         paused=cluster_pause.is_paused(),
         current_orchestration=cluster_session.current_orchestration(),
         last_updater_outcome=last_updater_outcome(),

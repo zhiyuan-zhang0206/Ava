@@ -44,7 +44,7 @@ from shared import machines
 from shared.cluster_drift import prod_source_head_sha
 from shared.config import settings
 from shared.live_events import ClusterUpdateStarted
-from shared.machine import is_agent_runner, is_gateway, machine_name
+from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.redis_client import publish_best_effort_sync
 
 router = APIRouter()
@@ -74,6 +74,7 @@ def _local_snapshot_blocking() -> ClusterStatus:
         machine_name=machine_name(),
         serve_gateway=is_gateway(),
         serve_agent_runner=is_agent_runner(),
+        serve_observability_station=is_observability_station(),
         paused=cluster_is_paused(),
         current_orchestration=current_orchestration(),
         head_sha=prod_source_head_sha(),

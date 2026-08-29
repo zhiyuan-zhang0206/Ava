@@ -296,7 +296,7 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"  ✓ {resolved['machine_name']} → {url}")
+    print(f"  ✓ {resolved['machine_name']} → {url or '(no dial url — station-only)'}")
     return 0
 
 
