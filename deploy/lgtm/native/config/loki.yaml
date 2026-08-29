@@ -9,6 +9,10 @@ auth_enabled: false
 
 server:
   http_listen_port: 3100
+  # Default info logs every flush stream per chunk (~100M/day into the
+  # launchd-captured log); warn keeps it small without hiding errors
+  # (task #1978).
+  log_level: warn
   # Listen host comes from the AVA_LGTM_LISTEN_HOST setting (default loopback);
   # the external-migration form widens it to 0.0.0.0 or a tailnet IP. The
   # brace-free token keeps this a valid YAML plain scalar — a {{...}} token
