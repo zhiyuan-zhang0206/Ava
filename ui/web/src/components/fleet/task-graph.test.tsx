@@ -80,6 +80,7 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
     created_by: "user",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
+    reminder_count: 0,
     ...over,
   };
 }
@@ -284,6 +285,115 @@ describe("TaskGraph (graph mode)", () => {
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.queryByText("Failed to load tasks.")).toBeNull();
     expect(screen.getByText("Stale")).toBeTruthy();
+  });
+});
+
+describe("TaskGraph hover detail card", () => {
+  // The instant hover card replaces the old native SVG <title> (whose
+  // appearance the browser deferred — the perceived hover lag): it must show
+  // the task's registry fields the moment the cursor enters the node.
+  it("shows the detail card instantly on hover, with the registry fields", async () => {
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      task(2, {
+        title: "Build the widget",
+        description: "A longer description\nspanning two lines",
+        results: "Shipped in #1",
+        status: "in_progress",
+        priority: "P1",
+        parent_id: 1,
+        owner: 30,
+        owner_label: "builder",
+        created_by: "user",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-02T00:00:00Z",
+        remind_interval_seconds: 7200,
+        last_reminded_at: "2026-01-02T00:00:00Z",
+        reminder_count: 3,
+      }),
+    ];
+    useTasks.mockReturnValue(ok(tasks));
+    const { container } = render(
+      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+
+    // No native <title> remains — the delayed browser tooltip is gone.
+    expect(container.querySelectorAll("svg title").length).toBe(0);
+
+    // The card appears synchronously with the mouseenter (no delay timer).
+    fireEvent.mouseEnter(group);
+    expect(screen.queryByRole("tooltip")).not.toBeNull();
+    const card = screen.getByRole("tooltip");
+    const text = card.textContent;
+    expect(text).toContain("Build the widget");
+    expect(text).toContain("Task #2");
+    expect(text).toContain("In progress");
+    expect(text).toContain("P1");
+    expect(text).toContain("builder");
+    expect(text).toContain("#30");
+    expect(text).toContain("User"); // created_by
+    expect(text).toContain("root (#1)"); // parent
+    expect(text).toContain("every 2h"); // remind interval
+    expect(text).toContain("3 reminders");
+    expect(text).toContain("A longer description");
+    expect(text).toContain("Shipped in #1");
+    expect(text).toContain("Double-click the node to open the owner");
+  });
+
+  it("hides the card on mouseleave", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(
+      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+
+    fireEvent.mouseEnter(texts[0].closest("g")!);
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    fireEvent.mouseLeave(texts[0].closest("g")!);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("shows empty states for unset fields and a plain parent id for orphans", async () => {
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      task(2, { title: "orphan", parent_id: 999 }), // parent not in the registry
+    ];
+    useTasks.mockReturnValue(ok(tasks));
+    render(
+      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/orphan/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+
+    fireEvent.mouseEnter(texts[0].closest("g")!);
+    const card = screen.getByRole("tooltip");
+    const text = card.textContent;
+    expect(text).toContain("Unowned"); // no owner
+    expect(text).toContain("#999"); // orphan parent falls back to the id
+    // No reminder configured: the cadence row shows the empty placeholder and
+    // no reminder history line appears.
+    expect(text).toContain("Reminder");
+    expect(text).not.toContain("every");
+  });
+
+  it("shows agent-created tasks by agent id", async () => {
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      task(2, { title: "agent-made", parent_id: 1, created_by: "405", owner: 405 }),
+    ];
+    useTasks.mockReturnValue(ok(tasks));
+    render(
+      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    // "agent-made" wraps at its hyphen into two tspans; match the first line.
+    const texts = await waitFor(() => { const r = screen.getAllByText(/^agent-$/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+
+    fireEvent.mouseEnter(texts[0].closest("g")!);
+    const text = screen.getByRole("tooltip").textContent;
+    expect(text).toContain("Agent #405"); // created_by: "405" → "Agent #405"
+    expect(text).toContain("Agent #405"); // owner: no label → agent id
   });
 });
 

@@ -53,6 +53,17 @@ export interface ForceGraphNode {
   readonly nodeTitle?: string | null;
 }
 
+/**
+ * Optional per-view hover detail card, rendered the instant the cursor enters
+ * a node (no delay). Replaces the native SVG <title>, whose appearance the
+ * browser defers (typically ~0.5–1s) — the perceived "hover lag" of the old
+ * tooltip. The card must return content for every node it is offered (null
+ * leaves the node with no hover surface); it is positioned beside the cursor
+ * and flips to stay inside the canvas. Views without a card keep the native
+ * title as their fallback.
+ */
+export type HoverCard = (node: ForceGraphNode) => ReactNode | null;
+
 export interface ForceGraphEdge {
   readonly from: number;
   readonly to: number;
@@ -187,6 +198,7 @@ export const ForceGraph = memo(function ForceGraph({
   statsText,
   legend,
   overlayLeft,
+  hoverCard,
   ariaLabel = "Fleet graph",
 }: {
   nodes: readonly ForceGraphNode[];
@@ -208,6 +220,8 @@ export const ForceGraph = memo(function ForceGraph({
   legend?: ReactNode;
   /** Extra control rendered beside the layout gear (e.g. the window selector). */
   overlayLeft?: ReactNode;
+  /** Instant hover detail card; see HoverCard. Absent → native <title> tooltip. */
+  hoverCard?: HoverCard;
   ariaLabel?: string;
 }) {
   // Max score across the graph — the radius normalizer. Must match the value
@@ -241,6 +255,38 @@ export const ForceGraph = memo(function ForceGraph({
   // Throttle onMouseMove → React setState to ~20 Hz so rapid cursor movement
   // doesn't trigger per-pixel re-renders just for hover opacity.
   const hoverThrottleRef = useRef(0);
+
+  // The instant hover card. Content is computed only for the hovered node
+  // (never per node per layout tick); when the view supplies no card the
+  // native <title> fallback stays in place per node.
+  const hoveredCard = useMemo(() => {
+    if (!hovered || !hoverCard) return null;
+    const node = nodeById.get(hovered.id);
+    return node ? hoverCard(node) : null;
+  }, [hovered, hoverCard, nodeById]);
+
+  // Card placement: anchored at the cursor (14px gap), flipped to the cursor's
+  // other side when it would clip the canvas edge. Done in a layout effect
+  // with direct style writes — before paint, no extra render per mousemove.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const hoverCardRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const card = hoverCardRef.current;
+    const container = containerRef.current;
+    if (!card || !container || !hovered) return;
+    const rect = container.getBoundingClientRect();
+    const cardW = card.offsetWidth;
+    const cardH = card.offsetHeight;
+    const gap = 14;
+    const x = hovered.x - rect.left;
+    const y = hovered.y - rect.top;
+    let left = x + gap;
+    let top = y + gap;
+    if (left + cardW > rect.width - 4) left = x - gap - cardW;
+    if (top + cardH > rect.height - 4) top = y - gap - cardH;
+    card.style.left = `${Math.max(4, left)}px`;
+    card.style.top = `${Math.max(4, top)}px`;
+  }, [hovered]);
 
   // User zoom/pan as an SVG transform on the content <g> (translate + scale),
   // separate from the fit-to-content viewBox base frame. d3-zoom owns wheel /
@@ -431,7 +477,7 @@ export const ForceGraph = memo(function ForceGraph({
   };
 
   return (
-    <div className={cn("relative h-full w-full", OVERFLOW_HIDDEN)}>
+    <div ref={containerRef} className={cn("relative h-full w-full", OVERFLOW_HIDDEN)}>
       {layout ? (
       <svg
         ref={attachZoom}
@@ -557,7 +603,9 @@ export const ForceGraph = memo(function ForceGraph({
                   }}
                   onMouseLeave={() => setHovered((cur) => (cur?.id === n.id ? null : cur))}
                 >
-                  <title>{n.nodeTitle ?? (n.label ? `${n.label} (#${n.id})` : `#${n.id}`)}</title>
+                  {hoverCard == null ? (
+                    <title>{n.nodeTitle ?? (n.label ? `${n.label} (#${n.id})` : `#${n.id}`)}</title>
+                  ) : null}
                   {isRinged ? (
                     shape === "circle" ? (
                       <circle
@@ -672,6 +720,20 @@ export const ForceGraph = memo(function ForceGraph({
       {legend != null ? (
         <div className="pointer-events-none absolute bottom-3 right-3 rounded-md border border-border bg-background/80 px-3 py-1.5 text-[10px] text-muted-foreground backdrop-blur">
           {legend}
+        </div>
+      ) : null}
+
+      {/* Instant hover detail card — pointer-events-none so it never steals
+          the cursor from the nodes beneath; position is set by the layout
+          effect above (flip-at-edge, before paint). */}
+      {hoveredCard != null ? (
+        <div
+          ref={hoverCardRef}
+          role="tooltip"
+          className="pointer-events-none absolute z-20"
+          style={{ left: 0, top: 0 }}
+        >
+          {hoveredCard}
         </div>
       ) : null}
 

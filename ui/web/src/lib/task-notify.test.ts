@@ -25,6 +25,7 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
     created_by: "user",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
+    reminder_count: 0,
     ...over,
   };
 }
