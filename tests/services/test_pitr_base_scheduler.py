@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import time
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -80,3 +82,61 @@ async def test_runner_cancellation_reaps_active_worker(
 
     assert stopped.read_text() == "stopped"
     assert not psutil.pid_exists(child_pid)
+
+
+# ── QA #931 R3: domain conditions never gate readiness ────────────────────
+
+
+async def _http_get_status(port: int) -> tuple[int, bytes]:
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+    await writer.drain()
+    raw = await reader.read()
+    writer.close()
+    await writer.wait_closed()
+    head, _, body = raw.partition(b"\r\n\r\n")
+    status_line = head.split(b"\r\n", 1)[0].decode("ascii", errors="replace")
+    return int(status_line.split(" ")[1]), body
+
+
+def _find_free_port() -> int:
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+@pytest.mark.asyncio
+async def test_degraded_domain_condition_keeps_healthz_200() -> None:
+    """QA #931 R3 discriminator: a domain condition (cleanup pending, last
+    error, stale candidate) must NOT flip /healthz to 503 — a respawn cannot
+    fix it, so the watchdog would restart-flap a healthy daemon every 60s.
+    The component reports degraded with gate_readiness=False; readiness
+    follows process liveness only."""
+    from shared.daemon_health import Liveness, start_health_server, stop_health_server
+
+    state = BaseCandidateState(last_error="GCS credentials rejected")
+    port = _find_free_port()
+    liveness = Liveness(timeout_s=120)
+    server = await start_health_server(
+        "pitr_base_backup",
+        port=port,
+        liveness=liveness,
+        components=lambda: _components(state),
+    )
+    try:
+        status, body = await _http_get_status(port)
+        assert status == 200, "domain condition must not gate readiness"
+        payload = json.loads(body)
+        assert payload["readiness"] == "ok"
+        comp = next(c for c in payload["components"] if c["name"] == "pitr_base_candidate")
+        assert comp["status"] == "degraded"
+        assert comp["gate_readiness"] is False
+        assert "GCS credentials rejected" in comp["detail"]
+        # The liveness lane still gates: a dead/wedged daemon flips to 503.
+        liveness._last = time.monotonic() - 1000
+        status, _ = await _http_get_status(port)
+        assert status == 503, "wedged daemon (stale liveness) still gates readiness"
+    finally:
+        await stop_health_server(server)
