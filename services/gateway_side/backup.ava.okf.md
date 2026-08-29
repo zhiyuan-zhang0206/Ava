@@ -30,8 +30,16 @@ host's: reading a host timezone can make a current dump appear to be future.
 ## Entry Points
 - `services/backup_scheduler/daemon.py` — scheduled due-check, retry, and health state
 - `services/backup.py:run_backup()` — actual dump + prune
+- `cli/commands/_converge_pitr.py` — publishes the disabled-by-default physical-backup layout and stable archive shim; it does not alter PostgreSQL
+- `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
 
 ## Notes
 - Gateway capability only; `ava start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.
 - Protects against bad migrations / accidental deletion / DB corruption and makes a best-effort encrypted Google Drive copy before pruning; an unavailable Drive folder leaves the local artifact intact. Object storage remains a future alternative, see `future/infra/pg-backup.md`.
 - Restore: follow `.agents/skills/operating-ava-cluster/references/db-restore.md` to decrypt before `pg_restore --clean --if-exists`.
+- Physical PITR is currently a **foundation only**: converge publishes a private
+  per-home spool and a source-independent, self-checked shim, while
+  `AVA_PITR_ENABLED` defaults false and PostgreSQL `archive_mode` stays untouched.
+  A local archived segment is not a remote ACK. The GCS uploader, base chains,
+  migration gate, and isolated physical restore arrive in follow-up PRs; logical
+  daily/pre-update dumps remain the active recovery contract throughout.

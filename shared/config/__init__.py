@@ -120,6 +120,7 @@ from shared.config.gateway import GatewaySettings
 from shared.config.general import GeneralSettings
 from shared.config.lm import LmSettings
 from shared.config.observability import ObservabilitySettings
+from shared.config.physical_backup import PhysicalBackupSettings
 from shared.config.profiles import (
     AVA_PROCESS_PROFILE_ENV,
     PROCESS_PROFILES,
@@ -237,6 +238,7 @@ class Settings(BaseModel):
     # BaseSettings fills from env at construction; pyright sees the zero-arg factory
     # as under-supplied.
     data_plane: DataPlaneSettings = Field(default_factory=DataPlaneSettings)  # pyright: ignore[reportArgumentType, reportUnknownVariableType]
+    physical_backup: PhysicalBackupSettings = Field(default_factory=PhysicalBackupSettings)
     services: ServiceSettings = Field(default_factory=ServiceSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     feishu: FeishuSettings = Field(default_factory=FeishuSettings)
