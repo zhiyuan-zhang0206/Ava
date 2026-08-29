@@ -18,15 +18,14 @@
 
 "use client";
 
-import { CheckCheck, CircleAlert, EyeOff } from "lucide-react";
+import { CheckCheck, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { PRIORITY_BG } from "@/lib/notices";
-import { needsYouByTask, rollupNeedsYou } from "@/lib/task-notify";
 import { formatRelative, formatUptime } from "@/lib/time";
-import type { AgentRow, TaskRow } from "@/lib/types";
+import type { TaskRow } from "@/lib/types";
 import { useTasks } from "@/lib/use-tasks";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
@@ -67,8 +66,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 // ── Hover detail card ──
 //
-// The instant, cursor-following replacement for the old native SVG <title>
-// (whose appearance the browser deferred ~0.5–1s — the perceived hover lag).
+// The instant, statically anchored replacement for the old native SVG <title>
+// (whose appearance the browser deferred ~0.5–1s — the perceived hover lag):
+// it appears on mouseenter pinned to the node's box and hides on mouseleave.
 // Renders the task like a real detail page: every registry field the wire
 // carries, grouped under labeled rows, with empty states for unset fields
 // instead of a bare text dump. Rendered through the shared ForceGraph's
@@ -247,38 +247,12 @@ function StaleBadge({ show }: { show: boolean }) {
   );
 }
 
-// The "Needs you" filter toggle. Inactive shows the board-wide pending
-// needs-you total (the aggregate count — allowed here: the board is an
-// explicitly opened pull surface, not an ambient one); active narrows the
-// board to subtrees waiting on the user.
-function NeedsYouToggle({
-  active,
-  onClick,
-  total,
-}: {
-  active: boolean;
-  onClick: () => void;
-  total: number;
-}) {
-  return (
-    <StatusToggleButton
-      active={active}
-      onClick={onClick}
-      label="Needs you"
-      hiddenCount={total}
-      icon={<CircleAlert className="size-3" />}
-    />
-  );
-}
-
 export function TaskGraph({
-  agents,
   selectedTaskId,
   onSelectTask,
   selectedAgentId,
   onSelectAgent,
 }: {
-  agents: readonly AgentRow[];
   selectedTaskId: number | null;
   onSelectTask: (id: number | null) => void;
   selectedAgentId: number | null;
@@ -298,30 +272,15 @@ export function TaskGraph({
   const setShowDone = (v: boolean) => setSetting("display.task_show_done", v);
   const showCanceled = settings["display.task_show_canceled"] === true;
   const setShowCanceled = (v: boolean) => setSetting("display.task_show_canceled", v);
-  const needsOnly = settings["display.task_needs_you"] === true;
-  const setNeedsOnly = (v: boolean) => setSetting("display.task_needs_you", v);
-
-  // Needs-you join (task-notify.ts): per-task pending require_response load
-  // from the owning agents, plus the subtree rollup that keeps a manager task
-  // visible while any descendant waits on the user.
-  const needsYou = useMemo(() => needsYouByTask(tasks, agents), [tasks, agents]);
-  const subtreeNeeds = useMemo(() => rollupNeedsYou(tasks, needsYou), [tasks, needsYou]);
-  const needsYouTotal = useMemo(() => {
-    let n = 0;
-    for (const ny of needsYou.values()) n += ny.count;
-    return n;
-  }, [needsYou]);
-
-  // Filter tasks based on toggles.
+  // Filter tasks based on the Done/Canceled toggles.
   const filteredTasks = useMemo(
     () =>
       tasks.filter(
         (t) =>
           (showDone || t.status !== "done") &&
-          (showCanceled || t.status !== "cancelled") &&
-          (!needsOnly || (subtreeNeeds.get(t.id) ?? 0) > 0),
+          (showCanceled || t.status !== "cancelled"),
       ),
-    [tasks, showDone, showCanceled, needsOnly, subtreeNeeds],
+    [tasks, showDone, showCanceled],
   );
   const hiddenDoneCount = useMemo(() => tasks.filter((t) => t.status === "done").length, [tasks]);
   const hiddenCanceledCount = useMemo(() => tasks.filter((t) => t.status === "cancelled").length, [tasks]);
@@ -478,41 +437,6 @@ export function TaskGraph({
     );
   }
   if (filteredTasks.length === 0) {
-    // With the needs-you filter on, an empty board is the healthy steady state
-    // — keep the FULL filter toolbar reachable: the needs-you toggle to turn
-    // the filter back off, and the Done/Canceled toggles because a pending
-    // decision can sit on a status-hidden task (needsYouTotal > 0 here means
-    // exactly that — every needy task was excluded by the status filters).
-    if (needsOnly) {
-      return (
-        <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
-          <div className={cn("shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1.5", FLEX)}>
-            <div className={cn("ml-auto items-center gap-1", FLEX)}>
-              <NeedsYouToggle active onClick={() => setNeedsOnly(false)} total={needsYouTotal} />
-              <StatusToggleButton
-                active={showDone}
-                onClick={() => setShowDone(!showDone)}
-                label="Done"
-                hiddenCount={showDone ? 0 : hiddenDoneCount}
-                icon={<CheckCheck className="size-3" />}
-              />
-              <StatusToggleButton
-                active={showCanceled}
-                onClick={() => setShowCanceled(!showCanceled)}
-                label="Canceled"
-                hiddenCount={showCanceled ? 0 : hiddenCanceledCount}
-                icon={<EyeOff className="size-3" />}
-              />
-            </div>
-          </div>
-          <div className={cn("items-center justify-center px-4 text-center text-xs text-muted-foreground", FLEX, FLEX_1)}>
-            {needsYouTotal > 0
-              ? "Pending decisions sit on Done/Canceled tasks — use the toggles above to reveal them."
-              : "Nothing needs you right now."}
-          </div>
-        </div>
-      );
-    }
     return (
       <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
         No tasks yet.
@@ -541,11 +465,6 @@ export function TaskGraph({
           </span>
           <StaleBadge show={error} />
           <div className={cn("ml-auto items-center gap-1", FLEX)}>
-            <NeedsYouToggle
-              active={needsOnly}
-              onClick={() => setNeedsOnly(!needsOnly)}
-              total={needsYouTotal}
-            />
             <StatusToggleButton
               active={showDone}
               onClick={() => setShowDone(!showDone)}
@@ -595,11 +514,6 @@ export function TaskGraph({
         </span>
         <StaleBadge show={error} />
         <div className={cn("ml-auto items-center gap-1", FLEX)}>
-          <NeedsYouToggle
-            active={needsOnly}
-            onClick={() => setNeedsOnly(!needsOnly)}
-            total={needsYouTotal}
-          />
           <StatusToggleButton
             active={showDone}
             onClick={() => setShowDone(!showDone)}

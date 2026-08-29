@@ -3,14 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  groupByTaskSubtree,
-  needsYouByTask,
-  rollupNeedsYou,
-  subtreeRootOf,
-  taskForAgent,
-} from "./task-notify";
-import type { AgentRow, OpenNotice, TaskRow } from "./types";
+import { groupByTaskSubtree, subtreeRootOf, taskForAgent } from "./task-notify";
+import type { TaskRow } from "./types";
 
 function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
   return {
@@ -27,41 +21,6 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
     updated_at: "2026-01-01T00:00:00Z",
     reminder_count: 0,
     ...over,
-  };
-}
-
-function notice(id: number, over: Partial<OpenNotice> = {}): OpenNotice {
-  return {
-    id,
-    title: `Notice ${id}`,
-    content: null,
-    priority: "P2",
-    require_response: true,
-    blocking: false,
-    created_at: "2026-01-01T00:00:00Z",
-    ...over,
-  };
-}
-
-function agent(agentId: number, notices: OpenNotice[]): AgentRow {
-  return {
-    agent_id: agentId,
-    spawner: "user",
-    fork_source_agent_id: null,
-    fork_source_checkpoint_id: null,
-    status: "running",
-    pid: null,
-    spawned_at: "2026-01-01T00:00:00Z",
-    started_at: null,
-    last_active_at: "2026-01-01T00:00:00Z", last_inbound_at: "2026-01-01T00:00:00Z",
-    label: null,
-    machine: "test",
-    supports_vision: true,
-    notices_awaiting_response: notices,
-    unread_notice_count: 0,
-    heartbeat_paused_until: null,
-    liveness_state: "online",
-    last_probe_at: null,
   };
 }
 
@@ -198,88 +157,5 @@ describe("groupByTaskSubtree", () => {
       idOf,
     );
     expect(units.map((u) => u.root?.id ?? null)).toEqual([5]);
-  });
-});
-
-describe("needsYouByTask", () => {
-  it("counts each agent's open require_response notices on its task", () => {
-    const agents = [
-      agent(30, [notice(1, { priority: "P1" }), notice(2, { priority: "P3" })]),
-      agent(60, [notice(3)]),
-      agent(999, [notice(4)]), // no task — not attributed anywhere
-      agent(40, []), // nothing pending — no entry
-    ];
-    const m = needsYouByTask(registry(), agents);
-    expect(m.get(3)).toEqual({ count: 2, top: "P1" });
-    expect(m.get(6)).toEqual({ count: 1, top: "P2" });
-    expect(m.has(4)).toBe(false);
-    expect(m.size).toBe(2);
-  });
-
-  it("attributes an agent's notices to only its FIRST owned task (no double count)", () => {
-    const tasks = [
-      task(1),
-      task(2, { parent_id: 1, owner: 10 }),
-      task(3, { parent_id: 1, owner: 10 }),
-    ];
-    const m = needsYouByTask(tasks, [agent(10, [notice(1, { priority: "P0" })])]);
-    expect(m.get(2)).toEqual({ count: 1, top: "P0" });
-    expect(m.has(3)).toBe(false);
-  });
-
-  it("attributes a notice to the task it names (task_id wins over the owner-join)", () => {
-    // Agent 30's owner-joined task is #3, but its notice names #4 — the notice
-    // must land on #4, not #3.
-    const m = needsYouByTask(registry(), [
-      agent(30, [notice(1, { priority: "P1", task_id: 4 })]),
-    ]);
-    expect(m.get(4)).toEqual({ count: 1, top: "P1" });
-    expect(m.has(3)).toBe(false);
-  });
-
-  it("splits one agent's notices across the different tasks they name", () => {
-    const m = needsYouByTask(registry(), [
-      agent(30, [
-        notice(1, { priority: "P0", task_id: 3 }),
-        notice(2, { priority: "P2", task_id: 4 }),
-      ]),
-    ]);
-    expect(m.get(3)).toEqual({ count: 1, top: "P0" });
-    expect(m.get(4)).toEqual({ count: 1, top: "P2" });
-  });
-
-  it("attributes a loose agent's notice by task_id even with no owned task", () => {
-    // Agent 999 owns nothing (owner-join null), but its notice names task #6.
-    const m = needsYouByTask(registry(), [agent(999, [notice(1, { task_id: 6 })])]);
-    expect(m.get(6)).toEqual({ count: 1, top: "P2" });
-  });
-
-  it("falls back to the owner-join when task_id names an unknown task", () => {
-    const m = needsYouByTask(registry(), [
-      agent(30, [notice(1, { priority: "P1", task_id: 9999 })]),
-    ]);
-    expect(m.get(3)).toEqual({ count: 1, top: "P1" });
-    expect(m.has(9999)).toBe(false);
-  });
-});
-
-describe("rollupNeedsYou", () => {
-  it("aggregates counts up the parent chain", () => {
-    const own = needsYouByTask(registry(), [
-      agent(30, [notice(1)]),
-      agent(40, [notice(2), notice(3)]),
-      agent(60, [notice(4)]),
-    ]);
-    const roll = rollupNeedsYou(registry(), own);
-    expect(roll.get(3)).toBe(1);
-    expect(roll.get(4)).toBe(2);
-    expect(roll.get(2)).toBe(3); // manager-a subtree: 1 + 2
-    expect(roll.get(5)).toBe(1); // manager-b subtree
-    expect(roll.get(1)).toBe(4); // system root sees everything
-    expect(roll.has(6)).toBe(true);
-  });
-
-  it("is empty when nothing needs the user", () => {
-    expect(rollupNeedsYou(registry(), new Map()).size).toBe(0);
   });
 });

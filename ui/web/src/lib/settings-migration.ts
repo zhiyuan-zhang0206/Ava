@@ -88,7 +88,6 @@ export const SETTINGS_MIGRATIONS: readonly MigrationEntry[] = [
   { legacyKey: "ava.fleet.taskGraphMode", settingKey: "display.task_graph_mode", parse: parseEnum(["graph", "kanban"]), default: "graph" },
   { legacyKey: "ava.fleet.taskShowDone", settingKey: "display.task_show_done", parse: parseBool, default: false },
   { legacyKey: "ava.fleet.taskShowCanceled", settingKey: "display.task_show_canceled", parse: parseBool, default: false },
-  { legacyKey: "ava.fleet.taskNeedsYou.v1", settingKey: "display.task_needs_you", parse: parseBool, default: false },
   { legacyKey: "ava.fleet.forceParams", settingKey: "display.graph_force_params", parse: parseJson },
   // Task force params: read the live key (#651 bumped it to .v2 to shed the
   // stuck-gravity default; #739 bumped the DB key to .v2 as well — the node

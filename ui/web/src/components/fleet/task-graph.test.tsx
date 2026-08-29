@@ -9,7 +9,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, OpenNotice, TaskRow } from "@/lib/types";
+import type { TaskRow } from "@/lib/types";
 import type { TasksResult } from "@/lib/use-tasks";
 import { resetMockSettings } from "@/test-support/user-settings-mock";
 
@@ -18,45 +18,6 @@ import { TASK_FORCE_KEY } from "./task-graph";
 import { TaskGraph } from "./task-graph";
 
 vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
-// Default agent roster for renders — empty: no needs-you signal anywhere.
-function agents(): AgentRow[] {
-  return [];
-}
-
-function openNotice(id: number, priority: OpenNotice["priority"]): OpenNotice {
-  return {
-    id,
-    title: `Notice ${id}`,
-    content: null,
-    priority,
-    require_response: true,
-    blocking: false,
-    created_at: "2026-01-01T00:00:00Z",
-  };
-}
-
-function fleetAgent(agentId: number, notices: OpenNotice[]): AgentRow {
-  return {
-    agent_id: agentId,
-    spawner: "user",
-    fork_source_agent_id: null,
-    fork_source_checkpoint_id: null,
-    status: "running",
-    pid: null,
-    spawned_at: "2026-01-01T00:00:00Z",
-    started_at: null,
-    last_active_at: "2026-01-01T00:00:00Z", last_inbound_at: "2026-01-01T00:00:00Z",
-    label: null,
-    machine: "test",
-    supports_vision: true,
-    notices_awaiting_response: notices,
-    unread_notice_count: 0,
-    heartbeat_paused_until: null,
-    liveness_state: "online",
-    last_probe_at: null,
-  };
-}
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -111,7 +72,7 @@ afterEach(cleanup);
 describe("TaskGraph (graph mode)", () => {
   it("explains task status colors", () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     const legend = screen.getByLabelText("Task graph legend");
     for (const label of ["In progress", "Done", "Canceled", "Root"]) {
@@ -124,7 +85,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("renders only in-progress cards by default", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     // The root task (#1) is shown in graph mode (ruling 2026-08-06) so
     // top-level tasks hang under it; only subtasks used to appear.
@@ -138,7 +99,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("has no swimlane band labels in graph mode", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     // The old swimlane labels should not appear as SVG text.
@@ -156,7 +117,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("shows Graph/Kanban mode toggle", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.getByText("Kanban")).toBeTruthy();
     expect(screen.getByText("Graph")).toBeTruthy();
@@ -164,7 +125,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("switches to Kanban mode and shows only visible columns", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     fireEvent.click(screen.getByText("Kanban"));
@@ -186,7 +147,7 @@ describe("TaskGraph (graph mode)", () => {
       task(3, { title: "done-child", status: "done", parent_id: 1 }),
     ];
     useTasks.mockReturnValue(ok(tasks));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     fireEvent.click(screen.getByText("Kanban"));
@@ -201,7 +162,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("shows Done tasks when the Done toggle is clicked (graph mode)", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     // #4 (done) is hidden.
@@ -214,7 +175,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("shows Canceled tasks when the Canceled toggle is clicked (graph mode)", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     // #5 (cancelled) is hidden.
@@ -229,7 +190,7 @@ describe("TaskGraph (graph mode)", () => {
   it("selects a card on single click", async () => {
     const onSelect = vi.fn();
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={onSelect} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={onSelect} />);
 
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const text = texts[0];
@@ -244,7 +205,7 @@ describe("TaskGraph (graph mode)", () => {
     // keeps the selection; the SVG background click deselects instead.
     const onSelect = vi.fn();
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={2} onSelectTask={onSelect} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={2} onSelectTask={onSelect} />);
 
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const text = texts[0];
@@ -254,7 +215,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("renders parent-child edges hanging under the root node", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    const { container } = render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
     await waitFor(() => expect(screen.getAllByText(/#1/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     // The root task (#1) is a visible node now (ruling 2026-08-06), so its
@@ -277,7 +238,7 @@ describe("TaskGraph (graph mode)", () => {
     ];
     useTasks.mockReturnValue(ok(tasks));
     const { container } = render(
-      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
 
@@ -305,7 +266,7 @@ describe("TaskGraph (graph mode)", () => {
     ];
     useTasks.mockReturnValue(ok(tasks));
     const { container } = render(
-      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     await waitFor(() => expect(screen.getAllByText(/#12/).length).toBeGreaterThan(0), { timeout: 4000 });
     // Both hidden ancestors render as ghosts (their id tspans).
@@ -321,7 +282,7 @@ describe("TaskGraph (graph mode)", () => {
   it("does not ghost a hidden done task with no visible children", async () => {
     useTasks.mockReturnValue(ok(sampleTasks())); // #4 done / #5 cancelled are leaves
     const { container } = render(
-      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     // Hidden leaves stay hidden — only structural parents become ghosts.
@@ -333,13 +294,13 @@ describe("TaskGraph (graph mode)", () => {
 
   it("empty task list (not loading, no error) shows the empty placeholder", () => {
     useTasks.mockReturnValue({ tasks: [], loading: false, error: false });
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
     expect(screen.getByText("No tasks yet.")).toBeTruthy();
   });
 
   it("cold error (no tasks loaded) shows the error placeholder", () => {
     useTasks.mockReturnValue({ tasks: [], loading: false, error: true });
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
     expect(screen.getByText("Failed to load tasks.")).toBeTruthy();
   });
 
@@ -347,7 +308,7 @@ describe("TaskGraph (graph mode)", () => {
     // A poll failed but tasks are already loaded — the board must stay, with a
     // lightweight "stale" flag instead of being replaced by the error screen.
     useTasks.mockReturnValue({ tasks: sampleTasks(), loading: false, error: true });
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.queryByText("Failed to load tasks.")).toBeNull();
@@ -381,7 +342,7 @@ describe("TaskGraph hover detail card", () => {
     ];
     useTasks.mockReturnValue(ok(tasks));
     const { container } = render(
-      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
 
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
@@ -413,7 +374,7 @@ describe("TaskGraph hover detail card", () => {
   it("hides the card on mouseleave", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(
-      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
 
@@ -429,7 +390,7 @@ describe("TaskGraph hover detail card", () => {
     // the node's on-screen box; a mousemove over the node leaves it put.
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(
-      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -447,6 +408,68 @@ describe("TaskGraph hover detail card", () => {
     expect(card.style.left).toBe("4px");
   });
 
+  it("flips beside the node's LEFT edge so the card never covers the hovered node", async () => {
+    // QA #990 BLOCK regression: the flip baseline must be the node's left
+    // edge — the old formula anchored the flip at the right edge and parked
+    // the card ON the hovered node (~70% overlap on right-edge nodes).
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+    // Canvas 300×400; the node box [250, 286] × [100, 136] sits at the right
+    // edge so the 200×100 card must flip.
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 300, height: 400 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 250, y: 100, width: 36, height: 36 }),
+    );
+    // Card size 200×100 — mock only the tooltip element's offsets, every
+    // other element keeps its real values.
+    const proto = HTMLElement.prototype;
+    // Typed through a shim so the descriptor's getter returns number.
+    const widthDesc = Object.getOwnPropertyDescriptor({ offsetWidth: 0 }, "offsetWidth");
+    const heightDesc = Object.getOwnPropertyDescriptor({ offsetHeight: 0 }, "offsetHeight");
+    const isCard = function (this: HTMLElement) {
+      return this.getAttribute("role") === "tooltip";
+    };
+    Object.defineProperty(proto, "offsetWidth", {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (isCard.call(this)) return 200;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- DOM descriptor getters are untyped in lib.dom; narrowed immediately below
+        const real = widthDesc?.get?.call(this);
+        return typeof real === "number" ? real : 0;
+      },
+    });
+    Object.defineProperty(proto, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (isCard.call(this)) return 100;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- DOM descriptor getters are untyped in lib.dom; narrowed immediately below
+        const real = heightDesc?.get?.call(this);
+        return typeof real === "number" ? real : 0;
+      },
+    });
+    try {
+      fireEvent.mouseEnter(group);
+      const card = screen.getByRole("tooltip");
+      // Default side starts at 286+14=300 and clips (300+200 > 296), so the
+      // card flips: right edge at the node's left edge minus the gap —
+      // left = 250 − 14 − 200 = 36. The card [36, 236] lies fully left of
+      // the node [250, 286] — zero overlap. (The old formula gave 72, which
+      // covered the node's right two-thirds.)
+      expect(card.style.left).toBe("36px");
+      expect(card.style.top).toBe("114px"); // 100 + 14, no vertical flip
+    } finally {
+      if (widthDesc) Object.defineProperty(proto, "offsetWidth", widthDesc);
+      if (heightDesc) Object.defineProperty(proto, "offsetHeight", heightDesc);
+    }
+  });
+
   it("shows empty states for unset fields and a plain parent id for orphans", async () => {
     const tasks: TaskRow[] = [
       task(1, { title: "root", status: "ongoing" }),
@@ -454,7 +477,7 @@ describe("TaskGraph hover detail card", () => {
     ];
     useTasks.mockReturnValue(ok(tasks));
     render(
-      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/orphan/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
 
@@ -476,7 +499,7 @@ describe("TaskGraph hover detail card", () => {
     ];
     useTasks.mockReturnValue(ok(tasks));
     render(
-      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     // "agent-made" wraps at its hyphen into two tspans; match the first line.
     const texts = await waitFor(() => { const r = screen.getAllByText(/^agent-$/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
@@ -537,7 +560,7 @@ describe("TaskGraph layout controls", () => {
     // graph's OWN key (display.task_force_params.v2), not the agent graph's.
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rect = container.querySelector("svg[role='img'] rect")!;
@@ -549,7 +572,7 @@ describe("TaskGraph layout controls", () => {
     });
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container: c2 } = render(
-      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rect2 = c2.querySelector("svg[role='img'] rect")!;
@@ -562,7 +585,7 @@ describe("TaskGraph layout controls", () => {
     // task node must be the same size — all sit at the minimum radius.
     useTasks.mockReturnValue(ok(sampleTasks())); // root #1 has 4 children
     const { container } = render(
-      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rects = [...container.querySelectorAll("svg[role='img'] rect")];
@@ -577,120 +600,9 @@ describe("TaskGraph layout controls", () => {
 
   it("insets the layout gear from the canvas edge", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const wrapper = screen.getByLabelText("Graph layout settings").parentElement!;
     expect([...wrapper.classList]).toEqual(expect.arrayContaining(["absolute", "left-3", "top-3"]));
-  });
-});
-
-describe("TaskGraph needs-you (RCS cut 3)", () => {
-  // Root #1 → #2 (owner 30, two pending P1/P3 notices) and #3 (owner 40, quiet).
-  function needyFixture(): { tasks: TaskRow[]; roster: AgentRow[] } {
-    return {
-      tasks: [
-        task(1, { title: "root" }),
-        task(2, { title: "needy", parent_id: 1, owner: 30, status: "in_progress" }),
-        task(3, { title: "quiet", parent_id: 1, owner: 40, status: "in_progress" }),
-      ],
-      roster: [
-        fleetAgent(30, [openNotice(1, "P1"), openNotice(2, "P3")]),
-        fleetAgent(40, []),
-      ],
-    };
-  }
-
-  it("renders no needs-you badge on task nodes (user ruling 2026-08-29)", async () => {
-    // The per-task "needs you" badge was removed: its semantics (open
-    // require_response notices attributed to the task) read as "owner =
-    // current user" to the user. The toolbar "Needs you" FILTER stays — it
-    // narrows the board to waiting subtrees, which is its own feature.
-    const { tasks, roster } = needyFixture();
-    useTasks.mockReturnValue(ok(tasks));
-    const { container } = render(
-      <TaskGraph agents={roster} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
-    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
-    expect(container.querySelectorAll('g[aria-label$="waiting on you"]').length).toBe(0);
-  });
-
-  it("renders no needs-you badge on kanban cards either", async () => {
-    const { tasks, roster } = needyFixture();
-    useTasks.mockReturnValue(ok(tasks));
-    render(
-      <TaskGraph agents={roster} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
-    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
-    fireEvent.click(screen.getByText("Kanban"));
-    await screen.findByText(/needy/);
-    expect(screen.queryByLabelText(/waiting on you/)).toBeNull();
-  });
-
-  it("Needs you toggle filters the board to needy subtrees", async () => {
-    const { tasks, roster } = needyFixture();
-    useTasks.mockReturnValue(ok(tasks));
-    render(
-      <TaskGraph agents={roster} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
-    // The node renders the title as its own text line (like the Agent Graph's
-    // label line), so the title tspans carry "needy" / "quiet".
-    await waitFor(() => expect(screen.getAllByText("needy").length).toBeGreaterThan(0), { timeout: 4000 });
-    expect(screen.getAllByText("quiet").length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByText("Needs you"));
-    // Quiet task #3 disappears; needy #2 stays.
-    await waitFor(() => expect(screen.queryByText("quiet")).toBeNull(), { timeout: 4000 });
-    expect(screen.getAllByText("needy").length).toBeGreaterThan(0);
-    // No localStorage assertion: this suite's environment has no localStorage
-    // (the component swallows that), so persistence is asserted elsewhere.
-  });
-
-  it("filter on with nothing pending keeps the toggle reachable", async () => {
-    const { tasks } = needyFixture();
-    useTasks.mockReturnValue(ok(tasks));
-    render(
-      <TaskGraph agents={[fleetAgent(30, []), fleetAgent(40, [])]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
-    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
-    fireEvent.click(screen.getByText("Needs you"));
-
-    expect(screen.getByText("Nothing needs you right now.")).toBeTruthy();
-    // The toggle survives the empty state — turning it off restores the board.
-    fireEvent.click(screen.getByText("Needs you"));
-    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
-  });
-
-  it("status-hidden needy task: empty state keeps Done toggle reachable and reveals it", async () => {
-    // A done-but-needy orphan (#2, parent missing) plus a quiet live sibling
-    // (#3). With Needs you on, #3 drops (not needy) and #2 drops (Done hidden)
-    // -> the board is empty while decisions are pending behind status filters.
-    const tasks = [
-      task(2, { title: "fin", parent_id: 1, owner: 30, status: "done" }),
-      task(3, { title: "alive", parent_id: 1, owner: 40, status: "in_progress" }),
-    ];
-    const roster = [fleetAgent(30, [openNotice(1, "P1")]), fleetAgent(40, [])];
-    useTasks.mockReturnValue(ok(tasks));
-    render(
-      <TaskGraph agents={roster} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
-    await waitFor(() => expect(screen.getAllByText("alive").length).toBeGreaterThan(0), { timeout: 4000 });
-
-    fireEvent.click(screen.getByText("Needs you"));
-    // Honest empty state: pending work exists but is status-hidden.
-    expect(screen.getByText(/Pending decisions sit on Done\/Canceled tasks/)).toBeTruthy();
-    // The full filter toolbar survives: reveal the hidden needy task via Done.
-    fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
-    await waitFor(() => expect(screen.getAllByText("fin").length).toBeGreaterThan(0), { timeout: 4000 });
-  });
-
-  it("inactive toggle shows the board-wide pending total", async () => {
-    const { tasks, roster } = needyFixture();
-    useTasks.mockReturnValue(ok(tasks));
-    render(
-      <TaskGraph agents={roster} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
-    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
-    const toggle = screen.getByText("Needs you").closest("button")!;
-    expect(toggle.textContent).toContain("2");
   });
 });

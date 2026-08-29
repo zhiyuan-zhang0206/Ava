@@ -7,8 +7,7 @@
 // the system root). Agents with no task stay loose — they are rendered flat,
 // never forced into a pseudo-group.
 
-import { PRIORITY_RANK } from "./notices";
-import type { AgentRow, OpenNotice, TaskRow } from "./types";
+import type { TaskRow } from "./types";
 
 /** First real task (parent_id !== null — never the system root) owned by the
  *  agent, or null. Mirrors the board's bidirectional-sync convention
@@ -67,7 +66,7 @@ export function groupByTaskSubtree<T>(
   const units: QueueUnit<T>[] = [];
   for (const item of items) {
     // The named task wins when it exists; a null / unknown id falls back to the
-    // owner-join (mirrors needsYouByTask's per-notice attribution).
+    // owner-join (the notice's task_id, or its owner agent's first task).
     const named = taskIdOf?.(item) ?? null;
     const namedTask = named !== null ? byId.get(named) : undefined;
     const task = namedTask ?? taskForAgent(tasks, agentIdOf(item));
@@ -86,67 +85,4 @@ export function groupByTaskSubtree<T>(
     }
   }
   return units;
-}
-
-/** Pending needs-you load on one task: how many open require_response notices
- *  its owner agents hold, and the highest priority among them. */
-export interface TaskNeedsYou {
-  count: number;
-  top: OpenNotice["priority"];
-}
-
-/** Per-task needs-you: each open require_response notice attaches to the task it
- *  names (`notice.task_id`, the authoritative link), or — when it names none, or
- *  names one absent from the registry — falls back to the first real task its
- *  owner agent holds (`taskForAgent`). Attributed per notice, so an agent whose
- *  notices point at different tasks splits across them. Tasks with zero pending
- *  notices have no entry. */
-export function needsYouByTask(
-  tasks: readonly TaskRow[],
-  agents: readonly AgentRow[],
-): Map<number, TaskNeedsYou> {
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  const result = new Map<number, TaskNeedsYou>();
-  const bump = (taskId: number, priority: OpenNotice["priority"]) => {
-    const cur = result.get(taskId);
-    if (!cur) {
-      result.set(taskId, { count: 1, top: priority });
-    } else {
-      cur.count += 1;
-      if (PRIORITY_RANK[priority] < PRIORITY_RANK[cur.top]) cur.top = priority;
-    }
-  };
-  for (const agent of agents) {
-    // Fallback target for a notice that names no task: the first real task the
-    // agent owns (the pre-task_id behavior).
-    const ownerTaskId = taskForAgent(tasks, agent.agent_id)?.id ?? null;
-    for (const notice of agent.notices_awaiting_response) {
-      const taskId =
-        notice.task_id != null && byId.has(notice.task_id) ? notice.task_id : ownerTaskId;
-      if (taskId === null) continue;
-      bump(taskId, notice.priority);
-    }
-  }
-  return result;
-}
-
-/** Subtree rollup: task id → total needs-you count in its subtree (itself +
- *  every descendant). Drives the board's "Needs you" filter, which keeps a
- *  manager task visible while any of its descendants waits on the user. */
-export function rollupNeedsYou(
-  tasks: readonly TaskRow[],
-  own: ReadonlyMap<number, TaskNeedsYou>,
-): Map<number, number> {
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  const result = new Map<number, number>();
-  for (const [taskId, ny] of own) {
-    let cur = byId.get(taskId);
-    const seen = new Set<number>();
-    while (cur && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      result.set(cur.id, (result.get(cur.id) ?? 0) + ny.count);
-      cur = cur.parent_id !== null ? byId.get(cur.parent_id) : undefined;
-    }
-  }
-  return result;
 }
