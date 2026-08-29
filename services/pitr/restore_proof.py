@@ -637,14 +637,27 @@ def publish_candidate_proof(
     *,
     candidate: CandidateManifest,
     root: Path,
+    ack_dir: Path,
     prefix: str,
     publisher: ProtectedManifestPublisher,
 ) -> ProtectedManifest:
     """Publish an already-durable proof from the controller process only."""
 
-    protected = _resume_protected_publish(
+    local = root / "protected-manifests" / f"{candidate.chain_id}.json"
+    pending = root / "protected-pending" / f"{candidate.chain_id}.json"
+    source = local if local.is_file() else pending if pending.is_file() else None
+    if source is None:
+        raise RestoreProofError("protected publication has no durable pending proof")
+    protected = ProtectedManifest.from_json(source.read_text())
+    if protected.candidate_sha256 != candidate_sha256(candidate):
+        raise RestoreProofError("pending proof differs from authoritative candidate")
+    archive_names = required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
+    authoritative_wal = wal_objects_from_acks(ack_dir=ack_dir, archive_names=archive_names)
+    if protected.base != _base_restore_object(candidate) or protected.wal != authoritative_wal:
+        raise RestoreProofError("pending proof differs from authoritative object generations")
+    resumed = _resume_protected_publish(
         root=root, candidate=candidate, prefix=prefix, publisher=publisher
     )
-    if protected is None:
-        raise RestoreProofError("protected publication has no durable pending proof")
-    return protected
+    if resumed is None:
+        raise RestoreProofError("protected publication lost its durable proof")
+    return resumed

@@ -206,6 +206,7 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
     protected = publish_candidate_proof(
         candidate=candidate,
         root=tmp_path,
+        ack_dir=tmp_path / "ack",
         prefix="pitr",
         publisher=Publisher(),
     )

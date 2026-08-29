@@ -8,7 +8,6 @@ import shlex
 import socket
 import subprocess
 import sys
-import threading
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -18,7 +17,6 @@ import psutil
 import psycopg
 from psycopg import sql
 
-from services.pitr.base_candidate import _verify_candidate
 from services.pitr.base_manifest import CandidateManifest, _lsn
 from services.pitr.restore_proof import (
     DrillResult,
@@ -26,8 +24,6 @@ from services.pitr.restore_proof import (
     RestoreProofError,
     update_restore_owner,
 )
-from shared.db import direct_db_url
-from shared.pg_tools import pg_tool
 
 
 def _migration_hash(conn: psycopg.Connection[tuple[object, ...]]) -> str:
@@ -236,8 +232,17 @@ def _stop_process_tree(identity: SandboxPostgresIdentity) -> None:
 
 
 class IsolatedPostgresRestoreExecutor:
-    def __init__(self, *, live_db_url: str | None = None, timeout_seconds: int = 900) -> None:
-        self._live_db_url = direct_db_url() if live_db_url is None else live_db_url
+    def __init__(
+        self,
+        *,
+        live_db_url: str,
+        pg_ctl: Path,
+        pg_verifybackup: Path,
+        timeout_seconds: int = 900,
+    ) -> None:
+        self._live_db_url = live_db_url
+        self._pg_ctl = pg_ctl
+        self._pg_verifybackup = pg_verifybackup
         self._timeout = timeout_seconds
 
     def live_identity(self) -> LivePostgresIdentity:
@@ -258,7 +263,10 @@ class IsolatedPostgresRestoreExecutor:
         if (pgdata / "postmaster.pid").exists():
             raise RestoreProofError("restore sandbox already has a postmaster")
         verify_started = time.monotonic()
-        _verify_candidate(pgdata, threading.Event())
+        _run(
+            [str(self._pg_verifybackup), "--no-parse-wal", str(pgdata)],
+            timeout=6 * 3600,
+        )
         restored_verify_seconds = time.monotonic() - verify_started
         socket_dir = run_root / "socket"
         socket_dir.mkdir(mode=0o700)
@@ -277,7 +285,7 @@ class IsolatedPostgresRestoreExecutor:
             )
             _run(
                 [
-                    str(pg_tool("pg_ctl")),
+                    str(self._pg_ctl),
                     "-D",
                     str(pgdata),
                     "-o",
@@ -390,7 +398,7 @@ class IsolatedPostgresRestoreExecutor:
             return
         with suppress(RestoreProofError):
             _run(
-                [str(pg_tool("pg_ctl")), "-D", str(pgdata), "-m", "fast", "-w", "stop"],
+                [str(self._pg_ctl), "-D", str(pgdata), "-m", "fast", "-w", "stop"],
                 timeout=30,
             )
         _stop_process_tree(identity)

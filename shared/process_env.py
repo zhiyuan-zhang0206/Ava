@@ -35,3 +35,15 @@ def remove_process_env(names: tuple[str, ...]) -> None:
 
     for name in names:
         os.environ.pop(name, None)
+
+
+def restricted_process_env() -> dict[str, str]:
+    """Build the fixed environment for a child that must inherit no authority."""
+
+    return {
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "TZ": "UTC",
+    }
