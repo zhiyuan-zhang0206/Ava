@@ -25,8 +25,13 @@ describe("frontend bind host", () => {
     expect(pkg.scripts.start).toContain("-H 127.0.0.1");
   });
 
-  it("never binds all interfaces", () => {
-    expect(pkg.scripts.dev).not.toContain("-H ::");
-    expect(pkg.scripts.start).not.toContain("-H ::");
+  it("never binds all interfaces (any spelling)", () => {
+    for (const script of [pkg.scripts.dev, pkg.scripts.start]) {
+      // Wildcard binds, in both the short and long flag spelling, are a
+      // regression: they reopen the direct app-port origin.
+      for (const wildcard of ["-H ::", "--hostname ::", "-H 0.0.0.0", "--hostname 0.0.0.0"]) {
+        expect(script).not.toContain(wildcard);
+      }
+    }
   });
 });
