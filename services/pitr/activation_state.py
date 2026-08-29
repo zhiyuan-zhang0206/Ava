@@ -75,8 +75,11 @@ class ActivationRecord:
 
     @classmethod
     def from_json(cls, payload: str) -> ActivationRecord:
-        raw = json.loads(payload)
-        if not isinstance(raw, dict) or set(raw) != set(cls.__dataclass_fields__):
+        raw_value: object = json.loads(payload)
+        if not isinstance(raw_value, dict):
+            raise TypeError("PITR activation record fields differ")
+        raw = cast(dict[str, object], raw_value)
+        if set(raw) != set(cls.__dataclass_fields__):
             raise ValueError("PITR activation record fields differ")
         phase = raw["phase"]
         if not isinstance(phase, str) or phase not in _PHASES:

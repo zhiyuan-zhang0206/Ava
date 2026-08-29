@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
 import hashlib
 import json
 import shutil
@@ -11,11 +12,13 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import psutil
 import psycopg
 from google.cloud import storage
 from google.oauth2 import service_account
+from psycopg import sql
 
 from services.pitr.activation_state import (
     ActivationRecord,
@@ -37,9 +40,11 @@ def _mode(path: Path) -> int:
 
 
 def _credential_identity(path: Path) -> tuple[str, str, str]:
-    raw = path.read_bytes()
-    value = json.loads(raw)
-    if not isinstance(value, dict) or value.get("type") != "service_account":
+    raw_value: object = json.loads(path.read_bytes())
+    if not isinstance(raw_value, dict):
+        raise TypeError(f"{path} is not a service-account credential")
+    value = cast(dict[str, object], raw_value)
+    if value.get("type") != "service_account":
         raise RuntimeError(f"{path} is not a service-account credential")
     fields: list[str] = []
     for name in ("client_email", "project_id", "private_key_id"):
@@ -103,7 +108,7 @@ def _read_pg_state() -> dict[str, str]:
         raise RuntimeError("cluster registry record is missing")
 
     def scalar(conn: psycopg.Connection[tuple[object, ...]], query: str) -> object:
-        row = conn.execute(query).fetchone()
+        row = conn.execute(sql.SQL(query)).fetchone()
         if row is None:
             raise RuntimeError(f"PostgreSQL returned no row for {query!r}")
         return row[0]
