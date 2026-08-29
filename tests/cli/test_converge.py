@@ -26,6 +26,9 @@ def test_ensure_ava_symlink_creates_and_is_idempotent(home, tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / ".venv" / "bin").mkdir(parents=True)
     (repo / ".venv" / "bin" / "ava").write_text("#!/bin/sh\n")
+    archive_shim = repo / "services" / "pitr" / "archive_shim.py"
+    archive_shim.parent.mkdir(parents=True)
+    archive_shim.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
     ctx = _ctx(repo, home)  # pyright: ignore[reportUnknownArgumentType]
 
     _converge._ensure_ava_symlink(ctx)
