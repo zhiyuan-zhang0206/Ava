@@ -503,3 +503,46 @@ def test_real_sigint_kills_child_and_replays_journal_before_recovery(tmp_path: P
                 parent.wait(timeout=2)
         if child_pid.exists():
             _terminate_test_child(int(child_pid.read_text()))
+
+
+# ─── PITR restart must bounce PostgreSQL too ───────────────────────────────────
+
+
+def test_pitr_restart_origin_classification() -> None:
+    """Only the activation/rollback seam's restart origins bounce the data
+    plane; every other origin keeps pg/redis up (migrations need them)."""
+    assert _local._pitr_restart("pitr-activation:op-1:orc-1") is True
+    assert _local._pitr_restart("pitr-rollback:op-1:orc-1") is True
+    assert _local._pitr_restart("agent:1818") is False
+    assert _local._pitr_restart("cli:macmini") is False
+    assert _local._pitr_restart("") is False
+
+
+def test_pitr_restart_stops_the_data_plane_but_plain_restart_keeps_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The 2026-08-30 activation stalled at wal_restart_pending because the
+    cluster restart kept pg up and the ALTER SYSTEM'd WAL config never took
+    effect. A PITR-seam restart must pass keep_infra=False to the stop leg."""
+    captured: list[bool] = []
+
+    def fake_do_stop(_repo: Path, *, keep_infra: bool, **_kwargs: object) -> int:
+        captured.append(keep_infra)
+        return 0
+
+    def fake_boot(_repo: Path, _preserve_frontend: frozenset[str]) -> int:
+        return 0
+
+    monkeypatch.setattr(_update, "_do_stop", fake_do_stop)
+    monkeypatch.setattr(_local, "_boot_gateway_fresh", fake_boot)
+    monkeypatch.setattr(_local, "_adopt_child_data_plane_credentials", lambda: None)
+
+    assert (
+        _local._run_gateway_local_update(tmp_path, pull=False, origin="pitr-activation:op-1:orc-1")
+        == 0
+    )
+    assert captured == [False]
+
+    captured.clear()
+    assert _local._run_gateway_local_update(tmp_path, pull=False, origin="cli:macmini") == 0
+    assert captured == [True]

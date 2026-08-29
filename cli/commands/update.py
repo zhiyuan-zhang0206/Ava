@@ -613,6 +613,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
                 restart_frontend=restart_frontend,
                 pull=not restart_only,
                 force_reap_agents=force_reap,
+                origin=origin,
             )
         if rc != 0:
             # rc carries the recovery outcome (1 recovered / 2 DOWN on the pull path;

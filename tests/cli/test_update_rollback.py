@@ -630,7 +630,9 @@ def test_orchestration_resolves_and_threads_target_sha(monkeypatch: pytest.Monke
     monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_fan_out", lambda *_a, **_k: [("a", "ok", "")])  # pyright: ignore[reportUnknownArgumentType]
 
-    def _local(_repo, *, target_sha, restart_frontend, pull=True, force_reap_agents=False):  # type: ignore[no-untyped-def]
+    def _local(  # type: ignore[no-untyped-def]
+        _repo, *, target_sha, restart_frontend, pull=True, force_reap_agents=False, origin=""
+    ):
         captured["local_target"] = target_sha
         return 0
 
