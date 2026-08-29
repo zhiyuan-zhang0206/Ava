@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +43,7 @@ from shared.paths import gateway_memory_dir
 router = APIRouter()
 
 # Both phases of the search handler are native async I/O (httpx.AsyncClient,
-# pymilvus AsyncMilvusClient); the semaphore caps in-flight Gemini requests so
+# the backend's async client); the semaphore caps in-flight Gemini requests so
 # a burst of searches cannot pile up. Before this, the handler ran a sync
 # embed call on the event loop and a slow Gemini API froze the whole gateway
 # for up to ~4.5 minutes (60s httpx timeout x 4 attempts including sleep
@@ -152,27 +151,22 @@ def _extract_meta(path: Path) -> tuple[str, list[str]]:
     return description, list(note.tags)
 
 
-async def _milvus_topk(query_vector: Any, k: int, deadline: float) -> list[str]:
-    """The milvus half of a search: connect, top-k, close — every step handed
-    an explicit deadline.
+async def _backend_topk(query_vector: Any, k: int, deadline: float) -> list[str]:
+    """The storage half of a search: ask the configured backend for top-k
+    paths, every step handed an explicit deadline.
 
-    pymilvus's async client leaves awaits unbounded when given no timeout, and
-    serializes connect/close on one process-global `AsyncConnectionManager`
-    lock. So an unbounded call does not just stall its own request — it pins
-    that lock and every later milvus call in the process queues behind it,
-    including the `close()` in this function's own `finally`. Passing the
-    deadline down bounds pymilvus's retry loop and its channel wait; the
-    caller's `asyncio.timeout` covers the rest (the `Connect` RPC inside
-    `ensure_channel_ready` takes no deadline at all).
+    pymilvus (the default backend) leaves awaits unbounded when given no
+    timeout, and serializes connect/close on one process-global
+    `AsyncConnectionManager` lock. So an unbounded call does not just stall
+    its own request — it pins that lock and every later milvus call in the
+    process queues behind it, including the `close()` in the backend's own
+    `finally`. Passing the deadline down bounds pymilvus's retry loop and
+    its channel wait; the caller's `asyncio.timeout` covers the rest (the
+    `Connect` RPC inside `ensure_channel_ready` takes no deadline at all).
     """
-    from services.memory_indexer import index
+    from services.memory_indexer.backends import factory
 
-    client = await index.connect_async(timeout=deadline)
-    try:
-        return await index.search_topk_async(client, query_vector, k, timeout=deadline)
-    finally:
-        with suppress(Exception):
-            await client.close()
+    return await factory.get_backend().search_topk_async(query_vector, k, timeout=deadline)
 
 
 @router.post(
@@ -189,20 +183,20 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
     reconstruct the absolute path. fs-neutral so gateway fs (e.g.
     /Users/x) and agent-runner fs (/home/y) being different still works.
 
-    Only the gateway hosts the milvus instance, so this endpoint
-    always runs on the gateway; agent-runner SDK calls reach this
+    Only the gateway hosts the search backend (milvus by default), so
+    this endpoint always runs on the gateway; agent-runner SDK calls reach this
     handler via the gateway URL they were configured with (CF Tunnel /
     private network) and never enter via a local agent-runner gateway
     (agent-runners run no gateway process).
 
     Raises:
-        IndexerUnavailable: embedder API / milvus backend unreachable, or the
+        IndexerUnavailable: embedder API / search backend unreachable, or the
             search exceeded its deadline (wire 503)
     """
     from services.memory_indexer import embedder
 
     # Both phases are native async I/O — httpx.AsyncClient for the Gemini
-    # embed, pymilvus's AsyncMilvusClient for the search — so a slow backend
+    # embed, the backend's async client for the search — so a slow backend
     # can never block the event loop (2026-08-03 freeze mechanism, see
     # _MEMORY_SEARCH_SEMAPHORE note). The semaphore still caps concurrency so
     # a burst of searches cannot pile up in-flight Gemini requests.
@@ -220,7 +214,7 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
                 async with _MEMORY_SEARCH_SEMAPHORE:
                     query_vector = await embedder.embed_query_async(body.query)
             except Exception as exc:
-                # Symmetric with the milvus phase below, and with what this
+                # Symmetric with the backend phase below, and with what this
                 # endpoint documents raising. Catching only EmbeddingAPIError
                 # left every other embed failure to escape as a bare 500 whose
                 # body carries no wire `reason` -- which the SDK cannot map back
@@ -235,9 +229,9 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
 
             try:
                 async with _MEMORY_SEARCH_SEMAPHORE:
-                    abs_paths = await _milvus_topk(query_vector, body.k, deadline)
+                    abs_paths = await _backend_topk(query_vector, body.k, deadline)
             except Exception as exc:
-                raise IndexerUnavailable(f"milvus search failed: {exc}") from exc
+                raise IndexerUnavailable(f"memory search backend failed: {exc}") from exc
     except TimeoutError as exc:
         raise IndexerUnavailable(f"memory search exceeded its {deadline:g}s deadline") from exc
 

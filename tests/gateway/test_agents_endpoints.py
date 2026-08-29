@@ -1230,7 +1230,7 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(loki_events, "query_events", _query)
     monkeypatch.setattr(embedder, "embed_query_async", _embed)
-    monkeypatch.setattr(memory_router, "_milvus_topk", _topk)
+    monkeypatch.setattr(memory_router, "_backend_topk", _topk)
     monkeypatch.setattr(agent_events_router, "event_stream", _stream)
 
 
