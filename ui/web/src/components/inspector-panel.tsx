@@ -50,13 +50,13 @@ import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/li
 // of the backend whitelist (StatsWindowHours: 1/6/24/72/168 = hours). -1 is
 // a local sentinel for the since-last-compact window — it never reaches the
 // backend as `hours`, instead selecting the `since_compact` query param.
-const WINDOWS: { label: string; value: number | null }[] = [
-  { label: "All", value: null },
-  { label: "5m", value: 0 },
-  { label: "1h", value: 1 },
-  { label: "24h", value: 24 },
-  { label: "7d", value: 168 },
-  { label: "Since compact", value: COMPACT_INSPECT_WINDOW },
+const WINDOWS: { labelKey: string; value: number | null }[] = [
+  { labelKey: "windowAll", value: null },
+  { labelKey: "window5m", value: 0 },
+  { labelKey: "window1h", value: 1 },
+  { labelKey: "window24h", value: 24 },
+  { labelKey: "window7d", value: 168 },
+  { labelKey: "windowSinceCompact", value: COMPACT_INSPECT_WINDOW },
 ];
 
 /**
@@ -82,9 +82,10 @@ const WINDOWS: { label: string; value: number | null }[] = [
 // when we already have a snapshot to display (stale-while-error) — a cold failure
 // gets the full error message in the body instead, so this never replaces content.
 function StaleDot() {
+  const t = useTranslations("inspector");
   return (
     <span
-      aria-label="Live refresh failing"
+      aria-label={t("liveRefreshFailing")}
       className="size-1.5 shrink-0 rounded-full bg-amber-500"
     />
   );
@@ -101,7 +102,7 @@ function matchesInspectWindow(
 }
 
 export function InspectorPanel({ agentId }: { agentId: number }) {
-  const t = useTranslations("runTimeline");
+  const t = useTranslations("inspector");
   const { open, toggle } = useInspectorOpen();
   const { inspectorHours: hours, setInspectorHours: setHours } = useInspectorHours();
   const { isLarge } = useBreakpoint();
@@ -215,20 +216,20 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         <button
           type="button"
           onClick={toggle}
-          aria-label="Close inspector"
+          aria-label={t("closeInspector")}
           className="shrink-0 rounded p-1 -ml-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
         >
           <X className="size-5" />
         </button>
         <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
-          Inspector
+          {t("title")}
         </span>
         {hasStaleError ? <StaleDot /> : null}
         <button
           type="button"
           onClick={refresh}
           disabled={isFetching}
-          aria-label="Refresh inspector data"
+          aria-label={t("refreshInspector")}
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
         >
           <RefreshCw className={cn("size-3.5", isFetching && "animate-spin")} />
@@ -236,12 +237,12 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         <select
           value={hours ?? "all"}
           onChange={(e) => setHours(e.target.value === "all" ? null : Number(e.target.value))}
-          aria-label="Cost + activity window"
+          aria-label={t("windowAriaLabel")}
           className="shrink-0 cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"
         >
           {WINDOWS.map((w) => (
-            <option key={w.label} value={w.value ?? "all"}>
-              {w.label}
+            <option key={w.labelKey} value={w.value ?? "all"}>
+              {t(w.labelKey as Parameters<typeof t>[0])}
             </option>
           ))}
         </select>
@@ -253,16 +254,16 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             <p>
               {liveQuery.error instanceof Error
                 ? liveQuery.error.message
-                : "Failed to load"}
+                : t("loadFailed")}
             </p>
             <button
               type="button"
               onClick={refresh}
               disabled={isFetching}
-              aria-label="Retry inspector"
+              aria-label={t("retryInspector")}
               className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10 disabled:opacity-50"
             >
-              {isFetching ? "Retrying…" : "Retry"}
+              {isFetching ? t("retrying") : t("retry")}
             </button>
           </div>
         ) : (
@@ -277,7 +278,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             ) : liveQuery.isPending ? (
               <LiveSectionsSkeleton />
             ) : (
-              <p className="font-mono text-[11px] text-muted-foreground">No data</p>
+              <p className="font-mono text-[11px] text-muted-foreground">{t("noData")}</p>
             )}
             {windowedData ? (
               <>
@@ -293,13 +294,13 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
               href={`/insights/run/${agentId}`}
               className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
             >
-              {t("open")}
+              {t("openRunTimeline")}
               <ExternalLink className="size-3" aria-hidden />
             </Link>
             {liveData ? (
               <NoticeReplySection agentId={agentId} notice={liveData.notice ?? null} />
             ) : liveQuery.isPending ? (
-              <SectionSkeleton title="Notice" />
+              <SectionSkeleton title={t("sectionNotice")} />
             ) : null}
           </div>
         )}
@@ -337,12 +338,13 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
  *  after this button opens it. */
 export function InspectorToggle() {
   const { open, toggle } = useInspectorOpen();
+  const t = useTranslations("inspector");
   return (
     <button
       type="button"
       onClick={toggle}
       data-inspector-toggle=""
-      aria-label={open ? "Close inspector" : "Open inspector"}
+      aria-label={open ? t("closeInspector") : t("openInspector")}
       className={cn(
         "inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors select-none",
         open
@@ -354,7 +356,7 @@ export function InspectorToggle() {
           close it back and keeps the "Close inspector" semantics. The
           2026-08-24 user ruling supersedes the 8/6 and #1065 up-arrow ruling. */}
       {open ? <ChevronLeft className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-      <span className="hidden sm:inline">Inspect</span>
+      <span className="hidden sm:inline">{t("toggle")}</span>
     </button>
   );
 }
@@ -407,44 +409,48 @@ function SectionSkeleton({ title, rows = 2 }: { title: string; rows?: number }) 
 }
 
 function LiveSectionsSkeleton() {
+  const t = useTranslations("inspector");
   return (
     <>
-      <SectionSkeleton title="Persistent shells" rows={1} />
-      <SectionSkeleton title="Liveness" rows={3} />
-      <SectionSkeleton title="Configuration overlay" rows={1} />
+      <SectionSkeleton title={t("sectionShells")} rows={1} />
+      <SectionSkeleton title={t("sectionLiveness")} rows={3} />
+      <SectionSkeleton title={t("sectionConfigOverlay")} rows={1} />
     </>
   );
 }
 
 function WindowedSectionsSkeleton() {
+  const t = useTranslations("inspector");
   return (
     <>
-      <SectionSkeleton title="Cost" rows={4} />
-      <SectionSkeleton title="Activity" rows={4} />
+      <SectionSkeleton title={t("sectionCost")} rows={4} />
+      <SectionSkeleton title={t("sectionActivity")} rows={4} />
     </>
   );
 }
 
 function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
+  const t = useTranslations("inspector");
   return (
     <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
-      <p>Windowed inspector data unavailable</p>
+      <p>{t("windowedUnavailable")}</p>
       <button
         type="button"
         onClick={onRetry}
         className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10"
       >
-        Retry windowed data
+        {t("retryWindowed")}
       </button>
     </div>
   );
 }
 
 function PageSection({ pages }: { pages: PageRow[] }) {
+  const t = useTranslations("inspector");
   return (
-    <Section icon={<LayoutPanelTop className="size-3" />} title="Page">
+    <Section icon={<LayoutPanelTop className="size-3" />} title={t("sectionPage")}>
       {pages.length === 0 ? (
-        <p className="font-mono text-[11px] text-muted-foreground/70">No open page</p>
+        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noOpenPage")}</p>
       ) : (
         pages.map((p) => (
           <a
@@ -485,8 +491,9 @@ function NoticeReplySection({
   notice: OpenNotice | null;
 }) {
   const queryClient = useQueryClient();
+  const t = useTranslations("inspector");
   return (
-    <Section icon={<Bell className="size-3" />} title="Notice" badge={notice ? "Open" : "None"}>
+    <Section icon={<Bell className="size-3" />} title={t("sectionNotice")} badge={notice ? t("badgeOpen") : t("badgeNone")}>
       {notice ? (
         // key by notice id: OpenNoticeDetail keeps `pending` true after a resolve
         // (the notice is going away), so when a refetch swaps in the NEXT open
@@ -503,7 +510,7 @@ function NoticeReplySection({
           }}
         />
       ) : (
-        <p className="font-mono text-[11px] text-muted-foreground/70">No open notice</p>
+        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noOpenNotice")}</p>
       )}
     </Section>
   );
@@ -512,14 +519,15 @@ function NoticeReplySection({
 function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
   const now = useNow(1_000);
+  const t = useTranslations("inspector");
   return (
     <Section
       icon={<Terminal className="size-3" />}
-      title="Persistent shells"
+      title={t("sectionShells")}
       badge={String(shells.length)}
     >
       {shells.length === 0 ? (
-        <p className="font-mono text-[11px] text-muted-foreground/70">None open</p>
+        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noShellsOpen")}</p>
       ) : (
         <ul className="space-y-1">
           {shells.map((s) => (
@@ -548,6 +556,7 @@ function ShellRow({
   shell: ShellInfo;
   now: Date;
 }) {
+  const t = useTranslations("inspector");
   const validAgent = Number.isFinite(agentId) && agentId >= 0;
   const validShell = Number.isFinite(shell.id) && shell.id >= 0;
   const createdMs = shell.created_at != null ? new Date(shell.created_at).getTime() : NaN;
@@ -560,7 +569,7 @@ function ShellRow({
   const content = (
     <>
       <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
-      <span className="truncate text-foreground">{shell.name ?? "(unnamed)"}</span>
+      <span className="truncate text-foreground">{shell.name ?? t("unnamed")}</span>
       <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
         {formatUptime(runtimeSeconds)}
       </span>
@@ -603,11 +612,12 @@ function displaySkillName(name: string): string {
 
 function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   const entries = Object.entries(inspect.config_overlay);
+  const t = useTranslations("inspector");
   return (
-    <Section icon={<SlidersHorizontal className="size-3" />} title="Configuration overlay">
+    <Section icon={<SlidersHorizontal className="size-3" />} title={t("sectionConfigOverlay")}>
       {entries.length === 0 ? (
         <p className="font-mono text-[11px] text-muted-foreground/70">
-          Defaults — no overrides
+          {t("configOverlayDefaults")}
         </p>
       ) : (
         <dl className="space-y-1">
@@ -631,17 +641,19 @@ function CostSection({ inspect }: { inspect: AgentInspect }) {
   // Cost is the sum of stored usage-time price snapshots; calls without one
   // (unpriced model) contribute 0 and surface as the sub-line so the figure
   // is never silently partial.
-  const unpricedSub = cost.unpriced_calls > 0 ? `${cost.unpriced_calls} unpriced` : undefined;
+  const t = useTranslations("inspector");
+  const unpricedSub =
+    cost.unpriced_calls > 0 ? t("unpriced", { count: String(cost.unpriced_calls) }) : undefined;
   return (
-    <Section icon={<DollarSign className="size-3" />} title="Cost">
+    <Section icon={<DollarSign className="size-3" />} title={t("sectionCost")}>
       <div className="grid grid-cols-2 gap-1">
-        <Metric label="Cost" value={`$${cost.cost_usd.toFixed(4)}`} sub={unpricedSub} />
-        <Metric label="LLM calls" value={String(cost.llm_calls)} />
+        <Metric label={t("metricCost")} value={`$${cost.cost_usd.toFixed(4)}`} sub={unpricedSub} />
+        <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
         <Metric
-          label="Tokens"
+          label={t("metricTokens")}
           value={`${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}`}
         />
-        <Metric label="Cache hit" value={`${cost.cache_hit_pct.toFixed(2)}%`} />
+        <Metric label={t("metricCacheHit")} value={`${cost.cache_hit_pct.toFixed(2)}%`} />
       </div>
     </Section>
   );
@@ -656,12 +668,13 @@ function ActivitySection({ inspect }: { inspect: AgentInspect }) {
   const { activity, tps } = inspect;
   const hasLife = activity.alive_seconds > 0;
   const idleSeconds = Math.max(0, activity.alive_seconds - activity.active_seconds);
+  const t = useTranslations("inspector");
   return (
-    <Section icon={<Timer className="size-3" />} title="Activity">
+    <Section icon={<Timer className="size-3" />} title={t("sectionActivity")}>
       <div className="grid grid-cols-2 gap-1">
-        <Metric label="TPS" value={formatTps(tps.lm_stage_tps)} />
+        <Metric label={t("metricTps")} value={formatTps(tps.lm_stage_tps)} />
         <Metric
-          label="LLM output"
+          label={t("metricLlmOutput")}
           value={
             hasLife
               ? formatInterval(Math.round(activity.llm_seconds))
@@ -669,7 +682,7 @@ function ActivitySection({ inspect }: { inspect: AgentInspect }) {
           }
         />
         <Metric
-          label="Code execution"
+          label={t("metricCodeExecution")}
           value={
             hasLife
               ? formatInterval(Math.round(activity.exec_seconds))
@@ -677,7 +690,7 @@ function ActivitySection({ inspect }: { inspect: AgentInspect }) {
           }
         />
         <Metric
-          label="Idle"
+          label={t("metricIdle")}
           value={hasLife ? formatInterval(Math.round(idleSeconds)) : "—"}
         />
       </div>
@@ -695,23 +708,27 @@ function ActivitySection({ inspect }: { inspect: AgentInspect }) {
 function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const { liveness_state: state, heartbeat, spawned_at } = inspect;
   const offline = state === "offline";
-  const next = nextHeartbeatCell(heartbeat);
+  const t = useTranslations("inspector");
+  const next = nextHeartbeatCell(heartbeat, {
+    pending: t("pending"),
+    due: t("due"),
+  });
   const lastPause = heartbeat.last_pause;
   return (
-    <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title="Liveness">
+    <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title={t("sectionLiveness")}>
       <div className="grid grid-cols-2 gap-1">
         <Metric
           className="col-span-2"
-          label="Birth"
+          label={t("metricBirth")}
           value={`${formatRelative(spawned_at)}, ${formatAbsolute(spawned_at)}`}
         />
-        <Metric label="Next heartbeat" value={next.value} />
+        <Metric label={t("metricNextHeartbeat")} value={next.value} />
         <Metric
-          label="Last pause"
+          label={t("metricLastPause")}
           value={
             lastPause
               ? `${formatRelative(lastPause.at)} · ${formatInterval(Math.round(lastPause.duration_s))}`
-              : "never paused"
+              : t("neverPaused")
           }
         />
       </div>
@@ -728,19 +745,22 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
 // restarting agent's idle clock runs on while the daemon skips it — a past
 // "next" time must never render as "Xm ago"); a running or terminated agent
 // an em dash (never checked in on).
-function nextHeartbeatCell(hb: HeartbeatInfo): { value: string } {
+function nextHeartbeatCell(
+  hb: HeartbeatInfo,
+  labels: { pending: string; due: string },
+): { value: string } {
   if (hb.paused_until) {
     return {
       value: formatShort(hb.paused_until, { includeDate: false }),
     };
   }
   if (hb.heartbeat_pending) {
-    return { value: "pending" };
+    return { value: labels.pending };
   }
   if (hb.next_at) {
     const next = new Date(hb.next_at).getTime();
     return {
-      value: next <= Date.now() ? "due" : formatRelative(hb.next_at),
+      value: next <= Date.now() ? labels.due : formatRelative(hb.next_at),
     };
   }
   return { value: "—" };
