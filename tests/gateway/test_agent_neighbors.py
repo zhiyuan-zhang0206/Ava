@@ -11,7 +11,9 @@ per-hop gamma decay, terminated inclusion, limit, self/root exclusions, and
 the archive+Loki merge on the same pair.
 """
 
+import json as _json
 import math
+import threading
 from datetime import timedelta
 from typing import Any
 
@@ -511,8 +513,6 @@ def test_archive_rows_fetched_once_then_served_from_cache(
     assert neighbors._ARCHIVE_CACHE_KEY in frozen_cache.store
     # the originating fetch's has_more rides the payload, so a cache hit
     # reports truncation exactly as the fetch did
-    import json as _json
-
     assert _json.loads(frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY])["has_more"] is False
 
 
@@ -543,38 +543,103 @@ def test_archive_cache_redis_outage_degrades_to_direct_query(
     assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_archive_refresh_failure_keeps_cache_empty_and_heals(
+def test_archive_refresh_failure_degrades_to_live_only_and_heals(
     db_conn: psycopg.Connection,
     fake_loki: FakeLoki,
     frozen_cache: _FakeRedis,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The daily archive refresh keeps the 45s default timeout, but Loki can
-    still fail it: the route surfaces the failure, the cache stays empty
-    (nothing partial is served), and the next healthy request repopulates it."""
+    still fail it: the route degrades to live-only ties (no 500), a short
+    negative cache entry absorbs the retry storm instead of leaving the
+    cache empty for every poll to re-attempt, and the first request after
+    the negative entry is gone repopulates the real rows (2026-08-29/30
+    incident: an empty cache + saturated Loki re-ran the scan on every
+    request and 45s-timed out for hours)."""
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
     _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
 
     state = {"fail_next_archive": True}
+    archive_calls = 0
     original = fake_loki.query_events
 
-    def flaky_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+    def counting_flaky_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        nonlocal archive_calls
+        if kwargs.get("archive"):
+            archive_calls += 1
         if kwargs.get("archive") and state["fail_next_archive"]:
             state["fail_next_archive"] = False
             raise httpx.ReadTimeout("timed out")
         return original(**kwargs)
 
-    monkeypatch.setattr(loki_events, "query_events", flaky_query)
+    monkeypatch.setattr(loki_events, "query_events", counting_flaky_query)
 
-    with TestClient(app, raise_server_exceptions=False) as client:
-        failed = client.get(f"/api/agents/{a}/neighbors")
-        assert failed.status_code == 500
-        assert neighbors._ARCHIVE_CACHE_KEY not in frozen_cache.store
+    with TestClient(app) as client:
+        degraded = _neighbors(client, a, depth=1)
+        # live-only: the archive tie is absent, but the route answers instead of 500ing
+        assert degraded == []  # pyright: ignore[reportUnknownArgumentType]
+        # the failed fetch wrote the short negative cache, not nothing
+        cached = _json.loads(frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY])
+        assert cached == {"rows": [], "has_more": False}
+        # within the negative window every request hits the cache — no re-fetch
+        again = _neighbors(client, a, depth=1)
+        assert again == []  # pyright: ignore[reportUnknownArgumentType]
+        assert archive_calls == 1
+        # once the negative entry expires (simulated), the next request
+        # refetches and repopulates the real rows
+        del frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY]
         rows = _neighbors(client, a, depth=1)
 
     assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
-    assert neighbors._ARCHIVE_CACHE_KEY in frozen_cache.store
+    assert archive_calls == 2
+    assert _json.loads(frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY])["rows"]
+
+
+def test_archive_fetch_single_flight_concurrent_misses_run_one_scan(
+    fake_loki: FakeLoki, frozen_cache: _FakeRedis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent cache misses run ONE whole-archive scan: a waiter that
+    cannot enter the fetch within the bounded wait serves live-only ties
+    instead of stacking its own scan on Loki (the stampede that saturated
+    the querier during the 2026-08-29/30 incident)."""
+    started = threading.Event()
+    release = threading.Event()
+    archive_calls = 0
+    original = fake_loki.query_events
+
+    def slow_archive_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        nonlocal archive_calls
+        if kwargs.get("archive"):
+            archive_calls += 1
+            started.set()
+            release.wait(timeout=10)
+        return original(**kwargs)
+
+    monkeypatch.setattr(loki_events, "query_events", slow_archive_query)
+
+    results: list[list[dict[str, Any]]] = []
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            results.append(neighbors._fetch_archive_rows())
+        except BaseException as exc:  # pragma: no cover - failure reporting
+            errors.append(exc)
+
+    first = threading.Thread(target=worker)
+    first.start()
+    assert started.wait(timeout=5)  # the first thread holds the fetch lock
+    second = threading.Thread(target=worker)
+    second.start()
+    second.join(timeout=10)
+    assert not second.is_alive()  # the waiter gave up after the bounded wait
+    release.set()
+    first.join(timeout=10)
+    assert not errors
+    assert archive_calls == 1  # one scan for two concurrent misses
+    assert len(results) == 2
+    assert results[0] == results[1] == []  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_corrupt_archive_cache_entry_refetches_from_loki(
