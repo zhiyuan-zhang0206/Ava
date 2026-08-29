@@ -12,7 +12,15 @@ on:
     branches:
       - main
     paths:
-      - 'ui/app/**'
+      # Only app code rebuilds the mutable android-latest channel: docs and
+      # unrelated trees (backend/, ui/web/) must not trigger a signed APK
+      # build. The filter also applies to tag pushes, which is safe: the
+      # version-alignment check in prepare (#900) means a release tag's
+      # commit always bumps Cargo.toml under src-tauri/**, so every
+      # legitimate android-v* tag still matches.
+      - 'ui/app/src-tauri/**'
+      - 'ui/app/app-ui/**'
+      - 'ui/app/android/**'
       - '.github/workflows/release-android.yml'
   workflow_dispatch:
 
