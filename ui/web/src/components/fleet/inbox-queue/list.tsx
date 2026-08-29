@@ -17,19 +17,10 @@ export function QueueHeader({
   total,
   onCollapse,
   stale,
-  fyiCount,
-  onMarkAllRead,
-  markAllPending,
-  markAllError,
 }: {
   total: number;
   onCollapse?: () => void;
   stale: boolean;
-  /** Open FYI notices — the only ones "Mark all read" clears. */
-  fyiCount: number;
-  onMarkAllRead: () => void;
-  markAllPending: boolean;
-  markAllError: string | null;
 }) {
   return (
     <header className={cn("shrink-0 items-center gap-2 border-b border-border px-4", BAR_HEIGHT_CLASS, FLEX)}>
@@ -37,22 +28,6 @@ export function QueueHeader({
       {total > 0 && (
         <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
           {total}
-        </span>
-      )}
-      {fyiCount > 0 && (
-        <button
-          type="button"
-          onClick={onMarkAllRead}
-          disabled={markAllPending}
-          title={`Mark all ${fyiCount} FYI notice${fyiCount === 1 ? "" : "s"} read in one request`}
-          className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
-        >
-          {markAllPending ? "Marking…" : "Mark all read"}
-        </button>
-      )}
-      {markAllError && (
-        <span className="text-[10px] text-destructive" title={markAllError}>
-          Failed
         </span>
       )}
       {/* Stale-while-error marker (audit C3): a refresh failed but the last
