@@ -543,8 +543,9 @@ def test_upload_loop_survives_oserror_enospc(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(uploader_daemon, "_wait_with_heartbeat", fake_wait)
 
     async def drive() -> None:
-        await uploader_daemon.upload_loop(  # pyright: ignore[reportArgumentType]
-            uploader, stop=stop
+        await uploader_daemon.upload_loop(
+            uploader,  # pyright: ignore[reportArgumentType]
+            stop=stop,
         )
 
     asyncio.run(drive())
@@ -560,14 +561,14 @@ def test_unacked_age_drives_health_component(tmp_path: Path) -> None:
     (QA #4681 block 3)."""
     import time
 
-    from services.pitr.uploader_daemon import _unacked_components
+    from services.pitr.uploader_daemon import _LoopErrors, _unacked_components
 
     store = FakeStore()
     uploader, source = _uploader(tmp_path, store)
     # Default warn threshold is 3600s; age the un-ACKed entry past it.
     old = time.time() - 4000
     os.utime(source, (old, old))
-    comps = _unacked_components(uploader)
+    comps = _unacked_components(uploader, _LoopErrors())
     assert comps[0]["status"] == "degraded"
     progress = str(comps[0]["progress"])
     assert "unacked=1" in progress
@@ -576,19 +577,108 @@ def test_unacked_age_drives_health_component(tmp_path: Path) -> None:
     # critical condition; the wire status stays degraded (no restart flap).
     older = time.time() - 8000
     os.utime(source, (older, older))
-    comps = _unacked_components(uploader)
+    comps = _unacked_components(uploader, _LoopErrors())
     assert comps[0]["status"] == "degraded"
     assert "critical" in str(comps[0]["detail"])
 
 
 def test_fully_acked_spool_reports_ok(tmp_path: Path) -> None:
-
-    from services.pitr.uploader_daemon import _unacked_components
+    from services.pitr.uploader_daemon import _LoopErrors, _unacked_components
 
     store = FakeStore()
     uploader, source = _uploader(tmp_path, store)
     uploader.upload_one(source)  # ACK written, spool removed
     assert not source.exists()
-    comps = _unacked_components(uploader)
+    comps = _unacked_components(uploader, _LoopErrors())
     assert comps[0]["status"] == "ok"
     assert "unacked=0" in str(comps[0]["progress"])
+
+
+# ── QA #4696 block 2: non-gating domain health keeps /healthz at 200 ─────
+
+
+async def _http_get_status(port: int) -> tuple[int, bytes]:
+    import asyncio
+
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+    await writer.drain()
+    raw = await reader.read()
+    writer.close()
+    await writer.wait_closed()
+    head, _, body = raw.partition(b"\r\n\r\n")
+    status_line = head.split(b"\r\n", 1)[0].decode("ascii", errors="replace")
+    return int(status_line.split(" ")[1]), body
+
+
+def _find_free_port() -> int:
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+@pytest.mark.asyncio
+async def test_unacked_critical_keeps_healthz_200(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QA #4696 block 2 discriminator: an unacked age past the critical bound
+    must NOT flip /healthz to 503 (the probe reads 503 as DOWN and the
+    watchdog would restart-flap onto the same condition every 60s). The
+    domain component reports degraded with gate_readiness=False; readiness
+    follows the loop liveness only."""
+    import json
+    import time
+
+    from services.pitr.uploader_daemon import _LoopErrors, _unacked_components
+    from shared.daemon_health import Liveness, start_health_server, stop_health_server
+
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    older = time.time() - 8000  # past critical (7200s default)
+    os.utime(source, (older, older))
+    port = _find_free_port()
+    liveness = Liveness(timeout_s=120)
+    server = await start_health_server(
+        "pitr_uploader",
+        port=port,
+        liveness=liveness,
+        components=lambda: _unacked_components(uploader, _LoopErrors(transient=2)),
+    )
+    try:
+        status, body = await _http_get_status(port)
+        assert status == 200, "domain condition must not gate readiness"
+        payload = json.loads(body)
+        assert payload["readiness"] == "ok"
+        pitr = next(c for c in payload["components"] if c["name"] == "pitr-uploader")
+        assert pitr["status"] == "degraded"
+        assert pitr["gate_readiness"] is False
+        assert "critical" in pitr["detail"]
+        assert "upload_errors=2" in pitr["progress"]
+        # The liveness lane still gates: a stale loop flips to 503.
+        liveness._last = time.monotonic() - 1000
+        status, _ = await _http_get_status(port)
+        assert status == 503, "wedged loop (stale liveness) still gates readiness"
+    finally:
+        await stop_health_server(server)
+
+
+def test_disk_hard_bound_still_gates_readiness(tmp_path: Path) -> None:
+    """QA #4696/405 ruling A: the disk component keeps the default gating —
+    a footprint past the hard bound genuinely degrades readiness (the daemon
+    cannot work), so it must still flip the response to 503."""
+    from services.pitr.uploader_daemon import _disk_components
+    from shared.health_schema import render
+
+    store = FakeStore()
+    uploader, _ = _uploader(tmp_path, store)
+    comps = _disk_components(uploader, warn_bytes=1, hard_bytes=2)
+    assert comps[0]["status"] == "down"
+    assert "gate_readiness" not in comps[0], "disk component keeps default gating"
+    status, _ = render({"name": "pitr_uploader"}, comps)
+    assert status == 503
+    # Within bounds it is OK and non-blocking.
+    comps = _disk_components(uploader, warn_bytes=10**9, hard_bytes=10**9 + 1)
+    status, _ = render({"name": "pitr_uploader"}, comps)
+    assert status == 200

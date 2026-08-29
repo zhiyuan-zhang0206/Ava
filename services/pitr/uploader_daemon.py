@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import json
 import logging
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.gcs_store import GCSObjectStore
@@ -23,7 +24,6 @@ from shared import health_schema
 from shared.config import settings
 from shared.daemon_health import Liveness, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
-from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 
@@ -61,9 +61,31 @@ _BACKOFF_HEARTBEAT_S = 30.0
 _ACK_SUFFIX = ".ack.json"
 
 
+@dataclass
+class _LoopErrors:
+    """Accumulated upload failure counters, read by the health components.
+
+    Carried through upload_loop so the health payload shows real error
+    signals instead of a hardcoded zero (QA #4696 yellow 2)."""
+
+    transient: int = 0
+    critical: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.transient + self.critical
+
+
 def _disk_components(
     uploader: PitrUploader, *, warn_bytes: int, hard_bytes: int
 ) -> list[dict[str, object]]:
+    """Disk-footprint component — GATED readiness (QA #4696/405 ruling A).
+
+    A combined spool+staging footprint past the hard bound means the daemon
+    cannot do its job; that genuinely degrades readiness and the watchdog
+    respawn (which re-reads config) is the right recovery, so this component
+    keeps the default gate_readiness=True.
+    """
     footprint = uploader.disk_footprint()
     total = footprint.total_bytes
     if total >= hard_bytes:
@@ -81,9 +103,9 @@ def _disk_components(
 def _unacked_health(uploader: PitrUploader, upload_errors_total: int) -> ArchiveHealth:
     """Project local spool vs remote ACK through state.py's health model.
 
-    QA #4681 block 3: AVA_PITR_UNACKED_* are live health inputs, not dead
-    configuration — the oldest un-ACKed spool entry's age is compared against
-    the warn/critical thresholds (the spool byte bounds ride the disk
+    QA #4681 block 3 / #4696: AVA_PITR_UNACKED_* are live health inputs, not
+    dead configuration — the oldest un-ACKed spool entry's age is compared
+    against the warn/critical thresholds (the spool byte bounds ride the disk
     component above). Low cardinality: no object names.
     """
     pending = uploader.pending()
@@ -125,36 +147,42 @@ def _unacked_health(uploader: PitrUploader, upload_errors_total: int) -> Archive
     )
 
 
-def _unacked_components(uploader: PitrUploader) -> list[dict[str, object]]:
-    """/healthz projection: unacked-age health through state.py's model.
+def _unacked_components(uploader: PitrUploader, errors: _LoopErrors) -> list[dict[str, object]]:
+    """Unacked-age health component — NON-gating (QA #4696 block 2).
 
-    A critical domain state (unacked age past the critical bound) reads as
-    degraded on the wire — never DOWN — so the watchdog does not restart-flap
-    on a condition that a restart cannot fix (baseline 7).
+    An unacked age past the critical bound is a domain condition (GCS
+    unreachable, operator action needed) that a restart cannot fix; gating
+    readiness would make the watchdog kill+restart the daemon every 60s onto
+    the same condition — the exact flap this PR exists to prevent. The
+    component reports the degraded/critical state in the payload (visible to
+    ops) but carries gate_readiness=False, so /healthz stays 200 while the
+    loop is alive.
     """
-    health = _unacked_health(uploader, upload_errors_total=0)
+    health = _unacked_health(uploader, upload_errors_total=errors.total)
     if health.level == "critical":
-        status = DEGRADED
+        status = health_schema.DEGRADED
         detail = f"critical — {health.detail}"
     elif health.level == "degraded":
-        status = DEGRADED
+        status = health_schema.DEGRADED
         detail = health.detail
     else:
-        status = OK
+        status = health_schema.OK
         detail = None
     oldest = (
         "none" if health.oldest_unacked_seconds is None else f"{health.oldest_unacked_seconds:.0f}s"
     )
     return [
-        component(
+        health_schema.component(
             "pitr-uploader",
             status,
             progress=(
                 f"unacked={health.unacked_segments} "
                 f"oldest_unacked={oldest} "
-                f"acked={health.remote_acked_segments}"
+                f"acked={health.remote_acked_segments} "
+                f"upload_errors={errors.total}"
             ),
             detail=detail,
+            gate_readiness=False,
         )
     ]
 
@@ -180,18 +208,23 @@ async def _wait_with_heartbeat(
 
 
 async def upload_loop(
-    uploader: PitrUploader, *, stop: asyncio.Event, liveness: Liveness | None = None
+    uploader: PitrUploader,
+    *,
+    stop: asyncio.Event,
+    liveness: Liveness | None = None,
+    errors: _LoopErrors | None = None,
 ) -> None:
     """Attempt one object per iteration; SDK and outer retries never nest.
 
-    Critical failures (auth/config rejection, an immutable-object collision)
-    never crash the daemon: a raised exception would make the watchdog respawn
-    the process on the same collision, a restart flap instead of a backoff
-    (baseline 7 — critical conditions do not busy-loop). They are logged and
-    retried on the long critical cadence, so a config fix or a manual
-    collision resolution recovers in place.
+    Critical failures (auth/config rejection, an immutable-object collision,
+    permission-class IO errors) never crash the daemon: a raised exception
+    would make the watchdog respawn the process on the same condition, a
+    restart flap instead of a backoff (baseline 7 — critical conditions do
+    not busy-loop). They are logged and retried on the long critical cadence,
+    so a config fix or a manual collision resolution recovers in place.
     """
     failures = 0
+    errors = errors if errors is not None else _LoopErrors()
     while not stop.is_set():
         if liveness is not None:
             liveness.beat()
@@ -206,26 +239,43 @@ async def upload_loop(
                 delay = 0.0
             except TransientObjectStoreError:
                 failures += 1
+                errors.transient += 1
                 delay = min(60.0, float(2 ** min(failures, 6)))
                 _log.warning("PITR upload temporarily failed; retrying after bounded backoff")
             except OSError as exc:
-                # Local IO failure (disk full ENOSPC, fsync EIO, ...) writing
-                # the staging file or ACK: transient by nature — the operator
-                # can free space — so back off and retry. Escaping the loop
-                # would crash the daemon and make the watchdog respawn it onto
-                # the same full disk, a restart flap instead of a backoff
-                # (QA #4681 block 1; baseline 7 — no busy-loop).
-                failures += 1
-                delay = min(60.0, float(2 ** min(failures, 6)))
-                _log.warning(
-                    "PITR upload local IO failure (%s); retrying after bounded backoff", exc
-                )
+                if exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+                    # Permission / read-only-filesystem class: an operator
+                    # fix, not a transient — same semantics as the permanent
+                    # store errors, so it backs off on the critical cadence
+                    # (QA #4696 yellow 1) instead of silently retrying.
+                    errors.critical += 1
+                    _log.error(
+                        "PITR upload permission failure (errno=%s, %s); "
+                        "operator action needed, backing off critically",
+                        exc.errno,
+                        exc,
+                    )
+                    delay = _CRITICAL_BACKOFF_S
+                else:
+                    # Local IO failure (disk full ENOSPC, fsync EIO, ...)
+                    # writing the staging file or ACK: transient by nature —
+                    # the operator can free space — so back off and retry.
+                    # Escaping the loop would crash the daemon and make the
+                    # watchdog respawn it onto the same full disk, a restart
+                    # flap instead of a backoff (QA #4681 block 1; baseline 7).
+                    failures += 1
+                    errors.transient += 1
+                    delay = min(60.0, float(2 ** min(failures, 6)))
+                    _log.warning(
+                        "PITR upload local IO failure (%s); retrying after bounded backoff", exc
+                    )
             except (
                 PermanentObjectStoreError,
                 AckCorruptionError,
                 RemoteCollisionError,
                 WalSourceTooLargeError,
             ) as exc:
+                errors.critical += 1
                 _log.error("PITR upload critical (operator action needed): %s", exc)
                 delay = _CRITICAL_BACKOFF_S
         await _wait_with_heartbeat(stop, delay, liveness)
@@ -238,6 +288,7 @@ async def run() -> None:
     uploader = build_uploader()
     stop = asyncio.Event()
     liveness = Liveness(timeout_s=120)
+    errors = _LoopErrors()
 
     def disk_health() -> dict[str, object]:
         footprint = uploader.disk_footprint()
@@ -253,7 +304,7 @@ async def run() -> None:
             uploader,
             warn_bytes=settings.physical_backup.pitr_spool_warn_bytes,
             hard_bytes=settings.physical_backup.pitr_spool_hard_bytes,
-        ) + _unacked_components(uploader)
+        ) + _unacked_components(uploader, errors)
 
     server = await start_health_server(
         "pitr_uploader",
@@ -262,7 +313,7 @@ async def run() -> None:
         extra=disk_health,
     )
     try:
-        await upload_loop(uploader, stop=stop, liveness=liveness)
+        await upload_loop(uploader, stop=stop, liveness=liveness, errors=errors)
     finally:
         await stop_health_server(server)
         remove_pidfile(pidfile)
