@@ -84,8 +84,8 @@ def test_collect_core_metrics_includes_statistics_coverage() -> None:
     """The core registry includes every statistic surfaced to operators."""
     import sys
 
-    sys.modules.pop("shared.core_metrics_panels", None)
-    sys.modules.pop("shared.core_metrics_observability", None)
+    for module_name in core_metrics._CORE_DEFINITION_MODULES:
+        sys.modules.pop(module_name, None)
     specs = core_metrics.collect_core_metrics()
     assert specs
     assert all(s.plugin == "core" for s in specs)
