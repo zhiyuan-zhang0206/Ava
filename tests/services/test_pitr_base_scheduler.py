@@ -19,6 +19,11 @@ from services.pitr.base_scheduler_daemon import BaseCandidateState, _components,
 from services.pitr.retention_planner import DryRunResult
 from services.pitr.retention_scheduler import RetentionDryRunState
 from services.pitr.retention_scheduler import health_component as retention_health_component
+from services.pitr.worker_process import (
+    WorkerQueue,
+    group_members,
+    reap_restore_subprocess_group,
+)
 from shared.process_env import restricted_process_env
 
 
@@ -89,13 +94,13 @@ def test_restricted_restore_group_reaps_orphan_descendant() -> None:
     )
     created_at = psutil.Process(process.pid).create_time()
     deadline = time.monotonic() + 10
-    while len(daemon._group_members(process.pid)) < 2 and time.monotonic() < deadline:
+    while len(group_members(process.pid)) < 2 and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert len(daemon._group_members(process.pid)) >= 2
+    assert len(group_members(process.pid)) >= 2
 
-    daemon._reap_restore_subprocess_group(process, created_at)
+    reap_restore_subprocess_group(process, created_at)
 
-    assert daemon._group_members(process.pid) == []
+    assert group_members(process.pid) == []
 
 
 def test_authoritative_verify_precedes_publisher_construction(
@@ -131,7 +136,7 @@ def _blocking_worker(
     started: Path,
     stopped: Path,
     stop: daemon.StopSignal,
-    _output: daemon._WorkerQueue,
+    _output: WorkerQueue,
 ) -> None:
     started.write_text(str(os.getpid()))
     stop.wait()
@@ -143,7 +148,7 @@ def _noncooperative_worker(
     armed: Path,
     late: Path,
     _stop: daemon.StopSignal,
-    _output: daemon._WorkerQueue,
+    _output: WorkerQueue,
 ) -> None:
     script = (
         "import signal,subprocess,sys,time\n"
