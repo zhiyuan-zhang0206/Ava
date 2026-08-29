@@ -160,6 +160,13 @@ def _noncooperative_worker(
     time.sleep(60)
 
 
+async def _wait_for_path(path: Path, *, timeout_s: float = 10) -> None:
+    deadline = time.monotonic() + timeout_s
+    while not path.exists() and time.monotonic() < deadline:
+        await asyncio.sleep(0.02)
+    assert path.exists(), f"worker did not publish {path.name} before the deadline"
+
+
 def test_due_uses_durable_candidate_after_restart(tmp_path: Path) -> None:
     now = datetime(2026, 8, 30, 4, tzinfo=UTC)  # Sunday after the weekly window.
     assert is_due(now, tmp_path)
@@ -184,10 +191,7 @@ async def test_runner_cancellation_reaps_active_worker(
     task = asyncio.create_task(
         daemon._run_worker(target=partial(_blocking_worker, started, stopped))
     )
-    for _ in range(100):
-        if started.exists():
-            break
-        await asyncio.sleep(0.01)
+    await _wait_for_path(started)
     child_pid = int(started.read_text())
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -270,15 +274,13 @@ async def test_forced_shutdown_reaps_noncooperative_group_and_late_fork(
             group_deadline_s=15,
         )
     )
-    for _ in range(200):
-        if started.exists():
-            break
-        await asyncio.sleep(0.01)
+    await _wait_for_path(started)
     worker_pid, child_pid = (int(value) for value in started.read_text().split())
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    await _wait_for_path(late)
     late_pid = int(late.read_text())
     assert not psutil.pid_exists(worker_pid)
     assert not psutil.pid_exists(child_pid)
