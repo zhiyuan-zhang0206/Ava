@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -62,6 +63,16 @@ _CACHE_TTL_SECONDS = 60
 _LAST_GOOD_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 _FROZEN_CACHE_TTL_SECONDS = 24 * 60 * 60
 _FROZEN_ARCHIVE_CACHE_KEY = "fleet_graph:frozen:archive:v1"
+
+# Single-flight guard for the whole-archive scan (2026-08-29/30 incident):
+# the cache entry is shared, but the fetch runs in this process. Concurrent
+# misses (a 24h TTL expiry, a Redis restart) would otherwise each run their
+# own multi-second scan — a stampede that saturates the Loki querier; when
+# Loki is already slow the scans time out and every following request
+# re-attempts the same doomed scan. One scan runs at a time; a waiter that
+# cannot enter within `_ARCHIVE_FETCH_WAIT_S` serves live-only edges.
+_ARCHIVE_FETCH_LOCK = threading.Lock()
+_ARCHIVE_FETCH_WAIT_S = 3.0
 _FROZEN_LEGACY_CACHE_KEY = "fleet_graph:frozen:legacy:v1"
 
 # Audit event names that form edges. Lineage (spawn/fork/resurrect) is
@@ -392,6 +403,32 @@ def _write_archive_cache(rows: list[dict[str, Any]]) -> None:
     _write_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, payload, cache_name="Loki archive")
 
 
+def _cached_archive_edges() -> list[dict[str, Any]]:
+    """Archive edge rows via the 24h Redis cache, single-flighted on miss.
+
+    Concurrent misses run ONE whole-archive scan instead of one each — a
+    stampede that saturates the Loki querier (2026-08-29/30 incident, see
+    `_ARCHIVE_FETCH_LOCK`). A waiter that cannot enter the fetch within
+    `_ARCHIVE_FETCH_WAIT_S` returns [] (live-only edges); the route's own
+    failure path still serves the last-good graph when the scan itself
+    raises."""
+    rows = _read_archive_cache()
+    if rows is not None:
+        return rows
+    if not _ARCHIVE_FETCH_LOCK.acquire(timeout=_ARCHIVE_FETCH_WAIT_S):
+        logger.warning("fleet_graph Loki archive fetch already in flight — serving live-only edges")
+        return []
+    try:
+        rows = _read_archive_cache()
+        if rows is not None:
+            return rows
+        rows, _ = _fetch_archive_edges()
+        _write_archive_cache(rows)
+        return rows
+    finally:
+        _ARCHIVE_FETCH_LOCK.release()
+
+
 class _PgGraphData(NamedTuple):
     """The DB-bound graph phase, kept separate from upstream telemetry work."""
 
@@ -583,10 +620,7 @@ def get_fleet_graph(
     # The whole-archive scan is slow but served once per day from the 24h
     # Redis cache; a failure degrades with the node set it did have.
     try:
-        archive_rows = _read_archive_cache()
-        if archive_rows is None:
-            archive_rows, _ = _fetch_archive_edges()
-            _write_archive_cache(archive_rows)
+        archive_rows = _cached_archive_edges()
     except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
         logger.warning("fleet_graph archive query failed — serving stale graph: {}", exc)
         return _stale_graph(key, _build_nodes(node_rows))

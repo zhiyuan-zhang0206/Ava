@@ -1,7 +1,9 @@
 """Regression tests for fleet-graph upstream failures and Redis fallbacks."""
 
 import json
+import threading
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 import psycopg
@@ -649,3 +651,53 @@ def test_pg_cancellation_serves_last_good_graph(
     assert resp.status_code == 200
     assert resp.json() == expected
     assert redis.writes == []
+
+
+def test_archive_edges_single_flight_concurrent_misses_run_one_scan(
+    fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent frozen-archive misses run ONE whole-archive scan: a waiter
+    that cannot enter the fetch within the bounded wait serves live-only
+    edges instead of stacking its own scan on Loki (the stampede that
+    saturated the querier during the 2026-08-29/30 incident)."""
+    import gateway.routers.fleet_graph as fg
+
+    redis = _FakeRedis()
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    started = threading.Event()
+    release = threading.Event()
+    archive_calls = 0
+    original = fake_loki.query_events
+
+    def slow_archive_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        nonlocal archive_calls
+        if kwargs.get("archive"):
+            archive_calls += 1
+            started.set()
+            release.wait(timeout=10)
+        return original(**kwargs)
+
+    monkeypatch.setattr(loki_events, "query_events", slow_archive_query)
+
+    results: list[list[dict[str, Any]]] = []
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            results.append(fg._cached_archive_edges())
+        except BaseException as exc:  # pragma: no cover - failure reporting
+            errors.append(exc)
+
+    first = threading.Thread(target=worker)
+    first.start()
+    assert started.wait(timeout=5)  # the first thread holds the fetch lock
+    second = threading.Thread(target=worker)
+    second.start()
+    second.join(timeout=10)
+    assert not second.is_alive()  # the waiter gave up after the bounded wait
+    release.set()
+    first.join(timeout=10)
+    assert not errors
+    assert archive_calls == 1  # one scan for two concurrent misses
+    assert len(results) == 2
+    assert results[0] == results[1] == []  # pyright: ignore[reportUnknownArgumentType]
