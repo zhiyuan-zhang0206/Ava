@@ -387,14 +387,17 @@ async def _run_restore_worker(inputs: _RestoreWorkerInput) -> dict[str, str]:
 def _restore_worker_result(returncode: int, stderr: str, result: Path) -> dict[str, str]:
     if returncode != 0:
         raise RuntimeError(f"restricted restore worker exited {returncode}: {stderr}")
-    raw = json.loads(result.read_text())
-    if not isinstance(raw, dict) or set(raw) != {
+    loaded: object = json.loads(result.read_text())
+    if not isinstance(loaded, dict):
+        raise TypeError("restricted restore worker result must be an object")
+    raw = cast(dict[str, object], loaded)
+    if set(raw) != {
         "chain_id",
         "candidate_sha256",
         "pending_sha256",
     }:
         raise RuntimeError("restricted restore worker returned an invalid result")
-    return {str(key): str(value) for key, value in raw.items()}
+    return {key: str(value) for key, value in raw.items()}
 
 
 def _worker_bootstrap(
