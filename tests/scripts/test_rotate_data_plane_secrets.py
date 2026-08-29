@@ -103,6 +103,62 @@ def test_runner_scope_requires_the_existing_runner_db_password(
         rotate.build_state("runner")
 
 
+def test_build_state_refuses_an_agent_process_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_gateway_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "profile", "agent")
+    (tmp_path / ".env").write_text(
+        "AVA_DB_ADMIN_PASSWORD=old-db\n"
+        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
+        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
+        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
+    )
+
+    with pytest.raises(RuntimeError, match="gateway context"):
+        rotate.build_state()
+
+
+def test_build_state_refuses_a_runner_projected_database_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_gateway_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "profile", None)
+    monkeypatch.setattr(
+        settings.data_plane,
+        "db_url",
+        "postgresql://ava_runner:old-runner-db@127.0.0.1:16433/ava_main",
+    )
+    (tmp_path / ".env").write_text(
+        "AVA_DB_ADMIN_PASSWORD=old-db\n"
+        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
+        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
+        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
+    )
+
+    with pytest.raises(RuntimeError, match="gateway context"):
+        rotate.build_state()
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_main_reports_an_agent_context_guard_cleanly(
+    resume: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _patch_gateway_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "profile", "agent")
+
+    args = ["--resume", str(tmp_path / "missing-state.json")] if resume else []
+
+    assert rotate.main(args) == 1
+    err = capsys.readouterr().err
+    assert "gateway context" in err
+    assert "unset AVA_PROCESS_PROFILE" in err
+    assert "Traceback" not in err
+
+
 def test_admin_scope_changes_owner_and_redis_default_only(monkeypatch: pytest.MonkeyPatch) -> None:
     state = _state("admin")
     role_calls: list[dict[str, object]] = []

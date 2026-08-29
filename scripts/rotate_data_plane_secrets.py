@@ -45,6 +45,12 @@ from shared.url_secret import url_host, url_with_password, url_with_userinfo
 
 _TOKEN_BYTES = 32
 _SCOPES = frozenset({"admin", "runner", "both"})
+_GATEWAY_CONTEXT_ERROR = (
+    "data-plane secret rotation must run on the gateway host in a gateway context, not from "
+    "an agent shell. Run:\n"
+    "cd <gateway checkout (e.g. ~/.ava/source)> && unset AVA_PROCESS_PROFILE && set -a; "
+    ". ~/.ava/.env; set +a && .venv/bin/python scripts/rotate_data_plane_secrets.py ..."
+)
 
 
 @dataclass
@@ -125,9 +131,19 @@ def _env_password(values: dict[str, str | None], key: str, fallback: str) -> str
     return (values.get(key) or "").strip() or fallback
 
 
+def _gateway_identity() -> str:
+    if settings.profile == "agent":
+        raise RuntimeError(_GATEWAY_CONTEXT_ERROR)
+    identity = identity_from_url(settings.data_plane.db_url)
+    if identity == RUNNER_ROLE:
+        raise RuntimeError(_GATEWAY_CONTEXT_ERROR)
+    return identity
+
+
 def build_state(scope: str = "both") -> RotationState:
     if scope not in _SCOPES:
         raise ValueError(f"unsupported scope {scope!r}")
+    identity = _gateway_identity()
     if not settings.data_plane.cluster_secret:
         raise RuntimeError("this is a no-auth cluster; it has no data-plane passwords to rotate")
     record = get_record(ava_home())
@@ -146,7 +162,7 @@ def build_state(scope: str = "both") -> RotationState:
         )
     return RotationState(
         scope=scope,
-        identity=identity_from_url(settings.data_plane.db_url),
+        identity=identity,
         old_db_admin_password=old_db_admin,
         new_db_admin_password=mint_secret() if scope in {"admin", "both"} else old_db_admin,
         old_redis_admin_password=old_redis_admin,
@@ -444,6 +460,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     parser.add_argument("--resume", metavar="STATE_FILE", help="resume a saved rotation")
     args = parser.parse_args(argv)
+    try:
+        _gateway_identity()
+    except RuntimeError:
+        print(_GATEWAY_CONTEXT_ERROR, file=sys.stderr)
+        return 1
     state = RotationState.load(Path(args.resume)) if args.resume else build_state(args.scope)
     print_plan(state, dry_run=not args.execute)
     if not args.execute:
