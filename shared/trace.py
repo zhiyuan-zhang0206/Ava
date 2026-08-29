@@ -3,9 +3,10 @@
 **Record** (this module): called once per process early in `agent/loop.py:main()`.
 When `trace_enabled` (default on), OpenLLMetry (traceloop-sdk) auto-instruments
 the Anthropic/OpenAI/Google SDKs + LangChain/LangGraph, and every span is
-exported over OTLP/HTTP (protobuf wire format) to the local OTel Collector sidecar
-(`AVA_TELEMETRY_OTLP_ENDPOINT`, default 127.0.0.1:4318) by
-`OtlpJsonHttpSpanExporter`. The sidecar (one per machine, supervised like every
+exported over OTLP/HTTP (protobuf wire format) to the local OTel Collector
+sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default 127.0.0.1:4318) by
+`OtlpJsonHttpSpanExporter`. The slow import+init runs on a daemon thread off
+the boot path — use sites wait via ensure_init_resolved(). The sidecar (one per machine, supervised like every
 other Ava service) writes the local JSONL mirror under `$AVA_HOME/traces/` via
 its file exporter. A gateway sidecar fans out to loopback Tempo; a pure runner
 sidecar relays to the gateway collector's authenticated private receiver. Each
@@ -198,6 +199,8 @@ _state: dict[str, Any] = {
     "initialized": False,
     "collector_offline_reported": False,
     "retry_thread": None,
+    "arm_thread": None,
+    "init_resolved": threading.Event(),
 }
 _init_lock = threading.Lock()
 
@@ -556,6 +559,105 @@ def _start_collector_retry() -> None:
     retry_thread.start()
 
 
+def _arm_tracing(endpoint: str) -> None:
+    """Import traceloop and run Traceloop.init, on one daemon thread.
+
+    The import + init cost ~2.5-3 s: traceloop.sdk pulls in pandas via its
+    datasets client, and the GOOGLE_GENERATIVEAI instrumentor imports
+    google.genai (the ~66 MB import shared/lm/_gemini_cache.py keeps lazy).
+    Off the boot path, initialize_tracing returns after the cheap decisions;
+    consumers wait on ensure_init_resolved() before first use; a failure
+    logs and resolves the wait — recording stays off instead of killing boot.
+    """
+    try:
+        # Content stripping, layer 1 (the source): the instrumentors check
+        # TRACELOOP_TRACE_CONTENT per prompt/completion, so false-before-init
+        # keeps LLM content out of span attributes. Unconditional when
+        # strip_content is on — an operator-set true would re-open the
+        # 31 GB/h hole. Layer 2 (the exporter) stays armed regardless.
+        if settings.observability.trace_strip_content:
+            os.environ["TRACELOOP_TRACE_CONTENT"] = "false"
+
+        from traceloop.sdk import Traceloop
+        from traceloop.sdk.instruments import Instruments
+
+        # Mirror the LLM call paths Ava actually uses. LangGraph rides on the
+        # LANGCHAIN instrumentor (its callback handler nests node spans), so
+        # there is no separate LANGGRAPH instrument. LiteLLM, when used,
+        # surfaces through the provider instrumentors (Anthropic/OpenAI) at
+        # the SDK layer.
+        instruments = {
+            Instruments.ANTHROPIC,
+            Instruments.OPENAI,
+            Instruments.LANGCHAIN,
+            Instruments.GOOGLE_GENERATIVEAI,
+        }
+
+        # `exporter=` makes OtlpJsonHttpSpanExporter the sole span exporter,
+        # pointed at the LOCAL OTel Collector sidecar (no api_endpoint /
+        # api_key, so the SDK never dials a remote backend itself).
+        # `telemetry_enabled=False` stops traceloop-sdk's own anonymous usage
+        # telemetry from phoning home to api.traceloop.com.
+        # traceloop-sdk's inlined init() signature types resource_attributes
+        # as dict[Unknown, Unknown]; the call below passes only fully-typed
+        # kwargs.
+        Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
+            app_name="ava",
+            exporter=OtlpJsonHttpSpanExporter(endpoint=endpoint),
+            instruments=instruments,
+            disable_batch=False,
+            telemetry_enabled=False,
+            resource_attributes={"cluster": cluster_label()},
+        )
+
+        logger.info(
+            "trace recording enabled",
+            event="trace",
+            endpoint=endpoint,
+            mirror_dir=str(traces_dir()),
+        )
+        _state["collector_offline_reported"] = False
+        _state["initialized"] = True
+    except Exception as exc:
+        logger.warning(
+            "trace recording failed to initialize — spans disabled this process",
+            event="trace",
+            action="recording_init_failed",
+            error=repr(exc),
+        )
+    finally:
+        _state["init_resolved"].set()
+
+
+def _start_arm_thread(endpoint: str) -> None:
+    """Spawn (once) the daemon thread that imports traceloop and arms it."""
+    arm_thread = _state["arm_thread"]
+    if isinstance(arm_thread, threading.Thread) and arm_thread.is_alive():
+        return
+    arm_thread = threading.Thread(
+        target=_arm_tracing,
+        args=(endpoint,),
+        daemon=True,
+        name="trace-arm",
+    )
+    _state["arm_thread"] = arm_thread
+    arm_thread.start()
+
+
+def ensure_init_resolved() -> None:
+    """Block until the boot-time trace decision is final; no-op when none is pending.
+
+    turn_span() calls this before opening the first turn root span: a span
+    opened against the unset proxy tracer is silently lost, and LangChain
+    callback managers configured before the instrumentor wrap lands never
+    carry the traceloop handler. Only waits when this process actually armed
+    background tracing — a declined or never-requested init returns
+    immediately (recording is off by decision, see initialize_tracing).
+    """
+    if _state["arm_thread"] is not None:
+        _state["init_resolved"].wait()
+
+
 def _serialized_initialize(function: Callable[[], None]) -> Callable[[], None]:
     """Apply the module init lock while preserving the public docstring."""
 
@@ -571,20 +673,22 @@ def _serialized_initialize(function: Callable[[], None]) -> Callable[[], None]:
 def initialize_tracing() -> None:
     """Initialize OTel span recording to the local collector. Idempotent.
 
-    No-op when settings.observability.trace_enabled=False. When on, builds an
-    OtlpJsonHttpSpanExporter (pointed at the local OTel Collector sidecar) and
-    hands it to Traceloop.init as the sole exporter — the explicit
-    `instruments=` set covers Anthropic + OpenAI + LangChain + Google GenAI so
-    all LLM call paths produce spans that nest under the per-turn root span
-    (see turn_span()). LangGraph is instrumented through the LangChain
-    instrumentor (callback handler), not a separate one.
+    No-op when settings.observability.trace_enabled=False. When on, this call
+    runs only the cheap decisions — disk guards + collector preflight — and
+    hands the heavy part (traceloop import + Traceloop.init, ~2.5-3 s) to one
+    daemon thread (_arm_tracing). The boot path is therefore sub-second; the
+    ordering contract "instrumentors installed before the first turn" is
+    enforced by ensure_init_resolved() inside turn_span (the callback-manager
+    wrap and the SDK instrumentors are call-time, so a model built during
+    boot still produces spans). Spans: OtlpJsonHttpSpanExporter pointed at
+    the LOCAL sidecar, traceloop instrumenting Anthropic + OpenAI +
+    LangChain + Google GenAI (LangGraph via the LangChain callback handler).
 
     Recording is one OTLP/HTTP hop to the LOCAL sidecar; the sidecar writes the
-    JSONL mirror and either fans out locally or relays to the gateway. Its
-    queues decouple ordinary backend outages, while prolonged pressure can
-    still return backpressure before the mirror. If the sidecar itself is not
-    answering at init, recording stays off temporarily: the episode is logged
-    once and one daemon loop re-checks every five minutes until init succeeds.
+    JSONL mirror and either fans out locally or relays to the gateway. If the
+    sidecar itself is not answering at init, recording stays off temporarily:
+    the episode is logged once and one daemon loop re-checks every five
+    minutes until init succeeds.
 
     Guards (each independently configurable):
     - compression (`_gzip_old_mirror`): rotated (non-active) mirror segments
@@ -655,53 +759,12 @@ def initialize_tracing() -> None:
         _start_collector_retry()
         return
 
-    # Content stripping, layer 1 (the source): the openllmetry instrumentors
-    # check TRACELOOP_TRACE_CONTENT on every prompt/completion they would
-    # attach, so setting it false before init means LLM content never becomes
-    # a span attribute in the first place. Set unconditionally when
-    # strip_content is on — an operator-set true would silently re-open the
-    # 31 GB/h hole. Layer 2 (the exporter) stays armed regardless.
-    if settings.observability.trace_strip_content:
-        os.environ["TRACELOOP_TRACE_CONTENT"] = "false"
-
-    from traceloop.sdk import Traceloop
-    from traceloop.sdk.instruments import Instruments
-
-    # Mirror the LLM call paths Ava actually uses. LangGraph rides on the
-    # LANGCHAIN instrumentor (its callback handler nests node spans), so there
-    # is no separate LANGGRAPH instrument. LiteLLM, when used, surfaces through
-    # the provider instrumentors (Anthropic/OpenAI) at the SDK layer.
-    instruments = {
-        Instruments.ANTHROPIC,
-        Instruments.OPENAI,
-        Instruments.LANGCHAIN,
-        Instruments.GOOGLE_GENERATIVEAI,
-    }
-
-    # `exporter=` makes OtlpJsonHttpSpanExporter the sole span exporter, pointed
-    # at the LOCAL OTel Collector sidecar (no api_endpoint/api_key, so the SDK
-    # never dials a remote backend itself). `telemetry_enabled=False` stops
-    # traceloop-sdk's own anonymous usage telemetry from phoning home to
-    # api.traceloop.com.
-    # traceloop-sdk's inlined init() signature types resource_attributes as
-    # dict[Unknown, Unknown]; the call below passes only fully-typed kwargs.
-    Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
-        app_name="ava",
-        exporter=OtlpJsonHttpSpanExporter(endpoint=endpoint),
-        instruments=instruments,
-        disable_batch=False,
-        telemetry_enabled=False,
-        resource_attributes={"cluster": cluster_label()},
-    )
-
-    logger.info(
-        "trace recording enabled",
-        event="trace",
-        endpoint=endpoint,
-        mirror_dir=str(traces_dir()),
-    )
-    _state["collector_offline_reported"] = False
-    _state["initialized"] = True
+    # The heavy part — traceloop import + Traceloop.init (~2.5-3 s) — runs on
+    # one daemon thread. It must COMPLETE before the first turn opens its root
+    # span and before the first LangChain run configures a callback manager;
+    # turn_span() waits on ensure_init_resolved() for exactly that, keeping
+    # the synchronous boot path down to the cheap decisions above.
+    _start_arm_thread(endpoint)
 
 
 @contextlib.contextmanager
@@ -718,8 +781,14 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
     attribute orders them within a process lifetime.
 
     No-op when trace_enabled=False or initialize_tracing hasn't run yet.
+    Waits for a pending background init first, so the root span never opens
+    against the unset proxy tracer (a span opened that way is silently lost).
     """
-    if not settings.observability.trace_enabled or not _state["initialized"]:
+    if not settings.observability.trace_enabled:
+        yield
+        return
+    ensure_init_resolved()
+    if not _state["initialized"]:
         yield
         return
     from opentelemetry import trace as otel_trace
