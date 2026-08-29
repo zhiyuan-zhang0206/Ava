@@ -59,6 +59,7 @@ import logging
 import shlex
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import shared.cluster
@@ -83,6 +84,7 @@ from ops.deploy_spawn import (
 )
 from ops.deploy_spawn import update_entry_args as _update_entry_args
 from ops.deploy_spawn import wait_for_ui_owner as _wait_for_ui_owner
+from ops.pitr_restart import PitrRestartContinuation, resume_commands
 from ops.update_check import (
     UpdateCheck as UpdateCheck,  # re-export (split out for the file-size ceiling)
 )
@@ -728,26 +730,19 @@ def spawn_rollout(
     }
 
 
-def spawn_restart(origin: str, *, force: bool = False, mode: str = "smooth") -> dict[str, str]:
+def spawn_restart(
+    origin: str,
+    *,
+    force: bool = False,
+    mode: str = "smooth",
+    continuation: PitrRestartContinuation | None = None,
+    bind_continuation: Callable[[], None] | None = None,
+) -> dict[str, str]:
     """Trigger a whole-cluster *restart* (no pull) via a detached session.
 
-    Runs a detached shell command — `{ cd <repo> && <venv-activation> ava
-    cluster update --local --restart-only; } 2>&1 | tee -a <log>` — hosted on the
-    service session backend (`get_backend()`; `ava` from this checkout's
-    `.venv/bin`, never a login PATH — see `spawn_rollout`).
-    `--local` keeps the detached child in-process; without it, the default
-    `--restart-only` route would POST again and collide with this child's live
-    session. The three-phase orchestration pauses every runner, quiesces agents,
-    stops / starts this host, and fans out runner bounces, but skips git pull /
-    uv sync / migration; services bounce without touching the checked-out revision.
-
-    `origin` names the trigger, same convention as `spawn_rollout` (heads the
-    log; no pin involvement — a restart pins nothing).
-
-    Mutually exclusive with rollout / update: refuses if a `ava-cluster-restart`,
-    `ava-rollout`, or `ava-updater` session is already alive.
-
-    Returns {"session": "ava-cluster-restart", "log": <path>}.
+    The detached `ava cluster update --local --restart-only` child uses the same
+    session backend and three-phase orchestration as rollout, without changing
+    the checkout. It is mutually exclusive with rollout and update sessions.
 
     Raises:
         ClusterUpdateInProgress: a restart / rollout / update is already in flight.
@@ -760,18 +755,19 @@ def spawn_restart(origin: str, *, force: bool = False, mode: str = "smooth") -> 
     log_path = _new_update_log("cluster-restart")
 
     repo = _REPO_ROOT
+    resume, native_resume = resume_commands(continuation, origin, _native_arg)
     inner_cmd = (
         f"{{ echo {shlex.quote(f'[cluster-restart] triggered by: {origin}')}; "
         f"cd {shlex.quote(str(repo))} && {venv_activation_prefix()}"
         f"ava cluster update --local --restart-only --origin {shlex.quote(origin)} "
-        f"--mode {shlex.quote(mode)}; "
+        f"--mode {shlex.quote(mode)}{resume}; "
         f'echo "[session-exit] rc=$?"; }} '
         f"2>&1 | tee -a {shlex.quote(str(log_path))}"
     )
     native_cmd = (
         f"echo [cluster-restart] triggered by {_native_arg(origin)}"
         f" & ava cluster update --local --restart-only --origin {_native_arg(origin)}"
-        f" --mode {_native_arg(mode)}"
+        f" --mode {_native_arg(mode)}" + native_resume
     )
     try:
         with shared.ui_update_state.lifecycle_lock():
@@ -782,6 +778,10 @@ def spawn_restart(origin: str, *, force: bool = False, mode: str = "smooth") -> 
                     "a persistent maintenance generation is already active or invalid; "
                     "recover it before starting another restart"
                 )
+            if bind_continuation is not None:
+                if continuation is None:
+                    raise ValueError("restart handoff binder requires a typed continuation")
+                bind_continuation()
             cluster_session._spawn_detached_session(
                 restart_sess, shell_cmd=inner_cmd, native_cmd=native_cmd
             )

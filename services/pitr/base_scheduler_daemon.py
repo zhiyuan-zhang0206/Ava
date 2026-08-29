@@ -22,6 +22,7 @@ from typing import cast
 import psutil
 
 from services._pidfile import acquire_pidfile, remove_pidfile
+from services.pitr.activation_state import load_record as load_activation_record
 from services.pitr.base_candidate import (
     StopSignal,
     create_base_candidate,
@@ -29,6 +30,7 @@ from services.pitr.base_candidate import (
 )
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.base_object_store import GCSRestartableStreamingObjectStore
+from services.pitr.base_scheduler_health import components as _components
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.restore_proof import (
     RestoreSpaceBudget,
@@ -39,9 +41,6 @@ from services.pitr.restore_proof import (
 from services.pitr.restore_publish_store import GCSProtectedManifestPublisher
 from services.pitr.retention_scheduler import (
     RetentionDryRunState,
-)
-from services.pitr.retention_scheduler import (
-    health_component as retention_health_component,
 )
 from services.pitr.retention_scheduler import (
     refresh as refresh_retention_plan,
@@ -63,7 +62,6 @@ from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.db import direct_db_url
-from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
@@ -122,7 +120,9 @@ def _candidate_manifests(root: Path) -> list[CandidateManifest]:
 def is_due(now: datetime, root: Path) -> bool:
     """Use durable manifests so a daemon restart cannot repeat this week."""
 
-    candidates = _candidate_manifests(root)
+    candidates = [
+        item for item in _candidate_manifests(root) if not item.chain_id.startswith("activation-")
+    ]
     week_start = (now - timedelta(days=now.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -136,61 +136,21 @@ def is_due(now: datetime, root: Path) -> bool:
 
 
 def _candidate_time(candidate: CandidateManifest) -> datetime:
-    return datetime.strptime(candidate.chain_id, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    stamp = (
+        candidate.chain_id.split("-", 2)[1]
+        if candidate.chain_id.startswith("activation-")
+        else candidate.chain_id
+    )
+    return datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
 
 
 def _last_durable_success(root: Path) -> float | None:
-    candidates = _candidate_manifests(root)
+    candidates = [
+        item for item in _candidate_manifests(root) if not item.chain_id.startswith("activation-")
+    ]
     if not candidates:
         return None
     return max(_candidate_time(item).timestamp() for item in candidates)
-
-
-def _components(state: BaseCandidateState) -> list[dict[str, object]]:
-    if state.cleanup_pending:
-        status, detail = DEGRADED, state.last_error or "completed candidate cleanup is pending"
-        progress = "cleanup"
-    elif state.running:
-        status, detail = OK, None
-        progress = "running"
-    elif state.last_error:
-        status, detail = DEGRADED, state.last_error
-        progress = "idle"
-    elif state.last_success and time.time() - state.last_success > BASE_BACKUP_STALE_AFTER_S:
-        status, detail = DEGRADED, "last base candidate is older than eight days"
-        progress = "idle"
-    else:
-        status, detail, progress = OK, None, "idle"
-    # The candidate's state is a domain condition (cleanup pending, GCS
-    # credentials, replication contract, staleness) that a restart cannot
-    # fix; gating readiness would make the watchdog respawn a healthy daemon
-    # every 60s onto the same condition (QA #931 R3, #927 arbitration A).
-    # Readiness follows process liveness only — /healthz 503 means the
-    # daemon is dead.
-    record = component(
-        "pitr_base_candidate",
-        status,
-        last_success=state.last_success,
-        progress=progress,
-        detail=detail,
-        now=time.time() if state.last_success else None,
-        gate_readiness=False,
-    )
-    record["protected"] = False
-    record["deferred_for_logical_backup"] = state.deferred_for_logical_backup
-    record["cleanup_pending"] = state.cleanup_pending
-    restore_status = OK if state.last_protected or not state.last_error else DEGRADED
-    restore = component(
-        "pitr_restore_proof",
-        restore_status,
-        last_success=state.last_protected,
-        progress="running" if state.restore_running else "idle",
-        detail=state.last_error if restore_status == DEGRADED else None,
-        now=time.time() if state.last_protected else None,
-        gate_readiness=False,
-    )
-    restore["protected"] = state.last_protected is not None
-    return [record, restore, retention_health_component(state.retention)]
 
 
 def _tree_bytes(path: Path) -> int:
@@ -243,7 +203,7 @@ def _pending_restore_candidate(root: Path) -> CandidateManifest | None:
     return None
 
 
-def _restore_worker_input() -> _RestoreWorkerInput:
+def _restore_worker_input_for(candidate: CandidateManifest) -> _RestoreWorkerInput:
     config = settings.physical_backup
     if not config.pitr_restore_proof_enabled:
         raise RuntimeError("restore proof cannot run while its flag is off")
@@ -252,9 +212,6 @@ def _restore_worker_input() -> _RestoreWorkerInput:
     if key_path is None or read_credentials is None:
         raise RuntimeError("validated viewer-only restore proof secrets are missing")
     root = ava_home() / "physical-backup"
-    candidate = _pending_restore_candidate(root)
-    if candidate is None:
-        raise RuntimeError("restore proof has no unprotected candidate")
     logical_peak = max(
         (item.stat().st_size for item in (ava_home() / "backups" / "db").glob("*.enc")),
         default=0,
@@ -276,6 +233,14 @@ def _restore_worker_input() -> _RestoreWorkerInput:
         pg_tool("pg_ctl"),
         pg_tool("pg_verifybackup"),
     )
+
+
+def _restore_worker_input() -> _RestoreWorkerInput:
+    root = ava_home() / "physical-backup"
+    candidate = _pending_restore_candidate(root)
+    if candidate is None:
+        raise RuntimeError("restore proof has no unprotected candidate")
+    return _restore_worker_input_for(candidate)
 
 
 def _publish_restore_proof(candidate: CandidateManifest, outcome: dict[str, str]) -> None:
@@ -541,6 +506,12 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
             continue
         else:
             state.cleanup_pending = False
+        activation = load_activation_record(ava_home())
+        if activation is not None and activation.phase not in {"protected", "rolled_back"}:
+            # The activation CLI owns its exact candidate/restore chain. The
+            # weekly loop must not select or publish unrelated work meanwhile.
+            await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
+            continue
         config = settings.physical_backup
         state.retention.enabled = config.pitr_retention_planner_enabled
         if config.pitr_retention_planner_enabled:

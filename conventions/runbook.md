@@ -598,20 +598,28 @@ The uploader's seekable staging contract is restricted to bounded WAL files;
 base backups must use the separate restartable streaming contract delivered by
 the base-chain rollout and must never materialize a full ciphertext sibling.
 
-Activation preparation is Ava-owned: use `ava cluster pitr status`, then
-`ava cluster pitr activate --origin operator:<name>`. The current command
-validates the disabled shadow posture and creates the mandatory verified logical
-recovery floor named with the durable operation ID, then reports
-`wal_config_pending`. That exact artifact is pinned while the operation is active;
+Activation is Ava-owned: use `ava cluster pitr status`, then
+`ava cluster pitr activate --origin operator:<name>`. The command validates the
+disabled shadow posture, creates the mandatory verified logical recovery floor,
+persists every side-effect intent, applies archive settings with `ALTER SYSTEM`,
+and dispatches the existing whole-cluster restart orchestration. Its typed,
+non-secret continuation automatically resumes the exact operation after restart
+readiness, executes `pg_switch_wal()`, and requires
+`pg_stat_archiver`, the fsynced local ACK, and viewer-only exact
+generation/size/CRC metadata to agree within the persisted five-minute deadline.
+It then forces one operation-scoped base candidate and exact isolated restore
+proof; only that chain may reach `protected`. That artifact is pinned while active;
 terminal runs use a bounded two-artifact retention window.
 Resume and status reverify that artifact. Preparation serializes with cluster
 update/maintenance, binds the live PGDATA/port/postmaster/system-id identity on
 both sides of the dump, and persists failures without resetting `started_at`.
 Its credential check proves distinct service-account emails, not merely distinct keys, and
-non-mutating bucket metadata access; write/delete IAM is intentionally left to
-the continuation gate. That status is not an instruction to edit PostgreSQL
-manually: do not change `archive_mode`, call `pg_ctl`, or signal Postgres.
-`ava cluster pitr rollback` preserves all logical and remote backup artifacts.
+non-mutating bucket metadata access. Never edit PostgreSQL or `.env` manually
+during this sequence. Resume a pending restart through the command; do not call
+`pg_ctl` or introduce another restart mechanism. `ava cluster pitr rollback`
+persists rollback intent, restores the frozen settings, disables PITR and
+retention gates, and uses the same durable whole-cluster restart continuation.
+It preserves logical dumps, local ACKs, remote objects, and protected manifests.
 
 Restore proof additionally requires
 `AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE`, a distinct 0600 viewer-only service

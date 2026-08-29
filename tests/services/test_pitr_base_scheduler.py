@@ -203,6 +203,28 @@ def test_due_uses_durable_candidate_after_restart(tmp_path: Path) -> None:
     assert not is_due(now, tmp_path)
 
 
+def test_activation_candidate_never_satisfies_weekly_due(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 30, 4, tzinfo=UTC)
+    chain = "activation-20260830T030000Z-00000000-0000-0000-0000-000000000001"
+    (tmp_path / f"{chain}.candidate.json").write_text(_candidate(chain).to_json())
+    assert is_due(now, tmp_path)
+
+
+def test_health_surfaces_corrupt_activation_state_without_throwing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        daemon,
+        "load_activation_record",
+        lambda _home: (_ for _ in ()).throw(ValueError("corrupt")),
+    )
+    components = daemon._components(BaseCandidateState())
+    activation_component = next(item for item in components if item["name"] == "pitr_activation")
+    assert activation_component["status"] == "degraded"
+    assert activation_component["progress"] == "unknown"
+    assert activation_component["gate_readiness"] is False
+
+
 def test_health_never_calls_a_candidate_protected() -> None:
     components = _components(BaseCandidateState(running=True))
     assert components[0]["protected"] is False
