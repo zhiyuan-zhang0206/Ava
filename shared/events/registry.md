@@ -23,7 +23,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination | retention |
 |------|------|-------------|------|------|
-| audit (category=audit) | `events` | 20 | events table | 365d+ |
+| audit (category=audit) | `events` | 21 | events table | 365d+ |
 | telemetry (category=telemetry) | `events` | 119 | events table | 90d |
 | log (category=log) | `events` | 6 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
@@ -55,7 +55,7 @@ spans go through the trace channel (30d).
 
 ---
 
-## 2. Audit events (20 primary category=audit; 20 status_change with extra_categories)
+## 2. Audit events (21 primary category=audit; 21 status_change with extra_categories)
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -75,6 +75,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `resurrect` | terminated agent woken | business | — | 365d | events |
 | `restart_completed` | restart finished | business | — | 365d | events |
 | `compact` | agent context compacted | business | — | 365d | events |
+| `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue) | business | — | 365d | events |
 | `report_activity` | activity report | business | — | 365d | events |
 | `exit` | agent process exited | business | — | 365d | events |
 | `label_change` | agent label changed | business | — | 365d | events |

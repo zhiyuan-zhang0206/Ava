@@ -52,7 +52,7 @@ from agent.db import ClaimedInbound, mark_agent_status
 from agent.graph._chat_inbound import build_chat_inbound
 from agent.graph._context import AvaContext
 from agent.graph._context_notes import fork_notes
-from agent.graph._nodes import BEFORE_LLM, END
+from agent.graph._nodes import BEFORE_LLM, CLAIM, END
 from agent.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
     CompactionFailedError,
@@ -60,6 +60,7 @@ from agent.hooks.compact import (
     generate_summary,
 )
 from agent.messages import NoteTag, system_note_message
+from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import scan_content
 from shared.agents import AgentStatus
 from shared.config import now_timestamp, settings
@@ -290,6 +291,7 @@ async def _handle_heartbeat(
     agent_id: int,
     item: ClaimedInbound,
     st: _BatchState,
+    state: _state.AgentState,
 ) -> None:
     """HEARTBEAT: check-in delivered as a system note, plus page liveness.
 
@@ -298,7 +300,33 @@ async def _handle_heartbeat(
     each heartbeat (default 5 min) remains the catch-all for server death:
     dead serve_dir pages are re-served and dead no-dir pages are closed.
     Best-effort; reconcile never raises.
+
+    With the heartbeat circuit breaker open (a permanent provider rejection
+    aborted the last turn) the check-in is consumed WITHOUT its note and
+    without routing to the LLM — the note would only re-fire the doomed call
+    and grow the context (the 3962 incident: 80 heartbeat cycles against a
+    permanent context-overflow 400). Page liveness still reconciles. The
+    overflow reason routes to BEFORE_LLM anyway so decide()'s forced-compact
+    arm runs; every other reason parks at CLAIM (the agent stays idling until
+    a real wake — the breaker closes on the first successful LLM call).
     """
+    assert ctx.ops_pool is not None, "_handle_heartbeat requires ctx.ops_pool"  # noqa: S101
+    from agent.startup import reconcile_open_pages
+
+    await reconcile_open_pages(ctx.ops_pool, agent_id, event_publisher=ctx.event_publisher)
+
+    circuit = state.circuit
+    if circuit.open:
+        logger.warning(
+            "heartbeat consumed while circuit breaker open (reason={reason}) — "
+            "check-in note skipped, no LLM call",
+            event="heartbeat_circuit_open",
+            agent_id=agent_id,
+            reason=circuit.reason,
+        )
+        if circuit.reason != CIRCUIT_REASON_CONTEXT_OVERFLOW:
+            st.next_goto = CLAIM
+        return
     st.new_msgs.append(
         system_note_message(
             content=f"{_ts_prefix()}{item.content}",
@@ -306,10 +334,6 @@ async def _handle_heartbeat(
             created_at=datetime.now(UTC),
         )
     )
-    assert ctx.ops_pool is not None, "_handle_heartbeat requires ctx.ops_pool"  # noqa: S101
-    from agent.startup import reconcile_open_pages
-
-    await reconcile_open_pages(ctx.ops_pool, agent_id, event_publisher=ctx.event_publisher)
 
 
 async def _handle_terminate(
@@ -565,7 +589,7 @@ async def dispatch_batch(
         elif kind == InboundKind.CANCEL:
             await _handle_cancel(ctx, agent_id, st)
         elif kind == InboundKind.HEARTBEAT:
-            await _handle_heartbeat(ctx, agent_id, item, st)
+            await _handle_heartbeat(ctx, agent_id, item, st, state)
         elif kind == InboundKind.TERMINATE:
             await _handle_terminate(item, st)
         elif kind == InboundKind.RESTART:

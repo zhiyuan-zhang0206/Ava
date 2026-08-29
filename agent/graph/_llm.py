@@ -60,6 +60,7 @@ from langgraph.types import Command
 import ava
 from agent import state as _state
 from agent.observe import log_llm_usage
+from agent.state_channels import CircuitState
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.event_publisher import AgentEventPublisher
@@ -329,6 +330,23 @@ async def llm_node(
                 duration_seconds=time.monotonic() - turn_start,
                 ok=True,
             )
+            # A successful LLM call is the circuit-healed signal: the provider
+            # accepted a request again, so whatever permanently rejected the
+            # last turn (overflow compacted away, balance topped up, key
+            # fixed) has cleared. Close the breaker so heartbeats resume
+            # routing normally. result is the fresh Command _llm_node_impl
+            # just built, so mutating its update dict is safe. The cancel
+            # path is the one success-shaped return that carries NO
+            # `messages` — no stream completed there (the partial generation
+            # was discarded), so it must not close the breaker.
+            update = result.update
+            if state.circuit.open and update is not None and "messages" in update:
+                update["circuit"] = CircuitState()
+                logger.info(
+                    "heartbeat circuit breaker CLOSED — LLM call accepted again",
+                    event="circuit_breaker_closed",
+                    agent_id=agent_id_from_config(config),
+                )
             return result
 
 
