@@ -88,6 +88,7 @@ class _BatchState:
     cancelled: bool = False
     restart_preserves_idle: bool = False
     restart_cas_applied: bool = False
+    restart_requested: bool = False
     update_initiated: bool = False
     committed_chat_ids: list[int] = field(default_factory=list)
 
@@ -409,12 +410,37 @@ async def _handle_restart(
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
-    """RESTART: flip status to 'restarting', route to END.
+    """RESTART: route to END.
 
-    Does NOT append a message — the new process writes the lifecycle marker
-    via RESTART_COMPLETED.  Deduplicates CAS across multiple restarts in one
-    batch.  Only called when this restart IS the routing winner.
+    Process mode: flip status to 'restarting' (the restarter relaunches a
+    process; the self-restart atexit fallback arms for the rollout window when
+    the restarter is paused) — the NEW process writes the lifecycle marker via
+    RESTART_COMPLETED, so no message is appended here.
+
+    Hosted mode: there is no process to relaunch and no restarter to flip the
+    row back — the host drops the cached runtime and ends the turn task, and
+    the next wake starts clean (the config view rebinds from `agents_meta`,
+    which is exactly the hosted replacement for "the process exits and boots
+    with the merged config"). The row must therefore NEVER leave a runnable
+    status, so the 'restarting' flip and the self-respawn are skipped, the
+    lifecycle marker renders right here (nothing else will), and the separate
+    `restart_requested` channel carries the intent to the host — `exit_requested`
+    stays False so the END does not route through the process-exit path.
+
+    Deduplicates CAS across multiple restarts in one batch.  Only called when
+    this restart IS the routing winner.
     """
+    if ctx.hosted:
+        st.new_msgs.append(
+            system_note_message(
+                content=_render_restart_completed_marker(item.source, item.payload),
+                tag=NoteTag.LIFECYCLE_RESTART,
+                created_at=datetime.now(UTC),
+            )
+        )
+        st.next_goto = END
+        st.restart_requested = True
+        return
     if not st.restart_cas_applied:
         assert ctx.ops_pool is not None, "_handle_restart requires ctx.ops_pool"  # noqa: S101
         await _flip_to_restarting(ctx.ops_pool, agent_id)

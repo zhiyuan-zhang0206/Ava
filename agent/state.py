@@ -116,6 +116,15 @@ class BaseAgentState(BaseModel):
     a lost lifecycle CAS); the turn-boundary END leaves it False so the
     runloop re-invokes. Both flags reset in every invocation's input — a
     stale checkpointed True (a resurrect) cannot kill the new process."""
+    restart_requested: bool = False
+    """Hosted mode only: claim resolved a restart inbound and this run is
+    hosted, so there is no process to exit and no restarter to pick up a
+    'restarting' row. The host treats it as the fourth loop answer — drop the
+    cached runtime, NO exit-notify (the row must stay runnable), end the turn
+    task — while `exit_requested` stays False so the same END never routes
+    through the process-exit path. Process mode never sets it; it resets per
+    invocation like the other three, for the same rollback reason as
+    `turn_idle`."""
     turn_idle: bool = False
     """Hosted mode only: claim found nothing and did NOT park (process mode
     blocks on the inbound pub/sub instead, so its driver never sees this). The
@@ -174,7 +183,7 @@ _PLUGIN_NAMESPACE_FIELDS: dict[str, set[str]] = {}
 # plugin's messages delta with the exec ToolMessage — tool result first,
 # notes after, per the Anthropic-compat adjacency constraint). Every other
 # BaseAgentState field is framework-managed per turn (halted / turn_active /
-# exit_requested / turn_idle / update_initiated / compact / memory / context_reset /
+# exit_requested / turn_idle / restart_requested / update_initiated / compact / memory / context_reset /
 # capabilities):
 # declaring one is rejected at register_plugin_state, and a direct
 # ava.state_update write to one is rejected by _validate_plugin_state_keys.
@@ -191,7 +200,7 @@ _BASE_FIELD_DECLARED: set[str] = set()
 # `messages` (only when the plugin declares it in its own BaseModel with the
 # exact BaseAgentState annotation, including the add_messages reducer;
 # register_plugin_state checks). Every other core key (halted / turn_active /
-# exit_requested / turn_idle / update_initiated / compact / memory / context_reset /
+# exit_requested / turn_idle / restart_requested / update_initiated / compact / memory / context_reset /
 # capabilities) is framework-managed every turn: declaring one raises at
 # registration, and
 # _BASE_FIELD_DECLARED tracks the declared (messages-only) set so a direct
