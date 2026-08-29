@@ -177,6 +177,11 @@ def test_logs_retention_help_explains_defaults_and_dry_run(
     assert "without\n                        deleting" in help_text
 
 
+def test_pitr_retention_inspect_parser_binds_read_only_handler() -> None:
+    args = _main._build_parser().parse_args(["pitr", "retention", "inspect"])
+    assert args.func is _main._h_pitr_retention_inspect
+
+
 def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     """`ava start --machine-name foo --serve-gateway ...` reaches _h_start with
     the parsed argparse Namespace."""
