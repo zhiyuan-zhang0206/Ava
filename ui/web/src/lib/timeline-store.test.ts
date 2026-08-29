@@ -1028,6 +1028,20 @@ describe("compact_done hard reset (incremental design)", () => {
 // the merge replaces wholesale instead of keep-all.
 
 describe("compact crossed unseen (SSE-gap heal)", () => {
+  // Production shape (shared/timeline.py `_compact_item`): the envelope's
+  // inbound_id is hardcoded null and message_timestamps prefixes the payload
+  // with a render-time ts — so the identity must be item_id + kind +
+  // created_at (the render-stable ava_created_at), never payload/inbound_id.
+  const ENVELOPE_CREATED = "2026-08-30T04:00:00.123456+00:00";
+  const envelope = (overrides: Partial<BackendTimelineItem> = {}): BackendTimelineItem =>
+    item({
+      item_id: "1.0",
+      kind: "inbound_compact_request",
+      payload: "Compact request 2026-08-30 12:00:00:\n\nsummary text",
+      created_at: ENVELOPE_CREATED,
+      ...overrides,
+    });
+
   it("reloadSnapshot replaces wholesale when the fetched snapshot crossed a compact the local items never folded", () => {
     act(() => {
       useTimelineStore.getState().switchThread(
@@ -1043,7 +1057,7 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
       useTimelineStore.getState().reloadSnapshot(
         [
           item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          envelope(),
           item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
         ],
         3,
@@ -1071,7 +1085,7 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
       useTimelineStore.getState().reloadSnapshot(
         [
           item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 9 }),
+          envelope(),
         ],
         2,
         false,
@@ -1082,13 +1096,16 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
     expect(s.resetPending).toBe(false);
   });
 
-  it("reloadSnapshot keeps the normal keep-all merge when the fetched envelope matches the local one", () => {
+  it("reloadSnapshot keeps the normal keep-all merge when the fetched envelope is the same compact (payload ts differs, identity holds)", () => {
+    // The SAME compact re-rendered: the payload differs (message_timestamps
+    // prefixes a render-time ts) but item_id + kind + created_at match — the
+    // ts must not masquerade as a new compact and fire the replace.
     act(() => {
       useTimelineStore.getState().switchThread(
         1,
         [
           item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          envelope(),
           item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
           item({ item_id: "3.0", kind: "agent_chat", payload: "newer SSE-folded reply" }),
         ],
@@ -1099,7 +1116,7 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
       useTimelineStore.getState().reloadSnapshot(
         [
           item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          envelope({ payload: "Compact request 2026-08-30 12:00:05:\n\nsummary text" }),
           item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
         ],
         3,
@@ -1108,6 +1125,34 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
     });
     const s = useTimelineStore.getState();
     expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0", "3.0"]);
+  });
+
+  it("same slot + same kind but a different created_at (a newer compact reused the wiped slot) still crosses", () => {
+    act(() => {
+      useTimelineStore.getState().switchThread(
+        1,
+        [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          envelope(),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "post-compact-1 turn" }),
+        ],
+        false,
+      );
+    });
+    act(() => {
+      useTimelineStore.getState().reloadSnapshot(
+        [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          envelope({ created_at: "2026-08-30T04:05:00.654321+00:00" }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "narration 2" }),
+        ],
+        3,
+        false,
+      );
+    });
+    const s = useTimelineStore.getState();
+    expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
+    expect(s.items.some((i) => i.payload === "post-compact-1 turn")).toBe(false);
   });
 
   it("a parked bucket that missed compact_done is replaced wholesale by the post-compact full snapshot", () => {
@@ -1131,7 +1176,7 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
         msg_count: 3,
         items: [
           item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          envelope(),
           item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
         ],
       });
@@ -1166,7 +1211,7 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
         agent_id: 1,
         msg_count: 4,
         items: [
-          item({ item_id: "3.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          envelope({ item_id: "3.0" }),
         ],
       });
     });
@@ -1192,7 +1237,7 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
         msg_count: 3,
         items: [
           item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          envelope(),
           item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
         ],
       });
