@@ -61,8 +61,13 @@ from ops.controllers._deploy_state import (
 )
 from ops.controllers.base import BlockScope, ReconcileResult
 from ops.controllers.update_trigger import in_cooldown, trigger_update
-from shared.cluster_drift import prod_source_head_sha, prod_source_pin_relation
+from shared.cluster_drift import (
+    prod_source_fetch,
+    prod_source_head_sha,
+    prod_source_pin_relation,
+)
 from shared.cluster_pin import get_cluster_target_sha
+from shared.config import settings
 from shared.machine import MachineRole
 
 _log = logging.getLogger("ops.controllers.pin")
@@ -347,7 +352,11 @@ def check_pin_drift() -> bool:
     the pin (the pin is an ancestor of HEAD — a failed rollout landed the code but
     never advanced the pin) is converged and is NEVER force-checked-out back to
     the stale pin; only a strictly-behind or diverged HEAD heals (2026-08-25
-    downgrade incident). Guards (each matters — this auto-triggers an update on
+    downgrade incident). An "unknown" relation (the pin commit is not in this
+    checkout's object store — a runner excluded from a rollout's fan-out) is
+    resolved by fetching the track ref first, then re-judged: the unknown branch
+    used to defer forever without fetching, so an excluded runner never converged
+    (#621). Guards (each matters — this auto-triggers an update on
     the live cluster): agent-runner only (the gateway half warns instead); defers
     while the last update is mid-flight or just failed/recovered (the aftermath
     window where a self-heal checkout races the operator's retry — 2026-08-02);
@@ -371,8 +380,17 @@ def check_pin_drift() -> bool:
     # recovered. "ahead" is also what a stray `git pull` produces; the next
     # rollout's force-checkout corrects it, and the warning below keeps it
     # visible. "unknown" (pin commit not present in this checkout) is the one
-    # case git cannot decide — never force-checkout blind there either.
+    # case git cannot decide — the fetch below resolves it when it can, and
+    # a pin that stays unknown is never force-checked-out blind.
     relation = prod_source_pin_relation(pin, head)
+    # The pin commit is not in this checkout's object store — most often a
+    # runner excluded from a rollout's fan-out, which never had the new pin
+    # fetched. Fetch the track ref so the relation can actually be decided;
+    # without it the unknown branch deferred forever and the host never
+    # converged (#621). Best-effort and bounded: a wedged network leaves
+    # the relation unknown and the deferral below stands.
+    if relation == "unknown" and prod_source_fetch("origin", settings.general.track_branch):
+        relation = prod_source_pin_relation(pin, head)
     if relation in ("aligned", "ahead"):
         _clear_pin_heal_attempt()
         if relation == "ahead":
@@ -386,10 +404,12 @@ def check_pin_drift() -> bool:
         return False
     if relation == "unknown":
         _log.warning(
-            "[ops.pin] off-pin (HEAD %s != pin %s) but pin ancestry unknown "
-            "(commit not present locally); deferring self-heal",
+            "[ops.pin] off-pin (HEAD %s != pin %s) but pin ancestry unknown even "
+            "after fetching origin/%s (pin not on the track ref, or the fetch "
+            "failed); deferring self-heal",
             head,
             pin,
+            settings.general.track_branch,
         )
         return False
     # ── behind / diverged from here: a real checkout heal, not a downgrade ──
