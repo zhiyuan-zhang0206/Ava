@@ -243,8 +243,13 @@ def build_record(
     """Assemble the stable trace dataset record for one agent run."""
     spawner, status, last_message_text = meta
 
-    user_messages = [message["content"] for message in inbounds if message["source"] == "user"]
-    agent_messages = [message for message in inbounds if message["source"].startswith("agent:")]
+    per_agent_inbounds = [message for message in inbounds if not message["is_broadcast"]]
+    user_messages = [
+        message["content"] for message in per_agent_inbounds if message["source"] == "user"
+    ]
+    agent_messages = [
+        message for message in per_agent_inbounds if message["source"].startswith("agent:")
+    ]
 
     task_prompt = user_messages[0] if user_messages else ""
     if not task_prompt.strip() and spawner.startswith("agent:"):

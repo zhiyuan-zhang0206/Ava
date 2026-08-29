@@ -103,6 +103,33 @@ def test_first_ever_inside_window_not_duplicated(
     assert [m["content"] for m in out[3]] == ["spawn prompt", "follow-up"]
 
 
+def test_inbounds_mark_same_instruction_sent_to_multiple_agents_as_broadcast(
+    collect_mod: Any, db_conn: psycopg.Connection
+) -> None:
+    """Fan-out instructions are fleet-scoped, not per-agent corrections."""
+    with db_conn.cursor() as cur:
+        for agent_id in (5, 6):
+            _insert_agent(cur, agent_id)
+            _insert_inbound(cur, agent_id, "user", f"task prompt {agent_id}", "2 days")
+            _insert_inbound(
+                cur,
+                agent_id,
+                "user",
+                "wrong: pause all work until resumed",
+                "1 hour",
+            )
+        _insert_inbound(cur, 5, "user", "wrong: use the requested path", "30 minutes")
+    db_conn.commit()
+
+    with db_conn.cursor() as cur:
+        out = _fetch(collect_mod, cur, [5, 6])
+
+    agent_five = {m["content"]: m["is_broadcast"] for m in out[5]}
+    assert agent_five["task prompt 5"] is False
+    assert agent_five["wrong: pause all work until resumed"] is True
+    assert agent_five["wrong: use the requested path"] is False
+
+
 def test_agent_without_inbounds_absent(collect_mod: Any, db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
         _insert_agent(cur, 4)
@@ -494,6 +521,27 @@ def test_test_label_ids_matches_prefix_only(collect_mod: Any, db_conn: psycopg.C
         ids = collect_mod._test_label_ids(cur, [9001, 9002, 9003, 99999])
 
     assert ids == {9001}
+
+
+def test_test_label_ids_excludes_direct_children_of_test_orchestrators(
+    collect_mod: Any, db_conn: psycopg.Connection
+) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents (id, label) VALUES (9010, 'TEST-orchestrator'), "
+            "(9011, 'ordinary-child'), (9012, 'ordinary-agent')"
+        )
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status) VALUES "
+            "(9010, 'user', 'terminated'), (9011, 'agent:9010', 'terminated'), "
+            "(9012, 'user', 'terminated')"
+        )
+    db_conn.commit()
+
+    with db_conn.cursor() as cur:
+        ids = collect_mod._test_label_ids(cur, [9010, 9011, 9012])
+
+    assert ids == {9010, 9011}
 
 
 def test_collect_with_counts_keeps_records_and_reports_filters(
