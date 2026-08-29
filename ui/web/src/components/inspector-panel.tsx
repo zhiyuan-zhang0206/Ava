@@ -165,26 +165,22 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
   }, [agentId, queryClient]);
 
-  // Agent switch / panel open must show the NEW agent's data immediately
-  // (task #1939). The inspect queries inherit the global 5min staleTime, and
-  // TanStack only refetches a key/enable change on an already-mounted
-  // observer when the cache is stale — refetchOnMount: "always" applies to a
-  // true mount only — so switching agents with the panel open (or opening it
-  // for a recently-visited agent) would keep the previous visit's cache: the
-  // response identity guards below then blank it out and the panel sits
-  // skeletonized until the next 60s interval tick. Invalidate on every
-  // (agentId | open) transition (the first run is skipped — the fresh mount
-  // already fetches); a cold key is a no-op and a closed panel has no active
-  // observer to refetch.
-  const firstTransitionRef = useRef(true);
+  // Agent switch must show the NEW agent's data immediately (task #1939).
+  // The panel is mounted only while open, so a switch with the panel open
+  // re-keys the inspect queries on an already-mounted observer — and TanStack
+  // only refetches that path when the cache is stale (refetchOnMount: "always"
+  // applies to a true mount only, i.e. opening the panel). With the app's
+  // global 5min staleTime a hot switch-back therefore keeps the previous
+  // visit's cached numbers on screen until the next 60s interval tick.
+  // Invalidate on agentId change while open to force the background refresh
+  // (the first run is skipped — the fresh mount fetches on its own); a cold
+  // key is a no-op and an in-flight fetch is deduped by the query cache.
+  const firstAgentIdRef = useRef(agentId);
   useEffect(() => {
-    if (firstTransitionRef.current) {
-      firstTransitionRef.current = false;
-      return;
-    }
-    if (!open) return;
+    if (firstAgentIdRef.current === agentId) return;
+    firstAgentIdRef.current = agentId;
     invalidateInspect();
-  }, [agentId, open, invalidateInspect]);
+  }, [agentId, invalidateInspect]);
 
   // Notice events affect the live notice immediately and may coincide with
   // aggregate activity, so reconcile both halves of the inspector cache.
