@@ -21,6 +21,7 @@ from services.pitr.restore_manifest import RestoreObject
 
 _TAG_BYTES = 16
 _CHUNK_BYTES = 1024 * 1024
+_ARCHIVE_OVERHEAD_BYTES = 128 * 1024 * 1024
 
 
 class BaseRestoreError(RuntimeError):
@@ -114,6 +115,28 @@ def authenticate_base_ciphertext(
     return header
 
 
+def _decompressed_chunks(chunks: Iterator[bytes], *, maximum: int) -> Iterator[bytes]:
+    decompressor = zstandard.ZstdDecompressor().decompressobj()
+    produced = 0
+    for chunk in chunks:
+        if decompressor.eof:
+            raise BaseRestoreError("base archive contains a trailing compressed stream")
+        value = decompressor.decompress(chunk)
+        if decompressor.unused_data:
+            raise BaseRestoreError("base archive contains trailing compressed bytes")
+        produced += len(value)
+        if produced > maximum:
+            raise BaseRestoreError("base archive expanded beyond its hard stream bound")
+        if value:
+            yield value
+    tail = decompressor.flush()
+    produced += len(tail)
+    if not decompressor.eof or produced > maximum:
+        raise BaseRestoreError("base archive did not end within its hard stream bound")
+    if tail:
+        yield tail
+
+
 class _ChunkReader(io.RawIOBase):
     def __init__(self, chunks: Iterator[bytes]) -> None:
         self._chunks = chunks
@@ -154,13 +177,13 @@ def extract_authenticated_base(
     try:
         raw = io.BufferedReader(
             _ChunkReader(  # pyright: ignore[reportArgumentType]
-                _plaintext_chunks(source, key=key, expected=expected)
+                _decompressed_chunks(
+                    _plaintext_chunks(source, key=key, expected=expected),
+                    maximum=max_extracted_bytes + _ARCHIVE_OVERHEAD_BYTES,
+                )
             )
         )
-        with (
-            zstandard.ZstdDecompressor().stream_reader(raw) as decompressed,
-            tarfile.open(fileobj=decompressed, mode="r|") as archive,
-        ):
+        with tarfile.open(fileobj=raw, mode="r|") as archive:
             seen: set[str] = set()
             declared_bytes = 0
             member_count = 0
@@ -186,7 +209,7 @@ def extract_authenticated_base(
                     output.flush()
                     os.fsync(output.fileno())
                 _require_member_size(target, member.size)
-            while decompressed.read(_CHUNK_BYTES):
+            while raw.read(_CHUNK_BYTES):
                 pass
         _validate_extracted_base(data_root, candidate_sha256, native_manifest_sha256)
         return data_root
