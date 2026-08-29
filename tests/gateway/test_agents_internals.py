@@ -385,7 +385,7 @@ class TestResurrectAgent:
         """A repeated force creates a newer intent fence without changing the
         real status-transition epoch used to reopen pages on manual resurrect."""
         agent_id = _spawn_agent()
-        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        monkeypatch.setattr("ops.ops_exit.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'work', 8765)",
@@ -451,7 +451,7 @@ class TestResurrectAgent:
             "_launch_agent_process",
             _record_agent_ids(launched),
         )
-        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        monkeypatch.setattr("ops.ops_exit.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -675,7 +675,7 @@ class TestResurrectAgent:
             "_launch_agent_process",
             _record_agent_ids(launched),
         )
-        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        monkeypatch.setattr("ops.ops_exit.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -775,7 +775,7 @@ class TestResurrectAgent:
         launched: list[int] = []
         failures: list[BaseException] = []
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _record_agent_ids(launched))
-        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        monkeypatch.setattr("ops.ops_exit.publish_inbound_wake", _noop)
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
 
         def _ordered_execute(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
@@ -1233,7 +1233,7 @@ class TestResurrectAgent:
         agent_id = _spawn_agent()
         launched: list[int] = []
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _record_agent_ids(launched))
-        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        monkeypatch.setattr("ops.ops_exit.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET status='terminated', termination_source='reaper', "

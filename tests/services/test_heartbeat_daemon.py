@@ -117,6 +117,37 @@ class TestSelectIdleAgents:
         db_conn.commit()
         assert aid not in _selected(pool)
 
+    def test_hosted_idling_without_a_lease_is_selected(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hosted mode (Task #1999): a hosted idle row carries no lease renewer —
+        idle is the absence of a turn task, not a process to prove alive — so
+        the R1 lease guard would exclude EVERY hosted agent and silently retire
+        the heartbeat's resident-duty nudge. The hosted clause drops the guard:
+        the lease-less idling row is selected (and woken by the check-in)."""
+        monkeypatch.setattr("ops.runner_mode.runner_mode", lambda: "hosted")
+        aid = _make_idle(db_conn, status_changed_s_ago=_THRESHOLD_S + 60)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET lease_expires_at = NULL, pid = NULL WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert aid in _selected(pool)
+
+    def test_hosted_legacy_hibernating_row_stays_selected(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A legacy pre-hosted hibernating row (dead pid, parked status) is still
+        nudgeable in hosted mode — the dispatcher materializes the turn the same
+        way it does for an idling row."""
+        monkeypatch.setattr("ops.runner_mode.runner_mode", lambda: "hosted")
+        aid = _make_idle(db_conn, status_changed_s_ago=_THRESHOLD_S + 60, status="hibernating")
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (aid,))
+        db_conn.commit()
+        assert aid in _selected(pool)
+
     def test_preclaim_idling_row_is_not_selected(
         self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:

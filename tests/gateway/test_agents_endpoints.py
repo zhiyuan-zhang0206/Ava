@@ -445,7 +445,7 @@ class TestTerminate:
             return AgentProcessIdentity.OWNED
 
         monkeypatch.setattr("ops.ops_exit.force_kill", _no_kill)
-        monkeypatch.setattr("ops.ops_lifecycle.process_alive", _not_alive, raising=False)
+        monkeypatch.setattr("ops.agent_identity.process_alive", _not_alive, raising=False)
         monkeypatch.setattr(
             "ops.ops_lifecycle.probe_agent_process",
             _owned_process,
@@ -485,7 +485,7 @@ class TestTerminate:
             return AgentProcessIdentity.UNREADABLE
 
         monkeypatch.setattr("ops.ops_exit.force_kill", _no_kill)
-        monkeypatch.setattr("ops.ops_lifecycle.process_alive", _not_alive, raising=False)
+        monkeypatch.setattr("ops.agent_identity.process_alive", _not_alive, raising=False)
         monkeypatch.setattr(
             "ops.ops_lifecycle.probe_agent_process",
             _unreadable_process,
