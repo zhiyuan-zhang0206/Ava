@@ -62,14 +62,15 @@ def _drive(
     *,
     registered: list[tuple[str, str | None]],
     statuses: dict[str, dict[str, str]] | None = None,
+    local_update_rc: int = 0,
 ) -> _Rollout:
     """Run the gateway orchestration with `registered` as the reconciled rollout
     list and this host named `ME`, recording which hosts each phase reached.
 
     `statuses` maps fan-out path -> host -> verdict ("ok" / "unreachable" /
-    "fatal") for that phase's dial; a host with no entry answers "ok". The
-    verdicts are per-path so a host can be offline for one phase and back for
-    the next — each phase re-probes.
+    "fatal") for that phase's dial; a host with no entry answers "ok". A host
+    that Phase 0 cannot reach is removed from the later-phase target set, so
+    entries for that host on later paths must never be observed.
     """
     set_machine_identity(role="gateway,agent-runner", name=ME)
     calls: list[tuple[str, list[tuple[str, str]]]] = []
@@ -93,7 +94,7 @@ def _drive(
     monkeypatch.setattr("shared.machines.list_stopped_agent_runners", list)
     monkeypatch.setattr(_cli, "_fan_out", _fan_out)
     monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: local_update_rc)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _cli,
         "_poll_until_unpaused",
@@ -123,10 +124,8 @@ def test_phase_0_skips_an_unreachable_host_and_rolls_the_rest(
     )
 
     assert rollout.rc == 0
-    # air was dialed but answered unreachable in every phase — never paused,
-    # never told to update.
-    assert [h for h, s in rollout.results("/api/cluster/stop") if s == "ok"] == [ME, "wsl"]
-    assert [h for h, s in rollout.results("/api/cluster/update") if s == "ok"] == ["wsl"]
+    assert rollout.results("/api/cluster/stop") == [(ME, "ok"), ("wsl", "ok")]
+    assert rollout.results("/api/cluster/update") == [("wsl", "ok")]
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "unreachable and skipped" in err
     assert "air" in err
@@ -150,13 +149,16 @@ def test_phase_0_aborts_on_a_reachable_host_that_cannot_fetch(
     assert rollout.results("/api/cluster/stop") == []  # nothing was paused
 
 
-def test_a_host_skipped_at_phase_0_is_not_excluded_from_later_phases(
+def test_a_host_skipped_at_phase_0_is_excluded_from_later_phases(
     monkeypatch: pytest.MonkeyPatch, set_machine_identity
 ) -> None:
-    """Skipping is a verdict about THIS phase's dial, not a membership decision: a
-    host offline at Phase 0 but back by Phase A/B is paused and updated like any
-    other — each phase re-probes, so Phase 0's skip cannot drop a recovered host
-    out of the rollout."""
+    """A host that did not fetch the pinned target must not be paused or updated.
+
+    An ops timeout does not prove whether the fetch completed.  Letting a later
+    successful pause re-admit that host strands it when Phase B validates a target
+    object the host may not have.  The host converges at the next rollout, or
+    when `ava cluster update` runs on it again.
+    """
     statuses = {"/api/cluster/fetch": {"air": "unreachable"}}
     rollout = _drive(
         monkeypatch,
@@ -166,8 +168,33 @@ def test_a_host_skipped_at_phase_0_is_not_excluded_from_later_phases(
     )
 
     assert rollout.rc == 0
-    assert [h for h, s in rollout.results("/api/cluster/stop") if s == "ok"] == [ME, "air", "wsl"]
-    assert [h for h, s in rollout.results("/api/cluster/update") if s == "ok"] == ["air", "wsl"]
+    assert [h for h, s in rollout.results("/api/cluster/stop") if s == "ok"] == [ME, "wsl"]
+    assert [h for h, s in rollout.results("/api/cluster/update") if s == "ok"] == ["wsl"]
+
+
+def test_a_skipped_host_is_not_resumed_when_the_rollout_fails(
+    monkeypatch: pytest.MonkeyPatch, set_machine_identity
+) -> None:
+    """A failed rollout's compensating resume shares the frozen eligible set.
+
+    `hosts_to_resume` materializes after Phase 0 excludes the skipped host, so
+    the `finally`'s resume fan-out must never dial it — even when the local leg
+    fails and every paused eligible host has to be unpaused.
+    """
+    statuses = {"/api/cluster/fetch": {"air": "unreachable"}}
+    rollout = _drive(
+        monkeypatch,
+        set_machine_identity,  # pyright: ignore[reportUnknownArgumentType]
+        registered=[(ME, None), ("air", None), ("wsl", None)],
+        statuses=statuses,
+        local_update_rc=1,
+    )
+
+    assert rollout.rc == 1
+    # Phase A paused only the eligible hosts; the failed local leg's compensating
+    # resume unpauses exactly those — the skipped host is never dialed.
+    assert rollout.results("/api/cluster/stop") == [(ME, "ok"), ("wsl", "ok")]
+    assert [h for h, _s in rollout.results("/api/cluster/resume")] == [ME, "wsl"]
 
 
 def test_phase_0_every_host_offline_still_rolls_the_gateway(
@@ -191,9 +218,10 @@ def test_phase_0_every_host_offline_still_rolls_the_gateway(
 
     assert rollout.rc == 0
     assert [h for h, s in rollout.results("/api/cluster/stop") if s == "ok"] == [ME]
-    # Phase B still dials the registered runners (each phase re-probes) — but none
-    # of them acks, so none is told to update.
-    assert [h for h, s in rollout.results("/api/cluster/update") if s == "ok"] == []
+    # Neither offline runner enters Phase A or Phase B; only the orchestrator's
+    # local leg runs.
+    assert rollout.results("/api/cluster/stop") == [(ME, "ok")]
+    assert rollout.results("/api/cluster/update") == []
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "unreachable and skipped" in err
     assert "air" in err and "wsl" in err

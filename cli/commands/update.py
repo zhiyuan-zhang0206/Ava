@@ -525,13 +525,6 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     # `stopped_at` filter would drop and reported as "N of M" — a stale stop
     # marker must not silently shrink the rollout (see `_resolve_fanout_targets`).
     agent_runners = _ns._resolve_fanout_targets()
-    # Materialize each agent-runner's ops URL now, while Postgres is up. The
-    # compensating resume in the `finally` dials these directly (never a fresh
-    # `machines` lookup) so it survives a data plane the failed local update took
-    # down — the 2026-07-20 incident, where the resume's own Postgres read raised
-    # and left every host stop-the-world + paused.
-    runner_urls: dict[str, str | None] = dict(agent_runners)
-    hosts_to_resume: list[tuple[str, str | None]] = list(agent_runners)
     # Report state for the aftermath summary the `finally` prints when the rollout did
     # not finish clean: how it ended (three outcomes, not a bool — see
     # `RolloutOutcome`), and whether the pin advanced (the gateway landed the new
@@ -568,6 +561,23 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         # include the phase whose failure aborted the rollout.
         telemetry.print_summary()
         return 1
+    if skipped:
+        skipped_names = set(skipped)
+        agent_runners = [(name, url) for name, url in agent_runners if name not in skipped_names]
+
+    # Freeze the eligible rollout set after Phase 0, while Postgres is up. A
+    # host whose fetch timed out may come back before Phase A, but pausing it
+    # would violate validate-before-kill: the timeout gave us no proof that it
+    # has the pinned target object Phase B will vet. The host converges at the
+    # next rollout, or when `ava cluster update` runs on it again.
+    #
+    # Materialize each eligible runner's ops URL for the same reason: the
+    # compensating resume in the `finally` dials these directly (never a fresh
+    # `machines` lookup) so it survives a data plane the failed local update took
+    # down — the 2026-07-20 incident, where the resume's own Postgres read raised
+    # and left every host stop-the-world + paused.
+    runner_urls: dict[str, str | None] = dict(agent_runners)
+    hosts_to_resume: list[tuple[str, str | None]] = list(agent_runners)
 
     try:
         # 1-1c) pause restarters (local + remote) + quiesce all agents. None = a
@@ -760,8 +770,8 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             print(
                 f"\n⚠ {len(skipped)} agent-runner(s) unreachable and skipped: "
                 f"{', '.join(sorted(skipped))} — never paused or updated by this rollout; "
-                "their watchdog pin-drift self-heals them to the pin when they come back "
-                "online (`ava cluster status` shows them off-pin until then).",
+                "they converge at the next rollout, or when `ava cluster update` runs on "
+                "that host (`ava cluster status` shows them off-pin until then).",
                 file=sys.stderr,
             )
         # One machine-readable line at the end of every rollout log: each phase's
