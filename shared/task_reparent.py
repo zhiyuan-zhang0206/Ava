@@ -2,10 +2,11 @@
 write surfaces (SDK `update()` and gateway `PATCH /api/tasks/{id}`).
 
 Both accept a `parent_id` change. The checks are identical: the parent must
-exist, must not be the task itself, and must not be one of its own descendants
-(no cycles); an explicit `None` resolves to the system root task (the anchor
-`create()` requires callers to pass explicitly -- id 1 -- for top-level tasks).
-Kept here so the two surfaces cannot drift apart.
+exist, must not be closed (done / cancelled -- a closed task never gains
+children), must not be the task itself, and must not be one of its own
+descendants (no cycles); an explicit `None` resolves to the system root task
+(the anchor `create()` requires callers to pass explicitly -- id 1 -- for
+top-level tasks). Kept here so the two surfaces cannot drift apart.
 """
 
 from __future__ import annotations
@@ -31,9 +32,16 @@ def resolve_reparent(cur: psycopg.Cursor, task_id: int, parent_id: int | None) -
     """
     effective = system_root_id(cur) if parent_id is None else parent_id
     if effective is not None:
-        cur.execute("SELECT id FROM agent_tasks WHERE id = %s", (effective,))
-        if cur.fetchone() is None:
+        cur.execute("SELECT id, status FROM agent_tasks WHERE id = %s", (effective,))
+        row = cur.fetchone()
+        if row is None:
             raise ValueError(f"parent task {effective} does not exist")
+        if row[1] in ("done", "cancelled"):
+            raise ValueError(
+                f"task {task_id} cannot be moved under a closed parent "
+                f"#{effective} ({row[1]}) — a closed task never gains children; "
+                "reopen it or pass None to move under the system root"
+            )
     if effective == task_id:
         raise ValueError(f"task {task_id} cannot be its own parent")
     node = effective

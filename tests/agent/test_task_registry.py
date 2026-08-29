@@ -1297,6 +1297,32 @@ def test_create_and_assign_uses_default_preset(
         ava._boot._agent_id = original
 
 
+@pytest.mark.parametrize("closed_status", ["done", "cancelled"])
+def test_create_and_assign_rejects_closed_parent_before_spawn(
+    db_conn: psycopg.Connection, closed_status: str, root_task_id: int
+) -> None:
+    """Same as the missing-parent guard: a closed parent is rejected before the
+    agent spawns, so no orphaned agent is left behind (task #1975)."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create(
+            f"andassign-parent-{closed_status}", "detail", parent=root_task_id
+        )
+        task_registry.update(parent.id, status=closed_status)
+        with (
+            patch("ava.agents.spawn") as mock_spawn,
+            pytest.raises(ValueError, match="closed task cannot be the parent"),
+        ):
+            task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
+                f"andassign-child-{closed_status}", "d", parent=parent.id
+            )
+        mock_spawn.assert_not_called()
+    finally:
+        ava._boot._agent_id = original
+
+
 def test_create_and_assign_rejects_bad_parent_before_spawn(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
@@ -1803,6 +1829,38 @@ def test_create_rejects_missing_parent(db_conn: psycopg.Connection, root_task_id
         ava._boot._agent_id = original
 
 
+@pytest.mark.parametrize("closed_status", ["done", "cancelled"])
+def test_create_rejects_closed_parent(
+    db_conn: psycopg.Connection, closed_status: str, root_task_id: int
+) -> None:
+    """A closed (done / cancelled) task must never gain children — creating a
+    subtask under it is rejected instead of silently building the parent chain
+    that produced false-orphan rows in the task graph (task #1975)."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create(
+            f"closed-parent-{closed_status}", "detail", parent=root_task_id
+        )
+        task_registry.update(parent.id, status=closed_status)
+        message = (
+            f"parent task {parent.id} is {closed_status} — a closed task cannot be the "
+            "parent of a new task"
+        )
+        with pytest.raises(ValueError, match=re.escape(message)):
+            task_registry.create(f"child-of-{closed_status}", "detail", parent=parent.id)
+        # Nothing leaked: the rejected create is fully rolled back.
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM agent_tasks WHERE title = %s",
+                (f"child-of-{closed_status}",),
+            )
+            assert cur.fetchone()[0] == 0  # type: ignore[index]
+    finally:
+        ava._boot._agent_id = original
+
+
 def test_create_rejects_parent_1_when_not_root(db_conn: psycopg.Connection) -> None:
     """The documented root id (1) is enforced: on a deployment where task 1 is
     not the system root, create(parent=1) fails loudly instead of silently
@@ -1899,6 +1957,34 @@ def test_update_rejects_missing_parent(db_conn: psycopg.Connection, root_task_id
         task = task_registry.create("missing-parent", "d", parent=root_task_id)
         with pytest.raises(ValueError, match="does not exist"):
             task_registry.update(task.id, parent_id=999_999)
+    finally:
+        ava._boot._agent_id = original
+
+
+@pytest.mark.parametrize("closed_status", ["done", "cancelled"])
+def test_update_rejects_closed_parent(
+    db_conn: psycopg.Connection, closed_status: str, root_task_id: int
+) -> None:
+    """Reparenting a task under a closed (done / cancelled) parent is rejected —
+    a closed task never gains children, the same invariant as create() (task #1975)."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create(
+            f"reparent-parent-{closed_status}", "detail", parent=root_task_id
+        )
+        child = task_registry.create(
+            f"reparent-child-{closed_status}", "detail", parent=root_task_id
+        )
+        task_registry.update(parent.id, status=closed_status)
+        message = (
+            f"task {child.id} cannot be moved under a closed parent #{parent.id} ({closed_status})"
+        )
+        with pytest.raises(ValueError, match=re.escape(message)):
+            task_registry.update(child.id, parent_id=parent.id)
+        # The tree is unchanged: the child stays under the root.
+        assert _persisted_parent(db_conn, child.id) == root_task_id
     finally:
         ava._boot._agent_id = original
 
