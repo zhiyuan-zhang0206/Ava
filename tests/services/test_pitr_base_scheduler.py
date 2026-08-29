@@ -212,12 +212,12 @@ def test_activation_candidate_never_satisfies_weekly_due(tmp_path: Path) -> None
 
 def test_health_surfaces_corrupt_activation_state_without_throwing(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(
-        daemon,
-        "load_activation_record",
-        lambda _home: (_ for _ in ()).throw(ValueError("corrupt")),
-    )
+    operation = tmp_path / "physical-backup" / "activation" / "operation.json"
+    operation.parent.mkdir(parents=True)
+    operation.write_text("{corrupt")
+    monkeypatch.setattr("services.pitr.activation_runtime.ava_home", lambda: tmp_path)
     components = daemon._components(BaseCandidateState())
     activation_component = next(item for item in components if item["name"] == "pitr_activation")
     assert activation_component["status"] == "degraded"

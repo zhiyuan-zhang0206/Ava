@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands import _pitr_activation as activation
+from ops.pitr_restart import PitrRestartContinuation
 from services.pitr.activation_state import ActivationRecord, load_record, write_record
 
 
@@ -111,7 +112,7 @@ def test_typed_restart_handoff_binds_inside_spawn_before_dispatch(
 
     def spawn(origin: str, **kwargs: object) -> dict[str, str]:
         continuation = kwargs["continuation"]
-        assert continuation is not None
+        assert isinstance(continuation, PitrRestartContinuation)
         binder = kwargs["bind_continuation"]
         assert callable(binder)
         binder()

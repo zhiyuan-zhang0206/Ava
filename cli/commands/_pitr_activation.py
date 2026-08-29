@@ -23,6 +23,9 @@ from google.oauth2 import service_account
 from psycopg.conninfo import make_conninfo
 
 from services.pitr.activation_runtime import (
+    _PITR_ENV_FIELDS as _PITR_ENV_FIELDS,
+)
+from services.pitr.activation_runtime import (
     _archive_settings,
     _desired_archive_settings,
     _enable_pitr_services,
@@ -31,6 +34,9 @@ from services.pitr.activation_runtime import (
     _restore_exact_file,
     _settings_digest,
     capture_pitr_env_baseline,
+)
+from services.pitr.activation_runtime import (
+    _restore_pitr_env as _restore_pitr_env,
 )
 from services.pitr.activation_runtime import (
     forced_candidate as _forced_candidate,
