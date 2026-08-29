@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useCallback, type ReactNode, useEffect } from "react";
+import { useCallback, type ReactNode, useEffect, useRef } from "react";
 
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { api } from "@/lib/api";
@@ -164,6 +164,23 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
     void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
   }, [agentId, queryClient]);
+
+  // Agent switch must show the NEW agent's data immediately (task #1939).
+  // The panel is mounted only while open, so a switch with the panel open
+  // re-keys the inspect queries on an already-mounted observer — and TanStack
+  // only refetches that path when the cache is stale (refetchOnMount: "always"
+  // applies to a true mount only, i.e. opening the panel). With the app's
+  // global 5min staleTime a hot switch-back therefore keeps the previous
+  // visit's cached numbers on screen until the next 60s interval tick.
+  // Invalidate on agentId change while open to force the background refresh
+  // (the first run is skipped — the fresh mount fetches on its own); a cold
+  // key is a no-op and an in-flight fetch is deduped by the query cache.
+  const firstAgentIdRef = useRef(agentId);
+  useEffect(() => {
+    if (firstAgentIdRef.current === agentId) return;
+    firstAgentIdRef.current = agentId;
+    invalidateInspect();
+  }, [agentId, invalidateInspect]);
 
   // Notice events affect the live notice immediately and may coincide with
   // aggregate activity, so reconcile both halves of the inspector cache.
