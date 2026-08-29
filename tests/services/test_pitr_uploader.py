@@ -10,7 +10,12 @@ from cryptography.exceptions import InvalidTag
 
 from services.pitr.crypto import create_plan, decrypt_archive, encrypt_archive, open_encrypted
 from services.pitr.object_store import RemoteObjectAck
-from services.pitr.uploader import AckCorruptionError, PitrUploader, RemoteCollisionError
+from services.pitr.uploader import (
+    AckCorruptionError,
+    PitrUploader,
+    RemoteCollisionError,
+    WalSourceTooLargeError,
+)
 
 NAME = "000000010000000000000001"
 
@@ -21,8 +26,9 @@ class FakeStore:
         self.puts = 0
         self.deletes = 0
         self.crash_after_put = False
+        self.staged_uploads: list[tuple[int, bytes]] = []
 
-    def put_file_if_absent(
+    def put_wal_ciphertext_if_absent(
         self, path: Path, object_name: str, metadata: Mapping[str, str]
     ) -> RemoteObjectAck:
         import base64
@@ -30,6 +36,7 @@ class FakeStore:
         import google_crc32c
 
         self.puts += 1
+        self.staged_uploads.append((path.stat().st_ino, path.read_bytes()))
         existing = self.objects.get(object_name)
         if existing is not None:
             # A 412 stat is a read, not a create: the caller must see
@@ -112,38 +119,73 @@ def test_verified_upload_writes_ack_then_removes_local_files(tmp_path: Path) -> 
 
 
 def test_412_exact_remote_is_idempotent_but_collision_is_critical(tmp_path: Path) -> None:
-    """Baseline-4 412 semantics: idempotency is decided on SOURCE attributes
-    (source sha/size, encryption format, key id), never on ciphertext bytes.
-
-    The second upload runs from a fresh plan (new staging dir -> new nonce ->
-    different ciphertext) yet must still ACK idempotently — re-encrypting the
-    same archive is not a collision. A different key id is."""
-    store = FakeStore()
-    uploader, source = _uploader(tmp_path, store)
-    first_ack = uploader.upload_one(source)
+    """Only the exact durable-plan ciphertext may satisfy a 412."""
     # Crash recovery (port from #405's gated-service test): the remote write
     # landed but the process died before the ACK; the retry meets the 412 and
-    # must ACK idempotently from source attributes.
-    store2 = FakeStore()
-    uploader_crash, source_crash = _uploader(tmp_path / "crash", store2)
-    store2.crash_after_put = True
+    # must reuse the same staged bytes and ACK the exact remote object.
+    store = FakeStore()
+    uploader_crash, source_crash = _uploader(tmp_path / "crash", store)
+    store.crash_after_put = True
     with pytest.raises(RuntimeError, match="simulated crash"):
         uploader_crash.upload_one(source_crash)
-    store2.crash_after_put = False
+    store.crash_after_put = False
     uploader_crash.upload_one(source_crash)
-    assert store2.puts == 2
-    uploader2, source2 = _uploader(tmp_path / "third", store)
-    second_ack = uploader2.upload_one(source2)
     assert store.puts == 2
-    assert second_ack.source_sha256 == first_ack.source_sha256
+    assert store.staged_uploads[0] == store.staged_uploads[1]
 
+
+@pytest.mark.parametrize(
+    ("changed_field", "changed_value"),
+    [
+        ("size", 1),
+        ("crc32c", "wrong"),
+        ("metadata", {"ava-key-id": "wrong"}),
+    ],
+)
+def test_412_size_crc_or_metadata_mismatch_is_critical(
+    tmp_path: Path, changed_field: str, changed_value: object
+) -> None:
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    store.crash_after_put = True
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        uploader.upload_one(source)
     remote = next(iter(store.objects.values()))
-    store.objects[remote.object_name] = replace(
-        remote, metadata={"ava-key-id": "wrong"}, created=False
-    )
-    uploader3, source3 = _uploader(tmp_path / "collision", store)
+    if changed_field == "size":
+        changed = replace(remote, size=int(changed_value), created=False)
+    elif changed_field == "crc32c":
+        changed = replace(remote, crc32c=str(changed_value), created=False)
+    elif changed_field == "metadata":
+        assert isinstance(changed_value, dict)
+        changed = replace(remote, metadata=changed_value, created=False)
+    else:
+        raise AssertionError(changed_field)
+    store.objects[remote.object_name] = changed
+    store.crash_after_put = False
     with pytest.raises(RemoteCollisionError):
-        uploader3.upload_one(source3)
+        uploader.upload_one(source)
+
+
+def test_source_over_64_mib_fails_before_staging(tmp_path: Path) -> None:
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    with source.open("r+b") as output:
+        output.truncate(64 * 1024 * 1024 + 1)
+    with pytest.raises(WalSourceTooLargeError):
+        uploader.upload_one(source)
+    assert not list((tmp_path / "staging").iterdir())
+    assert store.puts == 0
+
+
+def test_disk_footprint_counts_spool_and_staging(tmp_path: Path) -> None:
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    staged = tmp_path / "staging" / "active.enc"
+    staged.write_bytes(b"ciphertext")
+    footprint = uploader.disk_footprint()
+    assert footprint.spool_bytes == source.stat().st_size
+    assert footprint.staging_bytes == staged.stat().st_size
+    assert footprint.total_bytes == source.stat().st_size + staged.stat().st_size
 
 
 def test_durable_ack_recovers_cleanup_without_remote_call(tmp_path: Path) -> None:

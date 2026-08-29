@@ -26,6 +26,13 @@ class AckCorruptionError(RuntimeError):
     """A local durable ACK cannot be trusted."""
 
 
+class WalSourceTooLargeError(RuntimeError):
+    """A source exceeds the bounded WAL-only staging contract."""
+
+
+DEFAULT_MAX_WAL_SOURCE_BYTES = 64 * 1024 * 1024
+
+
 @dataclass(frozen=True)
 class AckManifest:
     archive_name: str
@@ -38,6 +45,16 @@ class AckManifest:
     encryption_format: str
     key_id: str
     acknowledged_at: str
+
+
+@dataclass(frozen=True)
+class DiskFootprint:
+    spool_bytes: int
+    staging_bytes: int
+
+    @property
+    def total_bytes(self) -> int:
+        return self.spool_bytes + self.staging_bytes
 
 
 def _digest(path: Path) -> tuple[str, int]:
@@ -78,6 +95,7 @@ class PitrUploader:
         key: bytes,
         key_id: str,
         store: ObjectStore,
+        max_source_bytes: int = DEFAULT_MAX_WAL_SOURCE_BYTES,
     ) -> None:
         self._spool = spool
         self._ack_dir = ack_dir
@@ -86,6 +104,19 @@ class PitrUploader:
         self._key = key
         self._key_id = key_id
         self._store = store
+        self._max_source_bytes = max_source_bytes
+
+    def disk_footprint(self) -> DiskFootprint:
+        """Return both plaintext spool and temporary ciphertext disk use."""
+
+        return DiskFootprint(
+            spool_bytes=sum(
+                entry.stat().st_size for entry in self._spool.iterdir() if entry.is_file()
+            ),
+            staging_bytes=sum(
+                entry.stat().st_size for entry in self._staging.iterdir() if entry.is_file()
+            ),
+        )
 
     def pending(self) -> list[Path]:
         return sorted(
@@ -153,10 +184,18 @@ class PitrUploader:
         its source, and the streaming reader raises UnsupportedOperation, so
         every real WAL segment failed while tests (which read the whole
         stream in one ``read()``) stayed green. The ciphertext is therefore
-        staged to disk first (atomic, 0600, fsync) and uploaded by filename;
-        the stream is still the single encryption implementation.
+        staged to disk first (atomic, 0600, fsync) and uploaded by filename.
+        This path is WAL-only and its caller enforces the source-size bound;
+        base backups use a separate restartable streaming contract.
         """
         staging_path = self._staging / f"{source.name}.enc"
+        active = [entry for entry in self._staging.glob("*.enc") if entry != staging_path]
+        if active:
+            raise AckCorruptionError("multiple active WAL ciphertext staging files")
+        if staging_path.exists():
+            if staging_path.stat().st_size != plan.ciphertext_size:
+                raise AckCorruptionError("staged WAL ciphertext size differs from its plan")
+            return staging_path
         fd, raw = tempfile.mkstemp(prefix=f".{staging_path.name}.", dir=self._staging)
         staged = Path(raw)
         try:
@@ -178,7 +217,14 @@ class PitrUploader:
     def upload_one(self, source: Path) -> AckManifest:
         if not archive_name_is_valid(source.name):
             raise ValueError("unsupported archive filename")
+        source_size_before_digest = source.stat().st_size
+        if source_size_before_digest > self._max_source_bytes:
+            raise WalSourceTooLargeError(
+                f"WAL source exceeds {self._max_source_bytes}-byte staging limit"
+            )
         source_hash, source_size = _digest(source)
+        if source_size != source_size_before_digest:
+            raise AckCorruptionError("WAL source changed while it was read")
         ack_path = self._ack_dir / f"{source.name}.ack.json"
         if ack_path.exists():
             ack = self._read_ack(ack_path)
@@ -200,7 +246,7 @@ class PitrUploader:
             "ava-encryption-format": MAGIC.decode(),
             "ava-key-id": self._key_id,
         }
-        remote = self._store.put_file_if_absent(staging_path, object_name, metadata)
+        remote = self._store.put_wal_ciphertext_if_absent(staging_path, object_name, metadata)
         self._verify_remote(remote, object_name, plan.ciphertext_size, expected_crc, metadata)
         ack = AckManifest(
             source.name,
@@ -232,29 +278,20 @@ class PitrUploader:
     ) -> None:
         if remote.object_name != object_name:
             raise RemoteCollisionError("immutable GCS object differs from local archive")
+        exact_match = (
+            remote.generation > 0
+            and remote.size == ciphertext_size
+            and remote.crc32c == expected_crc
+            and dict(remote.metadata) == metadata
+        )
         if remote.created:
             # Fresh upload: the reloaded object must match what we sent —
             # size, crc32c, metadata (design baseline 4) — before any ACK.
-            if (
-                remote.generation <= 0
-                or remote.size != ciphertext_size
-                or remote.crc32c != expected_crc
-                or dict(remote.metadata) != metadata
-            ):
+            if not exact_match:
                 raise RuntimeError("new GCS object failed post-upload verification")
             return
-        # 412 (the object already exists): baseline-4 idempotency compares
-        # SOURCE attributes only — source sha/size, encryption format, key id
-        # — never ciphertext bytes. A retry after a crash may legitimately
-        # re-encrypt with a fresh nonce (different ciphertext, same archive),
-        # so a ciphertext-level compare would false-positive into a critical
-        # collision. Mismatch here means a genuinely different object: critical
-        # collision, never overwrite.
-        source_keys = (
-            "ava-source-sha256",
-            "ava-source-size",
-            "ava-encryption-format",
-            "ava-key-id",
-        )
-        if any(remote.metadata.get(key) != metadata[key] for key in source_keys):
+        # The durable plan pins the nonce, so crash recovery reproduces the
+        # same ciphertext. Source-only equality would silently accept a
+        # different immutable object under the canonical name.
+        if not exact_match:
             raise RemoteCollisionError("immutable GCS object differs from local archive")

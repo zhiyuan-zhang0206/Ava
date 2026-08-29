@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import asdict
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.gcs_store import GCSObjectStore
 from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
-from services.pitr.uploader import PitrUploader, RemoteCollisionError
+from services.pitr.uploader import PitrUploader, RemoteCollisionError, WalSourceTooLargeError
 from shared.config import settings
 from shared.daemon_health import Liveness, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -77,7 +78,11 @@ async def upload_loop(
                 failures += 1
                 delay = min(60.0, float(2 ** min(failures, 6)))
                 _log.warning("PITR upload temporarily failed; retrying after bounded backoff")
-            except (PermanentObjectStoreError, RemoteCollisionError) as exc:
+            except (
+                PermanentObjectStoreError,
+                RemoteCollisionError,
+                WalSourceTooLargeError,
+            ) as exc:
                 _log.error("PITR upload critical (operator action needed): %s", exc)
                 delay = _CRITICAL_BACKOFF_S
         with contextlib.suppress(TimeoutError):
@@ -91,7 +96,16 @@ async def run() -> None:
     uploader = build_uploader()
     stop = asyncio.Event()
     liveness = Liveness(timeout_s=120)
-    server = await start_health_server("pitr_uploader", liveness=liveness)
+    server = await start_health_server(
+        "pitr_uploader",
+        liveness=liveness,
+        extra=lambda: {
+            "disk_footprint": {
+                **asdict(footprint := uploader.disk_footprint()),
+                "total_bytes": footprint.total_bytes,
+            }
+        },
+    )
     try:
         await upload_loop(uploader, stop=stop, liveness=liveness)
     finally:
