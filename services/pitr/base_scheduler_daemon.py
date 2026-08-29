@@ -41,6 +41,15 @@ from services.pitr.restore_proof import (
     verify_candidate_proof,
 )
 from services.pitr.restore_publish_store import GCSProtectedManifestPublisher
+from services.pitr.retention_scheduler import (
+    RetentionDryRunState,
+)
+from services.pitr.retention_scheduler import (
+    health_component as retention_health_component,
+)
+from services.pitr.retention_scheduler import (
+    refresh as refresh_retention_plan,
+)
 from services.pitr.space_budget import CandidateSpaceBudget
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
@@ -93,6 +102,7 @@ class BaseCandidateState:
     cleanup_pending: bool = False
     restore_running: bool = False
     last_protected: float | None = None
+    retention: RetentionDryRunState = field(default_factory=RetentionDryRunState)
 
 
 @dataclass(frozen=True)
@@ -190,7 +200,7 @@ def _components(state: BaseCandidateState) -> list[dict[str, object]]:
         gate_readiness=False,
     )
     restore["protected"] = state.last_protected is not None
-    return [record, restore]
+    return [record, restore, retention_health_component(state.retention)]
 
 
 def _tree_bytes(path: Path) -> int:
@@ -675,6 +685,19 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
         else:
             state.cleanup_pending = False
         config = settings.physical_backup
+        state.retention.enabled = config.pitr_retention_planner_enabled
+        if config.pitr_retention_planner_enabled:
+            state.retention.last_attempt = time.time()
+            try:
+                state.retention.plan = refresh_retention_plan(config)
+                state.retention.last_success = time.time()
+                state.retention.last_error = None
+            except Exception as exc:
+                state.retention.plan = None
+                state.retention.last_error = str(exc)
+                _log.exception("PITR retention dry-run planning failed")
+                await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
+                continue
         if config.pitr_restore_proof_enabled and _pending_restore_candidate(
             ava_home() / "physical-backup"
         ):

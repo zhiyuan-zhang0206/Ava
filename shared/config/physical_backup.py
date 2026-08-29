@@ -88,6 +88,17 @@ class PhysicalBackupSettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+    pitr_retention_planner_enabled: bool = Field(
+        default=False,
+        alias="AVA_PITR_RETENTION_PLANNER_ENABLED",
+        description="Enable local dry-run PITR retention planning; this never deletes objects.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
     pitr_gcs_project: str = Field(
         default="",
         alias="AVA_PITR_GCS_PROJECT",
@@ -291,6 +302,10 @@ class PhysicalBackupSettings(EnvSettings):
             raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_ENABLED")
         if self.pitr_restore_proof_enabled and not self.pitr_base_backup_enabled:
             raise ValueError("AVA_PITR_RESTORE_PROOF_ENABLED requires AVA_PITR_BASE_BACKUP_ENABLED")
+        if self.pitr_retention_planner_enabled and not self.pitr_restore_proof_enabled:
+            raise ValueError(
+                "AVA_PITR_RETENTION_PLANNER_ENABLED requires AVA_PITR_RESTORE_PROOF_ENABLED"
+            )
         if self.pitr_base_backup_enabled and not self.pitr_replication_db_url:
             raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_REPLICATION_DB_URL")
         if self.pitr_replication_db_url:

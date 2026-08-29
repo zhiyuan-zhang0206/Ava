@@ -16,6 +16,9 @@ import pytest
 import services.pitr.base_scheduler_daemon as daemon
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
+from services.pitr.retention_planner import DryRunResult
+from services.pitr.retention_scheduler import RetentionDryRunState
+from services.pitr.retention_scheduler import health_component as retention_health_component
 from shared.process_env import restricted_process_env
 
 
@@ -179,6 +182,52 @@ def test_due_uses_durable_candidate_after_restart(tmp_path: Path) -> None:
 def test_health_never_calls_a_candidate_protected() -> None:
     components = _components(BaseCandidateState(running=True))
     assert components[0]["protected"] is False
+
+
+def test_retention_health_is_explicitly_dry_run_only(tmp_path: Path) -> None:
+    result = DryRunResult(tmp_path / "plan", "digest", False, 3, 2, 30, 20)
+    components = daemon._components(
+        BaseCandidateState(
+            retention=RetentionDryRunState(
+                enabled=True, plan=result, last_attempt=time.time(), last_success=time.time()
+            )
+        )
+    )
+    retention = next(item for item in components if item["name"] == "pitr_retention_dry_run")
+    assert retention["delete_enabled"] is False
+    assert retention["eligible_objects"] == 2
+    assert retention["eligible_bytes"] == 20
+
+
+def test_retention_health_never_exposes_stale_or_failed_eligibility(tmp_path: Path) -> None:
+    result = DryRunResult(tmp_path / "plan", "digest", False, 3, 2, 30, 20)
+    state = RetentionDryRunState(
+        enabled=True,
+        plan=result,
+        last_attempt=time.time(),
+        last_success=time.time(),
+        last_error="inventory unavailable",
+    )
+    retention = retention_health_component(state)
+    assert retention["status"] == "degraded"
+    assert retention["eligible_objects"] == 0
+    assert retention["eligible_bytes"] == 0
+
+    state.last_error = None
+    state.last_success = time.time() - 3 * 3600
+    stale = retention_health_component(state)
+    assert stale["progress"] == "stale"
+    assert stale["current"] is False
+    assert stale["plan_digest"] is None
+
+    state.enabled = False
+    disabled = retention_health_component(state)
+    assert disabled["progress"] == "disabled"
+    assert disabled["current"] is False
+    assert disabled["retained_objects"] == 0
+    assert disabled["eligible_objects"] == 0
+    assert disabled["retained_bytes"] == 0
+    assert disabled["eligible_bytes"] == 0
 
 
 @pytest.mark.asyncio

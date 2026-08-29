@@ -34,6 +34,8 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 - `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
+- `services/pitr/retention_planner.py` — default-off local dry-run planner; strictly joins local ACK and viewer-only remote immutable identities, atomically records a canonical fail-closed N=2 plan, and exposes only fresh counts/bytes through scheduler health, with no remote-delete boundary; unprotected or cross-timeline evidence blocks eligibility
+- `cli/commands/pitr.py` — read-only `ava pitr retention inspect` view of the latest durable local plan
 
 ## Notes
 - Gateway capability only; `ava start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.
@@ -60,6 +62,11 @@ host's: reading a host timezone can make a current dump appear to be future.
   WAL allowlist in a sibling PostgreSQL instance, verifies stable fingerprints,
   and only then publishes a new immutable `protected=true` manifest. It never
   edits the candidate, touches live PGDATA, selects a latest object, or deletes
-  remote data. Chain-aware retention remains future work.
+  remote data. The optional `AVA_PITR_RETENTION_PLANNER_ENABLED` slice computes
+  only a local dry-run plan: latest two protected chains by capture identity,
+  every unprotected candidate pinned, and continuous ACKed WAL/history from the
+  oldest retained base. Any malformed, missing, forked, generation-ambiguous or
+  concurrently changing evidence blocks all eligibility. It has no delete API,
+  credential or production-enable path; remote execution remains future work.
   The second gate also requires an explicit local least-privilege replication
   URL; the ordinary cluster owner remains `NOSUPERUSER` without `REPLICATION`.
