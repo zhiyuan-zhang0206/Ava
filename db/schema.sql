@@ -840,11 +840,12 @@ CREATE TABLE machine_probe (
 -- register_self recomputes the machines row as the union over a machine's
 -- non-stopped units; every machines reader is unchanged.
 CREATE TABLE machine_units (
-    machine_name       TEXT NOT NULL,
-    home               TEXT NOT NULL,
-    serve_gateway      BOOLEAN NOT NULL DEFAULT false,
-    serve_agent_runner BOOLEAN NOT NULL DEFAULT false,
-    url                TEXT,
+    machine_name                 TEXT NOT NULL,
+    home                         TEXT NOT NULL,
+    serve_gateway                BOOLEAN NOT NULL DEFAULT false,
+    serve_agent_runner           BOOLEAN NOT NULL DEFAULT false,
+    serve_observability_station  BOOLEAN NOT NULL DEFAULT false,
+    url                          TEXT,
     up_since_at        TIMESTAMPTZ,
     stopped_at         TIMESTAMPTZ,
     PRIMARY KEY (machine_name, home)

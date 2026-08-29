@@ -92,6 +92,15 @@ def test_annotated_roster_membership_per_capability(role: str, expected: set[str
     assert got == expected
 
 
+def test_pure_station_runs_no_session_services() -> None:
+    """A pure observability-station host runs NO session service: every service
+    spec is gated on gateway and/or agent-runner, so `ava start` on a station
+    unit only converges the native LGTM backends. This is what makes
+    register_self (via `ava start`) the sole writer of a station unit's
+    machine_units row — the ops daemon's boot registration never runs there."""
+    assert spec.services_for_capabilities(frozenset({"observability-station"})) == ()
+
+
 def test_gateway_roster_ordering_is_load_bearing() -> None:
     """milvus must precede memory-indexer (memory-indexer cold-start connects to it)."""
     order = [s.session for s in spec.services_for_capabilities(frozenset({"gateway"}))]

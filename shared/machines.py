@@ -40,6 +40,7 @@ from shared.machine import (
     _resolve_gateway_url,
     is_agent_runner,
     is_gateway,
+    is_observability_station,
     machine_description,
     machine_name,
 )
@@ -162,9 +163,10 @@ def _reject_loopback_dial_url(
     )
 
 
-def unit_dial_url(roles: MachineRoles) -> str:
+def unit_dial_url(roles: MachineRoles) -> str | None:
     """The inbound base URL a unit carrying `roles` advertises — the address the
-    rest of the cluster dials.
+    rest of the cluster dials; None for a unit with no dial target (a pure
+    observability-station).
 
     The single definition, shared by both callers of `register_self`: `ava start`
     (`cli/commands/_repo.py:_register_machine_or_die`, passing its resolved
@@ -189,6 +191,10 @@ def unit_dial_url(roles: MachineRoles) -> str:
       a dead row.
     - gateway only: its own gateway URL, informational (a pure gateway runs no ops
       server, so nothing dials it for ops).
+    - observability-station only: None — a station advertises no dial target
+      (nothing reaches it for ops; the gateway dials its Loki/Prometheus on the
+      fixed backend ports), so the unit stores NULL and the composed machines
+      row keeps gateway_url NULL.
 
     Raises:
         GatewayUrlMissing: gateway-only unit with no resolvable gateway URL.
@@ -200,6 +206,8 @@ def unit_dial_url(roles: MachineRoles) -> str:
     from shared.daemon_health import health_port
     from shared.machine import reachable_host
 
+    if "gateway" not in roles and "agent-runner" not in roles:
+        return None  # pure observability-station: nothing dials it for ops
     if "agent-runner" not in roles:
         return gateway_url()
     host = reachable_host()
@@ -211,10 +219,12 @@ def register_self(url: str | None = None) -> None:
 
     A unit is identified by (machine_name, home) where home = this unit's
     $AVA_HOME (`shared.paths.ava_home()`). The unit contributes its own caps
-    (serve_gateway / serve_agent_runner), its dial `url`, a fresh `up_since_at`,
-    and a cleared `stopped_at` (coming back up un-stops THIS unit). The composed
-    `machines` row is then rebuilt from the machine's non-stopped units so every
-    reader sees the union — see `_recompute_machine_row`.
+    (serve_gateway / serve_agent_runner / serve_observability_station), its dial
+    `url` (None for a pure station — it advertises no dial target), a fresh
+    `up_since_at`, and a cleared `stopped_at` (coming back up un-stops THIS
+    unit). The composed `machines` row is then rebuilt from the machine's
+    non-stopped units so every reader sees the union — see
+    `_recompute_machine_row`.
 
     Two callers, and the second is what makes the record mean what its readers
     assume. `ava start` registers at the tail of a supervised bring-up; the ops
@@ -252,22 +262,24 @@ def register_self(url: str | None = None) -> None:
     home = str(ava_home())
     serve_gateway = is_gateway()
     serve_agent_runner = is_agent_runner()
+    serve_observability_station = is_observability_station()
     _reject_loopback_dial_url(
         url, serve_gateway=serve_gateway, serve_agent_runner=serve_agent_runner
     )
     with shared.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
-            "(machine_name, home, serve_gateway, serve_agent_runner, url, "
-            "up_since_at, stopped_at) "
-            "VALUES (%s, %s, %s, %s, %s, NOW(), NULL) "
+            "(machine_name, home, serve_gateway, serve_agent_runner, "
+            "serve_observability_station, url, up_since_at, stopped_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, NOW(), NULL) "
             "ON CONFLICT (machine_name, home) DO UPDATE SET "
             "serve_gateway = EXCLUDED.serve_gateway, "
             "serve_agent_runner = EXCLUDED.serve_agent_runner, "
+            "serve_observability_station = EXCLUDED.serve_observability_station, "
             "url = EXCLUDED.url, up_since_at = NOW(), "
             # coming back up clears this unit's prior intentional-stop marker
             "stopped_at = NULL",
-            (name, home, serve_gateway, serve_agent_runner, url),
+            (name, home, serve_gateway, serve_agent_runner, serve_observability_station, url),
         )
         _recompute_machine_row(cur, name)
         # description is host-level config; only register_self (running on the
@@ -313,7 +325,8 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
 
     Composition over the machine's NON-stopped units:
     - role = sorted union of caps ('gateway' if any live unit serves gateway,
-      'agent-runner' if any serves agent-runner).
+      'agent-runner' if any serves agent-runner, 'observability-station' if any
+      serves observability-station).
     - gateway_url = the dial URL: the live agent-runner unit's `url` (ops URL)
       when the machine serves agent-runner, else the gateway unit's `url`. This
       keeps the single-box meaning where `machines.gateway_url` holds the ops URL
@@ -340,7 +353,7 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
         # with `last_seen_at` alone, leaving `up_since_at` NULL for that row, and
         # the max below would raise on the mix. Two units of one machine can sit
         # on different checkouts during a rollout, so this is reachable.
-        "SELECT serve_gateway, serve_agent_runner, url, up_since_at "
+        "SELECT serve_gateway, serve_agent_runner, serve_observability_station, url, up_since_at "
         "FROM machine_units WHERE machine_name = %s AND stopped_at IS NULL",
         (name,),
     )
@@ -348,8 +361,15 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
 
     serve_gateway = any(row[0] for row in live)
     serve_agent_runner = any(row[1] for row in live)
+    serve_observability_station = any(row[2] for row in live)
     role = sorted(
-        cap for cap, on in (("gateway", serve_gateway), ("agent-runner", serve_agent_runner)) if on
+        cap
+        for cap, on in (
+            ("gateway", serve_gateway),
+            ("agent-runner", serve_agent_runner),
+            ("observability-station", serve_observability_station),
+        )
+        if on
     )
     if not role:
         # No live unit — leave the existing composed row untouched but mark it
@@ -358,14 +378,15 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
         return
 
     # Dial URL: ops URL of the live agent-runner unit when present, else the
-    # gateway unit's URL.
-    runner_url = next((row[2] for row in live if row[1]), None)
-    gateway_only_url = next((row[2] for row in live if row[0]), None)
+    # gateway unit's URL. A pure station unit advertises no dial target (nothing
+    # reaches it for ops), so a station-only machine row keeps gateway_url NULL.
+    runner_url = next((row[3] for row in live if row[1]), None)
+    gateway_only_url = next((row[3] for row in live if row[0]), None)
     gateway_url = runner_url if serve_agent_runner else gateway_only_url
     # The composed "up since" is the LATEST announce across live units; a unit
     # whose up_since_at is NULL (pre-#981 registration, never backfilled)
     # contributes nothing to the max instead of raising.
-    up_since_at = max((row[3] for row in live if row[3] is not None), default=None)
+    up_since_at = max((row[4] for row in live if row[4] is not None), default=None)
 
     # description is host-level config, written only by register_self (which runs
     # on the host itself). recompute does not touch it: a fresh row inserts NULL,
