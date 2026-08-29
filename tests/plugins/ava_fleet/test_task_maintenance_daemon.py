@@ -213,7 +213,8 @@ class TestRemind:
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == owner
-        assert "Task reminders — you have 1 overdue task(s):" in message
+        assert "Task reminders — you have 1 overdue task(s)." in message
+        assert "report your current status and advance the next step" in message
         assert f"#{tid}" in message
         assert emitted_events == [
             (
@@ -252,13 +253,56 @@ class TestRemind:
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == owner
-        assert "Task reminders — you have 3 overdue task(s):" in message
+        assert "Task reminders — you have 3 overdue task(s)." in message
         assert all(f"#{task_id}" in message for task_id in task_ids)
         for task_id in task_ids:
             row = _task_row(db_conn, task_id)
             assert row is not None
             assert row[2] == 1
             assert row[3] is not None
+
+    def test_digest_lists_tasks_priority_first(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
+    ) -> None:
+        """Overdue tasks in one digest are ordered P0 first (user ruling
+        2026-08-29: the reminder orders by priority so the highest-stakes
+        task leads the list), regardless of creation order."""
+        owner = _make_agent(db_conn)
+        p2 = _make_task(
+            db_conn,
+            owner=owner,
+            title="low",
+            priority="P2",
+            remind_interval_seconds=1800,
+            updated_s_ago=3600,
+        )
+        p0 = _make_task(
+            db_conn,
+            owner=owner,
+            title="top",
+            priority="P0",
+            remind_interval_seconds=1800,
+            updated_s_ago=3600,
+        )
+        p1 = _make_task(
+            db_conn,
+            owner=owner,
+            title="mid",
+            priority="P1",
+            remind_interval_seconds=1800,
+            updated_s_ago=3600,
+        )
+
+        assert _run_reminders(pool, 3600.0) == 1
+        assert len(deliver) == 1
+        _delivered_owner, message = deliver[0]
+        ids_in_order = [int(line.split(" ")[1].lstrip("#")) for line in message.splitlines()[1:]]
+        assert ids_in_order == [p0, p1, p2]
+        # The imperative instruction rides each line.
+        assert "report your current status and advance the next step" in message
+        assert "raise the reminder interval to wait explicitly" in message
+        # The reminder interval stays on the line.
+        assert "reminder interval: 30min" in message
 
     def test_owners_receive_separate_digests(
         self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
