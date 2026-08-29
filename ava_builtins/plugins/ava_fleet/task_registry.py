@@ -139,8 +139,15 @@ def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
     Also rejects parent=1 on a deployment where task 1 is not the system root
     (a migrated database whose root carries another id): the documented root
     id (1) must not silently attach a top-level task under a different parent.
+    A closed (done / cancelled) parent is rejected too: a closed task must
+    never gain children -- tasks created after a parent closed are what
+    produced the false-orphan rows in the task graph (task #1975). The system
+    root is exempt by construction (its status is 'ongoing', never closed).
+    The parent row is locked FOR UPDATE: the close path holds the same lock,
+    so a concurrent close cannot slip between this status read and the child
+    INSERT (TOCTOU, QA #993).
     Runs inside the caller's transaction/cursor."""
-    cur.execute("SELECT id, is_root FROM agent_tasks WHERE id = %s", (parent,))
+    cur.execute("SELECT id, is_root, status FROM agent_tasks WHERE id = %s FOR UPDATE", (parent,))
     row = cur.fetchone()
     if row is None:
         raise ValueError(
@@ -154,6 +161,12 @@ def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
         raise ValueError(
             f"task 1 is not the system root task -- the root is {what}; "
             "pass its id for a top-level task"
+        )
+    if row[2] in ("done", "cancelled"):
+        raise ValueError(
+            f"parent task {parent} is {row[2]} — a closed task cannot be the "
+            "parent of a new task; reopen it or pass the system root task id "
+            "(1) for a top-level task"
         )
 
 
@@ -241,8 +254,9 @@ def create(
         parent: id of an existing task this task descends from. The system
             root task (id 1) parents only top-level tasks; every other task
             must reference an existing task. Raises ValueError when the
-            parent does not exist (or, for parent=1, when task 1 is not the
-            system root on this deployment).
+            parent does not exist, is closed (done / cancelled — a closed
+            task never gains children), or, for parent=1, when task 1 is not
+            the system root on this deployment.
         remind_interval_seconds: cannot be disabled; None means the priority
             default (P0 30m / P1 1h / P2 2h / P3 4h), capped at 24h; an
             explicit value wins over the default.
