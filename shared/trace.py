@@ -5,10 +5,10 @@ When `trace_enabled` (default on), OpenLLMetry (traceloop-sdk) auto-instruments
 the Anthropic/OpenAI/Google SDKs + LangChain/LangGraph, and every span is
 exported over OTLP/HTTP (protobuf wire format) to the local OTel Collector
 sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default 127.0.0.1:4318) by
-`OtlpJsonHttpSpanExporter`. The slow import+init runs on a daemon thread off
-the boot path — use sites wait via ensure_init_resolved(). The sidecar (one per machine, supervised like every
-other Ava service) writes the local JSONL mirror under `$AVA_HOME/traces/` via
-its file exporter. A gateway sidecar fans out to loopback Tempo; a pure runner
+`OtlpJsonHttpSpanExporter`; the slow import+init runs on a daemon thread off
+the boot path (use sites wait via ensure_init_resolved()). The sidecar (one
+per machine, supervised like every other Ava service) writes the local JSONL
+mirror under `$AVA_HOME/traces/` via its file exporter. A gateway sidecar fans out to loopback Tempo; a pure runner
 sidecar relays to the gateway collector's authenticated private receiver. Each
 line is one standard OTLP/JSON `ExportTraceServiceRequest` (the same wire shape
 any OTLP backend ingests), giving accepted batches a vendor-neutral, grep-able
@@ -18,24 +18,22 @@ local recovery copy. A gap present in the mirror can be replayed with
   **Metadata-only by default (trace v2, 2026-08-05)**: spans record chain
   metadata (span names, langgraph paths, checkpoint refs, agent_id, durations,
   status, trace_id) but NOT LLM content. Content stripping happens at two
-  layers: `TRACELOOP_TRACE_CONTENT=false` stops the instrumentors from attaching
-  prompt/completion attributes at the source (2026-08-05 incident: 31 GB/h of
-  mirror, 99.89% of it `gen_ai.task.input/output`-style LLM content), and
-  `OtlpJsonHttpSpanExporter` re-strips defensively before anything leaves the
-  process (a future instrumentor that ignores the env var cannot leak content
-  back in — stripped here, it never reaches the sidecar, the mirror or Tempo).
-  Turn content is fetched on demand from the checkpoints table by trace id —
-  see `shared/checkpoint.py` / the gateway trace endpoint.
+  layers: `TRACELOOP_TRACE_CONTENT=false` stops the instrumentors from
+  attaching prompt/completion attributes at the source (2026-08-05 incident:
+  31 GB/h of mirror, 99.89% of it `gen_ai.task.input/output`-style content),
+  and `OtlpJsonHttpSpanExporter` re-strips defensively before anything leaves
+  the process (a future instrumentor that ignores the env var cannot leak
+  content back in). Turn content is fetched on demand from the checkpoints
+  table by trace id — see `shared/checkpoint.py` / the gateway trace endpoint.
 
 - **Ship** (`cli/commands/trace.py`, `ava trace ship`): replays a time window of
   the sidecar's JSONL mirror to Tempo directly on a gateway, or through the
   gateway collector's authenticated receiver on a pure runner. This is the
-  recovery path (backend down
-  longer than the collector queue held, offline machines) — the live fan-out is
-  the collector's job. It is resumable via a watermark, and it gates on
-  `telemetry_otlp_enabled` — one kill switch for the whole OTLP surface (with
-  the sidecar architecture this also stops recording, since recording IS the
-  OTLP export).
+  recovery path (backend down longer than the collector queue held, offline
+  machines) — the live fan-out is the collector's job. It is resumable via a
+  watermark, and it gates on `telemetry_otlp_enabled` — one kill switch for
+  the whole OTLP surface (with the sidecar architecture this also stops
+  recording, since recording IS the OTLP export).
 
 turn_span() in agent/_runloop.py wraps each graph.ainvoke — one invocation =
 one agent TURN — in a native OTel root span so every LLM/tool child span of
@@ -54,17 +52,12 @@ agent-side mirror -> local collector sidecar (task #1266) 2026-08-14.
 from __future__ import annotations
 
 import contextlib
-import gzip
 import json
 import os
-import re
-import shutil
 import threading
 import time
 from collections.abc import Callable, Generator, Sequence
-from datetime import UTC, date, datetime, timedelta
 from functools import wraps
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -80,6 +73,35 @@ from shared.telemetry_otlp import (
     _observability_export_allowed,
     endpoint_reachable,
 )
+from shared.trace_mirror import (
+    _disk_usage,
+    _disk_watermark_exceeded,
+    _enforce_dir_cap,
+    _gzip_old_mirror,
+    _mirror_day,
+    _mirror_epoch,
+    _mirror_size,
+    _mirror_sort_key,
+    _prune_old_mirror,
+)
+
+# Mirror-hygiene re-exports: moved to shared/trace_mirror.py 2026-08-30 and
+# re-exported here for the existing test/caller surface.
+__all__ = [
+    "OtlpJsonHttpSpanExporter",
+    "_disk_usage",
+    "_disk_watermark_exceeded",
+    "_enforce_dir_cap",
+    "_gzip_old_mirror",
+    "_mirror_day",
+    "_mirror_epoch",
+    "_mirror_size",
+    "_mirror_sort_key",
+    "_prune_old_mirror",
+    "ensure_init_resolved",
+    "initialize_tracing",
+    "turn_span",
+]
 
 # Span attribute keys.
 #
@@ -101,9 +123,9 @@ _ATTR_TURN = "ava.turn"
 # attributes and never appears here; these keys are pure payload.
 #
 # Blacklist (exact keys) + prefix rules (gen_ai.input.* / gen_ai.output.*):
-# both instrumentors we use (openllmetry anthropic/openai/langchain/google)
-# emit prompts/completions under gen_ai.* per the GenAI semantic convention,
-# and traceloop's langchain wrapper mirrors them as traceloop.entity.*.
+# the openllmetry instrumentors emit prompts/completions under gen_ai.* per
+# the GenAI semantic convention; traceloop's wrapper mirrors them as
+# traceloop.entity.*.
 _CONTENT_ATTR_KEYS: frozenset[str] = frozenset(
     {
         "gen_ai.task.input",
@@ -124,11 +146,10 @@ _CONTENT_ATTR_PREFIXES: tuple[str, ...] = (
 )
 
 # Defensive size guard: a metadata attribute is tiny (names, ids, paths,
-# durations). Anything bigger than this on a single string value is treated as
-# content even if an instrumentor invents a new key — bounds a future leak to
-# a few KB per span instead of the megabyte-scale blobs that caused the
-# incident. 16 KB is comfortably above the largest real metadata (a long
-# langgraph path array) and far below the smallest real content (a prompt).
+# durations); anything bigger on a single string value is treated as content
+# even if an instrumentor invents a new key — bounds a future leak to a few
+# KB per span. 16 KB is above the largest real metadata (a long langgraph
+# path array) and far below the smallest real content (a prompt).
 _MAX_ATTR_STRING_CHARS = 16 * 1024
 
 
@@ -163,8 +184,7 @@ def _strip_content_attributes(otlp: dict[str, Any]) -> None:
     every attribute whose key is a known content key (or content prefix), plus
     any attribute whose string payload exceeds `_MAX_ATTR_STRING_CHARS` (the
     size guard — metadata is never large). Span names, timestamps, status,
-    trace/span ids and every `traceloop.*` / `gen_ai.task.*` / `langgraph.*`
-    metadata attribute are untouched.
+    ids and `traceloop.*` / `gen_ai.task.*` / `langgraph.*` metadata survive.
     """
     for rs in otlp.get("resourceSpans", []):
         for ss in rs.get("scopeSpans", []):
@@ -201,273 +221,30 @@ _state: dict[str, Any] = {
     "retry_thread": None,
     "arm_thread": None,
     "init_resolved": threading.Event(),
+    "arm_failed": False,
+    "timeout_reported": False,
 }
 _init_lock = threading.Lock()
-
-# Mirror filenames (sidecar file exporter layout since task #1266):
-#   spans.jsonl                          — the ACTIVE file the collector appends to
-#   spans-<ISO-timestamp>-size.jsonl     — collector-rotated backups (timberjack
-#                                          1.4.5, pinned by otelcol-contrib 0.155.0,
-#                                          appends the trigger reason to the
-#                                          backup name: `-size` / `-time`;
-#                                          `spans-2026-08-27T03-29-10.942-size.jsonl`,
-#                                          stamped in UTC)
-#   spans-<ISO-timestamp>.jsonl          — older collector-rotated backups
-#                                          (pre-0.155.0 lumberjack, no reason suffix)
-#   spans-YYYYMMDD-<pid>.jsonl           — legacy agent-side mirror (pre-#1266)
-#   spans.cut-YYYYMMDD.jsonl             — manual "cut" of the active file (ops
-#                                          one-off): the collector keeps appending
-#                                          to the renamed inode until its next size
-#                                          rotation, then a fresh spans.jsonl is born
-#   <any of the above>.gz                — compressed by `_gzip_old_mirror` once the
-#                                          file stops being written; consumers
-#                                          (`ava trace ship`, inspect-a-trace) read
-#                                          these transparently
-# Old and rotated names parse their day from the name; the active file has no day
-# stamp and is therefore never a retention/prune target (the collector's own
-# rotation bounds it).
-_MIRROR_DAY_RE = re.compile(r"^spans-(\d{8})-(\d+)\.jsonl(?:\.gz)?$")
-_MIRROR_ROTATED_RE = re.compile(
-    r"^spans-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})\.\d+"
-    r"(?:-(?:size|time))?\.jsonl(?:\.gz)?$"
-)
-_MIRROR_CUT_RE = re.compile(r"^spans\.cut-(\d{8})\.jsonl(?:\.gz)?$")
-
-
-def _mirror_day(path: Path) -> date | None:
-    """Day stamp of a mirror file from its name; None when it carries none.
-
-    Old agent-side files stamp `spans-YYYYMMDD-<pid>.jsonl`; the collector's
-    rotated backups stamp `spans-YYYY-MM-DDTHH-MM-SS.<ms>(-size|-time)?.jsonl`
-    (timberjack 1.4.5 appends the trigger reason; optional `.gz` after the
-    agent-side gzip pass); manual cuts stamp `spans.cut-YYYYMMDD.jsonl`; the
-    ACTIVE `spans.jsonl` carries no stamp at all (never pruned, bounded by
-    the collector's own rotation).
-    """
-    m = _MIRROR_DAY_RE.match(path.name)
-    if m:
-        return datetime.strptime(m.group(1), "%Y%m%d").date()  # noqa: DTZ007 — date-only
-    m = _MIRROR_ROTATED_RE.match(path.name)
-    if m:
-        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    m = _MIRROR_CUT_RE.match(path.name)
-    if m:
-        return datetime.strptime(m.group(1), "%Y%m%d").date()  # noqa: DTZ007 — date-only
-    return None
-
-
-def _mirror_epoch(path: Path) -> int:
-    """Sub-day order key: pid for legacy files, epoch seconds for rotated
-    backups (both share the day key in `_mirror_sort_key`); 0 for the active
-    file. A name that parses as neither sorts last with day +inf — an
-    unrecognized file is never the deletion target."""
-    m = _MIRROR_DAY_RE.match(path.name)
-    if m:
-        return int(m.group(2))
-    m = _MIRROR_ROTATED_RE.match(path.name)
-    if m:
-        y, mo, d, h, mi, s = (int(m.group(i)) for i in range(1, 7))
-        return int(datetime(y, mo, d, h, mi, s, tzinfo=UTC).timestamp())
-    # A manual cut carries no sub-day order key; the day stamp alone orders it.
-    return 0
-
-
-def _prune_old_mirror(retention_days: int) -> None:
-    """Delete mirror files whose day stamp is older than retention_days.
-
-    Recording is always-on but shipping may be off, so the mirror grows
-    unbounded without this. Pruned on each agent start (the only frequent
-    recording entry); current-day files (the only ones being appended) are never
-    in range. A window not shipped within retention_days is gone — that is the
-    documented retention contract, not silent loss.
-    """
-    if retention_days <= 0:
-        return
-    cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).date()
-    removed = 0
-    # `.jsonl.gz` included: the gzip pass renames old segments, and retention
-    # must still reach them (their day stamp parses from the name).
-    for path in traces_dir().glob("spans*.jsonl*"):
-        day = _mirror_day(path)
-        if day is not None and day < cutoff:
-            path.unlink(missing_ok=True)
-            removed += 1
-    if removed:
-        logger.info(
-            "pruned old trace mirror files",
-            event="trace",
-            removed=removed,
-            cutoff=cutoff.isoformat(),
-        )
-
-
-def _gzip_old_mirror(grace_seconds: int = 60) -> int:
-    """gzip rotated (non-active) mirror files; return the number compressed.
-
-    The collector's file exporter cannot compress its own rotated backups
-    (fileexporter 0.155.0 forces timberjack Compression "none"; its zstd
-    option applies to the ACTIVE stream and would break the grep surface),
-    so this pass — running on each agent start next to the retention prune —
-    compresses every mirror file except the ACTIVE `spans.jsonl`. JSONL
-    compresses ~5-10x, so the recovery mirror's disk footprint drops
-    accordingly. Consumers read `.jsonl.gz` transparently: `ava trace ship`
-    continues from the per-file watermark keyed by the base name (a gzip pass
-    never strands unshipped lines), and the inspect-a-trace mirror fetcher
-    decompresses on read.
-
-    Idempotent: already-compressed `.gz` files are skipped; a crash between
-    writing the `.gz` and unlinking the original leaves both, and the next
-    pass re-compresses (overwrites) and unlinks. A manual "cut" of the active
-    file (the collector keeps appending to the renamed inode until its next
-    size rotation) is skipped within `grace_seconds` of its last write, so a
-    file still being appended is never compressed mid-write; timberjack-
-    rotated backups are static by construction and only the cut edge case is
-    guarded. The tail written after the rename-away is bounded loss under the
-    mirror's documented contract (it still reached Tempo through the
-    collector's live fan-out). A negative grace compresses regardless of
-    mtime (tests).
-    """
-    cutoff = time.time() - grace_seconds
-    compressed = 0
-    for path in traces_dir().glob("spans*.jsonl*"):
-        if path.name == "spans.jsonl" or path.name.endswith(".gz"):
-            continue
-        try:
-            if path.stat().st_mtime > cutoff:
-                continue
-        except OSError:
-            continue
-        gz_path = Path(f"{path}.gz")
-        try:
-            # mtime=0 keeps the compressed bytes deterministic (tests, dedup).
-            with (
-                path.open("rb") as src,
-                gzip.GzipFile(gz_path, mode="wb", compresslevel=6, mtime=0) as dst,
-            ):
-                shutil.copyfileobj(src, dst, length=1024 * 1024)
-            path.unlink(missing_ok=True)
-        except OSError:
-            gz_path.unlink(missing_ok=True)
-            continue
-        compressed += 1
-    if compressed:
-        logger.info(
-            "gzipped old trace mirror files",
-            event="trace",
-            compressed=compressed,
-            grace_seconds=grace_seconds,
-        )
-    return compressed
-
-
-def _mirror_sort_key(p: Path) -> tuple[int, int]:
-    """Oldest-first key for a mirror file (day, sub-day order).
-
-    Day comes from the name (`_mirror_day`); sub-day is the numeric pid for
-    legacy files (string order would prune `...-1000` before `...-999`,
-    deleting a newer file) or the epoch seconds of a rotated backup. The
-    ACTIVE `spans.jsonl` (no day stamp) sorts last — the cap prune never
-    deletes the file being written unless the cap is absurdly small (same
-    contract as retention: bounded disk, documented loss, never silent). No
-    stat — the file may vanish mid-parse.
-    """
-    day = _mirror_day(p)
-    if day is not None:
-        return (day.toordinal(), _mirror_epoch(p))
-    return (2**31, 0)
-
-
-def _mirror_size(p: Path) -> int:
-    """Size of a mirror file, 0 if it vanished between glob and stat.
-
-    The traces dir is shared by every agent process on the host; a peer's
-    prune can unlink a file this process already globbed, and a bare stat
-    would then raise FileNotFoundError — out of the agent boot path, which
-    calls `_enforce_dir_cap` with no try/except (a peer pruning at the same
-    moment could kill an agent start).
-    """
-    try:
-        return p.stat().st_size
-    except OSError:
-        return 0
-
-
-def _enforce_dir_cap(max_mb: int) -> int:
-    """Delete oldest mirror files until the traces directory fits under `max_mb`.
-
-    Iterates oldest-first by day stamp + numeric pid (`_mirror_sort_key`).
-    Never deletes the file currently being written (the newest, by key) unless
-    the cap is absurdly small — same contract as retention: bounded disk,
-    documented loss, never silent. Returns the number of files deleted. No-op
-    when max_mb <= 0.
-    """
-    if max_mb <= 0:
-        return 0
-    cap_bytes = max_mb * 1024 * 1024
-    files = sorted(traces_dir().glob("spans*.jsonl*"), key=_mirror_sort_key)
-    total = sum(_mirror_size(p) for p in files)
-    removed = 0
-    for p in files:
-        if total <= cap_bytes:
-            break
-        total -= _mirror_size(p)
-        p.unlink(missing_ok=True)
-        removed += 1
-    if removed:
-        logger.info(
-            "trace mirror over size cap — removed oldest files",
-            event="trace",
-            removed=removed,
-            cap_mb=max_mb,
-        )
-    return removed
-
-
-def _disk_usage() -> tuple[float, int] | None:
-    """(usage fraction, free bytes) of the traces dir's data disk.
-
-    The mirror is written to $AVA_HOME/traces, so the data disk is the one that
-    matters. A stat failure (exotic filesystem) returns None — the guard must
-    never be the reason recording is off.
-    """
-    try:
-        usage = shutil.disk_usage(traces_dir())
-    except OSError:
-        return None
-    return usage.used / usage.total, usage.free
-
-
-def _disk_watermark_exceeded(watermark: float) -> bool:
-    """True when the data disk's usage fraction exceeds the watermark.
-
-    `watermark >= 1.0` disables the guard (the fraction can never exceed 1.0).
-    """
-    if watermark >= 1.0:
-        return False
-    usage = _disk_usage()
-    return usage is not None and usage[0] > watermark
 
 
 class OtlpJsonHttpSpanExporter(SpanExporter):
     """OTLP/HTTP span exporter to the local OTel Collector (protobuf wire).
 
     Each `export()` batch is encoded to the OTLP dict, content-stripped
-    (defensive layer 2 — stripped here, content never leaves the process),
-    re-serialized to the OTLP `ExportTraceServiceRequest` protobuf and POSTed
-    to `{endpoint}/v1/traces` with `Content-Type: application/x-protobuf` —
-    the same wire path `ava trace ship` uses. Protobuf, not OTLP/JSON, on the
+    (defensive layer 2 — content never leaves the process), re-serialized to
+    the OTLP `ExportTraceServiceRequest` protobuf and POSTed to
+    `{endpoint}/v1/traces` with `Content-Type: application/x-protobuf` — the
+    same wire path `ava trace ship` uses. Protobuf, not OTLP/JSON, on the
     wire: the collector's JSON receiver rejects the SDK's padded-base64 ids
-    (verified 2026-08-14 against otelcol-contrib 0.155.0), and protobuf is
-    the canonical OTLP/HTTP encoding. The endpoint is the LOCAL sidecar
-    (``AVA_TELEMETRY_OTLP_ENDPOINT``, default 127.0.0.1:4318); agents never
-    dial a backend directly.
+    (verified 2026-08-14 against otelcol-contrib 0.155.0). The endpoint is
+    the LOCAL sidecar (``AVA_TELEMETRY_OTLP_ENDPOINT``, default
+    127.0.0.1:4318); agents never dial a backend directly.
 
     The sidecar is supervised (watchdog, 60s), so a failed POST means a
     restart in progress or a broken install: retry briefly, then return
     FAILURE and let the SDK's batch processor drop the batch — bounded loss,
     reported. The mirror is the collector's job now; this exporter's only
-    duties are stripping (defensive layer 2, before anything leaves the
-    process) and the POST itself.
+    duties are stripping (defensive layer 2) and the POST itself.
     """
 
     # POST attempts per batch before FAILURE. The sidecar is local; 3 tries
@@ -538,10 +315,11 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
 
 
 def _retry_initialize_tracing() -> None:
-    """Retry the collector preflight on one daemon thread until init succeeds."""
-    while not _state["initialized"]:
+    """Retry the collector preflight on one daemon thread until init succeeds
+    or fails permanently (arm_failed — one arm attempt per process)."""
+    while not _state["initialized"] and not _state["arm_failed"]:
         time.sleep(COLLECTOR_RETRY_INTERVAL_S)
-        if _state["initialized"]:
+        if _state["initialized"] or _state["arm_failed"]:
             return
         initialize_tracing()
 
@@ -562,17 +340,16 @@ def _start_collector_retry() -> None:
 def _arm_tracing(endpoint: str) -> None:
     """Import traceloop and run Traceloop.init, on one daemon thread.
 
-    The import + init cost ~2.5-3 s: traceloop.sdk pulls in pandas via its
-    datasets client, and the GOOGLE_GENERATIVEAI instrumentor imports
-    google.genai (the ~66 MB import shared/lm/_gemini_cache.py keeps lazy).
-    Off the boot path, initialize_tracing returns after the cheap decisions;
-    consumers wait on ensure_init_resolved() before first use; a failure
-    logs and resolves the wait — recording stays off instead of killing boot.
+    The import + init cost ~2.5-3 s (traceloop.sdk pulls in pandas via its
+    datasets client; the GOOGLE_GENERATIVEAI instrumentor imports the ~66 MB
+    google.genai that shared/lm/_gemini_cache.py keeps lazy). Off the boot
+    path, initialize_tracing returns after the cheap decisions; consumers
+    wait on ensure_init_resolved() before first use; a failure logs and
+    resolves the wait — recording stays off instead of killing boot.
     """
     try:
-        # Content stripping, layer 1 (the source): the instrumentors check
-        # TRACELOOP_TRACE_CONTENT per prompt/completion, so false-before-init
-        # keeps LLM content out of span attributes. Unconditional when
+        # Content stripping, layer 1 (the source): false-before-init keeps
+        # LLM content out of span attributes. Unconditional when
         # strip_content is on — an operator-set true would re-open the
         # 31 GB/h hole. Layer 2 (the exporter) stays armed regardless.
         if settings.observability.trace_strip_content:
@@ -584,8 +361,7 @@ def _arm_tracing(endpoint: str) -> None:
         # Mirror the LLM call paths Ava actually uses. LangGraph rides on the
         # LANGCHAIN instrumentor (its callback handler nests node spans), so
         # there is no separate LANGGRAPH instrument. LiteLLM, when used,
-        # surfaces through the provider instrumentors (Anthropic/OpenAI) at
-        # the SDK layer.
+        # surfaces through the provider instrumentors at the SDK layer.
         instruments = {
             Instruments.ANTHROPIC,
             Instruments.OPENAI,
@@ -594,13 +370,9 @@ def _arm_tracing(endpoint: str) -> None:
         }
 
         # `exporter=` makes OtlpJsonHttpSpanExporter the sole span exporter,
-        # pointed at the LOCAL OTel Collector sidecar (no api_endpoint /
-        # api_key, so the SDK never dials a remote backend itself).
-        # `telemetry_enabled=False` stops traceloop-sdk's own anonymous usage
-        # telemetry from phoning home to api.traceloop.com.
-        # traceloop-sdk's inlined init() signature types resource_attributes
-        # as dict[Unknown, Unknown]; the call below passes only fully-typed
-        # kwargs.
+        # pointed at the LOCAL sidecar (no api_endpoint/api_key, so the SDK
+        # never dials a remote backend itself); `telemetry_enabled=False`
+        # stops traceloop's own usage telemetry from phoning home.
         Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
             app_name="ava",
             exporter=OtlpJsonHttpSpanExporter(endpoint=endpoint),
@@ -619,6 +391,11 @@ def _arm_tracing(endpoint: str) -> None:
         _state["collector_offline_reported"] = False
         _state["initialized"] = True
     except Exception as exc:
+        # One attempt per process: the retry loop only bridges
+        # unreachable->reachable, and retrying Traceloop.init after a partial
+        # failure would fake-succeed — the TracerWrapper singleton survives,
+        # so a second init() adds no instrumentors yet reports success.
+        _state["arm_failed"] = True
         logger.warning(
             "trace recording failed to initialize — spans disabled this process",
             event="trace",
@@ -644,18 +421,35 @@ def _start_arm_thread(endpoint: str) -> None:
     arm_thread.start()
 
 
+_INIT_RESOLVED_TIMEOUT_S = 30.0
+
+
 def ensure_init_resolved() -> None:
     """Block until the boot-time trace decision is final; no-op when none is pending.
 
     turn_span() calls this before opening the first turn root span: a span
     opened against the unset proxy tracer is silently lost, and LangChain
-    callback managers configured before the instrumentor wrap lands never
-    carry the traceloop handler. Only waits when this process actually armed
-    background tracing — a declined or never-requested init returns
-    immediately (recording is off by decision, see initialize_tracing).
+    callback managers configured before the wrap lands never carry the
+    traceloop handler. Only waits when this process armed background tracing
+    — declined or never-requested init returns immediately.
+
+    The wait is bounded (_INIT_RESOLVED_TIMEOUT_S): a hung arm (cross-thread
+    import deadlock, SDK network stall) must not hang the first turn forever.
+    A timeout logs once, proceeds without recording, and later turns skip the
+    wait entirely — if the arm eventually completes, recording comes up
+    mid-life (the first turn's spans stay lost, the price of a hung init).
     """
-    if _state["arm_thread"] is not None:
-        _state["init_resolved"].wait()
+    if _state["arm_thread"] is None or _state["timeout_reported"]:
+        return
+    if _state["init_resolved"].wait(_INIT_RESOLVED_TIMEOUT_S):
+        return
+    _state["timeout_reported"] = True
+    logger.warning(
+        "trace init not resolved within timeout — proceeding without recording",
+        event="trace",
+        action="init_resolved_timeout",
+        timeout_s=_INIT_RESOLVED_TIMEOUT_S,
+    )
 
 
 def _serialized_initialize(function: Callable[[], None]) -> Callable[[], None]:
@@ -676,13 +470,14 @@ def initialize_tracing() -> None:
     No-op when settings.observability.trace_enabled=False. When on, this call
     runs only the cheap decisions — disk guards + collector preflight — and
     hands the heavy part (traceloop import + Traceloop.init, ~2.5-3 s) to one
-    daemon thread (_arm_tracing). The boot path is therefore sub-second; the
-    ordering contract "instrumentors installed before the first turn" is
-    enforced by ensure_init_resolved() inside turn_span (the callback-manager
-    wrap and the SDK instrumentors are call-time, so a model built during
-    boot still produces spans). Spans: OtlpJsonHttpSpanExporter pointed at
-    the LOCAL sidecar, traceloop instrumenting Anthropic + OpenAI +
-    LangChain + Google GenAI (LangGraph via the LangChain callback handler).
+    daemon thread (_arm_tracing), one attempt per process. The boot path is
+    therefore sub-second; the ordering contract "instrumentors installed
+    before the first turn" is enforced by ensure_init_resolved() inside
+    turn_span (the callback-manager wrap and the SDK instrumentors are
+    call-time, so a model built during boot still produces spans). Spans:
+    OtlpJsonHttpSpanExporter pointed at the LOCAL sidecar, traceloop
+    instrumenting Anthropic + OpenAI + LangChain + Google GenAI (LangGraph
+    via the LangChain callback handler).
 
     Recording is one OTLP/HTTP hop to the LOCAL sidecar; the sidecar writes the
     JSONL mirror and either fans out locally or relays to the gateway. If the
@@ -703,7 +498,7 @@ def initialize_tracing() -> None:
     - content stripping (`trace_strip_content`): TRACELOOP_TRACE_CONTENT=false
       + exporter-side re-strip, so the mirror holds metadata only.
     """
-    if _state["initialized"]:
+    if _state["initialized"] or _state["arm_failed"]:
         return
     if not settings.observability.trace_enabled:
         return
@@ -780,9 +575,9 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
     attribute groups one agent's turns into a session on the viewer; the turn
     attribute orders them within a process lifetime.
 
-    No-op when trace_enabled=False or initialize_tracing hasn't run yet.
-    Waits for a pending background init first, so the root span never opens
-    against the unset proxy tracer (a span opened that way is silently lost).
+    No-op when trace_enabled=False or initialize_tracing hasn't run yet; a
+    pending background init is awaited first (ensure_init_resolved) so the
+    root span never opens against the unset proxy tracer.
     """
     if not settings.observability.trace_enabled:
         yield
