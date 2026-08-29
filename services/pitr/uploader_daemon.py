@@ -20,11 +20,13 @@ _log = logging.getLogger("services.pitr.uploader_daemon")
 
 
 def build_uploader() -> PitrUploader:
-    config = settings.physical_backup
-    if not config.pitr_enabled:
+    # Each read is a full settings.<domain>.<field> access: the consumer-guard
+    # AST scan only recognizes that shape, and the gateway profile must carry
+    # the physical_backup domain for this daemon to construct it at runtime.
+    if not settings.physical_backup.pitr_enabled:
         raise RuntimeError("PITR uploader cannot start while AVA_PITR_ENABLED is off")
-    key_path = config.pitr_backup_key_file
-    credentials = config.pitr_gcs_credentials_file
+    key_path = settings.physical_backup.pitr_backup_key_file
+    credentials = settings.physical_backup.pitr_gcs_credentials_file
     if key_path is None or credentials is None:
         raise RuntimeError("validated PITR secrets are missing")
     root = ava_home() / "physical-backup"
@@ -32,21 +34,32 @@ def build_uploader() -> PitrUploader:
         spool=root / "spool",
         ack_dir=root / "ack",
         staging=root / "staging",
-        prefix=config.pitr_gcs_prefix,
+        prefix=settings.physical_backup.pitr_gcs_prefix,
         key=key_path.read_bytes(),
-        key_id=config.pitr_backup_key_id,
+        key_id=settings.physical_backup.pitr_backup_key_id,
         store=GCSObjectStore(
-            project=config.pitr_gcs_project,
-            bucket=config.pitr_gcs_bucket,
+            project=settings.physical_backup.pitr_gcs_project,
+            bucket=settings.physical_backup.pitr_gcs_bucket,
             credentials_file=credentials,
         ),
     )
 
 
+_CRITICAL_BACKOFF_S = 300.0
+
+
 async def upload_loop(
     uploader: PitrUploader, *, stop: asyncio.Event, liveness: Liveness | None = None
 ) -> None:
-    """Attempt one object per iteration; SDK and outer retries never nest."""
+    """Attempt one object per iteration; SDK and outer retries never nest.
+
+    Critical failures (auth/config rejection, an immutable-object collision)
+    never crash the daemon: a raised exception would make the watchdog respawn
+    the process on the same collision, a restart flap instead of a backoff
+    (baseline 7 — critical conditions do not busy-loop). They are logged and
+    retried on the long critical cadence, so a config fix or a manual
+    collision resolution recovers in place.
+    """
     failures = 0
     while not stop.is_set():
         if liveness is not None:
@@ -64,9 +77,9 @@ async def upload_loop(
                 failures += 1
                 delay = min(60.0, float(2 ** min(failures, 6)))
                 _log.warning("PITR upload temporarily failed; retrying after bounded backoff")
-            except (PermanentObjectStoreError, RemoteCollisionError):
-                _log.exception("PITR upload entered a critical operator-action state")
-                raise
+            except (PermanentObjectStoreError, RemoteCollisionError) as exc:
+                _log.error("PITR upload critical (operator action needed): %s", exc)
+                delay = _CRITICAL_BACKOFF_S
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop.wait(), timeout=delay)
 

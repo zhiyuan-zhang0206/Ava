@@ -209,6 +209,7 @@ class TestConsumptionMatrixDeclarations:
             # service, gated or not, or the runner projection has no key to
             # carry when a cluster does flip the mode.
             "agent_host",
+            "pitr_uploader",
         }
         meta = _fields()  # pyright: ignore[reportUnknownVariableType]
         for svc, alias in aliases.items():

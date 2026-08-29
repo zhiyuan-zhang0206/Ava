@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import BinaryIO, Protocol
+from pathlib import Path
+from typing import Protocol
 
 
 @dataclass(frozen=True)
@@ -18,15 +19,20 @@ class RemoteObjectAck:
 
 
 class ObjectStore(Protocol):
-    def put_stream_if_absent(
+    def put_file_if_absent(
         self,
-        open_source: Callable[[], BinaryIO],
-        size: int,
+        path: Path,
         object_name: str,
         metadata: Mapping[str, str],
-    ) -> RemoteObjectAck: ...
+    ) -> RemoteObjectAck:
+        """Publish ``path`` under ``object_name`` iff it does not exist yet.
 
-    def stat(self, object_name: str) -> RemoteObjectAck | None: ...
+        ``path`` MUST be a real regular file: the SDK's resumable upload
+        (> 8 MiB) seeks and re-reads its source, which only a seekable file
+        supports (an in-memory encrypted stream raises UnsupportedOperation
+        and every large WAL segment fails to upload — QA #920 block 1).
+        """
+        ...
 
 
 class ObjectStoreError(RuntimeError):

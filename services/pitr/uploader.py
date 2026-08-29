@@ -10,7 +10,8 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import BinaryIO
+
+import google_crc32c
 
 from services.pitr.archive_shim import archive_name_is_valid
 from services.pitr.crypto import MAGIC, EncryptionPlan, create_plan, open_encrypted
@@ -47,6 +48,15 @@ def _digest(path: Path) -> tuple[str, int]:
             value.update(chunk)
             size += len(chunk)
     return value.hexdigest(), size
+
+
+def _file_crc32c(path: Path) -> str:
+    """Base64 crc32c of the staging ciphertext — the value GCS reports back."""
+    checksum = google_crc32c.Checksum()  # pyright: ignore[reportUnknownMemberType]
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            checksum.update(chunk)  # pyright: ignore[reportUnknownMemberType]
+    return base64.b64encode(checksum.digest()).decode("ascii")
 
 
 def _fsync_dir(path: Path) -> None:
@@ -135,6 +145,36 @@ class PitrUploader:
             staged.unlink(missing_ok=True)
         return plan, plan_path
 
+    def _write_staging(self, source: Path, plan: EncryptionPlan) -> Path:
+        """Materialize the encrypted archive as a real seekable file.
+
+        QA #920 block 1: uploading the encrypted stream directly breaks past
+        ~8 MiB — the SDK's resumable upload calls ``tell()``/``seek()`` on
+        its source, and the streaming reader raises UnsupportedOperation, so
+        every real WAL segment failed while tests (which read the whole
+        stream in one ``read()``) stayed green. The ciphertext is therefore
+        staged to disk first (atomic, 0600, fsync) and uploaded by filename;
+        the stream is still the single encryption implementation.
+        """
+        staging_path = self._staging / f"{source.name}.enc"
+        fd, raw = tempfile.mkstemp(prefix=f".{staging_path.name}.", dir=self._staging)
+        staged = Path(raw)
+        try:
+            os.fchmod(fd, 0o600)
+            with (
+                os.fdopen(fd, "wb") as output,
+                open_encrypted(source, key=self._key, plan=plan) as encrypted,
+            ):
+                for chunk in iter(lambda: encrypted.read(1024 * 1024), b""):
+                    output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            staged.replace(staging_path)
+            _fsync_dir(self._staging)
+        finally:
+            staged.unlink(missing_ok=True)
+        return staging_path
+
     def upload_one(self, source: Path) -> AckManifest:
         if not archive_name_is_valid(source.name):
             raise ValueError("unsupported archive filename")
@@ -150,15 +190,8 @@ class PitrUploader:
 
         object_name = self._object_name(source.name)
         plan, plan_path = self._load_or_create_plan(source, object_name)
-
-        def open_source() -> BinaryIO:
-            return open_encrypted(source, key=self._key, plan=plan)
-
-        checksum = __import__("google_crc32c").Checksum()
-        with open_source() as encrypted:
-            for chunk in iter(lambda: encrypted.read(1024 * 1024), b""):
-                checksum.update(chunk)
-        expected_crc = base64.b64encode(checksum.digest()).decode()
+        staging_path = self._write_staging(source, plan)
+        expected_crc = _file_crc32c(staging_path)
         metadata = {
             "ava-archive-name": source.name,
             "ava-source-sha256": plan.source_sha256,
@@ -167,9 +200,7 @@ class PitrUploader:
             "ava-encryption-format": MAGIC.decode(),
             "ava-key-id": self._key_id,
         }
-        remote = self._store.put_stream_if_absent(
-            open_source, plan.ciphertext_size, object_name, metadata
-        )
+        remote = self._store.put_file_if_absent(staging_path, object_name, metadata)
         self._verify_remote(remote, object_name, plan.ciphertext_size, expected_crc, metadata)
         ack = AckManifest(
             source.name,
@@ -184,6 +215,7 @@ class PitrUploader:
             datetime.now(UTC).isoformat(),
         )
         self._write_ack(ack, ack_path)
+        staging_path.unlink()
         plan_path.unlink()
         _fsync_dir(self._staging)
         source.unlink()
@@ -198,13 +230,31 @@ class PitrUploader:
         expected_crc: str,
         metadata: dict[str, str],
     ) -> None:
-        if (
-            remote.object_name != object_name
-            or remote.generation <= 0
-            or remote.size != ciphertext_size
-            or remote.crc32c != expected_crc
-            or dict(remote.metadata) != metadata
-        ):
-            if not remote.created:
-                raise RemoteCollisionError("immutable GCS object differs from local archive")
-            raise RuntimeError("new GCS object failed post-upload verification")
+        if remote.object_name != object_name:
+            raise RemoteCollisionError("immutable GCS object differs from local archive")
+        if remote.created:
+            # Fresh upload: the reloaded object must match what we sent —
+            # size, crc32c, metadata (design baseline 4) — before any ACK.
+            if (
+                remote.generation <= 0
+                or remote.size != ciphertext_size
+                or remote.crc32c != expected_crc
+                or dict(remote.metadata) != metadata
+            ):
+                raise RuntimeError("new GCS object failed post-upload verification")
+            return
+        # 412 (the object already exists): baseline-4 idempotency compares
+        # SOURCE attributes only — source sha/size, encryption format, key id
+        # — never ciphertext bytes. A retry after a crash may legitimately
+        # re-encrypt with a fresh nonce (different ciphertext, same archive),
+        # so a ciphertext-level compare would false-positive into a critical
+        # collision. Mismatch here means a genuinely different object: critical
+        # collision, never overwrite.
+        source_keys = (
+            "ava-source-sha256",
+            "ava-source-size",
+            "ava-encryption-format",
+            "ava-key-id",
+        )
+        if any(remote.metadata.get(key) != metadata[key] for key in source_keys):
+            raise RemoteCollisionError("immutable GCS object differs from local archive")

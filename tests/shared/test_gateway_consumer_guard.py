@@ -41,6 +41,7 @@ _GATEWAY_SOURCE_ROOTS = [
     "services/milvus/",
     "services/delivery_watchdog/",
     "services/frontend/",
+    "services/pitr/",
 ]
 
 
@@ -357,6 +358,7 @@ _KIND_ROOTS: dict[str, list[str]] = {
         "services/memory_indexer/",
         "services/milvus/",
         "services/delivery_watchdog/",
+        "services/pitr/",
     ],
     "agent": ["agent/", "ava/", "ava_builtins/"],
     "runner": [
