@@ -204,7 +204,7 @@ def _seed_task(
     owner: int,
     *,
     title: str = "t",
-    status: str = "open",
+    status: str = "in_progress",
     reminder_count: int = 0,
 ) -> int:
     with db_conn.cursor() as cur:

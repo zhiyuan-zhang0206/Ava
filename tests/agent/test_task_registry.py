@@ -1700,6 +1700,39 @@ def test_update_non_root_rejects_ongoing_status(
         ava._boot._agent_id = original
 
 
+def test_zero_shim_update_status_open_is_rejected(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """The 'open' status is gone entirely (user ruling 2026-08-29): update()
+    refuses it with the narrowed enum's error — no backward-compat shim."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create("shim-check", "detail", parent=root_task_id)
+        with pytest.raises(ValueError, match="status must be one of"):
+            task_registry.update(task.id, status="open")
+        assert task_registry.get(task.id).status == "in_progress"
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_zero_shim_list_status_open_is_rejected(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """list(status="open") is refused too — the read filter lost the value
+    with the enum (the root stays addressable via 'ongoing')."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task_registry.create("shim-check-list", "detail", parent=root_task_id)
+        with pytest.raises(ValueError, match="status must be one of"):
+            task_registry.list(status="open")
+    finally:
+        ava._boot._agent_id = original
+
+
 # ── parent requirement & tree anchoring ──────────────────────────────────────
 
 

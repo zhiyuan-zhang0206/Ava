@@ -27,6 +27,8 @@ ALTER TABLE agent_tasks ADD CONSTRAINT agent_tasks_status_check
 --    keeps the migration replay-safe on a fresh DB bootstrapped from the
 --    already-updated db/schema.sql baseline (same idempotency convention as
 --    the root-task-ongoing migration's DROP CONSTRAINT IF EXISTS + ADD).
+--    Note: IF NOT EXISTS only guards an identical existing index; if a future
+--    change alters the predicate, it must DROP + CREATE (not IF NOT EXISTS).
 DROP INDEX IF EXISTS agent_tasks_title_unique_open;
 CREATE UNIQUE INDEX IF NOT EXISTS agent_tasks_title_unique_in_progress
     ON agent_tasks (title) WHERE status = 'in_progress';

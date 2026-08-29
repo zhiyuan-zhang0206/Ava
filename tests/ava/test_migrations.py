@@ -1427,6 +1427,10 @@ VALUES (1, 'Root', 'root', 'ongoing', 'system', TRUE, NULL),
        (2, 'open task', 'open', 'open', '1', FALSE, 1),
        (3, 'active task', 'active', 'in_progress', '1', FALSE, 1),
        (4, 'done task', 'done', 'done', '1', FALSE, 1);
+-- The explicit ids above do not advance the BIGSERIAL sequence; the tests
+-- insert without ids afterwards, so the sequence must be set to the max.
+SELECT setval(pg_get_serial_sequence('agent_tasks', 'id'),
+              (SELECT max(id) FROM agent_tasks));
 """
 
 
