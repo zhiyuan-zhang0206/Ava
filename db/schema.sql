@@ -182,6 +182,21 @@ COMMENT ON TABLE heartbeat_pause_log IS
 CREATE INDEX heartbeat_pause_log_agent_created_idx
     ON heartbeat_pause_log (agent_id, created_at DESC, id DESC);
 
+-- ava_runner surface for the pause trail (task #1932): the runner process
+-- (ava.self.pause_heartbeat) SELECTs the previous window and INSERTs the new
+-- row; the BIGSERIAL id draws from the owning sequence. UPDATE/DELETE stay
+-- out — the trail is append-only and no runner path rewrites rows.
+-- Gated on the role's existence: fresh bootstrap applies this baseline before
+-- install birth creates ava_runner, and shared/cluster/provision.py's
+-- ensure_runner_role grants the audited surface at birth.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT ON heartbeat_pause_log TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE heartbeat_pause_log_id_seq TO ava_runner;
+    END IF;
+END $$;
+
 -- ─────────────── agent_notices ───────────────
 -- The agent->user queue: one primitive at three obligation rungs, discriminated
 -- by require_response (the stakes axis priority P0..P3 is orthogonal):
