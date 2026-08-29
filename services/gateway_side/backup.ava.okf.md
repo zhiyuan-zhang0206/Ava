@@ -32,6 +32,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `services/backup.py:run_backup()` — actual dump + prune
 - `cli/commands/_converge_pitr.py` — publishes the disabled-by-default physical-backup layout and stable archive shim; it does not alter PostgreSQL
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
+- `services/pitr/activation_state.py` — strict atomic activation operation record; its persisted `started_at` survives refresh/restart and its first reachable transition ends at `wal_config_pending`
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 - `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
 - `services/pitr/retention_planner.py` — default-off local dry-run planner; strictly joins local ACK and viewer-only remote immutable identities, atomically records a canonical fail-closed N=2 plan, and exposes only fresh counts/bytes through scheduler health, with no remote-delete boundary; unprotected or cross-timeline evidence blocks eligibility
@@ -44,6 +45,10 @@ host's: reading a host timezone can make a current dump appear to be future.
 - Physical PITR is currently a **foundation only**: converge publishes a private
   per-home spool and a source-independent, self-checked shim, while
   `AVA_PITR_ENABLED` defaults false and PostgreSQL `archive_mode` stays untouched.
+  `ava cluster pitr activate` first validates that shadow posture and creates a
+  verified encrypted logical snapshot. It still leaves both feature flags and
+  PostgreSQL untouched until the separately reviewed remote-smoke/restart gate
+  is delivered.
   A local archived segment is not a remote ACK. When explicitly enabled, the
   GCS uploader encrypts each spooled segment, conditionally creates one immutable
   object, verifies its generation/CRC32C/metadata, and only then fsyncs an ACK
