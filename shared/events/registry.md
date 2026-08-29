@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 21 | events table |
-| telemetry (category=telemetry) | `events` | 128 | events table |
+| telemetry (category=telemetry) | `events` | 129 | events table |
 | log (category=log) | `events` | 6 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -88,7 +88,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 128)
+## 3. Telemetry events (category=telemetry, 129)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -227,6 +227,7 @@ consumers: see the comments at each emit point.
 | `resolution_status` | absolute unresolved + dismissed warning/error class counts over the daemon's fixed six-hour window | noise | unresolved_warnings, unresolved_errors, dismissed_warnings, dismissed_errors, window | — | events |
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events |
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events |
+| `archive_fetch_degraded` | frozen Loki archive read degraded (lock-wait skip or failed scan) | anomaly | route, reason | — | events |
 
 ## 4. Log (bare logs, category=log)
 
