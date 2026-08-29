@@ -1478,6 +1478,66 @@ async def test_claim_cas_loss_on_wake_flip_exits_cleanly(
     assert row is not None and row[0] == "terminated"
 
 
+async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """Hosted restart: goto END with `restart_requested` (not `exit_requested`),
+    no 'restarting' flip (there is no restarter to pick the row up — it must
+    stay runnable), and the lifecycle marker renders inline (nothing else will:
+    the restarter is what writes restart_completed in process mode)."""
+    tid = spawn_agent()
+    _set_agent_status(db_conn, tid, "running")
+    restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    await _await_inbound_visible(aops_pool, restart_id)
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
+        _config(tid),
+    )
+
+    assert cmd.goto == END
+    assert cmd.update["restart_requested"] is True  # type: ignore[index]
+    assert cmd.update["exit_requested"] is False  # type: ignore[index]
+    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert "You have been restarted by user" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    # the row never left a runnable status — no restarter will come for it
+    await _await_status(aops_pool, tid, "running")
+
+
+async def test_claim_restart_kind_hosted_self_arms_no_process_respawn(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A hosted self-restart must not arm the atexit self-respawn fallback —
+    that fallback forks a replacement PROCESS, which hosted mode has no use
+    for and which would double-claim with the dispatcher's turn task."""
+    from agent import db as agent_db
+
+    scheduled: list[int] = []
+    monkeypatch.setattr(agent_db, "schedule_self_respawn", scheduled.append)
+    tid = spawn_agent()
+    _set_agent_status(db_conn, tid, "running")
+    restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="self")
+    await _await_inbound_visible(aops_pool, restart_id)
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
+        _config(tid),
+    )
+
+    assert cmd.goto == END
+    assert cmd.update["restart_requested"] is True  # type: ignore[index]
+    assert scheduled == []
+    await _await_status(aops_pool, tid, "running")
+
+
 async def test_claim_restart_completed_kind_appends_marker_and_continues(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

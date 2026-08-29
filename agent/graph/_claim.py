@@ -177,13 +177,21 @@ async def _claim_node_impl(
     # A dispatched batch means this invocation is mid-turn: stamp turn_active
     # so a later claim pass that finds nothing to do ends the invocation (the
     # turn boundary above) instead of blocking. exit_requested carries the
-    # process-exit intent to the runloop; it keys on the dispatch verdict
-    # (st.next_goto == END: a terminate/restart won the batch), not on the
-    # command's own goto — a compact co-batched with a terminate routes
-    # through INIT_CONTEXT first and only then reaches END via reset.resume.
+    # process-exit intent to the runloop; restart_requested carries the hosted
+    # restart intent (drop the runtime, no exit-notify). Both key on the
+    # dispatch verdict (st.next_goto == END: a terminate/restart won the
+    # batch), not on the command's own goto — a compact co-batched with a
+    # terminate routes through INIT_CONTEXT first and only then reaches END
+    # via reset.resume.
     update = dict(outcome.command.update or {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     update["turn_active"] = True
-    update["exit_requested"] = st.next_goto == END
+    # Hosted restart sets restart_requested and must NOT set exit_requested:
+    # the host drops the runtime and ends the turn task without the
+    # process-exit notify. The two channels are mutually exclusive by
+    # construction (restart_requested is only ever set by the hosted restart
+    # branch, which never flips the row).
+    update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
+    update["restart_requested"] = st.restart_requested
     return Command[ClaimGoto](update=update, goto=outcome.command.goto)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType]
 
 

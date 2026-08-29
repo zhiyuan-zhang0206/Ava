@@ -369,6 +369,7 @@ class TestInvokeGraphLifecycleLogging:
             "turn_active": False,
             "exit_requested": False,
             "turn_idle": False,
+            "restart_requested": False,
         }
         # Exactly one Error event, naming the recoverable-pause semantics.
         error_emits = [c for c in pub.emit.call_args_list if '"role":"error"' in c.args[0]]
@@ -493,6 +494,7 @@ class TestInvokeGraphLifecycleLogging:
             "turn_active": False,
             "exit_requested": False,
             "turn_idle": False,
+            "restart_requested": False,
         }
 
     async def test_turn_boundary_reinvokes_until_exit_requested(self) -> None:
@@ -523,7 +525,8 @@ class TestInvokeGraphLifecycleLogging:
                 "turn_active": False,
                 "exit_requested": False,
                 "turn_idle": False,
-            }, "every invocation's input must reset the per-invoke turn/exit/idle flags"
+                "restart_requested": False,
+            }, "every invocation's input must reset the per-invoke turn/exit/idle/restart flags"
 
     async def test_exit_requested_flushes_node_exit_aggregate(
         self, monkeypatch: pytest.MonkeyPatch

@@ -88,9 +88,11 @@ per agent, and hosted mode does not change it here:
   launch-confirm and just delivers the first prompt + a wake, which this host's
   dispatcher turns into the first turn task. Resurrect / respawn / swap-in /
   revive flip the row and publish a wake the same way.
-- **restart** — an `exit_requested` restart ends the turn task and notifies the
-  gateway (which leaves the row `restarting` for the restarter); the restarter
-  then respawns a PROCESS. Hosted restart semantics land separately.
+- **restart** — hosted restarts resolve in-process: claim skips the
+  'restarting' flip (there is no restarter to pick it up) and sets the
+  `restart_requested` channel; this host drops the runtime and ends the task
+  without an exit-notify, so the row stays runnable and the next wake starts
+  clean with a rebinded config view.
 - **hibernation, the lease renewer, and the lease-zombie reaper** are untouched.
 
 That is the migration path the design doc plans (Phase 1 behind the flag, then
@@ -489,7 +491,7 @@ class AgentHost:
     async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> None:
         """Invoke the graph until this agent has nothing left to do.
 
-        Three-way, and the three cases are genuinely different:
+        Four-way, and the four cases are genuinely different:
 
         - `exit_requested` — claim resolved a terminate / restart, or lost a
           lifecycle CAS. Terminal for this agent: stop, tell the gateway, and
@@ -497,6 +499,12 @@ class AgentHost:
           makes on the way out, and it is guarded server-side, so a restart
           (which already flipped the row to `restarting`) is left alone while a
           terminate is finalized.
+        - `restart_requested` — claim resolved a restart and this run is
+          hosted: there is no process to exit and no restarter to pick up a
+          'restarting' row. Drop the cached runtime (the checkpointer thread,
+          the real state, is untouched — the next wake starts clean, exactly
+          like a fresh process), end the task, and do NOT notify the gateway:
+          the row must stay runnable.
         - `turn_idle` — claim found nothing to claim and this run is hosted, so
           there is no process to park. End the task; the dispatcher creates a
           fresh one when a wake lands, and until then this agent costs nothing.
@@ -504,7 +512,7 @@ class AgentHost:
           thread, so state carries across turns and the next invocation's claim
           does the looking.
 
-        The input is the minimal three-flag reset, never a full `AgentState()`:
+        The input is the minimal flag reset, never a full `AgentState()`:
         a default state would be an update resetting `halted`, the
         compact/memory sub-states, and every plugin state field on each turn.
         Each invocation gets its own root span, so one turn is one exported
@@ -522,6 +530,7 @@ class AgentHost:
                         "turn_active": False,
                         "exit_requested": False,
                         "turn_idle": False,
+                        "restart_requested": False,
                     },
                     config=config,
                     context=ctx,
@@ -537,6 +546,16 @@ class AgentHost:
                 )
                 self.drop_agent(agent_id)
                 _notify_exit(agent_id)
+                return
+            if result["restart_requested"]:
+                logger.info(
+                    "hosted agent {agent_id} requested a restart after {turns} turn(s) — "
+                    "dropping its runtime and ending the turn task; the next wake "
+                    "starts clean (no exit-notify: the row stays runnable)",
+                    agent_id=agent_id,
+                    turns=turn,
+                )
+                self.drop_agent(agent_id)
                 return
             if result["turn_idle"]:
                 return
