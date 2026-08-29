@@ -178,7 +178,8 @@ def _retry_delay_seconds(attempt: int) -> float:
 def _raise_from_response(resp: httpx.Response) -> None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Non-2xx → rebuild exception per wire contract. Flow:
 
-    1. body JSON parse failure (FastAPI default 500 plain text, etc.) →
+    1. body JSON parse failure (FastAPI default 500 plain text, corrupted
+       content-encoding → httpx.DecodingError, etc.) →
        call `resp.raise_for_status()` raising `httpx.HTTPStatusError`,
        full status + body preview shown to caller
     2. JSON OK but `reason` field missing / `ErrorReason(...)` unrecognized /
@@ -219,9 +220,16 @@ def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict] | None:  # no
     fall through to `raise_for_status` (HTTPStatusError with the original
     status code), not escape as a KeyError/JSONDecodeError that masks it.
     """
+    import httpx
+
     try:
         body = resp.json()
-    except _json.JSONDecodeError:
+    except (_json.JSONDecodeError, httpx.DecodingError):
+        # JSONDecodeError: body is not JSON (FastAPI default 500 text, ...).
+        # DecodingError: httpx 0.28.1 raises it when body decoding fails on a
+        # corrupted Content-Encoding (broken gzip/br stream) — same
+        # protocol-mismatch class; falls through to the clean HTTP error
+        # instead of escaping and masking the status code.
         return None
     if not isinstance(body, dict):
         return None
