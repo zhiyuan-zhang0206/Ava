@@ -4,8 +4,10 @@ The events-maintenance daemon publishes dismissed counts beside the
 unresolved ones; these two tiles complete the total / resolved / net trio
 with the Loki Warning / Error tiles (core_metrics_panels.py) and the
 unresolved tiles. PromQL static expressions, like their unresolved
-counterparts. Registered as a separate module so the core observability
-pack registry (locked at 19 metrics by tests) stays untouched.
+counterparts. The gauge names carry the `_ratio` suffix the OTel
+Prometheus exporter appends to unit-"1" instruments. Registered as a
+separate module so the core observability pack registry (locked at 19
+metrics by tests) stays untouched.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query="ava_resolution_status_dismissed_warnings",
+        query="ava_resolution_status_dismissed_warnings_ratio",
         query_type="promql",
         target_names=["dismissed_warning"],
         field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
@@ -38,7 +40,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query="ava_resolution_status_dismissed_errors",
+        query="ava_resolution_status_dismissed_errors_ratio",
         query_type="promql",
         target_names=["dismissed_error"],
         options={"noValue": "0"},

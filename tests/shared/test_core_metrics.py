@@ -103,9 +103,12 @@ def test_collect_core_metrics_includes_statistics_coverage() -> None:
     assert avg_turn.count('attributes_ok="true"') == 2
     assert "sum(count_over_time(" in avg_turn
     assert by_name["core_unresolved_warning"].query_type == "promql"
-    assert by_name["core_unresolved_warning"].query == "ava_resolution_status_unresolved_warnings"
+    assert (
+        by_name["core_unresolved_warning"].query
+        == "ava_resolution_status_unresolved_warnings_ratio"
+    )
     assert by_name["core_unresolved_error"].query_type == "promql"
-    assert by_name["core_unresolved_error"].query == "ava_resolution_status_unresolved_errors"
+    assert by_name["core_unresolved_error"].query == "ava_resolution_status_unresolved_errors_ratio"
 
 
 # ── LogQL dialect (task #1280) ────────────────────────────────────────────────
