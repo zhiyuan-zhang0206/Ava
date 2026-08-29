@@ -32,6 +32,7 @@ _GATEWAY_SESSIONS = {
     "gateway-watchdog",
     "otel-collector",
     "pg-backup",
+    "pitr-uploader",
 }
 _AGENT_RUNNER_SESSIONS = {
     "restarter",

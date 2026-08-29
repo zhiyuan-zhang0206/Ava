@@ -17,6 +17,13 @@ from pathlib import Path
 _ARCHIVE_NAME = re.compile(
     r"^(?:[0-9A-F]{24}|[0-9A-F]{8}\.history|[0-9A-F]{24}\.[0-9A-F]{8}\.backup)$"
 )
+
+
+def archive_name_is_valid(name: str) -> bool:
+    """Return whether *name* is a canonical PostgreSQL archive object name."""
+    return _ARCHIVE_NAME.fullmatch(name) is not None and Path(name).name == name
+
+
 EXIT_USAGE = 2
 EXIT_UNSAFE_PATH = 3
 EXIT_QUOTA = 4
@@ -33,7 +40,7 @@ def _digest(path: Path) -> bytes:
 
 
 def _validate(source: Path, name: str, spool: Path) -> None:
-    if not _ARCHIVE_NAME.fullmatch(name) or Path(name).name != name:
+    if not archive_name_is_valid(name):
         raise ValueError("unsupported archive filename")
     source_stat = source.lstat()
     if not stat.S_ISREG(source_stat.st_mode) or source.is_symlink() or source.name != name:

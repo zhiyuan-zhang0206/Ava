@@ -32,6 +32,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `services/backup.py:run_backup()` — actual dump + prune
 - `cli/commands/_converge_pitr.py` — publishes the disabled-by-default physical-backup layout and stable archive shim; it does not alter PostgreSQL
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
+- `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 
 ## Notes
 - Gateway capability only; `ava start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.
@@ -40,6 +41,9 @@ host's: reading a host timezone can make a current dump appear to be future.
 - Physical PITR is currently a **foundation only**: converge publishes a private
   per-home spool and a source-independent, self-checked shim, while
   `AVA_PITR_ENABLED` defaults false and PostgreSQL `archive_mode` stays untouched.
-  A local archived segment is not a remote ACK. The GCS uploader, base chains,
-  migration gate, and isolated physical restore arrive in follow-up PRs; logical
+  A local archived segment is not a remote ACK. When explicitly enabled, the
+  GCS uploader encrypts each spooled segment, conditionally creates one immutable
+  object, verifies its generation/CRC32C/metadata, and only then fsyncs an ACK
+  before removing local staging and spool files. Base chains, migration gate,
+  and isolated physical restore arrive in follow-up PRs; logical
   daily/pre-update dumps remain the active recovery contract throughout.

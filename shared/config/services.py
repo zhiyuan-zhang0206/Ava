@@ -368,6 +368,18 @@ class ServiceSettings(EnvSettings):
             "remote_writable": False,
         },
     )
+    pitr_uploader_pidfile: Path = Field(
+        default_factory=lambda: _unit_home() / "run" / "pitr_uploader.pid",
+        alias="AVA_PITR_UPLOADER_PIDFILE",
+        description="PITR uploader daemon pidfile path.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
 
     gateway_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "gateway.pid",
@@ -743,6 +755,18 @@ class ServiceSettings(EnvSettings):
         default=None,
         alias="AVA_PG_BACKUP_HEALTH_PORT",
         description="Postgres backup scheduler /healthz port override (per unit). Unset = shared default 8116.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+    pitr_uploader_health_port: int | None = Field(
+        default=None,
+        alias="AVA_PITR_UPLOADER_HEALTH_PORT",
+        description="PITR uploader /healthz port override (per unit). Unset = shared default 8117.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

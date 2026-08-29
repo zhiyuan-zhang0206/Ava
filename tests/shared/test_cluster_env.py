@@ -29,6 +29,7 @@ def _rec(tmp_path: Path):
             "im_bridge": 18017,
             "agent_host": 18019,
             "pg_backup": 18021,
+            "pitr_uploader": 18022,
         },
         gateway_home=str(tmp_path / ".ava-t1"),
         created_at="x",
@@ -45,6 +46,7 @@ def _old_rec(tmp_path: Path):
     del ports["im_bridge"]
     del ports["agent_host"]
     del ports["pg_backup"]
+    del ports["pitr_uploader"]
     return cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports),
         gateway_home=str(tmp_path / ".ava-t1"),
@@ -409,7 +411,7 @@ def test_record_health_port_agent_host_never_reaches_past_the_allocated_block(tm
 def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """BLOCK_SIZE has grown repeatedly (16 -> 18 -> 19 -> 20 -> 21 -> 22), but every
+    """BLOCK_SIZE has grown repeatedly (16 -> 18 -> 19 -> 20 -> 21 -> 22 -> 23), but every
     pre-existing record still occupies a 16-port block at 18000+16k — and a
     candidate inside such a block would overlap it. allocate_ports must skip
     overlapping blocks, not just exact bases, or a DOWN cluster's block gets
@@ -425,12 +427,12 @@ def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    # existing record at 18016 occupies 18016..18031 — at BLOCK_SIZE 22,
+    # existing record at 18016 occupies 18016..18031 — at BLOCK_SIZE 23,
     # candidates 18000 (block 18000..18021 overlaps 18016..18021) and 18022
     # (18022..18043 overlaps 18022..18031) must be skipped; the first legal
-    # base is 18044
+    # base is 18046
     ports = cl.allocate_ports({18016})
-    assert ports["gateway"] == 18044
+    assert ports["gateway"] == 18046
     assert set(ports) == set(cl.PORT_OFFSETS)
     # without any existing record, the allocator starts at BLOCK_START
     assert cl.allocate_ports(set())["gateway"] == BLOCK_START
