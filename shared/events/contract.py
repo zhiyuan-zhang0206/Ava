@@ -1030,6 +1030,22 @@ EVENTS: dict[str, EventSpec] = {
     "compact_request": _telemetry("compact_request", "compact requested", tier="noise"),
     "auto_compact": _telemetry("auto_compact", "auto-compact", tier="noise"),
     "compact_reminder": _telemetry("compact_reminder", "compact reminder", tier="noise"),
+    # heartbeat circuit breaker (task #1928)
+    "circuit_breaker_open": _telemetry(
+        "circuit_breaker_open", "heartbeat circuit breaker opened", tier="noise"
+    ),
+    "circuit_breaker_closed": _telemetry(
+        "circuit_breaker_closed", "heartbeat circuit breaker closed", tier="noise"
+    ),
+    "circuit_breaker_compact": _telemetry(
+        "circuit_breaker_compact", "forced overflow compact fired by the open breaker", tier="noise"
+    ),
+    "heartbeat_circuit_open": _telemetry(
+        "heartbeat_circuit_open", "heartbeat consumed while the breaker is open", tier="noise"
+    ),
+    "emergency_compact": _telemetry(
+        "emergency_compact", "emergency compaction (overflow self-rescue)", tier="noise"
+    ),
     "history_dump": _telemetry(
         "history_dump", "pre-compact history dumped to workspace", tier="noise"
     ),
