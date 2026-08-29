@@ -24,6 +24,7 @@ from services.pitr.restore_manifest import (
     RestoreProof,
     candidate_sha256,
 )
+from services.pitr.restore_proof import RestoreSpaceBudget
 from services.pitr.retention_planner import DryRunResult
 from services.pitr.retention_scheduler import RetentionDryRunState
 from services.pitr.retention_scheduler import health_component as retention_health_component
@@ -64,7 +65,7 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
         "project",
         "bucket",
         tmp_path / "viewer.json",
-        daemon.RestoreSpaceBudget(0, 0, 0),
+        RestoreSpaceBudget(0, 0, 0),
         "postgresql://viewer@127.0.0.1:5433/ava",
         Path("/usr/bin/true"),
         Path("/usr/bin/true"),
@@ -502,14 +503,14 @@ def test_retention_health_never_exposes_stale_or_failed_eligibility(tmp_path: Pa
         plan=result,
         last_attempt=time.time(),
         last_success=time.time(),
-        base_error="inventory unavailable",
+        last_error="inventory unavailable",
     )
     retention = retention_health_component(state)
     assert retention["status"] == "degraded"
     assert retention["eligible_objects"] == 0
     assert retention["eligible_bytes"] == 0
 
-    state.base_error = None
+    state.last_error = None
     state.last_success = time.time() - 3 * 3600
     stale = retention_health_component(state)
     assert stale["progress"] == "stale"

@@ -370,18 +370,17 @@ class ActivationRecord:
             if not set(record.rollback_settings_applied) <= rollback_names:
                 raise ValueError("PITR rollback applied setting name is unknown")
             for evidence in record.rollback_settings_applied.values():
-                value = json.loads(evidence)
-                if (
-                    not isinstance(value, dict)
-                    or set(value)
-                    != {
-                        "desired_value",
-                        "post_digest",
-                    }
-                    or not all(isinstance(item, str) for item in value.values())
-                ):
+                loaded: object = json.loads(evidence)
+                if not isinstance(loaded, dict) or not all(isinstance(key, str) for key in loaded):
                     raise ValueError("PITR rollback applied evidence fields differ")
-                if not re.fullmatch(r"[0-9a-f]{64}", value["post_digest"]):
+                value = cast(dict[str, object], loaded)
+                if set(value) != {"desired_value", "post_digest"}:
+                    raise ValueError("PITR rollback applied evidence fields differ")
+                desired_value = value["desired_value"]
+                post_digest = value["post_digest"]
+                if not isinstance(desired_value, str) or not isinstance(post_digest, str):
+                    raise TypeError("PITR rollback applied evidence fields differ")
+                if not re.fullmatch(r"[0-9a-f]{64}", post_digest):
                     raise ValueError("PITR rollback applied digest is invalid")
         baseline = record.pre_activation_pg_auto_conf or {}
         if record.rollback_setting_intent is not None and record.rollback_setting_intent[
