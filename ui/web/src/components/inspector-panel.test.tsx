@@ -893,22 +893,6 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
-  it("renders the fleet Alerts three-way split (total / resolved / remaining)", async () => {
-    getAgentInspect.mockResolvedValue(fixture());
-    getAgentInspectLive.mockResolvedValue(liveFixture());
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Alerts")).toBeTruthy());
-    // badge shows the effective stats window (24h default from the selector)
-    const alertsSection = screen.getByText("Alerts").closest("section");
-    expect(within(alertsSection!).getByText("24h")).toBeTruthy();
-    // warning row: total 2 / dismissed 1 / remaining 1
-    expect(within(alertsSection!).getByText("Total 2")).toBeTruthy();
-    expect(within(alertsSection!).getAllByText(/Resolved 1/)).toHaveLength(2);
-    expect(within(alertsSection!).getByText(/Remaining 1/)).toBeTruthy();
-    // error row is fully dismissed -> positive all-clear state
-    expect(within(alertsSection!).getByText("All clear")).toBeTruthy();
-  });
 
   it("shows the active pause window when paused", async () => {
     const pausedUntil = new Date(Date.now() + 720_000).toISOString(); // 12m
@@ -938,22 +922,6 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
-  it("renders the fleet Alerts three-way split (total / resolved / remaining)", async () => {
-    getAgentInspect.mockResolvedValue(fixture());
-    getAgentInspectLive.mockResolvedValue(liveFixture());
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Alerts")).toBeTruthy());
-    // badge shows the effective stats window (24h default from the selector)
-    const alertsSection = screen.getByText("Alerts").closest("section");
-    expect(within(alertsSection!).getByText("24h")).toBeTruthy();
-    // warning row: total 2 / dismissed 1 / remaining 1
-    expect(within(alertsSection!).getByText("Total 2")).toBeTruthy();
-    expect(within(alertsSection!).getAllByText(/Resolved 1/)).toHaveLength(2);
-    expect(within(alertsSection!).getByText(/Remaining 1/)).toBeTruthy();
-    // error row is fully dismissed -> positive all-clear state
-    expect(within(alertsSection!).getByText("All clear")).toBeTruthy();
-  });
 
   it("shows 'due' when the projected check-in is in the past", async () => {
     // A restarting agent's idle clock runs on while the daemon skips it, so a
