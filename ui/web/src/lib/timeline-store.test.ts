@@ -1016,6 +1016,193 @@ describe("compact_done hard reset (incremental design)", () => {
   });
 });
 
+// -- compact crossed unseen (SSE-gap heal) ───────────────────────────────────
+//
+// The reset window only works when compact_done actually arrives. An SSE gap
+// (the all-events re-key on agent switch, a reconnect) drops compact_done +
+// the post-compact snapshot together; nothing then tells the store the
+// history was rewritten, and the switch-back keep-all merge resurrects the
+// compacted-away items. The compact envelope row is the durable fingerprint:
+// it is INSERTed at enqueue and survives the rewrite, so a snapshot whose
+// envelope the local items never folded is post-compact relative to them —
+// the merge replaces wholesale instead of keep-all.
+
+describe("compact crossed unseen (SSE-gap heal)", () => {
+  it("reloadSnapshot replaces wholesale when the fetched snapshot crossed a compact the local items never folded", () => {
+    act(() => {
+      useTimelineStore.getState().switchThread(
+        1,
+        [
+          item({ item_id: "1.0", kind: "inbound_chat", payload: "pre-compact" }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "pre-compact reply" }),
+        ],
+        false,
+      );
+    });
+    act(() => {
+      useTimelineStore.getState().reloadSnapshot(
+        [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
+        ],
+        3,
+        true,
+      );
+    });
+    const s = useTimelineStore.getState();
+    expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
+    expect(s.items.some((i) => i.payload === "pre-compact reply")).toBe(false);
+    expect(s.hasMoreOlder).toBe(true);
+  });
+
+  it("reloadSnapshot inside an armed reset window replaces when the GET crossed the compact (post-compact GET)", () => {
+    act(() => {
+      useTimelineStore.getState().switchThread(
+        1,
+        [item({ item_id: "90.0", kind: "inbound_chat", payload: "pre-compact" })],
+        true,
+      );
+    });
+    act(() => {
+      useTimelineStore.getState().processSseEvent({ role: "compact_done", agent_id: 1 });
+    });
+    act(() => {
+      useTimelineStore.getState().reloadSnapshot(
+        [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 9 }),
+        ],
+        2,
+        false,
+      );
+    });
+    const s = useTimelineStore.getState();
+    expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0"]);
+    expect(s.resetPending).toBe(false);
+  });
+
+  it("reloadSnapshot keeps the normal keep-all merge when the fetched envelope matches the local one", () => {
+    act(() => {
+      useTimelineStore.getState().switchThread(
+        1,
+        [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
+          item({ item_id: "3.0", kind: "agent_chat", payload: "newer SSE-folded reply" }),
+        ],
+        false,
+      );
+    });
+    act(() => {
+      useTimelineStore.getState().reloadSnapshot(
+        [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
+        ],
+        3,
+        false,
+      );
+    });
+    const s = useTimelineStore.getState();
+    expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0", "3.0"]);
+  });
+
+  it("a parked bucket that missed compact_done is replaced wholesale by the post-compact full snapshot", () => {
+    act(() => {
+      useTimelineStore.getState().switchThread(
+        1,
+        [
+          item({ item_id: "1.0", kind: "inbound_chat", payload: "pre-compact" }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "pre-compact reply" }),
+        ],
+        false,
+      );
+    });
+    act(() => {
+      useTimelineStore.getState().switchThread(2, [item({ item_id: "9.0", payload: "other" })], false);
+    });
+    act(() => {
+      useTimelineStore.getState().processSseEvent({
+        role: "timeline_snapshot",
+        agent_id: 1,
+        msg_count: 3,
+        items: [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
+        ],
+      });
+    });
+    const parked = useTimelineStore.getState().threads.get(1);
+    expect(parked?.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
+    expect(parked?.resetPending).toBe(false);
+    // Switch back: the healed bucket seeds — no resurrection.
+    act(() => {
+      useTimelineStore.getState().switchThread(1, null, false);
+    });
+    expect(useTimelineStore.getState().items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
+  });
+
+  it("an incremental snapshot carrying the envelope still keep-merges into the parked bucket (no 0.0, no false replace)", () => {
+    act(() => {
+      useTimelineStore.getState().switchThread(
+        1,
+        [
+          item({ item_id: "1.0", kind: "inbound_chat", payload: "pre-compact" }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "pre-compact reply" }),
+        ],
+        false,
+      );
+    });
+    act(() => {
+      useTimelineStore.getState().switchThread(2, [item({ item_id: "9.0", payload: "other" })], false);
+    });
+    act(() => {
+      useTimelineStore.getState().processSseEvent({
+        role: "timeline_snapshot",
+        agent_id: 1,
+        msg_count: 4,
+        items: [
+          item({ item_id: "3.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+        ],
+      });
+    });
+    const parked = useTimelineStore.getState().threads.get(1);
+    expect(parked?.items.map((i) => i.item_id)).toEqual(["1.0", "2.0", "3.0"]);
+  });
+
+  it("a full-window post-compact snapshot replaces the ACTIVE thread even when compact_done was lost", () => {
+    act(() => {
+      useTimelineStore.getState().switchThread(
+        1,
+        [
+          item({ item_id: "1.0", kind: "inbound_chat", payload: "pre-compact" }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "pre-compact reply" }),
+        ],
+        false,
+      );
+    });
+    act(() => {
+      useTimelineStore.getState().processSseEvent({
+        role: "timeline_snapshot",
+        agent_id: 1,
+        msg_count: 3,
+        items: [
+          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "1.0", kind: "inbound_compact_request", payload: "envelope", inbound_id: 7 }),
+          item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
+        ],
+      });
+    });
+    const s = useTimelineStore.getState();
+    expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
+    expect(s.resetPending).toBe(false);
+  });
+});
+
 describe("processSseEvent: cancelled", () => {
   // A cancelled generation is discarded by the kernel (commits nothing). The
   // cancel event drops exactly the ids streamed this turn (streamingIds) —
