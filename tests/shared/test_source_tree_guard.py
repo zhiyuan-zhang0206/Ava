@@ -102,11 +102,71 @@ def test_head_moved_off_installed_commit_is_a_violation(
     assert any("installed commit" in v for v in violations)
 
 
-def test_non_git_checkout_is_quiet(tmp_path: Path) -> None:
+def test_non_git_checkout_signals_guard_skipped(tmp_path: Path) -> None:
+    """A checkout that is not a git repo must not look clean: the guard
+    cannot see anything, so it reports itself as skipped (not tampered)."""
     repo = tmp_path / "plain"
     repo.mkdir()
 
-    assert stg.source_tree_violations(repo) == ()
+    assert stg.source_tree_violations(repo) == ("guard skipped: not a git checkout",)
+
+
+def _no_git(_source: Path, *_args: str, _timeout: float = 5.0) -> None:
+    """Stand-in for a git binary that cannot run at all."""
+    return
+
+
+def test_git_unavailable_signals_guard_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken git (binary missing / command error / timeout) makes the
+    detector blind — the probe must alert on the blind guard, never pass it."""
+    repo = _init_source(tmp_path / "source")
+    monkeypatch.setattr(stg, "_git", _no_git)
+
+    assert stg.source_tree_violations(repo) == ("guard skipped: git unavailable",)
+
+
+def test_git_command_failure_signals_guard_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A git command that runs but exits non-zero is a blind guard too."""
+    repo = _init_source(tmp_path / "source")
+    failed = subprocess.CompletedProcess([], returncode=1, stdout="", stderr="boom")
+
+    def _git_fail(
+        _source: Path, *_args: str, _timeout: float = 5.0
+    ) -> subprocess.CompletedProcess[str]:
+        return failed
+
+    monkeypatch.setattr(stg, "_git", _git_fail)
+
+    assert stg.source_tree_violations(repo) == ("guard skipped: git unavailable",)
+
+
+def test_git_failure_keeps_partial_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Blindness is marked on top of whatever the guard did manage to see:
+    tracked tamper found by `status` is never dropped because `rev-parse`
+    failed."""
+    repo = _init_source(tmp_path / "source")
+    (repo / "tracked.txt").write_text("TAMPERED")
+    status_ok = subprocess.CompletedProcess([], returncode=0, stdout=" M tracked.txt\n", stderr="")
+
+    def _status_ok_then_fail(
+        _source: Path, *_args: str, _timeout: float = 5.0
+    ) -> subprocess.CompletedProcess[str] | None:
+        return status_ok if "status" in _args else None
+
+    monkeypatch.setattr(stg, "_git", _status_ok_then_fail)
+
+    violations = stg.source_tree_violations(repo)
+
+    assert any("tracked change" in v and "tracked.txt" in v for v in violations)
+    assert tuple(v for v in violations if v.startswith(stg.GUARD_SKIPPED_PREFIX)) == (
+        "guard skipped: git unavailable",
+    )
 
 
 # --- repair ---
@@ -235,3 +295,36 @@ def test_repair_non_git_checkout_is_none(tmp_path: Path) -> None:
     repo.mkdir()
 
     assert stg.repair_source_tree(repo) is None
+
+
+# --- whitelist self-check ---
+
+
+def test_whitelist_validation_rejects_empty() -> None:
+    """An empty whitelist would flag every untracked file as tamper and make
+    repair delete the runtime artifacts — the guard must fail fast instead."""
+    with pytest.raises(ValueError, match="must be non-empty"):
+        stg._validate_whitelist(())
+
+
+def test_whitelist_validation_rejects_catch_all_patterns() -> None:
+    """A catch-all pattern whitelists arbitrary paths — detection would be
+    always empty and repair never act (the silent-no-op misconfiguration)."""
+    for bad in (("*",), ("**",), ("*/*",), ("frontend/", "*")):
+        with pytest.raises(ValueError, match="arbitrary paths"):
+            stg._validate_whitelist(bad)
+
+
+def test_whitelist_validation_accepts_real_whitelist() -> None:
+    """The shipped whitelist stays sane: non-empty, no catch-all. Guards the
+    constant against a future edit that silently silences the guard."""
+    stg._validate_whitelist(stg.SOURCE_TREE_WHITELIST)
+
+
+def test_whitelist_matches_only_runtime_artifacts() -> None:
+    """Direct invariant for 'the whitelist must not swallow everything': a
+    junk path is never whitelisted while the frontend bundle stays legal."""
+    assert stg._is_whitelisted("junk.txt") is False
+    assert stg._is_whitelisted("junkdir/inner.txt") is False
+    assert stg._is_whitelisted("frontend/.next/build.txt") is True
+    assert stg._is_whitelisted("frontend/") is True

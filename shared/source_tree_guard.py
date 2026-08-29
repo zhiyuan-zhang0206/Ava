@@ -49,6 +49,12 @@ _WRITE_TIMEOUT_S = 30.0
 # trailing-slash pattern covers the whole subtree.
 SOURCE_TREE_WHITELIST: tuple[str, ...] = ("frontend/",)
 
+# Prefix of the distinguishable "the guard could not evaluate the checkout"
+# marker returned by ``source_tree_violations``. A blind guard must not look
+# like a clean tree: a broken git is exactly the state in which tampering
+# becomes invisible (and may be the work of the same actor that tampered).
+GUARD_SKIPPED_PREFIX = "guard skipped: "
+
 
 def _git(
     source: Path, *args: str, timeout: float = _READ_TIMEOUT_S
@@ -69,23 +75,65 @@ def _git(
         return None
 
 
+def _pattern_matches(pattern: str, rel_path: str) -> bool:
+    """True when one whitelist pattern covers a git-relative path."""
+    if fnmatch.fnmatch(rel_path, pattern):
+        return True
+    return pattern.endswith("/") and rel_path.startswith(pattern)
+
+
 def _is_whitelisted(rel_path: str) -> bool:
     """True when a git-relative path is a legal runtime artifact."""
-    for pattern in SOURCE_TREE_WHITELIST:
-        if fnmatch.fnmatch(rel_path, pattern):
-            return True
-        if pattern.endswith("/") and rel_path.startswith(pattern):
-            return True
-    return False
+    return any(_pattern_matches(pattern, rel_path) for pattern in SOURCE_TREE_WHITELIST)
+
+
+# Sentinel paths no runtime artifact should ever match: a whitelist pattern
+# accepting one of them would whitelist arbitrary untracked files (or, for a
+# bare "*"-class glob, everything) and make the guard a silent no-op.
+_WHITELIST_CATCHALL_PROBES = ("guard-must-not-be-whitelisted.txt", "guard-must-not-be-whitelisted/")
+
+
+def _validate_whitelist(patterns: tuple[str, ...]) -> None:
+    """Fail fast on a misconfigured whitelist (called at import).
+
+    Two misconfigurations make the guard a silent no-op on one side or a
+    false-alarm machine on the other, and without a loud check neither is
+    visible until the guard is needed and fails: an empty whitelist flags
+    every untracked file as tamper (and repair would delete the runtime
+    artifacts), while a catch-all pattern (``"*"``, ``"**"``, …) whitelists
+    anything — detection is always empty, repair never acts.
+    """
+    if not patterns:
+        raise ValueError(
+            "SOURCE_TREE_WHITELIST must be non-empty: with no entries every untracked "
+            "file is tamper and repair would remove the runtime artifacts"
+        )
+    for pattern in patterns:
+        if not pattern:
+            raise ValueError(f"SOURCE_TREE_WHITELIST entry {pattern!r} is empty")
+        for probe in _WHITELIST_CATCHALL_PROBES:
+            if _pattern_matches(pattern, probe):
+                raise ValueError(
+                    f"SOURCE_TREE_WHITELIST pattern {pattern!r} would whitelist arbitrary "
+                    "paths (the guard would never detect or repair anything)"
+                )
+
+
+_validate_whitelist(SOURCE_TREE_WHITELIST)
 
 
 def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:
-    """Human-readable tamper findings for the prod source checkout, else ().
+    """Human-readable tamper findings for the prod source checkout.
 
-    Best-effort: returns () when the checkout is absent, not a git repo, or
-    git is unavailable — a probe must not fail on a transient git hiccup (the
-    same never-crash contract as ``editable_install_violations``). Detects
-    three tamper shapes:
+    Returns ``()`` only when the guard SAW the tree and found nothing wrong.
+    When the checkout exists but the guard cannot evaluate it — not a git
+    checkout, or a git command failed (binary missing, command error,
+    timeout) — the result carries a ``{GUARD_SKIPPED_PREFIX}...`` marker
+    instead of ``()``, so the health probe reports the guard itself as
+    failing rather than mistaking a blind guard for a clean tree (best-effort
+    against transient git hiccups, but never silently blind — a broken git is
+    exactly the state in which tampering becomes invisible). Detects three
+    tamper shapes:
 
     - tracked files changed vs HEAD (any non-untracked ``git status`` entry)
     - untracked files outside the whitelist
@@ -94,9 +142,14 @@ def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:
     source = Path(repo) if repo is not None else prod_source_dir()
     if source is None:
         return ()
+    if not (source / ".git").exists():
+        return (f"{GUARD_SKIPPED_PREFIX}not a git checkout",)
     violations: list[str] = []
+    blind = False
     status = _git(source, "status", "--porcelain")
-    if status is not None and status.returncode == 0:
+    if status is None or status.returncode != 0:
+        blind = True
+    else:
         for line in status.stdout.splitlines():
             entry = line.strip()
             if not entry:
@@ -108,13 +161,17 @@ def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:
             else:
                 violations.append(f"tracked change: {entry}")
     head = _git(source, "rev-parse", "HEAD")
-    if head is not None and head.returncode == 0:
+    if head is None or head.returncode != 0:
+        blind = True
+    else:
         from shared.source_integrity import get as get_installed_sha
 
         installed = get_installed_sha()
         head_sha = head.stdout.strip()
         if installed is not None and head_sha != installed:
             violations.append(f"HEAD {head_sha[:7]} moved off installed commit {installed[:7]}")
+    if blind:
+        violations.append(f"{GUARD_SKIPPED_PREFIX}git unavailable")
     return tuple(violations)
 
 
