@@ -54,7 +54,7 @@ export function StatsCards({
   const windowedPlaceholder = windowMismatch ? "…" : placeholder;
   const windowedTitle = windowMismatch ? t("statisticsUpdatingFor", { win }) : null;
   const cards: (
-    | { kind?: undefined; label: string; value: string; title?: string; windowed?: boolean }
+    | { kind?: undefined; label: string; value: string; title?: string; windowed?: boolean; wide?: boolean }
     | { kind: "warnings"; title?: string; windowed?: boolean }
   )[] = [
     {
@@ -104,6 +104,7 @@ export function StatsCards({
     },
     {
       label: t("avgTurnTime"),
+      wide: true,
       windowed: true,
       value:
         windowMismatch
@@ -185,7 +186,12 @@ export function StatsCards({
             <div
               key={card.label}
               title={windowMismatch && card.windowed ? card.title : undefined}
-              className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
+              className={cn(
+                "gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40",
+                card.wide && "col-span-2",
+                FLEX,
+                FLEX_COL,
+              )}
             >
               <span className="text-[10px] tracking-wide text-muted-foreground">
                 {card.label}
@@ -239,7 +245,7 @@ export function SidebarFooter() {
           <Popover.Content
             sideOffset={6}
             align="start"
-            className="z-50 w-64 rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
+            className="z-50 w-[17.625rem] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
           >
             <StatsCards
               stats={stats}
@@ -363,18 +369,18 @@ function WarningErrorCard({
         rows.map((row) => (
           <div
             key={row.level}
-            className={cn("items-center gap-1 font-mono text-[11px] tabular-nums", FLEX)}
+            className={cn("flex-wrap items-center gap-0.5 font-mono text-[11px] tabular-nums", FLEX)}
           >
-            <span className="w-8 shrink-0 text-muted-foreground">
+            <span className="w-7 shrink-0 whitespace-nowrap text-muted-foreground">
               {row.level === "warning" ? t("warningLevel") : t("errorLevel")}
             </span>
-            <span className="text-foreground">
+            <span className="whitespace-nowrap text-foreground">
               {t("statsTotal")} {row.total.toLocaleString()}
             </span>
-            <span className="text-muted-foreground">
+            <span className="whitespace-nowrap text-muted-foreground">
               · {t("statsDismissed")} {row.dismissed.toLocaleString()}
             </span>
-            <span className="ml-auto shrink-0">
+            <span className="ml-auto shrink-0 whitespace-nowrap">
               {row.net === 0 ? (
                 <span className="rounded bg-emerald-500/15 px-1 text-emerald-600 dark:text-emerald-400">
                   {t("statsAllClear")}
