@@ -589,3 +589,16 @@ def test_quiesce_all_agents_hosted_is_a_noop(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr("shared.db.signal_live_agents_restart", _boom)
     assert _up._quiesce_all_agents(timeout_s=10.0) is True
+
+
+def test_quiesce_local_agents_hosted_force_skips_reap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force mode computes force_reap in the orchestration, but in hosted the
+    leaf guard must make the reap a no-op — the composition that would
+    otherwise CAS-mark every hosted row 'restarting' on a force rollout."""
+    monkeypatch.setattr("ops.runner_mode.is_hosted", lambda: True)
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise AssertionError("hosted force quiesce must not reach the reap")
+
+    monkeypatch.setattr(_up, "_force_reap_local_agents", _boom)
+    assert _up._quiesce_local_agents("force") is True

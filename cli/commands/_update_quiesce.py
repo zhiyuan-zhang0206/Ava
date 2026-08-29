@@ -201,10 +201,12 @@ def _force_reap_local_agents(*, defer_process_stop: bool = False) -> list[int]:
 
     Hosted mode is a no-op returning []: hosted rows stay `idling` for life and
     carry no pid, so "live" is not a straggler signal, and CAS-marking them
-    'restarting' would orphan them permanently — the restarter that respawns
-    marked rows is gated out of the hosted roster (PR4), so a hosted
-    force-reap is the one operation that can turn a fleet of reachable agents
-    into unreachable ones.
+    'restarting' would orphan them permanently once the restarter is gated
+    out of the hosted roster (PR #1029 — until that gate lands, the
+    restarter's hosted branch self-heals a marked row back to idling at the
+    cost of one spurious restart_completed per agent, which is why #1029 must
+    land before hosted goes live). A hosted force-reap is the one operation
+    that can turn a fleet of reachable agents into unreachable ones.
     """
     from ops.runner_mode import is_hosted
 
@@ -249,12 +251,14 @@ def _quiesce_local_agents(mode: str) -> bool:
 
     Hosted mode is a no-op returning True: agents run inside the agent-host
     and their rows stay `idling` for life, so there are no per-agent processes
-    to signal and no drain to poll. The hosted quiesce IS the graceful service
-    stop that follows this function in the update flow — SIGTERM to the
-    agent-host unwinds its dispatcher into `scheduler.aclose()`, which
-    checkpoints every in-flight turn before exit. Signalling here would insert
-    one restart inbound per agent for nothing, and the timeout reap would
-    CAS-mark rows 'restarting' that no restarter will ever respawn.
+    to signal and no drain to poll. The hosted quiesce IS the service stop
+    that follows this function — the update flow's graceful stop SIGTERMs the
+    agent-host, whose dispatcher unwinds into `scheduler.aclose()` and
+    checkpoints every in-flight turn before exit; `ava restart`'s non-graceful
+    kill cuts in-flight turns at their last step checkpoint instead (the same
+    accepted degradation as a process-mode force-reap). Signalling here would
+    insert one restart inbound per agent for nothing, and the timeout reap
+    would CAS-mark rows 'restarting' that no restarter will ever respawn.
     """
     import shared.db
     from cli.commands import update as _up_mod
@@ -267,9 +271,8 @@ def _quiesce_local_agents(mode: str) -> bool:
     if is_hosted():
         print(
             "  · hosted runner: agents run inside the agent-host — no per-agent "
-            "processes to signal and no drain to poll; the graceful service "
-            "stop that follows checkpoints every in-flight turn (scheduler "
-            "aclose) and is the hosted quiesce"
+            "processes to signal and no drain to poll; the service stop that "
+            "follows is the hosted quiesce"
         )
         return True
     timeout_s = _up_mod._quiesce_timeout_s(mode)
