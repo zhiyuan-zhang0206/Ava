@@ -77,8 +77,8 @@ def plan_retention(  # noqa: PLR0915
     if len(retained_chains) < retain_chains:
         blockers.add("fewer than two protected chains")
 
-    inventory = {(item.object_name, item.generation): item for item in evidence.inventory}
-    if len(inventory) != len(evidence.inventory):
+    remote_inventory = {(item.object_name, item.generation): item for item in evidence.inventory}
+    if len(remote_inventory) != len(evidence.inventory):
         blockers.add("duplicate remote object generation")
     by_name: dict[str, set[int]] = {}
     for item in evidence.inventory:
@@ -89,7 +89,7 @@ def plan_retention(  # noqa: PLR0915
     remote_by_archive = _archive_index(evidence.inventory, "remote", blockers)
     local_by_archive = _archive_index(evidence.local_acks, "local ACK", blockers)
     verified_inventory = {
-        identity: item for identity, item in inventory.items() if item.kind == "base"
+        identity: item for identity, item in remote_inventory.items() if item.kind == "base"
     }
     for archive_name in sorted(set(remote_by_archive) | set(local_by_archive)):
         remote = remote_by_archive.get(archive_name)
@@ -101,27 +101,30 @@ def plan_retention(  # noqa: PLR0915
             blockers.add("local ACK conflicts with exact remote archive identity")
             continue
         verified_inventory[(remote.object_name, remote.generation)] = remote
-    inventory = verified_inventory
-
-    if any(item.kind == "history" for item in evidence.inventory) or any(
+    cross_timeline = any(item.kind == "history" for item in evidence.inventory) or any(
         wal_range.timeline > 1 for item in candidates.values() for wal_range in item.wal_ranges
-    ):
+    )
+    if cross_timeline:
         blockers.add("cross-timeline ancestry is not authenticated by this planner")
 
     keep: dict[tuple[str, int], str] = {}
     for chain_id in unprotected_chains:
         candidate = candidates[chain_id]
-        _pin_candidate(keep, candidate, inventory, "unprotected candidate", blockers)
+        _pin_candidate(keep, candidate, verified_inventory, "unprotected candidate", blockers)
     for chain_id in retained_chains:
         proof = protected[chain_id]
-        _pin_proof(keep, proof, inventory, "retained protected chain", blockers)
+        _pin_proof(keep, proof, verified_inventory, "retained protected chain", blockers)
 
     high_water: str | None = None
     oldest = retained_chains[0] if retained_chains else None
     if oldest is not None:
         high_water = _pin_contiguous_wal(
-            keep, candidates[oldest], tuple(inventory.values()), blockers=blockers
+            keep, candidates[oldest], tuple(verified_inventory.values()), blockers=blockers
         )
+    if cross_timeline:
+        for identity, item in remote_inventory.items():
+            if item.kind in {"wal", "history"}:
+                keep[identity] = "cross-timeline ancestry pinned fail closed"
 
     protected_objects = {
         (proof.base.object_name, proof.base.generation)
@@ -130,7 +133,7 @@ def plan_retention(  # noqa: PLR0915
     }
     eligible: list[RetentionDecision] = []
     retained: list[RetentionDecision] = []
-    for identity, item in sorted(inventory.items()):
+    for identity, item in sorted(remote_inventory.items()):
         reason = keep.get(identity)
         if reason is not None:
             retained.append(RetentionDecision(item, reason))

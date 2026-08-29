@@ -84,4 +84,6 @@ class RetentionPlan:
 def _decision(raw: dict[str, Any]) -> RetentionDecision:
     if set(raw) != {"object", "reason"}:
         raise ValueError("retention decision fields do not match schema")
-    return RetentionDecision(RetentionObject(**raw["object"]), str(raw["reason"]))
+    raw_object = raw["object"]
+    raw_object["metadata"] = tuple(tuple(item) for item in raw_object["metadata"])
+    return RetentionDecision(RetentionObject(**raw_object), str(raw["reason"]))
