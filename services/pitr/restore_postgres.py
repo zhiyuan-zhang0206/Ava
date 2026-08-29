@@ -1,0 +1,364 @@
+"""Run a restore proof in a sibling PostgreSQL instance, never the live PGDATA."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import shlex
+import socket
+import subprocess
+import sys
+import threading
+import time
+from contextlib import suppress
+from dataclasses import dataclass
+from pathlib import Path
+
+import psutil
+import psycopg
+from psycopg import sql
+
+from services.pitr.base_candidate import _verify_candidate
+from services.pitr.base_manifest import CandidateManifest, _lsn
+from services.pitr.restore_proof import (
+    DrillResult,
+    LivePostgresIdentity,
+    RestoreProofError,
+    update_restore_owner,
+)
+from shared.db import direct_db_url
+from shared.pg_tools import pg_tool
+
+
+def _migration_hash(conn: psycopg.Connection[tuple[object, ...]]) -> str:
+    with conn.cursor() as cur:
+        cur.execute("SELECT name FROM schema_migrations ORDER BY name")
+        names = [str(row[0]) for row in cur.fetchall()]
+    return hashlib.sha256("\n".join(names).encode()).hexdigest()
+
+
+def _live_identity(db_url: str) -> LivePostgresIdentity:
+    with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT current_setting('data_directory'), system_identifier, "
+            "pg_postmaster_start_time()::text FROM pg_control_system()"
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RestoreProofError("live PostgreSQL omitted identity")
+        data_directory, system_identifier, started_at = (str(value) for value in row)
+        cur.execute("SELECT 1")
+        if cur.fetchone() != (1,):
+            raise RestoreProofError("live PostgreSQL read probe failed")
+    pid_path = Path(data_directory) / "postmaster.pid"
+    pid = int(pid_path.read_text().splitlines()[0])
+    created_at = psutil.Process(pid).create_time()
+    fingerprint = hashlib.sha256(
+        f"{data_directory}\n{system_identifier}\n{started_at}\n1".encode()
+    ).hexdigest()
+    return LivePostgresIdentity(
+        pid, created_at, data_directory, system_identifier, started_at, fingerprint
+    )
+
+
+def _free_port() -> int:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def _write_restore_allowlist(wal_dir: Path, run_root: Path) -> Path:
+    records: dict[str, dict[str, object]] = {}
+    for path in sorted(wal_dir.iterdir()):
+        if path.is_symlink() or not path.is_file():
+            raise RestoreProofError("restore archive contains a non-regular entry")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        path.chmod(0o400)
+        records[path.name] = {"path": str(path), "sha256": digest, "size": path.stat().st_size}
+    allowlist = run_root / "restore-allowlist.json"
+    fd = os.open(allowlist, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as output:
+        import json
+
+        json.dump(records, output, sort_keys=True, separators=(",", ":"))
+        output.flush()
+        os.fsync(output.fileno())
+    return allowlist
+
+
+def _append_recovery_config(
+    pgdata: Path, wal_dir: Path, socket_dir: Path, lsn: str, run_root: Path
+) -> None:
+    for path in (pgdata, wal_dir, socket_dir):
+        if path.is_symlink() or not path.resolve().is_relative_to(pgdata.parent.resolve()):
+            raise RestoreProofError("restore path escaped its owned run directory")
+    allowlist = _write_restore_allowlist(wal_dir, run_root)
+    command = " ".join(
+        shlex.quote(value)
+        for value in (
+            sys.executable,
+            "-m",
+            "services.pitr.restore_wal_command",
+            str(allowlist),
+            "%f",
+            "%p",
+        )
+    )
+    config = pgdata / "postgresql.auto.conf"
+    with config.open("w") as output:
+        output.write(f"restore_command = {command!r}\n")
+        output.write(f"recovery_target_lsn = {lsn!r}\n")
+        output.write("recovery_target_action = 'promote'\n")
+        output.write("archive_mode = 'off'\n")
+        output.flush()
+        os.fsync(output.fileno())
+    (pgdata / "recovery.signal").touch(mode=0o600, exist_ok=False)
+
+
+def _run(command: list[str], *, timeout: float) -> None:
+    result = subprocess.run(  # noqa: S603
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RestoreProofError(f"restore command exited {result.returncode}: {command[0]}")
+
+
+@dataclass(frozen=True)
+class SandboxPostgresIdentity:
+    pid: int
+    created_at: float
+    pgid: int
+    data_directory: str
+
+
+def _sandbox_identity(pgdata: Path) -> SandboxPostgresIdentity:
+    pid_path = pgdata / "postmaster.pid"
+    try:
+        lines = pid_path.read_text().splitlines()
+        pid = int(lines[0])
+        recorded_data_directory = Path(lines[1]).resolve()
+        process = psutil.Process(pid)
+        created_at = process.create_time()
+        pgid = os.getpgid(pid)
+    except (OSError, IndexError, ValueError, psutil.Error) as exc:
+        raise RestoreProofError("cannot establish sandbox PostgreSQL identity") from exc
+    if recorded_data_directory != pgdata.resolve():
+        raise RestoreProofError("sandbox postmaster PID file names another data directory")
+    command = " ".join(process.cmdline())
+    if str(pgdata) not in command and str(pgdata.resolve()) not in command:
+        raise RestoreProofError("sandbox postmaster command does not name its PGDATA")
+    return SandboxPostgresIdentity(pid, created_at, pgid, str(recorded_data_directory))
+
+
+def _matching_sandbox(identity: SandboxPostgresIdentity) -> psutil.Process | None:
+    try:
+        process = psutil.Process(identity.pid)
+        if abs(process.create_time() - identity.created_at) >= 0.01:
+            return None
+        if os.getpgid(identity.pid) != identity.pgid:
+            return None
+        return process
+    except (ProcessLookupError, psutil.NoSuchProcess, psutil.ZombieProcess):
+        return None
+    except (PermissionError, psutil.AccessDenied) as exc:
+        raise RestoreProofError("cannot verify sandbox PostgreSQL identity") from exc
+
+
+def _stop_process_tree(identity: SandboxPostgresIdentity) -> None:
+    leader = _matching_sandbox(identity)
+    if leader is None:
+        return
+    owned: dict[tuple[int, float], psutil.Process] = {}
+    try:
+        members = [leader, *leader.children(recursive=True)]
+        owned = {(item.pid, item.create_time()): item for item in members}
+    except (psutil.AccessDenied, psutil.NoSuchProcess) as exc:
+        raise RestoreProofError("cannot enumerate sandbox PostgreSQL descendants") from exc
+    for member in reversed(list(owned.values())):
+        with suppress(psutil.NoSuchProcess):
+            member.terminate()
+    deadline = time.monotonic() + 20
+    alive = list(owned.values())
+    while alive and time.monotonic() < deadline:
+        with suppress(psutil.NoSuchProcess):
+            for child in leader.children(recursive=True):
+                owned[(child.pid, child.create_time())] = child
+        _gone, alive = psutil.wait_procs(
+            list(owned.values()), timeout=min(0.25, max(0, deadline - time.monotonic()))
+        )
+        if time.monotonic() + 5 >= deadline:
+            for member in alive:
+                with suppress(psutil.NoSuchProcess):
+                    member.kill()
+    if alive:
+        raise RestoreProofError("sandbox PostgreSQL retained live descendants")
+
+
+class IsolatedPostgresRestoreExecutor:
+    def __init__(self, *, live_db_url: str | None = None, timeout_seconds: int = 900) -> None:
+        self._live_db_url = direct_db_url() if live_db_url is None else live_db_url
+        self._timeout = timeout_seconds
+
+    def live_identity(self) -> LivePostgresIdentity:
+        return _live_identity(self._live_db_url)
+
+    def run(
+        self,
+        *,
+        pgdata: Path,
+        wal_dir: Path,
+        candidate: CandidateManifest,
+        run_root: Path,
+        owner_path: Path,
+    ) -> DrillResult:
+        live = self.live_identity()
+        if pgdata.resolve() == Path(live.data_directory).resolve():
+            raise RestoreProofError("restore drill refused the live PostgreSQL data directory")
+        if (pgdata / "postmaster.pid").exists():
+            raise RestoreProofError("restore sandbox already has a postmaster")
+        verify_started = time.monotonic()
+        _verify_candidate(pgdata, threading.Event())
+        first_verify_seconds = time.monotonic() - verify_started
+        second_verify_started = time.monotonic()
+        _verify_candidate(pgdata, threading.Event())
+        second_verify_seconds = time.monotonic() - second_verify_started
+        socket_dir = run_root / "socket"
+        socket_dir.mkdir(mode=0o700)
+        port = _free_port()
+        _append_recovery_config(pgdata, wal_dir, socket_dir, candidate.end_lsn, run_root)
+        options = (
+            f"-c listen_addresses='' -c unix_socket_directories={shlex.quote(str(socket_dir))} "
+            f"-c archive_mode=off -c archive_command='' -c primary_conninfo='' "
+            f"-c shared_preload_libraries='' -c hot_standby=off -p {port}"
+        )
+        replay_started = time.monotonic()
+        sandbox: SandboxPostgresIdentity | None = None
+        try:
+            update_restore_owner(owner_path, state="postgres_starting")
+            _run(
+                [
+                    str(pg_tool("pg_ctl")),
+                    "-D",
+                    str(pgdata),
+                    "-o",
+                    options,
+                    "-w",
+                    "start",
+                ],
+                timeout=self._timeout,
+            )
+            sandbox = _sandbox_identity(pgdata)
+            if sandbox.pgid != os.getpgrp():
+                raise RestoreProofError("sandbox PostgreSQL escaped the restore process group")
+            update_restore_owner(
+                owner_path,
+                state="postgres_running",
+                sandbox_pid=sandbox.pid,
+                sandbox_created_at=sandbox.created_at,
+                sandbox_pgid=sandbox.pgid,
+                sandbox_pgdata=sandbox.data_directory,
+            )
+            achieved = self._wait_for_promotion(socket_dir, port, candidate)
+            replay_seconds = time.monotonic() - replay_started
+            smoke_started = time.monotonic()
+            restored_fingerprint = self._smoke(socket_dir, port, candidate)
+            smoke_seconds = time.monotonic() - smoke_started
+            if self.live_identity() != live:
+                raise RestoreProofError("live PostgreSQL changed while sandbox was running")
+            return DrillResult(
+                achieved,
+                first_verify_seconds,
+                replay_seconds,
+                smoke_seconds,
+                second_verify_seconds,
+                restored_fingerprint,
+            )
+        finally:
+            if sandbox is None and (pgdata / "postmaster.pid").exists():
+                sandbox = _sandbox_identity(pgdata)
+                update_restore_owner(
+                    owner_path,
+                    state="postgres_running",
+                    sandbox_pid=sandbox.pid,
+                    sandbox_created_at=sandbox.created_at,
+                    sandbox_pgid=sandbox.pgid,
+                    sandbox_pgdata=sandbox.data_directory,
+                )
+            if sandbox is not None:
+                self._stop(pgdata, sandbox)
+                update_restore_owner(owner_path, state="postgres_stopped")
+
+    def _wait_for_promotion(self, socket_dir: Path, port: int, candidate: CandidateManifest) -> str:
+        deadline = time.monotonic() + self._timeout
+        db_url = f"postgresql://?host={socket_dir}&port={port}&dbname=postgres"
+        last_error: Exception | None = None
+        while time.monotonic() < deadline:
+            try:
+                with psycopg.connect(db_url, connect_timeout=2) as conn, conn.cursor() as cur:
+                    cur.execute("SELECT pg_is_in_recovery(), pg_last_wal_replay_lsn()::text")
+                    row = cur.fetchone()
+                    if row is not None and row[0] is False and row[1] is not None:
+                        achieved = str(row[1])
+                        if _lsn(achieved) >= _lsn(candidate.end_lsn):
+                            return achieved
+            except psycopg.Error as exc:
+                last_error = exc
+            time.sleep(0.25)
+        raise RestoreProofError("sandbox did not promote at the target LSN") from last_error
+
+    @staticmethod
+    def _smoke(socket_dir: Path, port: int, candidate: CandidateManifest) -> str:
+        db_url = f"postgresql://?host={socket_dir}&port={port}&dbname=ava_main"
+        with psycopg.connect(db_url, connect_timeout=5) as conn, conn.cursor() as cur:
+            cur.execute("SELECT system_identifier FROM pg_control_system()")
+            row = cur.fetchone()
+            if row != (candidate.system_identifier,):
+                raise RestoreProofError("restored system identifier differs")
+            if _migration_hash(conn) != candidate.migration_set_sha256:
+                raise RestoreProofError("restored migration set differs")
+            evidence: list[str] = [candidate.system_identifier, candidate.migration_set_sha256]
+            for table, order in (
+                ("agents_meta", "id"),
+                ("checkpoints", "thread_id, checkpoint_id"),
+                ("events", "id"),
+            ):
+                query = sql.SQL(
+                    "SELECT to_jsonb(sample)::text FROM {} AS sample ORDER BY {} LIMIT 16"
+                ).format(
+                    sql.Identifier(table),
+                    sql.SQL(", ").join(sql.Identifier(part) for part in order.split(", ")),
+                )
+                cur.execute(query)
+                rows = [str(row[0]) for row in cur.fetchall()]
+                if not rows:
+                    raise RestoreProofError(f"restored {table} smoke sample is empty")
+                evidence.extend((table, *rows))
+            cur.execute(
+                "SELECT n.nspname, c.relname, c.relkind, "
+                "pg_get_userbyid(c.relowner) FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname <> 'information_schema' "
+                "ORDER BY 1,2,3"
+            )
+            evidence.extend("|".join(str(value) for value in row) for row in cur.fetchall())
+            return hashlib.sha256("\n".join(evidence).encode()).hexdigest()
+
+    def _stop(self, pgdata: Path, identity: SandboxPostgresIdentity) -> None:
+        if Path(identity.data_directory) != pgdata.resolve():
+            raise RestoreProofError("refusing to stop PostgreSQL outside the restore sandbox")
+        current = _matching_sandbox(identity)
+        if current is None:
+            return
+        with suppress(RestoreProofError):
+            _run(
+                [str(pg_tool("pg_ctl")), "-D", str(pgdata), "-m", "fast", "-w", "stop"],
+                timeout=30,
+            )
+        _stop_process_tree(identity)
+        if _matching_sandbox(identity) is not None:
+            raise RestoreProofError("sandbox PostgreSQL could not be reaped")

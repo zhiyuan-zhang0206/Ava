@@ -1,0 +1,610 @@
+"""Generation-pinned restore drill domain workflow."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import signal
+import struct
+import tempfile
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Protocol
+
+import psutil
+
+from services.pitr.base_manifest import CandidateManifest
+from services.pitr.base_restore_crypto import (
+    authenticate_base_ciphertext,
+    extract_authenticated_base,
+)
+from services.pitr.crypto import MAGIC, decrypt_archive
+from services.pitr.object_store import RemoteObjectAck
+from services.pitr.restore_manifest import (
+    PROTECTED_SCHEMA_VERSION,
+    ProtectedManifest,
+    RestoreObject,
+    RestoreProof,
+    candidate_sha256,
+    required_archive_names,
+    wal_objects_from_acks,
+)
+from services.pitr.restore_object_store import GenerationPinnedObjectReader
+
+
+class RestoreProofError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class RestoreSpaceBudget:
+    spool_and_pg_wal_reserve: int
+    logical_backup_peak: int
+    emergency_floor: int
+
+
+@dataclass(frozen=True)
+class LivePostgresIdentity:
+    pid: int
+    created_at: float
+    data_directory: str
+    system_identifier: str
+    postmaster_started_at: str
+    probe_sha256: str
+
+
+@dataclass(frozen=True)
+class DrillResult:
+    achieved_lsn: str
+    verify_before_restore_seconds: float
+    replay_seconds: float
+    smoke_seconds: float
+    second_verify_seconds: float
+    restored_fingerprint_sha256: str
+
+
+class RestoreDrillExecutor(Protocol):
+    def live_identity(self) -> LivePostgresIdentity: ...
+
+    def run(
+        self,
+        *,
+        pgdata: Path,
+        wal_dir: Path,
+        candidate: CandidateManifest,
+        run_root: Path,
+        owner_path: Path,
+    ) -> DrillResult: ...
+
+
+class ProtectedManifestPublisher(Protocol):
+    def put_manifest_if_absent(
+        self, *, payload: bytes, object_name: str, metadata: dict[str, str]
+    ) -> RemoteObjectAck: ...
+
+
+def _base_restore_object(candidate: CandidateManifest) -> RestoreObject:
+    metadata = {
+        "ava-candidate-sha256": candidate.base_object.source_sha256,
+        "ava-ciphertext-size": str(candidate.base_object.ciphertext_size),
+        "ava-ciphertext-crc32c": candidate.base_object.ciphertext_crc32c,
+        "ava-encryption-format": candidate.base_object.encryption_format,
+        "ava-key-id": candidate.base_object.key_id,
+        "ava-packer-version": "1",
+    }
+    return RestoreObject(
+        "base.tar.zst.enc",
+        candidate.base_object.object_name,
+        candidate.base_object.generation,
+        candidate.base_object.ciphertext_size,
+        candidate.base_object.ciphertext_crc32c,
+        tuple(sorted(metadata.items())),
+    )
+
+
+def _required_bytes(
+    candidate: CandidateManifest,
+    base: RestoreObject,
+    wal: tuple[RestoreObject, ...],
+    budget: RestoreSpaceBudget,
+) -> int:
+    wal_plain = sum(int(dict(item.metadata)["ava-source-size"]) for item in wal)
+    return (
+        base.size
+        + candidate.base_object.source_size
+        + sum(item.size for item in wal)
+        + wal_plain
+        + budget.spool_and_pg_wal_reserve
+        + budget.logical_backup_peak
+        + budget.emergency_floor
+    )
+
+
+def _require_space(root: Path, required: int) -> None:
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    free = shutil.disk_usage(root).free
+    if free < required:
+        raise RestoreProofError(
+            f"restore proof deferred: requires {required} bytes but only {free} are free"
+        )
+
+
+def _same_live(before: LivePostgresIdentity, after: LivePostgresIdentity) -> None:
+    if before != after:
+        raise RestoreProofError("live PostgreSQL identity changed during restore drill")
+
+
+def _download_wal(
+    *,
+    reader: GenerationPinnedObjectReader,
+    objects: tuple[RestoreObject, ...],
+    encrypted_dir: Path,
+    wal_dir: Path,
+    key: bytes,
+) -> None:
+    encrypted_dir.mkdir(mode=0o700)
+    wal_dir.mkdir(mode=0o700)
+    for item in objects:
+        ciphertext = encrypted_dir / f"{item.archive_name}.enc"
+        reader.download_exact(item, ciphertext)
+        _verify_wal_header(ciphertext, item)
+        destination = wal_dir / item.archive_name
+        decrypt_archive(ciphertext, destination, key=key)
+        source_sha256 = hashlib.sha256(destination.read_bytes()).hexdigest()
+        metadata = dict(item.metadata)
+        if (
+            destination.stat().st_size != int(metadata["ava-source-size"])
+            or source_sha256 != metadata["ava-source-sha256"]
+        ):
+            raise RestoreProofError("restored WAL plaintext differs from protected evidence")
+        ciphertext.unlink()
+
+
+def _verify_wal_header(path: Path, expected: RestoreObject) -> None:
+    with path.open("rb") as source:
+        if source.read(len(MAGIC)) != MAGIC:
+            raise RestoreProofError("WAL object has an unsupported encryption format")
+        raw_length = source.read(4)
+        if len(raw_length) != 4:
+            raise RestoreProofError("WAL object has a truncated header")
+        header_length = struct.unpack(">I", raw_length)[0]
+        if header_length <= 0 or header_length > 64 * 1024:
+            raise RestoreProofError("WAL object has an invalid header length")
+        header = json.loads(source.read(header_length))
+    metadata = dict(expected.metadata)
+    exact = {
+        "archive_name": expected.archive_name,
+        "key_id": metadata["ava-key-id"],
+        "object_name": expected.object_name,
+        "source_sha256": metadata["ava-source-sha256"],
+        "source_size": int(metadata["ava-source-size"]),
+    }
+    if set(header) != {*exact, "nonce"} or any(
+        header[key] != value for key, value in exact.items()
+    ):
+        raise RestoreProofError("WAL encryption header differs from protected evidence")
+
+
+def _write_local_manifest(path: Path, payload: bytes) -> None:
+    if path.is_file():
+        if path.read_bytes() != payload:
+            raise RestoreProofError("durable restore manifest differs from retry payload")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    staged = Path(raw)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(staged, path, follow_symlinks=False)
+        _fsync_dir(path.parent)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def _fsync_dir(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_owner(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    staged = Path(raw)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as output:
+            json.dump(value, output, sort_keys=True, separators=(",", ":"))
+            output.flush()
+            os.fsync(output.fileno())
+        staged.replace(path)
+        _fsync_dir(path.parent)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def update_restore_owner(path: Path, **changes: object) -> None:
+    """Durably extend restore ownership without weakening prior evidence."""
+
+    try:
+        evidence = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RestoreProofError("restore owner evidence is unreadable") from exc
+    if not isinstance(evidence, dict):
+        raise RestoreProofError("restore owner evidence is not an object")
+    evidence.update(changes)
+    _atomic_owner(path, evidence)
+
+
+def _matching_process(pid: int, created_at: float) -> psutil.Process | None:
+    try:
+        process = psutil.Process(pid)
+        if abs(process.create_time() - created_at) >= 0.01:
+            return None
+        return process
+    except psutil.AccessDenied as exc:
+        raise RestoreProofError("cannot verify restore owner identity") from exc
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return None
+
+
+def _group_members(pgid: int) -> list[psutil.Process]:
+    members: list[psutil.Process] = []
+    for process in psutil.process_iter(["pid"]):
+        try:
+            if os.getpgid(process.pid) == pgid:
+                members.append(process)
+        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
+            continue
+    return members
+
+
+def _stop_owned_group(leader: psutil.Process, pgid: int) -> None:
+    try:
+        if os.getpgid(leader.pid) != pgid or pgid == os.getpgrp():
+            raise RestoreProofError("refusing to signal an unowned restore process group")
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 20
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    grace = min(deadline, time.monotonic() + 5)
+    while _group_members(pgid) and time.monotonic() < grace:
+        time.sleep(0.1)
+    while _group_members(pgid) and time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    if _group_members(pgid):
+        raise RestoreProofError("restore process group retained live descendants")
+
+
+def _sandbox_is_live(evidence: dict[str, object]) -> bool:
+    raw_pid = evidence.get("sandbox_pid")
+    raw_created_at = evidence.get("sandbox_created_at")
+    if raw_pid is None and raw_created_at is None:
+        return False
+    if raw_pid is None or raw_created_at is None:
+        raise RestoreProofError("restore owner has incomplete sandbox identity")
+    return _matching_process(int(raw_pid), float(raw_created_at)) is not None
+
+
+def _stop_owned_sandbox(evidence: dict[str, object], pgid: int) -> None:
+    raw_pid = evidence.get("sandbox_pid")
+    raw_created_at = evidence.get("sandbox_created_at")
+    raw_pgid = evidence.get("sandbox_pgid")
+    if raw_pid is None or raw_created_at is None or raw_pgid is None:
+        raise RestoreProofError("orphaned restore group lacks sandbox ownership evidence")
+    if int(raw_pgid) != pgid:
+        raise RestoreProofError("sandbox PostgreSQL escaped its restore process group")
+    leader = _matching_process(int(raw_pid), float(raw_created_at))
+    if leader is None:
+        raise RestoreProofError("restore group survives without its recorded sandbox postmaster")
+    deadline = time.monotonic() + 20
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    grace = min(deadline, time.monotonic() + 5)
+    while _group_members(pgid) and time.monotonic() < grace:
+        time.sleep(0.1)
+    while _group_members(pgid) and time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    if _group_members(pgid):
+        raise RestoreProofError("orphaned restore process group could not be emptied")
+
+
+def _remove_owned_restore(partial: Path, owner: Path, evidence: dict[str, object]) -> None:
+    if partial.is_symlink() or not partial.is_dir():
+        raise RestoreProofError("refusing to remove an unexpected restore path")
+    if _sandbox_is_live(evidence):
+        raise RestoreProofError("refusing to remove a live restore PostgreSQL data directory")
+    if evidence.get("state") in {"postgres_starting", "postgres_running"}:
+        raise RestoreProofError("refusing to remove restore data with unresolved PostgreSQL state")
+    shutil.rmtree(partial)
+    _fsync_dir(partial.parent)
+    owner.unlink()
+    _fsync_dir(owner.parent)
+
+
+def _require_owner_object(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise RestoreProofError("restore owner evidence is not an object")
+    return value
+
+
+def reconcile_restore_runtime(root: Path) -> None:  # noqa: PLR0915
+    """Recover only restore runs whose durable owner identity is conclusive."""
+
+    restore_root = root / "restore"
+    owners = root / "restore-owners"
+    partials = set(restore_root.glob(".*.partial")) if restore_root.exists() else set()
+    owner_paths = set(owners.glob("*.owner.json")) if owners.exists() else set()
+    for owner in sorted(owner_paths):
+        try:
+            evidence = _require_owner_object(json.loads(owner.read_text()))
+            partial = Path(str(evidence["partial"]))
+            pid = int(evidence["pid"])
+            created_at = float(evidence["created_at"])
+            pgid = int(evidence["pgid"])
+            deadline = float(evidence["deadline"])
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RestoreProofError("invalid restore owner evidence") from exc
+        if partial.parent != restore_root:
+            raise RestoreProofError("restore owner escaped the restore root")
+        leader = _matching_process(pid, created_at)
+        if partial not in partials:
+            if leader is not None and time.time() < deadline:
+                raise RestoreProofError("restore spawn owner is still active")
+            if leader is not None:
+                _stop_owned_group(leader, pgid)
+            elif _group_members(pgid):
+                raise RestoreProofError("restore spawn owner left unattributed descendants")
+            owner.unlink()
+            _fsync_dir(owner.parent)
+            continue
+        if leader is not None:
+            if time.time() < deadline:
+                raise RestoreProofError("restore proof owner is still active")
+            _stop_owned_group(leader, pgid)
+        elif _group_members(pgid):
+            _stop_owned_sandbox(evidence, pgid)
+        if evidence.get("state") in {"postgres_starting", "postgres_running"}:
+            postmaster = partial / "sandbox" / "data" / "postmaster.pid"
+            if postmaster.exists():
+                raise RestoreProofError("dead restore owner left unresolved postmaster evidence")
+            evidence["state"] = "postgres_stopped"
+        _remove_owned_restore(partial, owner, evidence)
+        partials.remove(partial)
+    if partials:
+        raise RestoreProofError("restore partial lacks durable owner evidence")
+    pending_root = root / "protected-pending"
+    local_root = root / "protected-manifests"
+    if pending_root.exists():
+        for pending in pending_root.glob("*.json"):
+            local = local_root / pending.name
+            if not local.is_file():
+                continue
+            if local.read_bytes() != pending.read_bytes():
+                raise RestoreProofError("protected local and pending manifests differ")
+            pending.unlink()
+            _fsync_dir(pending_root)
+
+
+def _publish_protected(
+    *,
+    root: Path,
+    candidate: CandidateManifest,
+    prefix: str,
+    payload: bytes,
+    publisher: ProtectedManifestPublisher,
+) -> None:
+    object_name = f"{prefix.rstrip('/')}/protected/{candidate.chain_id}.json"
+    metadata = {
+        "ava-chain-id": candidate.chain_id,
+        "ava-candidate-sha256": candidate_sha256(candidate),
+        "ava-manifest-sha256": hashlib.sha256(payload).hexdigest(),
+        "ava-protected": "true",
+    }
+    ack = publisher.put_manifest_if_absent(
+        payload=payload, object_name=object_name, metadata=metadata
+    )
+    if (
+        ack.object_name != object_name
+        or ack.generation <= 0
+        or ack.size != len(payload)
+        or dict(ack.metadata) != metadata
+    ):
+        raise RestoreProofError("protected manifest remote ACK differs")
+    local = root / "protected-manifests" / f"{candidate.chain_id}.json"
+    _write_local_manifest(local, payload)
+
+
+def _resume_protected_publish(
+    *,
+    root: Path,
+    candidate: CandidateManifest,
+    prefix: str,
+    publisher: ProtectedManifestPublisher,
+) -> ProtectedManifest | None:
+    local = root / "protected-manifests" / f"{candidate.chain_id}.json"
+    pending = root / "protected-pending" / f"{candidate.chain_id}.json"
+    source = local if local.is_file() else pending if pending.is_file() else None
+    if source is None:
+        return None
+    payload = source.read_bytes()
+    protected = ProtectedManifest.from_json(payload.decode())
+    if protected.chain_id != candidate.chain_id or protected.candidate_sha256 != candidate_sha256(
+        candidate
+    ):
+        raise RestoreProofError("durable protected retry does not match its candidate")
+    if source == pending:
+        _publish_protected(
+            root=root,
+            candidate=candidate,
+            prefix=prefix,
+            payload=payload,
+            publisher=publisher,
+        )
+        pending.unlink()
+        _fsync_dir(pending.parent)
+    elif pending.is_file():
+        if pending.read_bytes() != payload:
+            raise RestoreProofError("protected local and pending manifests differ")
+        pending.unlink()
+        _fsync_dir(pending.parent)
+    return protected
+
+
+def prove_candidate(  # noqa: PLR0915
+    *,
+    candidate: CandidateManifest,
+    root: Path,
+    ack_dir: Path,
+    prefix: str,
+    key: bytes,
+    reader: GenerationPinnedObjectReader,
+    publisher: ProtectedManifestPublisher,
+    executor: RestoreDrillExecutor,
+    budget: RestoreSpaceBudget,
+    now: datetime | None = None,
+) -> ProtectedManifest:
+    """Publish protected=true only after a real isolated restore succeeds."""
+
+    reconcile_restore_runtime(root)
+    resumed = _resume_protected_publish(
+        root=root, candidate=candidate, prefix=prefix, publisher=publisher
+    )
+    if resumed is not None:
+        return resumed
+    archive_names = required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
+    wal = wal_objects_from_acks(ack_dir=ack_dir, archive_names=archive_names)
+    base = _base_restore_object(candidate)
+    _require_space(root, _required_bytes(candidate, base, wal, budget))
+    now = datetime.now(UTC) if now is None else now.astimezone(UTC)
+    run_id = f"{candidate.chain_id}-{now.strftime('%Y%m%dT%H%M%SZ')}"
+    partial = root / "restore" / f".{run_id}.partial"
+    owner = root / "restore-owners" / f"{run_id}.owner.json"
+    if partial.exists() or partial.is_symlink():
+        raise RestoreProofError("restore proof has unresolved owned work")
+    process = psutil.Process()
+    pgid = os.getpgrp()
+    if pgid != process.pid:
+        raise RestoreProofError("restore proof must run as its process-group leader")
+    if owner.exists() or owner.is_symlink():
+        raise RestoreProofError("restore proof owner evidence already exists")
+    _atomic_owner(
+        owner,
+        {
+            "schema_version": 1,
+            "state": "spawning",
+            "partial": str(partial),
+            "pid": process.pid,
+            "created_at": process.create_time(),
+            "pgid": pgid,
+            "deadline": time.time() + 6 * 3600,
+        },
+    )
+    try:
+        partial.mkdir(parents=True, mode=0o700)
+        update_restore_owner(owner, state="running")
+        started_at = now.isoformat()
+        before = executor.live_identity()
+        base_ciphertext = partial / "quarantine" / "base.enc"
+        reader.download_exact(base, base_ciphertext)
+        authenticate_base_ciphertext(base_ciphertext, key=key, expected=base)
+        pgdata = extract_authenticated_base(
+            base_ciphertext,
+            partial / "sandbox",
+            key=key,
+            expected=base,
+            candidate_sha256=candidate.base_object.source_sha256,
+            native_manifest_sha256=candidate.native_manifest_sha256,
+            max_extracted_bytes=candidate.base_object.source_size,
+        )
+        encrypted_wal = partial / "quarantine" / "wal"
+        wal_dir = partial / "archive"
+        _download_wal(
+            reader=reader,
+            objects=wal,
+            encrypted_dir=encrypted_wal,
+            wal_dir=wal_dir,
+            key=key,
+        )
+        result = executor.run(
+            pgdata=pgdata,
+            wal_dir=wal_dir,
+            candidate=candidate,
+            run_root=partial,
+            owner_path=owner,
+        )
+        after = executor.live_identity()
+        _same_live(before, after)
+        completed_at = datetime.now(UTC).isoformat()
+        proof = RestoreProof(
+            run_id,
+            started_at,
+            completed_at,
+            candidate.end_lsn,
+            result.achieved_lsn,
+            before.pid,
+            before.probe_sha256,
+            result.verify_before_restore_seconds,
+            result.replay_seconds,
+            result.smoke_seconds,
+            result.second_verify_seconds,
+            base.size + sum(item.size for item in wal),
+            result.restored_fingerprint_sha256,
+        )
+        protected = ProtectedManifest(
+            schema_version=PROTECTED_SCHEMA_VERSION,
+            protected=True,
+            chain_id=candidate.chain_id,
+            candidate_sha256=candidate_sha256(candidate),
+            candidate=candidate,
+            base=base,
+            wal=wal,
+            target_lsn=candidate.end_lsn,
+            wal_segment_size=candidate.wal_segment_size,
+            proof=proof,
+        )
+        payload = protected.to_json().encode()
+        pending = root / "protected-pending" / f"{candidate.chain_id}.json"
+        _write_local_manifest(pending, payload)
+        update_restore_owner(owner, state="publishing", pending=str(pending))
+        _publish_protected(
+            root=root,
+            candidate=candidate,
+            prefix=prefix,
+            payload=payload,
+            publisher=publisher,
+        )
+        pending.unlink()
+        _fsync_dir(pending.parent)
+        return protected
+    finally:
+        if owner.is_file():
+            if partial.exists():
+                evidence = json.loads(owner.read_text())
+                _remove_owned_restore(partial, owner, evidence)
+            else:
+                owner.unlink()
+                _fsync_dir(owner.parent)

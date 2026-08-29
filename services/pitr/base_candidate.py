@@ -55,6 +55,7 @@ _PARTIAL_NAME = re.compile(r"^\.\d{8}T\d{6}Z\.partial$")
 class CandidateFacts:
     postgres_major: int
     system_identifier: str
+    wal_segment_size: int
     timeline: int
     migration_set_sha256: str
 
@@ -90,16 +91,17 @@ def _migration_set_sha256(db_url: str) -> str:
     return hashlib.sha256("\n".join(names).encode()).hexdigest()
 
 
-def _server_facts(db_url: str) -> tuple[int, str, int]:
+def _server_facts(db_url: str) -> tuple[int, str, int, int]:
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT current_setting('server_version_num'), system_identifier, "
-            "timeline_id FROM pg_control_system(), pg_control_checkpoint()"
+            "timeline_id, bytes_per_wal_segment FROM pg_control_system(), "
+            "pg_control_checkpoint(), pg_control_init()"
         )
         row = cur.fetchone()
         if row is None:
             raise BaseCandidateError("PostgreSQL omitted physical backup identity")
-        version, system_id, timeline = row
+        version, system_id, timeline, wal_segment_size = row
         cur.execute(
             "SELECT spcname FROM pg_tablespace "
             "WHERE spcname NOT IN ('pg_default', 'pg_global') ORDER BY spcname"
@@ -109,7 +111,7 @@ def _server_facts(db_url: str) -> tuple[int, str, int]:
         raise BaseCandidateError(
             f"custom tablespaces are not supported: {', '.join(custom_tablespaces)}"
         )
-    return int(version) // 10000, str(system_id), int(timeline)
+    return int(version) // 10000, str(system_id), int(wal_segment_size), int(timeline)
 
 
 def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
@@ -308,10 +310,11 @@ def _birth_candidate(
         _recover_owned_partials(root)
         require_candidate_space(partial.parent, budget)
         _validate_replication_contract(db_url, replication_db_url)
-        postgres_major, system_id, timeline = _server_facts(db_url)
+        postgres_major, system_id, wal_segment_size, timeline = _server_facts(db_url)
         facts = CandidateFacts(
             postgres_major,
             system_id,
+            wal_segment_size,
             timeline,
             _migration_set_sha256(db_url),
         )
@@ -433,6 +436,7 @@ def reconcile_completed_candidates(root: Path, *, key: bytes, key_id: str) -> No
             or candidate.native_manifest_container_generation != candidate.base_object.generation
             or candidate.postgres_major != facts.postgres_major
             or candidate.system_identifier != facts.system_identifier
+            or candidate.wal_segment_size != facts.wal_segment_size
             or candidate.system_identifier != system_id
             or candidate.timeline != facts.timeline
             or candidate.start_lsn != start_lsn
@@ -533,6 +537,7 @@ def create_base_candidate(
         protected=False,
         postgres_major=facts.postgres_major,
         system_identifier=system_id,
+        wal_segment_size=facts.wal_segment_size,
         timeline=wal_ranges[0].timeline,
         start_lsn=start_lsn,
         end_lsn=end_lsn,

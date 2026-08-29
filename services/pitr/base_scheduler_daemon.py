@@ -28,6 +28,14 @@ from services.pitr.base_candidate import (
 )
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.base_object_store import GCSRestartableStreamingObjectStore
+from services.pitr.restore_object_store import GCSGenerationPinnedObjectReader
+from services.pitr.restore_postgres import IsolatedPostgresRestoreExecutor
+from services.pitr.restore_proof import (
+    RestoreSpaceBudget,
+    prove_candidate,
+    reconcile_restore_runtime,
+)
+from services.pitr.restore_publish_store import GCSProtectedManifestPublisher
 from services.pitr.space_budget import CandidateSpaceBudget
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
@@ -75,6 +83,8 @@ class BaseCandidateState:
     last_error: str | None = None
     deferred_for_logical_backup: bool = False
     cleanup_pending: bool = False
+    restore_running: bool = False
+    last_protected: float | None = None
 
 
 def _candidate_manifests(root: Path) -> list[CandidateManifest]:
@@ -146,7 +156,18 @@ def _components(state: BaseCandidateState) -> list[dict[str, object]]:
     record["protected"] = False
     record["deferred_for_logical_backup"] = state.deferred_for_logical_backup
     record["cleanup_pending"] = state.cleanup_pending
-    return [record]
+    restore_status = OK if state.last_protected or not state.last_error else DEGRADED
+    restore = component(
+        "pitr_restore_proof",
+        restore_status,
+        last_success=state.last_protected,
+        progress="running" if state.restore_running else "idle",
+        detail=state.last_error if restore_status == DEGRADED else None,
+        now=time.time() if state.last_protected else None,
+        gate_readiness=False,
+    )
+    restore["protected"] = state.last_protected is not None
+    return [record, restore]
 
 
 def _tree_bytes(path: Path) -> int:
@@ -191,6 +212,57 @@ def _build_candidate(stop: StopSignal) -> CandidateManifest:
     )
 
 
+def _pending_restore_candidate(root: Path) -> CandidateManifest | None:
+    protected = root / "protected-manifests"
+    for candidate in _candidate_manifests(root / "base-manifests"):
+        if not (protected / f"{candidate.chain_id}.json").is_file():
+            return candidate
+    return None
+
+
+def _build_restore_proof(_stop: StopSignal) -> CandidateManifest:
+    config = settings.physical_backup
+    if not config.pitr_restore_proof_enabled:
+        raise RuntimeError("restore proof cannot run while its flag is off")
+    key_path = config.pitr_backup_key_file
+    read_credentials = config.pitr_restore_gcs_credentials_file
+    publish_credentials = config.pitr_gcs_credentials_file
+    if key_path is None or read_credentials is None or publish_credentials is None:
+        raise RuntimeError("validated restore proof secrets are missing")
+    root = ava_home() / "physical-backup"
+    candidate = _pending_restore_candidate(root)
+    if candidate is None:
+        raise RuntimeError("restore proof has no unprotected candidate")
+    logical_peak = max(
+        (item.stat().st_size for item in (ava_home() / "backups" / "db").glob("*.enc")),
+        default=0,
+    )
+    prove_candidate(
+        candidate=candidate,
+        root=root,
+        ack_dir=root / "ack",
+        prefix=config.pitr_gcs_prefix,
+        key=key_path.read_bytes(),
+        reader=GCSGenerationPinnedObjectReader(
+            project=config.pitr_gcs_project,
+            bucket=config.pitr_gcs_bucket,
+            credentials_file=read_credentials,
+        ),
+        publisher=GCSProtectedManifestPublisher(
+            project=config.pitr_gcs_project,
+            bucket=config.pitr_gcs_bucket,
+            credentials_file=publish_credentials,
+        ),
+        executor=IsolatedPostgresRestoreExecutor(),
+        budget=RestoreSpaceBudget(
+            config.pitr_spool_hard_bytes,
+            logical_peak,
+            _EMERGENCY_FLOOR_BYTES,
+        ),
+    )
+    return candidate
+
+
 async def _sleep(seconds: float) -> None:
     remaining = seconds
     while remaining > 0:
@@ -202,6 +274,13 @@ async def _sleep(seconds: float) -> None:
 def _worker_entry(stop: StopSignal, output: _WorkerQueue) -> None:
     try:
         output.put((True, _build_candidate(stop).to_json()))
+    except BaseException as exc:
+        output.put((False, f"{type(exc).__name__}: {exc}"))
+
+
+def _proof_worker_entry(stop: StopSignal, output: _WorkerQueue) -> None:
+    try:
+        output.put((True, _build_restore_proof(stop).to_json()))
     except BaseException as exc:
         output.put((False, f"{type(exc).__name__}: {exc}"))
 
@@ -392,11 +471,12 @@ async def _run_worker(
         output.join_thread()
 
 
-async def _loop(state: BaseCandidateState) -> None:
+async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
     root = ava_home() / "physical-backup" / "base-manifests"
     while True:
         state.cleanup_pending = True
         try:
+            reconcile_restore_runtime(ava_home() / "physical-backup")
             key, key_id = _backup_key()
             reconcile_runtime_state(
                 ava_home() / "physical-backup",
@@ -410,6 +490,22 @@ async def _loop(state: BaseCandidateState) -> None:
             continue
         else:
             state.cleanup_pending = False
+        config = settings.physical_backup
+        if config.pitr_restore_proof_enabled and _pending_restore_candidate(
+            ava_home() / "physical-backup"
+        ):
+            state.restore_running = True
+            try:
+                await _run_worker(target=_proof_worker_entry)
+                state.last_protected = time.time()
+                state.last_error = None
+            except Exception as exc:
+                state.last_error = str(exc)
+                _log.exception("restore proof failed; candidate remains unprotected")
+            finally:
+                state.restore_running = False
+            await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
+            continue
         now = datetime.now(UTC)
         if not is_due(now, root):
             await _sleep(3600)
@@ -438,11 +534,17 @@ async def run() -> None:
         return
     root = ava_home() / "physical-backup" / "base-manifests"
     physical_root = ava_home() / "physical-backup"
-    cleanup_pending = any((physical_root / "base-candidates").glob(".*.partial")) or any(
-        (
-            physical_root / "base-manifests" / f"{path.name.removesuffix('.ready')}.candidate.json"
-        ).is_file()
-        for path in (physical_root / "base-candidates").glob("*.ready")
+    cleanup_pending = (
+        any((physical_root / "restore").glob(".*.partial"))
+        or any((physical_root / "base-candidates").glob(".*.partial"))
+        or any(
+            (
+                physical_root
+                / "base-manifests"
+                / f"{path.name.removesuffix('.ready')}.candidate.json"
+            ).is_file()
+            for path in (physical_root / "base-candidates").glob("*.ready")
+        )
     )
     state = BaseCandidateState(
         last_success=_last_durable_success(root), cleanup_pending=cleanup_pending
