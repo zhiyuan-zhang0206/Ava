@@ -6,7 +6,7 @@ from pathlib import Path
 import psutil
 from pytest import MonkeyPatch
 
-from services.pitr import restore_proof
+from services.pitr import restore_manifest, restore_proof
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.restore_manifest import RestoreObject
@@ -183,6 +183,7 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
         return pgdata
 
     monkeypatch.setattr(restore_proof, "required_archive_names", no_archives)
+    monkeypatch.setattr(restore_manifest, "required_archive_names", no_archives)
     monkeypatch.setattr(restore_proof, "authenticate_base_ciphertext", authenticate)
     monkeypatch.setattr(restore_proof, "extract_authenticated_base", extract)
     monkeypatch.setattr(restore_proof.psutil, "Process", Process)
