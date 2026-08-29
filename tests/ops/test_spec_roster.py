@@ -33,6 +33,7 @@ _GATEWAY_SESSIONS = {
     "otel-collector",
     "pg-backup",
     "pitr-uploader",
+    "pitr-base-candidate",
 }
 _AGENT_RUNNER_SESSIONS = {
     "restarter",
@@ -127,6 +128,20 @@ def test_browser_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     assert annotated["browser"] and "AVA_BROWSER_ENABLED" in annotated["browser"]
     assert annotated["browser-mcp"] and "AVA_BROWSER_ENABLED" in annotated["browser-mcp"]
+
+
+def test_base_candidate_is_independently_gated_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(spec.settings.physical_backup, "pitr_enabled", True)
+    monkeypatch.setattr(spec.settings.physical_backup, "pitr_base_backup_enabled", False)
+    annotated = {
+        service.session: reason
+        for service, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+    }
+    assert "BASE_BACKUP_ENABLED" in (annotated["pitr-base-candidate"] or "")
+    start = {service.session for service in spec.services_for_capabilities(frozenset({"gateway"}))}
+    assert "pitr-base-candidate" not in start
 
 
 def _agent_runner_annotated(monkeypatch: pytest.MonkeyPatch) -> dict[str, str | None]:

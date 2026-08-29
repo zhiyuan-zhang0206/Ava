@@ -184,6 +184,7 @@ _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     # The supervised pg-backup scheduler has its own per-unit health endpoint.
     "pg_backup",
     "pitr_uploader",
+    "pitr_base_backup",
     "memory_indexer",
     "ops",
     # Added in the S4 isolation pass (F-s4-2): these two daemons predate the
