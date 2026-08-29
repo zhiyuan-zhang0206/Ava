@@ -47,7 +47,6 @@ import { TaskKanban } from "./task-kanban";
 // regular task): it gets a dedicated color so the root stands apart from every
 // status-colored node in the graph — status colors have no meaning for it.
 const STATUS_FILL: Record<string, string> = {
-  open: "text-slate-400",
   in_progress: "text-sky-500",
   done: "text-emerald-500",
   cancelled: "text-destructive",
@@ -57,7 +56,6 @@ const STATUS_FILL: Record<string, string> = {
 // Human-readable status label (Kanban columns; 'ongoing' shows in the legend
 // as the root's own swatch).
 const STATUS_LABEL: Record<string, string> = {
-  open: "Open",
   in_progress: "In progress",
   done: "Done",
   cancelled: "Canceled",

@@ -704,11 +704,11 @@ COMMENT ON COLUMN agent_archive_stats.computed_at IS
 CREATE TABLE agent_tasks (
     id          BIGSERIAL PRIMARY KEY,
     parent_id   BIGINT REFERENCES agent_tasks(id),      -- parent task; every task descends from the root, so NULL marks only the root itself (task_registry.create() requires an explicit parent)
-    title       TEXT NOT NULL,                          -- short one-line name, shown in listings; renameable via update()/PATCH, unique among open/in_progress tasks (app-level check)
+    title       TEXT NOT NULL,                          -- short one-line name, shown in listings; renameable via update()/PATCH, unique among in_progress tasks (app-level check)
     description TEXT NOT NULL,                          -- full detail of what to do; read before working
     results     TEXT,                                   -- result log (what was done, output paths); replaced by update, appended by log
-    status      TEXT NOT NULL DEFAULT 'open'
-                CHECK (status IN ('open', 'in_progress', 'done', 'cancelled', 'ongoing')),
+    status      TEXT NOT NULL DEFAULT 'in_progress'
+                CHECK (status IN ('in_progress', 'done', 'cancelled', 'ongoing')),
     priority    TEXT NOT NULL DEFAULT 'P2'
                 CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),  -- stakes axis (P0 highest); orders the board within a status column and seeds a stall-escalation notice's priority
     owner       BIGINT REFERENCES agents(id),           -- current owner agent; NULL only on the system root task (every other task always has an owner)
@@ -736,14 +736,14 @@ CREATE INDEX idx_agent_tasks_owner_status   ON agent_tasks (owner, status);
 CREATE INDEX idx_agent_tasks_parent         ON agent_tasks (parent_id);
 CREATE INDEX idx_agent_tasks_status_created ON agent_tasks (status, created_at);
 
--- No two open/in_progress tasks share a title — the app-level guards in
+-- No two in_progress tasks share a title — the app-level guards in
 -- task_registry.create()/update() and the gateway PATCH give the friendly
 -- error; this partial unique index is the database backstop (a concurrent
 -- create/rename can slip past a pre-check). A title may repeat once the
--- earlier task leaves open/in_progress.
-CREATE UNIQUE INDEX agent_tasks_title_unique_open ON agent_tasks (title) WHERE status IN ('open', 'in_progress');
+-- earlier task leaves in_progress.
+CREATE UNIQUE INDEX agent_tasks_title_unique_in_progress ON agent_tasks (title) WHERE status = 'in_progress';
 
--- The root task: system-owned, always in_progress, parent of the cluster's
+-- The root task: system-owned, permanently 'ongoing', parent of the cluster's
 -- top-level tasks only. task_registry.create() requires an explicit parent,
 -- and the root (id 1) is the one id callers pass for a top-level task.
 -- Idempotent so re-bootstrapping is a no-op.

@@ -312,43 +312,27 @@ def test_update_nothing_raises(db_conn: psycopg.Connection, root_task_id: int) -
 
 
 @pytest.mark.parametrize("closing_status", ["done", "cancelled"])
-def test_update_rejects_closing_parent_with_open_child(
+def test_update_rejects_closing_parent_with_in_progress_child(
     db_conn: psycopg.Connection, closing_status: str, root_task_id: int
 ) -> None:
+    """A child is born in_progress, so closing a parent while any child is
+    active is rejected (post-2026-08-29 the 'open' status no longer exists —
+    a task starts in_progress)."""
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
         parent = task_registry.create(f"parent-{closing_status}", "detail", parent=root_task_id)
-        child = task_registry.create(f"open-child-{closing_status}", "detail", parent=parent.id)
+        child = task_registry.create(f"active-child-{closing_status}", "detail", parent=parent.id)
         message = (
-            f"task {parent.id} has 1 open/in_progress child tasks (e.g. #{child.id}) — "
+            f"task {parent.id} has 1 in_progress child tasks (e.g. #{child.id}) — "
             "close or cancel them first"
         )
 
         with pytest.raises(ValueError, match=re.escape(message)):
             task_registry.update(parent.id, status=closing_status)
 
-        assert task_registry.get(parent.id).status == "open"
-    finally:
-        ava._boot._agent_id = original
-
-
-def test_update_rejects_closing_parent_with_in_progress_child(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
-    try:
-        parent = task_registry.create("parent-with-active-child", "detail", parent=root_task_id)
-        child = task_registry.create("active-child", "detail", parent=parent.id)
-        task_registry.update(child.id, status="in_progress")
-
-        with pytest.raises(ValueError, match=rf"task {parent.id} has 1 .*#{child.id}"):
-            task_registry.update(parent.id, status="done")
-
-        assert task_registry.get(parent.id).status == "open"
+        assert task_registry.get(parent.id).status == "in_progress"
     finally:
         ava._boot._agent_id = original
 
@@ -392,7 +376,7 @@ def test_update_closes_parent_without_children(
         ava._boot._agent_id = original
 
 
-def test_update_starts_parent_with_open_child(
+def test_update_starts_parent_with_in_progress_child(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     agent_id = _seed_agent(db_conn)
@@ -400,7 +384,7 @@ def test_update_starts_parent_with_open_child(
     ava._boot._agent_id = agent_id
     try:
         parent = task_registry.create("parent-to-start", "detail", parent=root_task_id)
-        task_registry.create("open-child-of-started-parent", "detail", parent=parent.id)
+        task_registry.create("active-child-of-started-parent", "detail", parent=parent.id)
 
         task_registry.update(parent.id, status="in_progress")
 
@@ -409,7 +393,7 @@ def test_update_starts_parent_with_open_child(
         ava._boot._agent_id = original
 
 
-def test_update_title_and_note_on_parent_with_open_child(
+def test_update_title_and_note_on_parent_with_in_progress_child(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     agent_id = _seed_agent(db_conn)
@@ -417,12 +401,12 @@ def test_update_title_and_note_on_parent_with_open_child(
     ava._boot._agent_id = agent_id
     try:
         parent = task_registry.create("parent-to-edit", "detail", parent=root_task_id)
-        task_registry.create("open-child-of-edited-parent", "detail", parent=parent.id)
+        task_registry.create("active-child-of-edited-parent", "detail", parent=parent.id)
 
         task_registry.update(parent.id, title="edited-parent", note="still active")
 
         updated = task_registry.get(parent.id)
-        assert updated.status == "open"
+        assert updated.status == "in_progress"
         assert updated.title == "edited-parent"
         assert updated.results is not None
         assert updated.results.splitlines()[-1].endswith("still active")
@@ -1337,8 +1321,10 @@ def test_create_and_assign_rejects_bad_parent_before_spawn(
 # ── create() — duplicate title rejection ──────────────────────────────────
 
 
-def test_create_duplicate_open_title_raises(db_conn, root_task_id: int):
-    """Creating a task with the same title as an open task raises ValueError."""
+def test_create_duplicate_in_progress_title_raises(db_conn, root_task_id: int):
+    """Creating a task with the same title as an in_progress task raises
+    ValueError — a task is born in_progress (post-2026-08-29 the 'open'
+    status no longer exists), so any live task blocks its title."""
     agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
@@ -1346,20 +1332,6 @@ def test_create_duplicate_open_title_raises(db_conn, root_task_id: int):
         task_registry.create("unique title", "detail", parent=root_task_id)
         with pytest.raises(ValueError, match="already exists"):
             task_registry.create("unique title", "detail", parent=root_task_id)
-    finally:
-        ava._boot._agent_id = original
-
-
-def test_create_duplicate_in_progress_title_raises(db_conn, root_task_id: int):
-    """Creating a task with the same title as an in_progress task raises ValueError."""
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
-    try:
-        task = task_registry.create("unique title 2", "detail", parent=root_task_id)
-        task_registry.update(task.id, status="in_progress")
-        with pytest.raises(ValueError, match="already exists"):
-            task_registry.create("unique title 2", "detail", parent=root_task_id)
     finally:
         ava._boot._agent_id = original
 
@@ -1407,10 +1379,10 @@ def test_schema_created_by_accepts_system_and_user(db_conn):
     db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_schema_unique_open_title_backstop(db_conn):
-    """The partial unique index rejects a second open/in_progress task with a
+def test_schema_unique_in_progress_title_backstop(db_conn):
+    """The partial unique index rejects a second in_progress task with a
     duplicate title, but allows the title once the earlier task leaves
-    open/in_progress — the database mirror of the app-level rule."""
+    in_progress — the database mirror of the app-level rule."""
     with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
         cur.execute(  # pyright: ignore[reportUnknownMemberType]
             "INSERT INTO agent_tasks (title, description, created_by) "
@@ -1502,8 +1474,8 @@ def test_update_title_renames(db_conn, root_task_id: int):
         ava._boot._agent_id = original
 
 
-def test_update_title_duplicate_open_raises(db_conn, root_task_id: int):
-    """Renaming to another open/in_progress task's title raises ValueError —
+def test_update_title_duplicate_in_progress_raises(db_conn, root_task_id: int):
+    """Renaming to another in_progress task's title raises ValueError —
     the same invariant create() enforces."""
     agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     original = ava._boot._agent_id
@@ -1616,7 +1588,7 @@ def test_update_note_standalone_no_status_change(
         assert results is not None
         assert "progress update" in results
         # Status unchanged
-        assert task_registry.get(task.id).status == "open"
+        assert task_registry.get(task.id).status == "in_progress"
     finally:
         ava._boot._agent_id = original
 
@@ -1685,7 +1657,7 @@ def test_log_delegates_to_update_note(db_conn: psycopg.Connection, root_task_id:
         assert results is not None
         assert "via log()" in results
         # Status unchanged
-        assert task_registry.get(task.id).status == "open"
+        assert task_registry.get(task.id).status == "in_progress"
     finally:
         ava._boot._agent_id = original
 
@@ -1723,7 +1695,7 @@ def test_update_non_root_rejects_ongoing_status(
         with pytest.raises(ValueError, match="permanent state"):
             task_registry.update(task.id, status="ongoing")
         # The rejected write never landed.
-        assert task_registry.get(task.id).status == "open"
+        assert task_registry.get(task.id).status == "in_progress"
     finally:
         ava._boot._agent_id = original
 
@@ -1812,7 +1784,7 @@ def test_create_rejects_parent_1_when_not_root(db_conn: psycopg.Connection) -> N
             cur.execute("DELETE FROM agent_tasks")
             cur.execute(
                 "INSERT INTO agent_tasks (id, title, description, status, created_by, owner, is_root) "
-                "VALUES (1, 'not-root', 'd', 'open', %s, %s, FALSE), "
+                "VALUES (1, 'not-root', 'd', 'in_progress', %s, %s, FALSE), "
                 "(2, 'Root', 'root', 'ongoing', 'system', NULL, TRUE)",
                 (str(agent_id), agent_id),
             )

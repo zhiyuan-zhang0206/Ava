@@ -7,10 +7,10 @@ owned-task invariants at the HTTP boundary:
   a value must be positive and <= 24h.
 - owner: an explicit null is rejected (a task cannot be released). A non-null
   owner reassigns with a plain column write (no message to the affected agents).
-- title: renames; a title colliding with another open/in_progress task's is
+- title: renames; a title colliding with another in_progress task's is
   rejected (mirrors the SDK duplicate-title invariant).
 - parent close: status done/cancelled is rejected while a direct child remains
-  open/in_progress.
+  in_progress.
 - root task: the system root task (is_root=TRUE) is immutable — any PATCH
   targeting it is rejected with 422 before any write.
 """
@@ -196,8 +196,8 @@ class TestTitle:
         assert resp.status_code == 200
         assert resp.json()["title"] == "renamed"
 
-    def test_duplicate_open_title_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        """Renaming to another open/in_progress task's title is rejected —
+    def test_duplicate_in_progress_title_is_rejected(self, db_conn: psycopg.Connection) -> None:
+        """Renaming to another in_progress task's title is rejected —
         mirrors the SDK create()/update() invariant."""
         owner = _make_agent(db_conn)
         _make_task(db_conn, owner=owner)  # holds title 't'
@@ -243,23 +243,23 @@ class TestRootTaskImmutable:
 
 
 class TestParentClose:
-    def test_done_with_open_child_is_rejected_and_unchanged(
+    def test_done_with_in_progress_child_is_rejected_and_unchanged(
         self, db_conn: psycopg.Connection
     ) -> None:
         owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent-open-child")
+        parent = _make_task(db_conn, owner=owner, title="parent-active-child")
         child = _make_task(
             db_conn,
             owner=owner,
-            title="open-child",
-            status="open",
+            title="active-child",
+            status="in_progress",
             parent_id=parent,
         )
         with TestClient(app) as client:
             resp = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
         assert resp.status_code == 422
         assert resp.json()["detail"] == (
-            f"task {parent} has 1 open/in_progress child tasks (e.g. #{child}) — "
+            f"task {parent} has 1 in_progress child tasks (e.g. #{child}) — "
             "close or cancel them first"
         )
         assert _status(db_conn, parent) == "in_progress"

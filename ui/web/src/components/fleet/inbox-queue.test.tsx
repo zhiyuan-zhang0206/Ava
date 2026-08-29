@@ -409,7 +409,7 @@ function tk(id: number, over: Partial<TaskRow> = {}): TaskRow {
     title: `Task ${id}`,
     description: "",
     results: null,
-    status: "open",
+    status: "in_progress",
     priority: "P2",
     owner: null,
     created_by: "user",

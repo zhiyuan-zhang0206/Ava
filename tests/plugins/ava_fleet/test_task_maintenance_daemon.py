@@ -98,7 +98,7 @@ def _make_task(
     title: str | None = None,
 ) -> int:
     # Distinct titles by default: the agent_tasks partial unique index forbids
-    # two open/in_progress rows sharing a title, and these tests create many.
+    # two in_progress rows sharing a title, and these tests create many.
     if title is None:
         title = f"t-{next(_TASK_TITLE)}"
     with db.cursor() as cur:
@@ -338,12 +338,14 @@ class TestRemind:
         _make_task(db_conn, owner=owner, remind_interval_seconds=None, updated_s_ago=100 * _DAY_S)
         assert _run_reminders(pool, 3600.0) == 0
 
-    def test_open_task_not_reminded(
+    def test_done_task_not_reminded(
         self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
     ) -> None:
+        """Only in_progress tasks are reminded (post-2026-08-29 the 'open'
+        status no longer exists — a done task is the non-reminded case)."""
         owner = _make_agent(db_conn)
         _make_task(
-            db_conn, status="open", owner=owner, remind_interval_seconds=1800, updated_s_ago=3600
+            db_conn, status="done", owner=owner, remind_interval_seconds=1800, updated_s_ago=3600
         )
         assert _run_reminders(pool, 3600.0) == 0
 

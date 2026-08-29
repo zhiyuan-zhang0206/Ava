@@ -21,7 +21,7 @@ Any `update`/`log` write clears both `last_reminded_at` and `reminder_count`, re
 
 ## Daemon Behavior
 
-The task-maintenance daemon only sends reminders for tasks where **`status='in_progress'` AND `owner IS NOT NULL` AND `NOT is_root`** (`open` tasks are not reminded; root task never gets reminded).
+The task-maintenance daemon only sends reminders for tasks where **`status='in_progress'` AND `owner IS NOT NULL` AND `NOT is_root`** (done/cancelled tasks are not reminded; the root task never gets reminded). Post-2026-08-29 every task is born `in_progress`, so a newly created task is reminder-eligible immediately.
 
 Within the same overdue window, at most one reminder per backoff period (`AVA_TASK_REMINDER_BACKOFF_SECONDS`, default 3600s). When `reminder_count` reaches `AVA_TASK_ESCALATE_N` (default 3), escalation occurs:
 
