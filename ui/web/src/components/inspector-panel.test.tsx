@@ -1270,3 +1270,44 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
     expect(screen.queryByText("never")).toBeNull();
   });
 });
+
+describe("InspectorPanel agent switch (task #1939)", () => {
+  it("refetches inspect data on hot switch-back while open", async () => {
+    getAgentInspectLive.mockImplementation((id) => Promise.resolve(liveFixture({ agent_id: id })));
+    getAgentInspect.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
+    // Mirror the app's global 5min staleTime: with the default 0 every key
+    // change would refetch anyway and the regression (a hot switch-back
+    // serves the previous visit's cache with no refetch) would be invisible.
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 5 * 60_000 } },
+    });
+    const { rerender } = rtlRender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={1} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledTimes(1));
+
+    // Switch to a cold agent: the new key fetches on its own.
+    rerender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={2} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledTimes(2));
+
+    // Hot switch-back (agent 1's cache is not yet stale): without the
+    // invalidate-on-transition the mounted observer would keep the cached
+    // snapshot and never refetch — the response identity guards would blank
+    // the panel until the next 60s interval tick.
+    rerender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={1} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledTimes(3));
+  });
+});
