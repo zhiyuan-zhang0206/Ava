@@ -24,7 +24,7 @@ tags:
 | `heartbeat.py` | Heartbeat | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `labeler.py` | Labeler | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `memory_indexer.py` | Memory-indexer | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
-| `memory_search.py` | Memory search | real POST `/search` (zero vector, k=1) — traverses the store, not a bare TCP connect | `respawn_service` | the exact-search store answers real searches — breaks exactly when the gateway/indexer search calls would break |
+| `memory_search.py` | Memory search | real POST `/search` (zero vector, k=1) — traverses the store, not a bare TCP connect | `respawn_and_verify` (probe-confirmed) | the exact-search store answers real searches — breaks exactly when the gateway/indexer search calls would break |
 | `events_maintenance.py` | Events-maintenance | HTTP `/healthz` (identity-verified), per-loop progress with hard deadlines | `respawn_and_verify` | each loop completes bounded work; a timed-out worker wedges its tracker and 503s |
 | `pg_backup.py` | PG-backup scheduler | HTTP `/healthz` (identity-verified), backup last-success age | `respawn_and_verify` | scheduler progress: a fresh dump, boot grace, or running dump; otherwise 503 |
 | `pitr_uploader.py` | PITR uploader | HTTP `/healthz` (identity-verified): liveness + disk footprint (gating) + unacked-age (non-gating) | `respawn_and_verify` | loop ticking and disk under hard bound; unacked-age conditions report degraded without flipping 503 (no restart flaps) |

@@ -55,9 +55,10 @@ class MemoryStore:
         """Load rows from the npz when it exists; a fresh service starts
         empty and the indexer's cold-start reconcile fills it.
 
-        Two broken-file paths degrade to "start empty" instead of raising —
-        a file missing keys, and a file that does not parse at all
-        (truncated / foreign bytes). Both are a broken cache: the memory
+        Three broken-file paths degrade to "start empty" instead of raising —
+        a file missing keys, a file that does not parse at all
+        (truncated / foreign bytes), and a file that half-converts (one
+        column fails mid-load). All three are a broken cache: the memory
         pool is the source of truth and the cold-start reconcile rebuilds
         the index, so there is nothing worth crashing the daemon for — a
         raise here would mean the watchdog respawns into the same broken
@@ -78,30 +79,42 @@ class MemoryStore:
                         sorted(missing),
                     )
                     return
-                self._pks = [str(p) for p in data[_NPZ_PKS].tolist()]
-                self._paths = [str(p) for p in data[_NPZ_PATHS].tolist()]
-                self._kinds = [str(k) for k in data[_NPZ_KINDS].tolist()]
-                self._chunk_idx = [int(i) for i in data[_NPZ_CHUNK_IDX].tolist()]
-                self._mtimes = [float(m) for m in data[_NPZ_MTIMES].tolist()]
-                self._hashes = [str(h) for h in data[_NPZ_HASHES].tolist()]
-                self._matrix = data[_NPZ_VECTORS].astype(np.float32)
-                if self._matrix.ndim == 1:
-                    self._matrix = self._matrix.reshape(1, -1)
-                self._pk_index = {pk: idx for idx, pk in enumerate(self._pks)}
+                pks = [str(p) for p in data[_NPZ_PKS].tolist()]
+                paths = [str(p) for p in data[_NPZ_PATHS].tolist()]
+                kinds = [str(k) for k in data[_NPZ_KINDS].tolist()]
+                chunk_idx = [int(i) for i in data[_NPZ_CHUNK_IDX].tolist()]
+                mtimes = [float(m) for m in data[_NPZ_MTIMES].tolist()]
+                hashes = [str(h) for h in data[_NPZ_HASHES].tolist()]
+                matrix = data[_NPZ_VECTORS].astype(np.float32)
+                if matrix.ndim == 1:
+                    matrix = matrix.reshape(1, -1)
+                pk_index = {pk: idx for idx, pk in enumerate(pks)}
         except (OSError, ValueError, EOFError, KeyError, BadZipFile) as exc:
             # np.load raises ValueError / EOFError on foreign bytes, BadZipFile
             # (a plain Exception subclass, not OSError) on a truncated zip,
-            # OSError on read failures, and a malformed array can surface a
-            # KeyError on access — every one of them is the same "broken cache"
+            # OSError on read failures, a malformed array can surface a
+            # KeyError on access, and a column that fails conversion raises
+            # ValueError — every one of them is the same "broken cache"
             # condition.
             _log.warning(
-                "[memory_search] %s does not parse (%s: %s) — starting empty; "
-                "cold-start will rebuild the index",
+                "[memory_search] %s does not parse or fully convert (%s: %s) — "
+                "starting empty; cold-start will rebuild the index",
                 self._data_file,
                 type(exc).__name__,
                 exc,
             )
             return
+        # Every column converted — commit all-or-nothing, so a mid-file
+        # failure can never leave a half-loaded store (a few columns
+        # populated, the rest empty).
+        self._pks = pks
+        self._paths = paths
+        self._kinds = kinds
+        self._chunk_idx = chunk_idx
+        self._mtimes = mtimes
+        self._hashes = hashes
+        self._matrix = matrix
+        self._pk_index = pk_index
         _log.info("[memory_search] loaded %d rows from %s", len(self._pks), self._data_file)
 
     def save(self) -> None:

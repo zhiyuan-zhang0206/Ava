@@ -75,3 +75,21 @@ def test_restart_reports_failure_when_daemon_never_answers(monkeypatch: pytest.M
         lambda _uri: DaemonProbe.down("POST /search failed"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     assert hc._restart_daemon().alive is False
+
+
+def test_main_runs_the_shared_keepalive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() is exactly the shared keepalive body with this module's probe
+    and respawn (the 2026-08-29 decision's one policy) — never a
+    hand-rolled probe -> respawn -> exit loop."""
+    seen: dict[str, object] = {}
+
+    def fake_keepalive(label: str, log: object, *, probe: object, respawn: object) -> None:
+        seen.update(label=label, probe=probe, respawn=respawn)
+
+    monkeypatch.setattr(hc, "run_keepalive", fake_keepalive)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    hc.main()
+    assert seen["label"] == "memory_search"
+    assert seen["probe"] is hc._probe
+    assert seen["respawn"] is hc._restart_daemon
