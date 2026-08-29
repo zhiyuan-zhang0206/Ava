@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import logging
 import multiprocessing
+import os
 import queue
+import signal
+import sys
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Protocol, cast
+from typing import NoReturn, Protocol, cast
+
+import psutil
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.base_candidate import (
@@ -38,6 +45,7 @@ BASE_BACKUP_RETRY_INTERVAL_S = 1800
 BASE_BACKUP_STALE_AFTER_S = 8 * 24 * 3600
 _SLEEP_CHUNK_S = 30
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
+_LINUX_CHILD_ADOPTION_OPTION = 36
 
 
 class _WorkerQueue(Protocol):
@@ -45,9 +53,17 @@ class _WorkerQueue(Protocol):
 
     def get(self, timeout: float | None = None) -> object: ...
 
+    def get_nowait(self) -> object: ...
+
     def close(self) -> None: ...
 
     def join_thread(self) -> None: ...
+
+
+class _OwnedProcess(Protocol):
+    def is_alive(self) -> bool: ...
+
+    def join(self, timeout: float | None = None) -> None: ...
 
 
 @dataclass
@@ -190,10 +206,108 @@ def _worker_entry(stop: StopSignal, output: _WorkerQueue) -> None:
         output.put((False, f"{type(exc).__name__}: {exc}"))
 
 
+def _worker_bootstrap(
+    target: Callable[[StopSignal, _WorkerQueue], None],
+    stop: StopSignal,
+    output: _WorkerQueue,
+) -> None:
+    os.setsid()
+    process = psutil.Process()
+    output.put(
+        (
+            "ready",
+            str(process.pid),
+            str(os.getpgrp()),
+            repr(process.create_time()),
+        )
+    )
+    target(stop, output)
+
+
+def _group_members(pgid: int) -> list[psutil.Process]:
+    members: list[psutil.Process] = []
+    for process in psutil.process_iter(["pid"]):
+        try:
+            if os.getpgid(process.pid) == pgid:
+                members.append(process)
+        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
+            continue
+    return members
+
+
+def _enable_child_subreaper() -> None:
+    if sys.platform != "linux":
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(_LINUX_CHILD_ADOPTION_OPTION, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, "could not own orphaned base candidate descendants")
+
+
+def _reap_exited_group_children(process: _OwnedProcess, pgid: int) -> None:
+    process.join(timeout=0)
+    while True:
+        try:
+            pid, _status = os.waitpid(-pgid, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid == 0:
+            return
+
+
+def _reap_job_group(
+    process: _OwnedProcess,
+    *,
+    worker_pid: int,
+    pgid: int,
+    leader_created_at: float,
+    grace_s: float = 5,
+    deadline_s: float = 20,
+) -> None:
+    if pgid != worker_pid or pgid == os.getpgrp():
+        raise RuntimeError("refusing to signal an unowned base candidate process group")
+    leader: psutil.Process | None = None
+    with suppress(psutil.NoSuchProcess):
+        leader = psutil.Process(worker_pid)
+    if leader is not None and abs(leader.create_time() - leader_created_at) >= 0.01:
+        raise RuntimeError("base candidate worker PID identity changed")
+    deadline = time.monotonic() + deadline_s
+    with suppress(ProcessLookupError):
+        os.killpg(pgid, signal.SIGTERM)
+    grace_end = min(deadline, time.monotonic() + grace_s)
+    _reap_exited_group_children(process, pgid)
+    while _group_members(pgid) and time.monotonic() < grace_end:
+        time.sleep(0.1)
+        _reap_exited_group_children(process, pgid)
+    while _group_members(pgid) and time.monotonic() < deadline:
+        with suppress(ProcessLookupError):
+            os.killpg(pgid, signal.SIGKILL)
+        time.sleep(0.1)
+        _reap_exited_group_children(process, pgid)
+    if _group_members(pgid):
+        raise RuntimeError("base candidate process group could not be emptied")
+    process.join(timeout=max(0, deadline - time.monotonic()))
+    if process.is_alive():
+        raise RuntimeError("base candidate worker leader could not be reaped")
+
+
 def _worker_result(*, succeeded: bool, value: str) -> CandidateManifest:
     if not succeeded:
         raise RuntimeError(value)
     return CandidateManifest.from_json(value)
+
+
+def _validate_ready_message(
+    message: tuple[str, str, str, str], *, expected_pid: int
+) -> tuple[int, float]:
+    kind, raw_pid, raw_pgid, raw_created_at = message
+    if kind != "ready" or int(raw_pid) != expected_pid or int(raw_pgid) != expected_pid:
+        raise RuntimeError("base candidate worker reported invalid process ownership")
+    return int(raw_pgid), float(raw_created_at)
+
+
+def _raise_live_descendants() -> NoReturn:
+    raise RuntimeError("base candidate worker left live descendants")
 
 
 def _backup_key() -> tuple[bytes, str]:
@@ -205,17 +319,51 @@ def _backup_key() -> tuple[bytes, str]:
 
 
 async def _run_worker(
-    *, target: Callable[[StopSignal, _WorkerQueue], None] = _worker_entry
+    *,
+    target: Callable[[StopSignal, _WorkerQueue], None] = _worker_entry,
+    cooperative_timeout_s: float = 30,
+    group_grace_s: float = 5,
+    group_deadline_s: float = 20,
 ) -> CandidateManifest:
+    _enable_child_subreaper()
     context = multiprocessing.get_context("spawn")
     stop = context.Event()
-    output = cast(_WorkerQueue, context.Queue(maxsize=1))
-    process = context.Process(target=target, args=(stop, output), daemon=False)
+    output = cast(_WorkerQueue, context.Queue(maxsize=2))
+    process = context.Process(target=_worker_bootstrap, args=(target, stop, output), daemon=False)
     process.start()
+    worker_pid = process.pid
+    if worker_pid is None:
+        process.kill()
+        process.join(timeout=5)
+        raise RuntimeError("base candidate worker started without a PID")
+    pgid: int | None = None
+    leader_created_at: float | None = None
     try:
+        ready_deadline = time.monotonic() + 10
+        while pgid is None:
+            try:
+                message = cast(tuple[str, str, str, str], output.get_nowait())
+            except queue.Empty:
+                if not process.is_alive() or time.monotonic() >= ready_deadline:
+                    raise RuntimeError(
+                        "base candidate worker failed before ownership handshake"
+                    ) from None
+                await asyncio.sleep(0.05)
+                continue
+            pgid, leader_created_at = _validate_ready_message(message, expected_pid=worker_pid)
         while process.is_alive():
             await asyncio.sleep(0.25)
         process.join()
+        if _group_members(pgid):
+            _reap_job_group(
+                process,
+                worker_pid=worker_pid,
+                pgid=pgid,
+                leader_created_at=cast(float, leader_created_at),
+                grace_s=group_grace_s,
+                deadline_s=group_deadline_s,
+            )
+            _raise_live_descendants()
         try:
             succeeded, value = cast(tuple[bool, str], output.get(timeout=5))
         except queue.Empty as exc:
@@ -223,11 +371,17 @@ async def _run_worker(
         return _worker_result(succeeded=succeeded, value=value)
     except BaseException:
         stop.set()
-        process.join(timeout=30)
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=5)
-        if process.is_alive():
+        process.join(timeout=cooperative_timeout_s)
+        if pgid is not None and leader_created_at is not None and _group_members(pgid):
+            _reap_job_group(
+                process,
+                worker_pid=worker_pid,
+                pgid=pgid,
+                leader_created_at=leader_created_at,
+                grace_s=group_grace_s,
+                deadline_s=group_deadline_s,
+            )
+        elif process.is_alive():
             process.kill()
             process.join(timeout=5)
         if process.is_alive():

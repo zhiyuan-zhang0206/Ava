@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from functools import partial
@@ -45,6 +47,31 @@ def _blocking_worker(
     started.write_text(str(os.getpid()))
     stop.wait()
     stopped.write_text("stopped")
+
+
+def _noncooperative_worker(
+    started: Path,
+    armed: Path,
+    late: Path,
+    _stop: daemon.StopSignal,
+    _output: daemon._WorkerQueue,
+) -> None:
+    script = (
+        "import signal,subprocess,sys,time\n"
+        f"late={str(late)!r}\n"
+        "def spawn_late(*_args):\n"
+        " p=subprocess.Popen([sys.executable,'-c',"
+        "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)'])\n"
+        " open(late,'w').write(str(p.pid))\n"
+        "signal.signal(signal.SIGTERM,spawn_late)\n"
+        f"open({str(armed)!r},'w').write('armed')\n"
+        "time.sleep(60)\n"
+    )
+    child = subprocess.Popen([sys.executable, "-c", script])  # noqa: S603
+    while not armed.exists():
+        time.sleep(0.01)
+    started.write_text(f"{os.getpid()} {child.pid}")
+    time.sleep(60)
 
 
 def test_due_uses_durable_candidate_after_restart(tmp_path: Path) -> None:
@@ -140,3 +167,33 @@ async def test_degraded_domain_condition_keeps_healthz_200() -> None:
         assert status == 503, "wedged daemon (stale liveness) still gates readiness"
     finally:
         await stop_health_server(server)
+
+
+@pytest.mark.asyncio
+async def test_forced_shutdown_reaps_noncooperative_group_and_late_fork(
+    tmp_path: Path,
+) -> None:
+    started = tmp_path / "started"
+    armed = tmp_path / "armed"
+    late = tmp_path / "late"
+    task = asyncio.create_task(
+        daemon._run_worker(
+            target=partial(_noncooperative_worker, started, armed, late),
+            cooperative_timeout_s=0.1,
+            group_grace_s=3,
+            group_deadline_s=15,
+        )
+    )
+    for _ in range(200):
+        if started.exists():
+            break
+        await asyncio.sleep(0.01)
+    worker_pid, child_pid = (int(value) for value in started.read_text().split())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    late_pid = int(late.read_text())
+    assert not psutil.pid_exists(worker_pid)
+    assert not psutil.pid_exists(child_pid)
+    assert not psutil.pid_exists(late_pid)
