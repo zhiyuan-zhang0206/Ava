@@ -371,9 +371,12 @@ class ActivationRecord:
                 raise ValueError("PITR rollback applied setting name is unknown")
             for evidence in record.rollback_settings_applied.values():
                 loaded: object = json.loads(evidence)
-                if not isinstance(loaded, dict) or not all(isinstance(key, str) for key in loaded):
+                if not isinstance(loaded, dict):
+                    raise TypeError("PITR rollback applied evidence fields differ")
+                untyped = cast(dict[object, object], loaded)
+                if not all(isinstance(key, str) for key in untyped):
                     raise ValueError("PITR rollback applied evidence fields differ")
-                value = cast(dict[str, object], loaded)
+                value = cast(dict[str, object], untyped)
                 if set(value) != {"desired_value", "post_digest"}:
                     raise ValueError("PITR rollback applied evidence fields differ")
                 desired_value = value["desired_value"]
