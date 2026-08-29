@@ -140,6 +140,7 @@ def test_emit_bucket_distinguishes_tail_percentiles(monkeypatch: pytest.MonkeyPa
         ("/api/fleet/graph", "slow"),
         ("/api/agents/42/terminate", "slow"),
         ("/api/agents/42/resurrect", "slow"),
+        ("/api/agents/42/neighbors", "slow"),
         ("/api/health", "fast"),
         ("/api/agents", "fast"),
         ("/api/metrics/summary", "fast"),

@@ -51,6 +51,13 @@ MAX_SAMPLES_PER_ROUTE = 10_000
 # R17/R18 exclude these matched route patterns. Keep the alerting policy here,
 # beside the emitted route value, so a new slow route cannot drift from one
 # alert tier while remaining visible on the all-route dashboard.
+#
+# The "slow" tier covers reads that pay a Loki/embedding round-trip per
+# request. /api/agents/{agent_id}/neighbors moved here at the LGTM cutover
+# sweep: the retired SQL function became a per-request Loki edge-stream read
+# (task #1958) — the same data shape as /api/fleet/graph, which was already
+# slow-classified. Holding it to the fast tier's 3s bar is unattainable for
+# any Loki-backed read.
 R17_R18_EXCLUSION_ROUTE_PATTERNS: dict[str, tuple[str, ...]] = {
     "llm": (
         r"/api/agents/.*/messages",
@@ -66,6 +73,7 @@ R17_R18_EXCLUSION_ROUTE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"/api/fleet/graph",
         r"/api/agents/.*/terminate",
         r"/api/agents/.*/resurrect",
+        r"/api/agents/.*/neighbors",
     ),
 }
 _ROUTE_CLASS_REGEXES = {
