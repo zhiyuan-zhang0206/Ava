@@ -43,6 +43,7 @@ from shared.plugin_metrics import (
 _CORE_DEFINITION_MODULES = (
     "shared.core_metrics_panels",
     "shared.core_metrics_dismissed",
+    "shared.core_metrics_fleet",
     "shared.core_metrics_observability",
 )
 

@@ -3533,12 +3533,140 @@
    ]
   },
   {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Agents-table high-water mark (max id), sampled by the gateway every 60s into the ava_agent_registry_max_id_ratio gauge (task #2010); a vertical step marks a batch spawn.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "blue"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never"
+     }
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 163
+   },
+   "id": 2301,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Max Agent ID",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "ava_agent_registry_max_id_ratio",
+     "legendFormat": "max_id",
+     "queryType": "range",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Slope of the ava_agent_registry_max_id_ratio gauge over the last hour, expressed in agents per day (deriv() * 86400, task #2010); a spike marks a batch spawn.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "purple"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never"
+     }
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 163
+   },
+   "id": 2302,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Max Agent ID growth rate",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "deriv(ava_agent_registry_max_id_ratio[1h]) * 86400",
+     "legendFormat": "agents/day",
+     "queryType": "range",
+     "refId": "A"
+    }
+   ]
+  },
+  {
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 163
+    "y": 170
    },
    "id": 2005,
    "panels": [],
@@ -3579,7 +3707,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 164
+    "y": 171
    },
    "id": 1002,
    "options": {
@@ -3642,7 +3770,7 @@
     "h": 4,
     "w": 8,
     "x": 12,
-    "y": 164
+    "y": 171
    },
    "id": 1003,
    "options": {
@@ -3710,7 +3838,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 171
+    "y": 178
    },
    "id": 1005,
    "options": {
@@ -3780,7 +3908,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 171
+    "y": 178
    },
    "id": 1008,
    "options": {
@@ -3850,7 +3978,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 178
+    "y": 185
    },
    "id": 1009,
    "options": {
@@ -3928,7 +4056,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 178
+    "y": 185
    },
    "id": 1010,
    "options": {
@@ -3991,7 +4119,7 @@
     "h": 4,
     "w": 8,
     "x": 0,
-    "y": 185
+    "y": 192
    },
    "id": 1011,
    "options": {
@@ -4031,7 +4159,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 189
+    "y": 196
    },
    "id": 2006,
    "panels": [],
@@ -4051,7 +4179,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 190
+    "y": 197
    },
    "targets": [
     {
@@ -4098,7 +4226,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 190
+    "y": 197
    },
    "targets": [
     {
@@ -4145,7 +4273,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 198
+    "y": 205
    },
    "targets": [
     {
@@ -4200,7 +4328,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 198
+    "y": 205
    },
    "targets": [
     {
@@ -4247,7 +4375,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 206
+    "y": 213
    },
    "targets": [
     {
@@ -4292,7 +4420,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 206
+    "y": 213
    },
    "targets": [
     {
@@ -4337,7 +4465,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 214
+    "y": 221
    },
    "targets": [
     {
@@ -4388,7 +4516,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 214
+    "y": 221
    },
    "targets": [
     {
@@ -4438,7 +4566,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 222
+    "y": 229
    },
    "targets": [
     {
@@ -4483,7 +4611,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 222
+    "y": 229
    },
    "targets": [
     {
@@ -4533,7 +4661,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 230
+    "y": 237
    },
    "targets": [
     {
@@ -4584,7 +4712,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 230
+    "y": 237
    },
    "targets": [
     {
@@ -4622,7 +4750,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 238
+    "y": 245
    },
    "id": 2007,
    "panels": [],
@@ -4658,7 +4786,7 @@
     "h": 4,
     "w": 8,
     "x": 0,
-    "y": 239
+    "y": 246
    },
    "id": 38,
    "options": {
@@ -4720,7 +4848,7 @@
     "h": 4,
     "w": 16,
     "x": 8,
-    "y": 239
+    "y": 246
    },
    "id": 39,
    "options": {
@@ -4775,7 +4903,7 @@
     "h": 7,
     "w": 24,
     "x": 0,
-    "y": 243
+    "y": 250
    },
    "id": 41,
    "options": {
@@ -4831,7 +4959,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 250
+    "y": 257
    },
    "id": 42,
    "options": {
@@ -4880,7 +5008,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 250
+    "y": 257
    },
    "id": 43,
    "options": {
