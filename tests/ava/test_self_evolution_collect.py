@@ -494,3 +494,60 @@ def test_test_label_ids_matches_prefix_only(collect_mod: Any, db_conn: psycopg.C
         ids = collect_mod._test_label_ids(cur, [9001, 9002, 9003, 99999])
 
     assert ids == {9001}
+
+
+def test_collect_with_counts_keeps_records_and_reports_filters(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """collect_with_counts() returns the same records as collect() plus the
+    pre-record counts the daily sentinel keys on: distinct window agents
+    seen, TEST- drops, missing-lifecycle drops (QA review of PR #698)."""
+    rows: list[dict[str, object]] = [
+        {"agent_id": 1, "event_name": "turn_end", "attributes": {}},
+        {"agent_id": 2, "event_name": "turn_end", "attributes": {}},
+        {"agent_id": 3, "event_name": "turn_end", "attributes": {}},
+        {"agent_id": 4, "event_name": "turn_end", "attributes": {}},
+    ]
+
+    def _fetch(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        return rows
+
+    def _no_inbounds(*_args: object, **_kwargs: object) -> dict[int, Any]:
+        return {}
+
+    def _meta_for(*_args: object, **_kwargs: object) -> dict[int, tuple[str, str, str]]:
+        return dict.fromkeys((1, 2, 3), ("user", "completed", "done"))
+
+    def _test_ids(*_args: object, **_kwargs: object) -> set[int]:
+        return {2}
+
+    monkeypatch.setattr(collect_mod, "_fetch_events_window", _fetch)
+    monkeypatch.setattr(collect_mod, "_inbounds_by_agent", _no_inbounds)
+    monkeypatch.setattr(collect_mod, "_meta_by_agent", _meta_for)
+    monkeypatch.setattr(collect_mod, "_test_label_ids", _test_ids)
+
+    # collect() uses `with connect() as conn`, which closes the connection
+    # at block exit (psycopg 3 context-manager semantics) — give each call a
+    # fresh connection like the real pipeline gets.
+    def _fresh_conn() -> psycopg.Connection:
+        return psycopg.connect(collect_mod.settings.data_plane.db_url)
+
+    monkeypatch.setattr(collect_mod, "connect", _fresh_conn)
+
+    def _fake_build_record(agent_id: int, *_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"agent_id": agent_id, "label": "ok"}
+
+    monkeypatch.setattr(collect_mod, "build_record", _fake_build_record)
+
+    records, counts = collect_mod.collect_with_counts(1, "2026-08-26")
+
+    assert counts == {"seen": 4, "excluded_test": 1, "skipped_meta": 1}
+    assert [r["agent_id"] for r in records] == [1, 3]
+
+    # include_test opts the TEST- spawns back in for measurement runs.
+    records_all, counts_all = collect_mod.collect_with_counts(1, "2026-08-26", include_test=True)
+    assert counts_all == {"seen": 4, "excluded_test": 0, "skipped_meta": 1}
+    assert [r["agent_id"] for r in records_all] == [1, 2, 3]
+
+    # The plain collect() wrapper stays records-only for existing callers.
+    assert collect_mod.collect(1, "2026-08-26") == records
