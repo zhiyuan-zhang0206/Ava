@@ -32,6 +32,7 @@ class TaskRow(BaseModel):
     remind_interval_seconds: int | None = None
     last_reminded_at: str | None = None  # ISO-8601
     reminder_count: int = 0
+    ghost: bool = False  # out-of-window ancestor of a kept task (GET /api/tasks with a window) — delivered for tree connectivity and rendered dimmed by the graph
 
 
 class TaskListResponse(BaseModel):
