@@ -96,4 +96,51 @@ describe("AlertsSection", () => {
     wrap(<AlertsSection />);
     await waitFor(() => screen.getByText(/No alerts in the last 24h/));
   });
+
+  it("renders a no-horizontal-scroll layout: fixed table, wrapping detail cell, responsive columns (task #1960)", async () => {
+    vi.spyOn(api, "getAlerts").mockResolvedValue(
+      response({
+        alerts: [
+          {
+            ...ROW,
+            alertname: "extremely-long-alert-name-that-must-wrap-instead-of-overflow",
+            annotations: {
+              summary:
+                "an annotation whose full detail must wrap across multiple lines instead of pushing the table wider than the container and forcing a horizontal scroll",
+            },
+          },
+        ],
+        meta: { window: "24h", total: 1, unresolved_count: 1 },
+      }),
+    );
+    wrap(<AlertsSection />);
+    await waitFor(() => screen.getByTestId("alert-row-7"));
+
+    // Fixed layout: the declared column widths hold and content wraps within
+    // them — the table never grows past the container.
+    const table = screen.getByRole("table");
+    expect(table.className).toContain("table-fixed");
+
+    // The detail (Alert) cell wraps: both the alert name and the summary
+    // override the shared TableCell whitespace-nowrap and break long tokens,
+    // and the summary is NOT clamped (full multi-line display).
+    const row = screen.getByTestId("alert-row-7");
+    const nameCell = within(row).getByText(
+      "extremely-long-alert-name-that-must-wrap-instead-of-overflow",
+    );
+    expect(nameCell.className).toContain("whitespace-normal");
+    expect(nameCell.className).toContain("break-words");
+    const summaryCell = within(row).getByText(/full detail must wrap across multiple lines/);
+    expect(summaryCell.className).toContain("whitespace-normal");
+    expect(summaryCell.className).toContain("break-words");
+    expect(summaryCell.className).not.toContain("line-clamp-2");
+
+    // The secondary columns drop out below md so a phone-width viewport keeps
+    // Severity + Alert + State without a horizontal scrollbar. Every td in
+    // the row besides severity / alert / state must be hidden lg:table-cell.
+    const cells = Array.from(row.querySelectorAll("td"));
+    const responsiveHidden = cells.filter((td) => td.className.includes("lg:table-cell"));
+    expect(responsiveHidden.length).toBe(3); // Started / Duration / Source
+    expect(responsiveHidden.every((td) => td.className.includes("hidden"))).toBe(true);
+  });
 });
