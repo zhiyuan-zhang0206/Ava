@@ -42,6 +42,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import { api } from "./api";
+import { inspectLiveQueryKey } from "./inspector-prefetch";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
@@ -263,6 +264,19 @@ export function useTimeline(
   // and the cache + switch-back stay clean. The store's reset window drops
   // the refetch's merge while it is open, so the visible thread is unaffected
   // either way.
+  //
+  // The same deferred point invalidates the agent's other per-agent REST
+  // snapshots (task #1959): the inspector's live + windowed queries, the
+  // pending strip, and the token-usage context bar all cache per-agent data
+  // under the app-wide staleTime, and a compact that happens while the agent
+  // is NOT the active thread reaches the frontend through the widened
+  // all-events filter (parked threads are selected). Invalidating them at the
+  // post-compact snapshot marks the inactive entries so a later switch-back
+  // refetches post-compact data even within staleTime — the same
+  // commit-safe timing the timeline uses. An active observer (the compacting
+  // agent is being viewed) refetches right then: the since-compact inspector
+  // window and the context bar refresh without waiting out the 60s / 30s
+  // interval ticks.
   const trackCompactForInvalidation = useCallback(
     (ev: SystemEvent) => {
       if (ev.role === "compact_done") {
@@ -273,6 +287,12 @@ export function useTimeline(
         pendingCompactAgentsRef.current.delete(ev.agent_id)
       ) {
         void queryClient.invalidateQueries({ queryKey: ["timeline", ev.agent_id] });
+        void queryClient.invalidateQueries({
+          queryKey: inspectLiveQueryKey(ev.agent_id),
+        });
+        void queryClient.invalidateQueries({ queryKey: ["agent-inspect", ev.agent_id] });
+        void queryClient.invalidateQueries({ queryKey: ["pending", ev.agent_id] });
+        void queryClient.invalidateQueries({ queryKey: ["token-usage", ev.agent_id] });
       }
     },
     [queryClient],
