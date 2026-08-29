@@ -22,7 +22,9 @@ def cors_allowed_origins() -> list[str]:
     """Return the exact browser origins allowed to call the gateway.
 
     An explicit allowlist is authoritative. Otherwise derive the local frontend
-    origins and, when configured, the frontend port on the gateway URL's host.
+    origins and the gateway URL's own origin — its scheme, host, and port —
+    which is the Origin header a browser sends for same-origin requests to the
+    gateway itself (e.g. the Grafana proxy under /grafana).
     """
     explicit = settings.gateway.cors_allowed_origins
     if explicit:
@@ -43,7 +45,15 @@ def cors_allowed_origins() -> list[str]:
     hostname = parsed_gateway.hostname
     if ":" in hostname:
         hostname = f"[{hostname}]"
-    gateway_origin = f"{parsed_gateway.scheme}://{hostname}:{frontend_port}"
+    gateway_origin = f"{parsed_gateway.scheme}://{hostname}"
+    if parsed_gateway.port is not None:
+        gateway_origin = f"{gateway_origin}:{parsed_gateway.port}"
+    else:
+        # The URL carries no explicit port. Browsers serialize the scheme's
+        # default port away, so the Origin header has no port — but keep the
+        # explicit default-port form too, for clients that do send one.
+        default_port = 443 if parsed_gateway.scheme == "https" else 80
+        origins.append(f"{gateway_origin}:{default_port}")
     if gateway_origin not in origins:
         origins.append(gateway_origin)
     return origins

@@ -114,6 +114,11 @@ def test_session_cookie_secure_parses_explicit_bool() -> None:
 def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The derived allowlist mirrors the frontend origins and the gateway's OWN
+    origin — its own port, not the frontend entry port. Regression guard for
+    the /grafana proxy 403: the browser's same-origin POST Origin
+    (http://<gateway-host>:<gateway-port>) must be allowlisted exactly.
+    """
     monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
     monkeypatch.setattr(
         config.settings.services,
@@ -129,7 +134,57 @@ def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host(
     assert cors_allowed_origins() == [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://gateway.example:3000",
+        "https://gateway.example:8100",
+    ]
+
+
+def test_cors_allowed_origins_gateway_origin_matches_prod_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The prod-shaped gateway URL (explicit non-standard port, so the browser
+    Origin carries it) yields exactly that origin in the allowlist."""
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:3100",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "http://100.103.96.72:8000",
+    )
+
+    assert cors_allowed_origins() == [
+        "http://localhost:3100",
+        "http://127.0.0.1:3100",
+        "http://100.103.96.72:8000",
+    ]
+
+
+def test_cors_allowed_origins_gateway_default_port_has_bare_and_explicit_forms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A port-less gateway URL must yield the origin WITHOUT a port (what a
+    browser serializes for the scheme's default port) and the explicit
+    default-port form, since both can appear in an Origin header."""
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:3000",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "https://gateway.example",
+    )
+
+    assert cors_allowed_origins() == [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://gateway.example:443",
+        "https://gateway.example",
     ]
 
 
@@ -669,6 +724,42 @@ def test_bearer_authenticated_post_allows_disallowed_origin(
         )
 
     assert resp.status_code == 422
+
+
+def test_cookie_authenticated_post_allows_gateway_own_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gateway's own origin — the one a browser page served from the
+    gateway (Grafana proxy included) sends on same-origin POSTs — must pass
+    the Origin check. Regression guard for the /grafana data POST 403: the
+    allowlist previously carried the frontend port instead of the gateway
+    port, so every same-origin POST was rejected."""
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:3100",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "http://100.103.96.72:8000",
+    )
+    with TestClient(app) as client:
+        token = _login(client)
+        resp = client.post(
+            "/api/frontend-telemetry",
+            content=b"{}",
+            headers={
+                **_session_cookie(token),
+                "Origin": "http://100.103.96.72:8000",
+            },
+        )
+
+    # 422 (malformed batch) not 403 — the request reached the route: the
+    # gateway's own origin passed the exact-origin check.
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "invalid_telemetry_batch"
 
 
 def test_cookie_authenticated_post_allows_missing_origin(
