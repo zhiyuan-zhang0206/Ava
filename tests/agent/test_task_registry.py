@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import inspect
 import re
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
@@ -1985,6 +1987,79 @@ def test_update_rejects_closed_parent(
             task_registry.update(child.id, parent_id=parent.id)
         # The tree is unchanged: the child stays under the root.
         assert _persisted_parent(db_conn, child.id) == root_task_id
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_create_serializes_against_concurrent_parent_close(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """TOCTOU guard (QA #993): create() locks the parent row FOR UPDATE, and the
+    close path holds the same lock — so a concurrent close cannot commit between
+    the status read and the child INSERT and leave a child under a closed parent."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    outcome: dict[str, str] = {}
+
+    def worker() -> None:
+        try:
+            task_registry.create("race-child", "detail", parent=parent_id)
+        except ValueError as exc:
+            outcome["err"] = str(exc)
+
+    try:
+        parent = task_registry.create("race-parent", "detail", parent=root_task_id)
+        parent_id = parent.id
+        # Mimic the close path: UPDATE the parent to done but hold the row lock
+        # uncommitted — the worker's parent-row SELECT FOR UPDATE must block.
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = %s", (parent_id,))
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        time.sleep(0.5)
+        assert thread.is_alive(), "create did not block on the parent row lock"
+        db_conn.commit()  # the concurrent close lands: parent is now done
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert "closed task cannot be the parent" in outcome["err"]
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_reparent_serializes_against_concurrent_parent_close(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """The reparent path locks the parent row FOR UPDATE too (QA #993), so a
+    concurrent close cannot land between the status read and the parent_id
+    UPDATE."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    outcome: dict[str, str] = {}
+
+    def worker() -> None:
+        try:
+            task_registry.update(child_id, parent_id=parent_id)
+        except ValueError as exc:
+            outcome["err"] = str(exc)
+
+    try:
+        parent = task_registry.create("race-parent2", "detail", parent=root_task_id)
+        child = task_registry.create("race-child2", "detail", parent=root_task_id)
+        parent_id, child_id = parent.id, child.id
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = %s", (parent_id,))
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        time.sleep(0.5)
+        assert thread.is_alive(), "reparent did not block on the parent row lock"
+        db_conn.commit()
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert "closed parent" in outcome["err"]
+        # The tree is unchanged: the child stays under the root.
+        assert _persisted_parent(db_conn, child_id) == root_task_id
     finally:
         ava._boot._agent_id = original
 

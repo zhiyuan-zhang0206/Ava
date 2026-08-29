@@ -26,13 +26,16 @@ def resolve_reparent(cur: psycopg.Cursor, task_id: int, parent_id: int | None) -
     """Validate a reparent and return the effective parent id to write.
 
     `parent_id=None` moves the task under the system root. Raises ValueError
-    with a human-readable reason on a missing parent, self-parenting, or a
-    cycle (the task moved under one of its own descendants). The caller holds
-    the task row FOR UPDATE (read -> write race safety).
+    with a human-readable reason on a missing parent, a closed (done /
+    cancelled) parent, self-parenting, or a cycle (the task moved under one of
+    its own descendants). The caller holds the task row FOR UPDATE (read ->
+    write race safety); the parent row is locked FOR UPDATE here too, so a
+    concurrent close cannot slip between this status read and the parent_id
+    UPDATE (TOCTOU, QA #993).
     """
     effective = system_root_id(cur) if parent_id is None else parent_id
     if effective is not None:
-        cur.execute("SELECT id, status FROM agent_tasks WHERE id = %s", (effective,))
+        cur.execute("SELECT id, status FROM agent_tasks WHERE id = %s FOR UPDATE", (effective,))
         row = cur.fetchone()
         if row is None:
             raise ValueError(f"parent task {effective} does not exist")
