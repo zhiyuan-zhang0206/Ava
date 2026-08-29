@@ -359,6 +359,14 @@ def test_prune_with_snapshot_alone_keeps_newest_snapshot(bdir: Path) -> None:
     assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
 
 
+def test_prune_never_removes_pitr_activation_snapshot(bdir: Path) -> None:
+    activation = _touch(bdir, "ava-20260601T100000Z.pitr-activation.dump.enc")
+    for day in range(1, backup.BACKUP_KEEP + 3):
+        _touch(bdir, f"ava-202607{day:02d}T100000Z.dump.enc")
+    backup._prune(bdir)
+    assert activation.exists()
+
+
 def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A pre-update snapshot carries the kind segment so prune can classify it."""
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
@@ -383,6 +391,30 @@ def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.Mo
     assert path.name == "ava-20260609T190000Z.pre-update.dump.enc"
     assert backup._is_pre_update(path)
     assert backup._is_pre_update(_touch(bdir, "ava-20260609T190000Z.dump.gz.enc")) is False
+
+
+def test_run_backup_pitr_activation_has_independent_kind(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
+        output_flag = "--file" if cmd[0].endswith("pg_dump") else "-out"
+        Path(cmd[cmd.index(output_flag) + 1]).write_bytes(b"backup")
+        return _Ok()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+    path = backup.run_backup(
+        datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        db_url="dbname=ava",
+        pitr_activation=True,
+    )
+    assert path.name == "ava-20260609T190000Z.pitr-activation.dump.enc"
+    assert backup._is_activation(path)
 
 
 def test_run_backup_failure_leaves_no_files(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:

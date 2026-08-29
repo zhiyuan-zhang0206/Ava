@@ -45,6 +45,7 @@ from cli.commands._gateway_ready import (
     await_gateway_serving as _await_gateway_serving,
 )
 from cli.commands._lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
+from cli.commands._pitr_activation import cmd_pitr_activate, cmd_pitr_rollback, cmd_pitr_status
 from cli.commands._probe import (
     OccupiedPort,
     ReadinessWait,
@@ -297,6 +298,9 @@ __all__ = [
     "cmd_mcp_uninstall",
     "cmd_mcp_upgrade",
     "cmd_migrations_apply",
+    "cmd_pitr_activate",
+    "cmd_pitr_rollback",
+    "cmd_pitr_status",
     "cmd_plugins_disable",
     "cmd_plugins_enable",
     "cmd_plugins_install",
