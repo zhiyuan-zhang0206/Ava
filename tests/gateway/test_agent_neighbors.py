@@ -15,6 +15,7 @@ import math
 from datetime import timedelta
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -508,6 +509,11 @@ def test_archive_rows_fetched_once_then_served_from_cache(
     assert {r["agent_id"] for r in first} == {b}  # pyright: ignore[reportUnknownArgumentType]
     assert len(archive_calls) == 1  # second request hit the Redis cache
     assert neighbors._ARCHIVE_CACHE_KEY in frozen_cache.store
+    # the originating fetch's has_more rides the payload, so a cache hit
+    # reports truncation exactly as the fetch did
+    import json as _json
+
+    assert _json.loads(frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY])["has_more"] is False
 
 
 def test_archive_cache_redis_outage_degrades_to_direct_query(
@@ -535,6 +541,40 @@ def test_archive_cache_redis_outage_degrades_to_direct_query(
         rows = _neighbors(client, a, depth=1)
 
     assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_archive_refresh_failure_keeps_cache_empty_and_heals(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    frozen_cache: _FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The daily archive refresh keeps the 45s default timeout, but Loki can
+    still fail it: the route surfaces the failure, the cache stays empty
+    (nothing partial is served), and the next healthy request repopulates it."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
+
+    state = {"fail_next_archive": True}
+    original = fake_loki.query_events
+
+    def flaky_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        if kwargs.get("archive") and state["fail_next_archive"]:
+            state["fail_next_archive"] = False
+            raise httpx.ReadTimeout("timed out")
+        return original(**kwargs)
+
+    monkeypatch.setattr(loki_events, "query_events", flaky_query)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        failed = client.get(f"/api/agents/{a}/neighbors")
+        assert failed.status_code == 500
+        assert neighbors._ARCHIVE_CACHE_KEY not in frozen_cache.store
+        rows = _neighbors(client, a, depth=1)
+
+    assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
+    assert neighbors._ARCHIVE_CACHE_KEY in frozen_cache.store
 
 
 def test_corrupt_archive_cache_entry_refetches_from_loki(
