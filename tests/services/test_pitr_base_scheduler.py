@@ -92,6 +92,35 @@ def test_restricted_restore_group_reaps_orphan_descendant() -> None:
     assert daemon._group_members(process.pid) == []
 
 
+def test_authoritative_verify_precedes_publisher_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    constructed = False
+
+    def reject_mismatched_ack(**_kwargs: object) -> None:
+        raise ValueError("ACK generation mismatch")
+
+    class Publisher:
+        def __init__(self, **_kwargs: object) -> None:
+            nonlocal constructed
+            constructed = True
+
+    monkeypatch.setattr(daemon, "verify_candidate_proof", reject_mismatched_ack)
+    monkeypatch.setattr(daemon, "GCSProtectedManifestPublisher", Publisher)
+
+    with pytest.raises(ValueError, match="ACK generation mismatch"):
+        daemon._verify_then_construct_publisher(
+            candidate=_candidate("verify-first"),
+            root=tmp_path,
+            ack_dir=tmp_path / "ack",
+            project="project",
+            bucket="bucket",
+            credentials=tmp_path / "uploader.json",
+        )
+
+    assert constructed is False
+
+
 def _blocking_worker(
     started: Path,
     stopped: Path,
