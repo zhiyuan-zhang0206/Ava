@@ -10,7 +10,7 @@
 
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BAR_HEIGHT_CLASS } from "@/lib/layout";
@@ -627,14 +627,18 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     expect(screen.getByText("80.00%")).toBeTruthy(); // cache hit, 2 decimals
     expect(screen.getByText("$1.23")).toBeTruthy(); // windowed cost
     expect(screen.getByText("3s")).toBeTruthy(); // avg turn
-    // warn / err three-way rows: total / resolved / remaining (total / resolved / remaining)
-    expect(screen.getByText("Total 2")).toBeTruthy();
-    // the resolved/remaining cells share their span with the "· " separator
-    expect(screen.getAllByText(/Resolved 1/)).toHaveLength(2); // warning + error rows
-    expect(screen.getByText(/Remaining 1/)).toBeTruthy(); // warning row
-    expect(screen.getByText("Total 1")).toBeTruthy();
-    // error row is fully dismissed -> positive "all clear" state instead of a 0
-    expect(screen.getByText("All clear")).toBeTruthy();
+    // warn / err rows: one unresolved number per level, scoped to the row
+    // (user ruling 2026-08-29); the error row is fully dismissed -> all-clear
+    const warnRow = document.querySelector<HTMLElement>('[data-level="warning"]');
+    expect(warnRow).not.toBeNull();
+    expect(within(warnRow!).getByText("1")).toBeTruthy(); // warning unresolved
+    const errRow = document.querySelector<HTMLElement>('[data-level="error"]');
+    expect(errRow).not.toBeNull();
+    expect(within(errRow!).getByText("All clear")).toBeTruthy(); // error all-clear
+    // no Total / Resolved / Remaining labels anywhere in the card
+    expect(screen.queryByText(/Total/)).toBeNull();
+    expect(screen.queryByText(/Resolved/)).toBeNull();
+    expect(screen.queryByText(/Remaining/)).toBeNull();
   });
 
   it("error without data shows retry and clicking it refetches", () => {

@@ -25,7 +25,6 @@ import { useNow } from "@/lib/use-now";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { useAgentPages } from "@/lib/use-agent-pages";
 import { useInspectorHours, useInspectorOpen } from "@/lib/inspector-panel-store";
-import { STATS_WINDOW_LABELS, useStatsDashboard, type StatsWindowHours } from "@/lib/sidebar";
 import {
   COMPACT_INSPECT_WINDOW,
   fetchWindowedInspect,
@@ -39,7 +38,6 @@ import type {
   OpenNotice,
   PageRow,
   ShellInfo,
-  StatsDashboard,
   SystemEvent,
 } from "@/lib/types";
 import { formatAbsolute, formatRelative, formatShort, formatUptime } from "@/lib/time";
@@ -108,15 +106,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const { inspectorHours: hours, setInspectorHours: setHours } = useInspectorHours();
   const { isLarge } = useBreakpoint();
   const queryClient = useQueryClient();
-
-  // Fleet-wide warning/error resolution status (total / resolved / remaining) —
-  // the dashboard's three-way split. The inspector's own window selector
-  // overlaps the stats windows on 5m / 1h / 24h / 7d; the All and
-  // since-compact modes fall back to the default 24h. The shared poller in
-  // lib/sidebar dedupes this against the sidebar's own stats requests.
-  const statsWindow: StatsWindowHours =
-    hours === 0 || hours === 1 || hours === 24 || hours === 168 ? hours : 24;
-  const { stats: fleetStats } = useStatsDashboard(statsWindow);
 
   const liveQuery = useQuery({
     queryKey: inspectLiveQueryKey(agentId),
@@ -283,7 +272,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             ) : (
               <WindowedSectionsSkeleton />
             )}
-            {fleetStats ? <AlertSection stats={fleetStats} windowHours={statsWindow} /> : null}
             <Link
               href={`/insights/run/${agentId}`}
               className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
@@ -637,78 +625,6 @@ function CostSection({ inspect }: { inspect: AgentInspect }) {
           value={`${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}`}
         />
         <Metric label="Cache hit" value={`${cost.cache_hit_pct.toFixed(2)}%`} />
-      </div>
-    </Section>
-  );
-}
-
-/**
- * Alerts — the fleet-wide warning/error three-way split (total /
- * resolved / remaining) behind the sidebar stats card (task #1935). The backend derives all
- * three from the same per-class counts and the active event_dismissals
- * rows, so dismissed + net == total by construction; a zero net renders the
- * positive all-clear state. The badge shows the effective stats window when it
- * differs from the inspector selector's modes.
- */
-function AlertSection({
-  stats,
-  windowHours,
-}: {
-  stats: StatsDashboard;
-  windowHours: StatsWindowHours;
-}) {
-  const t = useTranslations("runTimeline");
-  const rows = [
-    {
-      level: "warning" as const,
-      total: stats.warnings,
-      dismissed: stats.warnings_dismissed,
-      net: stats.warnings_net,
-    },
-    {
-      level: "error" as const,
-      total: stats.errors,
-      dismissed: stats.errors_dismissed,
-      net: stats.errors_net,
-    },
-  ];
-  return (
-    <Section
-      icon={<Bell className="size-3" />}
-      title={t("alerts")}
-      badge={STATS_WINDOW_LABELS[windowHours]}
-    >
-      <div className="space-y-1">
-        {rows.map((row) => (
-          <div
-            key={row.level}
-            className={cn(
-              "items-center gap-1 rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px] tabular-nums",
-              FLEX,
-            )}
-          >
-            <span className="w-7 shrink-0 text-muted-foreground">
-              {row.level === "warning" ? t("alertWarning") : t("alertError")}
-            </span>
-            <span className="text-foreground">
-              {t("alertTotal")} {row.total.toLocaleString()}
-            </span>
-            <span className="text-muted-foreground">
-              · {t("alertDismissed")} {row.dismissed.toLocaleString()}
-            </span>
-            <span className="ml-auto shrink-0">
-              {row.net === 0 ? (
-                <span className="rounded bg-emerald-500/15 px-1 text-emerald-600 dark:text-emerald-400">
-                  {t("alertAllClear")}
-                </span>
-              ) : (
-                <span className="text-foreground">
-                  {t("alertNet")} {row.net.toLocaleString()}
-                </span>
-              )}
-            </span>
-          </div>
-        ))}
       </div>
     </Section>
   );

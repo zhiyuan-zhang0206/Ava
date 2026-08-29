@@ -72,14 +72,7 @@
     "loading": "Loading run timeline…",
     "loadFailed": "Could not load the run timeline.",
     "retry": "Retry",
-    "invalidAgent": "The agent id in this URL is invalid.",
-    "alerts": "Alerts",
-    "alertWarning": "WARN",
-    "alertError": "ERR",
-    "alertTotal": "Total",
-    "alertDismissed": "Resolved",
-    "alertNet": "Remaining",
-    "alertAllClear": "All clear"
+    "invalidAgent": "The agent id in this URL is invalid."
   },
   "nav": {
     "openSidebar": "Open sidebar",
@@ -139,9 +132,6 @@
     "searchAgent": "Search agent",
     "warningLevel": "WARN",
     "errorLevel": "ERR",
-    "statsTotal": "Total",
-    "statsDismissed": "Resolved",
-    "statsNet": "Remaining",
     "statsAllClear": "All clear"
   },
   "spawn": {
