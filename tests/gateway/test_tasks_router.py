@@ -241,6 +241,17 @@ class TestRootTaskImmutable:
         assert "permanent state" in resp.json()["detail"]
         assert _status(db_conn, tid) == "in_progress"  # unchanged
 
+    def test_patch_open_status_rejected(self, db_conn: psycopg.Connection) -> None:
+        """The 'open' status is gone (user ruling 2026-08-29): PATCHing it
+        into a task 422s through the narrowed valid-status list — zero shim."""
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner, title="regular-open")
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"status": "open"})
+        assert resp.status_code == 422
+        assert "Must be one of: in_progress, done, cancelled" in resp.json()["detail"]
+        assert _status(db_conn, tid) == "in_progress"  # unchanged
+
 
 class TestParentClose:
     def test_done_with_in_progress_child_is_rejected_and_unchanged(
