@@ -76,16 +76,19 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
 
 def test_restricted_restore_group_reaps_orphan_descendant() -> None:
     script = (
-        "import subprocess,sys; "
+        "import subprocess,sys,time; "
         "subprocess.Popen([sys.executable,'-c',"
         "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)']);"
+        "time.sleep(60)"
     )
     process = subprocess.Popen(  # noqa: S603
         [sys.executable, "-c", script], start_new_session=True, text=True
     )
     created_at = psutil.Process(process.pid).create_time()
-    process.wait(timeout=10)
-    assert daemon._group_members(process.pid)
+    deadline = time.monotonic() + 10
+    while len(daemon._group_members(process.pid)) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(daemon._group_members(process.pid)) >= 2
 
     daemon._reap_restore_subprocess_group(process, created_at)
 
