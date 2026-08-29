@@ -40,6 +40,12 @@ persistence.
 - Port: `AVA_MEMORY_SEARCH_PORT` (default 19531), URI: `AVA_MEMORY_SEARCH_URI`
 - Data dir: `AVA_MEMORY_SEARCH_DATA_DIR` (default `$AVA_HOME/memory-search/`)
 - Selected via `AVA_MEMORY_SEARCH_BACKEND=numpy` (`services/memory_indexer/backends/factory.py`)
+- **Probe limitation (tracked)**: the healthcheck's POST /search probe carries
+  no identity payload, so the `PORT_TAKEN` terminal verdict is unreachable for
+  it — another unit's daemon answering a valid search payload would read as
+  alive (no respawn attempted). The shared keepalive policy still bounds
+  persistent failure via exponential backoff + the respawn breaker. Tracked
+  limitation at single-unit scale, not a bug.
 - **Growth boundary**: upsert copies the full matrix (`np.vstack`) and every
   mutation rewrites the whole npz, so cold-start rebuild is quadratic in rows
   — fine at the current pool scale (~2k rows, tens of seconds), not at 5k+;

@@ -137,3 +137,25 @@ def test_load_truncated_zip_starts_empty(tmp_path: Path) -> None:
     store.load()
     assert len(store) == 0
     assert store.all_meta() == {}
+
+
+def test_load_mid_file_failure_leaves_store_empty(tmp_path: Path) -> None:
+    """A file whose keys are all present but one column fails to convert
+    (bytes-dtype mtimes holding a non-float) must not half-load: the store
+    stays fully empty, never a few columns populated and the rest absent."""
+    data_file = tmp_path / "vectors.npz"
+    np.savez(
+        data_file,
+        pks=np.array(["x"], dtype=str),
+        paths=np.array(["/a.md"], dtype=str),
+        kinds=np.array(["body"], dtype=str),
+        chunk_idx=np.array([0], dtype=np.int64),
+        mtimes=np.array([b"not-a-float"], dtype="S20"),
+        content_hashes=np.array(["h"], dtype=str),
+        vectors=np.zeros((1, embedder.DIM), dtype=np.float32),
+    )
+    store = MemoryStore(data_file)
+    store.load()
+    assert len(store) == 0
+    assert store.all_meta() == {}
+    assert store.search_topk(np.ones(embedder.DIM, dtype=np.float32), 5) == []
