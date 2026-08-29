@@ -266,7 +266,14 @@ def _emergency_fallback_summary(messages: list[AnyMessage]) -> str:
     """The no-LLM fallback summary: the emergency marker plus the last
     preserved prior summary, if one exists. Never raises, never calls the
     model — the whole point is to rescue an agent whose context the provider
-    rejects outright."""
+    rejects outright.
+
+    Deliberately exempt from `COMPACT_MIN_SUMMARY_CHARS` (the marker alone is
+    ~400 chars): that gate exists to reject a MODEL that ignored the summary
+    template, whereas this text is framework-authored and always follows the
+    format — there is nothing to detect, and rejecting it would strand the
+    agent in the overflow state this path exists to end. Downstream
+    (`build_compact_transition`) never checks the length either."""
     preserved = _last_compact_summary_text(messages)
     if preserved:
         return f"{_EMERGENCY_COMPACT_MARKER}\n\n{preserved}"

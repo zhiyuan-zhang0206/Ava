@@ -137,6 +137,28 @@ async def test_fatal_llm_stream_error_does_not_open_breaker() -> None:
     assert update == {"halted": True}
 
 
+async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> None:
+    """A second failure while the breaker is already open for the same reason
+    skips the duplicate open write + event (the original opened_at survives) —
+    one open event per incident, not one per failed wake."""
+    exc = FatalProviderError(
+        "provider permanently rejected (HTTP 402)",
+        error_class="permanent",
+        provider="anthropic",
+        status=402,
+    )
+    opened_at = "2026-08-29T00:00:00+00:00"
+
+    async def _reader() -> CircuitState | None:
+        return CircuitState(open=True, reason="billing", opened_at=opened_at)
+
+    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42, circuit_reader=_reader)
+
+    assert update == {"halted": True}, (
+        "the breaker is already open — the duplicate write must be skipped"
+    )
+
+
 # ── heartbeat gating (claim node) ──
 
 
