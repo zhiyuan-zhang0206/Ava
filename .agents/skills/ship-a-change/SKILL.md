@@ -59,7 +59,14 @@ a linear history.
 ### Merge queue (mandatory)
 
 PRs merge through the **Mergify** merge queue (`.mergify.yml`) — not by
-direct merge. Enqueuing is commenting `@mergifyio queue` on the PR (or
+direct merge. **QA gate:** the queue's merge conditions require the
+`qa-approved` label — a PR without it is never merged, even with green CI
+and an enqueued position (it waits in the queue until QA labels it). The
+label is applied by QA / the maintainers only, and only on a final PASS /
+PASS-with-nits conclusion; BLOCK / CONDITIONAL never carry it and a later
+BLOCK removes it immediately. Authors never self-apply the label; any new
+commit after a PASS still requires a delta re-review before the label is
+(re)applied. Enqueuing is commenting `@mergifyio queue` on the PR (or
 `.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge`, which posts that
 comment for you once CI is green). Mergify batches queued PRs into one
 speculative draft verification: a `mergify/merge-queue/*` branch carrying the
