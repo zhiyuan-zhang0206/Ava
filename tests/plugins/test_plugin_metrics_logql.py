@@ -181,7 +181,7 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
         ("dismissed_errors", "core_dismissed_error"),
     ):
         assert _METRIC_DISPOSITION[("resolution_status", field)] == "gauge"
-        assert specs[name].query == f"ava_resolution_status_{_strip_unit_suffix(field)}"
+        assert specs[name].query == f"ava_resolution_status_{_strip_unit_suffix(field)}_ratio"
         assert specs[name].query_type == "promql"
         assert specs[name].panel == "stat"
 
