@@ -111,8 +111,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # checkpoint_table_sizes and Task #1572's repair audit raise it to 114;
     # agent_boot_failed raises it to 115; gate_auth_probe_failed (Task #1736)
     # raises it to 116; the heartbeat circuit breaker (Task #1928) adds the
-    # five breaker/emergency-compact kinds, raising it to 124.
-    assert len(_TELEMETRY_KINDS) == 124
+    # five breaker/emergency-compact kinds, raising it to 124; the watchdog
+    # respawn breaker (Task #1941) adds respawn_breaker_open, raising it to 125.
+    assert len(_TELEMETRY_KINDS) == 125
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
