@@ -18,7 +18,13 @@ def test_pitr_is_disabled_without_credentials_or_cluster_secret() -> None:
     settings = PhysicalBackupSettings()
     assert settings.pitr_enabled is False
     assert settings.pitr_base_backup_enabled is False
+    assert settings.pitr_retention_planner_enabled is False
     assert settings.pitr_backup_key_file is None
+
+
+def test_retention_planner_requires_restore_proof_gate() -> None:
+    with pytest.raises(ValidationError, match="RETENTION_PLANNER_ENABLED requires"):
+        PhysicalBackupSettings(AVA_PITR_RETENTION_PLANNER_ENABLED=True)
 
 
 def test_enabled_pitr_requires_independent_private_key(tmp_path: Path) -> None:

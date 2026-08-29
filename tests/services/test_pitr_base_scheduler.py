@@ -16,6 +16,8 @@ import pytest
 import services.pitr.base_scheduler_daemon as daemon
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
+from services.pitr.retention_planner import DryRunResult
+from services.pitr.retention_scheduler import RetentionDryRunState
 from shared.process_env import restricted_process_env
 
 
@@ -179,6 +181,17 @@ def test_due_uses_durable_candidate_after_restart(tmp_path: Path) -> None:
 def test_health_never_calls_a_candidate_protected() -> None:
     components = _components(BaseCandidateState(running=True))
     assert components[0]["protected"] is False
+
+
+def test_retention_health_is_explicitly_dry_run_only(tmp_path: Path) -> None:
+    result = DryRunResult(tmp_path / "plan", "digest", False, 3, 2, 30, 20)
+    components = daemon._components(
+        BaseCandidateState(retention=RetentionDryRunState(enabled=True, plan=result))
+    )
+    retention = next(item for item in components if item["name"] == "pitr_retention_dry_run")
+    assert retention["delete_enabled"] is False
+    assert retention["eligible_objects"] == 2
+    assert retention["eligible_bytes"] == 20
 
 
 @pytest.mark.asyncio

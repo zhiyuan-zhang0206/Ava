@@ -611,6 +611,19 @@ isolated replay, promotion, fingerprints, live-Postgres identity check, and
 immutable proof publication all succeed. Keep daily and pre-update logical
 dumps regardless; this boundary has no retention or remote-delete operation.
 
+`AVA_PITR_RETENTION_PLANNER_ENABLED=true` adds only a local dry-run after the
+restore-proof gate is enabled. The private canonical plan lives at
+`$AVA_HOME/physical-backup/retention-plans/latest.dry-run.json`; inspect its
+digest, blockers, object counts and byte totals with:
+
+```bash
+ava pitr retention inspect
+```
+
+A blocked plan exits 2 and always has zero eligible objects. The flag grants no
+delete credential, calls no remote delete API, does not alter Cloud Storage soft
+delete, and leaves daily/pre-update `pg_dump` retention unchanged.
+
 All sessions have cwd set to the prod path `~/.ava/source/` (see "Prod and dev clone paths" above).
 Session commands run under `bash -lc` (#476) — the login-shell flag pulls in the user's
 `~/.bash_profile` / `~/.profile` so `~/.local/bin` (where `uv` typically lives on WSL / Linux) is on

@@ -41,6 +41,7 @@ from cli.parsers.management import (
     _add_schedules_parser,
 )
 from cli.parsers.mcp import _add_mcp_parser, _add_memory_parser
+from cli.parsers.pitr import _add_pitr_parser
 from cli.parsers.plugins import _add_plugins_parser, _add_skill_parser
 
 
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_computer_parser(sub)
     _add_trace_parser(sub)
     _add_logs_parser(sub)
+    _add_pitr_parser(sub)
     _add_agents_parser(sub)
     _add_config_parser(sub)
     _add_presets_parser(sub)
