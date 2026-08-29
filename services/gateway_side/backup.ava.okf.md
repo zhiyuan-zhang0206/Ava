@@ -33,6 +33,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `cli/commands/_converge_pitr.py` — publishes the disabled-by-default physical-backup layout and stable archive shim; it does not alter PostgreSQL
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
+- `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for unprotected physical base candidates; it never publishes a protected chain or deletes remote data
 
 ## Notes
 - Gateway capability only; `ava start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.
@@ -47,3 +48,13 @@ host's: reading a host timezone can make a current dump appear to be future.
   before removing local staging and spool files. Base chains, migration gate,
   and isolated physical restore arrive in follow-up PRs; logical
   daily/pre-update dumps remain the active recovery contract throughout.
+  `AVA_PITR_BASE_BACKUP_ENABLED` is a second, default-off gate: enabling WAL
+  upload alone cannot accidentally start a multi-GiB weekly base. A candidate
+  is born as one plain `pg_basebackup -Fp -X none` tree under the shared backup
+  lock, locally checked with `pg_verifybackup`, then uploaded outside the lock
+  as a deterministic canonical tar → zstd → AEAD stream. The stream is read
+  twice (identity preflight then upload) but no complete tar or ciphertext is
+  written locally. Candidates are explicitly `protected=false`; generation-
+  pinned restore, replay, the protection gate, and retention remain PR4 work.
+  The second gate also requires an explicit local least-privilege replication
+  URL; the ordinary cluster owner remains `NOSUPERUSER` without `REPLICATION`.

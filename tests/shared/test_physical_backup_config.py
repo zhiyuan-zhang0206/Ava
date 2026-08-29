@@ -9,6 +9,7 @@ from shared.config.physical_backup import PhysicalBackupSettings
 def test_pitr_is_disabled_without_credentials_or_cluster_secret() -> None:
     settings = PhysicalBackupSettings()
     assert settings.pitr_enabled is False
+    assert settings.pitr_base_backup_enabled is False
     assert settings.pitr_backup_key_file is None
 
 
@@ -26,8 +27,41 @@ def test_enabled_pitr_requires_independent_private_key(tmp_path: Path) -> None:
         AVA_PITR_BACKUP_KEY_FILE=key,
         AVA_PITR_GCS_CREDENTIALS_FILE=credentials,
         AVA_PITR_BACKUP_KEY_ID="prod-v1",
+        AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
     )
     assert settings.pitr_backup_key_file == key
+
+
+def test_base_candidates_require_wal_pitr_to_be_enabled() -> None:
+    with pytest.raises(ValidationError, match="BASE_BACKUP_ENABLED requires"):
+        PhysicalBackupSettings(AVA_PITR_BASE_BACKUP_ENABLED=True)
+
+
+def test_replication_url_rejects_remote_postgres() -> None:
+    with pytest.raises(ValidationError, match="must target loopback"):
+        PhysicalBackupSettings(
+            AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@db.example:5432/postgres"
+        )
+
+
+def test_base_candidates_accept_the_fully_validated_pitr_contract(tmp_path: Path) -> None:
+    key = tmp_path / "backup.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    credentials = tmp_path / "gcs.json"
+    credentials.write_text("{}")
+    credentials.chmod(0o600)
+    settings = PhysicalBackupSettings(
+        AVA_PITR_ENABLED=True,
+        AVA_PITR_BASE_BACKUP_ENABLED=True,
+        AVA_PITR_GCS_PROJECT="project",
+        AVA_PITR_GCS_BUCKET="bucket",
+        AVA_PITR_BACKUP_KEY_FILE=key,
+        AVA_PITR_GCS_CREDENTIALS_FILE=credentials,
+        AVA_PITR_BACKUP_KEY_ID="prod-v1",
+        AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
+    )
+    assert settings.pitr_base_backup_enabled is True
 
 
 def test_enabled_pitr_rejects_empty_or_overexposed_key(tmp_path: Path) -> None:
@@ -41,6 +75,7 @@ def test_enabled_pitr_rejects_empty_or_overexposed_key(tmp_path: Path) -> None:
             AVA_PITR_BACKUP_KEY_FILE=key,
             AVA_PITR_GCS_CREDENTIALS_FILE=key,
             AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
         )
 
 

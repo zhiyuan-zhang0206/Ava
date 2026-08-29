@@ -122,6 +122,7 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "page-server",
         "pg-backup",
         "pitr-uploader",
+        "pitr-base-candidate",
         "otel-collector",
         # The hosted agent-runner. build_services() is the UNGATED roster, so it
         # is listed here even though AVA_RUNNER_MODE keeps it off every cluster's

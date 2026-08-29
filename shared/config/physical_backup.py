@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import stat
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 
@@ -20,6 +21,17 @@ class PhysicalBackupSettings(EnvSettings):
         default=False,
         alias="AVA_PITR_ENABLED",
         description="Enable physical backup wiring. This foundation release never enables Postgres archiving.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    pitr_base_backup_enabled: bool = Field(
+        default=False,
+        alias="AVA_PITR_BASE_BACKUP_ENABLED",
+        description="Enable weekly unprotected physical base-backup candidates.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
@@ -169,6 +181,18 @@ class PhysicalBackupSettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+    pitr_replication_db_url: str = Field(
+        default="",
+        alias="AVA_PITR_REPLICATION_DB_URL",
+        description="Local least-privilege REPLICATION role URL used only by pg_basebackup.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
 
     @model_validator(mode="after")
     def _validate_contract(self) -> PhysicalBackupSettings:
@@ -202,6 +226,21 @@ class PhysicalBackupSettings(EnvSettings):
                 "PITR enabled requires AVA_PITR_GCS_PROJECT, AVA_PITR_GCS_BUCKET, "
                 "AVA_PITR_BACKUP_KEY_FILE, AVA_PITR_GCS_CREDENTIALS_FILE, and AVA_PITR_BACKUP_KEY_ID"
             )
+        if self.pitr_base_backup_enabled and not self.pitr_enabled:
+            raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_ENABLED")
+        if self.pitr_base_backup_enabled and not self.pitr_replication_db_url:
+            raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_REPLICATION_DB_URL")
+        if self.pitr_replication_db_url:
+            parsed_replication = urlsplit(self.pitr_replication_db_url)
+            if parsed_replication.scheme not in {
+                "postgres",
+                "postgresql",
+            } or parsed_replication.hostname not in {
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            }:
+                raise ValueError("AVA_PITR_REPLICATION_DB_URL must target loopback PostgreSQL")
         if self.pitr_enabled:
             key_file = self.pitr_backup_key_file
             if key_file is None:

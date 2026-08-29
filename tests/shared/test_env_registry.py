@@ -210,6 +210,7 @@ class TestConsumptionMatrixDeclarations:
             # carry when a cluster does flip the mode.
             "agent_host",
             "pitr_uploader",
+            "pitr_base_backup",
         }
         meta = _fields()  # pyright: ignore[reportUnknownVariableType]
         for svc, alias in aliases.items():
