@@ -115,7 +115,13 @@ def env_value_text(value: Any) -> str:
     return str(value)
 
 
-def write_fields(updates: dict[str, Any], removals: set[str]) -> None:
+def write_fields(
+    updates: dict[str, Any],
+    removals: set[str],
+    *,
+    capture_bytes: bool = False,
+    expected_digest: str | None = None,
+) -> bytes | None:
     """Set each field's alias in this unit's `.env`, and unset each removed field's.
 
     `updates` is field name -> value (stringified); `removals` reverts those
@@ -140,7 +146,14 @@ def write_fields(updates: dict[str, Any], removals: set[str]) -> None:
     #
     # It also covers `snapshot_env`: the backup is what recovery reads, and one
     # taken mid-rewrite would preserve a state that never existed.
+    captured: bytes | None = None
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
+        if expected_digest is not None:
+            import hashlib
+
+            current = path.read_bytes() if path.exists() else b""
+            if hashlib.sha256(current).hexdigest() != expected_digest:
+                raise RuntimeError(".env changed before owned runtime-config write")
         snapshot_env(path)
         path.touch(exist_ok=True)
         sp = str(path)
@@ -160,8 +173,11 @@ def write_fields(updates: dict[str, Any], removals: set[str]) -> None:
             path.chmod(0o600)
         except OSError:
             _log.warning("write_fields: could not chmod 0600 %s", path, exc_info=True)
+        if capture_bytes:
+            captured = path.read_bytes()
     if removals:
         _log.info("write_fields: unset %s in %s", sorted(amap[n] for n in removals), path.name)
+    return captured
 
 
 # -- one-time host-file migration: runtime_config.json -> .env (run in converge) --

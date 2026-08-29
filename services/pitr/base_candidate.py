@@ -48,7 +48,7 @@ class StopSignal(Protocol):
     def wait(self, timeout: float | None = None) -> bool: ...
 
 
-_PARTIAL_NAME = re.compile(r"^\.\d{8}T\d{6}Z\.partial$")
+_PARTIAL_NAME = re.compile(r"^\.(?:\d{8}T\d{6}Z|activation-\d{8}T\d{6}Z-[0-9a-f-]{36})\.partial$")
 
 
 @dataclass(frozen=True)
@@ -478,6 +478,7 @@ def create_base_candidate(
     replication_db_url: str,
     stop: StopSignal | None = None,
     now: datetime | None = None,
+    forced_chain_id: str | None = None,
 ) -> CandidateManifest:
     """Create one candidate. This module cannot mark a chain protected."""
 
@@ -494,6 +495,10 @@ def create_base_candidate(
             root / "base-manifests" / f"{path.name.removesuffix('.ready')}.candidate.json"
         ).exists()
     ]
+    if forced_chain_id is not None:
+        unrelated = [path for path in resumable if path.name != f"{forced_chain_id}.ready"]
+        if unrelated:
+            raise BaseCandidateError("unrelated base candidate is already in flight")
     if len(resumable) > 1:
         raise BaseCandidateError("multiple unfinished base candidates require operator review")
     if resumable:
@@ -502,7 +507,11 @@ def create_base_candidate(
         facts = _load_facts(root, chain_id)
         _verify_candidate(ready, stop)
     else:
-        chain_id = now.strftime("%Y%m%dT%H%M%SZ")
+        chain_id = forced_chain_id or now.strftime("%Y%m%dT%H%M%SZ")
+        if forced_chain_id is not None and not re.fullmatch(
+            r"activation-\d{8}T\d{6}Z-[0-9a-f-]{36}", forced_chain_id
+        ):
+            raise BaseCandidateError("activation chain id is invalid")
         ready, facts = _birth_candidate(
             root=root,
             chain_id=chain_id,
@@ -538,7 +547,12 @@ def create_base_candidate(
         "ava-key-id": key_id,
         "ava-packer-version": str(plan.packer_version),
     }
-    ack = store.put_base_if_absent(source=source, object_name=object_name, metadata=metadata)
+    ack = store.put_base_if_absent(
+        source=source,
+        object_name=object_name,
+        metadata=metadata,
+        cancelled=stop.is_set,
+    )
     candidate = CandidateManifest(
         schema_version=SCHEMA_VERSION,
         chain_id=chain_id,
@@ -565,6 +579,8 @@ def create_base_candidate(
         migration_set_sha256=facts.migration_set_sha256,
     )
     manifest_path = root / "base-manifests" / f"{chain_id}.candidate.json"
+    if stop.is_set():
+        raise BaseCandidateError("base candidate lost ownership before manifest publication")
     _atomic_json(manifest_path, json.loads(candidate.to_json()))
     _remove_tree(ready)
     plan_path.unlink()

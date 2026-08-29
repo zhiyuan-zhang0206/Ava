@@ -32,7 +32,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `services/backup.py:run_backup()` — actual dump + prune
 - `cli/commands/_converge_pitr.py` — publishes the disabled-by-default physical-backup layout and stable archive shim; it does not alter PostgreSQL
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
-- `services/pitr/activation_state.py` — strict atomic activation operation record; its persisted `started_at` survives refresh/restart and its first reachable transition ends at `wal_config_pending`
+- `services/pitr/activation_state.py` — strict schema-v3 atomic activation record; CAS transitions persist config digests, restart handoffs, exact WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 - `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
 - `services/pitr/retention_planner.py` — default-off local dry-run planner; strictly joins local ACK and viewer-only remote immutable identities, atomically records a canonical fail-closed N=2 plan, and exposes only fresh counts/bytes through scheduler health, with no remote-delete boundary; unprotected or cross-timeline evidence blocks eligibility
@@ -42,13 +42,15 @@ host's: reading a host timezone can make a current dump appear to be future.
 - Gateway capability only; `ava start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.
 - Protects against bad migrations / accidental deletion / DB corruption and makes a best-effort encrypted Google Drive copy before pruning; an unavailable Drive folder leaves the local artifact intact. Object storage remains a future alternative, see `future/infra/pg-backup.md`.
 - Restore: follow `.agents/skills/operating-ava-cluster/references/db-restore.md` to decrypt before `pg_restore --clean --if-exists`.
-- Physical PITR is currently a **foundation only**: converge publishes a private
+- Physical PITR is disabled by default: converge publishes a private
   per-home spool and a source-independent, self-checked shim, while
   `AVA_PITR_ENABLED` defaults false and PostgreSQL `archive_mode` stays untouched.
   `ava cluster pitr activate` first validates that shadow posture and creates a
-  verified encrypted logical snapshot. It still leaves both feature flags and
-  PostgreSQL untouched until the separately reviewed remote-smoke/restart gate
-  is delivered.
+  verified encrypted logical snapshot, then durably resumes through the existing
+  whole-cluster restart path. Protection requires exact PostgreSQL/local ACK/
+  viewer WAL evidence, an operation-scoped base candidate, and its isolated
+  restore proof. Rollback restores frozen settings through the same restart seam
+  and never deletes backup data.
   A local archived segment is not a remote ACK. When explicitly enabled, the
   GCS uploader encrypts each spooled segment, conditionally creates one immutable
   object, verifies its generation/CRC32C/metadata, and only then fsyncs an ACK

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import psutil
+import pytest
 from pytest import MonkeyPatch
 
 from services.pitr import restore_manifest, restore_proof
@@ -220,3 +221,32 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
     assert protected.protected is True
     assert calls == ["live", "download", "restore", "live", "publish"]
     assert (tmp_path / "protected-manifests" / f"{candidate.chain_id}.json").is_file()
+
+    local = tmp_path / "protected-manifests" / f"{candidate.chain_id}.json"
+    pending_path = tmp_path / "protected-pending" / f"{candidate.chain_id}.json"
+    local.unlink()
+    pending_path.write_text(protected.to_json())
+    lost = False
+
+    class LosingPublisher(Publisher):
+        def put_manifest_if_absent(
+            self, *, payload: bytes, object_name: str, metadata: dict[str, str]
+        ) -> RemoteObjectAck:
+            nonlocal lost
+            ack = RemoteObjectAck(object_name, 9, len(payload), "manifest-crc", metadata, True)
+            lost = True
+            return ack
+
+    with pytest.raises(RuntimeError, match="lease lost"):
+        publish_candidate_proof(
+            candidate=candidate,
+            root=tmp_path,
+            prefix="pitr",
+            verified=protected,
+            publisher=LosingPublisher(),
+            require_ownership=lambda: (
+                (_ for _ in ()).throw(RuntimeError("lease lost")) if lost else None
+            ),
+        )
+    assert pending_path.is_file()
+    assert not local.exists()

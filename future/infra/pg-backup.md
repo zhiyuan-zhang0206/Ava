@@ -55,12 +55,11 @@ subprocess (host/tool coupling) or handwritten REST (duplicated auth, resumable
 upload, checksum, and conditional retry machinery). It performs immutable
 generation-zero creates, verifies CRC32C/generation/metadata, and fsyncs a local
 ACK before deleting local staging or spool data. It never deletes remote objects.
-This delivery deliberately does not enable PostgreSQL archiving. Follow-up order:
-PostgreSQL archive-mode rollout, weekly verified
-base chains with chain-aware retention, then isolated restore drills and the
-migration restore-point gate. The first rollout cannot protect itself; existing
-verified pre-update `pg_dump` remains mandatory until the first remote physical
-chain is proven recoverable.
+Activation remains default-off and operator-owned: it journals the environment and
+`ALTER SYSTEM` changes, continues through the existing whole-cluster restart, proves
+an exact writer-smoke WAL through a durable ACK and independent viewer, then forces and
+restores one operation-scoped base chain. Existing verified pre-update `pg_dump`
+remains mandatory and is never pruned by physical-backup retention.
 
 1. **Off-site encrypted copy — delivered.** After encryption and before local
    pruning, the gateway copies the published artifact to the existing writable
