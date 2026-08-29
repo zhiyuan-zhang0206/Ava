@@ -27,16 +27,27 @@ def component(
     progress: str | None = None,
     detail: str | None = None,
     now: float | None = None,
+    gate_readiness: bool = True,
 ) -> dict[str, object]:
     """Build one component record while omitting facts the daemon has not observed.
 
     A missing timestamp is deliberately different from a zero timestamp: a newly
     started scheduler must report that it has no completed job yet, not invent an
     age from process birth.
+
+    ``gate_readiness`` marks whether this component's non-OK state flips the
+    daemon's HTTP readiness (503): True (default) keeps the historic behavior
+    — any non-OK component degrades the daemon. False reports a domain
+    condition without gating readiness, so a watchdog that respawns on 503
+    never restarts a daemon onto a condition a restart cannot fix (PITR
+    unacked-age health, QA #4696 block 2); the component stays visible in the
+    payload either way.
     """
     if status not in _COMPONENT_STATUSES:
         raise ValueError(f"unknown health component status: {status!r}")
     result: dict[str, object] = {"name": name, "status": status}
+    if not gate_readiness:
+        result["gate_readiness"] = False
     if last_success is not None:
         result["last_success"] = last_success
         if now is not None:
@@ -68,7 +79,7 @@ def render(
     reasons = [
         f"{record['name']}: {record['detail'] if 'detail' in record else record['status']}"
         for record in components
-        if record["status"] != OK
+        if record["status"] != OK and record.get("gate_readiness", True)
     ]
     stale = stale_for is not None or (liveness is not None and not liveness.is_alive())
     healthy = not reasons and not stale
