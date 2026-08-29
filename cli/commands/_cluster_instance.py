@@ -404,23 +404,31 @@ def _redis_running(redis_port: int, redis_admin_password: str, host: str = "127.
     return "PONG" in (out.stdout or "")
 
 
+# Redis default persistence schedule (900s/1 change, 300s/10, 60s/10000).
+_REDIS_SAVE_SCHEDULE = ("900 1", "300 10", "60 10000")
+
+
 def _write_redis_conf(data: Path, redis_admin_password: str) -> Path:
-    """Write the cluster's `requirepass` into a 0600 `redis.conf` and return it.
+    """Write the cluster's RDB save schedule and `requirepass` into a 0600
+    `redis.conf` and return it.
 
     `redis-server --requirepass <password>` would carry the Redis admin password on argv.
     redis overwrites its own process title moments later, so `ps` only sees it
     during startup — but a startup window is still a window, and the conf file is
-    the mechanism redis itself documents. Everything else stays a flag: redis
-    applies flags after the config file, so the per-cluster port/bind/dir still
-    win (and a stale conf from an older start cannot pin them).
+    the mechanism redis itself documents. The save schedule lives here too: a
+    restart without persistence wipes the frozen caches and re-causes the
+    all-at-once rebuild stampede (2026-08-29 #2004 amplifier, task #2027), so it
+    must survive every render, not ride a runtime CONFIG SET. Everything else
+    stays a flag: redis applies flags after the config file, so the per-cluster
+    port/bind/dir still win (and a stale conf from an older start cannot pin them).
 
     A no-secret cluster writes NO requirepass line — redis then serves without
     auth on the unconditional loopback-only bind."""
     conf = data / "redis.conf"
-    content = b""
+    content = b"".join(f"save {spec}\n".encode() for spec in _REDIS_SAVE_SCHEDULE)
     if redis_admin_password:
         escaped = redis_admin_password.replace("\\", "\\\\").replace('"', '\\"')
-        content = f'requirepass "{escaped}"\n'.encode()
+        content += f'requirepass "{escaped}"\n'.encode()
     write_private_bytes(conf, content)
     return conf
 
@@ -463,8 +471,6 @@ def _start_redis(
         str(data),
         "--logfile",
         str(data / "redis.log"),
-        "--save",
-        "",
     ]
     result = subprocess.run(args, check=False, capture_output=True, text=True)
     if result.returncode != 0:

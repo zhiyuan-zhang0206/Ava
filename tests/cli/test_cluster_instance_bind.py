@@ -209,6 +209,8 @@ def test_start_redis_binds_loopback_only_without_secret(
 
     assert _ci._start_redis(6380, "", "", "", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
+    assert "--save" not in started[0]  # persistence rides the rendered conf, not argv
+    assert (tmp_path / "redis.conf").read_text().startswith("save 900 1")
 
 
 def test_start_redis_binds_loopback_only_with_secret(
@@ -247,7 +249,9 @@ def test_running_redis_persists_the_authenticated_password_to_its_config(
     (tmp_path / "redis.conf").write_text('requirepass "stale-old-password"\n')
 
     assert _ci._start_redis(6380, "journal-password", "runtime", "bearer", "ava") == 0
-    assert (tmp_path / "redis.conf").read_text() == 'requirepass "journal-password"\n'
+    assert (tmp_path / "redis.conf").read_text() == (
+        'save 900 1\nsave 300 10\nsave 60 10000\nrequirepass "journal-password"\n'
+    )
 
 
 def test_redis_config_keeps_previous_complete_value_when_replace_fails(
@@ -267,6 +271,19 @@ def test_redis_config_keeps_previous_complete_value_when_replace_fails(
         _ci._write_redis_conf(tmp_path, "new-complete")
 
     assert conf.read_text() == 'requirepass "old-complete"\n'
+
+
+def test_redis_conf_always_renders_rdb_save_schedule(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A no-secret cluster still persists: the RDB save schedule must survive
+    every conf render, or a restart silently loses persistence (task #2027)."""
+    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _ci._start_redis(6380, "", "", "", "ava") == 0
+    assert (tmp_path / "redis.conf").read_text() == "save 900 1\nsave 300 10\nsave 60 10000\n"
 
 
 # ─── task #1303: postgres gets the same secret-gated reachable-bind wait ──────
