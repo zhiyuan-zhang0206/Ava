@@ -25,10 +25,21 @@ Only creation events carry parentage: send_message is a peer tie and
 resurrect wakes an existing agent, so neither forms an ancestor. Spawn
 chains form a forest, so the upward walk is a simple linked-list traversal
 to the top (a visited set guards against malformed cycles — no depth cap).
+
+Performance (task #1958): the archive stream is immutable — it froze at the
+cutover and no new rows enter it — yet every request re-scanned its ~24k
+edge rows (~5-28s Loki query, occasionally timing out at the client's 45s
+bound). The archive rows are now cached in Redis for a day (same pattern and
+TTL as the fleet graph's frozen-source caches), leaving one bounded live-tail
+read per request. The live read carries an 8s timeout (the fleet graph's
+telemetry-read bound) so a stalled Loki fails the route in seconds instead of
+pinning it for 45s. The cache is fail-open: a Redis outage degrades to a
+direct query, never to a 500.
 """
 
 from __future__ import annotations
 
+import json
 import math
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +47,7 @@ from typing import Any
 from gateway import loki_events
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
+from shared.redis_client import sync_redis
 
 # Audit event names that form ties (same family as fleet_graph._EDGE_EVENT_NAMES).
 _LINEAGE_EVENT_NAMES = ("spawn", "fork", "resurrect")
@@ -49,6 +61,59 @@ _ANCESTOR_EVENT_NAMES = ("spawn", "fork")
 # cutover; the cap is a guardrail, not an expectation (mirrors fleet_graph).
 _LOKI_EDGE_LIMIT = 50_000
 
+# Frozen-source cache (mirrors gateway/routers/fleet_graph.py): the archive
+# stream is immutable, so a 24h Redis entry turns its per-request scan into a
+# once-a-day one. 24h matches the fleet-graph precedent and self-heals if the
+# archive is ever rebuilt or the entry is evicted.
+_FROZEN_CACHE_TTL_SECONDS = 24 * 60 * 60
+_ARCHIVE_CACHE_KEY = "neighbors:archive:v1"
+
+# The live-tail read is the only per-request Loki query left. Bound it well
+# below the shared client's 45s default so a stalled Loki fails the route in
+# seconds instead of pinning a request (and a query-budget slot) for 45s —
+# the same bound fleet_graph uses for its telemetry reads.
+_LIVE_READ_TIMEOUT_S = 8.0
+
+
+def _read_frozen_json(key: str, *, cache_name: str) -> Any | None:
+    """Read one frozen-source payload, treating Redis or JSON errors as misses."""
+    try:
+        with sync_redis(decode_responses=True) as redis:
+            cached = redis.get(key)
+        return json.loads(cached) if cached is not None else None
+    except Exception as exc:
+        logger.debug("neighbors frozen %s cache read failed — querying source: %s", cache_name, exc)
+        return None
+
+
+def _write_frozen_json(key: str, payload: object, *, cache_name: str) -> None:
+    """Write one frozen-source payload without making Redis route-critical."""
+    try:
+        with sync_redis(decode_responses=True) as redis:
+            redis.set(key, json.dumps(payload), ex=_FROZEN_CACHE_TTL_SECONDS)
+    except Exception as exc:
+        logger.debug("neighbors frozen %s cache write failed: %s", cache_name, exc)
+
+
+def _rows_from_cache_payload(raw: Any, *, cache_name: str) -> list[dict[str, Any]] | None:
+    """Decode a cached [agent_id, target_agent_id, event_name, ts] row list.
+
+    Returns None on any shape/type mismatch so the caller refetches the
+    source — a corrupt entry must never be served as a (wrong) answer."""
+    try:
+        return [
+            {
+                "agent_id": row[0],
+                "target_agent_id": row[1],
+                "event_name": row[2],
+                "ts": datetime.fromisoformat(row[3]),
+            }
+            for row in raw["rows"]
+        ]
+    except Exception as exc:
+        logger.debug("neighbors frozen %s cache decode failed: %s", cache_name, exc)
+        return None
+
 
 def _fetch_archive_rows() -> list[dict[str, Any]]:
     """Pre-cutover tie + lineage rows from the Loki archive stream.
@@ -56,7 +121,28 @@ def _fetch_archive_rows() -> list[dict[str, Any]]:
     Raw rows (not grouped): the merge absorbs both archive and live rows
     with the same per-row math, so the two sides sum exactly like one table
     would. The archive stream holds only pre-cutover rows, so the query is
-    bounded to the archive's own span (within Loki's 90d max_query_length)."""
+    bounded to the archive's own span (within Loki's 90d max_query_length).
+    The rows are immutable and cached in Redis for a day; a miss runs the
+    Loki query and repopulates the cache. The fetch keeps the shared client's
+    45s default timeout (NOT the 8s live-read bound): it is a once-a-day
+    refresh whose measured range is 5-28s, so an 8s bound would time it out
+    on a cold Loki, leave the cache empty, and turn every request in that
+    window into a failure — worse than the slowness the cache exists to fix.
+    The fetch's `has_more` flag is persisted with the rows, so a cache hit
+    reports truncation exactly as the originating fetch did (no masking)."""
+    cached = _read_frozen_json(_ARCHIVE_CACHE_KEY, cache_name="Loki archive")
+    if cached is not None:
+        rows = _rows_from_cache_payload(cached, cache_name="Loki archive")
+        if rows is not None:
+            # The payload persists the originating fetch's has_more (entries
+            # without it predate that shape — a full page then conservatively
+            # counts as truncated).
+            if cached.get("has_more", len(rows) >= _LOKI_EDGE_LIMIT):
+                logger.warning(
+                    "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
+                    _LOKI_EDGE_LIMIT,
+                )
+            return rows
     rows, has_more = loki_events.query_events(
         event_names=list(_EDGE_EVENT_NAMES),
         categories=["audit"],
@@ -71,11 +157,26 @@ def _fetch_archive_rows() -> list[dict[str, Any]]:
             "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
             _LOKI_EDGE_LIMIT,
         )
+    _write_frozen_json(
+        _ARCHIVE_CACHE_KEY,
+        {
+            "rows": [
+                [row["agent_id"], row["target_agent_id"], row["event_name"], row["ts"].isoformat()]
+                for row in rows
+            ],
+            "has_more": has_more,
+        },
+        cache_name="Loki archive",
+    )
     return rows
 
 
 def _fetch_loki_edges(*, now: datetime) -> list[dict[str, Any]]:
-    """Live-tail audit rows from Loki since the archive freeze point."""
+    """Live-tail audit rows from Loki since the archive freeze point.
+
+    The only per-request Loki read left after the archive cache; bounded at
+    `_LIVE_READ_TIMEOUT_S` so a stalled Loki fails the route fast instead of
+    pinning it for the shared client's 45s default."""
     loki_from = ARCHIVE_FREEZE_AT
     rows, has_more = loki_events.query_events(
         event_names=list(_EDGE_EVENT_NAMES),
@@ -84,6 +185,7 @@ def _fetch_loki_edges(*, now: datetime) -> list[dict[str, Any]]:
         to=now,
         limit=_LOKI_EDGE_LIMIT,
         direction="forward",
+        timeout_s=_LIVE_READ_TIMEOUT_S,
     )
     if has_more:
         logger.warning(
