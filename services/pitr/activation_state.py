@@ -27,7 +27,7 @@ ActivationPhase = Literal[
     "rolled_back",
 ]
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _PHASES = frozenset(
     {
         "shadow",
@@ -57,6 +57,7 @@ class ActivationRecord:
     origin: str
     pre_activation_snapshot: str | None = None
     pre_activation_pg_settings: dict[str, str] | None = None
+    pre_activation_credential_evidence: dict[str, str] | None = None
     switched_wal: str | None = None
     protected_manifest: str | None = None
     error: str | None = None
@@ -97,22 +98,19 @@ class ActivationRecord:
                 raise ValueError(f"PITR activation {name} must be a string or null")
             return value
 
-        raw_settings = raw["pre_activation_pg_settings"]
-        settings_items = (
-            None
-            if raw_settings is None
-            else cast(dict[object, object], raw_settings)
-            if isinstance(raw_settings, dict)
-            else None
-        )
-        if raw_settings is not None and (
-            settings_items is None
-            or not all(
-                isinstance(key, str) and isinstance(value, str)
-                for key, value in settings_items.items()
-            )
-        ):
-            raise ValueError("PITR activation pre_activation_pg_settings must be string pairs")
+        def optional_string_map(name: str) -> dict[str, str] | None:
+            value = raw[name]
+            if value is None:
+                return None
+            if not isinstance(value, dict):
+                raise TypeError(f"PITR activation {name} must be an object or null")
+            items = cast(dict[object, object], value)
+            if not all(
+                isinstance(key, str) and isinstance(item, str) for key, item in items.items()
+            ):
+                raise ValueError(f"PITR activation {name} must contain string pairs")
+            return cast(dict[str, str], value)
+
         schema_version = raw["schema_version"]
         if not isinstance(schema_version, int) or isinstance(schema_version, bool):
             raise TypeError("PITR activation schema_version must be an integer")
@@ -124,7 +122,10 @@ class ActivationRecord:
             updated_at=required_string("updated_at"),
             origin=required_string("origin"),
             pre_activation_snapshot=optional_string("pre_activation_snapshot"),
-            pre_activation_pg_settings=cast(dict[str, str] | None, raw_settings),
+            pre_activation_pg_settings=optional_string_map("pre_activation_pg_settings"),
+            pre_activation_credential_evidence=optional_string_map(
+                "pre_activation_credential_evidence"
+            ),
             switched_wal=optional_string("switched_wal"),
             protected_manifest=optional_string("protected_manifest"),
             error=optional_string("error"),
@@ -142,9 +143,15 @@ class ActivationRecord:
         if updated < started:
             raise ValueError("PITR activation updated_at precedes started_at")
         if record.phase in _EVIDENCE_PHASES and (
-            not record.pre_activation_snapshot or not record.pre_activation_pg_settings
+            not record.pre_activation_snapshot
+            or not record.pre_activation_pg_settings
+            or not record.pre_activation_credential_evidence
         ):
             raise ValueError("PITR activation phase is missing logical recovery evidence")
+        if record.phase == "snapshot_pending" and (
+            not record.pre_activation_pg_settings or not record.pre_activation_credential_evidence
+        ):
+            raise ValueError("PITR activation snapshot phase is missing shadow evidence")
         if record.phase == "protected" and not record.protected_manifest:
             raise ValueError("protected PITR activation is missing its manifest")
         return record

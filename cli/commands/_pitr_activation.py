@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import LiteralString, cast
@@ -33,6 +34,12 @@ from shared.platform import LockTimeoutError, file_lock
 from shared.private_storage import ensure_private_dir
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
+
+
+@dataclass(frozen=True)
+class ShadowReadiness:
+    pg: dict[str, str]
+    credentials: dict[str, str]
 
 
 def _mode(path: Path) -> int:
@@ -181,7 +188,7 @@ def _read_pg_state() -> dict[str, str]:
     return current
 
 
-def _shadow_readiness() -> dict[str, str]:
+def _shadow_readiness() -> ShadowReadiness:
     """Validate every local prerequisite without changing PostgreSQL or config."""
     config = settings.physical_backup
     root = ava_home() / "physical-backup"
@@ -218,8 +225,7 @@ def _shadow_readiness() -> dict[str, str]:
     current = _read_pg_state()
     if current["archive_mode"] != "off" or current["archive_command"].strip():
         raise RuntimeError("shadow readiness requires archive_mode=off and no archive_command")
-    current.update(credential_evidence)
-    return current
+    return ShadowReadiness(pg=current, credentials=credential_evidence)
 
 
 def _print_record(record: ActivationRecord | None) -> int:
@@ -267,6 +273,11 @@ def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> No
         raise RuntimeError(f"PostgreSQL identity/settings changed {boundary}")
 
 
+def _require_same_credentials(expected: dict[str, str] | None, boundary: str) -> None:
+    if expected is None or _validate_secrets() != expected:
+        raise RuntimeError(f"PITR credential/bucket evidence changed {boundary}")
+
+
 def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
     from cli.commands._update_git import _verify_snapshot_artifact, snapshot_pre_activation_data
     from services.backup import activation_snapshot
@@ -275,6 +286,7 @@ def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
     if pg_settings is None:
         raise RuntimeError("PITR activation has no frozen PostgreSQL identity")
     _require_same_pg_state(pg_settings, "before snapshot")
+    _require_same_credentials(record.pre_activation_credential_evidence, "before snapshot")
     existing = activation_snapshot(record.operation_id)
     if existing is not None:
         snapshot = existing
@@ -285,6 +297,7 @@ def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
             db_url=pg_settings["direct_db_url"],
         )
     _require_same_pg_state(pg_settings, "during snapshot")
+    _require_same_credentials(record.pre_activation_credential_evidence, "during snapshot")
     record = record.advance(
         "snapshot_verified",
         pre_activation_snapshot=str(snapshot),
@@ -296,9 +309,11 @@ def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
 
 def _advance_activation(home: Path, record: ActivationRecord) -> ActivationRecord:
     if record.phase == "shadow":
+        readiness = _shadow_readiness()
         record = record.advance(
             "snapshot_pending",
-            pre_activation_pg_settings=_shadow_readiness(),
+            pre_activation_pg_settings=readiness.pg,
+            pre_activation_credential_evidence=readiness.credentials,
             error=None,
         )
         write_record(home, record)
