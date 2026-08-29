@@ -10,10 +10,11 @@
 // ForceGraph component (force-graph.tsx) renders both, with the ONLY visual
 // difference being node shape: agents are circles, tasks are squares. Same
 // physics, same ForceControls, same zoom/pan/focus interactions, same edge
-// styling. Task-specific chrome (status filters, needs-you, Kanban toggle)
-// lives in this module's toolbar; task nodes are UNIFORM size (user ruling
-// 2026-08-09 #1070 — the old descendant-count size encoding read as a bug)
-// and the needs-you badge rides on the node like a task card badge.
+// styling. Task-specific chrome (status filters, Kanban toggle) lives in this
+// module's toolbar; task nodes are UNIFORM size (user ruling 2026-08-09
+// #1070 — the old descendant-count size encoding read as a bug). A task whose
+// parent is hidden by the status toggles keeps its parent as a dimmed ghost
+// node so the tree never dangles a fake orphan (#1848).
 
 "use client";
 
@@ -22,7 +23,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { PRIORITY_BG, PRIORITY_TEXT } from "@/lib/notices";
+import { PRIORITY_BG } from "@/lib/notices";
 import { needsYouByTask, rollupNeedsYou } from "@/lib/task-notify";
 import { formatRelative, formatUptime } from "@/lib/time";
 import type { AgentRow, TaskRow } from "@/lib/types";
@@ -47,7 +48,9 @@ import { TaskKanban } from "./task-kanban";
 // regular task): it gets a dedicated color so the root stands apart from every
 // status-colored node in the graph — status colors have no meaning for it.
 const STATUS_FILL: Record<string, string> = {
-  in_progress: "text-sky-500",
+  // The old 'open' color — 'open' was dropped (tasks are born in_progress)
+  // and the graph no longer separates the two shades (user ruling 2026-08-29).
+  in_progress: "text-slate-400",
   done: "text-emerald-500",
   cancelled: "text-destructive",
   ongoing: "text-violet-500",
@@ -360,14 +363,44 @@ export function TaskGraph({
     [filteredTasks],
   );
 
-  // Graph node/edge set: visible subtasks PLUS every parent-less task (the
-  // system root) — top-level tasks hang under the root node in the graph
-  // (user ruling 2026-08-06: show the root). The root is a structural anchor:
-  // it joins the graph even when its own status would be hidden by the
-  // toggles (the kanban keeps hiding it — this set is graph-only).
+  // Structural ghost parents: a visible task whose parent was filtered out by
+  // the status toggles must not dangle as a fake orphan (#1848: parent done
+  // while Done is toggled off). Hidden ancestors of visible tasks join the
+  // graph as dimmed ghost nodes so the tree stays connected — graph-only
+  // (the kanban is a flat list with no parent edges).
+  const ghostTasks = useMemo(() => {
+    if (subtasks.length === 0) return [] as TaskRow[];
+    const visible = new Set(subtasks.map((t) => t.id));
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const ghosts = new Map<number, TaskRow>();
+    for (const t of subtasks) {
+      let cur = t.parent_id == null ? undefined : byId.get(t.parent_id);
+      // Walk up while the parent exists, is hidden, and is not the root (the
+      // root is always rendered and parent-less) — adding each hidden
+      // ancestor once.
+      while (
+        cur?.parent_id != null &&
+        !visible.has(cur.id) &&
+        !ghosts.has(cur.id)
+      ) {
+        ghosts.set(cur.id, cur);
+        cur = byId.get(cur.parent_id);
+      }
+    }
+    return [...ghosts.values()];
+  }, [subtasks, tasks]);
+
+  const ghostIds = useMemo(() => new Set(ghostTasks.map((t) => t.id)), [ghostTasks]);
+
+  // Graph node/edge set: visible subtasks PLUS their structural ghost parents
+  // PLUS every parent-less task (the system root) — top-level tasks hang
+  // under the root node in the graph (user ruling 2026-08-06: show the root).
+  // The root is a structural anchor: it joins the graph even when its own
+  // status would be hidden by the toggles (the kanban keeps hiding it — this
+  // set is graph-only).
   const graphTasks = useMemo(
-    () => [...subtasks, ...tasks.filter((t) => t.parent_id == null)],
-    [subtasks, tasks],
+    () => [...subtasks, ...ghostTasks, ...tasks.filter((t) => t.parent_id == null)],
+    [subtasks, ghostTasks, tasks],
   );
 
   // Bidirectional sync: when an agent is selected externally (from the
@@ -403,20 +436,18 @@ export function TaskGraph({
   // Adapt the task list to the shared node/edge model (square nodes).
   const graphNodes = useMemo<ForceGraphNode[]>(
     () =>
-      graphTasks.map((t) => {
-        const ny = needsYou.get(t.id);
-        return {
-          id: t.id,
-          label: t.title,
-          status: t.status,
-          // Uniform node size (user ruling 2026-08-09 #1070): every task
-          // node sits at the minimum radius — subtree size no longer drives
-          // the square. The Agent Graph keeps its score-driven sizing.
-          score: 0,
-          badge: ny != null ? { count: ny.count, tone: PRIORITY_TEXT[ny.top] } : null,
-        };
-      }),
-    [graphTasks, needsYou],
+      graphTasks.map((t) => ({
+        id: t.id,
+        label: t.title,
+        status: t.status,
+        // Uniform node size (user ruling 2026-08-09 #1070): every task
+        // node sits at the minimum radius — subtree size no longer drives
+        // the square. The Agent Graph keeps its score-driven sizing.
+        score: 0,
+        // Hidden-by-toggle structural parents render dimmed (see ghostTasks).
+        ghost: ghostIds.has(t.id),
+      })),
+    [graphTasks, ghostIds],
   );
   // Parent → child edges; the shared layout drops edges whose endpoints are
   // not both visible (a hidden parent leaves its children as isolates).
@@ -535,7 +566,6 @@ export function TaskGraph({
           tasks={filteredTasks}
           statusFill={STATUS_FILL}
           statusLabel={STATUS_LABEL}
-          needsYou={needsYou}
           selectedTaskId={selectedTaskId}
           onSelectTask={handleSelectTask}
           selectedAgentId={selectedAgentId}
@@ -610,7 +640,6 @@ export function TaskGraph({
                   </span>
                 ))}
               </div>
-              <p>Uniform node size</p>
             </div>
           }
         />

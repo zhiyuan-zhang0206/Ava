@@ -109,7 +109,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TaskGraph (graph mode)", () => {
-  it("explains task status colors and uniform sizing", () => {
+  it("explains task status colors", () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
@@ -117,7 +117,9 @@ describe("TaskGraph (graph mode)", () => {
     for (const label of ["In progress", "Done", "Canceled", "Root"]) {
       expect(legend.textContent).toContain(label);
     }
-    expect(legend.textContent).toContain("Uniform node size");
+    // The "Uniform node size" legend line was removed (user ruling 2026-08-29):
+    // the sizing itself is unchanged, the copy was clutter.
+    expect(legend.textContent).not.toContain("Uniform node size");
   });
 
   it("renders only in-progress cards by default", async () => {
@@ -264,6 +266,71 @@ describe("TaskGraph (graph mode)", () => {
     expect(edgeLines.length).toBe(2);
   });
 
+  it("renders a toggle-hidden done parent as a ghost node so its child is not a fake orphan (#1848)", async () => {
+    // #1848 repro: child 1848 is in_progress, its parent 1815 exists in the
+    // registry but is done — hidden while the Done toggle is off. Before the
+    // ghost fix the child dangled with no visible parent ("orphan").
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      task(1815, { title: "done-parent", status: "done", parent_id: 1 }),
+      task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
+    ];
+    useTasks.mockReturnValue(ok(tasks));
+    const { container } = render(
+      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
+
+    // The hidden parent renders as a dimmed ghost node.
+    const ghostTexts = screen.getAllByText(/#1815/);
+    expect(ghostTexts.length).toBeGreaterThan(0);
+    const ghostGroup = ghostTexts[0].closest("g")!;
+    expect(ghostGroup.classList.contains("opacity-40")).toBe(true);
+    // The real child node is not dimmed.
+    const childGroup = screen.getAllByText(/#1848/)[0].closest("g")!;
+    expect(childGroup.classList.contains("opacity-40")).toBe(false);
+
+    // Both tree edges render: root → done-parent → child.
+    const mainSvg = container.querySelector("svg[role='img']");
+    const edgeLines = mainSvg ? mainSvg.querySelectorAll("g > line") : [];
+    expect(edgeLines.length).toBe(2);
+  });
+
+  it("walks a chain of hidden ancestors so a deep subtree stays connected", async () => {
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      task(10, { title: "g-cancelled", status: "cancelled", parent_id: 1 }),
+      task(11, { title: "g-done", status: "done", parent_id: 10 }),
+      task(12, { title: "leaf", status: "in_progress", parent_id: 11 }),
+    ];
+    useTasks.mockReturnValue(ok(tasks));
+    const { container } = render(
+      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getAllByText(/#12/).length).toBeGreaterThan(0), { timeout: 4000 });
+    // Both hidden ancestors render as ghosts (their id tspans).
+    for (const id of [10, 11]) {
+      const g = screen.getAllByText(new RegExp(`#${String(id)}`))[0].closest("g")!;
+      expect(g.classList.contains("opacity-40")).toBe(true);
+    }
+    // Full chain edges: 1→10, 10→11, 11→12.
+    const mainSvg = container.querySelector("svg[role='img']");
+    expect(mainSvg!.querySelectorAll("g > line").length).toBe(3);
+  });
+
+  it("does not ghost a hidden done task with no visible children", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks())); // #4 done / #5 cancelled are leaves
+    const { container } = render(
+      <TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
+    // Hidden leaves stay hidden — only structural parents become ghosts.
+    expect(screen.queryByText(/#4/)).toBeNull();
+    expect(screen.queryByText(/#5/)).toBeNull();
+    const mainSvg = container.querySelector("svg[role='img']");
+    expect(mainSvg!.querySelectorAll("g.opacity-40").length).toBe(0);
+  });
+
   it("empty task list (not loading, no error) shows the empty placeholder", () => {
     useTasks.mockReturnValue({ tasks: [], loading: false, error: false });
     render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
@@ -354,6 +421,30 @@ describe("TaskGraph hover detail card", () => {
     expect(screen.getByRole("tooltip")).toBeTruthy();
     fireEvent.mouseLeave(texts[0].closest("g")!);
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("keeps the card anchored to the node while the cursor moves (no following)", async () => {
+    // User ruling 2026-08-29: the detail card shows on mouseenter and hides
+    // on mouseleave — it must not chase the cursor. The card is pinned to
+    // the node's on-screen box; a mousemove over the node leaves it put.
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(
+      <TaskGraph agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+
+    fireEvent.mouseEnter(group);
+    const card = screen.getByRole("tooltip");
+    const leftAfterEnter = card.style.left;
+
+    // A far-away mousemove must not move the card (jsdom boxes are all 0×0,
+    // so the card sits at the clamped 4px anchor; cursor-following would
+    // rewrite left to follow clientX).
+    fireEvent.mouseMove(group, { clientX: 900, clientY: 900 });
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    expect(card.style.left).toBe(leftAfterEnter);
+    expect(card.style.left).toBe("4px");
   });
 
   it("shows empty states for unset fields and a plain parent id for orphans", async () => {
@@ -509,20 +600,21 @@ describe("TaskGraph needs-you (RCS cut 3)", () => {
     };
   }
 
-  it("shows a needs-you badge on the graph card of a task whose agent waits", async () => {
+  it("renders no needs-you badge on task nodes (user ruling 2026-08-29)", async () => {
+    // The per-task "needs you" badge was removed: its semantics (open
+    // require_response notices attributed to the task) read as "owner =
+    // current user" to the user. The toolbar "Needs you" FILTER stays — it
+    // narrows the board to waiting subtrees, which is its own feature.
     const { tasks, roster } = needyFixture();
     useTasks.mockReturnValue(ok(tasks));
     const { container } = render(
       <TaskGraph agents={roster} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
-    const badge = container.querySelector('g[aria-label="2 waiting on you"]');
-    expect(badge).not.toBeNull();
-    // The quiet task carries no badge.
-    expect(container.querySelectorAll('g[aria-label$="waiting on you"]').length).toBe(1);
+    expect(container.querySelectorAll('g[aria-label$="waiting on you"]').length).toBe(0);
   });
 
-  it("shows the badge on the kanban card too", async () => {
+  it("renders no needs-you badge on kanban cards either", async () => {
     const { tasks, roster } = needyFixture();
     useTasks.mockReturnValue(ok(tasks));
     render(
@@ -530,8 +622,8 @@ describe("TaskGraph needs-you (RCS cut 3)", () => {
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     fireEvent.click(screen.getByText("Kanban"));
-    const badge = await screen.findByLabelText("2 waiting on you");
-    expect(badge.textContent).toBe("2");
+    await screen.findByText(/needy/);
+    expect(screen.queryByLabelText(/waiting on you/)).toBeNull();
   });
 
   it("Needs you toggle filters the board to needy subtrees", async () => {

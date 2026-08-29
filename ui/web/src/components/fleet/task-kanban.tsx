@@ -10,7 +10,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notices";
-import type { TaskNeedsYou } from "@/lib/task-notify";
 import type { TaskRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
@@ -27,7 +26,6 @@ export function TaskKanban({
   tasks,
   statusFill,
   statusLabel,
-  needsYou,
   selectedTaskId,
   onSelectTask,
   selectedAgentId,
@@ -36,7 +34,6 @@ export function TaskKanban({
   tasks: readonly TaskRow[];
   statusFill: Record<string, string>;
   statusLabel: Record<string, string>;
-  needsYou: ReadonlyMap<number, TaskNeedsYou>;
   selectedTaskId: number | null;
   onSelectTask: (id: number | null) => void;
   selectedAgentId: number | null;
@@ -104,7 +101,6 @@ export function TaskKanban({
                   task={task}
                   statusFill={statusFill}
                   statusLabel={statusLabel}
-                  needsYou={needsYou.get(task.id)}
                   selected={selectedTaskId === task.id}
                   onSelect={() =>
                     handleSelectTask(selectedTaskId === task.id ? null : task.id)
@@ -126,7 +122,6 @@ function KanbanCard({
   task,
   statusFill,
   statusLabel,
-  needsYou,
   selected,
   onSelect,
   agentOwner,
@@ -136,7 +131,6 @@ function KanbanCard({
   task: TaskRow;
   statusFill: Record<string, string>;
   statusLabel: Record<string, string>;
-  needsYou: TaskNeedsYou | undefined;
   selected: boolean;
   onSelect: () => void;
   agentOwner: number | null;
@@ -194,8 +188,8 @@ function KanbanCard({
           </div>
         )}
       </div>
-      {/* Meta rail — status / owner / needs-you, right-aligned so titles stay
-          flush left across the whole section. */}
+      {/* Meta rail — status / owner, right-aligned so titles stay flush left
+          across the whole section. */}
       <div className={cn("max-w-[40%] items-center gap-2 text-[10px] text-muted-foreground", FLEX, MIN_W_0)}>
         <span>{statusLabel[task.status] ?? task.status}</span>
         {task.owner != null ? (
@@ -208,19 +202,6 @@ function KanbanCard({
           </span>
         ) : (
           <span className="text-amber-500">Unowned</span>
-        )}
-        {/* Needs-you badge — pending require_response notices on this task's
-            owner agents, colored by top priority. */}
-        {needsYou && (
-          <span
-            className={cn(
-              "rounded-full px-1.5 text-[9px] font-semibold tabular-nums text-white",
-              PRIORITY_BG[needsYou.top],
-            )}
-            aria-label={`${needsYou.count} waiting on you`}
-          >
-            {needsYou.count}
-          </span>
         )}
       </div>
     </div>
