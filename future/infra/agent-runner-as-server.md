@@ -5,10 +5,12 @@
 > settings + plugin-config views, turn-scoped identity and log attribution, the
 > claim node's hosted idle branch, the wake dispatcher, and the `agent-host`
 > daemon that runs turns are all built (`services/agent_host/`). What is NOT
-> built is the lifecycle integration around them — spawn still forks a process
-> per agent, restart/terminate still route through the process path, and
-> hibernation, the per-agent lease renewer and the lease-zombie reaper are
-> untouched. So `hosted` is a runnable daemon but not yet an end-to-end cluster
+> built is the lifecycle integration around them — spawn/resurrect are
+> hosted-aware (the launch op skips the fork and hands delivery to the
+> dispatcher via a wake; `ops/agent_wake` flips rows and wakes instead of
+> launching processes), but restart/terminate still route through the process
+> path, and hibernation, the per-agent lease renewer and the lease-zombie
+> reaper are untouched. So `hosted` is a runnable daemon but not yet an end-to-end cluster
 > mode; the flag defaults to `process` and the service is gated off the roster
 > until a cluster opts in. Migration step 3's deletions remain future work.
 >

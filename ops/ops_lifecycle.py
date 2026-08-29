@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 from psycopg_pool import ConnectionPool
 
-from ops import agent_launch
+from ops import agent_launch, runner_mode
 from ops import cluster_rpc as _cluster_rpc
 from ops.agent_identity import RESIDENT_IDENTITIES, AgentProcessIdentity, probe_agent_process
 from ops.agent_wake import ResurrectTriggerStaleError
@@ -395,6 +395,24 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     from shared.lm.factory import validate_model_config
 
     await asyncio.to_thread(validate_model_config, model=settings.lm.llm_model, config=body.config)
+    if runner_mode.is_hosted():
+        # Hosted: the row the gateway created IS the agent. No fork, no
+        # launch-confirm (there is no pid to wait for — the claim CAS of the
+        # dispatcher's turn task is the confirmation). The prompt INSERT below
+        # publishes its own wake; the explicit wake at the end covers the fork,
+        # whose inbounds are raw SQL with no publish, and gives a plain spawn
+        # one cheap no-op turn that doubles as a spawn health check.
+        if body.prompt is not None:
+            assert body.prompt_source is not None  # narrowed by the caller  # noqa: S101
+            prompt = body.prompt
+            if body.label:
+                prompt = f"{prompt}\n\nYour label has been set to {body.label}."
+            iid = await asyncio.to_thread(
+                _insert_prompt_blocking, db_pool, body.agent_id, prompt, body.prompt_source
+            )
+            await publish_inbound_arrived(body.agent_id, iid, "chat", body.prompt_source, prompt)
+        publish_inbound_wake(body.agent_id, "0")
+        return SpawnedAgent(id=body.agent_id)
     # _launch_agent_process is synchronous (detached-process launch). Run it off
     # the event loop so a launch never blocks the ops dispatch loop and starves
     # concurrent requests (status probes / other ops) while it runs.
