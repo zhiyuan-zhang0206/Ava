@@ -125,6 +125,9 @@ from shared.cluster.ports import (
     record_health_port as record_health_port,
 )
 from shared.cluster.ports import (
+    record_memory_search_port as record_memory_search_port,
+)
+from shared.cluster.ports import (
     record_pgbouncer_port as record_pgbouncer_port,
 )
 from shared.cluster.ports import (

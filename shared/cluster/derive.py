@@ -325,6 +325,10 @@ def derive_env(
         "AVA_APP_PORT": str(cluster.record_app_port(rec)),
         "AVA_MILVUS_PORT": str(p["milvus"]),
         "AVA_MILVUS_URI": f"http://127.0.0.1:{p['milvus']}",
+        # Late slot: derived via record_memory_search_port (old records fall
+        # back to the legacy 19531 their .env also binds).
+        "AVA_MEMORY_SEARCH_PORT": str(cluster.record_memory_search_port(rec)),
+        "AVA_MEMORY_SEARCH_URI": f"http://127.0.0.1:{cluster.record_memory_search_port(rec)}",
         "AVA_BROWSER_CDP_PORT": str(p["browser"]),
         "AVA_PERMISSIONS_HELPER_PORT": str(cluster.record_health_port(rec, "permissions_helper")),
         "AVA_DB_URL": db_url,

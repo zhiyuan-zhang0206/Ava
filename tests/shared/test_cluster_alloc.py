@@ -57,6 +57,7 @@ def test_allocate_ports_first_block(monkeypatch: pytest.MonkeyPatch):
     ports = cluster.allocate_ports(existing_bases=set())
     assert ports["gateway"] == 18000
     assert ports["milvus"] == 18008
+    assert ports.get("memory_search") == 18024
 
 
 def test_allocate_ports_skips_used_base(monkeypatch: pytest.MonkeyPatch):
@@ -71,4 +72,4 @@ def test_allocate_ports_skips_used_base(monkeypatch: pytest.MonkeyPatch):
     derived assertion."""
     monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     ports = cluster.allocate_ports(existing_bases={18000})
-    assert ports["gateway"] == 18024
+    assert ports["gateway"] == 18025

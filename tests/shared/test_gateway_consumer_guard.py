@@ -38,6 +38,7 @@ _GATEWAY_SOURCE_ROOTS = [
     "services/labeler/",
     "services/events_maintenance/",
     "services/memory_indexer/",
+    "services/memory_search/",
     "services/milvus/",
     "services/delivery_watchdog/",
     "services/frontend/",

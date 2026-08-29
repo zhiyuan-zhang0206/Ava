@@ -52,3 +52,4 @@ def test_pidfile_fields_rooted_under_unit_home(_restore_ava_home: None) -> None:
     assert s.services.gateway_pidfile == root / "run" / "gateway.pid"
     assert s.services.memory_root == root / "memory"
     assert s.services.milvus_data_dir == root / "milvus-data"
+    assert s.services.memory_search_data_dir == root / "memory-search"

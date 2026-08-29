@@ -144,6 +144,9 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # One cohesive OTLP export backend (exporter class + metric views +
     # batch/flush lifecycle); a real split is tracked, not forgotten.
     "shared/telemetry_otlp.py": ("#405", 500, "2026-12-31"),
+    # The single-service-roster schema block — one ServiceSpec per session
+    # (no logic to split); crossed 800 when the memory-search spec landed.
+    "ops/spec.py": ("#405", 800, "2026-12-31"),
     # IM Bridge core: envelope, command routing, per-channel state, SSE
     # subscription push, inbound outbox — one cohesive dispatch module.
     "services/im_bridge/core.py": ("#405", 500, "2026-12-31"),

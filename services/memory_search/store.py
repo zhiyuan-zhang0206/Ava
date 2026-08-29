@@ -1,0 +1,216 @@
+"""The NumPy store — chunk rows in memory + npz persistence.
+
+One `MemoryStore` instance lives for the service process's lifetime. All
+rows sit in Python lists + one float32 matrix; mutations rewrite the npz
+atomically (tmp file + `os.replace`), so a crash mid-save can never leave
+a torn file behind. The service wraps every operation in one asyncio
+lock — search included (a full exact scan is microseconds at this scale,
+so the lock is never contended meaningfully).
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from zipfile import BadZipFile
+
+import numpy as np
+
+from services.memory_indexer.backends.base import KIND_BODY, pk_of
+from services.memory_indexer.embedder import DIM
+
+_log = logging.getLogger("services.memory_search.store")
+
+_NPZ_VECTORS = "vectors"
+_NPZ_PKS = "pks"
+_NPZ_PATHS = "paths"
+_NPZ_KINDS = "kinds"
+_NPZ_CHUNK_IDX = "chunk_idx"
+_NPZ_MTIMES = "mtimes"
+_NPZ_HASHES = "content_hashes"
+
+_NPZ_KEYS = frozenset(
+    {_NPZ_VECTORS, _NPZ_PKS, _NPZ_PATHS, _NPZ_KINDS, _NPZ_CHUNK_IDX, _NPZ_MTIMES, _NPZ_HASHES}
+)
+
+
+class MemoryStore:
+    """Chunk rows keyed by the shared folded pk — the same row vocabulary
+    every backend uses, so reconciliation can compare rows 1:1."""
+
+    def __init__(self, data_file: Path) -> None:
+        self._data_file = data_file
+        self._pk_index: dict[str, int] = {}
+        self._pks: list[str] = []
+        self._paths: list[str] = []
+        self._kinds: list[str] = []
+        self._chunk_idx: list[int] = []
+        self._mtimes: list[float] = []
+        self._hashes: list[str] = []
+        self._matrix = np.empty((0, DIM), dtype=np.float32)
+
+    # ── persistence ──────────────────────────────────────────────────────
+
+    def load(self) -> None:
+        """Load rows from the npz when it exists; a fresh service starts
+        empty and the indexer's cold-start reconcile fills it.
+
+        Two broken-file paths degrade to "start empty" instead of raising —
+        a file missing keys, and a file that does not parse at all
+        (truncated / foreign bytes). Both are a broken cache: the memory
+        pool is the source of truth and the cold-start reconcile rebuilds
+        the index, so there is nothing worth crashing the daemon for — a
+        raise here would mean the watchdog respawns into the same broken
+        file every 60s (the restart-loop shape the keepalive policy exists
+        to stop, but only a degradable load makes it a non-issue)."""
+        if not self._data_file.exists():
+            return
+        try:
+            with np.load(self._data_file) as data:
+                missing = _NPZ_KEYS - set(data.files)
+                if missing:
+                    # A torn/foreign file is a broken cache — start empty and let
+                    # the cold-start reconcile rebuild it rather than guess.
+                    _log.warning(
+                        "[memory_search] %s missing keys %s — starting empty; "
+                        "cold-start will rebuild the index",
+                        self._data_file,
+                        sorted(missing),
+                    )
+                    return
+                self._pks = [str(p) for p in data[_NPZ_PKS].tolist()]
+                self._paths = [str(p) for p in data[_NPZ_PATHS].tolist()]
+                self._kinds = [str(k) for k in data[_NPZ_KINDS].tolist()]
+                self._chunk_idx = [int(i) for i in data[_NPZ_CHUNK_IDX].tolist()]
+                self._mtimes = [float(m) for m in data[_NPZ_MTIMES].tolist()]
+                self._hashes = [str(h) for h in data[_NPZ_HASHES].tolist()]
+                self._matrix = data[_NPZ_VECTORS].astype(np.float32)
+                if self._matrix.ndim == 1:
+                    self._matrix = self._matrix.reshape(1, -1)
+                self._pk_index = {pk: idx for idx, pk in enumerate(self._pks)}
+        except (OSError, ValueError, EOFError, KeyError, BadZipFile) as exc:
+            # np.load raises ValueError / EOFError on foreign bytes, BadZipFile
+            # (a plain Exception subclass, not OSError) on a truncated zip,
+            # OSError on read failures, and a malformed array can surface a
+            # KeyError on access — every one of them is the same "broken cache"
+            # condition.
+            _log.warning(
+                "[memory_search] %s does not parse (%s: %s) — starting empty; "
+                "cold-start will rebuild the index",
+                self._data_file,
+                type(exc).__name__,
+                exc,
+            )
+            return
+        _log.info("[memory_search] loaded %d rows from %s", len(self._pks), self._data_file)
+
+    def save(self) -> None:
+        """Atomically rewrite the npz — tmp file in the same directory +
+        `os.replace` (same-filesystem rename is atomic)."""
+        self._data_file.parent.mkdir(parents=True, exist_ok=True)
+        # np.savez appends ".npz" to any name not already ending in it, so the
+        # tmp name must end in ".npz" for the replace below to find the file.
+        tmp = self._data_file.with_suffix(".tmp.npz")
+        np.savez(
+            tmp,
+            pks=np.array(self._pks, dtype=str),
+            paths=np.array(self._paths, dtype=str),
+            kinds=np.array(self._kinds, dtype=str),
+            chunk_idx=np.array(self._chunk_idx, dtype=np.int64),
+            mtimes=np.array(self._mtimes, dtype=np.float64),
+            content_hashes=np.array(self._hashes, dtype=str),
+            vectors=self._matrix,
+        )
+        tmp.replace(self._data_file)
+
+    # ── mutations ────────────────────────────────────────────────────────
+
+    def upsert(
+        self,
+        path: str,
+        mtime: float,
+        content_hash: str,
+        embedding: np.ndarray,
+        *,
+        kind: str = KIND_BODY,
+        chunk_idx: int = 0,
+    ) -> None:
+        """Write / update one chunk row; re-upserting the same triple
+        overwrites in place — identical semantics to the milvus backend."""
+        vector = embedding.astype(np.float32).reshape(-1)
+        if vector.shape != (DIM,):
+            raise ValueError(f"embedding shape {vector.shape} != ({DIM},)")
+        pk = pk_of(path, kind, chunk_idx)
+        idx = self._pk_index.get(pk)
+        if idx is None:
+            idx = len(self._pks)
+            self._pks.append(pk)
+            self._paths.append(path)
+            self._kinds.append(kind)
+            self._chunk_idx.append(int(chunk_idx))
+            self._mtimes.append(float(mtime))
+            self._hashes.append(content_hash)
+            self._pk_index[pk] = idx
+            if self._matrix.shape[0] == 0:
+                self._matrix = vector[np.newaxis, :]
+            else:
+                self._matrix = np.vstack([self._matrix, vector[np.newaxis, :]])
+        else:
+            self._paths[idx] = path
+            self._kinds[idx] = kind
+            self._chunk_idx[idx] = int(chunk_idx)
+            self._mtimes[idx] = float(mtime)
+            self._hashes[idx] = content_hash
+            self._matrix[idx] = vector
+
+    def delete(self, path: str) -> None:
+        """Delete every chunk row of `path`; no-op when the path is absent."""
+        keep_idx = [i for i, p in enumerate(self._paths) if p != path]
+        if len(keep_idx) == len(self._paths):
+            return
+        self._pks = [self._pks[i] for i in keep_idx]
+        self._paths = [self._paths[i] for i in keep_idx]
+        self._kinds = [self._kinds[i] for i in keep_idx]
+        self._chunk_idx = [self._chunk_idx[i] for i in keep_idx]
+        self._mtimes = [self._mtimes[i] for i in keep_idx]
+        self._hashes = [self._hashes[i] for i in keep_idx]
+        self._matrix = self._matrix[keep_idx]
+        self._pk_index = {pk: idx for idx, pk in enumerate(self._pks)}
+
+    def all_meta(self) -> dict[str, tuple[float, str]]:
+        """Per-path (mtime, content_hash) — one entry per **file**, not per
+        chunk (aggregation keeps the max mtime; same contract as milvus)."""
+        meta: dict[str, tuple[float, str]] = {}
+        for path, mtime, hash_ in zip(self._paths, self._mtimes, self._hashes, strict=True):
+            prev = meta.get(path)
+            if prev is None or mtime > prev[0]:
+                meta[path] = (mtime, hash_)
+        return meta
+
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
+        """Exact cosine top-k **paths**, aggregated over chunk rows.
+
+        One matrix product over every row (microseconds at pool scale), then
+        per path keep the best (maximum) cosine — the exact counterpart of the
+        milvus backend's minimum-distance aggregation, so both order paths the
+        same way. Returns fewer than k when the store has fewer distinct
+        paths; empty when the store is empty.
+        """
+        query = query_vector.astype(np.float32).reshape(-1)
+        if query.shape != (DIM,):
+            raise ValueError(f"query shape {query.shape} != ({DIM},)")
+        if self._matrix.shape[0] == 0:
+            return []
+        q_norm = float(np.linalg.norm(query))
+        row_norms = np.linalg.norm(self._matrix, axis=1)
+        if q_norm == 0.0:
+            return list(dict.fromkeys(self._paths))[:k]  # degenerate query: stable order
+        cos = self._matrix @ query / (row_norms * q_norm)
+        best: dict[str, float] = {}
+        for path, sim in zip(self._paths, cos, strict=True):
+            if path not in best or float(sim) > best[path]:
+                best[path] = float(sim)
+        return sorted(best, key=best.__getitem__, reverse=True)[:k]
+
+    def __len__(self) -> int:
+        return len(self._pks)

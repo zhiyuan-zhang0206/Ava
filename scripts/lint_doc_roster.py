@@ -18,7 +18,7 @@ Two tables are checked, both by set equality in both directions:
    - a service registered in `build_services()` but missing from the roster
      -> "added a daemon, forgot to document it".
 
-2. the healthcheck roster (`services/healthchecks/check-roster.ava.okf.md`)
+2. the healthcheck roster (`services/healthchecks/check-roster/check-roster.ava.okf.md`)
    against the healthcheck module directory plus the ServiceSpec
    `healthcheck_module` fields and the watchdog's hand-added imports — the
    2026-08-21 audit (issue #192) found the table documenting a phantom module
@@ -153,7 +153,11 @@ def check() -> int:
 
 _HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
 
-_HEALTHCHECK_ROSTER = _REPO_ROOT / "services" / "healthchecks" / "check-roster.ava.okf.md"
+# The roster table lives in its own subdirectory (the node outgrew the
+# healthchecks overview — 2026-08-30 split); the modules it lists live
+# directly in `services/healthchecks/`.
+_HEALTHCHECK_DIR = _REPO_ROOT / "services" / "healthchecks"
+_HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "check-roster" / "check-roster.ava.okf.md"
 
 _WATCHDOG_DAEMON = _REPO_ROOT / "services" / "watchdog" / "daemon.py"
 
@@ -179,9 +183,9 @@ def hand_added_healthchecks() -> set[str]:
 
 
 def directory_healthchecks() -> set[str]:
-    """The healthcheck module files themselves — every `*.py` beside the two
-    okf docs, minus `__init__.py`."""
-    return {p.stem for p in _HEALTHCHECK_ROSTER.parent.glob("*.py") if p.name != "__init__.py"}
+    """The healthcheck module files themselves — every `*.py` in
+    `services/healthchecks/`, minus `__init__.py`."""
+    return {p.stem for p in _HEALTHCHECK_DIR.glob("*.py") if p.name != "__init__.py"}
 
 
 def spec_healthchecks() -> set[str]:

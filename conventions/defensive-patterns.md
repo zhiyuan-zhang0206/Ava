@@ -224,7 +224,7 @@ to liveness — the daemon keepalive checks do, via identity-verified `/healthz`
 plus a `Liveness` beat that certifies the work loop is still ticking, not that
 the subsystem's work succeeds. The audit found one violation (`milvus`'s bare
 TCP connect, now a real `list_collections` RPC); the roster carries a
-"what it certifies" column per check (`services/healthchecks/check-roster.ava.okf.md`)
+"what it certifies" column per check (`services/healthchecks/check-roster/check-roster.ava.okf.md`)
 and `scripts/lint_doc_roster.py` pins roster, module directory, and ServiceSpec
 registrations together so the drift the audit found cannot silently return.
 

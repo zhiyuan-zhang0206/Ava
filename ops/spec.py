@@ -327,6 +327,19 @@ def build_services() -> tuple[ServiceSpec, ...]:
             tcp_port=settings.services.milvus_port,
             healthcheck_module="services.healthchecks.milvus",
         ),
+        # memory-search before memory-indexer too: the indexer's cold-start
+        # connects to whichever backend the switch names, so the storage
+        # services must come up first.
+        ServiceSpec(
+            session="memory-search",
+            cmd=".venv/bin/python -m services.memory_search.daemon",
+            capabilities=_GATEWAY,
+            # The numpy backend's store: in-memory matrix + npz, no Postgres —
+            # a pg outage is not its business (same as milvus).
+            requires_db=False,
+            tcp_port=settings.services.memory_search_port,
+            healthcheck_module="services.healthchecks.memory_search",
+        ),
         ServiceSpec(
             session="frontend",
             # Single source for the launch command: shared.cluster.frontend_service_cmd

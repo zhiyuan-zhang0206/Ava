@@ -24,6 +24,7 @@ tags:
 | `heartbeat.py` | Heartbeat | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `labeler.py` | Labeler | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `memory_indexer.py` | Memory-indexer | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
+| `memory_search.py` | Memory search | real POST `/search` (zero vector, k=1) — traverses the store, not a bare TCP connect | `respawn_service` | the exact-search store answers real searches — breaks exactly when the gateway/indexer search calls would break |
 | `events_maintenance.py` | Events-maintenance | HTTP `/healthz` (identity-verified), per-loop progress with hard deadlines | `respawn_and_verify` | each loop completes bounded work; a timed-out worker wedges its tracker and 503s |
 | `pg_backup.py` | PG-backup scheduler | HTTP `/healthz` (identity-verified), backup last-success age | `respawn_and_verify` | scheduler progress: a fresh dump, boot grace, or running dump; otherwise 503 |
 | `pitr_uploader.py` | PITR uploader | HTTP `/healthz` (identity-verified): liveness + disk footprint (gating) + unacked-age (non-gating) | `respawn_and_verify` | loop ticking and disk under hard bound; unacked-age conditions report degraded without flipping 503 (no restart flaps) |
@@ -40,10 +41,4 @@ tags:
 | `otel_collector.py` | OTel collector sidecar | POST `/v1/traces` to the OTLP receiver must return 2xx, and listeners on :4318/:8888 must resolve to this unit's collector binary + live session record; non-LGTM gateways warn and skip, pure runners retain relay behavior | give each verified stale holder one 5 s SIGTERM window before a verified SIGKILL fallback, then `respawn_and_verify`; a survivor remains loud/down | the supervisor-owned OTLP listener the agents export through answers, not an old collector that kept the port |
 | `lgtm.py` | local LGTM backends (`deploy/lgtm/`) | three readiness endpoints (Loki/Prometheus/Grafana) on their native fixed host ports; remote Tempo is excluded so its failure cannot restart local backends; any HTTP answer = alive, connection failure = down; no-op without the `$AVA_HOME/lgtm-host` marker or station capability | re-run the idempotent `deploy/lgtm/start.sh` | each local backend's readiness listener answers (its own health traversal) |
 
-The roster is pinned to reality by `scripts/lint_doc_roster.py` (set equality against the module directory and the ServiceSpec + hand-added registrations) — a module added, removed, or renamed without updating this table fails the lint.
-
-On a remote-managed data plane (Task #1752) the watchdog drops the local `redis_acl` / `pgbouncer` repairs — see `docs/history/2026-08-28/connection-layer-swappable.md`.
-
-Audit 2026-08-21 (issue #192): all 22 checks present at the audit traversed what they certify. `milvus.py` was the one port-open-only probe and was upgraded to a real RPC; the phantom `task_maintenance` row and seven missing rows are fixed here. The later `brew_pin.py` assertion traverses Homebrew's own read-only pin roster; later additions follow the same traversal rule.
-
-Parent: [[services/healthchecks/healthchecks.ava.okf.md|healthchecks]].
+Notes on how the table is pinned to the code, the remote-managed data-plane exception, and the 2026-08-21 audit: [[services/healthchecks/check-roster/roster-notes.ava.okf.md]]

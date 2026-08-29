@@ -199,8 +199,8 @@ class ServiceSettings(EnvSettings):
         default="milvus",
         alias="AVA_MEMORY_SEARCH_BACKEND",
         description=(
-            "Storage backend for the memory embedding index. 'milvus' is the default "
-            "(and today the only) backend; more land behind the same switch. The "
+            "Storage backend for the memory embedding index — 'milvus' (default) | "
+            "'numpy' (the local exact-search service). The "
             "indexer daemon and the gateway search endpoint both read it — switching "
             "is one env var + a restart, the cold-start scan rebuilds the index."
         ),
@@ -257,6 +257,56 @@ class ServiceSettings(EnvSettings):
         default_factory=lambda: _unit_home() / "milvus-data",
         alias="AVA_MILVUS_DATA_DIR",
         description="Milvus on-disk data directory.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    memory_search_port: int = Field(
+        default=19531,
+        alias="AVA_MEMORY_SEARCH_PORT",
+        description="Memory search service HTTP port (one past milvus's 19530).",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    memory_search_uri: str = Field(
+        default="http://127.0.0.1:19531",
+        alias="AVA_MEMORY_SEARCH_URI",
+        description="Memory search service base URI — indexer daemon / gateway dial it when the numpy backend is selected.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    memory_search_data_dir: Path = Field(
+        default_factory=lambda: _unit_home() / "memory-search",
+        alias="AVA_MEMORY_SEARCH_DATA_DIR",
+        description="Memory search on-disk data directory (vectors.npz).",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    memory_search_pidfile: Path = Field(
+        default_factory=lambda: _unit_home() / "run" / "memory_search.pid",
+        alias="AVA_MEMORY_SEARCH_PIDFILE",
+        description="Memory search daemon pidfile path.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

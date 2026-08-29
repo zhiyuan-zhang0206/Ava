@@ -280,6 +280,8 @@ _DERIVED_FIELDS = frozenset(
         "app_port",
         "milvus_port",
         "milvus_uri",
+        "memory_search_port",
+        "memory_search_uri",
         "browser_cdp_port",
         "permissions_helper_port",
         "db_url",
