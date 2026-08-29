@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -68,6 +69,12 @@ def run(input_path: Path, output_path: Path) -> None:
         "pending_sha256": hashlib.sha256(payload).hexdigest(),
     }
     output_path.write_text(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    acknowledgement = output_path.with_suffix(".ack")
+    deadline = time.monotonic() + 60
+    while not acknowledgement.is_file():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("restore controller did not acknowledge the worker result")
+        time.sleep(0.05)
 
 
 def main() -> None:
