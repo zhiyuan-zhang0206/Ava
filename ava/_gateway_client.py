@@ -146,6 +146,34 @@ _RETRY_MAX_DELAY_S = 8.0
 # Span of the per-agent jitter offset, seconds.
 _JITTER_SPAN_S = 5.0
 
+# ── memory search: its own timeout and retry budget ──
+# `/api/memory/search` stands apart from the other routes: the gateway gives
+# it a server-side deadline (`memory_search_deadline_seconds`, default 15s)
+# and answers a *modelled* 503 (reason indexer_unavailable) when it expires —
+# or in ~1s when the query-embed gate is congested (task #2003/E). So the
+# default SDK budget (20s x 3 attempts + backoff) spends agent time re-sending
+# a request whose failure the gateway already answered; on the 2026-08-29
+# fleet-wake storm that was the ~27s overhang measured behind search (#2003/A).
+# Two attempts (one retry) still ride out a transient blip (the 2026-08-07
+# indexer-500 class, task #960) without stacking the default 3; on a
+# persistent outage the caller decides how long it is worth.
+_MEMORY_SEARCH_MAX_RETRIES = 2
+# Per-attempt HTTP timeout must stay ABOVE the gateway's own search deadline:
+# the server's wire 503 is the informative failure (IndexerUnavailable), and a
+# client ReadTimeout that beats it converts the error into a generic
+# GatewayUnavailable — the exact "caller reads out first" case the deadline
+# setting's description warns about.
+_MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
+
+
+def _memory_search_timeout() -> httpx.Timeout:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """Per-attempt HTTP timeout for one memory search: the gateway's own
+    search deadline plus the margin, so the server's deadline fires first."""
+    import httpx
+
+    budget = settings.services.memory_search_deadline_seconds + _MEMORY_SEARCH_TIMEOUT_MARGIN_S
+    return httpx.Timeout(budget)
+
 
 def _agent_jitter_seconds() -> float:
     """Deterministic per-agent offset in [0, _JITTER_SPAN_S); 0 when no agent id.
@@ -254,6 +282,7 @@ def _post(
     *,
     idempotent: bool | None = None,
     idempotency_key: str | None = None,
+    max_retries: int | None = None,
 ) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
@@ -285,6 +314,13 @@ def _post(
     with a long message body) pass a per-call timeout. `None` means "use the
     client's configured timeout" — there is deliberately no way to ask for an
     unbounded request.
+
+    `max_retries` overrides the module-wide attempt count (`_MAX_RETRIES`) for
+    this one call. The default fits routes the gateway works on directly, but
+    a call whose failure mode is a *modelled, already-spent* response (e.g.
+    memory search, where the gateway answers 503 only after consuming its own
+    budget) should shrink it — re-sending such a request just waits behind the
+    same congestion.
     """
     import httpx
 
@@ -312,7 +348,8 @@ def _post(
     headers = {"Idempotency-Key": key} if semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY else None
 
     last_err: Exception | None = None
-    for attempt in range(_MAX_RETRIES):
+    retries = _MAX_RETRIES if max_retries is None else max_retries
+    for attempt in range(retries):
         try:
             resp = _client_singleton().post(
                 path, json=json or {}, params=params, timeout=per_call, headers=headers
@@ -327,11 +364,7 @@ def _post(
                 ) from e
             last_err = e
         else:
-            if (
-                resp.status_code in _TRANSIENT_HTTP_STATUSES
-                and retryable
-                and attempt < _MAX_RETRIES - 1
-            ):
+            if resp.status_code in _TRANSIENT_HTTP_STATUSES and retryable and attempt < retries - 1:
                 # Backend blip; the request is safe to re-send (idempotent,
                 # or AtLeastOnceWithKey — the server dedups by our key).
                 # Record the response and retry — the final failure (if
@@ -345,10 +378,10 @@ def _post(
                 )
             else:
                 return resp
-        if attempt < _MAX_RETRIES - 1:
+        if attempt < retries - 1:
             _time.sleep(_retry_delay_seconds(attempt))
     raise GatewayUnavailable(
-        f"Gateway transport error at {_client_singleton().base_url} (after {_MAX_RETRIES} retries): {last_err!s}"
+        f"Gateway transport error at {_client_singleton().base_url} (after {retries} retries): {last_err!s}"
     ) from last_err
 
 
@@ -434,7 +467,7 @@ class MemorySearchResult(NamedTuple):
     tags: tuple[str, ...] = ()
 
 
-def memory_search(query: str, k: int) -> list[MemorySearchResult]:
+def memory_search(query: str, k: int, *, timeout: float | None = None) -> list[MemorySearchResult]:
     """POST /api/memory/search → list of `MemorySearchResult`.
 
     Gateway-side primary directly calls embedder + milvus; secondary
@@ -443,10 +476,26 @@ def memory_search(query: str, k: int) -> list[MemorySearchResult]:
     re-read every file to get a summary.
 
     Semantically a read (idempotent): a transient backend 5xx (the
-    2026-08-07 memory-indexer 500 class) is retried with backoff + jitter
-    before surfacing, so a blip self-heals instead of reaching the caller.
+    2026-08-07 memory-indexer 500 class) is retried once with backoff +
+    jitter before surfacing, so a blip self-heals instead of reaching the
+    caller — and a persistent failure (the gateway's own deadline 503, a
+    congested gate) surfaces as `IndexerUnavailable` without stacking
+    attempts behind it.
+
+    `timeout` overrides the per-attempt HTTP timeout (seconds). The default
+    is the gateway's own search deadline plus a 3s margin (18s at default
+    settings): keep it above `AVA_MEMORY_SEARCH_DEADLINE_SECONDS`, or the
+    client reads out first and the caller sees `GatewayUnavailable` instead
+    of the informative `IndexerUnavailable`.
     """
-    resp = _post("/api/memory/search", {"query": query, "k": k})
+    import httpx
+
+    resp = _post(
+        "/api/memory/search",
+        {"query": query, "k": k},
+        timeout=httpx.Timeout(timeout) if timeout is not None else _memory_search_timeout(),
+        max_retries=_MEMORY_SEARCH_MAX_RETRIES,
+    )
     _raise_from_response(resp)
     return [
         MemorySearchResult(

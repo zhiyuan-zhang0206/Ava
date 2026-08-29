@@ -50,9 +50,8 @@ _ENDPOINT = (
 # Per-request ceiling is configurable (AVA_EMBED_TIMEOUT_SECONDS, task #698
 # G8): a 32-file batch is one round-trip and the daemon's liveness timeout
 # (180s) sits well above the default 60s, so a slow-but-legit batch does not
-# trip the healthcheck. The retry policy is a module constant (R2-D): 4
-# attempts, exponential backoff 1→2→4→8s + fleet jitter, 4xx never retried
-# (a deterministic caller bug — the pre-R2 loop wasted 3 attempts on it).
+# trip the healthcheck. The retry policies are module constants (R2-D) —
+# two of them, split by call site, see `_EMBED_POLICY` / `_QUERY_EMBED_POLICY`.
 
 
 class EmbeddingAPIError(RuntimeError):
@@ -62,13 +61,30 @@ class EmbeddingAPIError(RuntimeError):
     to the caller."""
 
 
-# R2-D shared retry primitive: idempotent read, 4 attempts, exponential
-# backoff 1→2→4→8s with per-process phase jitter, Retry-After respected.
-# http_classifier makes 4xx permanent (no wasted retries) and 429/5xx /
-# transport retryable.
+# R2-D shared retry primitives (idempotent read; http_classifier makes
+# 4xx permanent and 429/5xx / transport retryable; Retry-After respected).
+# Two policies deliberately split by call site (task #2003/B): the two embed
+# paths answer to different masters.
+#
+# `_EMBED_POLICY` — the indexer daemon's document embeds. The daemon embeds
+# once per batch and has no caller deadline, so its resilience IS the retry:
+# 4 attempts, backoff 1→2→4→8s.
+#
+# `_QUERY_EMBED_POLICY` — search query embeds on the gateway. They run inside
+# the search endpoint's own deadline (memory_search_deadline_seconds, default
+# 15s), so the 4-attempt schedule could spend the whole budget retrying a 429
+# the caller (passive recall / an explicit ava.memory.search) would simply
+# watch expire — and the caller retries the *search*, not the embed. One
+# retry with a 1s backoff still rides out a transient blip, and the caller is
+# the one that decides how long a persistent outage is worth waiting for.
 _EMBED_POLICY = Policy(
     max_attempts=4,
     backoff=ExponentialBackoff(base=1.0, factor=2.0, cap=8.0),
+    classify=http_classifier,
+)
+_QUERY_EMBED_POLICY = Policy(
+    max_attempts=2,
+    backoff=ExponentialBackoff(base=1.0, factor=2.0, cap=2.0),
     classify=http_classifier,
 )
 
@@ -110,7 +126,7 @@ def _vectors_from_body(body: dict[str, Any], texts: list[str]) -> np.ndarray:
     return vectors
 
 
-def _embed(texts: list[str], task_type: str) -> np.ndarray:
+def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
 
@@ -122,9 +138,11 @@ def _embed(texts: list[str], task_type: str) -> np.ndarray:
     = a single text part), so N texts yield N independent embeddings in
     order.
 
-    Retry semantics (R2-D `_EMBED_POLICY`): 4 attempts, exponential
-    backoff + jitter; 4xx is permanent (fails immediately), 429/5xx and
-    transport failures retry; Retry-After is respected.
+    Retry semantics (R2-D): `policy` is the caller's retry schedule —
+    `_EMBED_POLICY` for indexer documents, `_QUERY_EMBED_POLICY` for search
+    queries (see those constants). Backoff + jitter; 4xx is permanent
+    (fails immediately), 429/5xx and transport failures retry; Retry-After
+    is respected.
     """
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
@@ -138,21 +156,24 @@ def _embed(texts: list[str], task_type: str) -> np.ndarray:
         return response.json()
 
     try:
-        body = retry(_EMBED_POLICY)(_call)
+        body = retry(policy)(_call)
     except Exception as exc:
         raise EmbeddingAPIError(
-            f"Gemini embed failed after {_EMBED_POLICY.max_attempts} attempts: {exc!r}"
+            f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
     return _vectors_from_body(body, texts)
 
 
-async def _embed_async(texts: list[str], task_type: str) -> np.ndarray:
+async def _embed_async(
+    texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY
+) -> np.ndarray:
     """Async twin of ``_embed`` — native non-blocking I/O over
     ``httpx.AsyncClient`` with ``asyncio.sleep`` backoff. Same timeout /
     retry / validation contract. The gateway's ``/api/memory/search`` uses
     this so a slow Gemini API can never freeze the event loop (2026-08-03:
     the sync version blocked the whole gateway for up to ~4.5 min per call,
-    causing 13 restarts in 8h)."""
+    causing 13 restarts in 8h). ``policy`` carries the same call-site split
+    as ``_embed``: query embeds pass ``_QUERY_EMBED_POLICY``."""
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
     headers = {"x-goog-api-key": _api_key()}
@@ -173,12 +194,12 @@ async def _embed_async(texts: list[str], task_type: str) -> np.ndarray:
                 response.raise_for_status()
                 return response.json()
 
-            body = await aretry(_EMBED_POLICY)(_call)
+            body = await aretry(policy)(_call)
     except EmbeddingAPIError:
         raise
     except Exception as exc:
         raise EmbeddingAPIError(
-            f"Gemini embed failed after {_EMBED_POLICY.max_attempts} attempts: {exc!r}"
+            f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
     return _vectors_from_body(body, texts)
 
@@ -190,9 +211,9 @@ def embed_documents(texts: list[str]) -> np.ndarray:
 
 def embed_query(text: str) -> np.ndarray:
     """Embed single query for search. (DIM,) float32."""
-    return _embed([text], task_type="RETRIEVAL_QUERY")[0]
+    return _embed([text], task_type="RETRIEVAL_QUERY", policy=_QUERY_EMBED_POLICY)[0]
 
 
 async def embed_query_async(text: str) -> np.ndarray:
     """Async embed of a single query for search. (DIM,) float32."""
-    return (await _embed_async([text], task_type="RETRIEVAL_QUERY"))[0]
+    return (await _embed_async([text], task_type="RETRIEVAL_QUERY", policy=_QUERY_EMBED_POLICY))[0]
