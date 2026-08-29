@@ -10564,6 +10564,11 @@
             },
             "type": "array",
             "title": "Ancestors"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded",
+            "default": false
           }
         },
         "type": "object",

@@ -41,10 +41,12 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from datetime import UTC, datetime
 from typing import Any
 
 from gateway import loki_events
+from shared import telemetry
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
 from shared.redis_client import sync_redis
@@ -68,6 +70,26 @@ _LOKI_EDGE_LIMIT = 50_000
 _FROZEN_CACHE_TTL_SECONDS = 24 * 60 * 60
 _ARCHIVE_CACHE_KEY = "neighbors:archive:v1"
 
+# Single-flight guard for the archive fetch (2026-08-29/30 incident): the
+# cache entry is shared, but the fetch itself runs in this process.
+# Concurrent requests that miss together (a 24h TTL expiry, a Redis restart)
+# would otherwise each run their own 5-28s whole-archive scan — a stampede
+# that saturates the Loki querier; when Loki is already slow the scans time
+# out, nothing is written, and every following request re-attempts the same
+# doomed scan (observed: neighbors p50 8-19s for hours, repeated 45s client
+# timeouts). One scan runs at a time; a waiter that cannot enter within
+# `_ARCHIVE_FETCH_WAIT_S` serves live-only ties instead of stacking another
+# scan on Loki.
+_ARCHIVE_FETCH_LOCK = threading.Lock()
+_ARCHIVE_FETCH_WAIT_S = 3.0
+
+# A failed fetch writes this short-lived negative entry instead of leaving
+# the cache empty: the next minute of requests serve live-only ties without
+# re-hammering Loki, and the first request after the entry expires retries
+# the real fetch (self-heals once Loki recovers). The empty payload decodes
+# to a valid empty row list, so the read side needs no special case.
+_NEGATIVE_CACHE_TTL_SECONDS = 60
+
 # The live-tail read is the only per-request Loki query left. Bound it well
 # below the shared client's 45s default so a stalled Loki fails the route in
 # seconds instead of pinning a request (and a query-budget slot) for 45s —
@@ -86,11 +108,20 @@ def _read_frozen_json(key: str, *, cache_name: str) -> Any | None:
         return None
 
 
-def _write_frozen_json(key: str, payload: object, *, cache_name: str) -> None:
-    """Write one frozen-source payload without making Redis route-critical."""
+def _write_frozen_json(
+    key: str,
+    payload: object,
+    *,
+    cache_name: str,
+    ttl: int = _FROZEN_CACHE_TTL_SECONDS,
+) -> None:
+    """Write one frozen-source payload without making Redis route-critical.
+
+    `ttl` defaults to the 24h frozen-source lifetime; the negative cache
+    (`_NEGATIVE_CACHE_TTL_SECONDS`) passes the short one."""
     try:
         with sync_redis(decode_responses=True) as redis:
-            redis.set(key, json.dumps(payload), ex=_FROZEN_CACHE_TTL_SECONDS)
+            redis.set(key, json.dumps(payload), ex=ttl)
     except Exception as exc:
         logger.debug("neighbors frozen %s cache write failed: %s", cache_name, exc)
 
@@ -115,8 +146,52 @@ def _rows_from_cache_payload(raw: Any, *, cache_name: str) -> list[dict[str, Any
         return None
 
 
-def _fetch_archive_rows() -> list[dict[str, Any]]:
+def _read_cached_archive_rows() -> tuple[list[dict[str, Any]], bool] | None:
+    """Cached archive rows as (rows, degraded); None on a miss or corrupt entry.
+
+    The payload persists the originating fetch's has_more (entries without it
+    predate that shape — a full page then conservatively counts as
+    truncated), so a cache hit reports truncation exactly as the originating
+    fetch did (no masking). `degraded` is True for a negative-cache entry (a
+    failed fetch absorbed for `_NEGATIVE_CACHE_TTL_SECONDS`) — the response
+    can then say the archive is unavailable instead of pretending the
+    live-only result is the whole graph."""
+    cached = _read_frozen_json(_ARCHIVE_CACHE_KEY, cache_name="Loki archive")
+    if cached is None:
+        return None
+    rows = _rows_from_cache_payload(cached, cache_name="Loki archive")
+    if rows is None:
+        return None
+    if cached.get("has_more", len(rows) >= _LOKI_EDGE_LIMIT):
+        logger.warning(
+            "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
+            _LOKI_EDGE_LIMIT,
+        )
+    return rows, bool(cached.get("degraded", False))
+
+
+def _emit_archive_degraded(reason: str) -> None:
+    """One telemetry row per degraded frozen-archive read.
+
+    The route answers fast when degraded (fail-open), so slow-route latency
+    alerts no longer see the stall — this event keeps the degradation
+    attributable in the stream instead (2026-08-29/30 incident, task #2004)."""
+    telemetry.emit(
+        "telemetry",
+        "archive_fetch_degraded",
+        level="warning",
+        attributes={"route": "neighbors", "reason": reason},
+    )
+
+
+def _fetch_archive_rows() -> tuple[list[dict[str, Any]], bool]:
     """Pre-cutover tie + lineage rows from the Loki archive stream.
+
+    Returns `(rows, degraded)`: `degraded=True` means the archive could not
+    be read this request — a waiter that could not enter the fetch within
+    `_ARCHIVE_FETCH_WAIT_S`, a failed scan, or a negative-cache hit from an
+    earlier failure. Callers surface it so the response never pretends a
+    live-only result is the whole graph.
 
     Raw rows (not grouped): the merge absorbs both archive and live rows
     with the same per-row math, so the two sides sum exactly like one table
@@ -128,47 +203,70 @@ def _fetch_archive_rows() -> list[dict[str, Any]]:
     refresh whose measured range is 5-28s, so an 8s bound would time it out
     on a cold Loki, leave the cache empty, and turn every request in that
     window into a failure — worse than the slowness the cache exists to fix.
-    The fetch's `has_more` flag is persisted with the rows, so a cache hit
-    reports truncation exactly as the originating fetch did (no masking)."""
-    cached = _read_frozen_json(_ARCHIVE_CACHE_KEY, cache_name="Loki archive")
+
+    The fetch is single-flighted and fail-open (2026-08-29/30 incident):
+    concurrent misses run ONE scan — a waiter that cannot enter within
+    `_ARCHIVE_FETCH_WAIT_S` serves live-only ties instead of stacking its own
+    scan on a saturated Loki. A failed scan does not 500 the route either:
+    the request serves live-only ties and a short negative cache entry
+    absorbs the next minute of requests, so a stalled Loki is not re-hammered
+    by every poll; the first request after the entry expires retries and
+    repopulates the real rows."""
+    cached = _read_cached_archive_rows()
     if cached is not None:
-        rows = _rows_from_cache_payload(cached, cache_name="Loki archive")
-        if rows is not None:
-            # The payload persists the originating fetch's has_more (entries
-            # without it predate that shape — a full page then conservatively
-            # counts as truncated).
-            if cached.get("has_more", len(rows) >= _LOKI_EDGE_LIMIT):
-                logger.warning(
-                    "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
-                    _LOKI_EDGE_LIMIT,
-                )
-            return rows
-    rows, has_more = loki_events.query_events(
-        event_names=list(_EDGE_EVENT_NAMES),
-        categories=["audit"],
-        from_=ARCHIVE_FLOOR_AT,
-        to=ARCHIVE_FREEZE_AT,
-        limit=_LOKI_EDGE_LIMIT,
-        direction="forward",
-        archive=True,
-    )
-    if has_more:
-        logger.warning(
-            "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
-            _LOKI_EDGE_LIMIT,
+        return cached
+    if not _ARCHIVE_FETCH_LOCK.acquire(timeout=_ARCHIVE_FETCH_WAIT_S):
+        logger.warning("neighbors Loki archive fetch already in flight — serving live-only ties")
+        _emit_archive_degraded("lock_wait")
+        return [], True
+    try:
+        cached = _read_cached_archive_rows()
+        if cached is not None:
+            return cached
+        try:
+            rows, has_more = loki_events.query_events(
+                event_names=list(_EDGE_EVENT_NAMES),
+                categories=["audit"],
+                from_=ARCHIVE_FLOOR_AT,
+                to=ARCHIVE_FREEZE_AT,
+                limit=_LOKI_EDGE_LIMIT,
+                direction="forward",
+                archive=True,
+            )
+        except Exception as exc:
+            logger.warning("neighbors Loki archive fetch failed — serving live-only ties: %s", exc)
+            _write_frozen_json(
+                _ARCHIVE_CACHE_KEY,
+                {"rows": [], "has_more": False, "degraded": True},
+                cache_name="Loki archive",
+                ttl=_NEGATIVE_CACHE_TTL_SECONDS,
+            )
+            _emit_archive_degraded("fetch_failed")
+            return [], True
+        if has_more:
+            logger.warning(
+                "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
+                _LOKI_EDGE_LIMIT,
+            )
+        _write_frozen_json(
+            _ARCHIVE_CACHE_KEY,
+            {
+                "rows": [
+                    [
+                        row["agent_id"],
+                        row["target_agent_id"],
+                        row["event_name"],
+                        row["ts"].isoformat(),
+                    ]
+                    for row in rows
+                ],
+                "has_more": has_more,
+            },
+            cache_name="Loki archive",
         )
-    _write_frozen_json(
-        _ARCHIVE_CACHE_KEY,
-        {
-            "rows": [
-                [row["agent_id"], row["target_agent_id"], row["event_name"], row["ts"].isoformat()]
-                for row in rows
-            ],
-            "has_more": has_more,
-        },
-        cache_name="Loki archive",
-    )
-    return rows
+        return rows, False
+    finally:
+        _ARCHIVE_FETCH_LOCK.release()
 
 
 def _fetch_loki_edges(*, now: datetime) -> list[dict[str, Any]]:
@@ -345,17 +443,21 @@ def compute(
     limit: int,
     k: float = 0.5,
     gamma: float = 0.5,
-) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]:
-    """(neighbors, ancestors) for `root` — each a list of (agent_id, depth,
-    score) rows; neighbors strongest first, ancestors nearest first. The
-    Python counterpart of the retired agent_neighbors() SQL function, plus
-    the spawn-chain read it never had."""
+) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]], bool]:
+    """(neighbors, ancestors, archive_degraded) for `root` — the first two
+    are lists of (agent_id, depth, score) rows; neighbors strongest first,
+    ancestors nearest first. `archive_degraded` is True when the frozen
+    archive read degraded this request (the tie/lineage set is live-only —
+    the response carries the same flag). The Python counterpart of the
+    retired agent_neighbors() SQL function, plus the spawn-chain read it
+    never had."""
     now = datetime.now(UTC)
-    archive_rows = _fetch_archive_rows()
+    archive_rows, archive_degraded = _fetch_archive_rows()
     loki_rows = _fetch_loki_edges(now=now)
     weights = _merge_weights(archive_rows, loki_rows, k=k, now=now)
     parents = _merge_lineage_parents(archive_rows, loki_rows)
     return (
         _walk(weights, root=root, max_depth=max_depth, gamma=gamma, limit=limit),
         _walk_ancestors(parents, root=root, gamma=gamma),
+        archive_degraded,
     )

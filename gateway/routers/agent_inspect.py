@@ -660,7 +660,9 @@ def get_agent_neighbors(
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
-    ranked, ancestors_ranked = neighbors.compute(root=agent_id, max_depth=depth, limit=limit)
+    ranked, ancestors_ranked, archive_degraded = neighbors.compute(
+        root=agent_id, max_depth=depth, limit=limit
+    )
     ids = list({r[0] for r in ranked} | {r[0] for r in ancestors_ranked})
     label_status: dict[int, tuple[str | None, str]] = {}
     if ids:
@@ -695,7 +697,9 @@ def get_agent_neighbors(
         )
         for agent, depth_found, score in ancestors_ranked
     ]
-    return NeighborsResponse(neighbors=neighbors_rows, ancestors=ancestors_rows)
+    return NeighborsResponse(
+        neighbors=neighbors_rows, ancestors=ancestors_rows, degraded=archive_degraded
+    )
 
 
 @router.get("/api/agents/{agent_id}/inspect/metrics")
