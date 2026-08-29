@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import os
 import re
@@ -70,6 +69,8 @@ def archive(source: Path, name: str, spool: Path, hard_bytes: int) -> int:
         try:
             if not stat.S_ISREG(os.fstat(lock_fd).st_mode):
                 return EXIT_UNSAFE_PATH
+            import fcntl  # POSIX-only; imported lazily so the module imports on Windows
+
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
             spooled_bytes = _spooled_bytes(spool)
             target = spool / name
