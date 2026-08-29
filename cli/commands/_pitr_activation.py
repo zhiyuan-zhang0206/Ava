@@ -271,7 +271,10 @@ def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
     from cli.commands._update_git import _verify_snapshot_artifact, snapshot_pre_activation_data
     from services.backup import activation_snapshot
 
-    _require_same_pg_state(record.pre_activation_pg_settings, "before snapshot")
+    pg_settings = record.pre_activation_pg_settings
+    if pg_settings is None:
+        raise RuntimeError("PITR activation has no frozen PostgreSQL identity")
+    _require_same_pg_state(pg_settings, "before snapshot")
     existing = activation_snapshot(record.operation_id)
     if existing is not None:
         snapshot = existing
@@ -279,9 +282,9 @@ def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
     else:
         snapshot = snapshot_pre_activation_data(
             operation_id=record.operation_id,
-            db_url=record.pre_activation_pg_settings["direct_db_url"],
+            db_url=pg_settings["direct_db_url"],
         )
-    _require_same_pg_state(record.pre_activation_pg_settings, "during snapshot")
+    _require_same_pg_state(pg_settings, "during snapshot")
     record = record.advance(
         "snapshot_verified",
         pre_activation_snapshot=str(snapshot),
