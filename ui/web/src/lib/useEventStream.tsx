@@ -13,12 +13,17 @@
 //   (useInboxFeed, invalidate-refetch on notice_posted/notice_resolved)
 //   subscribe here.
 //
-// - AgentEventStreamProvider / useAgentEventStream: the active agent's
-//   throttled all-events stream (`/api/system/all?agents=<activeId>`). The
-//   server pushes that agent's events plus agent_id=0 system signals in a
-//   batched stream (max 10 pushes/sec, each push a JSON array of events).
-//   The frontend still filters internally via isEventForThread / role checks.
-//   The timeline (useTimeline), token usage (useTokenUsage), and pending strip
+// - AgentEventStreamProvider / useAgentEventStream: the throttled
+//   all-events stream (`/api/system/all?agents=<active>,<parked…>`). The
+//   server pushes the selected agents' events plus agent_id=0 system signals
+//   in a batched stream (max 10 pushes/sec, each push a JSON array of events).
+//   The selection is the active agent + the timeline store's parked threads
+//   (LRU-capped at 32) so parked buckets keep live-folding (R2/R3) AND a
+//   compact that happens while a thread is parked still reaches the store —
+//   without compact_done the reset window can never arm and a switch-back
+//   resurrects the compacted-away history (task #1959). The frontend still
+//   filters internally via isEventForThread / role checks. The timeline
+//   (useTimeline), token usage (useTokenUsage), and pending strip
 //   (usePendingMessages) subscribe here. Hidden tabs close SSE and receive a
 //   synthetic poll signal every 7s so their REST snapshots stay current.
 //
@@ -43,6 +48,7 @@ import { API_BASE, api } from "./api";
 import { notifySessionInvalid, useAuth } from "./auth-context";
 import { useFoldOwner } from "./fold/owner";
 import { useStore } from "./store";
+import { useTimelineStore } from "./timeline-store";
 import type { SystemEvent } from "./types";
 
 // Half-dead-connection watchdog window. The server emits a heartbeat data
@@ -465,6 +471,23 @@ export function AgentEventStreamProvider({
 }) {
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
   const activeId = useStore((s) => s.activeId);
+  // Parked thread ids + compact-marker ids, as stable joined strings — the
+  // provider re-renders (and the EventSource re-keys) only when the ID SET
+  // changes, not on every parked fold (a new Map/Set reference per event).
+  // Including parked threads in the filter keeps their buckets live-folded
+  // (R2/R3) AND — the task #1959 fix — delivers compact_done + the
+  // post-compact timeline_snapshot for a thread that compacts while parked:
+  // without those events the store can never arm its reset window, and a
+  // switch-back keep-merges the stale pre-compact cache into the post-compact
+  // snapshot, resurrecting the compacted-away history (task #1959).
+  // compactedThreadIds keeps an evicted-but-compacted thread in the filter
+  // until its post-compact snapshot consumes the marker.
+  const parkedIds = useTimelineStore(
+    (s) => [...s.threads.keys()].sort((a, b) => a - b).join(","),
+  );
+  const compactedIds = useTimelineStore(
+    (s) => [...s.compactedThreadIds].sort((a, b) => a - b).join(","),
+  );
   const [isVisible, setIsVisible] = useState(
     () => typeof document === "undefined" || document.visibilityState === "visible",
   );
@@ -486,8 +509,14 @@ export function AgentEventStreamProvider({
     return () => clearInterval(interval);
   }, [isVisible]);
 
+  const filteredIds = [
+    activeId,
+    ...parkedIds.split(",").filter(Boolean).map(Number),
+    ...compactedIds.split(",").filter(Boolean).map(Number),
+  ].filter((id): id is number => id != null && Number.isFinite(id));
+  const agentFilter = [...new Set(filteredIds)].sort((a, b) => a - b).join(",");
   const allEventsUrl =
-    `${API_BASE}/api/system/all` + (activeId != null ? `?agents=${activeId}` : "");
+    `${API_BASE}/api/system/all` + (agentFilter !== "" ? `?agents=${agentFilter}` : "");
   useSseConnection(isVisible ? allEventsUrl : null, subscribersRef, NOOP_OPEN_CHANGE);
   const subscribe = useSubscribe(subscribersRef);
 
