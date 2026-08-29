@@ -143,19 +143,16 @@ def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
     never gain children -- tasks created after a parent closed are what
     produced the false-orphan rows in the task graph (task #1975). The system
     root is exempt by construction (its status is 'ongoing', never closed).
+    The parent row is locked FOR UPDATE: the close path holds the same lock,
+    so a concurrent close cannot slip between this status read and the child
+    INSERT (TOCTOU, QA #993).
     Runs inside the caller's transaction/cursor."""
-    cur.execute("SELECT id, is_root, status FROM agent_tasks WHERE id = %s", (parent,))
+    cur.execute("SELECT id, is_root, status FROM agent_tasks WHERE id = %s FOR UPDATE", (parent,))
     row = cur.fetchone()
     if row is None:
         raise ValueError(
             f"parent task {parent} does not exist -- create the parent first, "
             "or pass the system root task id (1) for a top-level task"
-        )
-    if row[2] in ("done", "cancelled"):
-        raise ValueError(
-            f"parent task {parent} is {row[2]} — a closed task cannot be the "
-            "parent of a new task; reopen it or pass the system root task id "
-            "(1) for a top-level task"
         )
     if parent == 1 and not row[1]:
         cur.execute("SELECT id FROM agent_tasks WHERE is_root ORDER BY id LIMIT 1")
@@ -164,6 +161,12 @@ def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
         raise ValueError(
             f"task 1 is not the system root task -- the root is {what}; "
             "pass its id for a top-level task"
+        )
+    if row[2] in ("done", "cancelled"):
+        raise ValueError(
+            f"parent task {parent} is {row[2]} — a closed task cannot be the "
+            "parent of a new task; reopen it or pass the system root task id "
+            "(1) for a top-level task"
         )
 
 
