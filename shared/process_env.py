@@ -28,3 +28,10 @@ def consume_process_marker(name: str, *, armed_value: str) -> bool:
 def update_process_env(values: Mapping[str, str]) -> None:
     """Adopt committed handoff values for clients built later in this process."""
     os.environ.update(values)
+
+
+def remove_process_env(names: tuple[str, ...]) -> None:
+    """Strip parent-only authority before a restricted child starts work."""
+
+    for name in names:
+        os.environ.pop(name, None)

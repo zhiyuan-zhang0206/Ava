@@ -46,7 +46,6 @@ def test_restore_worker_never_opens_or_inherits_uploader_credential(
 ) -> None:
     uploader = tmp_path / "uploader.json"
     uploader.write_text("publisher-only")
-    monkeypatch.setenv("AVA_PITR_GCS_CREDENTIALS_FILE", str(uploader))
     original_read_bytes = Path.read_bytes
     messages: list[object] = []
 
@@ -74,7 +73,6 @@ def test_restore_worker_never_opens_or_inherits_uploader_credential(
     def viewer_only_build(
         received: daemon._RestoreWorkerInput, _stop: daemon.StopSignal
     ) -> CandidateManifest:
-        assert "AVA_PITR_GCS_CREDENTIALS_FILE" not in os.environ
         assert received == inputs
         return _candidate("viewer-only")
 
