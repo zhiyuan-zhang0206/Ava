@@ -75,3 +75,20 @@ def test_zero_header_with_nonzero_payload_is_rejected(tmp_path: Path) -> None:
     path.write_bytes(value)
     with pytest.raises(ValueError, match="magic"):
         validate_wal_file(path, _candidate())
+
+
+def test_first_range_on_later_timeline_accepts_ancestry_before_start(tmp_path: Path) -> None:
+    candidate = replace(
+        _candidate(),
+        timeline=2,
+        start_lsn="0/2000000",
+        end_lsn="0/3000000",
+        wal_ranges=(WalRange(2, "0/2000000", "0/3000000"),),
+    )
+    path = tmp_path / "00000002.history"
+    path.write_text("1\t0/1800000\tparent\n")
+    validate_wal_file(path, candidate)
+
+    path.write_text("1\t0/2800000\tfuture\n")
+    with pytest.raises(ValueError, match="ancestry"):
+        validate_wal_file(path, candidate)

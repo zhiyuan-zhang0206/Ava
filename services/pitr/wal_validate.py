@@ -66,7 +66,9 @@ def _validate_history(path: Path, candidate: CandidateManifest) -> None:
         for previous, current in zip(candidate.wal_ranges, candidate.wal_ranges[1:], strict=False)
         if current.timeline == timeline
     ]
-    if len(transitions) != 1:
+    first_range = candidate.wal_ranges[0]
+    starts_on_timeline = timeline == first_range.timeline and timeline > 1
+    if len(transitions) != 1 and not starts_on_timeline:
         raise ValueError("timeline history is not required by the candidate")
     rows = [line for line in path.read_text().splitlines() if line and not line.startswith("#")]
     if not rows:
@@ -80,10 +82,20 @@ def _validate_history(path: Path, candidate: CandidateManifest) -> None:
         high, low = fields[1].split("/", 1)
         _position = (int(high, 16), int(low, 16))
         parents.append((parent, fields[1]))
-    parent_timeline, _current_timeline, switch_lsn = transitions[0]
+    expected_parent = transitions[0][0] if transitions else parents[-1][0]
+    expected_switch = transitions[0][2] if transitions else parents[-1][1]
     if (
         [item[0] for item in parents] != sorted({item[0] for item in parents})
         or parents[-1][0] >= timeline
-        or parents[-1] != (parent_timeline, switch_lsn)
+        or parents[-1] != (expected_parent, expected_switch)
+        or (
+            starts_on_timeline
+            and _lsn_position(expected_switch) > _lsn_position(first_range.start_lsn)
+        )
     ):
         raise ValueError("timeline history ancestry is not canonical")
+
+
+def _lsn_position(value: str) -> int:
+    high, low = value.split("/", 1)
+    return (int(high, 16) << 32) | int(low, 16)
