@@ -605,6 +605,32 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
         return dump_path
 
 
+def snapshot_pre_activation_data() -> Path:
+    """Create the mandatory logical recovery floor before first PITR activation.
+
+    Unlike the rollout helper above this is intentionally unconditional: the
+    activation rollout cannot be protected by WAL archiving that is still off.
+    """
+    from services.backup import backup_lock, run_backup
+
+    with backup_lock(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S):
+        try:
+            dump_path = run_backup(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S, pre_update=True)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                "could not create pre-activation data snapshot: pg_dump timed out after "
+                f"{_PRE_UPDATE_DUMP_TIMEOUT_S:.0f}s"
+            ) from None
+        except Exception as exc:
+            raise RuntimeError(
+                "could not create pre-activation data snapshot: "
+                f"pg_dump failed ({type(exc).__name__})"
+            ) from None
+        _verify_snapshot_artifact(dump_path)
+        print(f"→ pre-activation data snapshot: {dump_path} (verified)")
+        return dump_path
+
+
 def rollback_schema_to(keep: set[str], *, local_admin: bool = False) -> list[str]:
     """Roll the DB schema back to the applied set `keep` (the snapshot from
     current_schema_state); return the migration names rolled back (empty when the
