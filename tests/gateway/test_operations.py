@@ -1271,3 +1271,31 @@ async def test_launch_agent_op_hosted_failure_reclaims_its_row(
     with pytest.raises(RuntimeError, match="prompt insert failed"):
         await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert reclaimed == [(7, "launch-confirm")]
+
+
+@pytest.mark.asyncio
+async def test_launch_agent_op_hosted_validation_failure_reclaims_its_row(
+    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+) -> None:
+    """A hosted row exists before validation runs, so a validation failure
+    must land inside the reclaim too: leaked outside it, the idling row has
+    no restarter reaper and the heartbeat pokes it into a prompt-less zombie
+    (QA #1029 required fix)."""
+    monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
+
+    def _boom_validate(*_a: object, **_k: object) -> None:
+        raise RuntimeError("bad model config")
+
+    monkeypatch.setattr("shared.lm.factory.validate_model_config", _boom_validate)
+    reclaimed: list[tuple[int, str]] = []
+
+    def _fake_reclaim(agent_id: int, _pool: object, *, source: str) -> list[str]:
+        reclaimed.append((agent_id, source))
+        return []
+
+    monkeypatch.setattr(ops_lifecycle, "_force_mark_terminated", _fake_reclaim)
+
+    body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
+    with pytest.raises(RuntimeError, match="bad model config"):
+        await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+    assert reclaimed == [(7, "launch-confirm")]
