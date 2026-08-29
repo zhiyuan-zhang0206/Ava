@@ -186,3 +186,28 @@ class AgentMemorySettings(EnvSettings):
             "lifecycle": "live",
         },
     )
+
+    memory_recall_deadline_seconds: float = Field(
+        default=5.0,
+        alias="AVA_MEMORY_RECALL_DEADLINE_SECONDS",
+        description=(
+            "Wall-clock budget (seconds) for one passive-recall pass — the "
+            "semantic search plus the relevance-filter call. Recall runs before "
+            "the LLM on every inbound turn, so a congested gateway must not hold "
+            "the turn hostage: when the deadline expires the turn proceeds with "
+            "no recall this turn and the next turn retries. Covers a healthy "
+            "pass (search ~1.7s + filter ~1.5s) with headroom; a fleet wake that "
+            "queues searches behind the gateway's search endpoint exceeds it and "
+            "degrades instead of stalling the first LLM call. Also caps the "
+            "filter leg: raising memory_recall_filter_timeout_seconds alone has "
+            "no effect on recall passes unless this deadline is raised with it."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )

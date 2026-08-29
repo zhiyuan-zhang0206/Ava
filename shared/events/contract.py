@@ -395,6 +395,28 @@ class RecallFilter(TypedDict):
     body: str
 
 
+class PassiveRecall(TypedDict, total=False):
+    """`passive_recall` payload — _memory_recall.py / ava_memory plugin.
+
+    The recall pass leg timings in milliseconds (the success path); the
+    defer / deadline-skip emissions carry no timing keys.
+    """
+
+    search_ms: int
+    filter_ms: int
+
+
+class HookTiming(TypedDict):
+    """`hook_timing` payload — agent/hooks/_registry.py.
+
+    Per-hook wall durations in milliseconds for one hook-runner pass
+    (`before_llm` / `before_exec` / `after_exec` / `after_init`) — the
+    sub-span replacement attributing a slow node to its hooks.
+    """
+
+    hook_ms: dict[str, float]
+
+
 class ResolvedMarker(TypedDict, total=False):
     """`warning_resolved` / `error_resolved` payload, supporting two eras.
 
@@ -1077,7 +1099,16 @@ EVENTS: dict[str, EventSpec] = {
     "recall_filter": _telemetry(
         "recall_filter", "memory recall filter", payload=RecallFilter, tier="noise"
     ),
-    "passive_recall": _telemetry("passive_recall", "passive memory recall", tier="noise"),
+    "passive_recall": _telemetry(
+        "passive_recall", "passive memory recall", payload=PassiveRecall, tier="noise"
+    ),
+    "hook_timing": _telemetry(
+        "hook_timing",
+        "hook-runner pass — per-hook wall durations, attributing a slow before_llm / "
+        "before_exec node to its hooks from events alone",
+        payload=HookTiming,
+        tier="noise",
+    ),
     "silent_idle": _telemetry("silent_idle", "silent idle verdict", tier="noise"),
     "last_msg": _telemetry("last_msg", "last-message check", tier="noise"),
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted

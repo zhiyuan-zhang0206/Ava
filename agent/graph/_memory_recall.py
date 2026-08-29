@@ -24,6 +24,7 @@ and persists the ones this call added).
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any, NamedTuple, cast
@@ -135,6 +136,7 @@ async def passive_memory_recall(
     if not query:
         return None
     retrieve_k = turn_settings.agent.memory_recall_retrieve_k
+    search_started = time.monotonic()
     try:
         results = await asyncio.to_thread(_gateway_client.memory_search, query, retrieve_k)
     except (GatewayUnavailable, IndexerUnavailable) as exc:
@@ -196,7 +198,21 @@ async def passive_memory_recall(
     if not candidates:
         return None
 
+    search_ms = (time.monotonic() - search_started) * 1000
+    filter_started = time.monotonic()
     picked = await filter_candidates(query, candidates)
+    # Leg timings keep the recall pass diagnosable from its events alone: the
+    # search leg is the one a congested gateway stretches (a fleet wake queues
+    # searches behind the search endpoint's semaphore), the filter leg is a
+    # model call with its own bound. Both sit in front of the turn's first LLM.
+    logger.info(
+        "[{label}] {body}",
+        label="passive-recall",
+        body=f"search {search_ms:.0f}ms, filter {(time.monotonic() - filter_started) * 1000:.0f}ms",
+        event="passive_recall",
+        search_ms=round(search_ms),
+        filter_ms=round((time.monotonic() - filter_started) * 1000),
+    )
     if not picked:
         # The filter judged none of them relevant. Injecting nothing is the
         # point: an unfiltered recall always had something to show.

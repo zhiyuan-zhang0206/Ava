@@ -212,6 +212,26 @@ class ServiceSettings(EnvSettings):
         },
     )
 
+    memory_search_max_concurrency: int = Field(
+        default=20,
+        alias="AVA_MEMORY_SEARCH_MAX_CONCURRENCY",
+        description=(
+            "Max concurrent /api/memory/search requests the gateway runs at once "
+            "(the query-embed phase concurrency gate). The historical default 2 "
+            "predated the async-embed fix (2026-08-03) and starved recall behind "
+            "a queue during fleet-wake bursts; query embeds are single short "
+            "Gemini calls on a paid Tier-2 key, so 20 is safe. Takes effect on "
+            "gateway restart."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     memory_search_deadline_seconds: float = Field(
         default=15.0,
         alias="AVA_MEMORY_SEARCH_DEADLINE_SECONDS",

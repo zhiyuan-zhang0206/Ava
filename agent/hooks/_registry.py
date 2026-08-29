@@ -53,6 +53,7 @@ up the dynamic class rebound by build_agent_state.
 
 from __future__ import annotations
 
+import time
 import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -66,6 +67,7 @@ from agent import state as _state
 from agent.nodes import NodeName
 from shared import plugin_activation, plugin_contributions
 from shared.context import AvaContext, agent_id_from_config
+from shared.log import logger
 from shared.plugin_context import current_plugin_name
 
 HookName = Literal["before_llm", "before_exec", "after_exec", "after_init"]
@@ -236,8 +238,15 @@ def make_hook_runner(
             # add_messages) allow multiple hooks to co-write without clobbering —
             # the reducer merges the values rather than overwriting.
             _model_fields = type(state).model_fields  # pyright: ignore[reportUnknownMemberType]
+            # Per-hook timings — one event per hook-runner pass, so a slow
+            # before_llm / before_exec node can be attributed to the hook that
+            # ate the time without a live debugger (the node span alone is a
+            # black box: no sub-spans, no events).
+            timings: list[tuple[str, float]] = []
             for hook in hooks:
+                started = time.monotonic()
                 result = await hook(state, runtime, config)
+                timings.append((hook.name, time.monotonic() - started))
                 if not result:
                     continue
                 # Activation telemetry (philosophy §6): a plugin hook that
@@ -277,6 +286,16 @@ def make_hook_runner(
                     else:
                         key_writer[key] = hook.name
                         update[key] = value  # pyright: ignore[reportUnknownArgumentType]
+            if timings:
+                # Skipped on an empty pass (no hooks registered) — an event
+                # with nothing to attribute is noise.
+                logger.info(
+                    "[hook {node}] {durations}",
+                    node=hook_name,
+                    durations=", ".join(f"{name} {ms * 1000:.1f}ms" for name, ms in timings),
+                    event="hook_timing",
+                    hook_ms={name: round(ms * 1000, 1) for name, ms in timings},
+                )
             if "goto" in update:
                 next_node = update.pop("goto")
             elif callable(default_next):
