@@ -183,6 +183,24 @@ describe("SchedulesPage", () => {
     expect(screen.getByText(/did the thing/)).toBeTruthy();
   });
 
+  it("expand: an in-progress run renders as … (ok=null), an interrupted one as ✗", async () => {
+    // QA P3-6: the run-history "…" path (ok IS NULL = genuinely in-progress)
+    // must render — a regression here would leave the live-run state blank.
+    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
+    vi.spyOn(api, "getSchedule").mockResolvedValue(FULL);
+    vi.spyOn(api, "scheduleLogs").mockResolvedValue({ source: "none", lines: [] });
+    vi.spyOn(api, "scheduleRuns").mockResolvedValue([
+      { id: 9, ran_at: "2026-06-30T09:00:00Z", ok: null, agent_id: null, note: null },
+      { id: 8, ran_at: "2026-06-29T09:00:00Z", ok: false, agent_id: null, note: "interrupted" },
+      { id: 7, ran_at: "2026-06-29T08:00:00Z", ok: true, agent_id: null, note: null },
+    ]);
+    wrap(<SchedulesPage />);
+    await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    await waitFor(() => expect(screen.getByText(/…/)).toBeTruthy());
+    expect(screen.getByText(/interrupted/)).toBeTruthy();
+  });
+
   it("does not refetch expanded schedule logs before 15 seconds", async () => {
     vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
     vi.spyOn(api, "getSchedule").mockResolvedValue(FULL);
