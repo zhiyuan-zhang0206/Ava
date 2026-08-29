@@ -228,10 +228,14 @@ class ErrorClassification(NamedTuple):
         context), unlike auth / billing / schema — so it must be
         distinguishable without scraping the message. A 400 whose body
         carries context-length vocabulary in any of the three body fields
-        (`type` / `code` / `message`) counts, plus the `context_length_exceeded`
-        type on its own (some providers say it without the generic wording).
-        Status-gated to 400 so a rate-limit 429 that happens to mention
-        "tokens" is never misread as overflow.
+        (`type` / `code` / `message`) counts. One deliberate exception to the
+        400 gate: the `context_length_exceeded` TYPE alone counts regardless
+        of status — it is the one spelling that says overflow explicitly
+        (some providers use it without the generic wording). A 429 carrying
+        it is still TRANSIENT (the RetryPolicy retries it; the breaker only
+        fires on PERMANENT-class rejections), so the flag is informational
+        there — the gate's purpose is only to keep a rate-limit 429 that
+        happens to mention "tokens" from being misread as overflow.
 
         The vocabulary is deliberately conservative (a wrong match routes an
         agent into a compaction, which is harmless; a missed match just means

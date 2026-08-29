@@ -165,7 +165,10 @@ def _circuit_reason(exc: FatalProviderError) -> str:
 
 
 async def _handle_fatal_llm_error(
-    exc: FatalLLMStreamError | FatalProviderError, ctx: AvaContext, agent_id: int
+    exc: FatalLLMStreamError | FatalProviderError,
+    ctx: AvaContext,
+    agent_id: int,
+    circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None = None,
 ) -> dict[str, object]:
     """Fatal LLM turn abort: log + one Error event, return the fresh-run input.
 
@@ -210,6 +213,27 @@ async def _handle_fatal_llm_error(
     input_update: dict[str, object] = {"halted": True}
     if isinstance(exc, FatalProviderError):
         reason = _circuit_reason(exc)
+        already_open = False
+        if circuit_reader is not None:
+            try:
+                current = await circuit_reader()
+            except Exception:
+                current = None
+            already_open = current is not None and current.open and current.reason == reason
+        if already_open:
+            # The breaker is still open for the same reason from an earlier
+            # failed turn — re-opening is idempotent and re-emitting the open
+            # event per failed wake is noise (QA #903 nit). Skip both; the
+            # original opened_at is preserved.
+            logger.info(
+                "heartbeat circuit breaker already open (reason={reason}) — "
+                "skipping duplicate open",
+                event="circuit_breaker_open",
+                agent_id=agent_id,
+                reason=reason,
+                status=exc.status,
+            )
+            return input_update
         input_update["circuit"] = CircuitState(
             open=True,
             reason=reason,
@@ -446,7 +470,14 @@ async def _invoke_graph_with_lifecycle_logging(
             # fresh-run input halts the claim node until the next inbound;
             # for a FatalProviderError it also opens the heartbeat circuit
             # breaker (see _handle_fatal_llm_error).
-            input_update = await _handle_fatal_llm_error(exc, ctx, agent_id)
+            async def _read_current_circuit() -> CircuitState | None:
+                snapshot = await graph.aget_state(_graph_config(agent_id, [], {}))
+                current = snapshot.values.get("circuit")
+                return current if isinstance(current, CircuitState) else None
+
+            input_update = await _handle_fatal_llm_error(
+                exc, ctx, agent_id, circuit_reader=_read_current_circuit
+            )
             continue
         except CompactionFailedError as exc:
             # Compaction could not produce a usable summary (model ignoring the
