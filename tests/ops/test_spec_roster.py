@@ -471,3 +471,32 @@ def test_runner_daemons_keep_the_runner_marker() -> None:
     by_session = {s.session: s for s in spec.build_services()}
     for sess in ("ops", "restarter", "page-server"):
         assert spec.profile_marker(by_session[sess]) == "runner", sess
+
+
+def test_restarter_gated_out_in_hosted_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hosted mode flip retires per-agent process supervision: the restarter
+    (respawn / hibernate / crash-resurrect / wedged — all process machinery)
+    drops out of the START roster, symmetric to how agent-host is gated out in
+    process mode. Exactly one of the two runs, by the same fail-closed read."""
+    monkeypatch.setattr(spec, "runner_mode", lambda: "hosted")
+    annotated = {
+        s.session: r
+        for s, r in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
+    }
+    assert annotated["restarter"] and "hosted" in annotated["restarter"]
+    assert annotated["agent-host"] is None
+    start = {s.session for s in spec.services_for_capabilities(frozenset({"agent-runner"}))}
+    assert "restarter" not in start
+    assert "agent-host" in start
+
+
+def test_restarter_runs_in_process_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The regression guard: default process mode keeps the restarter on the
+    start roster (and the agent-host off)."""
+    monkeypatch.setattr(spec, "runner_mode", lambda: "process")
+    annotated = {
+        s.session: r
+        for s, r in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
+    }
+    assert annotated["restarter"] is None
+    assert annotated["agent-host"] and "AVA_RUNNER_MODE" in annotated["agent-host"]

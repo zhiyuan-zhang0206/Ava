@@ -162,23 +162,54 @@ def _select_idle_agents_needing_heartbeat(
     nudging it would only keep a corpse busy. *Hibernating* stays nudgeable
     with no lease at all: it has no process by design (swapped out), and the
     nudge is exactly how it wakes.
+
+    Hosted mode (Task #1999): the lease concept does not exist — a hosted
+    agent's idle row carries no lease renewer (idle is the absence of a turn
+    task, not a process to prove alive), so the lease guard would exclude
+    EVERY hosted agent and silently retire the heartbeat's resident-duty
+    nudge. In hosted mode the clause drops the guard: every idling row is
+    nudgeable (a hibernating row here is a legacy pre-hosted one, still woken
+    the same way — the dispatcher materializes the turn either way).
     """
-    sql = (
-        "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
-        "FROM agents_meta "
-        "WHERE (status = 'hibernating' OR (status = 'idling' AND lease_expires_at > now())) "
-        "AND now() >= GREATEST("
-        "  heartbeat_paused_until, "
-        "  last_active_at "
-        "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0))"
-        ") "
-        "AND NOT EXISTS ("
-        "  SELECT 1 FROM inbound_messages im "
-        "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
-        "    AND im.created_at >= now() - make_interval(secs => %s) "
-        ") "
-        "ORDER BY last_active_at ASC"
-    )
+    from ops.runner_mode import runner_mode
+
+    # The mode picks BETWEEN two fully-static statements (never text spliced
+    # into one): the hosted clause drops the R1 lease guard because a hosted
+    # idle row has no lease concept, while the process clause keeps it.
+    if runner_mode() == "hosted":
+        sql = (
+            "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
+            "FROM agents_meta "
+            "WHERE (status IN ('hibernating', 'idling')) "
+            "AND now() >= GREATEST("
+            "  heartbeat_paused_until, "
+            "  last_active_at "
+            "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0))"
+            ") "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM inbound_messages im "
+            "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
+            "    AND im.created_at >= now() - make_interval(secs => %s) "
+            ") "
+            "ORDER BY last_active_at ASC"
+        )
+    else:
+        sql = (
+            "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
+            "FROM agents_meta "
+            "WHERE (status = 'hibernating' OR (status = 'idling' AND lease_expires_at > now())) "
+            "AND now() >= GREATEST("
+            "  heartbeat_paused_until, "
+            "  last_active_at "
+            "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0))"
+            ") "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM inbound_messages im "
+            "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
+            "    AND im.created_at >= now() - make_interval(secs => %s) "
+            ") "
+            "ORDER BY last_active_at ASC"
+        )
     params: list[object] = [idle_threshold_s, jitter_span_s, STALE_PENDING_S]
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
