@@ -111,7 +111,33 @@ def test_zero_line_floored_domain_fails(
     files = _files({"agent": (9, 10)})
     assert gates.check(files, threshold=85.0) == 1
     out = capsys.readouterr().out
-    assert "ops coverage 0.0% below floor 10.0%" in out
+    assert "ops has no measured lines" in out
+
+
+def test_zero_floor_still_fails_missing_domain(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The existence check is independent of the floor value: even at
+    floor 0.0 a vanished domain must fail — the calibration-state table
+    cannot mask a broken source glob."""
+    monkeypatch.setattr(gates, "FLOORS", {"ops": 0.0})
+    files = _files(_core_classes())
+    assert gates.check(files, threshold=85.0) == 1
+    out = capsys.readouterr().out
+    assert "ops has no measured lines" in out
+
+
+def test_zero_floor_passes_present_domain(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The floor boundary is inclusive: a present domain at exactly its
+    floor passes (rate >= floor, 0.0 >= 0.0)."""
+    monkeypatch.setattr(gates, "FLOORS", {"ops": 0.0})
+    files = _files({**_core_classes(), "ops/deploy_spawn.py": (0, 10)})
+    assert gates.check(files, threshold=85.0) == 0
+    out = capsys.readouterr().out
+    assert "coverage gates passed" in out
+    assert "floor 0.0% ok" in out
 
 
 def test_env_threshold_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

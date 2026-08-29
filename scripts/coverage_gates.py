@@ -12,12 +12,11 @@ the combined shard data in the backend CI job) and enforces two tiers:
 
 Floors are set just below each domain's measured baseline at gate
 introduction, so a regression below current coverage fails while
-shard/flake variance passes. The per-domain table is always printed
-(calibration + failure diagnosis); exits 1 when any gate fails.
-
-A floored domain with zero measured lines fails automatically: an empty
-domain (renamed package, broken source glob) must be loud, never a
-vacuous pass.
+shard/flake variance passes. A floored domain with zero measured lines
+fails regardless of its floor value: an empty domain (renamed package,
+broken source glob) must be loud, never a vacuous pass. The measured
+per-domain table is always printed (calibration + failure diagnosis);
+exits 1 when any gate fails.
 
 Usage: uv run python scripts/coverage_gates.py [coverage.json]
 """
@@ -41,13 +40,20 @@ CORE_THRESHOLD_DEFAULT = 85.0
 # ("services/pitr"). A prefix matches every reported file whose path is the
 # prefix itself or starts with "prefix/".
 #
-# CALIBRATION — set after the first CI run of this gate printed the
-# measured per-domain table; the audit's standalone measurements were
-# ops 48% (tests/ops) with services/ava_builtins lower.
+# Calibrated 2026-08-29 from the first measuring CI run (PR #965):
+# ops 92.6% / services 73.1% / ava_builtins 81.6%. Floors sit 2-4 points
+# below the measured baseline — enough buffer for shard-split and flake
+# variance, tight enough that a real regression (a critical module losing
+# its tests) trips the gate.
+#
+# ops is the deploy/rollout/cluster-lifecycle surface (highest incident
+# exposure — a broken upgrade takes the fleet down), so it keeps the
+# tightest buffer; services carries the data-durability daemons
+# (backup/pitr/watchdog) and ava_builtins the plugins.
 FLOORS: dict[str, float] = {
-    "ops": 0.0,
-    "services": 0.0,
-    "ava_builtins": 0.0,
+    "ops": 90.0,
+    "services": 70.0,
+    "ava_builtins": 78.0,
 }
 
 
@@ -126,11 +132,38 @@ def check(files: dict[str, dict], threshold: float) -> int:
     if core_rate < threshold:
         failures.append(f"core combined coverage {core_rate}% below {threshold}%")
 
-    print("domain floors:")
+    print("all measured domains (covered/total lines):")
+    for name, (covered, valid) in sorted(per_domain.items(), key=lambda kv: kv[1][1], reverse=True):
+        note = ""
+        if name in CORE_DOMAINS:
+            note = " — core gate"
+        elif name in FLOORS:
+            rate = _rate(covered, valid)
+            verdict = "ok" if rate >= FLOORS[name] else f"FAIL (floor {FLOORS[name]}%)"
+            note = f" — floor {FLOORS[name]}% {verdict}"
+        print(f"  {name:>20} {_rate(covered, valid):>6}% ({covered}/{valid}){note}")
+
+    floored_subdomains = [p for p in FLOORS if "/" in p]
+    if floored_subdomains:
+        print("floored subdomains:")
+        for prefix in floored_subdomains:
+            rate, covered, valid = _prefix_rate(per_domain, per_subdomain, prefix)
+            verdict = "ok" if rate >= FLOORS[prefix] else f"FAIL (floor {FLOORS[prefix]}%)"
+            print(
+                f"  {prefix:>20} {rate:>6}% ({covered}/{valid}) — floor {FLOORS[prefix]}% {verdict}"
+            )
+
     for prefix, floor in FLOORS.items():
         rate, covered, valid = _prefix_rate(per_domain, per_subdomain, prefix)
-        verdict = "ok" if rate >= floor else f"FAIL (floor {floor}%)"
-        print(f"  {prefix:>20} {rate:>6}% ({covered}/{valid} lines) — {verdict}")
+        if valid == 0:
+            # Existence check, independent of the floor value: a floored
+            # domain with no measured lines means the package vanished or
+            # the source glob broke — fail even at floor 0.0, never a
+            # vacuous pass.
+            failures.append(
+                f"{prefix} has no measured lines — package missing or source glob broken"
+            )
+            continue
         if rate < floor:
             failures.append(f"{prefix} coverage {rate}% below floor {floor}%")
 
