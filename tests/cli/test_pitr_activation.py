@@ -14,24 +14,27 @@ def test_activate_persists_snapshot_before_wal_pending(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     snapshot = tmp_path / "backups" / "verified.dump.enc"
+    pg = {
+        "archive_mode": "off",
+        "archive_command": "",
+        "archive_timeout": "0",
+        "wal_compression": "off",
+        "system_identifier": "42",
+        "direct_db_url": "dbname=ava",
+    }
+    credentials = {"uploader_client_email": "writer@example.test"}
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(
         activation,
         "_shadow_readiness",
-        lambda: {
-            "archive_mode": "off",
-            "archive_command": "",
-            "archive_timeout": "0",
-            "wal_compression": "off",
-            "system_identifier": "42",
-            "direct_db_url": "dbname=ava",
-        },
+        lambda: activation.ShadowReadiness(pg=pg, credentials=credentials),
     )
     monkeypatch.setattr(
         "cli.commands._update_git.snapshot_pre_activation_data", lambda **_kwargs: snapshot
     )
     monkeypatch.setattr("services.backup.activation_snapshot", lambda _operation_id: None)
-    monkeypatch.setattr(activation, "_read_pg_state", activation._shadow_readiness)
+    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
+    monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
@@ -41,14 +44,8 @@ def test_activate_persists_snapshot_before_wal_pending(
     assert record is not None
     assert record.phase == "wal_config_pending"
     assert record.pre_activation_snapshot == str(snapshot)
-    assert record.pre_activation_pg_settings == {
-        "archive_mode": "off",
-        "archive_command": "",
-        "archive_timeout": "0",
-        "wal_compression": "off",
-        "system_identifier": "42",
-        "direct_db_url": "dbname=ava",
-    }
+    assert record.pre_activation_pg_settings == pg
+    assert record.pre_activation_credential_evidence == credentials
 
 
 def test_activate_resume_never_repeats_snapshot(
@@ -60,6 +57,7 @@ def test_activate_resume_never_repeats_snapshot(
             "wal_config_pending",
             pre_activation_snapshot="/verified.dump.enc",
             pre_activation_pg_settings={"archive_mode": "off"},
+            pre_activation_credential_evidence={"viewer": "separate"},
         ),
     )
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
@@ -81,6 +79,7 @@ def test_rollback_preserves_snapshot_and_is_idempotent(
         "wal_config_pending",
         pre_activation_snapshot="/verified.dump.enc",
         pre_activation_pg_settings={"archive_mode": "off"},
+        pre_activation_credential_evidence={"viewer": "separate"},
     )
     write_record(tmp_path, record)
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
@@ -121,6 +120,7 @@ def test_concurrent_rollback_persists_error_and_preserves_phase(
         "wal_config_pending",
         pre_activation_snapshot="/verified.dump.enc",
         pre_activation_pg_settings={"archive_mode": "off"},
+        pre_activation_credential_evidence={"viewer": "separate"},
     )
     write_record(tmp_path, record)
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
@@ -165,13 +165,16 @@ def test_release_failure_does_not_roll_back_durable_phase(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     snapshot = tmp_path / "verified.dump.enc"
+    pg = {"archive_mode": "off", "direct_db_url": "dbname=ava"}
+    credentials = {"viewer": "separate"}
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(
         activation,
         "_shadow_readiness",
-        lambda: {"archive_mode": "off", "direct_db_url": "dbname=ava"},
+        lambda: activation.ShadowReadiness(pg=pg, credentials=credentials),
     )
-    monkeypatch.setattr(activation, "_read_pg_state", activation._shadow_readiness)
+    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
+    monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
     monkeypatch.setattr("services.backup.activation_snapshot", lambda _operation_id: None)
     monkeypatch.setattr(
@@ -189,3 +192,31 @@ def test_release_failure_does_not_roll_back_durable_phase(
     assert record.phase == "wal_config_pending"
     assert record.pre_activation_snapshot == str(snapshot)
     assert record.error == "RuntimeError"
+
+
+def test_credential_evidence_changes_fail_independently_of_pg_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pg = {"archive_mode": "off", "direct_db_url": "dbname=ava"}
+    record = ActivationRecord.start(operation_id="op-1", origin="cli").advance(
+        "snapshot_pending",
+        pre_activation_pg_settings=pg,
+        pre_activation_credential_evidence={"viewer_client_email": "old@example.test"},
+    )
+    write_record(tmp_path, record)
+    monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
+    monkeypatch.setattr(
+        activation,
+        "_validate_secrets",
+        lambda: {"viewer_client_email": "new@example.test"},
+    )
+    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
+    monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
+
+    assert activation.cmd_pitr_activate(origin="cli") == 1
+    failed = load_record(tmp_path)
+    assert failed is not None
+    assert failed.phase == "snapshot_pending"
+    assert failed.pre_activation_pg_settings == pg
+    assert failed.error == "RuntimeError"

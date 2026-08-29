@@ -15,6 +15,7 @@ def test_activation_record_keeps_original_started_at_across_resume(tmp_path: Pat
         "snapshot_verified",
         pre_activation_snapshot="/backup.enc",
         pre_activation_pg_settings={"archive_mode": "off"},
+        pre_activation_credential_evidence={"viewer": "separate"},
     )
     write_record(tmp_path, resumed)
 
