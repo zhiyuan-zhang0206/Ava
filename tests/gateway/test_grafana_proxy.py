@@ -214,6 +214,43 @@ def test_proxy_rejects_traversal(
     assert resp.status_code == 400
 
 
+def test_proxy_cookie_post_from_gateway_origin_passes(
+    grafana_server: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end guard for the reported 403: a browser session (cookie)
+    POSTing Grafana's datasource query from the gateway's own origin — the
+    page is served at AVA_GATEWAY_URL — must reach the proxy, not be rejected
+    by the exact-origin check. The derived allowlist used to carry the
+    frontend port on the gateway host, so the gateway's own origin never
+    matched and every same-origin data POST died with 403."""
+    _enable(monkeypatch, grafana_server)
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:3100",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "http://100.103.96.72:8000",
+    )
+    body = {"queries": [{"refId": "A"}]}
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"password": _SECRET})
+        assert login.status_code == 200
+        resp = client.post(
+            "/grafana/api/ds/query",
+            json=body,
+            headers={"Origin": "http://100.103.96.72:8000"},
+        )
+
+    assert resp.status_code == 200
+    assert json.loads(resp.json()["echo"]) == body
+
+
 def test_proxy_requires_auth(grafana_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
     """The proxy is auth-gated like every other API route: no credentials ->
     401; a valid bearer passes the middleware (404 here because the proxy is
