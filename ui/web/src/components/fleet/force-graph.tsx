@@ -8,7 +8,7 @@
 // visual difference between the two views is node shape — "circle" for agents,
 // "square" for tasks — everything else is this one component.
 //
-// Display data (status color, score, badge) is always read from the latest
+// Display data (status color, score, ghost flag) is always read from the latest
 // props on render — the simulation only owns positions, so live SSE updates
 // recolor/resize nodes in place without disturbing the layout.
 
@@ -35,8 +35,9 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout";
 // `score` is the node-size driver, normalized against the graph's max so the
 // band always spreads across the panel (agents: recent-work score; tasks:
 // uniform — every task node passes score 0 per user ruling 2026-08-09 #1070,
-// so the band collapses to the minimum radius). `badge` is the needs-you
-// overlay (tasks only). `dashed` marks fork lineage edges in the agent graph.
+// so the band collapses to the minimum radius). `ghost` marks structurally
+// required hidden parents (tasks only) — rendered dimmed with a dashed
+// outline. `dashed` marks fork lineage edges in the agent graph.
 
 export interface ForceGraphNode {
   readonly id: number;
@@ -47,8 +48,10 @@ export interface ForceGraphNode {
   /** Node-size driver; normalized against the graph max (0 → min size). */
   readonly score: number;
   readonly pulse?: boolean;
-  /** Needs-you overlay badge (count + priority tone class). */
-  readonly badge?: { count: number; tone: string } | null;
+  /** Structural ghost node: a hidden parent kept on the canvas to connect
+      the tree (e.g. a done parent whose child is still visible). Rendered
+      dimmed with a dashed outline. */
+  readonly ghost?: boolean;
   /** Native SVG hover title — full detail without cluttering the node. */
   readonly nodeTitle?: string | null;
 }
@@ -58,9 +61,9 @@ export interface ForceGraphNode {
  * a node (no delay). Replaces the native SVG <title>, whose appearance the
  * browser defers (typically ~0.5–1s) — the perceived "hover lag" of the old
  * tooltip. The card must return content for every node it is offered (null
- * leaves the node with no hover surface); it is positioned beside the cursor
- * and flips to stay inside the canvas. Views without a card keep the native
- * title as their fallback.
+ * leaves the node with no hover surface); it is anchored statically to the
+ * hovered node's on-screen box (no cursor following) and flips to stay inside
+ * the canvas. Views without a card keep the native title as their fallback.
  */
 export type HoverCard = (node: ForceGraphNode) => ReactNode | null;
 
@@ -251,10 +254,23 @@ export const ForceGraph = memo(function ForceGraph({
   );
   const { positions, layout } = useForceLayout(simNodes, simLinks, params);
 
-  const [hovered, setHovered] = useState<{ id: number; x: number; y: number } | null>(null);
-  // Throttle onMouseMove → React setState to ~20 Hz so rapid cursor movement
-  // doesn't trigger per-pixel re-renders just for hover opacity.
-  const hoverThrottleRef = useRef(0);
+  // Hover anchor: the node id plus the node's on-screen box captured at
+  // mouseenter. The card is pinned there for the whole hover — it never
+  // follows the cursor (user ruling 2026-08-29) — and clears on mouseleave.
+  // x/y anchor the card beside the node's top-right corner; flipX is the
+  // node's LEFT edge — the flip baseline (flipping off the right edge would
+  // park the card on top of the hovered node, QA #990); h is the node box
+  // height (the vertical fallback's below-placement anchor).
+  const [hovered, setHovered] = useState<{ id: number; x: number; y: number; flipX: number; h: number } | null>(null);
+
+  // Cap-state interactivity: when the card's height is capped it becomes
+  // scrollable, and for the scroll to be reachable the card must accept the
+  // pointer (pointer-events-auto) and survive the pointer crossing the gap
+  // between node and card. `cardScrollable` mirrors the style the placement
+  // effect writes; `hideTimerRef` is the grace period that covers the gap
+  // crossing (QA #990 delta2: the capped content had no user path).
+  const [cardScrollable, setCardScrollable] = useState(false);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // The instant hover card. Content is computed only for the hovered node
   // (never per node per layout tick); when the view supplies no card the
@@ -265,25 +281,89 @@ export const ForceGraph = memo(function ForceGraph({
     return node ? hoverCard(node) : null;
   }, [hovered, hoverCard, nodeById]);
 
-  // Card placement: anchored at the cursor (14px gap), flipped to the cursor's
-  // other side when it would clip the canvas edge. Done in a layout effect
-  // with direct style writes — before paint, no extra render per mousemove.
+  // Card placement, tried in order until one fits WITHOUT clamping (the card
+  // must never cover the hovered node — QA #990): beside the node (right
+  // preferred, then left, anchored at the node's box with a 14px gap), then
+  // above / below the node centered on its horizontal center (narrow
+  // canvases, mobile). When the card is taller than BOTH vertical sides (a
+  // long card on a short canvas), it pins to the roomier side and its height
+  // is capped so it still clears the node — the content scrolls. Done in a
+  // layout effect with direct style writes — before paint, and never re-run
+  // while the cursor moves (the anchor is static).
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hoverCardRef = useRef<HTMLDivElement | null>(null);
+  // Cancel a pending grace hide if the whole graph unmounts mid-hover.
+  useEffect(() => () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  }, []);
+
   useLayoutEffect(() => {
+    if (!hovered) {
+      // No hover — cancel any pending grace hide and clear the scroll flag
+      // so a fresh hover starts from the non-scrollable state.
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+      setCardScrollable(false);
+      return;
+    }
     const card = hoverCardRef.current;
     const container = containerRef.current;
-    if (!card || !container || !hovered) return;
+    if (!card || !container) return;
     const rect = container.getBoundingClientRect();
     const cardW = card.offsetWidth;
     const cardH = card.offsetHeight;
     const gap = 14;
-    const x = hovered.x - rect.left;
-    const y = hovered.y - rect.top;
-    let left = x + gap;
-    let top = y + gap;
-    if (left + cardW > rect.width - 4) left = x - gap - cardW;
-    if (top + cardH > rect.height - 4) top = y - gap - cardH;
+    const maxX = rect.width - 4;
+    const maxY = rect.height - 4;
+    const x = hovered.x - rect.left; // node's right edge
+    const y = hovered.y - rect.top; // node's top edge
+    const nodeLeft = hovered.flipX - rect.left;
+    const nodeBottom = y + hovered.h;
+
+    // A previous vertical placement may have capped the card's height — clear
+    // it so this run measures the uncapped card.
+    card.style.maxHeight = "";
+    card.style.overflowY = "";
+    setCardScrollable(false);
+
+    let left: number;
+    let top: number;
+    const fitsRight = x + gap + cardW <= maxX;
+    // Horizontal flip: anchor the card's RIGHT edge at the node's LEFT edge —
+    // the card ends up entirely on the node's other side.
+    const fitsLeft = nodeLeft - gap - cardW >= 4;
+    if (fitsRight || fitsLeft) {
+      left = fitsRight ? x + gap : nodeLeft - gap - cardW;
+      top = y + gap;
+      if (top + cardH > maxY) top = y - gap - cardH; // vertical flip beside
+    } else {
+      // Neither horizontal side fits (mid-band node on a narrow canvas):
+      // place the card above the node, else below, horizontally centered on
+      // the node (clamped into the canvas).
+      left = Math.max(4, Math.min((nodeLeft + x) / 2 - cardW / 2, maxX - cardW));
+      const fitsAbove = y - gap - cardH >= 4;
+      const fitsBelow = nodeBottom + gap + cardH <= maxY;
+      if (fitsAbove || fitsBelow) {
+        top = fitsAbove ? y - gap - cardH : nodeBottom + gap;
+      } else {
+        // Taller than the free vertical space: pin to the roomier side and
+        // cap the card's height there so it clears the node; the card body
+        // scrolls (style set below).
+        const aboveSpace = y - gap - 4;
+        const belowSpace = maxY - nodeBottom - gap;
+        if (aboveSpace >= belowSpace) {
+          top = 4;
+          card.style.maxHeight = `${aboveSpace}px`;
+        } else {
+          top = nodeBottom + gap;
+          card.style.maxHeight = `${belowSpace}px`;
+        }
+        card.style.overflowY = "auto";
+        setCardScrollable(true);
+      }
+    }
     card.style.left = `${Math.max(4, left)}px`;
     card.style.top = `${Math.max(4, top)}px`;
   }, [hovered]);
@@ -564,17 +644,20 @@ export const ForceGraph = memo(function ForceGraph({
               const r = radiusOf(n.score, maxScore, params.nodeSizeMin, params.nodeSizeMax);
               const isHovered = hovered?.id === n.id;
               const isRinged = selectedId === n.id;
+              const isGhost = n.ghost === true;
               const fill = statusText[n.status] ?? "text-slate-400";
               const showLabel = transform.k >= LABEL_MIN_ZOOM;
               const labelLines = showLabel && n.label ? wrapLabel(n.label, r) : [];
               const totalTextLines = 1 + labelLines.length;
               const firstTextLineY = -((totalTextLines - 1) * LABEL_LINE_HEIGHT) / 2;
-              const badgeR = Math.max(5, r * 0.4);
               return (
                 <g
                   key={n.id}
                   transform={`translate(${p.x},${p.y})`}
-                  className="cursor-pointer"
+                  // Ghost nodes (structurally required hidden parents) render
+                  // dimmed until hovered, so the tree stays readable while the
+                  // real nodes keep full contrast.
+                  className={cn("cursor-pointer", isGhost && !isHovered && "opacity-40")}
                   onPointerDown={(ev) => {
                     // Prevent d3-zoom from capturing the pointer; a flicker
                     // occurs when d3-zoom starts a drag gesture on a node
@@ -594,14 +677,41 @@ export const ForceGraph = memo(function ForceGraph({
                     ev.stopPropagation();
                     onOpen(n.id);
                   }}
-                  onMouseEnter={(ev) => setHovered({ id: n.id, x: ev.clientX, y: ev.clientY })}
-                  onMouseMove={(ev) => {
-                    const now = Date.now();
-                    if (now - hoverThrottleRef.current < 50) return;
-                    hoverThrottleRef.current = now;
-                    setHovered({ id: n.id, x: ev.clientX, y: ev.clientY });
+                  onMouseEnter={(ev) => {
+                    // A fresh hover cancels a pending grace hide from the
+                    // previous node.
+                    if (hideTimerRef.current) {
+                      clearTimeout(hideTimerRef.current);
+                      hideTimerRef.current = null;
+                    }
+                    // Static anchor: the card is pinned to the node's own
+                    // on-screen box and stays put until mouseleave — no
+                    // cursor chasing. x/y = the top-right corner (normal
+                    // side); flipX = the left edge (flip baseline).
+                    const box = ev.currentTarget.getBoundingClientRect();
+                    setHovered({ id: n.id, x: box.right, y: box.top, flipX: box.left, h: box.height });
                   }}
-                  onMouseLeave={() => setHovered((cur) => (cur?.id === n.id ? null : cur))}
+                  onMouseLeave={(ev) => {
+                    const card = hoverCardRef.current;
+                    // Cap state: the card is interactive (scrollable). If
+                    // the pointer landed inside it, the hover stays;
+                    // otherwise a short grace period covers the pointer
+                    // crossing the gap between node and card (QA #990
+                    // delta2: mouseleave unmounted the card before the
+                    // scrollable content could be reached).
+                    if (cardScrollable && card && ev.relatedTarget instanceof Node && card.contains(ev.relatedTarget)) {
+                      return;
+                    }
+                    if (cardScrollable) {
+                      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+                      hideTimerRef.current = setTimeout(
+                        () => setHovered((cur) => (cur?.id === n.id ? null : cur)),
+                        200,
+                      );
+                      return;
+                    }
+                    setHovered((cur) => (cur?.id === n.id ? null : cur));
+                  }}
                 >
                   {hoverCard == null ? (
                     <title>{n.nodeTitle ?? (n.label ? `${n.label} (#${n.id})` : `#${n.id}`)}</title>
@@ -640,6 +750,7 @@ export const ForceGraph = memo(function ForceGraph({
                       fill="currentColor"
                       stroke="var(--background)"
                       strokeWidth={1.5}
+                      strokeDasharray={isGhost ? "3 2" : undefined}
                       opacity={isHovered ? 1 : 0.92}
                     />
                   ) : (
@@ -653,6 +764,7 @@ export const ForceGraph = memo(function ForceGraph({
                       fill="currentColor"
                       stroke="var(--background)"
                       strokeWidth={1.5}
+                      strokeDasharray={isGhost ? "3 2" : undefined}
                       opacity={isHovered ? 1 : 0.92}
                     />
                   )}
@@ -675,28 +787,6 @@ export const ForceGraph = memo(function ForceGraph({
                         </tspan>
                       ))}
                     </text>
-                  ) : null}
-                  {/* Needs-you badge — pending require_response notices on this
-                      node's owner, colored by top priority (tasks only). */}
-                  {n.badge != null && n.badge.count > 0 ? (
-                    <g aria-label={`${n.badge.count} waiting on you`}>
-                      <circle
-                        cx={r - 1}
-                        cy={-(r - 1)}
-                        r={badgeR}
-                        className={n.badge.tone}
-                        style={{ fill: "currentColor" }}
-                      />
-                      <text
-                        x={r - 1}
-                        y={-(r - 1)}
-                        textAnchor="middle"
-                        dy={3}
-                        className="fill-white text-[9px] font-bold tabular-nums"
-                      >
-                        {n.badge.count}
-                      </text>
-                    </g>
                   ) : null}
                 </g>
               );
@@ -723,15 +813,35 @@ export const ForceGraph = memo(function ForceGraph({
         </div>
       ) : null}
 
-      {/* Instant hover detail card — pointer-events-none so it never steals
-          the cursor from the nodes beneath; position is set by the layout
-          effect above (flip-at-edge, before paint). */}
+      {/* Instant hover detail card — pointer-events-none in the normal
+          states so it never steals the cursor from the nodes beneath; in the
+          height-capped state the card body scrolls, so the card flips to
+          pointer-events-auto to stay reachable (its mouseenter cancels the
+          pending grace hide, its mouseleave unmounts). Position is set by
+          the layout effect above (flip-at-edge, before paint). */}
       {hoveredCard != null ? (
         <div
           ref={hoverCardRef}
           role="tooltip"
-          className="pointer-events-none absolute z-20"
+          className={cn("absolute z-20", cardScrollable ? "pointer-events-auto" : "pointer-events-none")}
           style={{ left: 0, top: 0 }}
+          onMouseEnter={() => {
+            // The pointer reached the card across the gap — cancel the
+            // pending grace hide so the card stays while it is scrolled.
+            if (hideTimerRef.current) {
+              clearTimeout(hideTimerRef.current);
+              hideTimerRef.current = null;
+            }
+          }}
+          onMouseLeave={() => {
+            // Leaving the card hides it (re-entering the node re-anchors on
+            // the node's own mouseenter).
+            if (hideTimerRef.current) {
+              clearTimeout(hideTimerRef.current);
+              hideTimerRef.current = null;
+            }
+            setHovered(null);
+          }}
         >
           {hoveredCard}
         </div>

@@ -721,7 +721,6 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.task_graph_mode": "graph",
   "display.task_show_done": false,
   "display.task_show_canceled": false,
-  "display.task_needs_you": false,
   // Shell tail page terminal theme: "system" | "light" | "dark".
   "display.shell_terminal_theme": "system",
   // Plugin-contributed skin, as "<plugin>/<theme>" (themePackId). null = the

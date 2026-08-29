@@ -10,22 +10,22 @@
 // ForceGraph component (force-graph.tsx) renders both, with the ONLY visual
 // difference being node shape: agents are circles, tasks are squares. Same
 // physics, same ForceControls, same zoom/pan/focus interactions, same edge
-// styling. Task-specific chrome (status filters, needs-you, Kanban toggle)
-// lives in this module's toolbar; task nodes are UNIFORM size (user ruling
-// 2026-08-09 #1070 — the old descendant-count size encoding read as a bug)
-// and the needs-you badge rides on the node like a task card badge.
+// styling. Task-specific chrome (status filters, Kanban toggle) lives in this
+// module's toolbar; task nodes are UNIFORM size (user ruling 2026-08-09
+// #1070 — the old descendant-count size encoding read as a bug). A task whose
+// parent is hidden by the status toggles keeps its parent as a dimmed ghost
+// node so the tree never dangles a fake orphan (#1848).
 
 "use client";
 
-import { CheckCheck, CircleAlert, EyeOff } from "lucide-react";
+import { CheckCheck, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { PRIORITY_BG, PRIORITY_TEXT } from "@/lib/notices";
-import { needsYouByTask, rollupNeedsYou } from "@/lib/task-notify";
+import { PRIORITY_BG } from "@/lib/notices";
 import { formatRelative, formatUptime } from "@/lib/time";
-import type { AgentRow, TaskRow } from "@/lib/types";
+import type { TaskRow } from "@/lib/types";
 import { useTasks } from "@/lib/use-tasks";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
@@ -47,7 +47,9 @@ import { TaskKanban } from "./task-kanban";
 // regular task): it gets a dedicated color so the root stands apart from every
 // status-colored node in the graph — status colors have no meaning for it.
 const STATUS_FILL: Record<string, string> = {
-  in_progress: "text-sky-500",
+  // The old 'open' color — 'open' was dropped (tasks are born in_progress)
+  // and the graph no longer separates the two shades (user ruling 2026-08-29).
+  in_progress: "text-slate-400",
   done: "text-emerald-500",
   cancelled: "text-destructive",
   ongoing: "text-violet-500",
@@ -64,8 +66,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 // ── Hover detail card ──
 //
-// The instant, cursor-following replacement for the old native SVG <title>
-// (whose appearance the browser deferred ~0.5–1s — the perceived hover lag).
+// The instant, statically anchored replacement for the old native SVG <title>
+// (whose appearance the browser deferred ~0.5–1s — the perceived hover lag):
+// it appears on mouseenter pinned to the node's box and hides on mouseleave.
 // Renders the task like a real detail page: every registry field the wire
 // carries, grouped under labeled rows, with empty states for unset fields
 // instead of a bare text dump. Rendered through the shared ForceGraph's
@@ -244,38 +247,12 @@ function StaleBadge({ show }: { show: boolean }) {
   );
 }
 
-// The "Needs you" filter toggle. Inactive shows the board-wide pending
-// needs-you total (the aggregate count — allowed here: the board is an
-// explicitly opened pull surface, not an ambient one); active narrows the
-// board to subtrees waiting on the user.
-function NeedsYouToggle({
-  active,
-  onClick,
-  total,
-}: {
-  active: boolean;
-  onClick: () => void;
-  total: number;
-}) {
-  return (
-    <StatusToggleButton
-      active={active}
-      onClick={onClick}
-      label="Needs you"
-      hiddenCount={total}
-      icon={<CircleAlert className="size-3" />}
-    />
-  );
-}
-
 export function TaskGraph({
-  agents,
   selectedTaskId,
   onSelectTask,
   selectedAgentId,
   onSelectAgent,
 }: {
-  agents: readonly AgentRow[];
   selectedTaskId: number | null;
   onSelectTask: (id: number | null) => void;
   selectedAgentId: number | null;
@@ -295,30 +272,15 @@ export function TaskGraph({
   const setShowDone = (v: boolean) => setSetting("display.task_show_done", v);
   const showCanceled = settings["display.task_show_canceled"] === true;
   const setShowCanceled = (v: boolean) => setSetting("display.task_show_canceled", v);
-  const needsOnly = settings["display.task_needs_you"] === true;
-  const setNeedsOnly = (v: boolean) => setSetting("display.task_needs_you", v);
-
-  // Needs-you join (task-notify.ts): per-task pending require_response load
-  // from the owning agents, plus the subtree rollup that keeps a manager task
-  // visible while any descendant waits on the user.
-  const needsYou = useMemo(() => needsYouByTask(tasks, agents), [tasks, agents]);
-  const subtreeNeeds = useMemo(() => rollupNeedsYou(tasks, needsYou), [tasks, needsYou]);
-  const needsYouTotal = useMemo(() => {
-    let n = 0;
-    for (const ny of needsYou.values()) n += ny.count;
-    return n;
-  }, [needsYou]);
-
-  // Filter tasks based on toggles.
+  // Filter tasks based on the Done/Canceled toggles.
   const filteredTasks = useMemo(
     () =>
       tasks.filter(
         (t) =>
           (showDone || t.status !== "done") &&
-          (showCanceled || t.status !== "cancelled") &&
-          (!needsOnly || (subtreeNeeds.get(t.id) ?? 0) > 0),
+          (showCanceled || t.status !== "cancelled"),
       ),
-    [tasks, showDone, showCanceled, needsOnly, subtreeNeeds],
+    [tasks, showDone, showCanceled],
   );
   const hiddenDoneCount = useMemo(() => tasks.filter((t) => t.status === "done").length, [tasks]);
   const hiddenCanceledCount = useMemo(() => tasks.filter((t) => t.status === "cancelled").length, [tasks]);
@@ -360,14 +322,44 @@ export function TaskGraph({
     [filteredTasks],
   );
 
-  // Graph node/edge set: visible subtasks PLUS every parent-less task (the
-  // system root) — top-level tasks hang under the root node in the graph
-  // (user ruling 2026-08-06: show the root). The root is a structural anchor:
-  // it joins the graph even when its own status would be hidden by the
-  // toggles (the kanban keeps hiding it — this set is graph-only).
+  // Structural ghost parents: a visible task whose parent was filtered out by
+  // the status toggles must not dangle as a fake orphan (#1848: parent done
+  // while Done is toggled off). Hidden ancestors of visible tasks join the
+  // graph as dimmed ghost nodes so the tree stays connected — graph-only
+  // (the kanban is a flat list with no parent edges).
+  const ghostTasks = useMemo(() => {
+    if (subtasks.length === 0) return [] as TaskRow[];
+    const visible = new Set(subtasks.map((t) => t.id));
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const ghosts = new Map<number, TaskRow>();
+    for (const t of subtasks) {
+      let cur = t.parent_id == null ? undefined : byId.get(t.parent_id);
+      // Walk up while the parent exists, is hidden, and is not the root (the
+      // root is always rendered and parent-less) — adding each hidden
+      // ancestor once.
+      while (
+        cur?.parent_id != null &&
+        !visible.has(cur.id) &&
+        !ghosts.has(cur.id)
+      ) {
+        ghosts.set(cur.id, cur);
+        cur = byId.get(cur.parent_id);
+      }
+    }
+    return [...ghosts.values()];
+  }, [subtasks, tasks]);
+
+  const ghostIds = useMemo(() => new Set(ghostTasks.map((t) => t.id)), [ghostTasks]);
+
+  // Graph node/edge set: visible subtasks PLUS their structural ghost parents
+  // PLUS every parent-less task (the system root) — top-level tasks hang
+  // under the root node in the graph (user ruling 2026-08-06: show the root).
+  // The root is a structural anchor: it joins the graph even when its own
+  // status would be hidden by the toggles (the kanban keeps hiding it — this
+  // set is graph-only).
   const graphTasks = useMemo(
-    () => [...subtasks, ...tasks.filter((t) => t.parent_id == null)],
-    [subtasks, tasks],
+    () => [...subtasks, ...ghostTasks, ...tasks.filter((t) => t.parent_id == null)],
+    [subtasks, ghostTasks, tasks],
   );
 
   // Bidirectional sync: when an agent is selected externally (from the
@@ -403,20 +395,18 @@ export function TaskGraph({
   // Adapt the task list to the shared node/edge model (square nodes).
   const graphNodes = useMemo<ForceGraphNode[]>(
     () =>
-      graphTasks.map((t) => {
-        const ny = needsYou.get(t.id);
-        return {
-          id: t.id,
-          label: t.title,
-          status: t.status,
-          // Uniform node size (user ruling 2026-08-09 #1070): every task
-          // node sits at the minimum radius — subtree size no longer drives
-          // the square. The Agent Graph keeps its score-driven sizing.
-          score: 0,
-          badge: ny != null ? { count: ny.count, tone: PRIORITY_TEXT[ny.top] } : null,
-        };
-      }),
-    [graphTasks, needsYou],
+      graphTasks.map((t) => ({
+        id: t.id,
+        label: t.title,
+        status: t.status,
+        // Uniform node size (user ruling 2026-08-09 #1070): every task
+        // node sits at the minimum radius — subtree size no longer drives
+        // the square. The Agent Graph keeps its score-driven sizing.
+        score: 0,
+        // Hidden-by-toggle structural parents render dimmed (see ghostTasks).
+        ghost: ghostIds.has(t.id),
+      })),
+    [graphTasks, ghostIds],
   );
   // Parent → child edges; the shared layout drops edges whose endpoints are
   // not both visible (a hidden parent leaves its children as isolates).
@@ -447,41 +437,6 @@ export function TaskGraph({
     );
   }
   if (filteredTasks.length === 0) {
-    // With the needs-you filter on, an empty board is the healthy steady state
-    // — keep the FULL filter toolbar reachable: the needs-you toggle to turn
-    // the filter back off, and the Done/Canceled toggles because a pending
-    // decision can sit on a status-hidden task (needsYouTotal > 0 here means
-    // exactly that — every needy task was excluded by the status filters).
-    if (needsOnly) {
-      return (
-        <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
-          <div className={cn("shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1.5", FLEX)}>
-            <div className={cn("ml-auto items-center gap-1", FLEX)}>
-              <NeedsYouToggle active onClick={() => setNeedsOnly(false)} total={needsYouTotal} />
-              <StatusToggleButton
-                active={showDone}
-                onClick={() => setShowDone(!showDone)}
-                label="Done"
-                hiddenCount={showDone ? 0 : hiddenDoneCount}
-                icon={<CheckCheck className="size-3" />}
-              />
-              <StatusToggleButton
-                active={showCanceled}
-                onClick={() => setShowCanceled(!showCanceled)}
-                label="Canceled"
-                hiddenCount={showCanceled ? 0 : hiddenCanceledCount}
-                icon={<EyeOff className="size-3" />}
-              />
-            </div>
-          </div>
-          <div className={cn("items-center justify-center px-4 text-center text-xs text-muted-foreground", FLEX, FLEX_1)}>
-            {needsYouTotal > 0
-              ? "Pending decisions sit on Done/Canceled tasks — use the toggles above to reveal them."
-              : "Nothing needs you right now."}
-          </div>
-        </div>
-      );
-    }
     return (
       <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
         No tasks yet.
@@ -510,11 +465,6 @@ export function TaskGraph({
           </span>
           <StaleBadge show={error} />
           <div className={cn("ml-auto items-center gap-1", FLEX)}>
-            <NeedsYouToggle
-              active={needsOnly}
-              onClick={() => setNeedsOnly(!needsOnly)}
-              total={needsYouTotal}
-            />
             <StatusToggleButton
               active={showDone}
               onClick={() => setShowDone(!showDone)}
@@ -535,7 +485,6 @@ export function TaskGraph({
           tasks={filteredTasks}
           statusFill={STATUS_FILL}
           statusLabel={STATUS_LABEL}
-          needsYou={needsYou}
           selectedTaskId={selectedTaskId}
           onSelectTask={handleSelectTask}
           selectedAgentId={selectedAgentId}
@@ -565,11 +514,6 @@ export function TaskGraph({
         </span>
         <StaleBadge show={error} />
         <div className={cn("ml-auto items-center gap-1", FLEX)}>
-          <NeedsYouToggle
-            active={needsOnly}
-            onClick={() => setNeedsOnly(!needsOnly)}
-            total={needsYouTotal}
-          />
           <StatusToggleButton
             active={showDone}
             onClick={() => setShowDone(!showDone)}
@@ -610,7 +554,6 @@ export function TaskGraph({
                   </span>
                 ))}
               </div>
-              <p>Uniform node size</p>
             </div>
           }
         />
