@@ -134,6 +134,8 @@ def _write_sandbox_config(pgdata: Path, socket_dir: Path, port: int, run_root: P
         "ssl": "off",
         "logging_collector": "off",
         "shared_preload_libraries": "",
+        "session_preload_libraries": "",
+        "local_preload_libraries": "",
         "archive_mode": "off",
         "archive_command": "",
         "primary_conninfo": "",

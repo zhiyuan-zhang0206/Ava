@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -50,10 +51,27 @@ def test_wal_header_binds_system_timeline_segment_and_filename(tmp_path: Path) -
 
 
 def test_timeline_history_requires_canonical_ancestry(tmp_path: Path) -> None:
+    candidate = replace(
+        _candidate(),
+        end_lsn="0/3000000",
+        wal_ranges=(
+            WalRange(1, "0/1000000", "0/2000000"),
+            WalRange(2, "0/2000000", "0/3000000"),
+        ),
+    )
     path = tmp_path / "00000002.history"
     path.write_text("1\t0/2000000\tparent\n")
-    validate_wal_file(path, _candidate())
+    validate_wal_file(path, candidate)
 
     path.write_text("2\t0/2000000\tself\n")
     with pytest.raises(ValueError, match="ancestry"):
+        validate_wal_file(path, candidate)
+
+
+def test_zero_header_with_nonzero_payload_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "000000010000000000000001"
+    value = bytearray(16 * 1024 * 1024)
+    value[40] = 1
+    path.write_bytes(value)
+    with pytest.raises(ValueError, match="magic"):
         validate_wal_file(path, _candidate())
