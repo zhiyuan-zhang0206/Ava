@@ -74,8 +74,9 @@ PORT_OFFSETS: dict[str, int] = {
     # existing cluster records retain their assigned ports.
     "pg_backup": 21,
     "pitr_uploader": 22,
+    "pitr_base_backup": 23,
 }
-BLOCK_SIZE = 23
+BLOCK_SIZE = 24
 BLOCK_START = 18000
 BLOCK_MAX = 20000
 
@@ -132,4 +133,5 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     # the vacated block offset above.
     "pg_backup": 8116,
     "pitr_uploader": 8117,
+    "pitr_base_backup": 8118,
 }

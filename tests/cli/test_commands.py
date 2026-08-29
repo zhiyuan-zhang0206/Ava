@@ -595,6 +595,7 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
         # — dropped both ways, like browser.
         "agent-host",
         "pitr-uploader",
+        "pitr-base-candidate",
     }
     assert "ops" not in sessions
     assert "browser" not in sessions
@@ -651,6 +652,7 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
         "browser-mcp",
         "agent-host",
         "pitr-uploader",
+        "pitr-base-candidate",
     }
     assert "ops" in sessions  # the load-bearing addition vs gateway-only
     assert "gateway" in sessions

@@ -372,6 +372,18 @@ def build_services() -> tuple[ServiceSpec, ...]:
             ),
             healthcheck_module="services.healthchecks.pitr_uploader",
         ),
+        ServiceSpec(
+            session="pitr-base-candidate",
+            cmd=".venv/bin/python -m services.pitr.base_scheduler_daemon",
+            capabilities=_GATEWAY,
+            requires_db=True,
+            pidfile=settings.services.pitr_base_backup_pidfile,
+            curl_url=_hz("pitr_base_backup"),
+            identity_probe=daemon_identity(
+                "pitr_base_backup", settings.services.pitr_base_backup_pidfile
+            ),
+            healthcheck_module="services.healthchecks.pitr_base_backup",
+        ),
         # One watchdog PER CAPABILITY (not a role-union daemon): two co-located
         # units on one host would otherwise collide on a single host-singleton
         # watchdog session, leaving one capability's services unrevived. The
@@ -711,6 +723,8 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)"
     if session == "pitr-uploader" and not settings.physical_backup.pitr_enabled:
         return "disabled (AVA_PITR_ENABLED off)"
+    if session == "pitr-base-candidate" and not settings.physical_backup.pitr_base_backup_enabled:
+        return "disabled (AVA_PITR_BASE_BACKUP_ENABLED off)"
     if session == "im-bridge" and not settings.services.im_bridge_enabled:
         return "disabled (AVA_IM_BRIDGE_ENABLED off)"
     if session == "agent-host" and runner_mode() != "hosted":
