@@ -67,6 +67,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import shared.db
+from gateway import _auth401_log as _auth401_log_module
 from gateway import (
     _idempotency,
     _latency,
@@ -340,6 +341,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # accumulator every 60s and emit one aggregate event per route.
     app.state.latency_flusher = asyncio.create_task(_latency.latency_flusher())
 
+    # Auth-401 count metering (Task #1712): one aggregate event per 60s
+    # window, restoring the central counter the per-request DEBUG/throttled
+    # log (PR #665) removed from observability.
+    app.state.auth401_flusher = asyncio.create_task(_auth401_log_module.auth401_flusher())
+
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
     # lifespan — StreamableHTTPSessionManager.run() can only be entered once
     # per instance, and the tools close over this pool. Off (the default):
@@ -363,6 +369,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.latency_flusher.cancel()
         with suppress(asyncio.CancelledError):
             await app.state.latency_flusher
+        app.state.auth401_flusher.cancel()
+        with suppress(asyncio.CancelledError):
+            await app.state.auth401_flusher
         await app.state.schedule_manager.stop()
         app.state.db_pool.close()
         app.state.control_db_pool.close()
