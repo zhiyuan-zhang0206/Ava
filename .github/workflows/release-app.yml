@@ -57,14 +57,23 @@ jobs:
           python3 - <<'PY'
           import os, pathlib, re, tomllib
 
+          cargo = tomllib.loads(pathlib.Path("ui/app/src-tauri/Cargo.toml").read_text())
+          cargo_version = cargo["package"]["version"]
           if os.environ["EVENT_NAME"] == "push":
               match = re.fullmatch(r"app-v(\d+\.\d+\.\d+)", os.environ["REF_NAME"])
               if match is None:
                   raise SystemExit(f"invalid app release tag: {os.environ['REF_NAME']}")
               version = match.group(1)
+              # The tag and Cargo.toml are both version sources; a release tag
+              # that lags the crate version would ship a downgraded package, so
+              # they must agree exactly.
+              if version != cargo_version:
+                  raise SystemExit(
+                      f"tag version {version} != Cargo.toml version {cargo_version}; "
+                      "bump ui/app/src-tauri/Cargo.toml to match the tag before releasing"
+                  )
           else:
-              cargo = tomllib.loads(pathlib.Path("ui/app/src-tauri/Cargo.toml").read_text())
-              version = cargo["package"]["version"]
+              version = cargo_version
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={version}\n")
           PY
