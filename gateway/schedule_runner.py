@@ -276,13 +276,17 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
 def _record_script_exit(schedule_id: int, run_id: int | None, exc: SystemExit) -> int:
     """Record a .py script's deliberate sys.exit() like a command's exit code
     (QA P3-3 — it must not leave the run row in-progress forever). A None code
-    is 0; a non-int code (a message string) is 1, mirroring the interpreter."""
-    code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    is 0; a non-int code (a message string) is 1. int() normalizes bools (the
+    interpreter treats them as exit codes: True -> 1, False -> 0); a non-int
+    code is a message the interpreter would print to stderr, so it rides the
+    note instead of being swallowed (QA N1)."""
+    code = int(exc.code) if isinstance(exc.code, int) else (0 if exc.code is None else 1)
     if code == 0:
         _finish_completed(schedule_id, run_id)
     else:
-        _record_error(schedule_id, f"script exited {code}")
-        _record_run_end(run_id, ok=False, note=f"script exited {code}")
+        message = "" if isinstance(exc.code, int) else f": {exc.code}"
+        _record_error(schedule_id, f"script exited {code}{message}")
+        _record_run_end(run_id, ok=False, note=f"script exited {code}{message}")
     return code
 
 

@@ -178,12 +178,45 @@ def test_run_records_py_sys_exit_nonzero(db_conn: psycopg.Connection, unit_home:
     assert _runs(db_conn, sid) == [(False, "script exited 3")]
 
 
-def test_run_records_py_sys_exit_message(db_conn: psycopg.Connection, unit_home: Path) -> None:
-    # sys.exit("message") exits 1, mirroring the interpreter's own behavior.
-    sid = _insert_schedule(db_conn, script="raise SystemExit('done early')\n")
+@pytest.mark.parametrize(
+    ("exit_expr", "expected_note"),
+    [
+        # A non-int code is a message the interpreter would print to stderr —
+        # it rides the run note instead of being swallowed (QA N1).
+        ("'done early'", "script exited 1: done early"),
+        ("3.7", "script exited 1: 3.7"),
+    ],
+)
+def test_run_records_py_sys_exit_message(
+    db_conn: psycopg.Connection, unit_home: Path, exit_expr: str, expected_note: str
+) -> None:
+    sid = _insert_schedule(db_conn, script=f"raise SystemExit({exit_expr})\n")
 
     assert run(sid) == 1
-    assert _runs(db_conn, sid) == [(False, "script exited 1")]
+    assert _runs(db_conn, sid) == [(False, expected_note)]
+
+
+@pytest.mark.parametrize(
+    ("exit_expr", "expected_rc", "expected_rows"),
+    [
+        # bool is an int subclass — the interpreter treats it as an exit code:
+        # True -> 1 (failure), False -> 0 (clean finish). int() normalization
+        # keeps the note wording honest ("script exited 1", not "True").
+        ("True", 1, [(False, "script exited 1")]),
+        ("False", 0, [(True, None)]),
+    ],
+)
+def test_run_records_py_sys_exit_bool(
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    exit_expr: str,
+    expected_rc: int,
+    expected_rows: list[tuple[bool | None, str | None]],
+) -> None:
+    sid = _insert_schedule(db_conn, script=f"raise SystemExit({exit_expr})\n")
+
+    assert run(sid) == expected_rc
+    assert _runs(db_conn, sid) == expected_rows
 
 
 def test_run_records_stall_timeout(
@@ -316,9 +349,9 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
 ) -> None:
     # QA P3-5: a failure writing the 'completed' status marker must not record
     # the run as 'crashed: OperationalError' — the script finished fine, only
-    # the bookkeeping lost a write. The run row reads ok=true with a note and
-    # rc stays 0, so a clean run is not counted toward the crash breaker
-    # (the manager relaunches anyway, since the completed signal is missing).
+    # the bookkeeping lost a write. The run row reads ok=true with a note;
+    # the manager still relaunches (status is not 'completed'), which is the
+    # same safe side as before, just without a false crash record.
     import gateway.schedule_runner as sr
 
     real_connect = sr.shared.db.connect
