@@ -183,8 +183,6 @@ def _recover_owned_partials(root: Path) -> None:
             if process is not None:
                 if time.time() < deadline:
                     raise BaseCandidateError(f"base candidate owner is still active for {chain_id}")
-                if pgid != pid:
-                    raise BaseCandidateError("refusing to signal an unexpected process group")
                 _stop_owned_group(process, pgid)
         else:
             raise BaseCandidateError("unknown base candidate owner state")
@@ -194,23 +192,34 @@ def _recover_owned_partials(root: Path) -> None:
 
 
 def _stop_owned_group(leader: psutil.Process, pgid: int) -> None:
-    deadline = time.monotonic() + 20
     try:
-        owned = [leader, *leader.children(recursive=True)]
-    except psutil.NoSuchProcess:
+        if os.getpgid(leader.pid) != pgid or pgid == os.getpgrp():
+            raise BaseCandidateError("refusing to signal an unowned backup process group")
+    except ProcessLookupError:
         return
-    if os.name == "nt":
-        leader.terminate()
-    else:
+    deadline = time.monotonic() + 20
+    with suppress(ProcessLookupError):
+        os.killpg(pgid, signal.SIGTERM)
+    grace_end = min(deadline, time.monotonic() + 5)
+    while _group_members(pgid) and time.monotonic() < grace_end:
+        time.sleep(0.1)
+    while _group_members(pgid) and time.monotonic() < deadline:
         with suppress(ProcessLookupError):
-            os.killpg(pgid, signal.SIGTERM)
-    _, alive = psutil.wait_procs(owned, timeout=min(5, max(0, deadline - time.monotonic())))
-    for member in alive:
-        with suppress(psutil.NoSuchProcess):
-            member.kill()
-    _, alive = psutil.wait_procs(alive, timeout=max(0, deadline - time.monotonic()))
-    if alive:
+            os.killpg(pgid, signal.SIGKILL)
+        time.sleep(0.1)
+    if _group_members(pgid):
         raise BaseCandidateError("backup process group retained live descendants")
+
+
+def _group_members(pgid: int) -> list[psutil.Process]:
+    members: list[psutil.Process] = []
+    for process in psutil.process_iter(["pid"]):
+        try:
+            if os.getpgid(process.pid) == pgid:
+                members.append(process)
+        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
+            continue
+    return members
 
 
 def _stop_process(process: subprocess.Popen[bytes]) -> None:
@@ -219,7 +228,28 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
     except psutil.NoSuchProcess:
         process.wait()
         return
-    _stop_owned_group(leader, process.pid)
+    owned: dict[tuple[int, float], psutil.Process] = {
+        (member.pid, member.create_time()): member
+        for member in [leader, *leader.children(recursive=True)]
+    }
+    for member in reversed(list(owned.values())):
+        with suppress(psutil.NoSuchProcess):
+            member.terminate()
+    deadline = time.monotonic() + 20
+    alive = list(owned.values())
+    while alive and time.monotonic() < deadline:
+        with suppress(psutil.NoSuchProcess):
+            for member in leader.children(recursive=True):
+                owned[(member.pid, member.create_time())] = member
+        _, alive = psutil.wait_procs(
+            list(owned.values()), timeout=min(0.25, max(0, deadline - time.monotonic()))
+        )
+        if time.monotonic() + 5 >= deadline:
+            for member in alive:
+                with suppress(psutil.NoSuchProcess):
+                    member.kill()
+    if alive:
+        raise BaseCandidateError("backup subprocess tree retained live descendants")
     try:
         process.wait(timeout=0)
     except subprocess.TimeoutExpired as exc:
@@ -244,7 +274,7 @@ def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: 
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=env,
-        start_new_session=os.name != "nt",
+        start_new_session=False,
     )
     while process.poll() is None:
         if stop.wait(0.25):
@@ -344,7 +374,7 @@ def _verify_candidate(path: Path, stop: StopSignal) -> None:
         [str(pg_tool("pg_verifybackup")), "--no-parse-wal", str(path)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=os.name != "nt",
+        start_new_session=False,
     )
     deadline = time.monotonic() + 6 * 3600
     while verify.poll() is None:
