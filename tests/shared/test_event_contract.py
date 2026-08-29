@@ -114,8 +114,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # respawn breaker (Task #1941) adds respawn_breaker_open, raising it to 125;
     # the gateway auth-401 aggregate (Task #1712) adds auth401_rejected,
     # raising it to 126; hook_timing (Task #1963's per-hook node attribution)
-    # raises it to 127.
-    assert len(_TELEMETRY_KINDS) == 127
+    # raises it to 127; the agent-registry max-id gauge (Task #2010) adds
+    # agent_registry, raising it to 128.
+    assert len(_TELEMETRY_KINDS) == 128
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
@@ -151,6 +152,18 @@ def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
         ("checkpoint_table_sizes", "checkpoints_live"): "gauge",
         ("checkpoint_table_sizes", "writes_live"): "gauge",
     }
+
+
+def test_agent_registry_payload_and_metric_disposition() -> None:
+    """The 60s agent-registry max-id sample is absolute state, not a sum:
+    declared as an int payload (the event contract), dispositioned as a
+    gauge (task #2010) — an int would otherwise default to a Counter and
+    accrue value on every sample."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("agent_registry") == ("max_id",)
+    assert _METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
 
 
 def test_category_for_kind() -> None:

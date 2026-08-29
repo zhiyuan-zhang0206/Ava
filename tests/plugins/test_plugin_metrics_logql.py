@@ -186,6 +186,29 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
         assert specs[name].panel == "stat"
 
 
+def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
+    """Gateway emission, Prometheus instrument, and dashboard wiring share names.
+
+    The agent-registry max-id sample (task #2010) is a unit-"1" gauge, so the
+    visible Prometheus metric carries the `_ratio` suffix the OTLP exporter
+    appends — the dashboard must query that exact name, and the growth-rate
+    panel derives from it (``deriv(...[1h]) * 86400``, agents per day)."""
+
+    from shared.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+
+    specs = {spec.name: spec for spec in _load_core()}
+    assert _METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
+    assert specs["core_agent_max_id"].query == (
+        f"ava_agent_registry_{_strip_unit_suffix('max_id')}_ratio"
+    )
+    assert specs["core_agent_max_id"].query_type == "promql"
+    assert specs["core_agent_max_id"].panel == "timeseries"
+    assert specs["core_agent_max_id_growth_rate"].query_type == "promql"
+    assert "deriv(ava_agent_registry_max_id_ratio[1h])" in (
+        specs["core_agent_max_id_growth_rate"].query
+    )
+
+
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:
     """Loki names and dashboard-wide time-range inheritance are contracts."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
