@@ -20,9 +20,51 @@ def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True, raising=False)
 
 
+_TRACE_BG_THREAD_NAMES = frozenset({"trace-arm", "trace-collector-retry"})
+
+
+def _assert_no_background_trace_threads() -> None:
+    """A background trace thread from a previous test must not be in flight —
+    a zombie arm finishing inside the next test runs whatever Traceloop.init
+    that test has installed (the #1065 delta attempt 1 flake: a second call
+    counted in test_idempotent_second_call_is_noop's lambda)."""
+    leftovers = [
+        t.name for t in threading.enumerate() if t.name in _TRACE_BG_THREAD_NAMES and t.is_alive()
+    ]
+    assert not leftovers, f"previous test leaked background thread(s): {leftovers}"
+
+
+_THREAD_DRAIN_TIMEOUT_S = 5.0
+
+
+def _drain_background_trace_threads() -> None:
+    """Join the module's background threads to death BEFORE the next test runs.
+
+    The arm thread runs the ~3s traceloop import + Traceloop.init on a daemon
+    thread; a test body that returns while it is still in flight used to leave
+    a zombie that completed inside the NEXT test and called whatever
+    Traceloop.init that test had installed — counted as a second init call
+    (the #1065 delta attempt 1 flake). The arm sets init_resolved in its
+    finally, so wait on that event first (deterministic - the event is set
+    when the arm actually finishes), then join the thread itself. Bounded:
+    a hung arm is caught by the next test's _assert_no_background_trace_threads
+    with a loud failure instead of a silent cross-test contamination.
+    """
+    retry_thread = trace_mod._state["retry_thread"]
+    if isinstance(retry_thread, threading.Thread):
+        retry_thread.join(timeout=_THREAD_DRAIN_TIMEOUT_S)
+    arm_thread = trace_mod._state["arm_thread"]
+    if isinstance(arm_thread, threading.Thread) and arm_thread.is_alive():
+        init_resolved = trace_mod._state["init_resolved"]
+        if isinstance(init_resolved, threading.Event):
+            init_resolved.wait(timeout=_THREAD_DRAIN_TIMEOUT_S)
+        arm_thread.join(timeout=_THREAD_DRAIN_TIMEOUT_S)
+
+
 @pytest.fixture(autouse=True)
 def _reset_init_flag():
     """Reset trace-init and retry-loop state between tests."""
+    _assert_no_background_trace_threads()
     gate = getattr(telemetry_otlp, "_observability_export_allowed", None)
     if gate is not None:
         gate.cache_clear()
@@ -40,12 +82,7 @@ def _reset_init_flag():
         gate.cache_clear()
     yield
     trace_mod._state["initialized"] = True
-    retry_thread = trace_mod._state["retry_thread"]
-    if isinstance(retry_thread, threading.Thread):
-        retry_thread.join(timeout=0.25)
-    arm_thread = trace_mod._state["arm_thread"]
-    if isinstance(arm_thread, threading.Thread):
-        arm_thread.join(timeout=0.25)
+    _drain_background_trace_threads()
     trace_mod._state.clear()
     trace_mod._state.update(
         initialized=False,
@@ -333,6 +370,31 @@ def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_
     assert trace_mod._state["initialized"] is True
 
 
+def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A test body that returns while the arm thread is still in flight must
+    not leave a zombie behind: its delayed Traceloop.init would then land in
+    the NEXT test's monkeypatched lambda (counted as a second init — the
+    #1065 delta attempt 1 flake). This test only has to leave one in flight;
+    the _reset_init_flag teardown has to drain it, and the setup boundary
+    check turns a leftover into a deterministic failure."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
+    _under_watermark(monkeypatch)
+
+    release = threading.Event()
+
+    def _slow_init(**_kw: object) -> None:
+        release.wait(timeout=1.0)
+
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
+
+    initialize_tracing()
+    arm_thread = trace_mod._state["arm_thread"]
+    assert isinstance(arm_thread, threading.Thread)
+    assert arm_thread.is_alive()
+    # Intentionally no _wait_init_resolved(): the fixture teardown must drain.
+
+
 def test_turn_span_waits_for_pending_arm(monkeypatch: pytest.MonkeyPatch) -> None:
     """The first-turn contract: turn_span blocks while the arm thread is
     pending and opens the root span only after the arm resolves — a span
@@ -407,6 +469,9 @@ def test_ensure_init_resolved_instant_without_arming(
         "shared.trace.endpoint_reachable",
         lambda _e: False,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
+    # Skip the daemon collector retry loop: this test asserts the instant
+    # no-wait contract, not the loop (that is the retry-loop test above).
+    monkeypatch.setattr("shared.trace._start_collector_retry", lambda: None)
 
     initialize_tracing()  # declined: collector unreachable, no arm thread
     ensure_init_resolved()  # must return at once, not hang on an unset event
@@ -1096,6 +1161,10 @@ def test_initialize_skips_when_collector_unreachable(
         "http://127.0.0.1:4318",
     )
     _under_watermark(monkeypatch)
+    # This test exercises the skip contract, not the daemon retry loop (that
+    # is test_collector_unreachable_retries_once_until_init_succeeds); without
+    # the stub the daemon retry thread (300s sleep) leaks across tests.
+    monkeypatch.setattr("shared.trace._start_collector_retry", lambda: None)
     calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
     warned: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
