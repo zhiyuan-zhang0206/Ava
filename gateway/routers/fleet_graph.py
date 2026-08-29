@@ -47,6 +47,7 @@ from gateway.schemas import (
     StatsWindowHours,
     window_delta,
 )
+from shared import telemetry
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from shared.observability import cluster_label
@@ -73,6 +74,11 @@ _FROZEN_ARCHIVE_CACHE_KEY = "fleet_graph:frozen:archive:v1"
 # cannot enter within `_ARCHIVE_FETCH_WAIT_S` serves live-only edges.
 _ARCHIVE_FETCH_LOCK = threading.Lock()
 _ARCHIVE_FETCH_WAIT_S = 3.0
+# A failed fetch writes this short-lived negative entry instead of leaving
+# the cache empty: the next minute of polls serves the last-good graph
+# without re-hammering Loki, and the first poll after the entry expires
+# retries the real fetch (self-heals once Loki recovers).
+_NEGATIVE_CACHE_TTL_SECONDS = 60
 _FROZEN_LEGACY_CACHE_KEY = "fleet_graph:frozen:legacy:v1"
 
 # Audit event names that form edges. Lineage (spawn/fork/resurrect) is
@@ -199,11 +205,20 @@ def _read_frozen_json(key: str, *, cache_name: str) -> Any | None:
         return None
 
 
-def _write_frozen_json(key: str, payload: object, *, cache_name: str) -> None:
-    """Write one frozen-source payload without making Redis route-critical."""
+def _write_frozen_json(
+    key: str,
+    payload: object,
+    *,
+    cache_name: str,
+    ttl: int = _FROZEN_CACHE_TTL_SECONDS,
+) -> None:
+    """Write one frozen-source payload without making Redis route-critical.
+
+    `ttl` defaults to the 24h frozen-source lifetime; the negative archive
+    cache (`_NEGATIVE_CACHE_TTL_SECONDS`) passes the short one."""
     try:
         with sync_redis(decode_responses=True) as redis:
-            redis.set(key, json.dumps(payload), ex=_FROZEN_CACHE_TTL_SECONDS)
+            redis.set(key, json.dumps(payload), ex=ttl)
     except Exception as exc:
         logger.debug("fleet_graph frozen {} cache write failed: {}", cache_name, exc)
 
@@ -380,51 +395,94 @@ def _fetch_archive_edges() -> tuple[list[dict[str, Any]], bool]:
     return rows, has_more
 
 
-def _read_archive_cache() -> list[dict[str, Any]] | None:
+def _read_archive_cache() -> tuple[list[dict[str, Any]], bool] | None:
+    """Cached archive rows as (rows, degraded); None on a miss or corrupt entry.
+
+    `degraded` is True for a negative-cache entry (a failed fetch absorbed
+    for `_NEGATIVE_CACHE_TTL_SECONDS`); a genuine 24h entry — even one whose
+    fetch returned zero rows — is not degraded."""
     raw = _read_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, cache_name="Loki archive")
     if raw is None:
         return None
     try:
-        return [
+        rows = [
             _edge_row(row[1], row[0], row[2], datetime.fromisoformat(row[3])) for row in raw["rows"]
         ]
     except Exception as exc:
         logger.debug("fleet_graph frozen Loki archive cache decode failed: {}", exc)
         return None
+    return rows, bool(raw.get("degraded", False))
 
 
-def _write_archive_cache(rows: list[dict[str, Any]]) -> None:
-    payload = {
+def _write_archive_cache(
+    rows: list[dict[str, Any]],
+    *,
+    degraded: bool = False,
+    ttl: int = _FROZEN_CACHE_TTL_SECONDS,
+) -> None:
+    """Persist archive rows; `degraded=True` marks a short negative entry."""
+    payload: dict[str, object] = {
         "rows": [
             [row["target_agent_id"], row["agent_id"], row["event_name"], row["ts"].isoformat()]
             for row in rows
         ],
     }
-    _write_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, payload, cache_name="Loki archive")
+    if degraded:
+        payload["degraded"] = True
+    _write_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, payload, cache_name="Loki archive", ttl=ttl)
 
 
-def _cached_archive_edges() -> list[dict[str, Any]]:
+def _emit_archive_degraded(route: str, reason: str) -> None:
+    """One telemetry row per degraded frozen-archive read.
+
+    The routes answer fast when degraded (fail-open), so slow-route latency
+    alerts no longer see the stall — this event keeps the degradation
+    attributable in the stream instead (2026-08-29/30 incident, task #2004)."""
+    telemetry.emit(
+        "telemetry",
+        "archive_fetch_degraded",
+        level="warning",
+        attributes={"route": route, "reason": reason},
+    )
+
+
+def _cached_archive_edges() -> tuple[list[dict[str, Any]], bool]:
     """Archive edge rows via the 24h Redis cache, single-flighted on miss.
+
+    Returns `(rows, degraded)`: `degraded=True` means the archive could not
+    be read this request — a waiter that could not enter the fetch within
+    `_ARCHIVE_FETCH_WAIT_S`, a failed scan, or a negative-cache hit from an
+    earlier failure. The route serves the last-good graph with its honest
+    `stale` flag whenever `degraded` is set.
 
     Concurrent misses run ONE whole-archive scan instead of one each — a
     stampede that saturates the Loki querier (2026-08-29/30 incident, see
-    `_ARCHIVE_FETCH_LOCK`). A waiter that cannot enter the fetch within
-    `_ARCHIVE_FETCH_WAIT_S` returns [] (live-only edges); the route's own
-    failure path still serves the last-good graph when the scan itself
-    raises."""
-    rows = _read_archive_cache()
-    if rows is not None:
-        return rows
+    `_ARCHIVE_FETCH_LOCK`). A failed scan writes a 60s negative entry so the
+    next minute of polls serves the last-good graph without re-running the
+    same doomed scan; the first poll after the entry expires retries."""
+    cached = _read_archive_cache()
+    if cached is not None:
+        return cached
     if not _ARCHIVE_FETCH_LOCK.acquire(timeout=_ARCHIVE_FETCH_WAIT_S):
-        logger.warning("fleet_graph Loki archive fetch already in flight — serving live-only edges")
-        return []
+        logger.warning("fleet_graph Loki archive fetch already in flight — serving stale graph")
+        _emit_archive_degraded("fleet_graph", "lock_wait")
+        return [], True
     try:
-        rows = _read_archive_cache()
-        if rows is not None:
-            return rows
-        rows, _ = _fetch_archive_edges()
+        cached = _read_archive_cache()
+        if cached is not None:
+            return cached
+        try:
+            rows, _ = _fetch_archive_edges()
+        except Exception as exc:
+            # Fail open like neighbors: any scan failure serves the last-good
+            # graph and writes the short negative entry, so the next minute of
+            # polls does not re-run the same doomed scan.
+            logger.warning("fleet_graph Loki archive fetch failed — serving stale graph: {}", exc)
+            _write_archive_cache([], degraded=True, ttl=_NEGATIVE_CACHE_TTL_SECONDS)
+            _emit_archive_degraded("fleet_graph", "fetch_failed")
+            return [], True
         _write_archive_cache(rows)
-        return rows
+        return rows, False
     finally:
         _ARCHIVE_FETCH_LOCK.release()
 
@@ -618,11 +676,15 @@ def get_fleet_graph(
 
     # --- Pre-cutover edges from the Loki archive stream (task #1281) ---
     # The whole-archive scan is slow but served once per day from the 24h
-    # Redis cache; a failure degrades with the node set it did have.
+    # Redis cache; a failure (or a degraded read) serves the last-good graph
+    # with its honest stale flag.
     try:
-        archive_rows = _cached_archive_edges()
+        archive_rows, archive_degraded = _cached_archive_edges()
     except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
         logger.warning("fleet_graph archive query failed — serving stale graph: {}", exc)
+        return _stale_graph(key, _build_nodes(node_rows))
+    if archive_degraded:
+        logger.warning("fleet_graph Loki archive unavailable — serving stale graph")
         return _stale_graph(key, _build_nodes(node_rows))
 
     # --- Token aggregates from Prometheus (the llm_usage counters) ---

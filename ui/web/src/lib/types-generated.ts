@@ -5748,6 +5748,11 @@ export interface components {
             neighbors: components["schemas"]["NeighborRow"][];
             /** Ancestors */
             ancestors: components["schemas"]["NeighborRow"][];
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
         };
         /**
          * NoticeCreateIn
