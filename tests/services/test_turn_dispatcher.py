@@ -500,6 +500,62 @@ class TestUncancellableTurn:
         )
 
 
+class TestCancelAgent:
+    async def test_cancel_agent_cancels_a_running_turn(self) -> None:
+        """The hosted force-terminate primitive: one agent's turn task is
+        cancelled at its next await point, the task unwinds and leaves the
+        registry — other agents' turns are untouched."""
+        rec = _Recorder()
+        sched = TurnScheduler(rec)
+        rec.gate(7)  # hold turn 7 open so the cancel lands on a RUNNING turn
+        rec.gate(8)  # hold turn 8 open too — it must survive 7's cancel
+        sched.wake(7)
+        sched.wake(8)
+        await rec.arrival(7).wait()
+        await rec.arrival(8).wait()
+
+        assert await asyncio.wait_for(sched.cancel_agent(7), 2) is True
+        await _settle()
+
+        assert 7 not in sched.active_agents, "the cancelled turn must unwind out of the registry"
+        assert 8 in sched.active_agents, "another agent's turn must not be touched"
+
+        # clean up agent 8
+        rec.gate(8).set()
+        await _settle()
+
+    async def test_cancel_agent_without_a_task_returns_false(self) -> None:
+        """False means "nothing to accelerate", never an error — the ops caller
+        treats a host with no task for this agent as already done."""
+        sched = TurnScheduler(_Recorder())
+        assert await asyncio.wait_for(sched.cancel_agent(42), 2) is False
+
+    async def test_cancel_agent_reports_a_stuck_turn(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A turn blocked where asyncio cannot interrupt it (a C call) refuses
+        the cancel — the bound applies, the SAME uncancellable report as a full
+        shutdown is emitted, and the task stays in the registry so a later wake
+        does not double-schedule the agent."""
+        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        monkeypatch.setattr(dispatcher.logger, "error", _capture)
+        turn = _StuckTurn()
+        sched = TurnScheduler(turn)
+        sched.wake(5)
+        await asyncio.wait_for(turn.entered.wait(), 2)
+
+        assert await asyncio.wait_for(sched.cancel_agent(5), 2) is True
+        report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
+        assert report["agent_id"] == 5
+        assert 5 in sched.active_agents, "a wedged turn still owns its registry slot"
+
+        await turn.release()
+        await _settle()
+
+
 class TestChannelParsing:
     @pytest.mark.parametrize(
         ("channel", "expected"),
