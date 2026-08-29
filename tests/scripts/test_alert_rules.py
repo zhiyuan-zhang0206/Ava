@@ -416,6 +416,19 @@ def test_disk_watermark_rule_is_per_mountpoint() -> None:
     )
 
 
+def test_disk_watermark_rule_excludes_wsl_docker_desktop_mount() -> None:
+    """The wsl machine's docker-desktop VM image is a loop device mounted
+    read-only under /mnt/wsl/docker-desktop/* and reports a constant 1.0
+    utilization — a by-design non-Ava asset, not disk growth. The rule must
+    never alert on it; the mountpoint prefix is WSL-specific, so the matcher
+    cannot hide a real volume on any other machine (task #2024)."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    expr = _exprs(rules["ava-ops-host-disk-watermark"], "prometheus")[0]
+    assert 'mountpoint!~"/mnt/wsl/docker-desktop.*"' in expr
+    # the grouping contract survives the matcher: still per-machine, per-mount
+    assert "by (machine_name, mountpoint)" in expr
+
+
 def test_infra_ratio_rules_round_for_readability() -> None:
     """The value is interpolated into the summary that reaches IM, and a raw
     float renders as 0.927223987411. Rounding to 0.001 cannot flip a verdict:

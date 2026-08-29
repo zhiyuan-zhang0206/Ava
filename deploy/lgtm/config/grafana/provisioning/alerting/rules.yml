@@ -727,6 +727,11 @@ groups:
       # (machine_name, mountpoint):
       # on macOS the volumes of one APFS container all report the container's
       # fullness, so a single full disk legitimately fires twice.
+      # Excluded: the wsl machine's docker-desktop VM image is mounted
+      # read-only under /mnt/wsl/docker-desktop/* on a loop device and
+      # reports a constant 1.0 utilization — a by-design non-Ava asset,
+      # not disk growth (task #2024). The mountpoint prefix is WSL-specific,
+      # so no other machine is affected by the matcher.
       - uid: ava-ops-host-disk-watermark
         title: "Filesystem over watermark"
         condition: D
@@ -760,7 +765,7 @@ groups:
               editorMode: code
               expr: >-
                 round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio), 0.001)
+                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*"}), 0.001)
               instant: true
               range: false
             relativeTimeRange:
