@@ -83,11 +83,14 @@ worse than doing nothing.
 This module runs turns. The rest of the agent lifecycle still assumes a process
 per agent, and hosted mode does not change it here:
 
-- **spawn** — `POST /api/agents` still forks `python -m agent`, so a hosted
-  runner serves agents that something else created as processes.
+- **spawn** — `POST /api/agents` no longer forks for hosted clusters: the
+  launch op (`ops/ops_lifecycle.launch_agent_op`) skips the fork and the
+  launch-confirm and just delivers the first prompt + a wake, which this host's
+  dispatcher turns into the first turn task. Resurrect / respawn / swap-in /
+  revive flip the row and publish a wake the same way.
 - **restart** — an `exit_requested` restart ends the turn task and notifies the
   gateway (which leaves the row `restarting` for the restarter); the restarter
-  then respawns a PROCESS.
+  then respawns a PROCESS. Hosted restart semantics land separately.
 - **hibernation, the lease renewer, and the lease-zombie reaper** are untouched.
 
 That is the migration path the design doc plans (Phase 1 behind the flag, then

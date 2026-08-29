@@ -1,18 +1,23 @@
 """Agent wake: an EXISTING agents_meta row back into a running process.
 
 The other lifecycle half from `ops/agent_spawn.py` (which creates new rows);
-both are reached through `ops/agents.py`. Three wake paths, one shape: a CAS on
-`agents_meta.status` into unclaimed 'idling' (clearing pid / started_at), an optional
-lifecycle inbound, then a relaunch attached to the same `agent_id` — LangGraph's
-checkpointer restores the message history, so the process resumes rather than
-starts over. Resurrection creates the detached session while its machine and
-agent row locks are held; the child cannot claim the row or process the inbound
-until that transaction commits. `resurrect_agent` comes from
-'terminated', `respawn_agent` from 'restarting', `swap_in_agent` from
-'hibernating'; only the first two write a lifecycle inbound, because
-hibernation is deliberately invisible to the agent. The *mechanics* of launching
-the child live in `ops/agent_launch.py`, reached via module-qualified access
-(`agent_launch._launch_or_force_terminated`).
+both are reached through `ops/agents.py`. Two wake paths here, one shape: a CAS
+on `agents_meta.status` into unclaimed 'idling' (clearing pid / started_at), a
+lifecycle inbound, then a relaunch attached to the same `agent_id` —
+LangGraph's checkpointer restores the message history, so the process resumes
+rather than starts over. Resurrection creates the detached session while its
+machine and agent row locks are held; the child cannot claim the row or process
+the inbound until that transaction commits. `resurrect_agent` comes from
+'terminated', `respawn_agent` from 'restarting'; the no-inbound wake paths
+(`swap_in_agent` from 'hibernating', `revive_agent` from a dead pid) live in
+`ops/agent_revive.py` (Task #1999 split, re-exported here). The *mechanics* of
+launching the child live in `ops/agent_launch.py`, reached via module-qualified
+access (`agent_launch._launch_or_force_terminated`).
+
+Hosted mode (`AVA_RUNNER_MODE=hosted`): the CAS and the inbound rows are the
+whole op — no process to launch. The hosted branches commit, publish the Redis
+wake (the inbound INSERTs here are raw SQL and do not publish), and skip the
+launch + pid-confirm machinery entirely.
 
 - **resurrect_agent(...)** — a 'terminated' row -> unclaimed 'idling' + launch.
   INSERTs a kind='resurrect' inbound so the LLM sees why it resumed; an
@@ -50,7 +55,13 @@ from typing import Literal
 import psycopg
 
 import shared.db
-from ops import agent_launch
+from ops import agent_launch, runner_mode
+
+# Re-exported so the existing importers (`ops.agents`, the restarter/hibernate
+# controllers, tests) keep their call sites unchanged after the Task #1999 split:
+# `swap_in_agent` / `revive_agent` now live in `ops/agent_revive.py`.
+from ops.agent_revive import revive_agent as revive_agent
+from ops.agent_revive import swap_in_agent as swap_in_agent
 from ops.pages import list_open_page_names
 from shared.agents import (
     AgentNotFound,
@@ -61,7 +72,7 @@ from shared.agents import (
     TerminationSource,
 )
 from shared.audit_events import insert_event_log
-from shared.db import fetch_one
+from shared.db import fetch_one, publish_inbound_wake
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
 
@@ -266,6 +277,21 @@ def _prepare_resurrect_attempt(
         config_overlay: dict[str, object] | None
         birth_config: dict[str, object] | None
         config_overlay, birth_config = fetch_one(cur, "resurrect: read per-agent config")
+        if runner_mode.is_hosted():
+            # Hosted: the dispatcher owns delivery — no process to fork. The
+            # inbound INSERTs above are raw SQL (no wake inside), so publish one
+            # explicitly; the dispatcher materializes a turn task and its claim
+            # CAS is the hosted equivalent of the launch confirm. `resurrect_agent`
+            # skips the pid-confirm machinery entirely in hosted mode.
+            conn.commit()
+            publish_agent_updated_sync(conn, agent_id)
+            publish_inbound_wake(agent_id, "0")
+            return _PreparedResurrect(
+                allocation_epoch=allocation_epoch,
+                config_overlay=config_overlay,
+                birth_config=birth_config,
+                event_target=_resurrect_event_target(resurrected_by),
+            )
         try:
             agent_launch._launch_agent_process(
                 agent_id,
@@ -487,7 +513,16 @@ def resurrect_agent(
         target_agent_id=prepared.event_target,
         payload={"prompt": prompt} if prompt else {},
     )
-    confirmed = _confirm_resurrect_with_retries(agent_id, prepared, first_attempt=first_attempt)
+    # Hosted has no pid to wait for: the transition + inbound are committed and
+    # the wake is published (both in _prepare_resurrect_attempt), and the
+    # dispatcher's turn task is the confirmation. The process-mode confirm polls
+    # `agents_meta.pid`, which hosted never writes — running it here would time
+    # out and force-terminate a row that is working exactly as designed.
+    confirmed = (
+        True
+        if runner_mode.is_hosted()
+        else _confirm_resurrect_with_retries(agent_id, prepared, first_attempt=first_attempt)
+    )
     logger.info(
         "agent {agent_id} resurrected by {resurrected_by} (confirmed={confirmed})",
         event="agent_resurrected",
@@ -653,6 +688,21 @@ def respawn_agent(agent_id: int) -> bool:
         )
         conn.commit()
         publish_agent_updated_sync(conn, agent_id)
+    if runner_mode.is_hosted():
+        # Hosted restart (PR-side change) never flips a row to 'restarting', so
+        # this branch is defensive — but if a row does land here, the hosted
+        # answer is the same as everywhere else: the dispatcher owns delivery.
+        # No process, no stale-session kill; the restart_completed inbound above
+        # is raw SQL, so publish the wake explicitly.
+        publish_inbound_wake(agent_id, "0")
+        logger.info(
+            "agent {agent_id} restarted in hosted mode (origin source {origin}) — "
+            "wake published, no process launched",
+            event="agent_restarted",
+            agent_id=agent_id,
+            origin=original_source,
+        )
+        return True
     agent_launch._kill_stale_session(agent_id)
     logger.info(
         "agent {agent_id} respawn phase 2: launching new process",
@@ -667,131 +717,5 @@ def respawn_agent(agent_id: int) -> bool:
         event="agent_restarted",
         agent_id=agent_id,
         origin=original_source,
-    )
-    return True
-
-
-def swap_in_agent(agent_id: int) -> bool:
-    """Swap a hibernating agent's process back in: UPDATE 'hibernating' ->
-    unclaimed 'idling' (clearing pid/started_at) + launch a fresh process attached to
-    the same agent_id, with NO lifecycle inbound.
-
-    The clean-restart counterpart to `resurrect_agent` / `respawn_agent`: the same
-    "UPDATE status + launch process" shape and the same launch mechanics
-    (LangGraph auto-restores the checkpoint), but it INSERTs no inbound and writes
-    no event_log. Hibernation is invisible to the agent, so the woken process
-    finds only whatever inbound already triggered the wake (a heartbeat nudge, a
-    chat, a task) in its first claim batch — exactly what a never-swapped idle
-    agent would see. There is deliberately NO "you were hibernating" marker (unlike
-    resurrect's resurrect inbound / respawn's restart_completed), which is the
-    whole point: the agent cannot tell it was ever swapped out.
-
-    Race-safe noop: the CAS `WHERE status='hibernating'` picks a single winner, so
-    two concurrent swap-in attempts (the controller's poll racing its own next
-    tick) cannot both launch. pid/started_at are cleared on the flip to
-    unclaimed 'idling' so a dead prior pid never lingers as ghost data (agent 44
-    incident), matching resurrect/respawn.
-
-    The caller MUST run this on the agent's home machine (`agents_meta.machine`) —
-    launching the process on any other host trips the boot placement gate and
-    crash-loops (agent 1513 incident). The hibernation controller satisfies this
-    by only scanning `machine = local`.
-
-    Returns:
-        True: won the CAS, new process launched.
-        False: lost the race / the row was not 'hibernating' — noop, does not raise.
-    """
-    with shared.db.connect() as conn, conn.cursor() as cur:
-        # Race-safe gate: flip + commit so a concurrent swap-in sees unclaimed 'idling'
-        # and loses. Clears pid/started_at (parked from the pre-hibernation
-        # process), same as resurrect/respawn returning to unclaimed 'idling'.
-        cur.execute(
-            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-            "lease_expires_at = NULL WHERE id = %s AND status = %s",
-            (AgentStatus.IDLING, agent_id, AgentStatus.HIBERNATING),
-        )
-        won_race = cur.rowcount == 1
-        conn.commit()
-        if not won_race:
-            return False
-        cur.execute(
-            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
-        )
-        config_overlay: dict[str, object] | None
-        birth_config: dict[str, object] | None
-        config_overlay, birth_config = fetch_one(cur, "swap_in: read per-agent config")
-        publish_agent_updated_sync(conn, agent_id)
-    agent_launch._kill_stale_session(agent_id)
-    agent_launch._launch_or_force_terminated(
-        agent_id, config_overlay=config_overlay, birth_config=birth_config
-    )
-    logger.info(
-        "agent {agent_id} swapped in from hibernation",
-        event="agent_swapped_in",
-        agent_id=agent_id,
-    )
-    return True
-
-
-def revive_agent(agent_id: int, dead_pid: int) -> bool:
-    """Revive a dead 'running'/'idling' row: CAS to unclaimed 'idling' + launch a fresh
-    process, with NO lifecycle inbound.
-
-    The boot-revive half of Task #689 G5. A machine reboot / power-off leaves
-    every local agent row 'running'/'idling' behind a dead (or recycled) pid;
-    the restarter reaper used to force those rows to 'terminated', and nothing
-    ever brought the agents back (crash-resurrect needs a pending inbound, the
-    heartbeat only targets idling/hibernating) -- the user-visible failure "the
-    machine came back but the fleet stayed dead". This mirrors `swap_in_agent`
-    exactly (same UPDATE-status + launch shape, same invisibility: the woken
-    process finds its checkpoint and whatever inbound waited, no marker), but
-    the CAS re-asserts the probed dead pid so a row whose process is actually
-    alive (or already revived by a concurrent pass) is never double-launched.
-
-    The caller MUST run this on the agent's home machine (`agents_meta.machine`)
-    -- launching on any other host trips the boot placement gate and crash-loops
-    (agent 1513 incident). The reaper satisfies this by only scanning
-    `machine = local`.
-
-    Crash-loop bound: if the revived process dies again at boot, the row lands
-    as a boot-phase death and the reapers + launch-confirm force it to
-    'terminated' -- at most one extra revive cycle per dead agent.
-
-    Returns:
-        True: won the CAS, new process launched.
-        False: lost the race / the row is not 'running'/'idling' with that pid --
-            noop, does not raise.
-    """
-    with shared.db.connect() as conn, conn.cursor() as cur:
-        # Race-safe gate, pid-reasserted (ABA-closed like the reaper): flip +
-        # commit so a concurrent revive/reap/launch sees unclaimed 'idling' and loses.
-        # Clears pid/started_at -- the probed pid is a corpse (or recycled), it
-        # must not linger as ghost data (agent 44 incident).
-        cur.execute(
-            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-            "lease_expires_at = NULL "
-            "WHERE id = %s AND status IN ('running', 'idling') AND pid = %s",
-            (AgentStatus.IDLING, agent_id, dead_pid),
-        )
-        won_race = cur.rowcount == 1
-        conn.commit()
-        if not won_race:
-            return False
-        cur.execute(
-            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
-        )
-        config_overlay: dict[str, object] | None
-        birth_config: dict[str, object] | None
-        config_overlay, birth_config = fetch_one(cur, "revive: read per-agent config")
-        publish_agent_updated_sync(conn, agent_id)
-    agent_launch._kill_stale_session(agent_id)
-    agent_launch._launch_or_force_terminated(
-        agent_id, config_overlay=config_overlay, birth_config=birth_config
-    )
-    logger.info(
-        "agent {agent_id} revived (dead pid {dead_pid})",
-        event="agent_revived",
-        agent_id=agent_id,
-        dead_pid=dead_pid,
     )
     return True
