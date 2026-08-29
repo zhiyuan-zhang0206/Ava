@@ -61,7 +61,7 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     out of the cluster.
 
     Thin client: POSTs /api/cluster/machines/{name}/pause on the gateway,
-    which drains (reassigns open/in_progress tasks of the machine's agents to
+    which drains (reassigns in_progress tasks of the machine's agents to
     the drain owner #405, with a note on each), terminates every live agent on
     the machine, resolves any open "machine offline" alert for it and sets the
     pause latch. From then on the machine is hidden from the roster / cluster

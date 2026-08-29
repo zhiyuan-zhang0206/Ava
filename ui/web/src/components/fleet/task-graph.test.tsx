@@ -74,7 +74,7 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
     title: `Task ${id}`,
     description: `Description for task ${id}`,
     results: null,
-    status: "open",
+    status: "in_progress",
     priority: "P2",
     owner: null,
     created_by: "user",
@@ -88,7 +88,7 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
 function sampleTasks(): TaskRow[] {
   return [
     task(1, { title: "root", status: "ongoing" }),
-    task(2, { title: "subtask-open", status: "open", parent_id: 1 }),
+    task(2, { title: "subtask-active", status: "in_progress", parent_id: 1 }),
     task(3, { title: "subtask-ip", status: "in_progress", parent_id: 1 }),
     task(4, { title: "subtask-done", status: "done", parent_id: 1 }),
     task(5, { title: "subtask-cancelled", status: "cancelled", parent_id: 1 }),
@@ -114,13 +114,13 @@ describe("TaskGraph (graph mode)", () => {
     render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     const legend = screen.getByLabelText("Task graph legend");
-    for (const label of ["Open", "In progress", "Done", "Canceled", "Root"]) {
+    for (const label of ["In progress", "Done", "Canceled", "Root"]) {
       expect(legend.textContent).toContain(label);
     }
     expect(legend.textContent).toContain("Uniform node size");
   });
 
-  it("renders only open/in-progress cards by default", async () => {
+  it("renders only in-progress cards by default", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
@@ -167,12 +167,12 @@ describe("TaskGraph (graph mode)", () => {
 
     fireEvent.click(screen.getByText("Kanban"));
 
-    // Kanban mode has columns: Open, In Progress, Done, Canceled.
+    // Kanban mode has columns: In Progress, Done, Canceled (the 'Open' lane
+    // was dropped 2026-08-29 — tasks are born in_progress).
     // Done and Canceled columns are hidden when empty (by default Done/Canceled
     // tasks are toggled off so those lanes have zero cards).
-    // Open column is also empty here (no open subtasks) so it is hidden too.
     await waitFor(() => expect(screen.getAllByText("In progress").length).toBeGreaterThanOrEqual(1));
-    // Open, Done, and Canceled lane headers do not render when empty.
+    // Done and Canceled lane headers do not render when empty.
   });
 
   it("in Kanban mode, Done column appears when Done toggle is on", async () => {
@@ -256,7 +256,7 @@ describe("TaskGraph (graph mode)", () => {
     await waitFor(() => expect(screen.getAllByText(/#1/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     // The root task (#1) is a visible node now (ruling 2026-08-06), so its
-    // visible children (#2 open, #3 in_progress) each render a parent→child
+    // visible children (#2, #3 in_progress) each render a parent→child
     // edge; #4/#5 are hidden by the status toggles.
     // Query only the main graph SVG, not icon SVGs in toolbar buttons.
     const mainSvg = container.querySelector("svg[role='img']");
@@ -475,7 +475,7 @@ describe("TaskGraph layout controls", () => {
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rects = [...container.querySelectorAll("svg[role='img'] rect")];
-    // The graph renders open/in_progress visible tasks — root #1 plus its
+    // The graph renders in_progress visible tasks — root #1 plus its
     // children (done/cancelled are filtered out). Root included, so under the
     // old descendant-count sizing these widths would differ.
     expect(rects.length).toBeGreaterThanOrEqual(3);

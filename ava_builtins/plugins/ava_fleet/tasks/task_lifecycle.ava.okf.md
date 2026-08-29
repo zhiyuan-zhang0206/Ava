@@ -15,12 +15,12 @@ tags:
 ## State Transitions
 
 ```
-open ──→ in_progress ──→ done
-  │           │
-  └───────────┴──→ cancelled
+in_progress ──→ done
+     │
+     └──→ cancelled
 ```
 
-- **`open`**: created (creator is default owner); **`in_progress`**: actively worked; **`done`**: completed (outcome in `results`); **`cancelled`**: from any state.
+- **`in_progress`**: created and actively worked (a task is born `in_progress` — user ruling 2026-08-29 dropped the meaningless `open` state); **`done`**: completed (outcome in `results`); **`cancelled`**: from any state.
 - **`ongoing`**: the system root task's permanent state only — never assignable via `create()`/`update()`/PATCH, and never present on a regular task (user ruling 2026-08-27).
 
 `status` is enforced by a database `CHECK` constraint; passing an illegal value raises `ValueError`.
@@ -29,13 +29,13 @@ open ──→ in_progress ──→ done
 
 ### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None) -> Task`
 
-Create a task and return the full `Task`. `title` is a single line (unique among `open`/`in_progress`); `description` is the task description.
+Create a task and return the full `Task`. `title` is a single line (unique among `in_progress` tasks); `description` is the task description.
 
 - **`parent` is required** — the id of an existing task this task descends from. The system root task (**id 1**) is the parent of the cluster's top-level tasks **only**; a subtask must pass the id of an existing task as its parent (create the parent first). A missing parent id raises `ValueError`; `parent=1` is also rejected when task 1 is not the system root on that deployment (so the documented root id can never silently attach a task under a different parent). `create_and_assign` validates the parent before spawning, so a bad parent never leaves an orphaned agent behind.
 - **Creator defaults to owner** (`owner=None`); when explicitly passing another agent id, the task is directly assigned to that agent, and that agent receives a notification including title + description.
 - `priority`: `"P0"` (highest)..`"P3"` (lowest), default `"P2"`; illegal value raises `ValueError` (#663; board sorts within a status column by this).
 - `remind_interval_seconds`: no-update duration after which the owner is reminded. Default scales with priority — P0 30m / P1 1h / P2 2h / P3 4h. **Cannot be disabled**—`None` falls back to the priority default; an explicit value wins; cap 24h; out-of-range raises `ValueError`.
-- **Rejects duplicate titles** among `open`/`in_progress` tasks (`ValueError`).
+- **Rejects duplicate titles** among `in_progress` tasks (`ValueError`).
 - Triggers a `task_create` event log + publishes `task_created` (SSE, board invalidates and refetches).
 
 ### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", remind_interval_seconds=None) -> (Task, int)`
@@ -54,7 +54,6 @@ Filter the task list, ordered by `created_at` ascending. All parameters are opti
 |-----------|--------|
 | `owner=your_id` | Your tasks |
 | `owner=None` (default) | Don't filter by owner (return all owners) |
-| `status="open"` | Only open tasks |
 | `parent=some_id` | Direct child tasks |
 | `parent=some_id, recursive=True` | Entire subtree (recursive CTE) |
 | No parameters | All tasks |
@@ -63,8 +62,8 @@ Filter the task list, ordered by `created_at` ascending. All parameters are opti
 
 Modify task fields, **pass only what you want to change**—omitted fields remain unchanged. `results` is replaced wholesale; to append progress, use `note=` or `log()`.
 
-- `title`: rename; must be unique among `open`/`in_progress` tasks, conflict raises `ValueError` (same duplicate check as `create`, checked inside row lock).
-- `status`: changing to `done` or `cancelled` is rejected while any direct child remains `open` or `in_progress`; close or cancel those children first. Other status changes and non-status updates are unaffected.
+- `title`: rename; must be unique among `in_progress` tasks, conflict raises `ValueError` (same duplicate check as `create`, checked inside row lock).
+- `status`: changing to `done` or `cancelled` is rejected while any direct child remains `in_progress`; close or cancel those children first. Other status changes and non-status updates are unaffected.
 - `owner`: pass an agent id to transfer/claim; **not passing or passing `None` both mean "unchanged"**—a task always has an owner, `owner=None` no longer releases a task.
 - `remind_interval_seconds`: **not passing or passing `None` both mean "unchanged"**—reminders cannot be disabled; only passing a positive integer (≤24h) changes it, exceeding raises `ValueError`.
 - `priority`: `None` (default) means "unchanged"; passing `"P0"`..`"P3"` writes it, illegal value raises `ValueError` (#663).
