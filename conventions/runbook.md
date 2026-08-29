@@ -576,6 +576,15 @@ supervisor socket for agent shells / watchers).
 | `computer-mcp` (agent-runner only, platform-gated: signed permissions helper enabled + capable, AF_UNIX transport, non-Windows host — Windows is the phase-3 pilot) | `.venv/bin/python -m services.computer.mcp_daemon` (computer-use executor: every desktop action through the signed permissions helper — serialized machine-wide, screen-coordinated (lease + FIFO queue + `release_control`), Vision OCR on snapshots, audited as `computer_action` + `computer_session_start/end` events, served over `~/.ava/run/computer-mcp.sock`) | `services.healthchecks.computer_mcp` (Unix-socket lock-free `ping` probe) |
 | `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava._mcps_daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
 
+Physical PITR is disabled by default. Converge only prepares
+`$AVA_HOME/physical-backup/{spool,ack}` (0700) and atomically publishes the
+self-contained shim at `$AVA_HOME/runtime/pg-archive/archive-shim`; it does not
+set `archive_mode`, restart PostgreSQL, upload to GCS, or replace the daily and
+pre-update logical dumps. Do not set `AVA_PITR_ENABLED=true` until the GCS
+uploader and verified base-chain rollout have landed. Spool hard-bound failures
+make PostgreSQL retain WAL in `pg_wal`; monitor their combined disk usage and
+never delete unacknowledged segments to relieve pressure.
+
 All sessions have cwd set to the prod path `~/.ava/source/` (see "Prod and dev clone paths" above).
 Session commands run under `bash -lc` (#476) — the login-shell flag pulls in the user's
 `~/.bash_profile` / `~/.profile` so `~/.local/bin` (where `uv` typically lives on WSL / Linux) is on
