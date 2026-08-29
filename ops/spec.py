@@ -743,6 +743,11 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return "disabled (AVA_IM_BRIDGE_ENABLED off)"
     if session == "agent-host" and runner_mode() != "hosted":
         return "disabled (AVA_RUNNER_MODE is process)"
+    if session == "restarter" and runner_mode() == "hosted":
+        # All four restarter controllers reason about agent PROCESSES (pid
+        # probes, lease rows, session relaunches); hosted rows have none of
+        # those, so a process reaper would harvest every healthy agent.
+        return "disabled (AVA_RUNNER_MODE is hosted — per-agent process supervision retired)"
     return None
 
 

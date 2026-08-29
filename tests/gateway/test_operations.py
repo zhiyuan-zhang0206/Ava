@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from ops import ops_cluster, ops_exit, ops_lifecycle
+from ops import ops_cluster, ops_exit, ops_launch, ops_lifecycle
 from ops.rpc_schemas import (
     LaunchAgentRequest,
     RestartAgentRequest,
@@ -84,9 +84,9 @@ async def test_launch_agent_op_launches_precreated_row(
         launched["birth_config"] = birth_config
         launched["confirm"] = confirm
 
-    monkeypatch.setattr(ops_lifecycle.agent_launch, "_launch_agent_process", _fake_launch)
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", _fake_launch)
     monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
-        ops_lifecycle.agent_launch, "schedule_launch_confirm", confirmed.append
+        ops_launch.agent_launch, "schedule_launch_confirm", confirmed.append
     )
     body = LaunchAgentRequest(
         agent_id=7,
@@ -108,8 +108,8 @@ async def test_launch_agent_op_delivers_plain_spawn_prompt(
 ) -> None:
     """A plain spawn's first prompt is inserted + InboundArrived published on
     the runner side after launch (inbound INSERT is within the runner role)."""
-    monkeypatch.setattr(ops_lifecycle.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_lifecycle.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     seen: dict[str, object] = {}
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -118,7 +118,7 @@ async def test_launch_agent_op_delivers_plain_spawn_prompt(
         seen["source"] = source
         return 11
 
-    monkeypatch.setattr(ops_lifecycle, "_insert_prompt_blocking", _fake_insert)
+    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
     published: list[object] = []
 
     async def _fake_publish(aid: int, iid: int, kind: str, source: str, prompt: str) -> None:
@@ -143,15 +143,15 @@ async def test_launch_agent_op_skips_prompt_for_fork(
 ) -> None:
     """A fork's prompt was already delivered pre-launch by create_agent_row —
     the launch op must not insert a second inbound."""
-    monkeypatch.setattr(ops_lifecycle.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_lifecycle.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
         inserted.append(1)
         return 0
 
-    monkeypatch.setattr(ops_lifecycle, "_insert_prompt_blocking", _fake_insert)
+    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
     monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
     body = LaunchAgentRequest(agent_id=10)  # no prompt — a fork
@@ -188,8 +188,8 @@ class TestSpawnPrechecksBlocking:
 
     def test_fork_resolves_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """fork_from -> latest_checkpoint_id resolves to an explicit id, not 'latest'."""
-        monkeypatch.setattr(ops_lifecycle, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        checkpoint = ops_lifecycle._spawn_prechecks_blocking(
+        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        checkpoint = ops_launch._spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user", fork_from=3),
             self._FakePool(),  # type: ignore[arg-type]
         )
@@ -199,9 +199,9 @@ class TestSpawnPrechecksBlocking:
         """fork_from with no checkpoint raises ForkSourceEmpty (wire-mapped to 409)."""
         from shared.agents import ForkSourceEmpty
 
-        monkeypatch.setattr(ops_lifecycle, "latest_checkpoint_id", lambda _cur, _aid: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         with pytest.raises(ForkSourceEmpty):
-            ops_lifecycle._spawn_prechecks_blocking(
+            ops_launch._spawn_prechecks_blocking(
                 SpawnAgentRequest(spawner="user", fork_from=3),
                 self._FakePool(),  # type: ignore[arg-type]
             )
@@ -214,8 +214,8 @@ class TestSpawnPrechecksBlocking:
             looked_up.append(1)
             return "never"
 
-        monkeypatch.setattr(ops_lifecycle, "latest_checkpoint_id", _fake_lookup)
-        checkpoint = ops_lifecycle._spawn_prechecks_blocking(
+        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", _fake_lookup)
+        checkpoint = ops_launch._spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user"),
             self._FakePool(),  # type: ignore[arg-type]
         )
@@ -1094,22 +1094,22 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
     """Hosted mode: the row the gateway created IS the agent. No fork, no
     launch-confirm — the prompt INSERT (which publishes its own wake inside
     `insert_inbound_message`) plus one explicit wake is the whole launch."""
-    monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: True)
+    monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
     launches: list[int] = []
     confirmed: list[int] = []
     monkeypatch.setattr(
-        ops_lifecycle.agent_launch,
+        ops_launch.agent_launch,
         "_launch_agent_process",
         lambda *_a, **_k: launches.append(1),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(ops_lifecycle.agent_launch, "schedule_launch_confirm", confirmed.append)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", confirmed.append)  # pyright: ignore[reportUnknownArgumentType]
     inserted: list[tuple[int, str, str]] = []
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
         inserted.append((agent_id, prompt, source))
         return 11
 
-    monkeypatch.setattr(ops_lifecycle, "_insert_prompt_blocking", _fake_insert)
+    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
 
     async def _fake_publish(*_a: object, **_k: object) -> None:
         return None
@@ -1117,7 +1117,7 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
     monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
     wakes: list[tuple[int, str]] = []
     monkeypatch.setattr(
-        ops_lifecycle, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
+        ops_launch, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
     )
 
     body = LaunchAgentRequest(agent_id=7, prompt="go do X", prompt_source="user")
@@ -1136,16 +1136,16 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     """A fork's inbounds were pre-inserted by create_agent_row as raw SQL (no
     wake inside) — the hosted launch must publish the wake explicitly, and must
     not insert a second prompt."""
-    monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: True)
-    monkeypatch.setattr(ops_lifecycle.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_lifecycle.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
         inserted.append(1)
         return 0
 
-    monkeypatch.setattr(ops_lifecycle, "_insert_prompt_blocking", _fake_insert)
+    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
 
     async def _fake_publish(*_a: object, **_k: object) -> None:
         return None
@@ -1153,7 +1153,7 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
     wakes: list[tuple[int, str]] = []
     monkeypatch.setattr(
-        ops_lifecycle, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
+        ops_launch, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
     )
 
     body = LaunchAgentRequest(agent_id=8)
@@ -1242,3 +1242,32 @@ async def test_force_terminate_process_mode_still_kills_the_process(
     )
     assert resp.status == "force_killed"
     assert captured == {"agent_id": 9, "kill_process": True}
+
+
+@pytest.mark.asyncio
+async def test_launch_agent_op_hosted_failure_reclaims_its_row(
+    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+) -> None:
+    """Hosted mode has no unclaimed-idling reaper (the restarter is retired), so
+    a failed hosted launch must reclaim its own corpse: any failure after the
+    row exists marks it terminated ('launch-confirm', the same class the
+    process-mode launch confirm stamps) and re-raises."""
+    monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    def _boom(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
+        raise RuntimeError("prompt insert failed")
+
+    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _boom)
+    reclaimed: list[tuple[int, str]] = []
+
+    def _fake_reclaim(agent_id: int, _pool: object, *, source: str) -> list[str]:
+        reclaimed.append((agent_id, source))
+        return []
+
+    monkeypatch.setattr(ops_lifecycle, "_force_mark_terminated", _fake_reclaim)
+
+    body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
+    with pytest.raises(RuntimeError, match="prompt insert failed"):
+        await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+    assert reclaimed == [(7, "launch-confirm")]
