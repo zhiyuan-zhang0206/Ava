@@ -373,6 +373,13 @@ def _recover_interrupted_update(
     return _recover_rc(repo, pull_recover, preserve_frontend)
 
 
+def _pitr_restart(origin: str) -> bool:
+    """Whether this cluster restart was dispatched by the PITR activation or
+    rollback seam. Those must bounce PostgreSQL too, so the ALTER SYSTEM'd WAL
+    config takes effect; the generic restart keeps the data plane up."""
+    return origin.startswith(("pitr-activation:", "pitr-rollback:"))
+
+
 def _run_gateway_local_update(
     repo: Path,
     *,
@@ -380,6 +387,7 @@ def _run_gateway_local_update(
     restart_frontend: bool = True,
     pull: bool = True,
     force_reap_agents: bool = False,
+    origin: str = "",
 ) -> int:
     """Middle phase of `cmd_update` — gateway's local stop -> checkout -> sync -> start.
 
@@ -426,8 +434,15 @@ def _run_gateway_local_update(
     # subsequent migrate is not hit by local daemons running old code).
     # **keep_infra=True** — the next step (apply migrations) still needs DB;
     # stopping this cluster's pg/redis would immediately give connect-refused on
-    # migration (verified in prod on 2026-05-19).
-    print("\n→ stop gateway daemons (graceful, keep pg/redis up for migrations)")
+    # migration (verified in prod on 2026-05-19). The one exception is a PITR-seam
+    # restart: its whole point is to restart postgres on the ALTER SYSTEM'd WAL
+    # config, so it bounces the data plane too.
+    print(
+        "\n→ stop gateway daemons (graceful, keep pg/redis up for migrations)"
+        if not _pitr_restart(origin)
+        else "\n→ stop gateway daemons (graceful, bounce pg/redis too — "
+        "PITR WAL config must take effect)"
+    )
     if not restart_frontend:
         print("  · keeping frontend up (backend-only change, no UI rebuild)")
     with _stage_telemetry("stop"):
@@ -435,7 +450,7 @@ def _run_gateway_local_update(
             repo,
             graceful=True,
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=not _pitr_restart(origin),
             preserve_sessions=preserve_frontend,
             force_reap_agents=force_reap_agents,
         )
