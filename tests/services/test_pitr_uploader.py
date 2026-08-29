@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 
 import pytest
 from cryptography.exceptions import InvalidTag
 
 from services.pitr.crypto import create_plan, decrypt_archive, encrypt_archive, open_encrypted
-from services.pitr.object_store import RemoteObjectAck
+from services.pitr.object_store import ObjectStore, RemoteObjectAck
 from services.pitr.uploader import (
     AckCorruptionError,
+    AckManifest,
     PitrUploader,
     RemoteCollisionError,
     WalSourceTooLargeError,
@@ -61,7 +63,7 @@ class FakeStore:
         return self.objects.get(object_name)
 
 
-def _uploader(tmp_path: Path, store: FakeStore) -> tuple[PitrUploader, Path]:
+def _uploader(tmp_path: Path, store: ObjectStore) -> tuple[PitrUploader, Path]:
     spool = tmp_path / "spool"
     ack = tmp_path / "ack"
     staging = tmp_path / "staging"
@@ -217,6 +219,85 @@ def test_corrupt_plan_fails_closed_before_remote_write(tmp_path: Path) -> None:
     assert store.puts == 0
 
 
+@pytest.mark.parametrize("remaining", [("stage", "plan"), ("plan",), ()])
+def test_ack_fast_path_reconciles_every_cleanup_crash_point(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    remaining: tuple[str, ...],
+) -> None:
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    original_write_ack = uploader._write_ack  # pyright: ignore[reportPrivateUsage]
+
+    def crash_after_ack(ack: AckManifest, destination: Path) -> None:
+        original_write_ack(ack, destination)
+        raise RuntimeError("crash after durable ACK")
+
+    monkeypatch.setattr(uploader, "_write_ack", crash_after_ack)
+    with pytest.raises(RuntimeError, match="crash after durable ACK"):
+        uploader.upload_one(source)
+    stage = tmp_path / "staging" / f"{NAME}.enc"
+    plan = tmp_path / "staging" / f"{NAME}.plan.json"
+    if "stage" not in remaining:
+        stage.unlink()
+    if "plan" not in remaining:
+        plan.unlink()
+    monkeypatch.setattr(uploader, "_write_ack", original_write_ack)
+    uploader.upload_one(source)
+    assert not source.exists()
+    assert not stage.exists()
+    assert not plan.exists()
+    assert store.puts == 1
+
+
+def test_same_size_staged_ciphertext_tamper_fails_before_remote_retry(tmp_path: Path) -> None:
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    store.crash_after_put = True
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        uploader.upload_one(source)
+    stage = next((tmp_path / "staging").glob("*.enc"))
+    damaged = bytearray(stage.read_bytes())
+    damaged[len(damaged) // 2] ^= 1
+    stage.write_bytes(damaged)
+    store.crash_after_put = False
+    with pytest.raises(AckCorruptionError, match="differs from its plan"):
+        uploader.upload_one(source)
+    assert store.puts == 1
+
+
+@pytest.mark.asyncio
+async def test_critical_backoff_heartbeats_and_stops_promptly() -> None:
+    from services.pitr.uploader_daemon import _wait_with_heartbeat
+    from shared.daemon_health import Liveness
+
+    stop = asyncio.Event()
+    liveness = Liveness(timeout_s=0.04)
+    waiter = asyncio.create_task(_wait_with_heartbeat(stop, 1.0, liveness, heartbeat_interval=0.01))
+    await asyncio.sleep(0.12)
+    assert liveness.is_alive()
+    stop.set()
+    await asyncio.wait_for(waiter, timeout=0.1)
+
+
+@pytest.mark.parametrize(
+    ("extra_staging_bytes", "expected_status"),
+    [(0, "ok"), (8, "degraded"), (24, "down")],
+)
+def test_disk_health_counts_spool_stage_and_temp_files(
+    tmp_path: Path, extra_staging_bytes: int, expected_status: str
+) -> None:
+    from services.pitr.uploader_daemon import _disk_components
+
+    store = FakeStore()
+    uploader, source = _uploader(tmp_path, store)
+    source.write_bytes(b"s" * 8)
+    if extra_staging_bytes:
+        (tmp_path / "staging" / ".ciphertext.tmp").write_bytes(b"x" * extra_staging_bytes)
+    component = _disk_components(uploader, warn_bytes=16, hard_bytes=32)[0]
+    assert component["status"] == expected_status
+
+
 # ── QA #920 block 1: real >8 MiB payloads must upload (resumable seek/tell) ─
 
 
@@ -270,14 +351,14 @@ class _ResumableFakeClient:
         return self._bucket
 
 
-def test_real_16mib_upload_survives_resumable_seek(
+def test_filename_adapter_uses_seekable_16mib_ciphertext(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """QA #920 block 1 regression: a real >8 MiB WAL segment must reach GCS.
+    """QA #920 block 1 regression: the adapter receives a seekable WAL file.
 
     The path under test is the production one end to end: the real streaming
-    encryption (open_encrypted) writes the staging file, and the REAL
-    GCSObjectStore uploads it through a client whose upload_from_filename
+    encryption (open_encrypted) writes the staging file, and GCSObjectStore
+    uploads it through a boundary fake whose upload_from_filename
     performs the resumable tell()/seek() dance. A regression back to
     streamed upload fails here with UnsupportedOperation (the SDK's resumable
     transport cannot tell() a BufferedReader) even though FakeStore-based
@@ -327,3 +408,99 @@ def test_real_16mib_upload_survives_resumable_seek(
     assert not source.exists()
     assert not list(staging.iterdir()), "staging (plan + ciphertext) cleaned after ACK"
     assert blob.data.startswith(b"AVAPITR1"), "the stored object is the encrypted archive"
+
+
+def test_real_sdk_resumable_transport_retries_16mib_upload(tmp_path: Path) -> None:
+    """Run the installed SDK's resumable session against a local HTTP transport."""
+
+    import base64
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlparse
+
+    import google_crc32c
+    from google.api_core.client_options import ClientOptions
+    from google.auth.credentials import AnonymousCredentials
+    from google.cloud import storage
+
+    from services.pitr.gcs_store import BucketClient, GCSObjectStore
+
+    class ResumableHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        puts = 0
+        uploaded = b""
+        object_metadata: ClassVar[dict[str, str]] = {}
+        object_name = ""
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+        def _json(self, status: int, body: dict[str, object]) -> None:
+            payload = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        @classmethod
+        def _object(cls) -> dict[str, object]:
+            crc = base64.b64encode(google_crc32c.Checksum(cls.uploaded).digest()).decode()
+            return {
+                "name": cls.object_name,
+                "generation": "1",
+                "size": str(len(cls.uploaded)),
+                "crc32c": crc,
+                "metadata": cls.object_metadata,
+            }
+
+        def do_POST(self) -> None:
+            query = parse_qs(urlparse(self.path).query)
+            assert query["uploadType"] == ["resumable"]
+            assert query["ifGenerationMatch"] == ["0"]
+            length = int(self.headers["Content-Length"])
+            request = cast(dict[str, object], json.loads(self.rfile.read(length)))
+            type(self).object_name = cast(str, request["name"])
+            type(self).object_metadata = cast(dict[str, str], request["metadata"])
+            self.send_response(200)
+            self.send_header("Location", f"http://127.0.0.1:{server.server_port}/upload-session")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_PUT(self) -> None:
+            length = int(self.headers["Content-Length"])
+            payload = self.rfile.read(length)
+            type(self).puts += 1
+            if type(self).puts == 1:
+                self._json(503, {"error": {"message": "retry this chunk"}})
+                return
+            type(self).uploaded = payload
+            self._json(200, type(self)._object())
+
+        def do_GET(self) -> None:
+            self._json(200, type(self)._object())
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ResumableHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f"http://127.0.0.1:{server.server_port}"
+        client = storage.Client(
+            project="proj",
+            credentials=AnonymousCredentials(),
+            client_options=ClientOptions(api_endpoint=endpoint),
+        )
+        store = GCSObjectStore.from_bucket_client(
+            cast(BucketClient, client.bucket("bucket")), timeout_seconds=5
+        )
+        uploader, source = _uploader(tmp_path, store)
+        source.write_bytes(b"w" * (16 * 1024 * 1024))
+        ack = uploader.upload_one(source)
+        assert ResumableHandler.puts == 2
+        assert len(ResumableHandler.uploaded) == ack.ciphertext_size
+        assert ack.ciphertext_crc32c == ResumableHandler._object()["crc32c"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

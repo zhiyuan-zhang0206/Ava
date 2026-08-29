@@ -39,7 +39,7 @@ _TRANSIENT = (
 _PERMANENT = (BadRequest, Forbidden, Unauthorized)
 
 
-class _Blob(Protocol):
+class BlobClient(Protocol):
     name: str
     generation: int | str | None
     size: int | str | None
@@ -51,10 +51,10 @@ class _Blob(Protocol):
     def reload(self, **kwargs: object) -> None: ...
 
 
-class _Bucket(Protocol):
-    def blob(self, name: str) -> _Blob: ...
+class BucketClient(Protocol):
+    def blob(self, name: str) -> BlobClient: ...
 
-    def get_blob(self, name: str, **kwargs: object) -> _Blob | None: ...
+    def get_blob(self, name: str, **kwargs: object) -> BlobClient | None: ...
 
 
 class GCSObjectStore:
@@ -70,7 +70,7 @@ class GCSObjectStore:
             str(credentials_file)
         )
         self._bucket = cast(
-            _Bucket,
+            BucketClient,
             storage.Client(  # pyright: ignore[reportUnknownMemberType]
                 project=project, credentials=credentials
             ).bucket(bucket),
@@ -78,7 +78,7 @@ class GCSObjectStore:
         self._timeout = timeout_seconds
 
     @staticmethod
-    def _ack(blob: _Blob, *, created: bool) -> RemoteObjectAck:
+    def _ack(blob: BlobClient, *, created: bool) -> RemoteObjectAck:
         if blob.generation is None or blob.size is None or blob.crc32c is None:
             raise TransientObjectStoreError("GCS object omitted verification properties")
         return RemoteObjectAck(
@@ -89,6 +89,17 @@ class GCSObjectStore:
             metadata=dict(blob.metadata or {}),
             created=created,
         )
+
+    @classmethod
+    def from_bucket_client(
+        cls, bucket: BucketClient, *, timeout_seconds: int = 30
+    ) -> GCSObjectStore:
+        """Construct around a transport-controlled SDK bucket for contract tests."""
+
+        instance = cls.__new__(cls)
+        instance._bucket = bucket
+        instance._timeout = timeout_seconds
+        return instance
 
     def stat(self, object_name: str) -> RemoteObjectAck | None:
         try:
