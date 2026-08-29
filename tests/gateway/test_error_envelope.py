@@ -216,12 +216,15 @@ def _request(
 
 @pytest.fixture(autouse=True)
 def _clear_auth401_throttle_state() -> Iterator[None]:
-    """Keep process-local auth-401 throttle state from coupling tests."""
+    """Keep process-local auth-401 throttle + aggregate-count state from
+    coupling tests."""
     auth401_log._auth401_last_warn.clear()
     auth401_log._auth401_suppressed.clear()
+    auth401_log._auth401_total = 0
     yield
     auth401_log._auth401_last_warn.clear()
     auth401_log._auth401_suppressed.clear()
+    auth401_log._auth401_total = 0
 
 
 def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -441,6 +444,53 @@ def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
     messages = [record.getMessage() for record in records]
     assert any("path=/api/agents client=127.0.0.2" in message for message in messages)
     assert any("path=/api/alerts client=127.0.0.1" in message for message in messages)
+
+
+def test_auth401_aggregate_counts_every_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The process-local counter increments on EVERY middleware rejection —
+    SSE flood paths and throttled repeats included (the log severity is
+    throttled, the count must not be; task #1712)."""
+    _enable_cluster_auth(monkeypatch)
+    assert auth401_log._auth401_total == 0
+
+    _unauthorized_auth_response(_request(path="/api/events/stream"))
+    _unauthorized_auth_response(_request(path="/api/events/stream"))
+    _unauthorized_auth_response(_request(path="/api/agents"))
+    _unauthorized_auth_response(_request(path="/api/agents"))
+
+    assert auth401_log._auth401_total == 4
+
+
+def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """drain_auth401_count() reads the aggregate and resets — the flusher's
+    read-and-reset must not double-count a window."""
+    _enable_cluster_auth(monkeypatch)
+    _unauthorized_auth_response(_request())
+    _unauthorized_auth_response(_request())
+
+    assert auth401_log.drain_auth401_count() == 2
+    assert auth401_log.drain_auth401_count() == 0
+    _unauthorized_auth_response(_request())
+    assert auth401_log.drain_auth401_count() == 1
+
+
+def test_auth401_emit_aggregate_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """emit_auth401_count sends one `auth401_rejected` telemetry event with the
+    window count; a zero window emits nothing (no zero datapoints)."""
+    emitted: list[tuple[str, str, dict[str, int]]] = []
+
+    def _fake_emit(
+        category: str, event_name: str, *, attributes: dict[str, int] | None = None
+    ) -> None:
+        emitted.append((category, event_name, attributes or {}))
+
+    monkeypatch.setattr(auth401_log.telemetry, "emit", _fake_emit)
+
+    auth401_log.emit_auth401_count(0)
+    assert emitted == []
+
+    auth401_log.emit_auth401_count(17)
+    assert emitted == [("telemetry", "auth401_rejected", {"count": 17})]
 
 
 def test_cluster_pause_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:

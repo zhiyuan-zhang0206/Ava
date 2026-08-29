@@ -478,6 +478,21 @@ class GatewayLatency(TypedDict):
     count: int
 
 
+class Auth401Rejected(TypedDict):
+    """`auth401_rejected` payload — gateway/_auth401_log.py flusher.
+
+    One event per 60s window carrying the number of gateway auth-middleware
+    401 rejections in that window (task #1712). The per-request log line was
+    downgraded to DEBUG / throttled to recover the event stream from the SSE
+    reconnect storm (PR #665), which removed the central count too — this
+    aggregate restores the counter at bounded volume (one event per window,
+    never one per rejection), feeding the OTLP-mapped
+    ``ava_auth401_rejected_count_total`` Prometheus counter.
+    """
+
+    count: int
+
+
 class TelemetryReadStale(TypedDict):
     """`telemetry_read_stale` payload — gateway/telemetry_staleness.py."""
 
@@ -1071,6 +1086,15 @@ EVENTS: dict[str, EventSpec] = {
         "gateway_latency",
         "gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count)",
         payload=GatewayLatency,
+        tier="noise",
+    ),
+    # gateway auth middleware 401 aggregate (task #1712) — one event per 60s
+    # window, never per rejection: the per-request line is DEBUG/throttled on
+    # purpose (PR #665), but the central count must stay observable.
+    "auth401_rejected": _telemetry(
+        "auth401_rejected",
+        "gateway auth-401 rejections in the 60s window (aggregate count)",
+        payload=Auth401Rejected,
         tier="noise",
     ),
     "telemetry_read_stale": _telemetry(
