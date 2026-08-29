@@ -154,6 +154,38 @@ def test_run_records_nonzero_command(db_conn: psycopg.Connection, unit_home: Pat
     assert _runs(db_conn, sid) == [(False, "command exited 3")]
 
 
+def test_run_records_py_sys_exit_zero(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    # A .py script that calls sys.exit(0) exits deliberately — a finish like a
+    # clean return, not a crash and not an eternal in-progress row (QA P3-3).
+    sid = _insert_schedule(db_conn, script="raise SystemExit(0)\n")
+
+    assert run(sid) == 0
+    status, last_error = _status_and_error(db_conn, sid)
+    assert status == "completed"
+    assert last_error is None
+    assert _runs(db_conn, sid) == [(True, None)]
+
+
+def test_run_records_py_sys_exit_nonzero(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    # A .py script that calls sys.exit(3) is recorded like a command's nonzero
+    # exit — the row closes ok=false and the manager's crash path relaunches.
+    sid = _insert_schedule(db_conn, script="raise SystemExit(3)\n")
+
+    assert run(sid) == 3
+    status, last_error = _status_and_error(db_conn, sid)
+    assert status != "completed"
+    assert last_error is not None and "script exited 3" in last_error
+    assert _runs(db_conn, sid) == [(False, "script exited 3")]
+
+
+def test_run_records_py_sys_exit_message(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    # sys.exit("message") exits 1, mirroring the interpreter's own behavior.
+    sid = _insert_schedule(db_conn, script="raise SystemExit('done early')\n")
+
+    assert run(sid) == 1
+    assert _runs(db_conn, sid) == [(False, "script exited 1")]
+
+
 def test_run_records_stall_timeout(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -277,6 +309,77 @@ def test_run_record_failure_does_not_break_the_run(
     assert run(sid) == 0
     status, _ = _status_and_error(db_conn, sid)
     assert status == "completed"
+
+
+def test_run_completed_marker_failure_keeps_run_row_honest(
+    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # QA P3-5: a failure writing the 'completed' status marker must not record
+    # the run as 'crashed: OperationalError' — the script finished fine, only
+    # the bookkeeping lost a write. The run row reads ok=true with a note and
+    # rc stays 0, so a clean run is not counted toward the crash breaker
+    # (the manager relaunches anyway, since the completed signal is missing).
+    import gateway.schedule_runner as sr
+
+    real_connect = sr.shared.db.connect
+
+    class _FlakyCursor:
+        """Cursor proxy that fails only the completed-marker statement."""
+
+        def __init__(self, cur: Any) -> None:
+            self._cur = cur
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._cur, name)
+
+        def __enter__(self) -> _FlakyCursor:
+            self._cur.__enter__()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: Any,
+        ) -> None:
+            self._cur.__exit__(exc_type, exc_val, exc_tb)
+
+        def execute(self, sql: str, params: Any = None) -> Any:
+            if "status = 'completed'" in sql:
+                raise RuntimeError("db down on completed marker")
+            return self._cur.execute(sql, params)
+
+    class _Flaky:
+        """Connection proxy whose cursor fails the completed-marker statement."""
+
+        def __init__(self, conn: psycopg.Connection) -> None:
+            self._conn = conn
+
+        def __enter__(self) -> _Flaky:
+            self._inner = self._conn.__enter__()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: Any,
+        ) -> None:
+            self._conn.__exit__(exc_type, exc_val, exc_tb)
+
+        def cursor(self) -> _FlakyCursor:
+            return _FlakyCursor(self._inner.cursor())
+
+    def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
+        return _Flaky(real_connect(*args, **kwargs))  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(sr.shared.db, "connect", _flaky_connect)
+    sid = _insert_schedule(db_conn, script="x = 1\n")
+
+    assert run(sid) == 0
+    status, _ = _status_and_error(db_conn, sid)
+    assert status != "completed"  # the marker write failed — manager will relaunch
+    assert _runs(db_conn, sid) == [(True, "completed-marker write failed")]
 
 
 @pytest.mark.parametrize(
