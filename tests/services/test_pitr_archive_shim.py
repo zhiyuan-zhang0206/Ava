@@ -133,9 +133,9 @@ def test_spool_refuses_non_regular_entries_fail_closed(
     if entry_kind == "directory":
         entry.mkdir()
     elif entry_kind == "symlink":
-        target = tmp_path / "target"
-        target.write_bytes(b"outside")
-        entry.symlink_to(target)
+        symlink_target = tmp_path / "target"
+        symlink_target.write_bytes(b"outside")
+        entry.symlink_to(symlink_target)
     elif entry_kind == "fifo":
         os.mkfifo(entry)
     else:
