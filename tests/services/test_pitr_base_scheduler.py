@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
+from typing import cast
 
 import psutil
 import pytest
@@ -38,6 +39,55 @@ def _candidate(chain_id: str) -> CandidateManifest:
         native_manifest_container_generation=1,
         migration_set_sha256="migrations",
     )
+
+
+def test_restore_worker_never_opens_or_inherits_uploader_credential(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    uploader = tmp_path / "uploader.json"
+    uploader.write_text("publisher-only")
+    monkeypatch.setenv("AVA_PITR_GCS_CREDENTIALS_FILE", str(uploader))
+    original_read_bytes = Path.read_bytes
+    messages: list[object] = []
+
+    class Queue:
+        def put(self, item: object) -> None:
+            messages.append(item)
+
+    def audited_read_bytes(path: Path) -> bytes:
+        if path == uploader:
+            raise AssertionError("restore worker opened the uploader credential")
+        return original_read_bytes(path)
+
+    inputs = daemon._RestoreWorkerInput(
+        _candidate("viewer-only").to_json(),
+        tmp_path,
+        tmp_path / "ack",
+        b"key",
+        "project",
+        "bucket",
+        tmp_path / "viewer.json",
+        daemon.RestoreSpaceBudget(0, 0, 0),
+    )
+    assert str(uploader) not in repr(inputs)
+
+    def viewer_only_build(
+        received: daemon._RestoreWorkerInput, _stop: daemon.StopSignal
+    ) -> CandidateManifest:
+        assert "AVA_PITR_GCS_CREDENTIALS_FILE" not in os.environ
+        assert received == inputs
+        return _candidate("viewer-only")
+
+    monkeypatch.setattr(Path, "read_bytes", audited_read_bytes)
+    monkeypatch.setattr(daemon, "_build_restore_proof", viewer_only_build)
+
+    daemon._proof_worker_entry(
+        inputs,
+        cast(daemon.StopSignal, object()),
+        cast(daemon._WorkerQueue, Queue()),
+    )
+
+    assert messages == [(True, _candidate("viewer-only").to_json())]
 
 
 def _blocking_worker(

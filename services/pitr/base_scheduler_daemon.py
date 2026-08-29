@@ -15,6 +15,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import NoReturn, Protocol, cast
 
@@ -33,6 +34,7 @@ from services.pitr.restore_postgres import IsolatedPostgresRestoreExecutor
 from services.pitr.restore_proof import (
     RestoreSpaceBudget,
     prove_candidate,
+    publish_candidate_proof,
     reconcile_restore_runtime,
 )
 from services.pitr.restore_publish_store import GCSProtectedManifestPublisher
@@ -83,6 +85,18 @@ class BaseCandidateState:
     last_error: str | None = None
     deferred_for_logical_backup: bool = False
     cleanup_pending: bool = False
+
+
+@dataclass(frozen=True)
+class _RestoreWorkerInput:
+    candidate_json: str
+    root: Path
+    ack_dir: Path
+    key: bytes
+    project: str
+    bucket: str
+    viewer_credentials: Path
+    budget: RestoreSpaceBudget
     restore_running: bool = False
     last_protected: float | None = None
 
@@ -220,15 +234,14 @@ def _pending_restore_candidate(root: Path) -> CandidateManifest | None:
     return None
 
 
-def _build_restore_proof(_stop: StopSignal) -> CandidateManifest:
+def _restore_worker_input() -> _RestoreWorkerInput:
     config = settings.physical_backup
     if not config.pitr_restore_proof_enabled:
         raise RuntimeError("restore proof cannot run while its flag is off")
     key_path = config.pitr_backup_key_file
     read_credentials = config.pitr_restore_gcs_credentials_file
-    publish_credentials = config.pitr_gcs_credentials_file
-    if key_path is None or read_credentials is None or publish_credentials is None:
-        raise RuntimeError("validated restore proof secrets are missing")
+    if key_path is None or read_credentials is None:
+        raise RuntimeError("validated viewer-only restore proof secrets are missing")
     root = ava_home() / "physical-backup"
     candidate = _pending_restore_candidate(root)
     if candidate is None:
@@ -237,30 +250,57 @@ def _build_restore_proof(_stop: StopSignal) -> CandidateManifest:
         (item.stat().st_size for item in (ava_home() / "backups" / "db").glob("*.enc")),
         default=0,
     )
-    prove_candidate(
-        candidate=candidate,
-        root=root,
-        ack_dir=root / "ack",
-        prefix=config.pitr_gcs_prefix,
-        key=key_path.read_bytes(),
-        reader=GCSGenerationPinnedObjectReader(
-            project=config.pitr_gcs_project,
-            bucket=config.pitr_gcs_bucket,
-            credentials_file=read_credentials,
-        ),
-        publisher=GCSProtectedManifestPublisher(
-            project=config.pitr_gcs_project,
-            bucket=config.pitr_gcs_bucket,
-            credentials_file=publish_credentials,
-        ),
-        executor=IsolatedPostgresRestoreExecutor(),
-        budget=RestoreSpaceBudget(
+    return _RestoreWorkerInput(
+        candidate.to_json(),
+        root,
+        root / "ack",
+        key_path.read_bytes(),
+        config.pitr_gcs_project,
+        config.pitr_gcs_bucket,
+        read_credentials,
+        RestoreSpaceBudget(
             config.pitr_spool_hard_bytes,
             logical_peak,
             _EMERGENCY_FLOOR_BYTES,
         ),
     )
+
+
+def _build_restore_proof(inputs: _RestoreWorkerInput, _stop: StopSignal) -> CandidateManifest:
+    candidate = CandidateManifest.from_json(inputs.candidate_json)
+    prove_candidate(
+        candidate=candidate,
+        root=inputs.root,
+        ack_dir=inputs.ack_dir,
+        key=inputs.key,
+        reader=GCSGenerationPinnedObjectReader(
+            project=inputs.project,
+            bucket=inputs.bucket,
+            credentials_file=inputs.viewer_credentials,
+        ),
+        executor=IsolatedPostgresRestoreExecutor(),
+        budget=inputs.budget,
+    )
     return candidate
+
+
+def _publish_restore_proof(candidate: CandidateManifest) -> None:
+    """Publish durable proof only from the controller that owns uploader authority."""
+
+    config = settings.physical_backup
+    credentials = config.pitr_gcs_credentials_file
+    if credentials is None:
+        raise RuntimeError("validated PITR publisher credential is missing")
+    publish_candidate_proof(
+        candidate=candidate,
+        root=ava_home() / "physical-backup",
+        prefix=config.pitr_gcs_prefix,
+        publisher=GCSProtectedManifestPublisher(
+            project=config.pitr_gcs_project,
+            bucket=config.pitr_gcs_bucket,
+            credentials_file=credentials,
+        ),
+    )
 
 
 async def _sleep(seconds: float) -> None:
@@ -278,9 +318,12 @@ def _worker_entry(stop: StopSignal, output: _WorkerQueue) -> None:
         output.put((False, f"{type(exc).__name__}: {exc}"))
 
 
-def _proof_worker_entry(stop: StopSignal, output: _WorkerQueue) -> None:
+def _proof_worker_entry(
+    inputs: _RestoreWorkerInput, stop: StopSignal, output: _WorkerQueue
+) -> None:
     try:
-        output.put((True, _build_restore_proof(stop).to_json()))
+        os.environ.pop("AVA_PITR_GCS_CREDENTIALS_FILE", None)
+        output.put((True, _build_restore_proof(inputs, stop).to_json()))
     except BaseException as exc:
         output.put((False, f"{type(exc).__name__}: {exc}"))
 
@@ -496,7 +539,9 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
         ):
             state.restore_running = True
             try:
-                await _run_worker(target=_proof_worker_entry)
+                inputs = _restore_worker_input()
+                candidate = await _run_worker(target=partial(_proof_worker_entry, inputs))
+                _publish_restore_proof(candidate)
                 state.last_protected = time.time()
                 state.last_error = None
             except Exception as exc:
