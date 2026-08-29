@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import time
 
+import httpx
 import psycopg
 import pytest
 from playwright.sync_api import Page
@@ -27,6 +28,7 @@ from playwright.sync_api import Page
 from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._env import E2EEnv
+from tests.e2e.conftest import _HOSTED
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_restart:build")
@@ -36,7 +38,7 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
-    if settings.daemon.runner_mode == "hosted":
+    if _HOSTED:
         _assert_hosted_self_restart(e2e_env, page, agent_id)
         return
 
@@ -92,8 +94,6 @@ def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> N
     agent-host, and the row never leaves a runnable status. Asserts the row
     stays idling with a NULL pid, the marker reaches the timeline, and no
     restarter-style inbound row appears."""
-    import httpx
-
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
