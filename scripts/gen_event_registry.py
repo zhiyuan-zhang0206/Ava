@@ -2,7 +2,7 @@
 """Generate shared/events/registry.md from the event contract registry (R2-C).
 
 Single source of truth: ``shared/events/contract.EVENTS`` (name x category x
-payload TypedDict x retention x destination) plus the SSE roles in
+payload TypedDict x destination) plus the SSE roles in
 ``shared/live_events.py``. The generated doc carries the registry data as
 tables and preserves the governance prose (§6-§8) verbatim; producer /
 consumer provenance now lives at the emit sites in code, not in this doc.
@@ -17,12 +17,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from shared.events.contract import (
-    EVENTS,
-    RETENTION_BY_CATEGORY,
-    payload_keys,
-    retention_days,
-)
+from shared.events.contract import EVENTS, payload_keys
 from shared.live_events import GLOBAL_ROLES, SYSTEM_ROLES
 
 _OUT = Path("shared/events/registry.md")
@@ -50,13 +45,13 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 ## 0. Quick overview (numbers)
 
-| mechanism | table/channel | registered event_names | destination | retention |
-|------|------|-------------|------|------|
-| audit (category=audit) | `events` | {n_audit} | events table | {ret_audit}d+ |
-| telemetry (category=telemetry) | `events` | {n_telemetry} | events table | {ret_telemetry}d |
-| log (category=log) | `events` | {n_log} | events table | {ret_log}d |
-| file-only (destination=file) | file log | {n_file} | file only (not the events table) | — |
-| SSE live | Redis → frontend (not persisted) | {n_sse} role | live projection | ephemeral |
+| mechanism | table/channel | registered event_names | destination |
+|------|------|-------------|------|
+| audit (category=audit) | `events` | {n_audit} | events table |
+| telemetry (category=telemetry) | `events` | {n_telemetry} | events table |
+| log (category=log) | `events` | {n_log} | events table |
+| file-only (destination=file) | file log | {n_file} | file only (not the events table) |
+| SSE live | Redis → frontend (not persisted) | {n_sse} role | live projection |
 
 All persistent events land in the single `events` table (`category` distinguishes
 audit / telemetry / log). The four legacy mechanisms under the unified event model
@@ -70,14 +65,14 @@ river** (trace_id ties them together). Full treatment in
 
 ## 1. Category split
 
-The unified model's `category` field drives retention, query permissions, and
+The unified model's `category` field drives query permissions and
 monitoring alerts (design doc §5):
 
-| category | what it is | destination | target retention |
-|----------|--------|---------|---------|
-| `audit` | business-operation facts: who did what to whom (spawn/message/task/status) | `events` | {ret_audit}d+ (immutable, append-only) |
-| `telemetry` | runtime observations: token, turn, exec, node, health, delivery | `events` | {ret_telemetry}d |
-| `log` | bare log lines (logger calls without event=/label=) | `events` | {ret_log}d (currently INFO+ persisted; design intent: L2 = WARNING+ only, see §7.2) |
+| category | what it is | destination |
+|----------|--------|---------|
+| `audit` | business-operation facts: who did what to whom (spawn/message/task/status) | `events` |
+| `telemetry` | runtime observations: token, turn, exec, node, health, delivery | `events` |
+| `log` | bare log lines (logger calls without event=/label=) | `events` |
 
 SSE roles are not persisted and have no retention concept — live projection; OTel
 spans go through the trace channel (30d).
@@ -95,8 +90,8 @@ more often than payload. Payload keys other than those listed have no Pydantic m
 (display-surface use; see the payload tiering rules in `shared/audit_events.py`).
 Emit sites and consumers: see the comments at each emit point.
 
-| event_name | meaning | tier | key payload fields | retention | destination |
-|------|------|------|-----------------|------|------|
+| event_name | meaning | tier | key payload fields | destination |
+|------|------|------|-----------------|------|
 """
 
 _TELEMETRY_INTRO = """
@@ -109,15 +104,15 @@ Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 write SQL directly — both are annotated in the registry doc field. Emit sites and
 consumers: see the comments at each emit point.
 
-| event_name | meaning | tier | key payload fields | family | retention | destination |
-|------|------|------|-----------------|----|------|------|
+| event_name | meaning | tier | key payload fields | family | destination |
+|------|------|------|-----------------|----|------|
 """
 
 _LOG_INTRO = """
 ## 4. Log (bare logs, category=log)
 
-| event_name | meaning | tier | key payload fields | retention | destination |
-|------|------|------|-----------------|------|------|
+| event_name | meaning | tier | key payload fields | destination |
+|------|------|------|-----------------|------|
 """
 
 _SSE_INTRO = """
@@ -224,7 +219,7 @@ loaded semantics = the body was actually read.
 ### 7.6 [Settled] Final event_name-category caliber (2026-08-05, tracker #762/#763)
 
 The `EVENTS` registry in `shared/events/contract.py` (R2-C) is the final caliber for
-event_name and category (telemetry 90d / log 30d); `_TELEMETRY_KINDS` in
+event_name and category; `_TELEMETRY_KINDS` in
 `shared/telemetry.py` is a derived projection, no longer hand-maintained:
 
 - **`text`, `syntax_fix` → telemetry**: the whitelist previously missed these two
@@ -275,18 +270,16 @@ def _row(name: str) -> str:
     """One registry table row for `name`."""
     spec = EVENTS[name]
     keys = ", ".join(payload_keys(name)) if payload_keys(name) else "—"
-    ret = f"{retention_days(name)}d"
     dest = "file" if spec.destination == "file" else "events"
-    return f"| `{name}` | {spec.doc} | {spec.tier} | {keys} | {ret} | {dest} |"
+    return f"| `{name}` | {spec.doc} | {spec.tier} | {keys} | {dest} |"
 
 
 def _row_telemetry(name: str) -> str:
     spec = EVENTS[name]
     keys = ", ".join(payload_keys(name)) if payload_keys(name) else "—"
-    ret = f"{retention_days(name)}d"
     dest = "file" if spec.destination == "file" else "events"
     fam = spec.family or "—"
-    return f"| `{name}` | {spec.doc} | {spec.tier} | {keys} | {fam} | {ret} | {dest} |"
+    return f"| `{name}` | {spec.doc} | {spec.tier} | {keys} | {fam} | {dest} |"
 
 
 def render() -> str:
@@ -301,9 +294,6 @@ def render() -> str:
         n_log=len(log),
         n_file=len(file_only),
         n_sse=len(SYSTEM_ROLES),
-        ret_audit=RETENTION_BY_CATEGORY["audit"],
-        ret_telemetry=RETENTION_BY_CATEGORY["telemetry"],
-        ret_log=RETENTION_BY_CATEGORY["log"],
     )
 
     out += _AUDIT_INTRO.format(
