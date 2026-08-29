@@ -113,8 +113,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # five breaker/emergency-compact kinds, raising it to 124; the watchdog
     # respawn breaker (Task #1941) adds respawn_breaker_open, raising it to 125;
     # the gateway auth-401 aggregate (Task #1712) adds auth401_rejected,
-    # raising it to 126.
-    assert len(_TELEMETRY_KINDS) == 126
+    # raising it to 126; hook_timing (Task #1963's per-hook node attribution)
+    # raises it to 127.
+    assert len(_TELEMETRY_KINDS) == 127
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
@@ -203,6 +204,8 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("process_exit") == ("reason", "pid")
     assert payload_keys("agent_boot_failed") == ("model", "error_type", "error")
     assert payload_keys("recall_filter") == ("body",)
+    assert payload_keys("passive_recall") == ("search_ms", "filter_ms")
+    assert payload_keys("hook_timing") == ("hook_ms",)
     assert payload_keys("heartbeat_nudged") == ("idle_minutes",)
     assert payload_keys("delivery_stalled") == ("inbound_id", "age_s")
     assert payload_keys("telemetry_read_stale") == (

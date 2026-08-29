@@ -497,6 +497,7 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "llm_stream_inter_chunk_timeout_seconds": _range_validator(gt=0),
     "llm_stream_ttft_timeout_seconds": _range_validator(gt=0),
     "memory_recall_filter_timeout_seconds": _range_validator(gt=0),
+    "memory_recall_deadline_seconds": _range_validator(gt=0),
     # fractions — (0, 1]
     "auto_compact_fraction": _range_validator(gt=0, le=1),
     "compact_reminder_fraction": _range_validator(gt=0, le=1),

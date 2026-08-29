@@ -3,7 +3,7 @@
 Test Hook subclass registration path, runner merge semantics, Command(goto=) routing (including hook override), fail-fast exception propagation. hooks changed from functions to `Hook` subclass instances: registration accepts instance, runner calls with `hook(state, runtime, config)` (instance is callable, call site unchanged). HOOKS is module-level state, conftest fixture snapshots/restores before/after each test to avoid cross-test contamination.
 """
 
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -338,3 +338,35 @@ async def test_activation_key_matches_the_ledger_entry(monkeypatch: pytest.Monke
         _empty_state(), _empty_runtime(), _empty_config()
     )
     assert [(c.plugin, c.surface, c.identifier) for c in ledger] == recorded
+
+
+async def test_runner_emits_one_hook_timing_event_per_pass(loguru_records: list[dict[str, Any]]):
+    """Every hook-runner pass logs one `hook_timing` event carrying per-hook
+    durations — the sub-span replacement that makes a slow before_llm /
+    before_exec node attributable to its hook from the events alone (the
+    node span has no sub-spans and is otherwise a black box)."""
+    register_before_llm(_RecordHook("a", []))
+    register_before_llm(_ReturnHook({"halted": True}))
+
+    await make_hook_runner("before_llm", default_next="llm")(
+        _empty_state(), _empty_runtime(), _empty_config()
+    )
+
+    timing = [r for r in loguru_records if r["extra"].get("event") == "hook_timing"]
+    assert len(timing) == 1
+    assert "hook before_llm" in timing[0]["message"]
+    assert "_RecordHook" in timing[0]["message"]
+    assert "_ReturnHook" in timing[0]["message"]
+    hook_ms = timing[0]["extra"]["hook_ms"]
+    assert set(hook_ms) == {"_RecordHook", "_ReturnHook"}
+    assert all(isinstance(ms, float) and ms >= 0 for ms in hook_ms.values())
+
+
+async def test_runner_skips_hook_timing_on_empty_pass(loguru_records: list[dict[str, Any]]):
+    """No hooks registered → no `hook_timing` event (an empty pass has nothing
+    to attribute; the event would be pure noise)."""
+    await make_hook_runner("before_llm", default_next="llm")(
+        _empty_state(), _empty_runtime(), _empty_config()
+    )
+
+    assert not [r for r in loguru_records if r["extra"].get("event") == "hook_timing"]

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -43,19 +44,30 @@ from shared.paths import gateway_memory_dir
 router = APIRouter()
 
 # Both phases of the search handler are native async I/O (httpx.AsyncClient,
-# the backend's async client); the semaphore caps in-flight Gemini requests so
-# a burst of searches cannot pile up. Before this, the handler ran a sync
-# embed call on the event loop and a slow Gemini API froze the whole gateway
-# for up to ~4.5 minutes (60s httpx timeout x 4 attempts including sleep
-# backoff) — 13 gateway restarts in 8h on 2026-08-03, 3 of the 5 examined
-# freezes ended with a gemini-embedding POST as the last MainThread log line.
+# the backend's async client); the semaphore caps in-flight Gemini query
+# embeds so a burst of searches cannot pile up unbounded on the shared key.
+# Sized by `memory_search_max_concurrency` (env
+# AVA_MEMORY_SEARCH_MAX_CONCURRENCY, default 20 — see shared/config/services.py):
+# the historical hardcoded 2 predated the async-embed fix (2026-08-03, when a
+# sync embed on the event loop froze the whole gateway for up to ~4.5 minutes
+# and cost 13 restarts in 8h) and starved passive recall behind a queue
+# during fleet-wake bursts; query embeds are short single calls on a paid
+# Tier-2 key, so a burst fits well within the quota at 20.
 #
-# A capped semaphore only helps while permits come back. Every wait under it
-# must therefore be bounded — see `post_memory_search`'s deadline. Holding a
-# permit across an unbounded await is what turned a stalled backend into a
-# dead endpoint later the same day: two permits pinned, every later request
-# parked forever in acquire, and each agent's passive recall wedged with it.
-_MEMORY_SEARCH_SEMAPHORE = asyncio.Semaphore(2)
+# Every wait under the semaphore must be bounded — see `post_memory_search`'s
+# deadline. Holding a permit across an unbounded await is what turned a
+# stalled backend into a dead endpoint on 2026-08-03: both permits pinned,
+# every later request parked forever in acquire, and each agent's passive
+# recall wedged with it.
+
+
+@lru_cache(maxsize=1)
+def _search_semaphore() -> asyncio.Semaphore:
+    """The query-embed concurrency gate, built once per process from the
+    `memory_search_max_concurrency` setting — a knob, not a hardcoded
+    constant, so a deployment can widen or narrow it without a code change
+    (config panel or env; takes effect on gateway restart)."""
+    return asyncio.Semaphore(settings.services.memory_search_max_concurrency)
 
 
 # Files reserved by OKF spec — excluded from concept graph
@@ -198,7 +210,7 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
     # Both phases are native async I/O — httpx.AsyncClient for the Gemini
     # embed, the backend's async client for the search — so a slow backend
     # can never block the event loop (2026-08-03 freeze mechanism, see
-    # _MEMORY_SEARCH_SEMAPHORE note). The semaphore still caps concurrency so
+    # `_search_semaphore` note). The semaphore still caps concurrency so
     # a burst of searches cannot pile up in-flight Gemini requests.
     #
     # The deadline wraps the semaphore acquires as well as the two phases: a
@@ -211,7 +223,7 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
     try:
         async with asyncio.timeout(deadline):
             try:
-                async with _MEMORY_SEARCH_SEMAPHORE:
+                async with _search_semaphore():
                     query_vector = await embedder.embed_query_async(body.query)
             except Exception as exc:
                 # Symmetric with the backend phase below, and with what this
@@ -228,7 +240,7 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
                 raise IndexerUnavailable(f"embed query failed: {exc}") from exc
 
             try:
-                async with _MEMORY_SEARCH_SEMAPHORE:
+                async with _search_semaphore():
                     abs_paths = await _backend_topk(query_vector, body.k, deadline)
             except Exception as exc:
                 raise IndexerUnavailable(f"memory search backend failed: {exc}") from exc
