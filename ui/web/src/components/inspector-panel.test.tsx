@@ -1299,9 +1299,9 @@ describe("InspectorPanel agent switch (task #1939)", () => {
     await waitFor(() => expect(getAgentInspect).toHaveBeenCalledTimes(2));
 
     // Hot switch-back (agent 1's cache is not yet stale): without the
-    // invalidate-on-transition the mounted observer would keep the cached
-    // snapshot and never refetch — the response identity guards would blank
-    // the panel until the next 60s interval tick.
+    // invalidate-on-transition the mounted observer would keep the previous
+    // visit's cached snapshot and never refetch until the next 60s interval
+    // tick.
     rerender(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
