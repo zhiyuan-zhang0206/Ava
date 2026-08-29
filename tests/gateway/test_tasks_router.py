@@ -17,6 +17,7 @@ owned-task invariants at the HTTP boundary:
 
 from __future__ import annotations
 
+import httpx2
 import psycopg
 from fastapi.testclient import TestClient
 
@@ -394,3 +395,99 @@ class TestTimestampOffset:
         row = next(t for t in resp.json()["tasks"] if t["id"] == tid)
         assert row["created_at"].endswith("+00:00")
         assert row["updated_at"].endswith("+00:00")
+
+
+class TestGetTasksWindow:
+    """GET /api/tasks?window= — backend-side last-activity filtering for the
+    task graph time filter (Task #1969): window on updated_at, in_progress
+    exemption, ghost ancestors for tree connectivity, done/cancelled outside
+    the window omitted."""
+
+    def _backdate(self, db: psycopg.Connection, tid: int, days: int) -> None:
+        with db.cursor() as cur:
+            # The placeholder stays outside the interval literal — a %s inside
+            # quotes is mis-bound by psycopg3's client-side substitution.
+            cur.execute(
+                "UPDATE agent_tasks SET updated_at = now() - (%s * interval '1 day') WHERE id = %s",
+                (days, tid),  # pyright: ignore[reportUnknownArgumentType]
+            )
+        db.commit()
+
+    def _ids(self, resp: httpx2.Response) -> set[int]:
+        return {t["id"] for t in resp.json()["tasks"]}
+
+    def test_window_keeps_recent_and_in_progress_drops_old_done(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        owner = _make_agent(db_conn)
+        root = _make_root_task(db_conn)
+        old_ip = _make_task(
+            db_conn, owner=owner, status="in_progress", parent_id=root, title="old-ip"
+        )
+        recent_done = _make_task(
+            db_conn, owner=owner, status="done", parent_id=root, title="recent-done"
+        )
+        old_done = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-done")
+        self._backdate(db_conn, old_ip, 40)
+        self._backdate(db_conn, old_done, 40)
+        with TestClient(app) as client:
+            resp = client.get("/api/tasks", params={"window": "7d"})
+        assert resp.status_code == 200
+        rows = {t["id"]: t for t in resp.json()["tasks"]}
+        # Root + the old in_progress task are exempt; the recent done task is
+        # inside the window; the old done task is dropped entirely.
+        assert self._ids(resp) == {root, old_ip, recent_done}
+        assert all(rows[tid]["ghost"] is False for tid in rows)
+
+    def test_window_delivers_out_of_window_ancestor_as_ghost(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        owner = _make_agent(db_conn)
+        root = _make_root_task(db_conn)
+        old_done_parent = _make_task(
+            db_conn, owner=owner, status="done", parent_id=root, title="old-parent"
+        )
+        child = _make_task(
+            db_conn, owner=owner, status="in_progress", parent_id=old_done_parent, title="child"
+        )
+        self._backdate(db_conn, old_done_parent, 40)
+        with TestClient(app) as client:
+            resp = client.get("/api/tasks", params={"window": "7d"})
+        assert resp.status_code == 200
+        rows = {t["id"]: t for t in resp.json()["tasks"]}
+        assert self._ids(resp) == {root, old_done_parent, child}
+        assert rows[child]["ghost"] is False
+        # The out-of-window done ancestor is delivered for tree connectivity,
+        # flagged ghost so the graph renders it dimmed.
+        assert rows[old_done_parent]["ghost"] is True
+
+    def test_30d_window_includes_older_activity(self, db_conn: psycopg.Connection) -> None:
+        owner = _make_agent(db_conn)
+        root = _make_root_task(db_conn)
+        mid = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="mid-done")
+        self._backdate(db_conn, mid, 20)
+        with TestClient(app) as client:
+            resp7 = client.get("/api/tasks", params={"window": "7d"})
+            resp30 = client.get("/api/tasks", params={"window": "30d"})
+        assert resp7.status_code == 200 and resp30.status_code == 200
+        assert mid not in self._ids(resp7)
+        assert mid in self._ids(resp30)
+
+    def test_default_and_all_return_everything_unflagged(self, db_conn: psycopg.Connection) -> None:
+        owner = _make_agent(db_conn)
+        root = _make_root_task(db_conn)
+        old_done = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-done")
+        self._backdate(db_conn, old_done, 400)
+        with TestClient(app) as client:
+            plain = client.get("/api/tasks")
+            allp = client.get("/api/tasks", params={"window": "all"})
+        assert plain.status_code == 200 and allp.status_code == 200
+        for resp in (plain, allp):
+            rows = resp.json()["tasks"]
+            assert old_done in self._ids(resp)
+            assert all(t["ghost"] is False for t in rows)
+
+    def test_unknown_window_is_rejected(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            resp = client.get("/api/tasks", params={"window": "99d"})
+        assert resp.status_code == 422
