@@ -656,6 +656,21 @@ def test_shadow_drift_fails_before_snapshot(
     assert record.error == "RuntimeError"
 
 
+def test_shadow_pg_gate_accepts_pg17_disabled_archive_command() -> None:
+    """PG17 always reports archive_command as '(disabled)' while archive_mode
+    is off; the gate must accept that display, not only an empty string (the
+    CI mocks previously hid the real PostgreSQL behavior, so activation
+    failed at shadow on a pristine cluster)."""
+    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "(disabled)"})
+    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "  (disabled)  "})
+    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": ""})
+    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "   "})
+    assert not activation._shadow_pg_gate({"archive_mode": "on", "archive_command": "(disabled)"})
+    assert not activation._shadow_pg_gate(
+        {"archive_mode": "off", "archive_command": "cp %p /spool/%f"}
+    )
+
+
 def test_release_failure_does_not_roll_back_durable_phase(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -789,6 +804,9 @@ def test_frozen_pg_state_contract_with_real_reader(
         )
 
         frozen = activation._read_pg_state()
+        # Real PG17 masks archive_command as '(disabled)' while mode is off —
+        # the shadow gate must accept exactly this display.
+        assert frozen["archive_command"] == "(disabled)"
         # The frozen face round-trips: unchanged cluster -> comparison passes.
         activation._require_same_pg_state(frozen, "contract")
         # Reading twice yields the identical 12-key face (stable, no drift).

@@ -35,6 +35,7 @@ from services.pitr.activation_runtime import (
     _pitr_env_baseline,
     _restore_pitr_env,
     _settings_digest,
+    _shadow_pg_gate,
     capture_pitr_env_baseline,
     rollback_effect_state,
 )
@@ -256,7 +257,7 @@ def _shadow_readiness() -> ShadowReadiness:
             f"only {usage.free} available"
         )
     current = _read_pg_state()
-    if current["archive_mode"] != "off" or current["archive_command"].strip():
+    if not _shadow_pg_gate(current):
         raise RuntimeError("shadow readiness requires archive_mode=off and no archive_command")
     return ShadowReadiness(pg=current, credentials=credential_evidence)
 
