@@ -356,6 +356,7 @@ async def _run_restore_worker(inputs: _RestoreWorkerInput) -> dict[str, str]:
     work = Path(tempfile.mkdtemp(prefix=".proof-", dir=control_root))
     request = work / "request.json"
     result = work / "result.json"
+    acknowledgement = result.with_suffix(".ack")
     request.write_text(json.dumps(_restore_request(inputs), sort_keys=True, separators=(",", ":")))
     request.chmod(0o600)
     process = subprocess.Popen(  # noqa: S603
@@ -371,11 +372,21 @@ async def _run_restore_worker(inputs: _RestoreWorkerInput) -> dict[str, str]:
     )
     leader_created_at = psutil.Process(process.pid).create_time()
     try:
-        while process.poll() is None:
+        while not result.is_file():
+            if process.poll() is not None:
+                stderr = process.stderr.read() if process.stderr is not None else ""
+                return _restore_worker_result(process.returncode, stderr, result)
             await asyncio.sleep(0.25)
-        if _group_members(process.pid):
+        members = [member for member in _group_members(process.pid) if member.pid != process.pid]
+        if members:
             _reap_restore_subprocess_group(process, leader_created_at)
             _reject_restore_descendants()
+        acknowledgement.write_text("accepted")
+        acknowledgement.chmod(0o600)
+        while process.poll() is None:
+            await asyncio.sleep(0.05)
+        if _group_members(process.pid):
+            _raise_surviving_restore_group()
         stderr = process.stderr.read() if process.stderr is not None else ""
         return _restore_worker_result(process.returncode, stderr, result)
     except BaseException:
@@ -393,10 +404,17 @@ def _reap_restore_subprocess_group(
 ) -> None:
     if process.pid == os.getpgrp():
         raise RuntimeError("refusing to signal the controller process group")
-    with suppress(psutil.NoSuchProcess):
+    try:
         leader = psutil.Process(process.pid)
         if abs(leader.create_time() - leader_created_at) >= 0.01:
             raise RuntimeError("restricted restore worker PID identity changed")
+    except psutil.NoSuchProcess as exc:
+        if _group_members(process.pid):
+            raise RuntimeError(
+                "restricted restore descendants outlived their verifiable leader"
+            ) from exc
+        process.wait(timeout=1)
+        return
     deadline = time.monotonic() + 20
     with suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGTERM)
@@ -414,6 +432,10 @@ def _reap_restore_subprocess_group(
 
 def _reject_restore_descendants() -> NoReturn:
     raise RuntimeError("restricted restore worker left live descendants")
+
+
+def _raise_surviving_restore_group() -> NoReturn:
+    raise RuntimeError("restricted restore worker group survived its owned leader")
 
 
 def _restore_worker_result(returncode: int, stderr: str, result: Path) -> dict[str, str]:
