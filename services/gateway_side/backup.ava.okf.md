@@ -33,7 +33,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `cli/commands/_converge_pitr.py` — publishes the disabled-by-default physical-backup layout and stable archive shim; it does not alter PostgreSQL
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
-- `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for unprotected physical base candidates; it never publishes a protected chain or deletes remote data
+- `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
 
 ## Notes
 - Gateway capability only; `ava start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.
@@ -55,6 +55,11 @@ host's: reading a host timezone can make a current dump appear to be future.
   as a deterministic canonical tar → zstd → AEAD stream. The stream is read
   twice (identity preflight then upload) but no complete tar or ciphertext is
   written locally. Candidates are explicitly `protected=false`; generation-
-  pinned restore, replay, the protection gate, and retention remain PR4 work.
+  A third default-off restore-proof gate downloads each exact object generation
+  once into owned quarantine, authenticates locally, replays through an exact
+  WAL allowlist in a sibling PostgreSQL instance, verifies stable fingerprints,
+  and only then publishes a new immutable `protected=true` manifest. It never
+  edits the candidate, touches live PGDATA, selects a latest object, or deletes
+  remote data. Chain-aware retention remains future work.
   The second gate also requires an explicit local least-privilege replication
   URL; the ordinary cluster owner remains `NOSUPERUSER` without `REPLICATION`.
