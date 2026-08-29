@@ -10,9 +10,8 @@ constants (a hand-written ``attributes->>'...'`` literal elsewhere fails the
 SQL-key lint); shared/events/registry.md is generated from this module.
 
 Derived views live here and nowhere else: ``category_for_kind``,
-``telemetry_events``, ``family_events``, ``payload_keys``, ``retention_days``,
-event tiers, plus the folded ``_LLM_ERROR_EVENTS`` family and the ops grid
-constants.
+``telemetry_events``, ``family_events``, ``payload_keys``, event tiers, plus
+the folded ``_LLM_ERROR_EVENTS`` family and the ops grid constants.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ Category = Literal["audit", "telemetry", "log"]
 EventTier = Literal["business", "anomaly", "observation", "noise"]
 
 # Event tiers control the human-facing event stream, independently from the
-# category that controls retention and access semantics:
+# category that controls event-class access semantics:
 #
 # - business: an audit fact a human normally performed or requested;
 # - anomaly: a warning/error or a problem-shaped signal needing attention;
@@ -43,10 +42,6 @@ EventTier = Literal["business", "anomaly", "observation", "noise"]
 # time. OPS_BUCKET_S is the finest window step; coarser windows are multiples.
 OPS_BUCKET_S = 60
 OPS_GRID_ORIGIN = datetime(2000, 1, 1, tzinfo=UTC)
-
-# Retention floors by category (registry.md §1): audit 365d+, telemetry 90d,
-# log 30d. The events-maintenance TTL job consumes these through the registry.
-RETENTION_BY_CATEGORY: dict[Category, int] = {"audit": 365, "telemetry": 90, "log": 30}
 
 # The LLM failure family — one declaration; the ops panels / rollups that used
 # to carry three hand-copied `_LLM_ERROR_EVENTS` tuples read `family_events`.
@@ -633,7 +628,7 @@ class LogPayload(TypedDict):
 
 @dataclass(frozen=True)
 class EventSpec:
-    """One declared event: name x category x payload x retention x destination.
+    """One declared event: name x category x payload x destination.
 
     ``extra_categories``: a name that genuinely carries more than one category
     (status_change: the loguru side emits telemetry, audit_events emits audit).
@@ -651,7 +646,6 @@ class EventSpec:
     tier: EventTier
     extra_categories: frozenset[Category] = frozenset()
     payload: Any | None = None
-    retention_days: int | None = None  # None -> RETENTION_BY_CATEGORY[category]
     destination: Literal["events", "file"] = "events"
     family: str | None = None
     doc: str = ""
@@ -960,7 +954,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "heartbeat_paused": _telemetry("heartbeat_paused", "heartbeat paused", payload=HeartbeatPaused),
     "code": _telemetry("code", "LLM generated code block", payload=ExecPayload, tier="noise"),
-    # label-fallback events kept in the registry (90d retention classification)
+    # label-fallback events kept in the registry
     "text": _telemetry("text", "LLM text output", tier="noise"),
     "syntax_fix": _telemetry(
         "syntax_fix", "syntax repair executed", payload=SyntaxFix, tier="noise"
@@ -1246,16 +1240,6 @@ def payload_keys(event_name: str) -> tuple[str, ...]:
     if spec is None or spec.payload is None:
         return ()
     return tuple(get_type_hints(spec.payload))
-
-
-def retention_days(event_name: str) -> int:
-    """TTL for `event_name` rows: spec override, else the category floor."""
-    spec = EVENTS.get(event_name)
-    if spec is None:
-        return RETENTION_BY_CATEGORY["log"]
-    if spec.retention_days is not None:
-        return spec.retention_days
-    return RETENTION_BY_CATEGORY[spec.category]
 
 
 # ── SQL fragment constants — the only key spellings read sites may use ──
