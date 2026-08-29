@@ -7,6 +7,7 @@ import json
 import re
 import stat
 from pathlib import Path, PurePosixPath
+from typing import cast
 from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
@@ -44,9 +45,10 @@ def _service_account_identity(path: Path, alias: str) -> tuple[str, str, str]:
 def _validate_service_account_payload(raw: object) -> None:
     if not isinstance(raw, dict):
         raise TypeError("service-account payload must be an object")
-    if {"type", "client_email", "project_id", "private_key_id"} - set(raw):
+    payload = cast(dict[str, object], raw)
+    if {"type", "client_email", "project_id", "private_key_id"} - set(payload):
         raise ValueError("service-account identity fields are missing")
-    if raw["type"] != "service_account":
+    if payload["type"] != "service_account":
         raise ValueError("credential is not a service account")
 
 

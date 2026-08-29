@@ -152,8 +152,10 @@ def extract_authenticated_base(
     destination.mkdir(parents=True, mode=0o700)
     data_root = destination / "data"
     try:
-        raw = io.BufferedReader(  # pyright: ignore[reportArgumentType]
-            _ChunkReader(_plaintext_chunks(source, key=key, expected=expected))
+        raw = io.BufferedReader(
+            _ChunkReader(  # pyright: ignore[reportArgumentType]
+                _plaintext_chunks(source, key=key, expected=expected)
+            )
         )
         with (
             zstandard.ZstdDecompressor().stream_reader(raw) as decompressed,

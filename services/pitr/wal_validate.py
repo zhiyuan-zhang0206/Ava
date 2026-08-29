@@ -73,6 +73,6 @@ def _validate_history(path: Path) -> None:
             raise ValueError("timeline history row is malformed")
         parents.append(int(fields[0], 16))
         high, low = fields[1].split("/", 1)
-        int(high, 16), int(low, 16)
+        _position = (int(high, 16), int(low, 16))
     if parents != sorted(set(parents)) or parents[-1] >= timeline:
         raise ValueError("timeline history ancestry is not canonical")
