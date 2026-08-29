@@ -109,6 +109,7 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
           src={src}
           alt={alt}
           crossOrigin="use-credentials"
+          loading="lazy"
           className="max-h-48 max-w-[16rem] rounded border border-border object-contain"
         />
       </button>
@@ -128,6 +129,7 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
             src={src}
             alt={alt}
             crossOrigin="use-credentials"
+            loading="lazy"
             className="max-h-[88vh] max-w-[92vw] rounded object-contain shadow-2xl"
           />
         </div>

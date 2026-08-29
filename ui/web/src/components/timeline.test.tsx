@@ -2860,10 +2860,14 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
       />,
     );
     expect(screen.queryByTestId("attach-lightbox")).toBeNull();
+    // Thumbnails declare loading="lazy" so large data-URI images do not block
+    // initial paint (QA nit #831-3).
+    expect(screen.getAllByTestId("attach-thumbnail")[0].querySelector("img")?.getAttribute("loading")).toBe("lazy");
     fireEvent.click(screen.getAllByTestId("attach-thumbnail")[0]);
     const lightbox = screen.getByTestId("attach-lightbox");
     // The enlarged image is the lightbox content.
     expect(lightbox.querySelector("img")?.getAttribute("src")).toBe(IMG1);
+    expect(lightbox.querySelector("img")?.getAttribute("loading")).toBe("lazy");
     // Click anywhere on the backdrop closes.
     fireEvent.click(lightbox);
     expect(screen.queryByTestId("attach-lightbox")).toBeNull();
