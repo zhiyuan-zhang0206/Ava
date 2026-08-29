@@ -438,6 +438,6 @@ def _fleet_self_section() -> str:
         "brought back later is cheaper than standing by, and your state is "
         "preserved. Stay alive only while a known event is pending, or while "
         "you own a long-lived role whose work keeps arriving.\n\n"
-        "While idle, a periodic check-in asks whether you are still working, "
-        "waiting, or done — a safety net, not a punishment."
+        "While idle, a periodic check-in nudges you to find something to do or "
+        "pause your heartbeat — a safety net, not a punishment."
     )

@@ -179,7 +179,7 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
     wait SELECT recheck. Delivered as a system note (kind='heartbeat') — the claim
     node wraps it via system_note_message(tag=NoteTag.HEARTBEAT). `idle_minutes`
     rides the telemetry event only; the inbound content is the plain check-in."""
-    content = "Heartbeat."
+    content = "Heartbeat. Find something to do, or pause your heartbeat for some time."
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
