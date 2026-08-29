@@ -47,10 +47,7 @@ def _load_all() -> None:
 def _load_core() -> list[MetricSpec]:
     """Register the complete core metric set from fresh definition modules."""
     core_metrics.clear_core_registry()
-    for module_name in (
-        "shared.core_metrics_panels",
-        "shared.core_metrics_observability",
-    ):
+    for module_name in core_metrics._CORE_DEFINITION_MODULES:
         sys.modules.pop(module_name, None)
     return core_metrics.collect_core_metrics()
 
