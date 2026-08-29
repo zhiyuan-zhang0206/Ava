@@ -72,14 +72,7 @@
     "loading": "正在加载运行时间线…",
     "loadFailed": "无法加载运行时间线。",
     "retry": "重试",
-    "invalidAgent": "此 URL 中的 agent id 无效。",
-    "alerts": "告警",
-    "alertWarning": "警告",
-    "alertError": "错误",
-    "alertTotal": "总",
-    "alertDismissed": "已排解",
-    "alertNet": "净剩",
-    "alertAllClear": "全清"
+    "invalidAgent": "此 URL 中的 agent id 无效。"
   },
   "nav": {
     "openSidebar": "打开侧边栏",
@@ -139,9 +132,6 @@
     "searchAgent": "搜索 agent",
     "warningLevel": "警告",
     "errorLevel": "错误",
-    "statsTotal": "总",
-    "statsDismissed": "已排解",
-    "statsNet": "净剩",
     "statsAllClear": "全清"
   },
   "spawn": {
