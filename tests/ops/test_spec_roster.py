@@ -27,6 +27,7 @@ _GATEWAY_SESSIONS = {
     "events-maintenance",
     "task-maintenance",
     "milvus",
+    "memory-search",
     "memory-indexer",
     "frontend",
     "gateway-watchdog",
@@ -317,6 +318,7 @@ def test_mcp_daemon_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> Non
 _LIVENESS_ONLY_SESSIONS = {
     "frontend",  # Next.js — serves no Ava payload; a 2xx is all there is
     "milvus",  # gRPC — TCP connect only, uncurlable
+    "memory-search",  # the search API carries no Ava identity payload; its healthcheck traverses a real /search
     "browser-mcp",  # MCP over a Unix socket its own healthcheck dials
     "computer-mcp",  # MCP over a Unix socket; its healthcheck dials + pings it
     "mcp-daemon",  # MCP over a Unix socket; its healthcheck dials + pings it

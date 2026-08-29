@@ -75,8 +75,12 @@ PORT_OFFSETS: dict[str, int] = {
     "pg_backup": 21,
     "pitr_uploader": 22,
     "pitr_base_backup": 23,
+    # The memory search service (numpy backend) — appended like every late
+    # slot: existing records pin their block base, so renumbering a live
+    # offset would move a running daemon's port out from under it.
+    "memory_search": 24,
 }
-BLOCK_SIZE = 24
+BLOCK_SIZE = 25
 BLOCK_START = 18000
 BLOCK_MAX = 20000
 
@@ -134,4 +138,7 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     "pg_backup": 8116,
     "pitr_uploader": 8117,
     "pitr_base_backup": 8118,
+    # The memory search service's TCP port (like milvus's 19530, not a health
+    # port — its healthcheck probes the real /search endpoint).
+    "memory_search": 19531,
 }

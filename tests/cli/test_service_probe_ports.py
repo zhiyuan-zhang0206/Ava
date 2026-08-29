@@ -110,6 +110,7 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "events-maintenance",
         "task-maintenance",
         "milvus",
+        "memory-search",
         "memory-indexer",
         "frontend",
         "gateway-watchdog",

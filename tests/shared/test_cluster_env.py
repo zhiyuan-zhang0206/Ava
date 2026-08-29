@@ -429,10 +429,10 @@ def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    # Existing record at 18016 occupies 18016..18031. At BLOCK_SIZE 24,
-    # candidates 18000 and 18024 overlap it; the first legal base is 18048.
+    # Existing record at 18016 occupies 18016..18031. At BLOCK_SIZE 25,
+    # candidates 18000 and 18025 overlap it; the first legal base is 18050.
     ports = cl.allocate_ports({18016})
-    assert ports["gateway"] == 18048
+    assert ports["gateway"] == 18050
     assert set(ports) == set(cl.PORT_OFFSETS)
     # without any existing record, the allocator starts at BLOCK_START
     assert cl.allocate_ports(set())["gateway"] == BLOCK_START

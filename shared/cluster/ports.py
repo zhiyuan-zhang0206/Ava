@@ -121,6 +121,22 @@ def record_app_port(rec: cluster.ClusterRecord) -> int:
     return rec.ports["gateway"] + PORT_OFFSETS["app"]
 
 
+def record_memory_search_port(rec: cluster.ClusterRecord) -> int:
+    """This cluster's memory search service port (offset 24), deriving it for
+    records saved before the slot existed.
+
+    Records born before offset 24 own smaller blocks (16..24 ports), so
+    `base + 24` would land inside the NEXT cluster's block — the same reason
+    agent_host derives its legacy value for old records. Records lacking the
+    key therefore always fall back to the legacy 19531 (the port the unit's
+    .env predating the key also binds); fresh births carry the key and read it
+    back."""
+    port = rec.ports.get("memory_search")
+    if port is not None:
+        return port
+    return LEGACY_AVA_PORTS["memory_search"]
+
+
 def record_pgbouncer_port(rec: cluster.ClusterRecord) -> int:
     """This cluster's PgBouncer listener port, deriving it for records saved before
     the `pgbouncer` slot existed (the prod default home + any pre-existing cluster).
