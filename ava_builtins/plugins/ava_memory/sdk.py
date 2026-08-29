@@ -58,13 +58,25 @@ an absolute pool path, immune to `ava.cwd` changes."""
 PATH = _ava.const(_ava_home() / "memory", doc=_PATH_DOC)
 
 
-def _search(query: str, k: int = 5) -> list[tuple[Path, str, list[str]]]:
+def _search(
+    query: str, k: int = 5, *, timeout: float | None = None
+) -> list[tuple[Path, str, list[str]]]:
     """Semantic search; return the most relevant notes as (absolute path,
     description, tags) tuples. The description is "" when absent; tags carry
-    the note's `type/<x>` tag."""
+    the note's `type/<x>` tag.
+
+    `timeout` bounds one attempt (seconds) — default is the gateway's own
+    search deadline plus a 3s margin (18s). Under a congested index the
+    gateway answers 503 (`IndexerUnavailable`) in about a second instead of
+    queueing the request, so an explicit search degrades fast instead of
+    piling up behind the fleet's shared gate. Pass a value only when the
+    default is wrong for this call; keep it above
+    `AVA_MEMORY_SEARCH_DEADLINE_SECONDS`, or the caller reads out first.
+    """
     query = coerce_str(query, "query")
     k = coerce_typed(k, "k", int)
-    results = _client.memory_search(query, k)
+    timeout = coerce_typed(timeout, "timeout", (int, float), allow_none=True)
+    results = _client.memory_search(query, k, timeout=timeout)
     return [(PATH / r.path, r.description, list(r.tags)) for r in results]
 
 
