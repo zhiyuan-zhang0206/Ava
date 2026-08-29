@@ -8,12 +8,13 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from shared.private_storage import ensure_private_dir
 
 ActivationPhase = Literal[
     "shadow",
+    "snapshot_pending",
     "snapshot_verified",
     "wal_config_pending",
     "wal_restart_pending",
@@ -27,6 +28,23 @@ ActivationPhase = Literal[
 ]
 
 _SCHEMA_VERSION = 1
+_PHASES = frozenset(
+    {
+        "shadow",
+        "snapshot_pending",
+        "snapshot_verified",
+        "wal_config_pending",
+        "wal_restart_pending",
+        "wal_ack_pending",
+        "wal_remote_verified",
+        "base_pending",
+        "restore_pending",
+        "protected",
+        "rollback_pending",
+        "rolled_back",
+    }
+)
+_EVIDENCE_PHASES = _PHASES - {"shadow", "snapshot_pending", "rolled_back"}
 
 
 @dataclass(frozen=True)
@@ -60,11 +78,65 @@ class ActivationRecord:
         raw = json.loads(payload)
         if not isinstance(raw, dict) or set(raw) != set(cls.__dataclass_fields__):
             raise ValueError("PITR activation record fields differ")
-        record = cls(**raw)
+        phase = raw["phase"]
+        if not isinstance(phase, str) or phase not in _PHASES:
+            raise ValueError("unknown PITR activation phase")
+
+        def required_string(name: str) -> str:
+            value = raw[name]
+            if not isinstance(value, str):
+                raise TypeError(f"PITR activation {name} must be a string")
+            return value
+
+        def optional_string(name: str) -> str | None:
+            value = raw[name]
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"PITR activation {name} must be a string or null")
+            return value
+
+        raw_settings = raw["pre_activation_pg_settings"]
+        if raw_settings is not None and (
+            not isinstance(raw_settings, dict)
+            or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in raw_settings.items()
+            )
+        ):
+            raise ValueError("PITR activation pre_activation_pg_settings must be string pairs")
+        schema_version = raw["schema_version"]
+        if not isinstance(schema_version, int) or isinstance(schema_version, bool):
+            raise TypeError("PITR activation schema_version must be an integer")
+        record = cls(
+            schema_version=schema_version,
+            operation_id=required_string("operation_id"),
+            phase=cast(ActivationPhase, phase),
+            started_at=required_string("started_at"),
+            updated_at=required_string("updated_at"),
+            origin=required_string("origin"),
+            pre_activation_snapshot=optional_string("pre_activation_snapshot"),
+            pre_activation_pg_settings=cast(dict[str, str] | None, raw_settings),
+            switched_wal=optional_string("switched_wal"),
+            protected_manifest=optional_string("protected_manifest"),
+            error=optional_string("error"),
+        )
         if record.schema_version != _SCHEMA_VERSION:
             raise ValueError("unsupported PITR activation record schema")
-        datetime.fromisoformat(record.started_at)
-        datetime.fromisoformat(record.updated_at)
+        started = datetime.fromisoformat(record.started_at)
+        updated = datetime.fromisoformat(record.updated_at)
+        if started.tzinfo is None or updated.tzinfo is None:
+            raise ValueError("PITR activation timestamps must carry timezone")
+        if started.utcoffset() != UTC.utcoffset(started) or updated.utcoffset() != UTC.utcoffset(
+            updated
+        ):
+            raise ValueError("PITR activation timestamps must be UTC")
+        if updated < started:
+            raise ValueError("PITR activation updated_at precedes started_at")
+        if record.phase in _EVIDENCE_PHASES and (
+            not record.pre_activation_snapshot or not record.pre_activation_pg_settings
+        ):
+            raise ValueError("PITR activation phase is missing logical recovery evidence")
+        if record.phase == "protected" and not record.protected_manifest:
+            raise ValueError("protected PITR activation is missing its manifest")
         return record
 
     def advance(self, phase: ActivationPhase, **changes: object) -> ActivationRecord:
@@ -72,7 +144,7 @@ class ActivationRecord:
         raw.update(changes)
         raw["phase"] = phase
         raw["updated_at"] = datetime.now(UTC).isoformat()
-        return ActivationRecord(**raw)
+        return ActivationRecord.from_json(json.dumps(raw))
 
 
 def activation_root(home: Path) -> Path:
@@ -81,6 +153,10 @@ def activation_root(home: Path) -> Path:
 
 def record_path(home: Path) -> Path:
     return activation_root(home) / "operation.json"
+
+
+def lock_path(home: Path) -> Path:
+    return activation_root(home) / "operation.lock"
 
 
 def load_record(home: Path) -> ActivationRecord | None:
@@ -93,6 +169,7 @@ def load_record(home: Path) -> ActivationRecord | None:
 
 
 def write_record(home: Path, record: ActivationRecord) -> None:
+    ActivationRecord.from_json(json.dumps(asdict(record)))
     directory = ensure_private_dir(activation_root(home))
     path = record_path(home)
     fd, raw = tempfile.mkstemp(prefix=".operation-", suffix=".partial", dir=directory)

@@ -2,19 +2,32 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import stat
 import subprocess
 import sys
 import uuid
+from datetime import datetime
 from pathlib import Path
 
+import psutil
 import psycopg
+from google.cloud import storage
+from google.oauth2 import service_account
 
-from services.pitr.activation_state import ActivationRecord, load_record, write_record
+from services.pitr.activation_state import (
+    ActivationRecord,
+    load_record,
+    lock_path,
+    write_record,
+)
 from shared.config import settings
 from shared.paths import ava_home
+from shared.pg_tools import pg_tool
+from shared.platform import LockTimeoutError, file_lock
+from shared.private_storage import ensure_private_dir
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 
@@ -28,7 +41,33 @@ def _credential_identity(path: Path) -> tuple[str, str, str]:
     value = json.loads(raw)
     if not isinstance(value, dict) or value.get("type") != "service_account":
         raise RuntimeError(f"{path} is not a service-account credential")
-    return str(value["client_email"]), str(value["project_id"]), str(value["private_key_id"])
+    fields: list[str] = []
+    for name in ("client_email", "project_id", "private_key_id"):
+        field = value[name]
+        if not isinstance(field, str) or not field:
+            raise RuntimeError(f"{path} service-account {name} is missing")
+        fields.append(field)
+    return fields[0], fields[1], fields[2]
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _probe_bucket(credentials_path: Path) -> str:
+    credentials = service_account.Credentials.from_service_account_file(str(credentials_path))
+    client = storage.Client(
+        project=settings.physical_backup.pitr_gcs_project, credentials=credentials
+    )
+    bucket = client.get_bucket(settings.physical_backup.pitr_gcs_bucket, timeout=30)
+    location = str(bucket.location or "").upper()
+    if not location:
+        raise RuntimeError("PITR bucket metadata omitted its region")
+    return location
 
 
 def _validate_secrets() -> None:
@@ -49,6 +88,10 @@ def _validate_secrets() -> None:
         raise RuntimeError("uploader and viewer service-account identities must differ")
     if uploader_id[1] != config.pitr_gcs_project or viewer_id[1] != config.pitr_gcs_project:
         raise RuntimeError("PITR service-account project differs from configured GCS project")
+    uploader_location = _probe_bucket(uploader)
+    viewer_location = _probe_bucket(viewer)
+    if uploader_location != viewer_location:
+        raise RuntimeError("uploader and viewer resolved different bucket regions")
 
 
 def _read_pg_state() -> dict[str, str]:
@@ -58,18 +101,60 @@ def _read_pg_state() -> dict[str, str]:
     record = get_record(ava_home())
     if record is None:
         raise RuntimeError("cluster registry record is missing")
+
+    def scalar(conn: psycopg.Connection[tuple[object, ...]], query: str) -> object:
+        row = conn.execute(query).fetchone()
+        if row is None:
+            raise RuntimeError(f"PostgreSQL returned no row for {query!r}")
+        return row[0]
+
     with psycopg.connect(pg_admin_url(record_postgres_port(record)), autocommit=True) as conn:
-        system_id = str(
-            conn.execute("SELECT system_identifier FROM pg_control_system()").fetchone()[0]
-        )
-        server_version = int(conn.execute("SHOW server_version_num").fetchone()[0])
+        system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
+        server_version = int(str(scalar(conn, "SHOW server_version_num")))
         current = {
-            name: str(conn.execute(f"SHOW {name}").fetchone()[0])
+            name: str(scalar(conn, f"SHOW {name}"))
             for name in ("archive_mode", "archive_command", "archive_timeout", "wal_compression")
         }
+        current["data_directory"] = str(scalar(conn, "SHOW data_directory"))
+        current["port"] = str(scalar(conn, "SHOW port"))
+        current["postmaster_started_at"] = str(
+            scalar(conn, "SELECT pg_postmaster_start_time()::text")
+        )
     if server_version // 10000 != 17:
         raise RuntimeError("running PostgreSQL server is not major version 17")
     current["system_identifier"] = system_id
+    expected_data = (ava_home() / "pg").resolve(strict=True)
+    if Path(current["data_directory"]).resolve(strict=True) != expected_data:
+        raise RuntimeError("live PostgreSQL data_directory differs from this AVA_HOME")
+    if int(current["port"]) != record_postgres_port(record):
+        raise RuntimeError("live PostgreSQL port differs from the cluster registry")
+    pid_path = expected_data / "postmaster.pid"
+    pid = int(pid_path.read_text().splitlines()[0])
+    process = psutil.Process(pid)
+    current["postmaster_pid"] = str(pid)
+    current["postmaster_create_time"] = str(process.create_time())
+    postmaster_started = datetime.fromisoformat(current["postmaster_started_at"])
+    if abs(postmaster_started.timestamp() - process.create_time()) > 5:
+        raise RuntimeError("postmaster PID create-time differs from PostgreSQL start time")
+    control = subprocess.run(
+        [str(pg_tool("pg_controldata")), str(expected_data)],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=30,
+    )
+    if control.returncode:
+        raise RuntimeError("pg_controldata failed for the live cluster data directory")
+    control_id = next(
+        (
+            line.split(":", 1)[1].strip()
+            for line in control.stdout.splitlines()
+            if line.startswith("Database system identifier:")
+        ),
+        None,
+    )
+    if control_id != system_id:
+        raise RuntimeError("pg_controldata system identifier differs from the live server")
     return current
 
 
@@ -86,12 +171,17 @@ def _shadow_readiness() -> dict[str, str]:
     )
     if result.returncode:
         raise RuntimeError("stable archive shim self-check failed")
+    source = Path(__file__).resolve().parents[2] / "services" / "pitr" / "archive_shim.py"
+    if _sha256(source) != _sha256(shim):
+        raise RuntimeError("installed archive shim differs from the current source")
     for directory in required_dirs:
         if not directory.is_dir() or directory.is_symlink() or _mode(directory) != 0o700:
             raise RuntimeError(f"private PITR directory is unsafe: {directory}")
     _validate_secrets()
     if not config.pitr_gcs_bucket or not config.pitr_gcs_prefix:
         raise RuntimeError("PITR bucket and prefix must be configured")
+    if config.pitr_enabled or config.pitr_base_backup_enabled or config.pitr_restore_proof_enabled:
+        raise RuntimeError("shadow readiness requires all PITR service flags to remain off")
     pg_version = (ava_home() / "pg" / "PG_VERSION").read_text().strip()
     if pg_version != "17":
         raise RuntimeError(f"PITR activation requires PostgreSQL 17, found {pg_version!r}")
@@ -102,7 +192,10 @@ def _shadow_readiness() -> dict[str, str]:
             f"PITR activation needs {required_free} free bytes for spool + emergency floor; "
             f"only {usage.free} available"
         )
-    return _read_pg_state()
+    current = _read_pg_state()
+    if current["archive_mode"] != "off" or current["archive_command"].strip():
+        raise RuntimeError("shadow readiness requires archive_mode=off and no archive_command")
+    return current
 
 
 def _print_record(record: ActivationRecord | None) -> int:
@@ -120,8 +213,87 @@ def _print_record(record: ActivationRecord | None) -> int:
     return 0
 
 
+def _validate_snapshot(record: ActivationRecord) -> None:
+    if not record.pre_activation_snapshot:
+        return
+    path = Path(record.pre_activation_snapshot)
+    if path.is_symlink() or not path.is_file() or _mode(path) != 0o600:
+        raise RuntimeError("pre-activation snapshot is missing or unsafe")
+    from cli.commands._update_git import _verify_snapshot_artifact
+
+    _verify_snapshot_artifact(path)
+
+
 def cmd_pitr_status() -> int:
-    return _print_record(load_record(ava_home()))
+    record = load_record(ava_home())
+    if record is not None and record.phase not in {"protected", "rolled_back"}:
+        _validate_snapshot(record)
+    return _print_record(record)
+
+
+def _save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None:
+    write_record(home, record.advance(record.phase, error=type(exc).__name__))
+
+
+def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> None:
+    if expected is None or _read_pg_state() != expected:
+        raise RuntimeError(f"PostgreSQL identity/settings changed {boundary}")
+
+
+def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
+    from cli.commands._update_git import _verify_snapshot_artifact, snapshot_pre_activation_data
+    from services.backup import activation_snapshots_since
+
+    _require_same_pg_state(record.pre_activation_pg_settings, "before snapshot")
+    candidates = activation_snapshots_since(datetime.fromisoformat(record.started_at))
+    if candidates:
+        snapshot = candidates[-1]
+        _verify_snapshot_artifact(snapshot)
+    else:
+        snapshot = snapshot_pre_activation_data()
+    _require_same_pg_state(record.pre_activation_pg_settings, "during snapshot")
+    record = record.advance(
+        "snapshot_verified",
+        pre_activation_snapshot=str(snapshot),
+        error=None,
+    )
+    write_record(home, record)
+    return record
+
+
+def _advance_activation(home: Path, record: ActivationRecord) -> ActivationRecord:
+    if record.phase == "shadow":
+        record = record.advance(
+            "snapshot_pending",
+            pre_activation_pg_settings=_shadow_readiness(),
+            error=None,
+        )
+        write_record(home, record)
+    if record.phase == "snapshot_pending":
+        record = _prepare_snapshot(home, record)
+    if record.phase == "snapshot_verified":
+        _validate_snapshot(record)
+        record = record.advance("wal_config_pending", error=None)
+        write_record(home, record)
+    if record.phase != "wal_config_pending":
+        raise RuntimeError(f"activation phase {record.phase!r} is not handled by this CLI")
+    _validate_snapshot(record)
+    return record
+
+
+def _rollback_record(home: Path, record: ActivationRecord) -> None:
+    allowed = {"shadow", "snapshot_pending", "snapshot_verified", "wal_config_pending"}
+    if record.phase not in allowed:
+        raise RuntimeError(f"rollback for phase {record.phase!r} is not implemented")
+    from shared.cluster_lock import acquire_update_lock, release_update_lock
+
+    holder = f"pitr-rollback:{record.operation_id}"
+    if not acquire_update_lock(holder, kind="update"):
+        raise RuntimeError("cluster update/maintenance owner is already active")
+    try:
+        write_record(home, record.advance("rolled_back", error=None))
+    finally:
+        release_update_lock(holder)
 
 
 def cmd_pitr_activate(*, origin: str) -> int:
@@ -133,28 +305,34 @@ def cmd_pitr_activate(*, origin: str) -> int:
     protection it cannot yet prove.
     """
     home = ava_home()
-    record = load_record(home)
-    if record is None or record.phase == "rolled_back":
-        record = ActivationRecord.start(operation_id=str(uuid.uuid4()), origin=origin)
-        write_record(home, record)
-    if record.phase == "shadow":
-        pg_settings = _shadow_readiness()
-        from cli.commands._update_git import snapshot_pre_activation_data
+    ensure_private_dir(home / "physical-backup" / "activation")
+    try:
+        with file_lock(lock_path(home), timeout_s=5):
+            record = load_record(home)
+            if record is None or record.phase == "rolled_back":
+                record = ActivationRecord.start(operation_id=str(uuid.uuid4()), origin=origin)
+                write_record(home, record)
+            from shared.cluster_lock import acquire_update_lock, release_update_lock
 
-        snapshot = snapshot_pre_activation_data()
-        record = record.advance(
-            "snapshot_verified",
-            pre_activation_snapshot=str(snapshot),
-            pre_activation_pg_settings=pg_settings,
-        )
-        write_record(home, record)
-    if record.phase == "snapshot_verified":
-        record = record.advance("wal_config_pending")
-        write_record(home, record)
+            holder = f"pitr-activation:{record.operation_id}"
+            if not acquire_update_lock(holder, kind="update"):
+                exc = RuntimeError("cluster update/maintenance owner is already active")
+                _save_error(home, record, exc)
+                raise exc
+            try:
+                record = _advance_activation(home, record)
+            except BaseException as exc:
+                _save_error(home, record, exc)
+                raise
+            finally:
+                release_update_lock(holder)
+    except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
+        print(f"PITR activation refused: {type(exc).__name__}", file=sys.stderr)
+        return 1
     _print_record(record)
     print(
-        "  PostgreSQL remains unchanged. WAL activation requires the follow-on "
-        "remote-smoke/restart gate; do not edit postgresql.conf manually."
+        "  PostgreSQL remains unchanged in wal_config_pending. WAL activation requires the "
+        "follow-on remote-smoke/restart gate; do not edit postgresql.conf manually."
     )
     return 0
 
@@ -162,18 +340,23 @@ def cmd_pitr_activate(*, origin: str) -> int:
 def cmd_pitr_rollback() -> int:
     """Record a safe rollback request without deleting backups or remote objects."""
     home = ava_home()
-    record = load_record(home)
-    if record is None:
-        print("PITR activation: not started (rollback is a no-op)")
-        return 0
-    if record.phase == "rolled_back":
-        return _print_record(record)
-    # PR-A never mutates PostgreSQL.  Later activation phases must teach this
-    # same verb how to restore the exact settings snapshotted above before they
-    # can become reachable.
-    if record.phase not in {"shadow", "snapshot_verified", "wal_config_pending"}:
-        print("PITR rollback is unavailable for this newer activation phase", file=sys.stderr)
+    ensure_private_dir(home / "physical-backup" / "activation")
+    record: ActivationRecord | None = None
+    try:
+        with file_lock(lock_path(home), timeout_s=5):
+            record = load_record(home)
+            if record is None:
+                print("PITR activation: not started (rollback is a no-op)")
+                return 0
+            if record.phase == "rolled_back":
+                return _print_record(record)
+            try:
+                _rollback_record(home, record)
+            except BaseException as exc:
+                _save_error(home, record, exc)
+                raise
+    except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
+        print(f"PITR rollback refused: {type(exc).__name__}", file=sys.stderr)
         return 1
-    write_record(home, record.advance("rolled_back"))
     print("PITR activation rolled back; logical/remote backup data was preserved")
     return 0

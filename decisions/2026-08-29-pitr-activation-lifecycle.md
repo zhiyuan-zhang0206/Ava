@@ -10,9 +10,28 @@ not edit PostgreSQL configuration, signal Postgres, or start backup daemons by
 hand.
 
 The first activation delivery stops at `wal_config_pending` after proving the
-disabled shadow layout and creating a verified encrypted logical `pg_dump`. It
-does not change PostgreSQL. A rollout cannot deliver its own protection, so the
-first rollout remains protected only by that logical snapshot.
+disabled shadow layout and creating a verified encrypted logical `pg_dump` with
+the dedicated `pitr-activation` kind. Ordinary daily/pre-update retention never
+prunes that recovery floor while the operation is active. Resume and status
+revalidate that it is a regular mode-0600 artifact and passes the backup
+verification contract. It does not change PostgreSQL. A rollout cannot deliver
+its own protection, so the first rollout remains protected only by that logical
+snapshot.
+
+Preparation holds both a per-home activation lock and the cluster update owner
+across record read, snapshot side effects, and record publication. Therefore an
+activation, rollback, update, or maintenance transition cannot overwrite
+another operation. The shadow baseline requires all three PITR service gates
+off, PostgreSQL archiving off, and an empty archive command; any half-active
+manual state fails closed.
+
+Readiness binds the running PostgreSQL process to this registered cluster's
+PGDATA, port, postmaster birth time, major version, and system identifier before
+and after the dump. It also hashes the installed stable shim against current
+source and checks its private spool layout. Credential JSON identities must be
+distinct and both identities must successfully perform a non-mutating bucket
+metadata read in the configured project/region. This is not a write/delete IAM
+proof; the privileged continuation owns that smoke test.
 
 The privileged continuation is a separate delivery. It must add a real
 least-privilege GCS write/read/delete smoke boundary, atomically configure WAL
