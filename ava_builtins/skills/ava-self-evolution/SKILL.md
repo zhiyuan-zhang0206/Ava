@@ -247,7 +247,7 @@ verified mean — invalid replays are reported separately.
 Events come from **Loki** via the gateway `/api/events` endpoint — PG `events`
 is a frozen archive since 2026-08-12 (Task #1197 LGTM cutover); `collect.py`
 is the Loki read path, and a 0-run dataset is an ALERT (exit 2), never
-"nothing to act on".
+"nothing to act on" — except a TEST- only window (QA review of PR #698), which exits 0.
 
 **Transcript completeness.** Each record's `transcript` is the checkpoint's
 complete read path (`load_checkpoint_messages_full`, `shared/checkpoint.py`):
@@ -263,8 +263,8 @@ Between weekly runs, a daily schedule (`self-evolution-daily`, 00:00 deployment
 timezone) runs `reference/daily_scan.py --days 1`: it collects the past day's
 runs into `$AVA_HOME/self_evolution/daily/<date>.jsonl` (weekly `dataset/` files
 are never touched), prints a compact report, and exits 2 (ALERT) whenever any
-run is labeled `failed` or `fumbled` — waking this agent to review immediately
-instead of waiting a week. The threshold is deliberately low: an alert costs
+run is labeled `failed` or `fumbled`, or 0 runs were collected with no
+TEST- only explanation (data source outage) — waking this agent to review. The threshold is deliberately low: an alert costs
 one cheap review, a missed bad run costs the weekly cycle its earliest signal.
 A missing script or a hard failure also wakes this agent, so a silently broken
 scan cannot hide.

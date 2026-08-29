@@ -115,16 +115,46 @@ def test_scan_passes_include_test_flag_through(
 
     class _CollectStub:
         @staticmethod
-        def collect(days: int, week: str | None, include_test: bool = False) -> list[dict]:
+        def collect_with_counts(
+            days: int, week: str | None, include_test: bool = False
+        ) -> tuple[list[dict], dict[str, int]]:
             calls.append((days, week, include_test))
-            return []
+            return [], {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
 
     monkeypatch.setattr(daily_scan, "collect", _CollectStub)
     monkeypatch.setattr(daily_scan, "ava_home", lambda: tmp_path)
 
-    daily_scan.scan(1, week="w1")
-    daily_scan.scan(2, week="w2", include_test=True)
+    _records1, _path1, counts1 = daily_scan.scan(1, week="w1")
+    _records2, _path2, counts2 = daily_scan.scan(2, week="w2", include_test=True)
 
     assert calls == [(1, "w1", False), (2, "w2", True)]
+    assert counts1 == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
+    assert counts2 == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
     # the default run wrote the dataset file, the measurement run too
     assert (tmp_path / "self_evolution" / "daily").is_dir()
+
+
+def test_alert_exit_is_0_on_test_only_window(daily_scan: Any) -> None:
+    """A window whose only activity was TEST- spawns is a quiet day, not a
+    data-source outage: the filter removed every run by design, so the
+    empty-dataset sentinel must not fire (QA review of PR #698)."""
+    ds = daily_scan
+    counts = {"seen": 3, "excluded_test": 3, "skipped_meta": 0}
+    assert ds.alert_exit([], counts) == 0
+    rendered = ds.render([], Path("daily-test-only.jsonl"), 1, counts)
+    assert "ALERT" not in rendered
+    assert "0 runs collected" not in rendered
+    assert "3 window agent(s) were TEST- spawns" in rendered
+
+
+def test_alert_exit_stays_2_when_seen_runs_vanish_without_test_filter(
+    daily_scan: Any,
+) -> None:
+    """The sentinel keys on pre-filter activity: a window whose seen runs
+    produced no records for any other reason (e.g. every lifecycle row
+    missing) is still an anomaly, never a quiet day."""
+    ds = daily_scan
+    counts = {"seen": 2, "excluded_test": 0, "skipped_meta": 2}
+    assert ds.alert_exit([], counts) == 2
+    rendered = ds.render([], Path("d.jsonl"), 1, counts)
+    assert "ALERT — 0 runs collected" in rendered
