@@ -600,11 +600,16 @@ the base-chain rollout and must never materialize a full ciphertext sibling.
 
 Activation preparation is Ava-owned: use `ava cluster pitr status`, then
 `ava cluster pitr activate --origin operator:<name>`. The current command
-validates the disabled shadow posture and creates the mandatory verified
-logical recovery floor, then reports `wal_config_pending`. That status is not
-an instruction to edit PostgreSQL manually: do not change `archive_mode`, call
-`pg_ctl`, or signal Postgres. `ava cluster pitr rollback` preserves all logical
-and remote backup artifacts.
+validates the disabled shadow posture and creates the mandatory verified,
+retention-pinned logical recovery floor, then reports `wal_config_pending`.
+Resume and status reverify that artifact. Preparation serializes with cluster
+update/maintenance, binds the live PGDATA/port/postmaster/system-id identity on
+both sides of the dump, and persists failures without resetting `started_at`.
+Its credential check proves distinct service-account JSON identities and
+non-mutating bucket metadata access; write/delete IAM is intentionally left to
+the continuation gate. That status is not an instruction to edit PostgreSQL
+manually: do not change `archive_mode`, call `pg_ctl`, or signal Postgres.
+`ava cluster pitr rollback` preserves all logical and remote backup artifacts.
 
 Restore proof additionally requires
 `AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE`, a distinct 0600 viewer-only service
