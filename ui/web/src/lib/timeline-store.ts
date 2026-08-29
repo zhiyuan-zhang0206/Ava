@@ -239,6 +239,46 @@ function evictLruThreads(threads: Map<number, ThreadTimelineState>): void {
 
 
 /**
+ * The timeline kinds that mark a history rewrite — the compact envelope rows
+ * (`inbound_compact_request` = UI-triggered force compact,
+ * `inbound_compact_summary` = agent-initiated `ava.self.compact`).
+ */
+const COMPACT_ENVELOPE_KINDS: ReadonlySet<string> = new Set([
+  "inbound_compact_request",
+  "inbound_compact_summary",
+]);
+
+/**
+ * Whether `incoming` carries a compact envelope the local items never folded
+ * — the history was rewritten by a compact the local state missed (an SSE
+ * gap: the re-key/reconnect window dropped compact_done + the post-compact
+ * snapshot). The envelope row is the durable fingerprint: it is INSERTed at
+ * enqueue and survives the rewrite, so a snapshot that shows it at a
+ * position (or with an identity) the local items don't share is post-compact
+ * relative to them. Keep-all merging the two would resurrect the
+ * compacted-away items, so callers replace wholesale when this is true.
+ *
+ * The comparison is by item_id + inbound_id (the row's stable identity): a
+ * same-id envelope with a DIFFERENT inbound_id is a newer compact that
+ * reused the wiped slot; a missing item_id means the envelope moved (the
+ * rewrite re-positioned it). Legacy rows without inbound_id fall back to
+ * kind + payload — the envelope content is never rewritten in place, so a
+ * payload change at the same id is likewise a newer compact.
+ */
+function crossedUnseenCompact(
+  local: BackendTimelineItem[],
+  incoming: BackendTimelineItem[],
+): boolean {
+  return incoming.some((env) => {
+    if (!COMPACT_ENVELOPE_KINDS.has(env.kind)) return false;
+    const localEnv = local.find((it) => it.item_id === env.item_id);
+    if (localEnv === undefined) return true;
+    if (env.inbound_id != null) return localEnv.inbound_id !== env.inbound_id;
+    return localEnv.kind !== env.kind || localEnv.payload !== env.payload;
+  });
+}
+
+/**
  * The per-event reducer shared by `processSseEvent` and
  * `processSseEventBatch` — one event, one state, one partial to merge
  * ({} = nothing changed). Pure: both entry points route through it, so the
@@ -287,15 +327,24 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
     // post-REMOVE_ALL init_context enter on an older backend) is skipped
     // — replacing with [] would blank the panel before the real history
     // arrives.
-    if (state.resetPending && ev.role === "timeline_snapshot") {
+    if (ev.role === "timeline_snapshot") {
       const snapItems = ev.items as unknown as BackendTimelineItem[];
-      if (snapItems.length === 0) return {};
-      return {
-        items: snapItems,
-        streamingIds: new Set(),
-        resetPending: false,
-        hasMoreOlder: state.hasMoreOlder,
-      };
+      // A full-window snapshot (0.0 present) whose compact envelope the local
+      // items never folded is the post-compact history a missed compact_done
+      // should have armed the window for (SSE gap) — replace wholesale so the
+      // compacted-away items cannot resurrect, same as the reset window.
+      const crossedCompact =
+        snapItems.some((it) => it.item_id === "0.0") &&
+        crossedUnseenCompact(state.items, snapItems);
+      if (state.resetPending || crossedCompact) {
+        if (snapItems.length === 0) return {};
+        return {
+          items: snapItems,
+          streamingIds: new Set(),
+          resetPending: false,
+          hasMoreOlder: state.hasMoreOlder,
+        };
+      }
     }
     const next = foldEvent(
       {
@@ -351,20 +400,28 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
   if (parked) {
     // Parked reset window: same wholesale-replace rule as the active
     // thread — the first non-empty post-compact snapshot replaces the
-    // bucket and clears the marker.
-    if (parked.resetPending && ev.role === "timeline_snapshot") {
+    // bucket and clears the marker. The same replace fires when a FULL-window
+    // snapshot (0.0 present) crossed a compact the bucket never folded (its
+    // compact_done was lost in an SSE gap): without it the pre-compact items
+    // would sit in the bucket and keep-merge back in on switch-back.
+    if (ev.role === "timeline_snapshot") {
       const snapItems = ev.items as unknown as BackendTimelineItem[];
-      if (snapItems.length === 0) return {};
-      const compactedThreadIds = new Set(state.compactedThreadIds);
-      compactedThreadIds.delete(ev.agent_id);
-      threads.set(ev.agent_id, {
-        ...parked,
-        items: snapItems,
-        streamingIds: new Set(),
-        resetPending: false,
-        hasMoreOlder: parked.hasMoreOlder,
-      });
-      return { threads, compactedThreadIds };
+      const crossedCompact =
+        snapItems.some((it) => it.item_id === "0.0") &&
+        crossedUnseenCompact(parked.items, snapItems);
+      if (parked.resetPending || crossedCompact) {
+        if (snapItems.length === 0) return {};
+        const compactedThreadIds = new Set(state.compactedThreadIds);
+        compactedThreadIds.delete(ev.agent_id);
+        threads.set(ev.agent_id, {
+          ...parked,
+          items: snapItems,
+          streamingIds: new Set(),
+          resetPending: false,
+          hasMoreOlder: parked.hasMoreOlder,
+        });
+        return { threads, compactedThreadIds };
+      }
     }
     threads.set(ev.agent_id, foldEvent(parked, ev));
   }
@@ -480,22 +537,35 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
 
   reloadSnapshot: (snapshot, msg_count, hasMoreOlder) => {
     set((s) => {
-      // Inside a compact-reset window a GET may read a lagging pre-compact
-      // checkpoint (compact commits asynchronously; compact_done fires before
-      // the commit lands) — never merge it, keep-all would resurrect the old
-      // history. The post-compact SSE snapshot (memory-rendered, race-free)
-      // replaces the thread; until then the thread shows empty. hasMoreOlder
-      // is still refreshed — the truncation is real either way.
-      if (s.resetPending) {
+      // A fetched snapshot that crossed a compact the local items never
+      // folded (its envelope row is one the local state doesn't share — the
+      // compact_done + post-compact snapshot were lost in an SSE gap):
+      // keep-all merging would resurrect the compacted-away history. Replace
+      // wholesale instead; still-streaming partials survive through the same
+      // merge rule the reset window relies on. This also satisfies an armed
+      // reset window (a crossed snapshot IS the post-compact state), while a
+      // non-crossed GET inside the window keeps being dropped: it may read a
+      // lagging pre-compact checkpoint (compact commits asynchronously;
+      // compact_done fires before the commit lands) — keep-all would
+      // resurrect the old history. hasMoreOlder refreshes either way — the
+      // truncation is real.
+      const crossedCompact = crossedUnseenCompact(s.items, snapshot);
+      if (s.resetPending && !crossedCompact) {
         return { hasMoreOlder };
       }
       const snapshotIds = new Set(snapshot.map((it) => it.item_id));
-      const merged = mergeSnapshotWithStreaming(s.items, snapshot, msg_count, s.streamingIds);
+      const merged = mergeSnapshotWithStreaming(
+        crossedCompact ? [] : s.items,
+        snapshot,
+        msg_count,
+        s.streamingIds,
+      );
       return {
         // committed ids drop out of streamingIds; still-streaming ones stay
         streamingIds: new Set([...s.streamingIds].filter((id) => !snapshotIds.has(id))),
         items: merged,
         hasMoreOlder,
+        resetPending: crossedCompact ? false : s.resetPending,
       };
     });
   },
