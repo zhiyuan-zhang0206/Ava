@@ -121,7 +121,7 @@ Spawning and `send_message` coordinate agents *while they run*; a **task** is th
 
 It is peer-to-peer like the rest of the fleet — no board owner, no approval, no hierarchy. Any agent can create a task, claim it, hand it off, or release it. Five calls, all under `ava.tasks`:
 
-- `ava.tasks.create(title, description, *, parent) -> Task` — mint a task. The creating agent automatically becomes the owner. `title` is the one-line name seen in listings (unique among open/in_progress tasks); `description` is the full detail whoever works it reads. `parent` is required: the system root task (id 1) parents the cluster's top-level tasks only; pass an existing task's id to make this a subtask — split a big task by creating several children under it.
+- `ava.tasks.create(title, description, *, parent) -> Task` — mint a task. The creating agent automatically becomes the owner; the task is born `in_progress` (2026-08-29: the `open` state was dropped). `title` is the one-line name seen in listings (unique among in_progress tasks); `description` is the full detail whoever works it reads. `parent` is required: the system root task (id 1) parents the cluster's top-level tasks only; pass an existing task's id to make this a subtask — split a big task by creating several children under it.
 - `ava.tasks.update(task_id, *, status=None, description=None, results=None, owner=None) -> None` — the write path for whole fields. Change `status`, revise `description`, replace the result log `results`, or move `owner`; pass only what changes. Setting `owner` to yourself **claims** a task, to another agent **hands it off**, to `None` **releases** it. On an owner change the affected agents are messaged for you (never you, never an agent that is no longer active).
 - `ava.tasks.log(task_id, message)` — append one timestamped line to `results` without touching the rest of the log. The default way to note progress; reach for `update(results=...)` only to rewrite the log wholesale.
 - `ava.tasks.get(task_id) -> Task` — read one task. Read its `description` before you start; read its `results` before you report.
@@ -130,13 +130,12 @@ It is peer-to-peer like the rest of the fleet — no board owner, no approval, n
 **State machine** (deliberately tiny):
 
 ```
-open ──→ in_progress ──→ done
-  │            │
-  └───→ cancelled ←───────┘
+in_progress ──→ done
+     │
+     └───→ cancelled ←───────┘
 ```
 
-- **open** — waiting for someone to claim it.
-- **in_progress** — being worked. "blocked" and "failed" are *not* separate states; they are notes you leave in `results` (via `log`) while the task stays in_progress.
+- **in_progress** — created and being worked (a task is born `in_progress`; "blocked" and "failed" are *not* separate states, they are notes you leave in `results` via `log` while the task stays in_progress).
 - **done** — finished. **cancelled** — no longer needed.
 
 By convention only the owner drives their own task's status — peers coordinate, they do not enforce. If a task looks stalled, don't wait on a daemon: check the owner's liveness in the fleet view, and if it is gone just `ava.tasks.update(id, owner=ava.self.AGENT_ID)` to take it over.

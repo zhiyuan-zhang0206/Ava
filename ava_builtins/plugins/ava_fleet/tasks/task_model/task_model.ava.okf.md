@@ -17,10 +17,10 @@ The `Task` data class represents one work item in the task registry. All tasks f
 class Task:
     id: int                    # auto-increment primary key, globally unique
     parent_id: int | None      # parent task id, NULL only on root task (others default to root)
-    title: str                 # short title; unique among open/in_progress; can be renamed
+    title: str                 # short title; unique among in_progress; can be renamed
     description: str           # full description — the first thing an assignee should read
     results: str | None        # result log — appended via log/note or replaced via update
-    status: str                # "open" | "in_progress" | "done" | "cancelled" ("ongoing" = root-only permanent state)
+    status: str                # "in_progress" | "done" | "cancelled" ("ongoing" = root-only permanent state); a task is born "in_progress" (2026-08-29: "open" dropped)
     owner: int | None          # responsible agent id; NULL only on root task
     created_by: str            # creator agent's id string ("system" for root)
     created_at: datetime       # creation time

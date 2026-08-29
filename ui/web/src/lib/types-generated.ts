@@ -2085,7 +2085,7 @@ export interface paths {
          *        transaction (explicit, pending-work, controller, and retry) locks and
          *        checks this latch before its agent row, so stale resurrection cannot
          *        escape the sweep.
-         *     2. **Drain** — every open/in_progress task owned by a live agent on this
+         *     2. **Drain** — every in_progress task owned by a live agent on this
          *        machine is reassigned to the drain owner (#405) with a note; the
          *        reminder daemon then surfaces it.
          *     3. **Final sweep** — every agent row on the machine, including an already
@@ -3447,7 +3447,7 @@ export interface paths {
          *     status, priority, title, description, and results are taken when non-null
          *     (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
          *     the system root's permanent state, never assignable; a title colliding with
-         *     another open/in_progress task's is rejected). owner reassigns to another
+         *     another in_progress task's is rejected). owner reassigns to another
          *     agent (an explicit null is rejected — a task cannot be released).
          *     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
          *     null is rejected — reminders cannot be disabled). Any write resets the
@@ -3459,7 +3459,7 @@ export interface paths {
          *     reassigned, completed, cancelled, or otherwise edited.
          *
          *     A status change to done or cancelled is rejected with 422 while any direct
-         *     child remains open or in progress. Close or cancel those children first.
+         *     child remains in progress. Close or cancel those children first.
          */
         patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;
@@ -5304,7 +5304,7 @@ export interface components {
          * MachinePauseResponse
          * @description POST /api/cluster/machines/{name}/pause response — what the pause did.
          *
-         *     The pause is the three-step operator act: drain (reassign open/in_progress
+         *     The pause is the three-step operator act: drain (reassign in_progress
          *     tasks owned by the machine's agents to the drain owner), terminate every
          *     live agent on the machine (graceful via its ops server; agents whose
          *     graceful terminate could not be enqueued — machine already unreachable —

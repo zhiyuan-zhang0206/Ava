@@ -2450,11 +2450,11 @@ def _seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
     db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
 
 
-def _seed_open_task(db_conn: psycopg.Connection, owner: int, title: str) -> int:
+def _seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -> int:
     with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         cur.execute(  # pyright: ignore[reportUnknownMemberType]
             "INSERT INTO agent_tasks (title, description, status, owner, created_by) "
-            "VALUES (%s, 'desc', 'open', %s, 'user') RETURNING id",
+            "VALUES (%s, 'desc', 'in_progress', %s, 'user') RETURNING id",
             (title, owner),
         )
         row = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
@@ -2479,7 +2479,7 @@ class TestMachinePauseResume:
         _seed_drain_owner(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         aid = _seed_agent_on_machine(db_conn, "away")  # pyright: ignore[reportUnknownArgumentType]
         _seed_agent_on_machine(db_conn, "away")  # pyright: ignore[reportUnknownArgumentType]
-        _seed_open_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
+        _seed_in_progress_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
 
         with TestClient(app) as client:
             r = client.post(
