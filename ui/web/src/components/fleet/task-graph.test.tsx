@@ -316,6 +316,41 @@ describe("TaskGraph (graph mode)", () => {
   });
 });
 
+/** Mock the hover card's offsetWidth/offsetHeight (the role="tooltip"
+ *  element) at the given size; every other element keeps its real values.
+ *  Returns a restore function. */
+function mockCardSize(width: number, height: number): () => void {
+  const proto = HTMLElement.prototype;
+  // Typed through a shim so the descriptor's getter returns number.
+  const widthDesc = Object.getOwnPropertyDescriptor({ offsetWidth: 0 }, "offsetWidth");
+  const heightDesc = Object.getOwnPropertyDescriptor({ offsetHeight: 0 }, "offsetHeight");
+  const isCard = function (this: HTMLElement) {
+    return this.getAttribute("role") === "tooltip";
+  };
+  Object.defineProperty(proto, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (isCard.call(this)) return width;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- DOM descriptor getters are untyped in lib.dom; narrowed immediately below
+      const real = widthDesc?.get?.call(this);
+      return typeof real === "number" ? real : 0;
+    },
+  });
+  Object.defineProperty(proto, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (isCard.call(this)) return height;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- DOM descriptor getters are untyped in lib.dom; narrowed immediately below
+      const real = heightDesc?.get?.call(this);
+      return typeof real === "number" ? real : 0;
+    },
+  });
+  return () => {
+    if (widthDesc) Object.defineProperty(proto, "offsetWidth", widthDesc);
+    if (heightDesc) Object.defineProperty(proto, "offsetHeight", heightDesc);
+  };
+}
+
 describe("TaskGraph hover detail card", () => {
   // The instant hover card replaces the old native SVG <title> (whose
   // appearance the browser deferred — the perceived hover lag): it must show
@@ -427,33 +462,7 @@ describe("TaskGraph hover detail card", () => {
     vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
       DOMRect.fromRect({ x: 250, y: 100, width: 36, height: 36 }),
     );
-    // Card size 200×100 — mock only the tooltip element's offsets, every
-    // other element keeps its real values.
-    const proto = HTMLElement.prototype;
-    // Typed through a shim so the descriptor's getter returns number.
-    const widthDesc = Object.getOwnPropertyDescriptor({ offsetWidth: 0 }, "offsetWidth");
-    const heightDesc = Object.getOwnPropertyDescriptor({ offsetHeight: 0 }, "offsetHeight");
-    const isCard = function (this: HTMLElement) {
-      return this.getAttribute("role") === "tooltip";
-    };
-    Object.defineProperty(proto, "offsetWidth", {
-      configurable: true,
-      get(this: HTMLElement) {
-        if (isCard.call(this)) return 200;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- DOM descriptor getters are untyped in lib.dom; narrowed immediately below
-        const real = widthDesc?.get?.call(this);
-        return typeof real === "number" ? real : 0;
-      },
-    });
-    Object.defineProperty(proto, "offsetHeight", {
-      configurable: true,
-      get(this: HTMLElement) {
-        if (isCard.call(this)) return 100;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- DOM descriptor getters are untyped in lib.dom; narrowed immediately below
-        const real = heightDesc?.get?.call(this);
-        return typeof real === "number" ? real : 0;
-      },
-    });
+    const restore = mockCardSize(200, 100);
     try {
       fireEvent.mouseEnter(group);
       const card = screen.getByRole("tooltip");
@@ -465,8 +474,70 @@ describe("TaskGraph hover detail card", () => {
       expect(card.style.left).toBe("36px");
       expect(card.style.top).toBe("114px"); // 100 + 14, no vertical flip
     } finally {
-      if (widthDesc) Object.defineProperty(proto, "offsetWidth", widthDesc);
-      if (heightDesc) Object.defineProperty(proto, "offsetHeight", heightDesc);
+      restore();
+    }
+  });
+
+  it("places the card vertically above a mid-band node when no horizontal side fits (QA #990: 320x390)", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+    // 320x390 canvas; the node box [130,166] x [180,216] sits mid-band on
+    // both axes. Card 200x100.
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 320, height: 390 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 130, y: 180, width: 36, height: 36 }),
+    );
+    const restore = mockCardSize(200, 100);
+    try {
+      fireEvent.mouseEnter(group);
+      const card = screen.getByRole("tooltip");
+      // Neither side fits (right: 166+14+200 > 316; left: 130−14−200 < 4),
+      // so the card goes ABOVE the node, horizontally centered:
+      // top = 180 − 14 − 100 = 66; left = center(148) − 100 = 48.
+      // Card [48,248] x [66,166] sits fully above node [130,166] x [180,216]
+      // — zero overlap (the old code clamped to left=4 and covered it).
+      expect(card.style.left).toBe("48px");
+      expect(card.style.top).toBe("66px");
+    } finally {
+      restore();
+    }
+  });
+
+  it("caps the card height when it is taller than both vertical sides (long card, short canvas)", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 320, height: 390 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 130, y: 180, width: 36, height: 36 }),
+    );
+    // Card 200x300 fits nowhere beside (320 canvas) and nowhere vertically
+    // (above space 162, below space 156 — both under 300).
+    const restore = mockCardSize(200, 300);
+    try {
+      fireEvent.mouseEnter(group);
+      const card = screen.getByRole("tooltip");
+      // Pinned to the roomier side (above: 162px) with the height capped so
+      // the card still clears the node: top = 4, bottom = 166 = node top −
+      // gap. The body scrolls instead of covering the node.
+      expect(card.style.top).toBe("4px");
+      expect(card.style.maxHeight).toBe("162px");
+      expect(card.style.overflowY).toBe("auto");
+    } finally {
+      restore();
     }
   });
 
