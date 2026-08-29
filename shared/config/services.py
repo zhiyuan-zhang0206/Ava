@@ -195,6 +195,23 @@ class ServiceSettings(EnvSettings):
         },
     )
 
+    memory_search_backend: str = Field(
+        default="milvus",
+        alias="AVA_MEMORY_SEARCH_BACKEND",
+        description=(
+            "Storage backend for the memory embedding index. 'milvus' is the default "
+            "(and today the only) backend; more land behind the same switch. The "
+            "indexer daemon and the gateway search endpoint both read it — switching "
+            "is one env var + a restart, the cold-start scan rebuilds the index."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     memory_search_deadline_seconds: float = Field(
         default=15.0,
         alias="AVA_MEMORY_SEARCH_DEADLINE_SECONDS",
