@@ -13,15 +13,35 @@ the archive+Loki merge on the same pair.
 
 import math
 from datetime import timedelta
+from typing import Any
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events
+from gateway import loki_events, neighbors
 from gateway.app import app
 from shared.loki_index_labels import ARCHIVE_FREEZE_AT
 from tests.gateway.loki_fake import FakeLoki
+
+
+class _FakeRedis:
+    """In-memory stand-in for the frozen-source cache's sync_redis client."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.store[key] = value
+
+    def __enter__(self) -> "_FakeRedis":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +51,19 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     fake = FakeLoki()
     monkeypatch.setattr(loki_events, "query_events", fake.query_events)
     monkeypatch.setattr(loki_events, "count_events", fake.count_events)
+    return fake
+
+
+@pytest.fixture(autouse=True)
+def frozen_cache(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
+    """A fresh per-test fake Redis for the archive-row cache, so cached state
+    never leaks between tests (and the real Redis is never touched)."""
+    fake = _FakeRedis()
+
+    def _fake_sync_redis(*_args: object, **_kwargs: object) -> _FakeRedis:
+        return fake
+
+    monkeypatch.setattr(neighbors, "sync_redis", _fake_sync_redis)
     return fake
 
 
@@ -438,6 +471,110 @@ def test_ancestors_archive_and_loki_merge_counts(
 
     assert [r["agent_id"] for r in rows] == [a]  # pyright: ignore[reportUnknownVariableType]
     assert rows[0]["score"] == pytest.approx(math.log1p(2), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+
+
+# ── frozen archive cache: the immutable Loki archive is read once a day ──
+
+
+def test_archive_rows_fetched_once_then_served_from_cache(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    frozen_cache: _FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The archive stream is immutable, so its rows are cached: the first
+    request runs the Loki archive query, the second serves the same answer
+    without touching Loki again (task #1958 — the per-request archive scan
+    was ~5-28s and is what made the route slow)."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
+
+    archive_calls: list[dict[str, object]] = []
+    original = fake_loki.query_events
+
+    def counting_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        if kwargs.get("archive"):
+            archive_calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(loki_events, "query_events", counting_query)
+
+    with TestClient(app) as client:
+        first = _neighbors(client, a, depth=1)
+        second = _neighbors(client, a, depth=1)
+
+    assert first == second
+    assert {r["agent_id"] for r in first} == {b}  # pyright: ignore[reportUnknownArgumentType]
+    assert len(archive_calls) == 1  # second request hit the Redis cache
+    assert neighbors._ARCHIVE_CACHE_KEY in frozen_cache.store
+
+
+def test_archive_cache_redis_outage_degrades_to_direct_query(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail-open: when Redis is unavailable the route still answers, reading
+    the archive straight from Loki (and skipping the cache write)."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
+
+    class _BrokenRedis:
+        def __enter__(self) -> "_BrokenRedis":
+            raise RuntimeError("redis down")
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def _broken_sync_redis(*_args: object, **_kwargs: object) -> _BrokenRedis:
+        return _BrokenRedis()
+
+    monkeypatch.setattr(neighbors, "sync_redis", _broken_sync_redis)
+
+    with TestClient(app) as client:
+        rows = _neighbors(client, a, depth=1)
+
+    assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_corrupt_archive_cache_entry_refetches_from_loki(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, frozen_cache: _FakeRedis
+) -> None:
+    """A corrupt cached entry is a miss, not an answer: the decode failure
+    refetches the archive instead of serving a wrong (or crashing) result."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
+    # Valid JSON, wrong row shape (row[3] missing) — exercises the row decode.
+    frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY] = '{"rows": [[999, 998, "spawn"]]}'
+
+    with TestClient(app) as client:
+        rows = _neighbors(client, a, depth=1)
+
+    assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_live_tail_read_is_bounded_and_cached_parts_never_requery(
+    fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The live read is the only per-request Loki query and carries the 8s
+    bound (the fleet graph's telemetry-read bound) instead of the shared
+    client's 45s default, which is what pinned requests when Loki stalled."""
+    live_calls: list[dict[str, object]] = []
+    original = fake_loki.query_events
+
+    def counting_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        if not kwargs.get("archive"):
+            live_calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(loki_events, "query_events", counting_query)
+    neighbors.compute(root=1, max_depth=1, limit=20)
+
+    assert len(live_calls) == 1
+    call = live_calls[0]
+    assert call["timeout_s"] == neighbors._LIVE_READ_TIMEOUT_S
+    assert call["from_"] == ARCHIVE_FREEZE_AT
 
 
 # ── migration round-trip: the down migration must actually execute ────────
