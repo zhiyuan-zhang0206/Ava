@@ -84,8 +84,13 @@ def _id_to_hex(value: str) -> str:
         return value.lower()
     try:
         decoded = base64.b64decode(value, validate=True)
-    except Exception as exc:  # binascii.Error / ValueError
-        raise ValueError(f"malformed span id {value[:24]!r} (neither hex nor base64)") from exc
+    except Exception:
+        # Unpadded base64 (legacy OTLP JSON writers may omit the trailing
+        # "="); pad to a multiple of 4 and retry the strict decode.
+        try:
+            decoded = base64.b64decode(value + "=" * (-len(value) % 4), validate=True)
+        except Exception as exc:  # binascii.Error / ValueError
+            raise ValueError(f"malformed span id {value[:24]!r} (neither hex nor base64)") from exc
     if len(decoded) not in (16, 8):
         raise ValueError(
             f"malformed span id {value[:24]!r}: decoded to {len(decoded)} bytes, "
@@ -128,9 +133,15 @@ def _spans_from_envelope(data: dict, hex_trace_id: str | None) -> list[dict]:
     for group in groups:
         for ss in group.get("scopeSpans", []):
             for sp in ss.get("spans", []):
-                if hex_trace_id is not None and _id_to_hex(sp["traceId"]) != hex_trace_id:
+                try:
+                    if hex_trace_id is not None and _id_to_hex(sp["traceId"]) != hex_trace_id:
+                        continue
+                    out.append(_normalize_span(sp))
+                except (KeyError, ValueError):
+                    # A malformed sibling span (empty traceId, missing field,
+                    # garbage id) must never abort the whole scan — skip it
+                    # and keep going (the pre-#637 behavior).
                     continue
-                out.append(_normalize_span(sp))
     return out
 
 
@@ -201,7 +212,10 @@ def _mirror_day(fp: Path) -> datetime.date | None:
             return None
     m = re.match(r"spans-(\d{4})-(\d{2})-(\d{2})T", fp.name)
     if m:
-        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
     return None
 
 
@@ -235,9 +249,14 @@ def fetch_from_mirror(args, hex_trace_id: str) -> list[dict]:
     for fp in files:
         found = 0
         # Old segments are gzipped by the agent-side compression pass; read
-        # them transparently (gzip.open with text mode + encoding).
-        opener = gzip.open if fp.name.endswith(".gz") else fp.open
-        with opener(fp, "rt", encoding="utf-8") as f:
+        # them transparently. `fp.open` is a bound method and must NOT be
+        # called with the path as its first argument (gzip.open does take
+        # it) — passing it crashed every non-gzipped mirror scan.
+        with (
+            gzip.open(fp, "rt", encoding="utf-8")
+            if fp.name.endswith(".gz")
+            else fp.open("rt", encoding="utf-8")
+        ) as f:
             for line in f:
                 if not any(needle in line for needle in needles):
                     continue
@@ -277,10 +296,10 @@ def cmd_fetch(args) -> int:
     if not args.trace_id:
         print("--trace-id is required in fetch mode")
         return 2
-    trace_id = args.trace_id.zfill(32)
-    if not re.fullmatch(r"[0-9a-f]{32}", trace_id):
+    if not re.fullmatch(r"[0-9a-f]{31,32}", args.trace_id):
         print("--trace-id must be a 31- or 32-char hex id")
         return 2
+    trace_id = args.trace_id.zfill(32)
     spans = (
         fetch_from_mirror(args, trace_id)
         if args.source == "mirror"
