@@ -65,6 +65,7 @@ from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -81,7 +82,9 @@ _log = logging.getLogger(__name__)
 
 BACKUP_HOUR = 3  # cluster time; the first tick at/after this hour runs the day's backup
 BACKUP_KEEP = 7  # a week of daily dumps: a bad migration found a day later must not have overwritten the last good copy
+ACTIVATION_KEEP = 2
 _PRE_UPDATE_MARKER = "pre-update"  # filename kind segment for `ava cluster update` snapshots
+_ACTIVATION_MARKER = "pitr-activation"
 # Generous ceiling for one dump (the DB is far smaller); see the comment at the
 # subprocess.run call for why an unbounded pg_dump is not acceptable here.
 # 60 min: a full dump with checkpoint history takes about 6.3 min. This is
@@ -92,7 +95,7 @@ _DUMP_TIMEOUT_S = 60 * 60
 _BREAKDOWN_CONNECT_TIMEOUT_S = 10
 _NAME_RE = re.compile(
     r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z|\d{8}-\d{6})"
-    r"(?:\.(?P<kind>pre-update))?\.dump(?:\.gz\.enc|\.enc)?$"
+    r"(?:\.(?P<kind>pre-update|pitr-activation(?:-[0-9a-f-]{36})?))?\.dump(?:\.gz\.enc|\.enc)?$"
 )
 _TS_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC, offset-bearing by construction
 _LEGACY_TS_FORMAT = "%Y%m%d-%H%M%S"  # pre-cutover names: wall clock, no offset
@@ -173,10 +176,44 @@ def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
     return sorted(dumps)
 
 
+def activation_snapshot(operation_id: str) -> Path | None:
+    """The exact published dump owned by one durable activation operation."""
+    suffix = f".{_ACTIVATION_MARKER}-{operation_id}.dump.enc"
+    matches = [
+        path for _timestamp, path in _managed_dumps(backup_dir()) if path.name.endswith(suffix)
+    ]
+    if len(matches) > 1:
+        raise RuntimeError("multiple snapshots belong to one PITR activation operation")
+    return matches[0] if matches else None
+
+
 def _is_pre_update(path: Path) -> bool:
     """Whether a managed dump is an update-kind snapshot rather than a daily dump."""
     m = _NAME_RE.match(path.name)
-    return bool(m and m.group("kind"))
+    return bool(m and m.group("kind") == _PRE_UPDATE_MARKER)
+
+
+def _is_activation(path: Path) -> bool:
+    """Whether a dump is pinned by a not-yet-protected PITR operation."""
+    m = _NAME_RE.match(path.name)
+    return bool(m and (m.group("kind") or "").startswith(_ACTIVATION_MARKER))
+
+
+def _active_activation_pin(directory: Path) -> Path | None:
+    if directory.resolve() != backup_dir().resolve():
+        return None
+    from services.pitr.activation_state import load_record
+    from shared.paths import ava_home
+
+    record = load_record(ava_home())
+    if record is None or record.phase in {"protected", "rolled_back"}:
+        return None
+    if record.pre_activation_snapshot is None:
+        return None
+    pin = Path(record.pre_activation_snapshot)
+    if pin.parent.resolve() != directory.resolve():
+        raise RuntimeError("active PITR snapshot lies outside the managed backup directory")
+    return pin
 
 
 def is_due(now: datetime) -> bool:
@@ -197,9 +234,15 @@ def _prune(directory: Path) -> list[Path]:
     the updates would silently shrink the daily window; the newest snapshot is
     always the most recent full dump before a migration, so it is kept."""
     dumps = _managed_dumps(directory)
-    dailies = [(ts, path) for ts, path in dumps if not _is_pre_update(path)]
+    dailies = [
+        (ts, path) for ts, path in dumps if not _is_pre_update(path) and not _is_activation(path)
+    ]
     snapshots = [(ts, path) for ts, path in dumps if _is_pre_update(path)]
-    keep = set(dailies[-BACKUP_KEEP:])
+    activations = [(ts, path) for ts, path in dumps if _is_activation(path)]
+    keep = set(dailies[-BACKUP_KEEP:]) | set(activations[-ACTIVATION_KEEP:])
+    active_pin = _active_activation_pin(directory)
+    if active_pin is not None:
+        keep.update(item for item in activations if item[1] == active_pin)
     if snapshots:
         keep.add(snapshots[-1])
     removed: list[Path] = []
@@ -351,13 +394,25 @@ def _copy_offsite(artifact: Path) -> None:
         _log.exception("[backup] encrypted off-site copy failed; local artifact retained")
 
 
-def _available_target(directory: Path, dbname: str, now: datetime, *, pre_update: bool) -> Path:
+def _available_target(
+    directory: Path,
+    dbname: str,
+    now: datetime,
+    *,
+    pre_update: bool,
+    pitr_activation: str | None,
+) -> Path:
     """Return an unused managed dump path without replacing a prior snapshot.
 
     `pre_update` marks an `ava cluster update` snapshot with a kind segment so
     prune can give update-kind artifacts their own retention slot.
     """
-    kind = f".{_PRE_UPDATE_MARKER}" if pre_update else ""
+    if pre_update and pitr_activation:
+        raise ValueError("a backup cannot be both pre-update and PITR activation")
+    if pitr_activation is not None and str(UUID(pitr_activation)) != pitr_activation:
+        raise ValueError("PITR activation backup requires a canonical operation UUID")
+    marker = f"{_ACTIVATION_MARKER}-{pitr_activation}" if pitr_activation else _PRE_UPDATE_MARKER
+    kind = f".{marker}" if pre_update or pitr_activation else ""
     for offset_s in range(_TARGET_NAME_ATTEMPTS):
         stamp = (now + timedelta(seconds=offset_s)).astimezone(UTC).strftime(_TS_FORMAT)
         target = directory / f"{dbname}-{stamp}{kind}.dump.enc"
@@ -372,6 +427,7 @@ def run_backup(
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
     pre_update: bool = False,
+    pitr_activation: str | None = None,
 ) -> Path:
     """Dump the cluster DB into backup_dir() and prune; return the dump path.
 
@@ -385,7 +441,13 @@ def run_backup(
     retention slot (newest one) instead of consuming a daily-dump slot.
     """
     with backup_lock():
-        return _run_backup(now, db_url=db_url, timeout_s=timeout_s, pre_update=pre_update)
+        return _run_backup(
+            now,
+            db_url=db_url,
+            timeout_s=timeout_s,
+            pre_update=pre_update,
+            pitr_activation=pitr_activation,
+        )
 
 
 def _db_size_breakdown(db_url: str | None = None) -> str:
@@ -438,6 +500,7 @@ def _run_backup(
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
     pre_update: bool = False,
+    pitr_activation: str | None = None,
 ) -> Path:
     """Write one managed dump while `backup_lock` is held.
 
@@ -462,7 +525,13 @@ def _run_backup(
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
     _log.info("[backup] db composition: %s", _db_size_breakdown(db_url))
-    target = _available_target(directory, dbname, now, pre_update=pre_update)
+    target = _available_target(
+        directory,
+        dbname,
+        now,
+        pre_update=pre_update,
+        pitr_activation=pitr_activation,
+    )
     stem = target.name.removesuffix(".dump.enc")
     dump_partial = directory / f"{stem}.dump.partial"
     encrypted_partial = target.with_name(target.name + ".partial")
