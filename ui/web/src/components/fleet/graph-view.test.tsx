@@ -486,23 +486,40 @@ describe("GraphView", () => {
     useFleetGraph.mockReturnValue(
       ok({ nodes: [node(1, { label: "alpha", node_score: 12_345 })], edges: [] }),
     );
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
     const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
     const group = label.closest("g")!;
 
     // The card is present synchronously — no delay timer, no debounce
     // (the old native title waited on the browser's tooltip timer).
-    fireEvent.mouseEnter(group);
-    expect(screen.queryByRole("tooltip")).not.toBeNull();
-    const card = screen.getByRole("tooltip");
-    expect(card.textContent).toContain("alpha");
-    expect(card.textContent).toContain("Agent #1");
-    expect(card.textContent).toContain("Running");
-    expect(card.textContent).toContain("Activity score: 12,345");
+    // Pin a roomy non-capped geometry: the beside-node card hides the moment
+    // the pointer leaves the node. (jsdom's all-zero boxes land every card
+    // in the height-capped state, where a grace window legitimately delays
+    // the hide so the scrollable content stays reachable.)
+    const svg = container.querySelector('svg[aria-label="Fleet relationship graph"]')!;
+    const canvas = svg.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 600, height: 400 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 100, y: 100, width: 36, height: 36 }),
+    );
+    const restoreCard = mockCardSize(200, 100);
+    try {
+      fireEvent.mouseEnter(group);
+      expect(screen.queryByRole("tooltip")).not.toBeNull();
+      const card = screen.getByRole("tooltip");
+      expect(card.textContent).toContain("alpha");
+      expect(card.textContent).toContain("Agent #1");
+      expect(card.textContent).toContain("Running");
+      expect(card.textContent).toContain("Activity score: 12,345");
 
-    // Leaving the node dismisses the card.
-    fireEvent.mouseLeave(group);
-    expect(screen.queryByRole("tooltip")).toBeNull();
+      // Leaving the node dismisses the card.
+      fireEvent.mouseLeave(group);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      restoreCard();
+    }
   });
 
   it("empty graph (not loading, no error) shows the empty placeholder", () => {
@@ -563,3 +580,37 @@ describe("GraphView", () => {
     expect(screen.getByText("Graph unavailable.")).toBeTruthy();
   });
 });
+
+/** Mock the hover card's offsetWidth/offsetHeight (the role="tooltip"
+ *  element) at the given size; every other element keeps its real values.
+ *  Returns a restore function. */
+function mockCardSize(width: number, height: number): () => void {
+  const proto = HTMLElement.prototype;
+  const widthDesc = Object.getOwnPropertyDescriptor({ offsetWidth: 0 }, "offsetWidth");
+  const heightDesc = Object.getOwnPropertyDescriptor({ offsetHeight: 0 }, "offsetHeight");
+  const isCard = function (this: HTMLElement) {
+    return this.getAttribute("role") === "tooltip";
+  };
+  Object.defineProperty(proto, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (isCard.call(this)) return width;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- DOM descriptor getters are untyped in lib.dom; narrowed immediately below
+      const real = widthDesc?.get?.call(this);
+      return typeof real === "number" ? real : 0;
+    },
+  });
+  Object.defineProperty(proto, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (isCard.call(this)) return height;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- DOM descriptor getters are untyped in lib.dom; narrowed immediately below
+      const real = heightDesc?.get?.call(this);
+      return typeof real === "number" ? real : 0;
+    },
+  });
+  return () => {
+    if (widthDesc) Object.defineProperty(proto, "offsetWidth", widthDesc);
+    if (heightDesc) Object.defineProperty(proto, "offsetHeight", heightDesc);
+  };
+}
