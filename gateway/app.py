@@ -674,8 +674,8 @@ app.middleware("http")(_latency.latency_middleware)
 # the Exception handler below because ServerErrorMiddleware sits outside user
 # middleware (#187). Browser origins are exact matches: an explicit setting is
 # authoritative; otherwise the allowlist derives the local frontend origins and
-# the gateway host at the frontend entry port. A CORS preflight (OPTIONS) is
-# answered here before auth or pause ever see it.
+# the gateway URL's own origin (its own scheme, host, and port). A CORS
+# preflight (OPTIONS) is answered here before auth or pause ever see it.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins(),
