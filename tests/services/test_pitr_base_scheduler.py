@@ -74,6 +74,24 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
     assert completed.returncode == 0
 
 
+def test_restricted_restore_group_reaps_orphan_descendant() -> None:
+    script = (
+        "import subprocess,sys; "
+        "subprocess.Popen([sys.executable,'-c',"
+        "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)']);"
+    )
+    process = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", script], start_new_session=True
+    )
+    created_at = psutil.Process(process.pid).create_time()
+    process.wait(timeout=10)
+    assert daemon._group_members(process.pid)
+
+    daemon._reap_restore_subprocess_group(process, created_at)
+
+    assert daemon._group_members(process.pid) == []
+
+
 def _blocking_worker(
     started: Path,
     stopped: Path,

@@ -37,6 +37,7 @@ from services.pitr.restore_proof import (
     RestoreSpaceBudget,
     publish_candidate_proof,
     reconcile_restore_runtime,
+    verify_candidate_proof,
 )
 from services.pitr.restore_publish_store import GCSProtectedManifestPublisher
 from services.pitr.space_budget import CandidateSpaceBudget
@@ -295,16 +296,22 @@ def _publish_restore_proof(candidate: CandidateManifest, outcome: dict[str, str]
         or outcome.get("pending_sha256") != hashlib.sha256(pending.read_bytes()).hexdigest()
     ):
         raise RuntimeError("restricted restore outcome differs from authoritative evidence")
-    publish_candidate_proof(
+    verified = verify_candidate_proof(
         candidate=authoritative,
         root=root,
         ack_dir=root / "ack",
+    )
+    publisher = GCSProtectedManifestPublisher(
+        project=config.pitr_gcs_project,
+        bucket=config.pitr_gcs_bucket,
+        credentials_file=credentials,
+    )
+    publish_candidate_proof(
+        candidate=authoritative,
+        root=root,
         prefix=config.pitr_gcs_prefix,
-        publisher=GCSProtectedManifestPublisher(
-            project=config.pitr_gcs_project,
-            bucket=config.pitr_gcs_bucket,
-            credentials_file=credentials,
-        ),
+        verified=verified,
+        publisher=publisher,
     )
 
 
@@ -362,26 +369,51 @@ async def _run_restore_worker(inputs: _RestoreWorkerInput) -> dict[str, str]:
         close_fds=True,
         text=True,
     )
+    leader_created_at = psutil.Process(process.pid).create_time()
     try:
         while process.poll() is None:
             await asyncio.sleep(0.25)
+        if _group_members(process.pid):
+            _reap_restore_subprocess_group(process, leader_created_at)
+            _reject_restore_descendants()
         stderr = process.stderr.read() if process.stderr is not None else ""
         return _restore_worker_result(process.returncode, stderr, result)
     except BaseException:
-        if process.poll() is None:
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                with suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=15)
+        if process.poll() is None or _group_members(process.pid):
+            _reap_restore_subprocess_group(process, leader_created_at)
         raise
     finally:
         if process.stderr is not None:
             process.stderr.close()
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _reap_restore_subprocess_group(
+    process: subprocess.Popen[str], leader_created_at: float
+) -> None:
+    if process.pid == os.getpgrp():
+        raise RuntimeError("refusing to signal the controller process group")
+    with suppress(psutil.NoSuchProcess):
+        leader = psutil.Process(process.pid)
+        if abs(leader.create_time() - leader_created_at) >= 0.01:
+            raise RuntimeError("restricted restore worker PID identity changed")
+    deadline = time.monotonic() + 20
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
+    grace = min(deadline, time.monotonic() + 5)
+    while _group_members(process.pid) and time.monotonic() < grace:
+        time.sleep(0.1)
+    while _group_members(process.pid) and time.monotonic() < deadline:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        time.sleep(0.1)
+    process.wait(timeout=max(0.1, deadline - time.monotonic()))
+    if _group_members(process.pid):
+        raise RuntimeError("restricted restore worker process group could not be emptied")
+
+
+def _reject_restore_descendants() -> NoReturn:
+    raise RuntimeError("restricted restore worker left live descendants")
 
 
 def _restore_worker_result(returncode: int, stderr: str, result: Path) -> dict[str, str]:
