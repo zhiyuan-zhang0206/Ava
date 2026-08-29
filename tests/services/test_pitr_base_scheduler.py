@@ -16,6 +16,7 @@ import pytest
 import services.pitr.base_scheduler_daemon as daemon
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
+from shared.process_env import restricted_process_env
 
 
 def _candidate(chain_id: str) -> CandidateManifest:
@@ -24,7 +25,9 @@ def _candidate(chain_id: str) -> CandidateManifest:
         chain_id=chain_id,
         protected=False,
         postgres_major=17,
+        database_name="ava",
         system_identifier="1",
+        wal_segment_size=16 * 1024 * 1024,
         timeline=1,
         start_lsn="0/100",
         end_lsn="0/200",
@@ -36,6 +39,89 @@ def _candidate(chain_id: str) -> CandidateManifest:
         native_manifest_container_generation=1,
         migration_set_sha256="migrations",
     )
+
+
+def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_path: Path) -> None:
+    uploader = tmp_path / "uploader.json"
+    uploader.write_text("publisher-only")
+    inputs = daemon._RestoreWorkerInput(
+        _candidate("viewer-only").to_json(),
+        tmp_path,
+        tmp_path / "ack",
+        tmp_path / "backup.key",
+        "project",
+        "bucket",
+        tmp_path / "viewer.json",
+        daemon.RestoreSpaceBudget(0, 0, 0),
+        "postgresql://viewer@127.0.0.1:5433/ava",
+        Path("/usr/bin/true"),
+        Path("/usr/bin/true"),
+    )
+    assert str(uploader) not in repr(inputs)
+    environment = restricted_process_env()
+    assert not any(name.startswith(("AVA_", "GOOGLE_", "PG")) for name in environment)
+    script = (
+        "import sys; import services.pitr.restore_worker; "
+        "forbidden={'shared.config','services.pitr.restore_publish_store'}; "
+        "raise SystemExit(1 if forbidden & set(sys.modules) else 0)"
+    )
+    completed = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[2],
+        env=environment,
+        check=False,
+    )
+    assert completed.returncode == 0
+
+
+def test_restricted_restore_group_reaps_orphan_descendant() -> None:
+    script = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c',"
+        "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)']);"
+        "time.sleep(60)"
+    )
+    process = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", script], start_new_session=True, text=True
+    )
+    created_at = psutil.Process(process.pid).create_time()
+    deadline = time.monotonic() + 10
+    while len(daemon._group_members(process.pid)) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(daemon._group_members(process.pid)) >= 2
+
+    daemon._reap_restore_subprocess_group(process, created_at)
+
+    assert daemon._group_members(process.pid) == []
+
+
+def test_authoritative_verify_precedes_publisher_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    constructed = False
+
+    def reject_mismatched_ack(**_kwargs: object) -> None:
+        raise ValueError("ACK generation mismatch")
+
+    class Publisher:
+        def __init__(self, **_kwargs: object) -> None:
+            nonlocal constructed
+            constructed = True
+
+    monkeypatch.setattr(daemon, "verify_candidate_proof", reject_mismatched_ack)
+    monkeypatch.setattr(daemon, "GCSProtectedManifestPublisher", Publisher)
+
+    with pytest.raises(ValueError, match="ACK generation mismatch"):
+        daemon._verify_then_construct_publisher(
+            candidate=_candidate("verify-first"),
+            root=tmp_path,
+            ack_dir=tmp_path / "ack",
+            project="project",
+            bucket="bucket",
+            credentials=tmp_path / "uploader.json",
+        )
+
+    assert constructed is False
 
 
 def _blocking_worker(
@@ -74,6 +160,13 @@ def _noncooperative_worker(
     time.sleep(60)
 
 
+async def _wait_for_path(path: Path, *, timeout_s: float = 10) -> None:
+    deadline = time.monotonic() + timeout_s
+    while not path.exists() and time.monotonic() < deadline:
+        await asyncio.sleep(0.02)
+    assert path.exists(), f"worker did not publish {path.name} before the deadline"
+
+
 def test_due_uses_durable_candidate_after_restart(tmp_path: Path) -> None:
     now = datetime(2026, 8, 30, 4, tzinfo=UTC)  # Sunday after the weekly window.
     assert is_due(now, tmp_path)
@@ -98,10 +191,7 @@ async def test_runner_cancellation_reaps_active_worker(
     task = asyncio.create_task(
         daemon._run_worker(target=partial(_blocking_worker, started, stopped))
     )
-    for _ in range(100):
-        if started.exists():
-            break
-        await asyncio.sleep(0.01)
+    await _wait_for_path(started)
     child_pid = int(started.read_text())
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -184,15 +274,13 @@ async def test_forced_shutdown_reaps_noncooperative_group_and_late_fork(
             group_deadline_s=15,
         )
     )
-    for _ in range(200):
-        if started.exists():
-            break
-        await asyncio.sleep(0.01)
+    await _wait_for_path(started)
     worker_pid, child_pid = (int(value) for value in started.read_text().split())
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    await _wait_for_path(late)
     late_pid = int(late.read_text())
     assert not psutil.pid_exists(worker_pid)
     assert not psutil.pid_exists(child_pid)
