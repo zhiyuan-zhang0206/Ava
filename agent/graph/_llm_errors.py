@@ -82,11 +82,17 @@ class FatalProviderError(Exception):
         error_class: str | None = None,
         provider: str | None = None,
         status: int | None = None,
+        context_overflow: bool = False,
     ) -> None:
         super().__init__(message)
         self.error_class = error_class
         self.provider = provider
         self.status = status
+        # True when the rejection was the context window being exceeded (the
+        # classifier's `context_overflow` predicate). The one permanent
+        # failure the agent can self-rescue from (compaction) — the runloop
+        # keys the heartbeat circuit breaker's forced-compact arm on it.
+        self.context_overflow = context_overflow
 
 
 # Provider error types that are deterministic within a turn — retrying cannot flip
@@ -159,6 +165,7 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     classification = classify_error(exc)
     fatal_type_hit = _is_fatal_provider_error_type(exc)
     fatal = classification.error_class is ErrorClass.PERMANENT or fatal_type_hit
+    context_overflow = classification.context_overflow
     model = turn_settings.lm.llm_model
     logger.opt(exception=True).warning(
         "[{label}] {error_class} provider={provider} status={status} fatal={fatal}",
@@ -170,6 +177,7 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
         error_type=classification.error_type,
         fatal=fatal,
         billing=classification.billing,
+        context_overflow=context_overflow,
         vendor=provider_key_of_model(model),
         model=model,
     )
@@ -187,6 +195,7 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
         error_class=classification.error_class.value,
         provider=classification.provider,
         status=classification.status,
+        context_overflow=context_overflow,
     )
 
 

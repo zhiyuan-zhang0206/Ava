@@ -99,7 +99,15 @@ async def _claim_node_impl(
     # ── First SELECT: try uncontended claim before pub/sub wait ──
     batch = await claim_inbound_batch(ctx.ops_pool, agent_id)
     if not batch:
-        if state.halted or not has_conversation(state.messages):
+        # The breaker parks the agent too: an open non-overflow breaker means
+        # the last LLM call was permanently rejected (billing / auth / ...) —
+        # a self-initiated continue-loop (this else-less branch's normal
+        # caller) would only re-fire the doomed call. Only real inbound
+        # (dispatch) may attempt a call, and the breaker closes on the first
+        # success (llm_node). The overflow reason is deliberately NOT parked:
+        # it must keep flowing to decide()'s forced-compact arm, which runs on
+        # dispatched wakes only.
+        if state.halted or not has_conversation(state.messages) or state.circuit.parks_idle:
             drain = build_attach_drain(state, ctx)
             if drain is not None:
                 return Command[ClaimGoto](update=drain, goto=CLAIM)

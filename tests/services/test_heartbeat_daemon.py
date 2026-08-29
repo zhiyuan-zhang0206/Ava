@@ -20,6 +20,8 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from services.heartbeat.daemon import (
+    _backoff_deadlines,
+    _reconcile_checkin_outcomes,
     _select_idle_agents_needing_heartbeat,
     _send_heartbeat_checkin,
 )
@@ -454,3 +456,130 @@ class TestSendHeartbeatCheckin:
             )
         finally:
             await listener.close()
+
+
+# ───────────── consecutive-failure backoff (Task #1928) ─────────────
+
+
+class TestConsecutiveFailureBackoff:
+    """A check-in that produces no LLM turn is a failed check-in (the 3962
+    context-overflow case: the daemon poked a permanently-rejecting agent
+    ~1150 times). The daemon spaces streaking agents by `2^streak` idle
+    windows; a real turn resets the streak."""
+
+    def test_backoff_skips_agent_until_deadline(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        # Deadline in the future -> excluded; deadline passed -> selected.
+        assert aid not in dict(
+            _select_idle_agents_needing_heartbeat(
+                pool, _THRESHOLD_S, backoff_until={aid: time.time() + 1000}
+            )
+        )
+        assert aid in dict(
+            _select_idle_agents_needing_heartbeat(
+                pool, _THRESHOLD_S, backoff_until={aid: time.time() - 1}
+            )
+        )
+
+    def test_backed_off_agent_does_not_consume_limit_slots(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """The limit applies AFTER the backoff filter: a backed-off agent must
+        not occupy a per-step wake-rate slot that a healthy due agent needs."""
+        healthy = _make_idle(db_conn, status_changed_s_ago=900)
+        wedged = _make_idle(db_conn, status_changed_s_ago=700)
+
+        selected = _select_idle_agents_needing_heartbeat(
+            pool,
+            _THRESHOLD_S,
+            limit=1,
+            backoff_until={wedged: time.time() + 10_000},
+        )
+        assert [r[0] for r in selected] == [healthy]
+
+    def test_reconcile_increments_streak_when_checkin_produced_no_turn(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """The check-in was sent when the agent had been idle ~6 minutes; a
+        cycle later `last_active_at` has not moved (no turn ran) -> streak 1."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        pending: dict[int, float] = {aid: 6.0}
+        streaks: dict[int, int] = {}
+
+        _reconcile_checkin_outcomes(
+            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+        )
+
+        assert pending == {}
+        assert streaks == {aid: 1}
+
+    def test_reconcile_resets_streak_when_checkin_produced_a_turn(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """The check-in produced a turn (`last_active_at` advanced) -> streak
+        reset (stays empty / drops)."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_active_at = now() WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        pending: dict[int, float] = {aid: 6.0}
+        streaks: dict[int, int] = {aid: 3}
+
+        _reconcile_checkin_outcomes(
+            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+        )
+
+        assert streaks == {}, "a turn after the check-in must clear the streak"
+
+    def test_reconcile_resets_streak_on_fresh_activity_without_pending(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """No check-in was sent this cycle (backoff active), but a real wake
+        produced a turn — fresh `last_active_at` clears the streak so the
+        recovered agent is probed again at the normal cadence."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_active_at = now() WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        streaks: dict[int, int] = {aid: 4}
+
+        _reconcile_checkin_outcomes(
+            pool, pending_checkin={}, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+        )
+
+        assert streaks == {}
+
+    def test_reconcile_stops_tracking_agents_outside_daemon_lanes(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (aid,))
+        db_conn.commit()
+        streaks: dict[int, int] = {aid: 2}
+
+        _reconcile_checkin_outcomes(
+            pool, pending_checkin={}, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+        )
+
+        assert streaks == {}
+
+    def test_backoff_deadlines_exponential_capped(self) -> None:
+        """streak=1 doubles the normal interval; the growth caps at
+        _BACKOFF_MAX_WINDOWS so the daemon still probes a wedged agent."""
+        from services.heartbeat.daemon import _BACKOFF_MAX_WINDOWS
+
+        d1 = _backoff_deadlines({1: 1}, _THRESHOLD_S)
+        d2 = _backoff_deadlines({1: 2}, _THRESHOLD_S)
+        d10 = _backoff_deadlines({1: 10}, _THRESHOLD_S)
+        assert d1[1] - time.time() == pytest.approx(2 * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
+        assert d2[1] - d1[1] == pytest.approx(2 * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
+        assert d10[1] - d2[1] == pytest.approx((_BACKOFF_MAX_WINDOWS - 4) * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]

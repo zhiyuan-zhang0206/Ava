@@ -61,7 +61,7 @@ from shared.config.turn_view import turn_settings
 from shared.live_events import CompactDone
 from shared.lm.context_budget import latest_input_tokens, resolve_context_budget
 from shared.log import logger
-from shared.message_kwargs import AvaMsgType
+from shared.message_kwargs import AvaMsgType, read_ava_kwargs
 
 # Compaction bookkeeping lives in the nested `compact` sub-state (CompactState)
 # on BaseAgentState — read via `state.compact.version` etc.; writers overwrite
@@ -96,6 +96,21 @@ def compose_summary_message(summary: str) -> str:
 # Compaction summary monitoring + retry knobs.
 COMPACT_MIN_SUMMARY_CHARS = 1000
 COMPACT_MAX_ATTEMPTS = 3
+
+# The no-LLM fallback summary of the overflow emergency path
+# (emergency_compact_summary): produced when the provider rejects even the
+# compaction request itself (context over the effective input ceiling), so the
+# agent is rescued without any model call. The text is the fresh context's
+# whole memory — it names where the dropped history went (the history_dump
+# note rides the tail) and where the agent's durable state lives.
+_EMERGENCY_COMPACT_MARKER = (
+    "[system] Emergency context trim: the conversation was removed because the "
+    "context window overflowed and the provider also rejected the compaction "
+    "call itself (the request no longer fits). Your personal memory "
+    "(memory/ + MEMORY.md) and workspace files are intact — read them to "
+    "reconstruct where you were. If a summary was preserved from an earlier "
+    "compaction it follows below."
+)
 
 
 class CompactionFailedError(RuntimeError):
@@ -209,6 +224,129 @@ async def generate_summary(
             f" cannot replace history with an empty summary"
         )
     return summary
+
+
+def _last_compact_summary_text(messages: list[AnyMessage]) -> str | None:
+    """The most recent prior compaction's summary text still in the
+    conversation, or None.
+
+    A compaction replaces the whole history with `[system, summary]` and the
+    following conversation grows after it, so at overflow time the last
+    preserved summary sits at messages[1] — a HumanMessage stamped
+    `ava_msg_type` compact_summary / compact_request. The emergency fallback
+    embeds it verbatim so a forced trim keeps as much memory as a model-less
+    wipe can (the summary is the compact contract's "complete memory" of
+    everything before it).
+    """
+    for msg in messages[1:]:
+        kw = read_ava_kwargs(msg)
+        if kw.get("ava_msg_type") in (
+            AvaMsgType.COMPACT_SUMMARY.value,
+            AvaMsgType.COMPACT_REQUEST.value,
+        ):
+            content = msg.content  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            if isinstance(content, str) and content:
+                return content
+            return None
+    return None
+
+
+def _is_permanent_provider_failure(exc: BaseException) -> bool:
+    """Whether ``exc`` is a PERMANENT-class provider rejection (the compaction
+    request itself cannot go out — context over the effective ceiling). Any
+    other failure (transient network / provider 5xx / empty-model-output) must
+    NOT trigger the wipe fallback: it would destroy the conversation for a
+    blip that a retry or a later attempt clears."""
+    from shared.lm.errors import ErrorClass, classify_error
+
+    return classify_error(exc).error_class is ErrorClass.PERMANENT
+
+
+def _emergency_fallback_summary(messages: list[AnyMessage]) -> str:
+    """The no-LLM fallback summary: the emergency marker plus the last
+    preserved prior summary, if one exists. Never raises, never calls the
+    model — the whole point is to rescue an agent whose context the provider
+    rejects outright.
+
+    Deliberately exempt from `COMPACT_MIN_SUMMARY_CHARS` (the marker alone is
+    ~400 chars): that gate exists to reject a MODEL that ignored the summary
+    template, whereas this text is framework-authored and always follows the
+    format — there is nothing to detect, and rejecting it would strand the
+    agent in the overflow state this path exists to end. Downstream
+    (`build_compact_transition`) never checks the length either."""
+    preserved = _last_compact_summary_text(messages)
+    if preserved:
+        return f"{_EMERGENCY_COMPACT_MARKER}\n\n{preserved}"
+    return _EMERGENCY_COMPACT_MARKER
+
+
+async def emergency_compact_summary(messages: list[AnyMessage], llm: BaseChatModel) -> str:
+    """The circuit-breaker compaction summary: a real compaction first, then the
+    no-LLM fallback — used by the overflow self-rescue path (claim decide).
+
+    The breaker opens on a permanent context-overflow rejection, so the
+    conversation is already over the provider's effective input ceiling; the
+    compaction request (the same conversation plus one instruction) may be
+    rejected too. This mirrors `generate_summary`'s retry loop, with two
+    differences:
+
+    - a PERMANENT-class failure stops retrying immediately and returns the
+      minimal fallback (marker + last preserved summary) instead of raising —
+      a request the provider refuses outright cannot be fixed by retry, and
+      the wipe must still happen for the agent to recover;
+    - a transient failure / short summary retries, and raising
+      `CompactionFailedError` when exhausted stays the outcome — a provider
+      blip or a template-defying model must not silently destroy the
+      conversation either.
+
+    Returns the summary text; callers feed it through the normal compact
+    transition (build_compact_transition), so the fallback is indistinguishable
+    from a real compaction downstream (same header, same wipe, same notes).
+    """
+    last_error: Exception | None = None
+    for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
+        try:
+            summary = await generate_summary(messages, llm)
+        except Exception as e:
+            last_error = e
+            if _is_permanent_provider_failure(e):
+                logger.warning(
+                    "[{label}] {body}",
+                    label="emergency-compact",
+                    event="emergency_compact",
+                    body=(
+                        f"attempt {attempt}/{COMPACT_MAX_ATTEMPTS}: compaction call "
+                        f"rejected ({e!r}) — falling back to the no-LLM minimal compact"
+                    ),
+                )
+                return _emergency_fallback_summary(messages)
+            logger.warning(
+                "[{label}] {body}",
+                label="emergency-compact",
+                event="emergency_compact",
+                body=f"attempt {attempt}/{COMPACT_MAX_ATTEMPTS}: {e}; retrying",
+            )
+            continue
+        if len(summary) >= COMPACT_MIN_SUMMARY_CHARS:
+            logger.info(
+                "[{label}] {body}",
+                label="emergency-compact",
+                event="emergency_compact",
+                body=f"attempt {attempt}/{COMPACT_MAX_ATTEMPTS}: summary {len(summary)} chars",
+            )
+            return summary
+        last_error = None
+        logger.warning(
+            "[{label}] {body}",
+            label="emergency-compact",
+            event="emergency_compact",
+            body=f"attempt {attempt}/{COMPACT_MAX_ATTEMPTS}: summary too short; retrying",
+        )
+    raise CompactionFailedError(
+        f"Emergency compaction produced no usable summary across {COMPACT_MAX_ATTEMPTS}"
+        f" attempts (last: {last_error!r}) — refusing to wipe the conversation with a"
+        f" non-summary; the turn is aborted and the breaker stays open for the next wake"
+    ) from last_error
 
 
 def _estimate_tokens(messages: list[AnyMessage]) -> int:

@@ -32,6 +32,7 @@ STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
         ("agent.state", "MemoryState"),
         ("agent.state", "ContextReset"),
         ("agent.state", "CapabilitiesState"),
+        ("agent.state", "CircuitState"),
         ("agent.state", "AgentState"),
         # Current pairs: freshly-written checkpoints carry the real module.
         ("agent.state_channels", "AttachState"),
@@ -40,5 +41,6 @@ STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
         ("agent.state_channels", "MemoryState"),
         ("agent.state_channels", "ContextReset"),
         ("agent.state_channels", "CapabilitiesState"),
+        ("agent.state_channels", "CircuitState"),
     }
 )

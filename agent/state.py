@@ -8,6 +8,7 @@ BaseAgentState (framework layer, static):
     turn_idle        — hosted mode: claim found nothing and did not park, so the host ends the turn task
     update_initiated — this agent kicked off a cluster self-update
     compact          — nested compaction bookkeeping (CompactState, agent/state_channels.py)
+    circuit          — nested heartbeat circuit-breaker state (CircuitState, agent/state_channels.py)
     attach           — nested next-turn attachment queue (AttachState, agent/state_channels.py)
     memory           — nested passive-recall bookkeeping (MemoryState, agent/state_channels.py)
     capabilities     — nested capability-index snapshot (CapabilitiesState, agent/state_channels.py)
@@ -75,6 +76,7 @@ from agent.state_channels import AttachEntry as _AttachEntry
 from agent.state_channels import (
     AttachState,
     CapabilitiesState,
+    CircuitState,
     CompactState,
     ContextReset,
     MemoryState,
@@ -132,6 +134,9 @@ class BaseAgentState(BaseModel):
 
     compact: CompactState = Field(default_factory=CompactState)
     """Compaction bookkeeping — nested last-value channel (see CompactState)."""
+
+    circuit: CircuitState = Field(default_factory=CircuitState)
+    """Heartbeat circuit breaker — nested last-value channel (see CircuitState)."""
 
     attach: AttachState = Field(default_factory=AttachState)
     """Pending files — nested last-value channel (see AttachState)."""

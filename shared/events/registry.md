@@ -23,8 +23,8 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination | retention |
 |------|------|-------------|------|------|
-| audit (category=audit) | `events` | 20 | events table | 365d+ |
-| telemetry (category=telemetry) | `events` | 119 | events table | 90d |
+| audit (category=audit) | `events` | 21 | events table | 365d+ |
+| telemetry (category=telemetry) | `events` | 124 | events table | 90d |
 | log (category=log) | `events` | 6 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection | ephemeral |
@@ -55,7 +55,7 @@ spans go through the trace channel (30d).
 
 ---
 
-## 2. Audit events (20 primary category=audit; 20 status_change with extra_categories)
+## 2. Audit events (21 primary category=audit; 21 status_change with extra_categories)
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -75,6 +75,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `resurrect` | terminated agent woken | business | — | 365d | events |
 | `restart_completed` | restart finished | business | — | 365d | events |
 | `compact` | agent context compacted | business | — | 365d | events |
+| `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue) | business | — | 365d | events |
 | `report_activity` | activity report | business | — | 365d | events |
 | `exit` | agent process exited | business | — | 365d | events |
 | `label_change` | agent label changed | business | — | 365d | events |
@@ -87,7 +88,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | 365d | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | 365d | events |
 
-## 3. Telemetry events (category=telemetry, 119)
+## 3. Telemetry events (category=telemetry, 124)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -197,6 +198,11 @@ consumers: see the comments at each emit point.
 | `compact_request` | compact requested | noise | — | — | 90d | events |
 | `auto_compact` | auto-compact | noise | — | — | 90d | events |
 | `compact_reminder` | compact reminder | noise | — | — | 90d | events |
+| `circuit_breaker_open` | heartbeat circuit breaker opened | noise | — | — | 90d | events |
+| `circuit_breaker_closed` | heartbeat circuit breaker closed | noise | — | — | 90d | events |
+| `circuit_breaker_compact` | forced overflow compact fired by the open breaker | noise | — | — | 90d | events |
+| `heartbeat_circuit_open` | heartbeat consumed while the breaker is open | noise | — | — | 90d | events |
+| `emergency_compact` | emergency compaction (overflow self-rescue) | noise | — | — | 90d | events |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | 90d | events |
 | `checkpoint_trim` | checkpoint trimmed | noise | — | — | 90d | events |
 | `recall_filter` | memory recall filter | noise | body | — | 90d | events |

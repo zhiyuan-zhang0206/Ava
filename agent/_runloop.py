@@ -22,6 +22,7 @@ This module owns:
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from datetime import UTC, datetime
 from typing import cast
 
 import psycopg
@@ -30,6 +31,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import PoolTimeout
 
+from shared.audit_events import insert_event_log_async
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.db import PG_KEEPALIVE_KWARGS
@@ -46,6 +48,17 @@ from .startup import (
     _repair_dangling_tool_use_at_startup,
 )
 from .state import BaseAgentState
+from .state_channels import (
+    CIRCUIT_REASON_AUTH,
+    CIRCUIT_REASON_BAD_REQUEST,
+    CIRCUIT_REASON_BILLING,
+    CIRCUIT_REASON_CONTEXT_OVERFLOW,
+    CIRCUIT_REASON_FORBIDDEN,
+    CIRCUIT_REASON_MODEL_NOT_FOUND,
+    CIRCUIT_REASON_PERMANENT,
+    CIRCUIT_REASON_SCHEMA,
+    CircuitState,
+)
 
 # LangGraph recursion_limit defaults to 25 — far too low for this graph even
 # per-turn: one invocation is one TURN, and a turn is a whole work bout (the
@@ -128,8 +141,34 @@ def _emit_error_event(ctx: AvaContext, agent_id: int, content: str) -> None:
         ctx.event_publisher.emit(Error(agent_id=agent_id, content=content).model_dump_json())
 
 
-def _handle_fatal_llm_error(
-    exc: FatalLLMStreamError | FatalProviderError, ctx: AvaContext, agent_id: int
+def _circuit_reason(exc: FatalProviderError) -> str:
+    """Map a permanent provider rejection to its circuit-breaker reason.
+
+    The one reason that matters for behaviour is `context_overflow` — the
+    self-rescuable case the forced-compact arm keys on. Every other rejection
+    (auth / billing / schema / ...) just stops heartbeat re-fires until a
+    real wake succeeds; they map to a stable label for the breaker event,
+    with a generic `permanent` fallback for anything unmapped."""
+    if exc.context_overflow:
+        return CIRCUIT_REASON_CONTEXT_OVERFLOW
+    status = exc.status
+    if status is None:
+        return CIRCUIT_REASON_PERMANENT
+    return {
+        401: CIRCUIT_REASON_AUTH,
+        402: CIRCUIT_REASON_BILLING,
+        403: CIRCUIT_REASON_FORBIDDEN,
+        404: CIRCUIT_REASON_MODEL_NOT_FOUND,
+        422: CIRCUIT_REASON_SCHEMA,
+        400: CIRCUIT_REASON_BAD_REQUEST,
+    }.get(status, CIRCUIT_REASON_PERMANENT)
+
+
+async def _handle_fatal_llm_error(
+    exc: FatalLLMStreamError | FatalProviderError,
+    ctx: AvaContext,
+    agent_id: int,
+    circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None = None,
 ) -> dict[str, object]:
     """Fatal LLM turn abort: log + one Error event, return the fresh-run input.
 
@@ -139,6 +178,14 @@ def _handle_fatal_llm_error(
     run: claim node idles for the next inbound so the user can see the error
     and the agent recovers on its next wake-up once the cause clears (e.g.
     balance topped up) without a manual revive.
+
+    A `FatalProviderError` additionally OPENS the heartbeat circuit breaker:
+    the next heartbeat nudge would re-fire the same doomed call (the 3962
+    incident — 80 heartbeat cycles against a permanent context-overflow 400).
+    The breaker state rides the fresh-run input (`circuit` channel); while it
+    is open the claim consumes heartbeat check-ins without routing to the
+    LLM, and for the `context_overflow` reason routes any wake into a forced
+    compaction instead. It closes on the first successful LLM call (llm_node).
     """
     logger.opt(exception=True).error(
         "LLM turn aborted (retry cap exhausted or provider rejected) — "
@@ -150,6 +197,7 @@ def _handle_fatal_llm_error(
         error_class=getattr(exc, "error_class", None),
         provider=getattr(exc, "provider", None),
         status=getattr(exc, "status", None),
+        context_overflow=getattr(exc, "context_overflow", None),
     )
     _emit_error_event(
         ctx,
@@ -162,7 +210,64 @@ def _handle_fatal_llm_error(
     # instead of re-entering the LLM with the same messages and hitting the
     # same fatal error in an infinite loop (agent #1581 incident — DeepSeek
     # stream stall with 616 messages).
-    return {"halted": True}
+    input_update: dict[str, object] = {"halted": True}
+    if isinstance(exc, FatalProviderError):
+        reason = _circuit_reason(exc)
+        already_open = False
+        if circuit_reader is not None:
+            try:
+                current = await circuit_reader()
+            except Exception:
+                current = None
+            already_open = current is not None and current.open and current.reason == reason
+        if already_open:
+            # The breaker is still open for the same reason from an earlier
+            # failed turn — re-opening is idempotent and re-emitting the open
+            # event per failed wake is noise (QA #903 nit). Skip both; the
+            # original opened_at is preserved.
+            logger.info(
+                "heartbeat circuit breaker already open (reason={reason}) — "
+                "skipping duplicate open",
+                event="circuit_breaker_open",
+                agent_id=agent_id,
+                reason=reason,
+                status=exc.status,
+            )
+            return input_update
+        input_update["circuit"] = CircuitState(
+            open=True,
+            reason=reason,
+            opened_at=datetime.now(UTC).isoformat(),
+        )
+        logger.warning(
+            "heartbeat circuit breaker OPEN — reason={reason} status={status}",
+            event="circuit_breaker_open",
+            agent_id=agent_id,
+            reason=reason,
+            status=exc.status,
+        )
+        # Record the breaker-open event in event_log (best-effort: a failure
+        # only loses the audit row, never the breaker state itself).
+        if ctx.ops_pool is not None:
+            try:
+                await insert_event_log_async(
+                    event_type="circuit_breaker",
+                    agent_id=agent_id,
+                    source="system",
+                    payload={
+                        "action": "open",
+                        "reason": reason,
+                        "status": exc.status,
+                        "error_class": exc.error_class,
+                    },
+                )
+            except Exception as exc_log:
+                logger.warning(
+                    "failed to record circuit_breaker event: {exc!r}",
+                    agent_id=agent_id,
+                    exc=exc_log,
+                )
+    return input_update
 
 
 async def _recover_from_db_outage(
@@ -362,8 +467,17 @@ async def _invoke_graph_with_lifecycle_logging(
         except (FatalLLMStreamError, FatalProviderError) as exc:
             # Retry cap fired, or the provider permanently rejected the request
             # (402/401/403) — abort this turn but keep the agent alive. The
-            # fresh-run input halts the claim node until the next inbound.
-            input_update = _handle_fatal_llm_error(exc, ctx, agent_id)
+            # fresh-run input halts the claim node until the next inbound;
+            # for a FatalProviderError it also opens the heartbeat circuit
+            # breaker (see _handle_fatal_llm_error).
+            async def _read_current_circuit() -> CircuitState | None:
+                snapshot = await graph.aget_state(_graph_config(agent_id, [], {}))
+                current = snapshot.values.get("circuit")
+                return current if isinstance(current, CircuitState) else None
+
+            input_update = await _handle_fatal_llm_error(
+                exc, ctx, agent_id, circuit_reader=_read_current_circuit
+            )
             continue
         except CompactionFailedError as exc:
             # Compaction could not produce a usable summary (model ignoring the

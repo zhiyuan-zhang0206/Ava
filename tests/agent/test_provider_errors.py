@@ -223,6 +223,74 @@ def test_billing_code_match_does_not_widen_the_reported_error_type() -> None:
     assert result.error_type == "invalid_request_error"
 
 
+# ───────────── context overflow (the circuit-breaker trigger) ─────────────
+
+
+def test_context_overflow_400_with_length_message() -> None:
+    """The 3962 failure shape: a 400 whose message says the context length was
+    exceeded is flagged context_overflow — the heartbeat circuit breaker's
+    self-rescue trigger."""
+    exc = _FakeStatusError(
+        400,
+        {
+            "error": {
+                "type": "invalid_request_error",
+                "message": (
+                    "This model's maximum context length is 1048576 tokens. "
+                    "However, you requested 1076056 tokens (692056 in the "
+                    "messages, 384000 in the completion). Please reduce the "
+                    "length of the messages or completion."
+                ),
+            }
+        },
+    )
+    result = classify_error(exc)
+    assert result.error_class is ErrorClass.PERMANENT
+    assert result.context_overflow is True
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    ["context_length_exceeded", "prompt_is_too_long", "prompt_too_long"],
+)
+def test_context_overflow_error_type_vocabulary(error_type: str) -> None:
+    """OpenAI-style `context_length_exceeded` (and the type-level vocabulary
+    spellings) flag overflow from the error type alone — no message needed."""
+    exc = _FakeStatusError(400, {"error": {"type": error_type}})
+    assert classify_error(exc).context_overflow is True
+
+
+def test_schema_400_is_not_context_overflow() -> None:
+    """A plain bad-request 400 (schema / malformed) carries none of the
+    context-length vocabulary — it must NOT be flagged overflow."""
+    exc = _FakeStatusError(
+        400, {"error": {"type": "invalid_request_error", "message": "bad schema"}}
+    )
+    result = classify_error(exc)
+    assert result.error_class is ErrorClass.PERMANENT
+    assert result.context_overflow is False
+
+
+def test_rate_limit_429_mentioning_tokens_is_not_overflow() -> None:
+    """A rate-limit 429 that happens to mention tokens must not be misread as
+    overflow — the predicate is status-gated to 400."""
+    exc = _FakeStatusError(
+        429, {"error": {"type": "rate_limit_error", "message": "too many tokens per minute"}}
+    )
+    assert classify_error(exc).context_overflow is False
+
+
+def test_429_with_context_length_exceeded_type_stays_transient() -> None:
+    """The `context_length_exceeded` type exception to the status gate is
+    informational only: a 429 carrying that type is still TRANSIENT (the
+    RetryPolicy retries it — it never opens the breaker, which only fires on
+    PERMANENT-class rejections)."""
+    exc = _FakeStatusError(429, {"error": {"type": "context_length_exceeded"}})
+    result = classify_error(exc)
+    assert result.error_class is ErrorClass.TRANSIENT
+    assert result.context_overflow is True
+
+
 def test_billing_is_independent_of_error_class() -> None:
     """OpenAI's out-of-credit arrives as a 429 (TRANSIENT — the RetryPolicy
     still retries it, deliberately unchanged), yet it is still a billing

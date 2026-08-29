@@ -12,8 +12,10 @@ the probe itself against a real local HTTP server.
 from __future__ import annotations
 
 import pytest
+from langchain_core.messages import HumanMessage
 
 from agent.startup import _page_server_alive, reconcile_open_pages
+from agent.state import AgentState
 
 
 class _FakeCursor:
@@ -214,11 +216,12 @@ async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) ->
 
     item = ClaimedInbound(id=1, agent_id=7, content="check-in", kind="heartbeat", source="system")
     st = _BatchState()
-    await _handle_heartbeat(_Ctx(), 7, item, st)  # type: ignore[arg-type]
+    state = AgentState(messages=[HumanMessage(content="hi")])
+    await _handle_heartbeat(_Ctx(), 7, item, st, state)  # type: ignore[arg-type]
 
     assert len(calls) == 1
     _pool, agent_id, publisher = calls[0]
     assert agent_id == 7
     assert publisher is _Ctx.event_publisher
-    # heartbeat system note still appended as usual
+    # heartbeat system note still appended as usual (breaker closed)
     assert len(st.new_msgs) == 1

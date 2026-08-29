@@ -27,9 +27,16 @@ from agent.graph._claim_routing import ClaimGoto, _Routing
 from agent.graph._context import AvaContext
 from agent.graph._nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
 from agent.history_dump import dump_history, history_dump_note
-from agent.hooks.compact import build_compact_transition, trim_checkpoints_after_compact
+from agent.hooks.compact import (
+    build_compact_transition,
+    conversation_messages,
+    emergency_compact_summary,
+    trim_checkpoints_after_compact,
+)
+from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from shared.inbound import InboundKind
 from shared.live_events import CompactDone
+from shared.log import logger
 from shared.message_kwargs import AvaMsgType
 
 
@@ -102,6 +109,32 @@ async def decide(
                 goto=CLAIM,
             )
         )
+
+    # ── Circuit-breaker forced compact (overflow self-rescue) ──
+    # The heartbeat circuit breaker is open with reason=context_overflow: the
+    # provider permanently rejected the last LLM call because the context
+    # exceeds the window. Every wake routes here instead of into the doomed
+    # call — a real compaction first, then the no-LLM minimal fallback when
+    # the compaction request itself is rejected (emergency_compact_summary).
+    # The result flows into the compact path below (transition, checkpoint
+    # trim, chat deferral, version bump) exactly like a /compact.
+    if (
+        st.compact_payload is None
+        and st.next_goto == BEFORE_LLM
+        and not st.cancelled
+        and state.circuit.open
+        and state.circuit.reason == CIRCUIT_REASON_CONTEXT_OVERFLOW
+        and conversation_messages(state.messages)
+    ):
+        assert ctx.llm is not None, "circuit-breaker compact requires ctx.llm"  # noqa: S101
+        logger.warning(
+            "circuit breaker open (context_overflow) — forcing compaction on "
+            "this wake instead of the doomed LLM call",
+            event="circuit_breaker_compact",
+            agent_id=agent_id,
+        )
+        summary = await emergency_compact_summary(state.messages, ctx.llm)
+        st.compact_payload = (summary, AvaMsgType.COMPACT_REQUEST.value)
 
     # ── Compact path ──
     if st.compact_payload is not None:
