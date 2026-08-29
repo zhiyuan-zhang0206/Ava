@@ -56,6 +56,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "plugin_activation",
         "gateway_latency",  # gateway/_latency.py:emit_bucket telemetry.emit("telemetry", ...)
         "auth401_rejected",  # gateway/_auth401_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
+        "agent_registry",  # gateway/_agent_max_id.py:emit_max_agent_id telemetry.emit("telemetry", ...)
         "plugin_load_failed",  # agent/graph/_build.py:_report_plugin_load_failure telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit
