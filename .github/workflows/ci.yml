@@ -268,6 +268,7 @@ jobs:
           uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4
           --splits 8 --group ${{ matrix.group }}
           --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
+          --cov=ops --cov=services --cov=ava_builtins
 
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -313,6 +314,7 @@ jobs:
         run: >
           uv run pytest tests/ -m flaky --ignore=tests/e2e -q
           --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
+          --cov=ops --cov=services --cov=ava_builtins
 
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -370,24 +372,20 @@ jobs:
           # 100% — line coverage is not quality; this gate only sees shard data
           # that reached the combine step (including coverage-data-serial).
           #
-          # Denominator (must match [tool.coverage.run].source in pyproject):
-          # agent/ava/cli/gateway/shared/ui — cli was added 2026-08-25 (tech
-          # audit P1; measured 82% standalone, projected combined ~88.6%).
-          # ops/services/ava_builtins stay EXCLUDED by decision, documented
-          # (pyproject): their measured standalone coverage (ops 48% via
-          # tests/ops; services/ava_builtins lower) would take the 85% gate
-          # below threshold even though their tests run in CI. The audit's
-          # per-risk-domain minimum-line gates for those packages are a
-          # tracked follow-up, not this gate.
+          # Two tiers, enforced by scripts/coverage_gates.py:
+          # - the combined 85% gate over the core domains
+          #   agent/ava/cli/gateway/shared/ui (cli joined 2026-08-25, tech
+          #   audit P1 — measured 82% standalone);
+          # - per-risk-domain minimum line floors for ops/services/ava_builtins
+          #   (tech audit 2026-08-24 finding #10, Task #1570): the
+          #   high-incident operational domains (deploy/backup/watchdog/ops)
+          #   are measured into the same coverage data but never scored by the
+          #   85% gate — their standalone coverage (ops 48% via tests/ops;
+          #   services/ava_builtins lower) would take the combined rate below
+          #   threshold even though their tests run in every shard.
           uv run coverage combine coverage-data-*
-          uv run coverage xml
-          uv run python -c "
-          import sys, xml.etree.ElementTree as ET, os
-          pct = round(float(ET.parse('coverage.xml').getroot().attrib['line-rate']) * 100, 1)
-          threshold = float(os.environ.get('BACKEND_COVERAGE_THRESHOLD', 85))
-          print(f'Backend line coverage: {pct}% (threshold: {threshold}%)')
-          sys.exit(1) if pct < threshold else None
-          "
+          uv run coverage json -o coverage.json
+          uv run python scripts/coverage_gates.py coverage.json
 
   frontend:
     name: frontend (eslint + tsc + vitest)
