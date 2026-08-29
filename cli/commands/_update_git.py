@@ -586,7 +586,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
         try:
             dump_path = run_backup(
                 timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
-                pitr_activation=True,
+                pre_update=True,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
@@ -618,7 +618,10 @@ def snapshot_pre_activation_data() -> Path:
 
     with backup_lock(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S):
         try:
-            dump_path = run_backup(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S, pre_update=True)
+            dump_path = run_backup(
+                timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
+                pitr_activation=True,
+            )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 "could not create pre-activation data snapshot: pg_dump timed out after "
