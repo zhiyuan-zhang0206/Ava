@@ -11,8 +11,9 @@ hand.
 
 The first activation delivery stops at `wal_config_pending` after proving the
 disabled shadow layout and creating a verified encrypted logical `pg_dump` with
-the dedicated `pitr-activation` kind. Ordinary daily/pre-update retention never
-prunes that recovery floor while the operation is active. Resume and status
+the dedicated `pitr-activation-<operation-id>` kind. Ordinary daily/pre-update
+retention never prunes that exact recovery floor while the operation is active;
+terminal operations keep a bounded two-snapshot recovery window. Resume and status
 revalidate that it is a regular mode-0600 artifact and passes the backup
 verification contract. It does not change PostgreSQL. A rollout cannot deliver
 its own protection, so the first rollout remains protected only by that logical
@@ -28,10 +29,16 @@ manual state fails closed.
 Readiness binds the running PostgreSQL process to this registered cluster's
 PGDATA, port, postmaster birth time, major version, and system identifier before
 and after the dump. It also hashes the installed stable shim against current
-source and checks its private spool layout. Credential JSON identities must be
-distinct and both identities must successfully perform a non-mutating bucket
+source and checks its private spool layout. Credential JSON service-account emails
+must be distinct (different keys for one account are not separation), with project
+and key IDs retained as evidence, and both identities must perform a non-mutating bucket
 metadata read in the configured project/region. This is not a write/delete IAM
 proof; the privileged continuation owns that smoke test.
+
+The dump target is not inherited from a process-wide URL. Readiness constructs a
+local direct URL from the registered Postgres port/socket and database identity,
+freezes it in the operation evidence, passes it explicitly to `pg_dump`, and
+rechecks the same database/system identifier after publication.
 
 The privileged continuation is a separate delivery. It must add a real
 least-privilege GCS write/read/delete smoke boundary, atomically configure WAL

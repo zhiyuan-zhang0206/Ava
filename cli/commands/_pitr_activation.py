@@ -18,6 +18,7 @@ import psutil
 import psycopg
 from google.cloud import storage
 from google.oauth2 import service_account
+from psycopg.conninfo import make_conninfo
 
 from services.pitr.activation_state import (
     ActivationRecord,
@@ -74,7 +75,7 @@ def _probe_bucket(credentials_path: Path) -> str:
     return location
 
 
-def _validate_secrets() -> None:
+def _validate_secrets() -> dict[str, str]:
     config = settings.physical_backup
     key = config.pitr_backup_key_file
     uploader = config.pitr_gcs_credentials_file
@@ -88,7 +89,7 @@ def _validate_secrets() -> None:
         raise RuntimeError("PITR backup key must be exactly 32 bytes")
     uploader_id = _credential_identity(uploader)
     viewer_id = _credential_identity(viewer)
-    if uploader_id == viewer_id:
+    if uploader_id[0] == viewer_id[0]:
         raise RuntimeError("uploader and viewer service-account identities must differ")
     if uploader_id[1] != config.pitr_gcs_project or viewer_id[1] != config.pitr_gcs_project:
         raise RuntimeError("PITR service-account project differs from configured GCS project")
@@ -96,6 +97,15 @@ def _validate_secrets() -> None:
     viewer_location = _probe_bucket(viewer)
     if uploader_location != viewer_location:
         raise RuntimeError("uploader and viewer resolved different bucket regions")
+    return {
+        "uploader_client_email": uploader_id[0],
+        "uploader_project_id": uploader_id[1],
+        "uploader_private_key_id": uploader_id[2],
+        "viewer_client_email": viewer_id[0],
+        "viewer_project_id": viewer_id[1],
+        "viewer_private_key_id": viewer_id[2],
+        "bucket_location": uploader_location,
+    }
 
 
 def _read_pg_state() -> dict[str, str]:
@@ -126,6 +136,13 @@ def _read_pg_state() -> dict[str, str]:
         current["postmaster_started_at"] = str(
             scalar(conn, "SELECT pg_postmaster_start_time()::text")
         )
+    direct_url = make_conninfo(pg_admin_url(record_postgres_port(record)), dbname=record.db_name)
+    with psycopg.connect(direct_url, autocommit=True) as conn:
+        current["dbname"] = str(scalar(conn, "SELECT current_database()"))
+        direct_system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
+    if current["dbname"] != record.db_name or direct_system_id != system_id:
+        raise RuntimeError("direct dump target differs from the verified cluster database")
+    current["direct_db_url"] = direct_url
     if server_version // 10000 != 17:
         raise RuntimeError("running PostgreSQL server is not major version 17")
     current["system_identifier"] = system_id
@@ -183,7 +200,7 @@ def _shadow_readiness() -> dict[str, str]:
     for directory in required_dirs:
         if not directory.is_dir() or directory.is_symlink() or _mode(directory) != 0o700:
             raise RuntimeError(f"private PITR directory is unsafe: {directory}")
-    _validate_secrets()
+    credential_evidence = _validate_secrets()
     if not config.pitr_gcs_bucket or not config.pitr_gcs_prefix:
         raise RuntimeError("PITR bucket and prefix must be configured")
     if config.pitr_enabled or config.pitr_base_backup_enabled or config.pitr_restore_proof_enabled:
@@ -201,6 +218,7 @@ def _shadow_readiness() -> dict[str, str]:
     current = _read_pg_state()
     if current["archive_mode"] != "off" or current["archive_command"].strip():
         raise RuntimeError("shadow readiness requires archive_mode=off and no archive_command")
+    current.update(credential_evidence)
     return current
 
 
@@ -238,7 +256,10 @@ def cmd_pitr_status() -> int:
 
 
 def _save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None:
-    write_record(home, record.advance(record.phase, error=type(exc).__name__))
+    latest = load_record(home)
+    if latest is None or latest.operation_id != record.operation_id:
+        raise RuntimeError("PITR activation operation changed while recording failure") from exc
+    write_record(home, latest.advance(latest.phase, error=type(exc).__name__))
 
 
 def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> None:
@@ -248,15 +269,18 @@ def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> No
 
 def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
     from cli.commands._update_git import _verify_snapshot_artifact, snapshot_pre_activation_data
-    from services.backup import activation_snapshots_since
+    from services.backup import activation_snapshot
 
     _require_same_pg_state(record.pre_activation_pg_settings, "before snapshot")
-    candidates = activation_snapshots_since(datetime.fromisoformat(record.started_at))
-    if candidates:
-        snapshot = candidates[-1]
+    existing = activation_snapshot(record.operation_id)
+    if existing is not None:
+        snapshot = existing
         _verify_snapshot_artifact(snapshot)
     else:
-        snapshot = snapshot_pre_activation_data()
+        snapshot = snapshot_pre_activation_data(
+            operation_id=record.operation_id,
+            db_url=record.pre_activation_pg_settings["direct_db_url"],
+        )
     _require_same_pg_state(record.pre_activation_pg_settings, "during snapshot")
     record = record.advance(
         "snapshot_verified",
@@ -331,7 +355,11 @@ def cmd_pitr_activate(*, origin: str) -> int:
                 _save_error(home, record, exc)
                 raise
             finally:
-                release_update_lock(holder)
+                try:
+                    release_update_lock(holder)
+                except BaseException as exc:
+                    _save_error(home, record, exc)
+                    raise
     except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
         print(f"PITR activation refused: {type(exc).__name__}", file=sys.stderr)
         return 1

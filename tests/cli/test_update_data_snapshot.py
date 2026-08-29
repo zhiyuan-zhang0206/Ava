@@ -264,15 +264,22 @@ def test_pre_activation_snapshot_uses_activation_kind(
     calls: list[float] = []
     verified: list[Path] = []
 
-    def _run_backup(*, timeout_s: float, pitr_activation: bool) -> Path:
+    def _run_backup(*, timeout_s: float, pitr_activation: str, db_url: str) -> Path:
         calls.append(timeout_s)
-        assert pitr_activation is True
+        assert pitr_activation == "11111111-1111-1111-1111-111111111111"
+        assert db_url == "dbname=ava"
         return dump
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
     monkeypatch.setattr(_git, "_verify_snapshot_artifact", verified.append)
 
-    assert _git.snapshot_pre_activation_data() == dump
+    assert (
+        _git.snapshot_pre_activation_data(
+            operation_id="11111111-1111-1111-1111-111111111111",
+            db_url="dbname=ava",
+        )
+        == dump
+    )
     assert calls == [_git._PRE_UPDATE_DUMP_TIMEOUT_S]
     assert verified == [dump]
     out = capsys.readouterr().out

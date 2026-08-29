@@ -24,10 +24,13 @@ def test_activate_persists_snapshot_before_wal_pending(
             "archive_timeout": "0",
             "wal_compression": "off",
             "system_identifier": "42",
+            "direct_db_url": "dbname=ava",
         },
     )
-    monkeypatch.setattr("cli.commands._update_git.snapshot_pre_activation_data", lambda: snapshot)
-    monkeypatch.setattr("services.backup.activation_snapshots_since", lambda _started: [])
+    monkeypatch.setattr(
+        "cli.commands._update_git.snapshot_pre_activation_data", lambda **_kwargs: snapshot
+    )
+    monkeypatch.setattr("services.backup.activation_snapshot", lambda _operation_id: None)
     monkeypatch.setattr(activation, "_read_pg_state", activation._shadow_readiness)
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
@@ -44,6 +47,7 @@ def test_activate_persists_snapshot_before_wal_pending(
         "archive_timeout": "0",
         "wal_compression": "off",
         "system_identifier": "42",
+        "direct_db_url": "dbname=ava",
     }
 
 
@@ -64,7 +68,7 @@ def test_activate_resume_never_repeats_snapshot(
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
     monkeypatch.setattr(
         "cli.commands._update_git.snapshot_pre_activation_data",
-        lambda: (_ for _ in ()).throw(AssertionError("snapshot repeated")),
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("snapshot repeated")),
     )
 
     assert activation.cmd_pitr_activate(origin="cli") == 0
@@ -98,7 +102,7 @@ def test_concurrent_activation_refuses_without_snapshot(
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: False)
     called = False
 
-    def snapshot() -> Path:
+    def snapshot(**_kwargs: object) -> Path:
         nonlocal called
         called = True
         return tmp_path / "unexpected"
@@ -144,7 +148,7 @@ def test_shadow_drift_fails_before_snapshot(
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
     called = False
 
-    def snapshot() -> Path:
+    def snapshot(**_kwargs: object) -> Path:
         nonlocal called
         called = True
         return tmp_path / "unexpected"
@@ -154,4 +158,34 @@ def test_shadow_drift_fails_before_snapshot(
     assert called is False
     record = load_record(tmp_path)
     assert record is not None and record.phase == "shadow"
+    assert record.error == "RuntimeError"
+
+
+def test_release_failure_does_not_roll_back_durable_phase(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot = tmp_path / "verified.dump.enc"
+    monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        activation,
+        "_shadow_readiness",
+        lambda: {"archive_mode": "off", "direct_db_url": "dbname=ava"},
+    )
+    monkeypatch.setattr(activation, "_read_pg_state", activation._shadow_readiness)
+    monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
+    monkeypatch.setattr("services.backup.activation_snapshot", lambda _operation_id: None)
+    monkeypatch.setattr(
+        "cli.commands._update_git.snapshot_pre_activation_data", lambda **_kwargs: snapshot
+    )
+    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
+    monkeypatch.setattr(
+        "shared.cluster_lock.release_update_lock",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("release failed")),
+    )
+
+    assert activation.cmd_pitr_activate(origin="cli") == 1
+    record = load_record(tmp_path)
+    assert record is not None
+    assert record.phase == "wal_config_pending"
+    assert record.pre_activation_snapshot == str(snapshot)
     assert record.error == "RuntimeError"
