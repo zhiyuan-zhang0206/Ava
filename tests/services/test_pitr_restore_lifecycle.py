@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import psutil
+from pytest import MonkeyPatch
+
 from services.pitr import restore_proof
 from services.pitr.restore_postgres import _write_sandbox_config
 
@@ -37,7 +40,7 @@ def test_sandbox_config_ignores_restored_config_and_disables_host_side_effects(
 
 
 def test_reconcile_removes_stale_postmaster_evidence_only_after_owner_is_dead(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     restore_root = tmp_path / "restore"
     owners = tmp_path / "restore-owners"
@@ -64,8 +67,15 @@ def test_reconcile_removes_stale_postmaster_evidence_only_after_owner_is_dead(
             }
         )
     )
-    monkeypatch.setattr(restore_proof, "_matching_process", lambda _pid, _created: None)
-    monkeypatch.setattr(restore_proof, "_group_members", lambda _pgid: [])
+
+    def no_process(_pid: int, _created: float) -> psutil.Process | None:
+        return None
+
+    def no_group(_pgid: int) -> list[psutil.Process]:
+        return []
+
+    monkeypatch.setattr(restore_proof, "_matching_process", no_process)
+    monkeypatch.setattr(restore_proof, "_group_members", no_group)
 
     restore_proof.reconcile_restore_runtime(tmp_path)
 
