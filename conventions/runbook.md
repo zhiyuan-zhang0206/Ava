@@ -991,6 +991,11 @@ Routine data-plane rotation is independent and uses
 .venv/bin/python scripts/rotate_data_plane_secrets.py --scope runner --execute
 ```
 
+Run this script in a gateway context, not an agent shell: agent contexts see the
+runner-projected `AVA_DB_URL` and agent-profile environment hygiene, so the script
+refuses them. See [Data-plane credential split](data-plane-secret-split.md#routine-data-plane-rotation)
+for the exact invocation command.
+
 Both scripts are gateway-home scoped, default to read-only, and save 0600 resume
 state on failure. The complete upgrade, verification, runner-restart, and
 recovery procedure is [Data-plane credential split](data-plane-secret-split.md).
