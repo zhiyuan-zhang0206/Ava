@@ -259,8 +259,9 @@ export const ForceGraph = memo(function ForceGraph({
   // follows the cursor (user ruling 2026-08-29) — and clears on mouseleave.
   // x/y anchor the card beside the node's top-right corner; flipX is the
   // node's LEFT edge — the flip baseline (flipping off the right edge would
-  // park the card on top of the hovered node, QA #990).
-  const [hovered, setHovered] = useState<{ id: number; x: number; y: number; flipX: number } | null>(null);
+  // park the card on top of the hovered node, QA #990); h is the node box
+  // height (the vertical fallback's below-placement anchor).
+  const [hovered, setHovered] = useState<{ id: number; x: number; y: number; flipX: number; h: number } | null>(null);
 
   // The instant hover card. Content is computed only for the hovered node
   // (never per node per layout tick); when the view supplies no card the
@@ -271,10 +272,15 @@ export const ForceGraph = memo(function ForceGraph({
     return node ? hoverCard(node) : null;
   }, [hovered, hoverCard, nodeById]);
 
-  // Card placement: anchored at the hovered node's box (14px gap), flipped to
-  // the node's other side when it would clip the canvas edge. Done in a
-  // layout effect with direct style writes — before paint, and never
-  // re-run while the cursor moves (the anchor is static).
+  // Card placement, tried in order until one fits WITHOUT clamping (the card
+  // must never cover the hovered node — QA #990): beside the node (right
+  // preferred, then left, anchored at the node's box with a 14px gap), then
+  // above / below the node centered on its horizontal center (narrow
+  // canvases, mobile). When the card is taller than BOTH vertical sides (a
+  // long card on a short canvas), it pins to the roomier side and its height
+  // is capped so it still clears the node — the content scrolls. Done in a
+  // layout effect with direct style writes — before paint, and never re-run
+  // while the cursor moves (the anchor is static).
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hoverCardRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
@@ -285,14 +291,53 @@ export const ForceGraph = memo(function ForceGraph({
     const cardW = card.offsetWidth;
     const cardH = card.offsetHeight;
     const gap = 14;
-    const x = hovered.x - rect.left;
-    const y = hovered.y - rect.top;
-    let left = x + gap;
-    let top = y + gap;
+    const maxX = rect.width - 4;
+    const maxY = rect.height - 4;
+    const x = hovered.x - rect.left; // node's right edge
+    const y = hovered.y - rect.top; // node's top edge
+    const nodeLeft = hovered.flipX - rect.left;
+    const nodeBottom = y + hovered.h;
+
+    // A previous vertical placement may have capped the card's height — clear
+    // it so this run measures the uncapped card.
+    card.style.maxHeight = "";
+    card.style.overflowY = "";
+
+    let left: number;
+    let top: number;
+    const fitsRight = x + gap + cardW <= maxX;
     // Horizontal flip: anchor the card's RIGHT edge at the node's LEFT edge —
-    // the card ends up entirely on the node's other side (never on top of it).
-    if (left + cardW > rect.width - 4) left = hovered.flipX - rect.left - gap - cardW;
-    if (top + cardH > rect.height - 4) top = y - gap - cardH;
+    // the card ends up entirely on the node's other side.
+    const fitsLeft = nodeLeft - gap - cardW >= 4;
+    if (fitsRight || fitsLeft) {
+      left = fitsRight ? x + gap : nodeLeft - gap - cardW;
+      top = y + gap;
+      if (top + cardH > maxY) top = y - gap - cardH; // vertical flip beside
+    } else {
+      // Neither horizontal side fits (mid-band node on a narrow canvas):
+      // place the card above the node, else below, horizontally centered on
+      // the node (clamped into the canvas).
+      left = Math.max(4, Math.min((nodeLeft + x) / 2 - cardW / 2, maxX - cardW));
+      const fitsAbove = y - gap - cardH >= 4;
+      const fitsBelow = nodeBottom + gap + cardH <= maxY;
+      if (fitsAbove || fitsBelow) {
+        top = fitsAbove ? y - gap - cardH : nodeBottom + gap;
+      } else {
+        // Taller than the free vertical space: pin to the roomier side and
+        // cap the card's height there so it clears the node; the card body
+        // scrolls (style set below).
+        const aboveSpace = y - gap - 4;
+        const belowSpace = maxY - nodeBottom - gap;
+        if (aboveSpace >= belowSpace) {
+          top = 4;
+          card.style.maxHeight = `${aboveSpace}px`;
+        } else {
+          top = nodeBottom + gap;
+          card.style.maxHeight = `${belowSpace}px`;
+        }
+        card.style.overflowY = "auto";
+      }
+    }
     card.style.left = `${Math.max(4, left)}px`;
     card.style.top = `${Math.max(4, top)}px`;
   }, [hovered]);
@@ -612,7 +657,7 @@ export const ForceGraph = memo(function ForceGraph({
                     // cursor chasing. x/y = the top-right corner (normal
                     // side); flipX = the left edge (flip baseline).
                     const box = ev.currentTarget.getBoundingClientRect();
-                    setHovered({ id: n.id, x: box.right, y: box.top, flipX: box.left });
+                    setHovered({ id: n.id, x: box.right, y: box.top, flipX: box.left, h: box.height });
                   }}
                   onMouseLeave={() => setHovered((cur) => (cur?.id === n.id ? null : cur))}
                 >
