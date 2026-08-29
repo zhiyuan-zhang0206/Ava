@@ -483,7 +483,7 @@ function DualPanelWaterfall({
             return (
               <g>
                 <line x1={x} y1={0} x2={x} y2={PANEL_HEIGHT} stroke="#a855f7" strokeWidth={2} strokeDasharray="2 2" />
-                <text x={x} y={10} fontSize={9} fill="#a855f7" textAnchor="end">
+                <text x={Math.min(x, 995)} y={10} fontSize={9} fill="#a855f7" textAnchor="end">
                   compact
                 </text>
               </g>
@@ -494,7 +494,9 @@ function DualPanelWaterfall({
         {[0, 0.5, 1].map((f) => (
           <g key={f}>
             <line x1={f * 1000} y1={PANEL_HEIGHT} x2={f * 1000} y2={PANEL_HEIGHT + 6} stroke="#94a3b8" />
-            <text x={f * 1000} y={PANEL_HEIGHT + 15} fontSize={9} fill="#94a3b8" textAnchor={f === 0 ? "start" : f === 1 ? "end" : "middle"}>
+            {/* edge labels inset so they never clip at the panel border on
+                narrow viewports (mobile bleed self-check) */}
+            <text x={f === 0 ? 4 : f === 1 ? 996 : 500} y={PANEL_HEIGHT + 15} fontSize={9} fill="#94a3b8" textAnchor={f === 0 ? "start" : f === 1 ? "end" : "middle"}>
               {fmtTime(new Date(windowFrom + (windowTo - windowFrom) * f).toISOString())}
             </text>
           </g>
@@ -588,7 +590,7 @@ function DualPanelWaterfall({
         {[0, 0.5, 1].map((f) => (
           <g key={f}>
             <line x1={f * 1000} y1={PANEL_HEIGHT} x2={f * 1000} y2={PANEL_HEIGHT + 6} stroke="#94a3b8" />
-            <text x={f * 1000} y={PANEL_HEIGHT + 15} fontSize={9} fill="#94a3b8" textAnchor={f === 0 ? "start" : f === 1 ? "end" : "middle"}>
+            <text x={f === 0 ? 4 : f === 1 ? 996 : 500} y={PANEL_HEIGHT + 15} fontSize={9} fill="#94a3b8" textAnchor={f === 0 ? "start" : f === 1 ? "end" : "middle"}>
               {fmtTokens(tokenLo + (tokenHi - tokenLo) * f)}
             </text>
           </g>
