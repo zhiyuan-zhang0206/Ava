@@ -14,13 +14,18 @@ def test_pitr_is_disabled_without_credentials_or_cluster_secret() -> None:
 
 def test_enabled_pitr_requires_independent_private_key(tmp_path: Path) -> None:
     key = tmp_path / "backup.key"
-    key.write_text("independent")
+    key.write_bytes(b"k" * 32)
     key.chmod(0o600)
+    credentials = tmp_path / "gcs.json"
+    credentials.write_text("{}")
+    credentials.chmod(0o600)
     settings = PhysicalBackupSettings(
         AVA_PITR_ENABLED=True,
         AVA_PITR_GCS_PROJECT="project",
         AVA_PITR_GCS_BUCKET="bucket",
         AVA_PITR_BACKUP_KEY_FILE=key,
+        AVA_PITR_GCS_CREDENTIALS_FILE=credentials,
+        AVA_PITR_BACKUP_KEY_ID="prod-v1",
     )
     assert settings.pitr_backup_key_file == key
 
@@ -28,12 +33,14 @@ def test_enabled_pitr_requires_independent_private_key(tmp_path: Path) -> None:
 def test_enabled_pitr_rejects_empty_or_overexposed_key(tmp_path: Path) -> None:
     key = tmp_path / "backup.key"
     key.touch(mode=0o644)
-    with pytest.raises(ValidationError, match="non-empty, non-symlink regular file with mode 0600"):
+    with pytest.raises(ValidationError, match="32-byte, non-symlink regular file with mode 0600"):
         PhysicalBackupSettings(
             AVA_PITR_ENABLED=True,
             AVA_PITR_GCS_PROJECT="project",
             AVA_PITR_GCS_BUCKET="bucket",
             AVA_PITR_BACKUP_KEY_FILE=key,
+            AVA_PITR_GCS_CREDENTIALS_FILE=key,
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
         )
 
 
@@ -44,6 +51,26 @@ def test_enabled_pitr_rejects_relative_key_path() -> None:
             AVA_PITR_GCS_PROJECT="project",
             AVA_PITR_GCS_BUCKET="bucket",
             AVA_PITR_BACKUP_KEY_FILE=Path("backup.key"),
+            AVA_PITR_GCS_CREDENTIALS_FILE=Path("gcs.json"),
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+        )
+
+
+def test_enabled_pitr_rejects_overexposed_credentials(tmp_path: Path) -> None:
+    key = tmp_path / "backup.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    credentials = tmp_path / "gcs.json"
+    credentials.write_text("{}")
+    credentials.chmod(0o644)
+    with pytest.raises(ValidationError, match=r"GCS_CREDENTIALS_FILE.*mode 0600"):
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_GCS_PROJECT="project",
+            AVA_PITR_GCS_BUCKET="bucket",
+            AVA_PITR_BACKUP_KEY_FILE=key,
+            AVA_PITR_GCS_CREDENTIALS_FILE=credentials,
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
         )
 
 

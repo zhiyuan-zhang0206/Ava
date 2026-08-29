@@ -37,6 +37,7 @@ def converge_pitr_foundation(ctx: ConvergeCtx) -> None:
     root = ensure_private_dir(ctx.ava_home / "physical-backup")
     ensure_private_dir(root / "spool")
     ensure_private_dir(root / "ack")
+    ensure_private_dir(root / "staging")
     runtime = ensure_private_dir(ctx.ava_home / "runtime" / "pg-archive")
     source = ctx.repo / "services" / "pitr" / "archive_shim.py"
     destination = runtime / "archive-shim"

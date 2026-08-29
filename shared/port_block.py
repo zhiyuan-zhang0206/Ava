@@ -73,8 +73,9 @@ PORT_OFFSETS: dict[str, int] = {
     # The backup scheduler is a first-class health daemon. Append its slot so
     # existing cluster records retain their assigned ports.
     "pg_backup": 21,
+    "pitr_uploader": 22,
 }
-BLOCK_SIZE = 22
+BLOCK_SIZE = 23
 BLOCK_START = 18000
 BLOCK_MAX = 20000
 
@@ -130,4 +131,5 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     # left unused rather than renumbered, for the same record-pinning reason as
     # the vacated block offset above.
     "pg_backup": 8116,
+    "pitr_uploader": 8117,
 }

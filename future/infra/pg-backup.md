@@ -48,10 +48,15 @@
 ### Physical PITR delivery
 
 The foundation is source-controlled in `services/pitr/`: per-`AVA_HOME` private
-layout, a stable stdlib-only archive shim, strong disabled-by-default config,
+layout, a stable stdlib-only archive shim, a disabled-by-default GCS uploader,
 and a health-state contract that never equates local archive with remote ACK.
-It deliberately does not enable PostgreSQL archiving. Follow-up delivery order:
-GCS uploader + verified ACK, PostgreSQL archive-mode rollout, weekly verified
+The uploader uses the official Google Cloud Storage SDK rather than a `gcloud`
+subprocess (host/tool coupling) or handwritten REST (duplicated auth, resumable
+upload, checksum, and conditional retry machinery). It performs immutable
+generation-zero creates, verifies CRC32C/generation/metadata, and fsyncs a local
+ACK before deleting local staging or spool data. It never deletes remote objects.
+This delivery deliberately does not enable PostgreSQL archiving. Follow-up order:
+PostgreSQL archive-mode rollout, weekly verified
 base chains with chain-aware retention, then isolated restore drills and the
 migration restore-point gate. The first rollout cannot protect itself; existing
 verified pre-update `pg_dump` remains mandatory until the first remote physical

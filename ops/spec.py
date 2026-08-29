@@ -359,6 +359,18 @@ def build_services() -> tuple[ServiceSpec, ...]:
             identity_probe=daemon_identity("pg_backup", settings.services.pg_backup_pidfile),
             healthcheck_module="services.healthchecks.pg_backup",
         ),
+        ServiceSpec(
+            session="pitr-uploader",
+            cmd=".venv/bin/python -m services.pitr.uploader_daemon",
+            capabilities=_GATEWAY,
+            requires_db=False,
+            pidfile=settings.services.pitr_uploader_pidfile,
+            curl_url=_hz("pitr_uploader"),
+            identity_probe=daemon_identity(
+                "pitr_uploader", settings.services.pitr_uploader_pidfile
+            ),
+            healthcheck_module="services.healthchecks.pitr_uploader",
+        ),
         # One watchdog PER CAPABILITY (not a role-union daemon): two co-located
         # units on one host would otherwise collide on a single host-singleton
         # watchdog session, leaving one capability's services unrevived. The
@@ -696,6 +708,8 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return "disabled (AVA_HEARTBEAT_ENABLED off)"
     if session == "delivery-watchdog" and not settings.daemon.delivery_watchdog_enabled:
         return "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)"
+    if session == "pitr-uploader" and not settings.physical_backup.pitr_enabled:
+        return "disabled (AVA_PITR_ENABLED off)"
     if session == "im-bridge" and not settings.services.im_bridge_enabled:
         return "disabled (AVA_IM_BRIDGE_ENABLED off)"
     if session == "agent-host" and _runner_mode() != "hosted":
