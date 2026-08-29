@@ -547,3 +547,45 @@ def test_force_reap_local_agents_noop_when_none_live(
 
     assert _up._force_reap_local_agents() == []
     assert reaped == []
+
+
+# ─── hosted mode: per-agent quiesce/reap are no-ops ───────────────────────────
+
+
+def test_quiesce_local_agents_hosted_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted rows stay idling for life and there are no per-agent processes —
+    the local quiesce must signal nobody and report the skip as quiesced."""
+    monkeypatch.setattr("ops.runner_mode.is_hosted", lambda: True)
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise AssertionError("hosted mode must not signal agents")
+
+    monkeypatch.setattr("shared.db.signal_live_agents_restart", _boom)
+    assert _up._quiesce_local_agents("smooth") is True
+
+
+def test_force_reap_local_agents_hosted_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CAS-marking hosted rows 'restarting' orphans them forever (the
+    restarter is gated out of the hosted roster) — the hosted reap must
+    mark nobody and return no stragglers."""
+    monkeypatch.setattr("ops.runner_mode.is_hosted", lambda: True)
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise AssertionError("hosted mode must not CAS-mark agents")
+
+    monkeypatch.setattr("shared.db.mark_agents_restarting", _boom)
+    assert _up._force_reap_local_agents() == []
+
+
+def test_quiesce_all_agents_hosted_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fleet quiesce has no drain to converge on in hosted mode and its
+    signal would restart every agent mid-work for nothing — it must skip and
+    report quiesced (which keeps the orchestration from computing force_reap,
+    a flag hosted rows must never see)."""
+    monkeypatch.setattr("ops.runner_mode.is_hosted", lambda: True)
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise AssertionError("hosted mode must not signal the fleet")
+
+    monkeypatch.setattr("shared.db.signal_live_agents_restart", _boom)
+    assert _up._quiesce_all_agents(timeout_s=10.0) is True
