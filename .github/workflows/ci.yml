@@ -5,8 +5,8 @@
 # make SHARDING the speed lever: the pytest suite dominates wall clock, so it
 # fans out over pytest-split shards (duration-balanced via the committed
 # .test_durations — slow tests only, >=0.2s, 87% of total runtime; tests
-# absent from it are costed at the file average. Refresh occasionally with
-# `pytest --store-durations` + trimming to >=0.2s).
+# absent from it are costed at this run's average. Refreshed nightly by
+# scripts/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
@@ -509,12 +509,17 @@ jobs:
         run: uv run playwright install --with-deps chromium
 
       - name: Run e2e tests
-        # tests/e2e has no entries in .test_durations (it is generated from the
-        # backend suite), so pytest-split estimates them at the file average —
-        # effectively an even split by count.
+        # tests/e2e shares .test_durations with the backend suite (pytest-split
+        # filters the file to this run's node ids; the nightly refresh measures
+        # both suites), so the split is duration-balanced once e2e entries land.
+        # With only ~27 tests, least_duration (LPT) balances far better than the
+        # sequential duration_based_chunks default: measured 40/93/157/83s vs a
+        # 93/93/93/93s split (2026-08-30 run). Before e2e entries land, absent
+        # tests cost the average = an even split by count.
         run: >
           uv run pytest tests/e2e/ -v -n 2
           --splits 4 --group ${{ matrix.group }}
+          --splitting-algorithm least_duration
 
       - name: Upload e2e logs on failure
         if: failure()
