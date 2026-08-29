@@ -107,16 +107,25 @@ _retire_legacy_grafana() {
     fi
 }
 
+# Probe endpoints follow the observability settings (AVA_TELEMETRY_LOKI_URL /
+# AVA_TELEMETRY_PROMETHEUS_URL / AVA_TELEMETRY_GRAFANA_URL), the same source
+# the lgtm healthcheck's readiness probes derive from — one contract, so the
+# watchdog and this script can never probe different targets (WP3, task #1945).
+# The loopback defaults are the historical byte-identical values.
+LOKI_URL="${AVA_TELEMETRY_LOKI_URL:-http://127.0.0.1:3100}"
+PROM_URL="${AVA_TELEMETRY_PROMETHEUS_URL:-http://127.0.0.1:9090}"
+GRAFANA_PROBE_URL="${AVA_TELEMETRY_GRAFANA_URL:-http://127.0.0.1:3003}"
+
 _verify_loki_config
-_start_native loki http://127.0.0.1:3100/ready
-_start_native prometheus http://127.0.0.1:9090/-/ready
-_start_native grafana http://127.0.0.1:3003/
+_start_native loki "$LOKI_URL/ready"
+_start_native prometheus "$PROM_URL/-/ready"
+_start_native grafana "$GRAFANA_PROBE_URL/"
 _retire_legacy_grafana
 
 grafana_password="$NATIVE_DIR/grafana/admin_password"
 if [[ -f "$grafana_password" ]]; then
     alert_rules=$(curl -s -u "admin:$(<"$grafana_password")" \
-        http://127.0.0.1:3003/api/v1/provisioning/alert-rules 2>/dev/null || true)
+        "$GRAFANA_PROBE_URL/api/v1/provisioning/alert-rules" 2>/dev/null || true)
     if alert_count=$(printf '%s' "$alert_rules" | python3 -c 'import json, sys; print(len(json.load(sys.stdin)))' 2>/dev/null); then
         if [[ "$alert_count" -lt 18 ]]; then
             log "WARNING: Grafana provisioned $alert_count alert rules; expected at least 18"
@@ -130,9 +139,9 @@ fi
 
 log "stack is up:"
 GRAFANA_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"
-log "  Loki         http://127.0.0.1:3100   (native launchd)"
-log "  Prometheus   http://127.0.0.1:9090   (native launchd)"
+log "  Loki         $LOKI_URL   (native launchd)"
+log "  Prometheus   $PROM_URL   (native launchd)"
 log "  Grafana      $GRAFANA_URL   (native launchd)"
 log "  Tempo        remote per cluster config (intake AVA_TELEMETRY_TEMPO_ENDPOINT; query AVA_TELEMETRY_TEMPO_QUERY_URL)"
-log "  sidecar OTLP http://localhost:4318    (native ava-otel-collector)"
+log "  sidecar OTLP ${AVA_TELEMETRY_OTLP_ENDPOINT:-http://localhost:4318}   (native ava-otel-collector)"
 log "  stop with: bash $SCRIPT_DIR/stop.sh"

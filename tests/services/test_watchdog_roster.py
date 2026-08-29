@@ -55,6 +55,24 @@ def test_watchdogs_declare_no_healthcheck_module() -> None:
     assert all(s.healthcheck_module is None for s in watchdogs)
 
 
+def test_station_capable_runner_watchdog_keeps_lgtm_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A station-capable agent-runner (lgtm-host marker OR observability-station
+    capability, no gateway) owns the host's native backends, so its watchdog
+    carries the lgtm pseudo-check exactly like the gateway watchdog does. A
+    pure runner (no station identity) must NOT get the check — zero regression
+    (task #1945, WP3)."""
+    monkeypatch.setattr(wd, "read_skipped", set)
+    monkeypatch.setattr("services.watchdog.daemon._runner_watchdog_owns_lgtm", lambda: True)
+    got = {c.name for c in wd._checks_for_capability("agent-runner")}
+    assert "lgtm" in got
+
+    monkeypatch.setattr("services.watchdog.daemon._runner_watchdog_owns_lgtm", lambda: False)
+    got = {c.name for c in wd._checks_for_capability("agent-runner")}
+    assert "lgtm" not in got
+
+
 @pytest.mark.parametrize("role", ["gateway", "agent-runner"])
 def test_derived_roster_covers_all_role_healthchecks(
     role: MachineRole, monkeypatch: pytest.MonkeyPatch

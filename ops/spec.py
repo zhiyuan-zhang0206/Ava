@@ -538,7 +538,8 @@ def build_services() -> tuple[ServiceSpec, ...]:
             capabilities=_BOTH,
             requires_db=False,
             # The healthcheck POSTs a valid empty ExportTraceServiceRequest; bare TCP is insufficient.
-            tcp_port=4318,
+            # The port follows AVA_TELEMETRY_OTLP_PORT (single source, task #1945).
+            tcp_port=settings.observability.telemetry_otlp_port,
             identity_probe=probe_collector,
             before_launch=take_over_stale_collector,
             healthcheck_module="services.healthchecks.otel_collector",

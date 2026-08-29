@@ -54,7 +54,8 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   (rotated `spans-<ISO>.jsonl`). Recovery replay is `ava trace ship`: it
   POSTs each mirror line as OTLP/HTTP protobuf to the role-correct recovery
   target: gateway/single-box → `{AVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces`
-  without auth; pure runner → gateway private address port 4318 with
+  without auth; pure runner → gateway private address on the OTLP ingress
+  port (`AVA_TELEMETRY_OTLP_PORT`, default 4318) with
   `Authorization: Bearer $AVA_CLUSTER_SECRET`. It refuses while the OTLP flag
   is off (one kill switch for the
   whole OTLP surface — with the sidecar architecture that also stops
@@ -78,8 +79,9 @@ The LGTM consumers are documented separately:
 [[gateway/prom-metrics.ava.okf.md|Prometheus telemetry aggregates]].
 
 **Flag semantics** — `AVA_TELEMETRY_OTLP_ENABLED` /
-`AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318`, the standard
-local OTLP HTTP port) are startup-applied
+`AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318` — the standard
+local OTLP HTTP port, derived from `AVA_TELEMETRY_OTLP_PORT`'s default, the
+single ingress-port source) are startup-applied
 (`restart_required=all`); `shared/config` has no live-reload — flip +
 restart applies changes. Off leaves only the JSONL event sink: Loki/Prometheus
 and their read surfaces stop advancing, with no Postgres fallback. Converge

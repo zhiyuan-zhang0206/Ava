@@ -715,6 +715,25 @@ def test_gateway_has_separate_authenticated_reachable_receiver(
         assert cfg["exporters"][exporter_id]["endpoint"] == endpoint
 
 
+def test_otlp_ingress_port_single_source_renders_everywhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AVA_TELEMETRY_OTLP_PORT is the one knob for the OTLP ingress: the
+    sidecar receiver, the gateway's authenticated remote receiver, and the
+    pure-runner relay endpoint all follow it (WP3, task #1945). Under the
+    default 4318 the rendered endpoints are byte-identical to the historical
+    values (locked by the tests above)."""
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_port", 4319)
+    gateway_cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    assert gateway_cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4319"}
+    assert gateway_cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == (
+        "100.64.0.10:4319"
+    )
+    runner_cfg = _render_real_template(monkeypatch, frozenset({"agent-runner"}))
+    for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
+        assert runner_cfg["exporters"][exporter_id]["endpoint"] == "http://100.64.0.10:4319"
+
+
 def test_hybrid_gateway_runner_still_serves_remote_runners(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

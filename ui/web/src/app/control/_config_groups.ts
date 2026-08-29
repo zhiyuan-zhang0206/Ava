@@ -177,6 +177,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_TRACE_RETENTION_DAYS",
     "AVA_TELEMETRY_OTLP_ENABLED",
     "AVA_TELEMETRY_OTLP_ENDPOINT",
+    "AVA_TELEMETRY_OTLP_PORT",
   ],
   "config-web": [
     "AVA_WEB_SEARCH_TIMEOUT_SECONDS",

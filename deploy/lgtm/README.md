@@ -178,10 +178,54 @@ Copy `.env.example` to `.env` only when an override is needed.
 | `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
 | `AVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form — the matching `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` must follow (converge warns otherwise) |
 | `AVA_LGTM_GRAFANA_LISTEN_HOST` | `0.0.0.0` | Listen host for native Grafana's HTTP listener (the historical all-interfaces form); narrow it to `127.0.0.1` or a tailnet IP to restrict the anonymous read-only UI — a specific non-loopback address requires `AVA_TELEMETRY_GRAFANA_URL` to follow (converge warns otherwise) |
+| `AVA_TELEMETRY_OTLP_PORT` | `4318` | The OTLP/HTTP ingress port — single source (WP3, task #1945) for the sidecar receiver endpoint, the gateway's authenticated remote receiver + pure-runner relay endpoint, and the roster/healthcheck port probes. Deviating from 4318 also requires `AVA_TELEMETRY_OTLP_ENDPOINT` (the agents' full export URL) to follow |
 
 `.env` holds live secrets and is gitignored; never commit it. Converge renders
 the native Grafana provisioning path and runtime configuration; `.env` supplies
 only allowed secret and URL overrides.
+
+### GRAFANA_ROOT_URL — migration semantics (task #1945, WP3)
+
+`GRAFANA_ROOT_URL` is Grafana's `root_url` (`deploy/lgtm/native/config/run.sh`
+exports it with the `http://localhost:3003` default; `grafana.ini` consumes it
+via `$__env{GRAFANA_ROOT_URL}` with `serve_from_sub_path = true`). It is the
+base Grafana uses to build redirects and absolute links (login, dashboard
+sharing, alert links) — NOT the listener address (that is
+`AVA_LGTM_GRAFANA_LISTEN_HOST` + the fixed `3003` http_port).
+
+The default stays loopback because the gateway proxies Grafana through its
+authenticated `/grafana/` route, so the browser never dials `:3003` directly.
+When the observatory moves to a remote station (stage C of the observatory
+migration, `AVA_OBSERVABILITY_URL` set), the *rendered* Grafana is what
+migrates: point `GRAFANA_ROOT_URL` at the station's browser-reachable URL
+(e.g. the gateway proxy base or the station's tailnet address, keeping
+`serve_from_sub_path` semantics) so redirects survive the move. The
+docker-compose rollback path reads the same variable (`.env`),
+so a shared value stays consistent across both lifecycles. The alert webhook
+and datasource URLs are separate settings (`AVA_ALERTS_WEBHOOK_URL` /
+`AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL`) — they follow the
+observatory independently, per the two-state rules above.
+
+### Localhost-assumption inventory (task #1945, WP3)
+
+The observatory migration (stage C) requires knowing every loopback assumption
+on this surface. Status of each, as of WP3:
+
+| Assumption | Where | Status |
+|---|---|---|
+| Sidecar OTLP receiver `127.0.0.1:4318` | `deploy/otel-collector/otel-collector.yaml` | Parameterized — `AVA_TELEMETRY_OTLP_PORT` (single source, task #1945) |
+| Gateway OTLP ingress + runner relay `:4318` | `cli/commands/_otel_collector.py` | Parameterized — same setting |
+| Roster gate + healthcheck probes `:4318` | `ops/spec.py`, `services/healthchecks/otel_collector.py` | Parameterized — same setting |
+| Agent export endpoint default `http://127.0.0.1:4318` | `shared/config/observability.py` | Default derived from the same constant; the full URL stays a separate override (`AVA_TELEMETRY_OTLP_ENDPOINT`) |
+| Loki/Prometheus/Grafana probes `127.0.0.1:3100/9090/3003` | `deploy/lgtm/start.sh` | Parameterized — probe URLs follow `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` / `AVA_TELEMETRY_GRAFANA_URL` (same source as the lgtm healthcheck's readiness probes) |
+| Grafana `root_url` `http://localhost:3003` | `deploy/lgtm/native/config/run.sh` | Deliberately NOT parameterized into a converge render: it is the browser-facing redirect base, resolved at runtime from `GRAFANA_ROOT_URL` (migration section above). Rendered run.sh is asserted byte-identical in `tests/cli/test_converge_lgtm.py` |
+| Tempo container-internal OTLP receiver `0.0.0.0:4318` | `deploy/lgtm/config/tempo.yaml` (docker-compose rollback path) | Cannot be parameterized: it is the container-internal contract the compose file maps host `14318` → container `4318`; the host-visible OTLP entry on the LGTM host is `14318` (`AVA_TELEMETRY_TEMPO_ENDPOINT`), and `4318` on the host belongs to the sidecar |
+| Test pins `http://127.0.0.1:3200` / `http://127.0.0.1:14318` / `localhost` / `AVA_TELEMETRY_OTLP_PORT=4318` | `tests/conftest.py` | Reviewed WP3: every pin exists to neutralize the operator's ambient `.env` on a dev box (login-shell leak class) and is asserted against both env and settings so a weakened pin fails loudly. `GRAFANA_ROOT_URL` is deliberately not pinned — it never reaches renders (script-level default), only runtime Grafana |
+
+Everything host-visible on the OTLP/LGTM surface now derives from settings;
+the two intentional literals left are the Grafana redirect base (runtime env
+by design) and the compose container-internal receiver port (mapping
+contract).
 
 ## Verify
 
