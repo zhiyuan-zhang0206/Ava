@@ -2,9 +2,10 @@
 `_check_pin_drift` / `_warn_gateway_off_pin` tests when the gate moved to
 `ops.controllers.pin`.
 
-Covers the agent-runner acting half (self-heal to the pin, five guards: lock,
-in-flight local update, backoff, cooldown, POST-failure) and the gateway warn-only
-half (never acts, never gates), plus the PinController role dispatch.
+Covers the agent-runner acting half (self-heal to the pin: unknown pins are
+fetched first, then judged, then healed; five guards: lock, in-flight local
+update, backoff, cooldown, POST-failure) and the gateway warn-only half (never
+acts, never gates), plus the PinController role dispatch.
 
 The in-flight-update guard is issue #1074: the lease is blind to a watchdog-spawned
 `ava-updater`, and being off-pin is that updater's own mid-flight state, so the pin
@@ -65,6 +66,9 @@ def pin_drift_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str |
     # A strictly-behind HEAD: the heal is a catch-up, not a downgrade. Tests
     # for the ahead / unknown relations override this per-case.
     monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("behind"))
+    # The unknown branch fetches before re-judging; default success so no test
+    # reaches real git. Tests that care override with their own recorder.
+    monkeypatch.setattr(pin, "prod_source_fetch", lambda *_: True)  # pyright: ignore[reportUnknownArgumentType]
     spawned: list[str | None] = []
 
     def _spy(target_sha: str | None = None) -> bool:
@@ -113,19 +117,79 @@ def test_does_not_downgrade_when_head_ahead_of_pin(
     assert any("AHEAD of pin" in r.message for r in caplog.records)
 
 
-def test_defers_when_pin_ancestry_unknown(
+def test_defers_when_pin_still_unknown_after_fetch(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, pin_drift_env: list
 ) -> None:
-    """The pin commit is not present in this checkout — git cannot tell behind
-    from ahead, so the heal defers instead of force-checking-out blind (a
-    checkout is the wrong default when the pin may be older than HEAD)."""
+    """unknown → the controller fetches the track ref and re-judges; a pin that
+    is STILL unknown after the fetch (not on the track ref, or the fetch failed)
+    defers instead of force-checking-out blind (a checkout is the wrong default
+    when the pin may be older than HEAD)."""
+    fetches: list[tuple[str, ...]] = []
+    monkeypatch.setattr(pin, "prod_source_fetch", lambda *refs: fetches.append(refs) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
+    monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("unknown"))
+    with caplog.at_level("WARNING"):
+        assert pin.check_pin_drift() is False
+    assert fetches == [("origin", "main")]
+    assert pin_drift_env == []
+    assert any("ancestry unknown even after fetching" in r.message for r in caplog.records)
+
+
+def test_fetches_then_heals_when_pin_becomes_resolvable(
+    monkeypatch: pytest.MonkeyPatch, pin_drift_env: list
+) -> None:
+    """unknown → the fetch brings the pin → the re-judged relation is behind →
+    the heal runs. This is the excluded-runner convergence path (#621): a host
+    that never had the new pin fetched used to defer forever."""
+    calls: list[str] = []
+
+    def _r(_pin: str, _head: str) -> str:
+        calls.append("judge")
+        return "unknown" if len(calls) == 1 else "behind"
+
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _r)
+    monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
+    monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
+    assert pin.check_pin_drift() is True
+    assert calls == ["judge", "judge"]  # judged once, fetched, judged again
+    assert pin_drift_env == ["abc1234"]
+
+
+def test_defers_when_fetch_fails(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, pin_drift_env: list
+) -> None:
+    """A wedged network (fetch returns False) leaves the relation unknown — the
+    deferral stands and nothing spawns; the next tick retries."""
+    monkeypatch.setattr(pin, "prod_source_fetch", lambda *_: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
     monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
     monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("unknown"))
     with caplog.at_level("WARNING"):
         assert pin.check_pin_drift() is False
     assert pin_drift_env == []
-    assert any("ancestry unknown" in r.message for r in caplog.records)
+    assert any("ancestry unknown even after fetching" in r.message for r in caplog.records)
+
+
+def test_does_not_downgrade_when_fetch_reveals_ahead(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, pin_drift_env: list
+) -> None:
+    """The pin=floor semantics survive the fetch: a pin that resolves to an
+    ancestor of HEAD after the fetch is still never checked-out under the head
+    (the 2026-08-25 downgrade shape) — converged at-or-above the pin."""
+    calls: list[str] = []
+
+    def _r(_pin: str, _head: str) -> str:
+        calls.append("judge")
+        return "unknown" if len(calls) == 1 else "ahead"
+
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _r)
+    monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
+    monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
+    with caplog.at_level("WARNING"):
+        assert pin.check_pin_drift() is False
+    assert pin_drift_env == []  # no spawn, no downgrade
+    assert any("AHEAD of pin" in r.message for r in caplog.records)
 
 
 def test_heals_when_head_behind_pin(monkeypatch: pytest.MonkeyPatch, pin_drift_env: list) -> None:
