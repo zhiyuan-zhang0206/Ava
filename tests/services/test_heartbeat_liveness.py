@@ -196,7 +196,7 @@ class TestLivenessPass:
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=_OFFLINE_AFTER_FAILURES)
         aid = _make_agent(db_conn, status="idling", lease_s_ahead=600)
-        aid2 = _make_agent(db_conn, status="hibernating", lease_s_ahead=None)
+        aid2 = _make_agent(db_conn, status="restarting", lease_s_ahead=None)
         # Probe success would reset the failure count — this test exercises
         # the merge judgement directly on a pre-set probe state.
         _merge_liveness(pool)
@@ -286,18 +286,6 @@ class TestLivenessPass:
         announced.clear()
         asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
         assert announced == [aid]  # offline -> online
-
-    def test_hibernating_is_lease_exempt(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        """R1: hibernating holds no lease by design (swapped out) — machine up
-        means online, lease expiry never applies."""
-        _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="hibernating", lease_s_ahead=None)
-        import asyncio
-
-        asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
-        assert _state(db_conn, aid)[0] == "online"
 
     def test_preclaim_idling_stays_unknown(
         self, pool: ConnectionPool, db_conn: psycopg.Connection

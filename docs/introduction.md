@@ -279,12 +279,11 @@ see [`conventions/non-goals.md`](../conventions/non-goals.md).
 The dependencies are heavy on purpose — Postgres, Redis, a LangGraph
 checkpoint and a real OS process per agent — so Ava ships several independent
 memory-reclaim layers rather than pretending the stack is light. The flagship
-one is **hibernation**: an agent idle past 450s with no pending work has its
-process killed outright (not suspended) and relaunches in ~1s on its next
-message, reclaiming its full resident footprint between wakes. A warm-pool
-floor keeps the most-recently-active agents resident regardless of idle time,
-so the reclaim never costs a cold start on the agents actually likely to be
-reused. Full verified breakdown:
+one is the **hosted runner** (`AVA_RUNNER_MODE=hosted`): one `agent-host`
+daemon runs every local agent's turns as asyncio tasks, and an idle agent is
+no task at all — its identity lives in `agents_meta` + its checkpoint, so
+idle costs nothing by construction (the older hibernation layer was deleted
+with it, 2026-08). Full verified breakdown:
 [`conventions/runbook.md#deployment-footprint--memory`](../conventions/runbook.md#deployment-footprint--memory).
 
 ---

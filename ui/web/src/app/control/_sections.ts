@@ -67,7 +67,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
       { id: "config-memory", label: "Agent memory & compact", labelKey: "config-memory" },
       { id: "config-sdk", label: "Agent SDK", labelKey: "config-sdk" },
       { id: "config-agent-infra", label: "Agent DB & infra", labelKey: "config-agent-infra" },
-      { id: "config-daemon-heartbeat", label: "Daemon: heartbeat & hibernate", labelKey: "config-daemon-heartbeat" },
+      { id: "config-daemon-heartbeat", label: "Daemon: heartbeat", labelKey: "config-daemon-heartbeat" },
       { id: "config-daemon-tasks", label: "Daemon: tasks & events", labelKey: "config-daemon-tasks" },
       { id: "config-gateway", label: "Gateway", labelKey: "config-gateway" },
       { id: "config-connection", label: "Connection", labelKey: "config-connection" },

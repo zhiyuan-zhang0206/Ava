@@ -96,8 +96,7 @@ class AgentActivity(BaseModel):
     (reasoning + output). `exec_seconds` = Σ `duration_seconds` of every
     `node_exit` for the `exec` node — the code execution wall-clock. The `claim`
     node is excluded because its wall-clock IS the idle-wait (it parks the agent
-    in the inbound wait between turns); hibernation (swapped-out process) is
-    likewise not in any node, so both fall into the blocked remainder.
+    in the inbound wait between turns), so it falls into the blocked remainder.
     `alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate
     intervals, open tail to now), clipped to the same window — the same lifecycle
     basis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped
@@ -131,8 +130,8 @@ class HeartbeatInfo(BaseModel):
     """Idle check-in heartbeat state for one agent — mutually-exclusive display
     states the panel renders:
 
-    - idle-family (idling / hibernating / restarting — the statuses the fleet
-      view projects to "Idle") & not paused & no fresh wake queued: `next_at` is
+    - idle-family (idling / restarting — the statuses the fleet view
+      projects to "Idle") & not paused & no fresh wake queued: `next_at` is
       set — the daemon's projected check-in due time,
       `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)`. The daemon
       dispatches the actual check-in at its first poll tick at/after that (at

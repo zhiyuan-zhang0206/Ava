@@ -599,22 +599,6 @@ class TestGetNeighbors:
         assert rows[0].score > rows[1].score
         assert f"#{fresh}" in str(rows[0]) and "depth=1" in str(rows[0])
 
-    def test_hibernating_neighbor_projected_to_idling(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A hibernating peer reads as IDLING to an agent — the ops-only swap-out
-        state is projected at the SDK boundary, so no agent ever observes it."""
-        fake = FakeLoki()
-        monkeypatch.setattr(loki_events, "query_events", fake.query_events)
-        a = self._seed(db_conn)
-        parked = self._seed(db_conn, status="hibernating")
-        self._tie(fake, parked, a, days_ago=0.0)
-
-        rows = ava.agents.get_neighbors(a)
-
-        assert [r.agent_id for r in rows] == [parked]
-        assert rows[0].status is AgentStatus.IDLING  # never AgentStatus.HIBERNATING
-
     def test_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         with pytest.raises(AgentNotFound):
             ava.agents.get_neighbors(9999)
@@ -680,47 +664,6 @@ class TestGetAncestors:
     def test_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         with pytest.raises(AgentNotFound):
             ava.agents.get_ancestors(9999)
-
-
-class TestHibernationProjection:
-    """The agent SDK never surfaces the ops-only 'hibernating' status — it is
-    projected to 'idling' at the gateway-client boundary, BEFORE any status
-    filter, so a swapped-out agent is indistinguishable from an idle one and is
-    still returned by an 'idling' query (not dropped by the filter)."""
-
-    @staticmethod
-    def _hibernate(db: psycopg.Connection, aid: int) -> None:
-        with db.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'hibernating' WHERE id = %s", (aid,))
-        db.commit()
-
-    def test_get_status_projects_to_idling(self, db_conn: psycopg.Connection) -> None:
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        self._hibernate(db_conn, a_id)
-        # Projected to IDLING — not raised as AgentNotFound (which the default
-        # RUNNING/IDLING filter would cause if the raw 'hibernating' leaked through).
-        assert ava.agents.get_status(a_id) is ava.agents.AgentStatus.IDLING
-
-    def test_default_filter_keeps_hibernating_as_idling(self, db_conn: psycopg.Connection) -> None:
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        self._hibernate(db_conn, a_id)
-
-        rows = ava.agents.list_agents()  # default (RUNNING, IDLING)
-        match = [r for r in rows if r.agent_id == a_id]
-        assert len(match) == 1
-        assert match[0].status is ava.agents.AgentStatus.IDLING
-
-    def test_cannot_filter_for_hibernating(self, db_conn: psycopg.Connection) -> None:
-        """The projection is airtight: an agent cannot even filter FOR hibernating —
-        the row already reads 'idling', so a HIBERNATING filter matches nothing."""
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        self._hibernate(db_conn, a_id)
-
-        rows = ava.agents.list_agents(filter_by_status=(ava.agents.AgentStatus.HIBERNATING,))
-        assert [r.agent_id for r in rows if r.agent_id == a_id] == []
 
 
 class TestListAgents:

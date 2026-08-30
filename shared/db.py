@@ -584,15 +584,14 @@ def insert_inbound_message(
 # the set a cluster-wide stop-the-world (quiesce before a schema migration) must
 # drain. The three helpers below all key off this same predicate; the statuses
 # live in ONE constant, passed as a parameter (`status = ANY(%s)`), so a "live"
-# semantics change (e.g. adding hibernating) touches one line, not three literal
-# copies (audit 05-gateway-lifecycle A3).
+# semantics change touches one line, not three literal copies (audit
+# 05-gateway-lifecycle A3).
 # R1 (Task #1021): the single "alive" predicate — status in {running, idling}
 # AND lease unexpired. The lease (`agents_meta.lease_expires_at`, written at
 # claim by `agent._starting.claim_agent_row`, renewed by the agent's loop)
 # is the liveness authority: a process that died without writing 'terminated'
 # leaves its status behind and the lease expires; a process that cannot renew
-# (wedged, pre-lease code) is a zombie the reaper collects. 'hibernating' is
-# deliberately excluded: swapped out, no process, reaper-exempt.
+# (wedged, pre-lease code) is a zombie the reaper collects.
 #
 # The statuses live in ONE constant and the lease condition in ONE fragment
 # (`ALIVE_SQL`), so a "live" semantics change touches one line, not the literal

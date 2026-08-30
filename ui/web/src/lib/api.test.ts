@@ -161,7 +161,6 @@ describe("lifecycle endpoints", () => {
       "idling",
       "restarting",
       "terminated",
-      "hibernating",
     ];
     vi.stubGlobal(
       "fetch",
@@ -187,7 +186,6 @@ describe("lifecycle endpoints", () => {
       "idling",
       "idling",
       "terminated",
-      "idling",
     ]);
   });
 

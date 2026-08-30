@@ -1400,7 +1400,7 @@ class TestResurrectAgent:
 
     @pytest.mark.parametrize(
         "alive_status",
-        ["running", "idling", "restarting", "hibernating"],
+        ["running", "idling", "restarting"],
     )
     def test_resurrect_alive_agent_raises_already_alive(
         self,
@@ -1412,8 +1412,8 @@ class TestResurrectAgent:
 
         Full parametrization locks the contract that "resurrect refuses all states that are still alive or not fully dead".
         Historically only running/idling/restarting were tested. The complete current
-        non-terminal set is covered explicitly, including the ops-only hibernating state —
-        a regression that changed the guard to `if current in [...]` and missed a value would silently let resurrect
+        non-terminal set is covered explicitly — a regression that changed the guard
+        to `if current in [...]` and missed a value would silently let resurrect
         send a revival notification to an agent that is "still running / still init'ing",
         with the production consequence of a dual-process race on the same agent_id.
         """
@@ -3134,8 +3134,8 @@ class TestExitedEndpoint:
     The `WHERE status IN ('running','idling')` guard is
     load-bearing: a restart goes claim -> 'restarting' -> END -> process exit
     -> this endpoint, and clobbering 'restarting' to 'terminated' would strand
-    the restarter. Hibernating is likewise left alone. Both negative cases are
-    asserted below alongside the happy paths.
+    the restarter — the negative case is asserted below alongside the happy
+    paths.
     """
 
     def test_running_to_terminated(
@@ -3196,22 +3196,6 @@ class TestExitedEndpoint:
             row = cur.fetchone()
         assert row is not None and row[0] == "restarting"  # untouched
 
-    def test_hibernating_unchanged(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The ops-only hibernating state is left alone — the exit guard excludes it."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        agent_id = _spawn_agent()
-        _set_status(db_conn, agent_id, "hibernating")
-        with TestClient(app) as client:
-            resp = client.post(f"/api/agents/{agent_id}/exited")
-        assert resp.status_code == 204
-        # Read from a fresh connection — avoids cross-connection visibility lag.
-        with shared.db.connect() as fresh_conn, fresh_conn.cursor() as cur:
-            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-            row = cur.fetchone()
-        assert row is not None and row[0] == "hibernating"
-
     def test_idempotent(self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
         """Calling twice is safe (the finally block may run more than once) —
         the second call is a no-op on the already-'terminated' row."""
@@ -3226,88 +3210,6 @@ class TestExitedEndpoint:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
             row = cur.fetchone()
         assert row is not None and row[0] == "terminated"
-
-
-class TestHibernatedEndpoint:
-    """POST /api/agents/{id}/hibernating — an agent reports a hibernation swap-out;
-    the gateway parks the row 'hibernating'. Twin of /exited but: parks 'hibernating'
-    not 'terminated', keeps pages OPEN, guard is `status IN ('running','idling')`."""
-
-    def _fresh_status(self, agent_id: int) -> str:
-        with shared.db.connect() as conn, conn.cursor() as cur:
-            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-            row = cur.fetchone()
-        assert row is not None
-        return row[0]
-
-    def test_idling_to_hibernating(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        agent_id = _spawn_agent()
-        _set_status(db_conn, agent_id, "idling")
-        with TestClient(app) as client:
-            resp = client.post(f"/api/agents/{agent_id}/hibernating")
-        assert resp.status_code == 204
-        assert self._fresh_status(agent_id) == "hibernating"
-
-    def test_running_to_hibernating(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The idle-wait finally flips IDLING->RUNNING as SIGUSR1 unwinds, so
-        'running' must be accepted (phantom-running), same as /exited."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        agent_id = _spawn_agent()
-        _set_status(db_conn, agent_id, "running")
-        with TestClient(app) as client:
-            resp = client.post(f"/api/agents/{agent_id}/hibernating")
-        assert resp.status_code == 204
-        assert self._fresh_status(agent_id) == "hibernating"
-
-    def test_restarting_unchanged(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A concurrent restart's 'restarting' is left for the restarter."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        agent_id = _spawn_agent()
-        _set_status(db_conn, agent_id, "restarting")
-        assert _status(db_conn, agent_id) == "restarting"
-        with TestClient(app) as client:
-            resp = client.post(f"/api/agents/{agent_id}/hibernating")
-        assert resp.status_code == 204
-        assert self._fresh_status(agent_id) == "restarting"
-
-    def test_pages_stay_open(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Unlike /exited, hibernation keeps the agent's pages open."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        agent_id = _spawn_agent()
-        _set_status(db_conn, agent_id, "idling")
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'work', 8765)",
-                (agent_id,),
-            )
-        db_conn.commit()
-        with TestClient(app) as client:
-            assert client.post(f"/api/agents/{agent_id}/hibernating").status_code == 204
-        with shared.db.connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = 'work'",
-                (agent_id,),
-            )
-            row = cur.fetchone()
-        assert row is not None and row[0] is None  # page still open (not cascade-closed)
-
-    def test_idempotent(self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        agent_id = _spawn_agent()
-        _set_status(db_conn, agent_id, "idling")
-        with TestClient(app) as client:
-            assert client.post(f"/api/agents/{agent_id}/hibernating").status_code == 204
-            assert client.post(f"/api/agents/{agent_id}/hibernating").status_code == 204
-        assert self._fresh_status(agent_id) == "hibernating"
 
 
 class TestLaunchConfirmTerminatedBoot:

@@ -28,14 +28,12 @@ from agent._starting import claim_agent_row
 from agent.graph._context import AvaContext
 from agent.graph._llm import FatalLLMStreamError, FatalProviderError
 from agent.hooks.compact import CompactionFailedError
-from agent.lifecycle import HIBERNATE_EXIT_REASON
 from agent.loop import (
     _exit_reason,
     _install_lifecycle_signal_handlers,
     _mcp_socket_path,
     _MCPDaemon,
     _notify_exit,
-    _notify_hibernate,
     run,
 )
 from shared import boot_timing
@@ -114,26 +112,6 @@ class TestNotifyExit:
         _notify_exit(42)  # must not raise
 
 
-class TestNotifyHibernate:
-    """`_notify_hibernate` posts to /hibernating (park the row) instead of /exited;
-    main()'s finally routes here on a hibernation swap-out exit."""
-
-    def test_calls_gateway_hibernating(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        called: list[int] = []
-        monkeypatch.setattr("ava._gateway_client.hibernating", called.append)
-        _notify_hibernate(42)
-        assert called == [42]
-
-    def test_swallows_gateway_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Gateway unreachable → logged, not raised (the corpse-reaper backstops)."""
-
-        def _boom(_aid: int) -> None:
-            raise RuntimeError("gateway down")
-
-        monkeypatch.setattr("ava._gateway_client.hibernating", _boom)
-        _notify_hibernate(42)  # must not raise
-
-
 def _fake_ctx() -> AvaContext:
     return AvaContext(
         ops_pool=MagicMock(),
@@ -150,8 +128,8 @@ class TestInvokeGraphLifecycleLogging:
     async def test_cancelled_logs_info_and_reraises(self, loguru_records) -> None:
         """ainvoke raises CancelledError → opt(exception=True).info leaves traceback + raise.
 
-        CancelledError on this path is a NORMAL exit (hibernate swap-out / restart /
-        terminate cancel the in-flight ainvoke), so it must NOT be logged as ERROR —
+        CancelledError on this path is a NORMAL exit (restart / terminate cancel
+        the in-flight ainvoke), so it must NOT be logged as ERROR —
         the crash/ERROR path is reserved for unexpected failures.
         """
         graph = MagicMock()
@@ -652,38 +630,6 @@ class TestExitReason:
         except SystemExit:
             assert _exit_reason() == "signal:SIGHUP"
 
-    def test_sigusr1_maps_to_hibernate(self) -> None:
-        """The hibernation swap-out signal (SIGUSR1) maps to 'hibernate' via the
-        module flag — the handler sets `_hibernate_requested` synchronously before
-        raising, and that flag (NOT the SystemExit message) is the routing channel:
-        asyncio converts the handler's SystemExit into a CancelledError before
-        main()'s finally runs, so only the flag survives. This test sets the flag
-        exactly as the handler does; `test_installs_sigusr1_hibernate_handler`
-        covers the real handler end-to-end."""
-        import agent.lifecycle as _lc
-
-        try:
-            _lc._hibernate_requested = True  # what the SIGUSR1 handler sets
-            assert _exit_reason() == HIBERNATE_EXIT_REASON == "hibernate"
-        finally:
-            _lc._hibernate_requested = False  # one-shot flag: never leak to other tests
-
-    def test_sigusr1_message_string_alone_does_not_route(self) -> None:
-        """A bare SystemExit('signal:SIGUSR1') with no flag set is NOT a hibernation
-        swap-out — the message string is deliberately not part of the routing
-        protocol (single channel: the flag, per the D2 audit finding). It reads as
-        the raw signal tag instead, and routes to /exited like any other signal."""
-        import agent.lifecycle as _lc
-
-        try:
-            assert _lc._hibernate_requested is False  # no flag -> no hibernate routing
-            try:
-                raise SystemExit("signal:SIGUSR1")  # noqa: TRY301 — set sys.exc_info()
-            except SystemExit:
-                assert _exit_reason() == "signal:SIGUSR1"
-        finally:
-            _lc._hibernate_requested = False
-
     def test_plain_systemexit_returns_system_exit(self) -> None:
         """sys.exit() / sys.exit(1) (no signal: prefix) → 'system_exit'."""
         try:
@@ -745,39 +691,6 @@ class TestInstallLifecycleSignalHandlers:
         finally:
             signal.signal(signal.SIGHUP, prev)
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
-
-    def test_installs_sigusr1_hibernate_handler(self) -> None:
-        """SIGUSR1 (the hibernation swap-out signal) is registered and its handler
-        SETS the module hibernate flag synchronously — that flag (not the exception
-        message) is what makes `_exit_reason` return 'hibernate', because asyncio
-        turns the handler's SystemExit into a CancelledError before main()'s finally
-        runs. So a controller's swap-out signal parks the process 'hibernating'."""
-        import signal
-
-        import agent.lifecycle as _lc
-
-        prev_usr1 = signal.getsignal(signal.SIGUSR1)
-        prev_hup = signal.getsignal(signal.SIGHUP)
-        prev_term = signal.getsignal(signal.SIGTERM)
-        try:
-            assert _lc._hibernate_requested is False  # clean starting state
-            _install_lifecycle_signal_handlers()
-            handler = signal.getsignal(signal.SIGUSR1)
-            assert callable(handler) and handler is not prev_usr1
-            with pytest.raises(SystemExit, match=r"^signal:SIGUSR1$"):
-                handler(int(signal.SIGUSR1), None)
-            # The handler set the flag; the reason main()'s finally computes from
-            # ANY in-flight exception (asyncio's CancelledError included) is now
-            # 'hibernate', which routes to /hibernating.
-            assert _lc._hibernate_requested is True
-            assert _exit_reason() == HIBERNATE_EXIT_REASON
-        finally:
-            _lc._hibernate_requested = (
-                False  # one-shot flag: reset so it never leaks to other tests
-            )
-            signal.signal(signal.SIGUSR1, prev_usr1)
-            signal.signal(signal.SIGHUP, prev_hup)
-            signal.signal(signal.SIGTERM, prev_term)
 
 
 # ─── MCP daemon subprocess manager ───

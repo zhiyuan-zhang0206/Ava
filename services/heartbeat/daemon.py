@@ -123,23 +123,17 @@ def _select_idle_agents_needing_heartbeat(
     cycle (an idle agent runs no LLM turn through it), so an ops event never resets
     an agent's idle timer.
 
-    An agent is due when it is `idling` or `hibernating` (the ops-layer memory
-    swap-out state — a parked agent whose process was killed to free RAM), has no
-    pending inbound already queued to wake it (one about to wake on a real message
-    does not also need a check-in), and `now()` has reached its next check-in
-    time. Including `hibernating` is deliberate: the heartbeat is the liveness
-    signal, so a swapped-out agent must still be woken. For a hibernating agent
-    the inbound this check-in inserts has no live process listening; the
-    hibernation controller on the agent's home machine polls for a hibernating
-    row with a pending inbound and relaunches it (clean restart), after which the
-    woken process claims the check-in — identical to how a never-swapped idle
-    agent handles it. Its next check-in is the later of the pause window and the
-    idle clock: `GREATEST(heartbeat_paused_until, last_active_at +
-    idle_threshold_s + jitter)`. The pause window is a floor; while it dominates,
-    no check-in can arrive before its end. A real turn during that window starts a
-    new normal idle clock, so after the window expires the check-in still waits
-    `last_active_at + idle_threshold_s + jitter`. PostgreSQL `GREATEST` ignores a
-    NULL pause window, which leaves the unpaused idle-clock behavior unchanged.
+    An agent is due when it is `idling`, has no pending inbound already queued
+    to wake it (one about to wake on a real message does not also need a
+    check-in), and `now()` has reached its next check-in time. Its next
+    check-in is the later of the pause window and the idle clock:
+    `GREATEST(heartbeat_paused_until, last_active_at + idle_threshold_s +
+    jitter)`. The pause window is a floor; while it dominates, no check-in
+    can arrive before its end. A real turn during that window starts a new
+    normal idle clock, so after the window expires the check-in still waits
+    `last_active_at + idle_threshold_s + jitter`. PostgreSQL `GREATEST`
+    ignores a NULL pause window, which leaves the unpaused idle-clock
+    behavior unchanged.
 
     `jitter_span_s` de-phases the idle-clock term by a deterministic per-agent
     offset `id mod jitter_span_s` seconds, spreading a fleet that went idle
@@ -159,17 +153,14 @@ def _select_idle_agents_needing_heartbeat(
 
     R1 (Task #1021): an *idling* nudge target must hold an unexpired lease — an
     idling row whose lease expired is a zombie the reaper is collecting, and
-    nudging it would only keep a corpse busy. *Hibernating* stays nudgeable
-    with no lease at all: it has no process by design (swapped out), and the
-    nudge is exactly how it wakes.
+    nudging it would only keep a corpse busy.
 
     Hosted mode (Task #1999): the lease concept does not exist — a hosted
     agent's idle row carries no lease renewer (idle is the absence of a turn
     task, not a process to prove alive), so the lease guard would exclude
     EVERY hosted agent and silently retire the heartbeat's resident-duty
     nudge. In hosted mode the clause drops the guard: every idling row is
-    nudgeable (a hibernating row here is a legacy pre-hosted one, still woken
-    the same way — the dispatcher materializes the turn either way).
+    nudgeable (the dispatcher materializes the turn either way).
     """
     from ops.runner_mode import runner_mode
 
@@ -180,7 +171,7 @@ def _select_idle_agents_needing_heartbeat(
         sql = (
             "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
             "FROM agents_meta "
-            "WHERE (status IN ('hibernating', 'idling')) "
+            "WHERE status = 'idling' "
             "AND now() >= GREATEST("
             "  heartbeat_paused_until, "
             "  last_active_at "
@@ -197,7 +188,7 @@ def _select_idle_agents_needing_heartbeat(
         sql = (
             "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
             "FROM agents_meta "
-            "WHERE (status = 'hibernating' OR (status = 'idling' AND lease_expires_at > now())) "
+            "WHERE (status = 'idling' AND lease_expires_at > now()) "
             "AND now() >= GREATEST("
             "  heartbeat_paused_until, "
             "  last_active_at "
@@ -302,7 +293,7 @@ def _reconcile_checkin_outcomes(
             )
             row = cur.fetchone()
             sent_at = pending_checkin.pop(agent_id, None)
-            if row is None or row[0] not in ("idling", "hibernating", "running"):
+            if row is None or row[0] not in ("idling", "running"):
                 # Gone, or parked outside the daemon's lanes — stop tracking.
                 failure_streak.pop(agent_id, None)
                 continue

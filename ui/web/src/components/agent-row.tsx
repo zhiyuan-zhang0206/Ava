@@ -57,9 +57,9 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
 export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting";
 
 // Public status semantics: sky = actively running, emerald = idling/waiting,
-// red = terminated. Internal launch/restart/hibernation states are projected
-// to idling before a row reaches this component; offline remains a separate
-// liveness badge.
+// red = terminated. Internal launch/restart states are projected to idling
+// before a row reaches this component; offline remains a separate liveness
+// badge.
 export const STATUS_DOT: Record<PublicAgentStatus, string> = {
   running: "bg-sky-500",
   idling: "bg-emerald-500",

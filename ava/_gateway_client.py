@@ -602,42 +602,25 @@ def get_last_message(agent_id: int, caller: str) -> str | None:
     return resp.json()["text"]
 
 
-def _project_ops_status(row: dict) -> dict:
-    """Project an ops-only status to its agent-visible equivalent, in place.
-
-    `hibernating` is a memory swap-out state the ops layer owns; to a peer agent
-    it is indistinguishable from `idling` (the agent is parked and wakes on a
-    message), so the SDK never exposes it. Applied at this client boundary —
-    BEFORE any `filter_by_status` in `list_agents` — so a hibernating agent still
-    matches an `idling` filter and `get_status` finds it. The gateway response
-    itself stays truthful (the frontend/ops read the raw value from the same
-    endpoint); only what the agent SDK surfaces is projected.
-    """
-    if row.get("status") == AgentStatus.HIBERNATING.value:
-        row["status"] = AgentStatus.IDLING.value
-    return row
-
-
 def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict]:
     """GET /api/agents/{id}/neighbors → list of neighbor dicts.
 
     Each dict has id / label / status / depth / score, strongest first
-    (order preserved from the gateway). Ops-only statuses are projected to their
-    agent-visible equivalent (`hibernating` → `idling`; see `_project_ops_status`).
+    (order preserved from the gateway).
     """
     resp = _get(f"/api/agents/{agent_id}/neighbors", params={"depth": depth, "limit": limit})
     _raise_from_response(resp)
-    return [_project_ops_status(n) for n in resp.json()["neighbors"]]
+    return resp.json()["neighbors"]
 
 
 def get_ancestors(agent_id: int) -> list[dict]:
     """GET /api/agents/{id}/neighbors → the `ancestors` rows: the spawn/fork
     chain above `agent_id`, nearest ancestor first (the gateway walks to the
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
-    shape and ops-status projection as get_neighbors."""
+    shape as get_neighbors."""
     resp = _get(f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
     _raise_from_response(resp)
-    return [_project_ops_status(n) for n in resp.json()["ancestors"]]
+    return resp.json()["ancestors"]
 
 
 def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list[dict]:
@@ -648,14 +631,10 @@ def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list
     match terminated rows request ``scope=live``; a terminated-only filter
     requests ``scope=terminated``; mixed / unfiltered calls preserve the full
     historical ``scope=all`` contract.  The exact public-status filter remains
-    client-side after ops-only status projection.
+    client-side.
 
     ``filter_by_status``: a non-empty tuple of AgentStatus values to keep;
     None or an empty tuple returns all agents unfiltered.
-
-    Ops-only statuses are projected to their agent-visible equivalent
-    (`hibernating` → `idling`) BEFORE the filter runs, so a swapped-out agent is
-    kept by an `idling` filter and reads as `idling` to every SDK caller.
     """
     scope = "all"
     if filter_by_status:
@@ -666,7 +645,7 @@ def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list
             scope = "live"
     resp = _get("/api/agents", params={"scope": scope})
     _raise_from_response(resp)
-    rows: list[dict] = [_project_ops_status(r) for r in resp.json()]
+    rows: list[dict] = resp.json()
     if filter_by_status:
         rows = [r for r in rows if r["status"] in filter_by_status]
     return rows
@@ -705,21 +684,6 @@ def exited(agent_id: int) -> None:
     finalizing itself.
     """
     resp = _post(f"/api/agents/{agent_id}/exited")
-    _raise_from_response(resp)
-
-
-def hibernating(agent_id: int) -> None:
-    """POST /api/agents/{id}/hibernating — report this process is swapping out for
-    hibernation.
-
-    Called from the process-exit path (not by a peer) when the exit was triggered
-    by the hibernation swap-out signal (SIGUSR1). The gateway parks the row as
-    'hibernating' (guarded WHERE status IN running/idling), keeping the agent's
-    pages open and writing no exit event — unlike /exited, which finalizes to
-    'terminated' and closes only show() pages. No body — the agent is parking
-    itself.
-    """
-    resp = _post(f"/api/agents/{agent_id}/hibernating")
     _raise_from_response(resp)
 
 

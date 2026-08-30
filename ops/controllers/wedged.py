@@ -32,7 +32,7 @@ of unconsumed lifecycle rows. Gateway-health gated like the other controllers:
 a resurrect while the gateway is down would crash-loop.
 
 Extracted as a Controller so the restarter daemon runs it alongside
-RespawnController, HibernateController, and CrashResurrectController.
+RespawnController and CrashResurrectController.
 """
 
 from __future__ import annotations

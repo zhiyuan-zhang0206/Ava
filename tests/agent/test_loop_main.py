@@ -107,7 +107,6 @@ def _setup_main_boundary_mocks(  # noqa: PLR0915 — single helper concentrating
     fake_build_chat = _spy("build_chat_model", ret=MagicMock(name="llm"))
     fake_write_eff = _spy("_write_effective_config_to_restart_completed")
     fake_mark_term = _spy("_notify_exit", ret=[])
-    fake_hibernate = _spy("_notify_hibernate")
     fake_scan_load = _spy("scan_and_load")
     fake_apply_overlay = _spy("apply_config_overlay")
 
@@ -199,7 +198,6 @@ def _setup_main_boundary_mocks(  # noqa: PLR0915 — single helper concentrating
     fake_build_graph = _wrap(fake_build_graph, "build_graph")
     fake_write_eff = _wrap(fake_write_eff, "_write_effective_config_to_restart_completed")
     fake_mark_term = _wrap(fake_mark_term, "_notify_exit")
-    fake_hibernate = _wrap(fake_hibernate, "_notify_hibernate")
     fake_scan_load = _wrap(fake_scan_load, "scan_and_load")
     fake_apply_overlay = _wrap(fake_apply_overlay, "apply_config_overlay")
     fake_invoke = _wrap(fake_invoke, "_invoke_graph_with_lifecycle_logging")
@@ -240,7 +238,6 @@ def _setup_main_boundary_mocks(  # noqa: PLR0915 — single helper concentrating
         fake_write_eff,
     )
     monkeypatch.setattr("agent.lifecycle._notify_exit", fake_mark_term)
-    monkeypatch.setattr("agent.lifecycle._notify_hibernate", fake_hibernate)
     monkeypatch.setattr("agent.loop._invoke_graph_with_lifecycle_logging", fake_invoke)
     monkeypatch.setattr("ava._extend.scan_and_load", fake_scan_load)
 
@@ -269,7 +266,6 @@ def _setup_main_boundary_mocks(  # noqa: PLR0915 — single helper concentrating
         "build_graph": fake_build_graph,
         "write_eff": fake_write_eff,
         "mark_term": fake_mark_term,
-        "hibernate": fake_hibernate,
         "scan_load": fake_scan_load,
         "apply_overlay": fake_apply_overlay,
         "invoke": fake_invoke,
@@ -736,33 +732,6 @@ class TestMainExceptionPath:
         names = [c[0] for c in spies["calls"]]
         assert "_notify_exit" in names
         assert "mcp.stop" in names
-
-    async def test_hibernate_signal_routes_to_notify_hibernate(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The hibernation swap-out signal (SIGUSR1) runs the same finally cleanups
-        but routes the process-end notify to _notify_hibernate (park 'hibernating'),
-        NOT _notify_exit (finalize 'terminated'). The routing channel is the module
-        flag the SIGUSR1 handler sets synchronously before raising (the flag — not
-        the SystemExit message — survives asyncio's CancelledError conversion), so
-        this test sets it exactly as the handler does."""
-        import agent.lifecycle as _lc
-
-        spies = _setup_main_boundary_mocks(
-            monkeypatch,
-            ainvoke_side_effect=SystemExit("signal:SIGUSR1"),
-        )
-        try:
-            _lc._hibernate_requested = True  # what the SIGUSR1 handler sets
-            with pytest.raises(SystemExit):
-                await main(agent_id=42)
-        finally:
-            _lc._hibernate_requested = False  # one-shot flag: never leak to other tests
-        names = [c[0] for c in spies["calls"]]
-        assert "inbound_listener.close" in names
-        assert "mcp.stop" in names
-        assert "_notify_hibernate" in names
-        assert "_notify_exit" not in names  # the swap-out path must not finalize 'terminated'
 
 
 # ───────────────────────────────────────────────────────────────────────────

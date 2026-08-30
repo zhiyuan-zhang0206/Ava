@@ -121,19 +121,6 @@ class TestSelectStalePending:
         db_conn.commit()
         assert select_stale_pending(pool, _THRESHOLD_S) == []
 
-    def test_hibernating_owner_still_alerts(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        """Hibernating + pending past the threshold = swap-in failure (the
-        hibernation controller relaunches on pending inbound); worth alerting."""
-        aid = _make_idling_agent(db_conn)
-        _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'hibernating' WHERE id = %s", (aid,))
-        db_conn.commit()
-        rows = select_stale_pending(pool, _THRESHOLD_S)
-        assert [r[0] for r in rows] == [aid] or len(rows) == 1
-
 
 class TestScanOnce:
     def test_alerts_each_stale_row_once_while_pending(
@@ -254,8 +241,8 @@ class TestSelectPendingForDispatch:
         self, db_conn: psycopg.Connection, pool: ConnectionPool
     ) -> None:
         """Fresh rows (still within the dispatch threshold) and owners not in
-        'idling' (running = mid-turn queue, hibernating/terminated = their own
-        controllers) are left alone."""
+        'idling' (running = mid-turn queue, terminated = its own controller)
+        are left alone."""
         aid = _make_idling_agent(db_conn)
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S - 0.3)  # fresh
         with db_conn.cursor() as cur:
@@ -263,8 +250,7 @@ class TestSelectPendingForDispatch:
         db_conn.commit()
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (aid,))
-            cur.execute("UPDATE agents_meta SET status = 'hibernating' WHERE id = %s", (aid,))
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (aid,))
         db_conn.commit()
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         assert select_pending_for_dispatch(pool, _DISPATCH_THRESHOLD_S) == []

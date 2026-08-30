@@ -178,14 +178,14 @@ def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -
                 200,
                 [
                     {"agent_id": 7, "status": "terminated"},
-                    {"agent_id": 9, "status": "hibernating"},
+                    {"agent_id": 9, "status": "restarting"},
                 ],
             )
         return _Resp(
             200,
             [
                 _notice(1, 7, title="dead agent", require_response=True),
-                _notice(2, 9, title="hibernating agent"),
+                _notice(2, 9, title="restarting agent"),
             ],
         )
 

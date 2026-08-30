@@ -137,11 +137,11 @@ async def _claim_node_impl(
                 batch = await _wait_for_batch(ctx, agent_id)
             except LifecycleCasLostError as exc:
                 # Claim-time lifecycle race: between the idle flip and the
-                # IDLING→RUNNING flip, another op (terminate / hibernate
-                # swap-out / reaper) took ownership of the row. End the
-                # process cleanly instead of crashing — a crash during a
-                # network outage cannot be resurrected (Task #688); the
-                # owning controller (swap-in / restarter / resurrect)
+                # IDLING→RUNNING flip, another op (terminate / reaper) took
+                # ownership of the row. End the process cleanly instead of
+                # crashing — a crash during a network outage cannot be
+                # resurrected (Task #688); the owning controller (restarter /
+                # resurrect)
                 # relaunches or leaves it dead as intended.
                 logger.warning(
                     "claim wait aborted: {reason}",

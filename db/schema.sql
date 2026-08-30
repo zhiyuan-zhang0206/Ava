@@ -73,7 +73,6 @@ CREATE TABLE agents (
 --   restarting — UPDATE before graceful exit, after the agent receives a restart inbound. The gateway
 --                restart watcher sees this state → auto-resurrects to spawn a fresh process
 --                attached to the same agent (new PID, LangGraph state preserved)
---   hibernating — ops-only memory swap-out state, projected as idling to SDK and frontend consumers
 --   terminated — UPDATE before graceful exit, after the process receives a terminate inbound
 --
 -- After launch, `_launch_agent_process` polls pid to confirm the child claimed the row. No claim within the
@@ -109,7 +108,7 @@ CREATE TABLE agents_meta (
     spawner                    TEXT NOT NULL DEFAULT 'user',
     fork_source_agent_id       BIGINT REFERENCES agents(id),
     fork_source_checkpoint_id  TEXT,
-    status                     TEXT NOT NULL CHECK (status IN ('running', 'idling', 'restarting', 'terminated', 'hibernating')),
+    status                     TEXT NOT NULL CHECK (status IN ('running', 'idling', 'restarting', 'terminated')),
     pid                        INTEGER,                  -- filled while a process owns the running/idling row, for ops ps lookup / force kill
     spawned_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at                 TIMESTAMPTZ,              -- filled alongside pid and lease by agent._starting.claim_agent_row

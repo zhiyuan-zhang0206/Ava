@@ -115,7 +115,7 @@ def project_heartbeat(
     *future* value (a NULL / past pause arrives here as None = not paused). The
     display states are mutually exclusive:
 
-    - idle-family (idling / hibernating / restarting), paused → `paused_until`.
+    - idle-family (idling / restarting), paused → `paused_until`.
     - idle-family, not paused, a wake already queued → `heartbeat_pending`.
     - idle-family, not paused, nothing queued → `next_at` (the daemon's projected
       check-in due time — idle clock plus the per-agent jitter; the daemon
@@ -151,7 +151,7 @@ def project_heartbeat(
     next_at: datetime | None = None
     active_pause: datetime | None = None
     heartbeat_pending = False
-    if status in (AgentStatus.IDLING, AgentStatus.HIBERNATING, AgentStatus.RESTARTING):
+    if status in (AgentStatus.IDLING, AgentStatus.RESTARTING):
         if paused_until is not None:
             active_pause = paused_until
         # Mirror the daemon's `NOT EXISTS (pending inbound)` guard: with a

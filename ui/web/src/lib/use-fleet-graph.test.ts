@@ -146,7 +146,6 @@ describe("useFleetGraph", () => {
         { ...API_GRAPH.nodes[0], agent_id: 2, status: "idling" },
         { ...API_GRAPH.nodes[0], agent_id: 3, status: "restarting" },
         { ...API_GRAPH.nodes[0], agent_id: 4, status: "terminated" },
-        { ...API_GRAPH.nodes[0], agent_id: 5, status: "hibernating" },
       ],
       edges: [],
     } as unknown as WireFleetGraph;
@@ -162,7 +161,6 @@ describe("useFleetGraph", () => {
       "idling",
       "idling",
       "terminated",
-      "idling",
     ]);
   });
 

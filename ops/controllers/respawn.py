@@ -118,8 +118,7 @@ def _process_still_resident(agent_id: int, pid: int) -> bool:
     integer: once the agent dies the OS may reissue that number, and after a
     reboot it reissues the whole range at once. A `process_alive` check passes on
     such a pid forever, which is how five rows sat 'idling' behind dead agents
-    across a dozen reaper passes while the hibernation scan signalled the
-    strangers that had inherited their pids (issue #1123). Liveness was only ever
+    across a dozen reaper passes (issue #1123). Liveness was only ever
     a proxy for "the process behind this row exists"; identity is the thing
     itself.
 
@@ -227,7 +226,7 @@ def _revive_local_dead_running_idling(
     and owns this row". When that process dies (machine reboot / power-off /
     OOM / SIGKILL), the row keeps its status. The pre-G5 reaper forced such
     rows to 'terminated', and nothing ever brought the agent back — the
-    heartbeat only targets idling/hibernating, crash-resurrect needs a pending
+    heartbeat only targets idling, crash-resurrect needs a pending
     inbound, and `ava start` revives no one: after a reboot the whole local
     fleet sat dead until the next message (Task #689 G5, the user-visible
     "machine came back, agents did not").
@@ -291,8 +290,7 @@ def _collect_local_lease_zombies(pool: ConnectionPool, local_machine: str) -> li
     authority, and a row that stopped renewing is dead even when its pid still
     answers. A resident process behind an expired lease is wedged or running
     pre-lease code — kill it; the revive pass below then relaunches the row in
-    place. 'hibernating' is exempt by design (swapped out, no renewal, and the
-    status set here never includes it). The pass is gated upstream by
+    place. The pass is gated upstream by
     ``_reap_corpses``'s post-outage grace window: during a DB outage the
     paused-but-alive processes cannot renew, and killing them on the first
     post-outage reap would destroy the in-flight turn the pause exists to

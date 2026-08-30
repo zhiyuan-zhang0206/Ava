@@ -486,10 +486,10 @@ async def enter_idling_state(pool: AsyncConnectionPool, agent_id: int) -> None:
         )
     except RuntimeError:
         # CAS lost between the SELECT and the UPDATE — a concurrent lifecycle
-        # op (terminate / hibernate swap-out / reaper) moved the row in the
-        # gap. Degrade instead of crashing (Task #688): the next claim
-        # attempt sees the foreign state and the process exits via the normal
-        # path (terminate inbound → END; hibernate signal → exit).
+        # op (terminate / reaper) moved the row in the gap. Degrade instead
+        # of crashing (Task #688): the next claim attempt sees the foreign
+        # state and the process exits via the normal path (terminate inbound
+        # → END).
         logger.warning(
             "idle flip CAS lost for agent {agent_id} — concurrent lifecycle "
             "op took the row; continuing (next claim attempt will exit cleanly)",

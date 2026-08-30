@@ -20,8 +20,8 @@ Two signals, merged per agent:
   clobbered by register_self).
 - **Process lease** — `agents_meta.lease_expires_at` (R1, Task #1021): the
   agent process renews it every 60s while alive, so expiry with the machine up
-  means a dead/wedged process. `hibernating` is lease-exempt by design (swapped
-  out, no renewal). An unclaimed `idling` row has no process yet, so it stays
+  means a dead/wedged process. An unclaimed `idling` row has no process yet, so
+  it stays
   `unknown` until its atomic claim writes `started_at`; `restarting` judges on
   machine reachability alone.
 

@@ -428,7 +428,6 @@
     "statusIdling": "空闲中",
     "statusRestarting": "重启中",
     "statusTerminated": "已终止",
-    "statusHibernating": "空闲中",
     "statusOffline": "离线 — 机器不可达或进程失联"
   },
   "contentToggle": {
@@ -497,7 +496,7 @@
       "config-memory": "Agent 记忆与压缩",
       "config-sdk": "Agent SDK",
       "config-agent-infra": "Agent 数据库与基础设施",
-      "config-daemon-heartbeat": "守护进程：心跳与休眠",
+      "config-daemon-heartbeat": "守护进程：心跳",
       "config-daemon-tasks": "守护进程：任务与事件",
       "config-gateway": "Gateway",
       "config-connection": "连接",

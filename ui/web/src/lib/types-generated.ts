@@ -441,40 +441,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/hibernating": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Agent Hibernating
-         * @description An agent process reports it is swapping out for hibernation — park its
-         *     row as 'hibernating' (its process is exiting to free RAM).
-         *
-         *     Called by the agent itself from its process-exit path when the exit was
-         *     triggered by the hibernation swap-out signal (SIGUSR1), not by a user/peer.
-         *     Distinct from `/exited`: this parks the row 'hibernating' (guarded WHERE
-         *     status IN running/idling), keeps the agent's pages OPEN, and writes no exit
-         *     event — the agent is not dying, it is being swapped out and will be
-         *     relaunched by the hibernation controller on the next heartbeat/inbound. The
-         *     guard leaves a concurrent restart's 'restarting' / an already-'terminated'
-         *     row untouched (idempotent).
-         *
-         *     No cross-machine forwarding: the work is a status UPDATE + event publish,
-         *     both against the shared DB / events channel, so it runs on whichever gateway
-         *     receives it.
-         */
-        post: operations["post_agent_hibernating_api_agents__agent_id__hibernating_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{agent_id}/resurrect": {
         parameters: {
             query?: never;
@@ -3028,7 +2994,7 @@ export interface paths {
          * @description Pull all data for the sidebar-top stats card in one shot.
          *
          *     Data sources:
-         *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
+         *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting)
          *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
          *     - average turn duration: Loki's unified event stream in 12-hour shards
          *     - warning/error counts: per-class counts via the resolution daemon's
@@ -3259,7 +3225,7 @@ export interface paths {
          *     agent — are excluded by default (user ruling 2026-08-09 #1104: terminated
          *     agents never appear in the graph, mirroring the sidebar's agent tree). The
          *     filter ORDER is liveness first: the node set is live-only (`status !=
-         *     'terminated'`, so hibernating/restarting etc. stay), and edges only ever
+         *     'terminated'`, so restarting etc. stay), and edges only ever
          *     connect two live endpoints — a live node whose lineage partner has since
          *     terminated simply renders without that edge. Raw source rows are filtered
          *     during the merge; pass `?include_terminated=true` for the full graph.
@@ -3626,8 +3592,7 @@ export interface components {
          *     (reasoning + output). `exec_seconds` = Σ `duration_seconds` of every
          *     `node_exit` for the `exec` node — the code execution wall-clock. The `claim`
          *     node is excluded because its wall-clock IS the idle-wait (it parks the agent
-         *     in the inbound wait between turns); hibernation (swapped-out process) is
-         *     likewise not in any node, so both fall into the blocked remainder.
+         *     in the inbound wait between turns), so it falls into the blocked remainder.
          *     `alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate
          *     intervals, open tail to now), clipped to the same window — the same lifecycle
          *     basis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped
@@ -4048,7 +4013,7 @@ export interface components {
          * AgentStatus
          * @enum {string}
          */
-        AgentStatus: "running" | "idling" | "restarting" | "terminated" | "hibernating";
+        AgentStatus: "running" | "idling" | "restarting" | "terminated";
         /**
          * AgentTps
          * @description Token-per-second metrics for one agent — two views of throughput.
@@ -4948,8 +4913,8 @@ export interface components {
          * @description Idle check-in heartbeat state for one agent — mutually-exclusive display
          *     states the panel renders:
          *
-         *     - idle-family (idling / hibernating / restarting — the statuses the fleet
-         *       view projects to "Idle") & not paused & no fresh wake queued: `next_at` is
+         *     - idle-family (idling / restarting — the statuses the fleet view
+         *       projects to "Idle") & not paused & no fresh wake queued: `next_at` is
          *       set — the daemon's projected check-in due time,
          *       `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)`. The daemon
          *       dispatches the actual check-in at its first poll tick at/after that (at
@@ -7990,35 +7955,6 @@ export interface operations {
         };
     };
     post_agent_exited_api_agents__agent_id__exited_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_agent_hibernating_api_agents__agent_id__hibernating_post: {
         parameters: {
             query?: never;
             header?: never;

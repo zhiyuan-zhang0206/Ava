@@ -975,8 +975,6 @@ EVENTS: dict[str, EventSpec] = {
     "agent_spawned": _telemetry("agent_spawned", "agent process started", payload=AgentSpawned),
     "agent_resurrected": _telemetry("agent_resurrected", "agent resurrected"),
     "agent_terminated": _telemetry("agent_terminated", "agent terminated"),
-    "agent_hibernating": _telemetry("agent_hibernating", "agent hibernated", tier="noise"),
-    "agent_swapped_in": _telemetry("agent_swapped_in", "process swapped in", tier="noise"),
     "agent_revived": _telemetry("agent_revived", "agent revived", tier="noise"),
     "respawn_phase1": _telemetry("respawn_phase1", "restart phase 1", tier="noise"),
     "respawn_phase2_launch": _telemetry(

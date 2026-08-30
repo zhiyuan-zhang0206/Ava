@@ -225,15 +225,6 @@ class TestPauseMiddleware:
             r = client.post("/api/agents/123/exited")
         assert r.status_code == 204
 
-    def test_agent_hibernating_bypasses_503_when_paused(self, fake_flag: Path) -> None:
-        """Symmetric to /exited: a SIGUSR1-swapped agent's self-report parks the
-        row 'hibernating' (guarded UPDATE + event publish); a 503 would degrade
-        a swap-out into a corpse-reaped termination."""
-        fake_flag.write_text("")
-        with TestClient(app) as client:
-            r = client.post("/api/agents/123/hibernating")
-        assert r.status_code == 204
-
     def test_other_agent_paths_still_503_when_paused(self, fake_flag: Path) -> None:
         """Only the agent SELF-REPORT paths bypass the pause — an externally
         initiated terminate stays 503 (business logic, not a drain signal)."""

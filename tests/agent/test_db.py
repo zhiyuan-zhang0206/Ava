@@ -146,9 +146,9 @@ class TestWaitForInbound:
         aops_pool: AsyncConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A CAS loss on the RUNNING→IDLING flip (a concurrent terminate /
-        hibernate op moving the row between enter_idling_state's pre-SELECT
-        and its UPDATE) used to raise RuntimeError and crash the process
+        """A CAS loss on the RUNNING→IDLING flip (a concurrent terminate
+        op moving the row between enter_idling_state's pre-SELECT and its
+        UPDATE) used to raise RuntimeError and crash the process
         (Task #688). It must degrade to a warning instead: the wait loop then
         discovers the foreign state on its next claim attempt and exits via
         the normal path."""

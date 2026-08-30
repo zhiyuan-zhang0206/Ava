@@ -66,14 +66,13 @@ def _inbound_rows(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str,
 
 def test_quiesce_signals_only_live_agents(db_conn: psycopg.Connection) -> None:
     """One restart/source='system:update' inbound per running/idling agent;
-    terminated/restarting/hibernating agents get none. After signalling, flip the
-    live rows to 'restarting' so the poll terminates (mirrors the agent process
-    taking itself down)."""
+    terminated/restarting agents get none. After signalling, flip the live rows
+    to 'restarting' so the poll terminates (mirrors the agent process taking
+    itself down)."""
     running = _seed_agent(db_conn, "running")
     idling = _seed_agent(db_conn, "idling")
     terminated = _seed_agent(db_conn, "terminated")
     restarting = _seed_agent(db_conn, "restarting")
-    hibernating = _seed_agent(db_conn, "hibernating")
 
     # Quiesce will poll until live count hits 0; flip the two live agents to
     # 'restarting' from a background thread, the way a real agent claim node
@@ -116,7 +115,6 @@ def test_quiesce_signals_only_live_agents(db_conn: psycopg.Connection) -> None:
     assert _inbound_rows(db_conn, idling) == [("restart", "system:update", "")]
     assert _inbound_rows(db_conn, terminated) == []
     assert _inbound_rows(db_conn, restarting) == []
-    assert _inbound_rows(db_conn, hibernating) == []
 
 
 def test_quiesce_returns_immediately_when_no_live_agents(db_conn: psycopg.Connection) -> None:

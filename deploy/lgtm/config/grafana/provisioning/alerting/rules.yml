@@ -597,7 +597,7 @@ groups:
             not a limit the kernel enforces — a training or eval job may
             legitimately own the box. The operator decides: identify the
             consumer (Grafana /grafana/d/ava-ops-main, "Host & data plane" section), then
-            investigate, hibernate agents, or leave it alone.
+            investigate, terminate idle agents, or leave it alone.
         data:
           - refId: A
             datasourceUid: prometheus
@@ -668,7 +668,7 @@ groups:
             RAM for 15 minutes (reclaimable cache excluded). Sustained
             pressure precedes swapping and the OOM killer, whose visible form
             is an agent restart spike (R3). Check the per-agent footprint and
-            consider hibernating idle agents.
+            consider terminating idle agents.
         data:
           - refId: A
             datasourceUid: prometheus
