@@ -43,7 +43,7 @@ turns into a session by it) plus `ava.turn` (the per-process turn counter).
 
 Idempotent: the _initialized guard prevents a second init. A collector miss at
 startup logs once, then one daemon loop retries every five minutes until trace
-recording comes up; disk-watermark auto-degrade remains a deliberate no-retry.
+recording comes up (or the single arm attempt fails permanently); disk-watermark auto-degrade remains a deliberate no-retry.
 
 History: Laminar -> Langfuse 2026-06-06; Langfuse -> Tempo (LGTM) 2026-08-11;
 agent-side mirror -> local collector sidecar (task #1266) 2026-08-14.
@@ -408,11 +408,21 @@ def _arm_tracing(endpoint: str) -> None:
             except Exception:
                 _state["arm_failed"] = True
                 raise
-    except Exception as exc:
+    except BaseException as exc:
         # One attempt per process: the retry loop only bridges
         # unreachable->reachable, and retrying Traceloop.init after a partial
         # failure would fake-succeed — the TracerWrapper singleton survives,
         # so a second init() adds no instrumentors yet reports success.
+        #
+        # BaseException (a SystemExit/GeneratorExit escape from inside the
+        # SDK — not expected, but the one-attempt contract must hold for
+        # however the thread dies): with only `except Exception`, a dead
+        # arm_thread carrying no flag gets past _start_arm_thread's
+        # is_alive() guard and a later initialize_tracing() would re-arm —
+        # the one-attempt-per-process contract was bypassable in a corner.
+        # Mark the attempt spent; this daemon thread has no caller to
+        # propagate to, so swallow and log.
+        _state["arm_failed"] = True
         logger.warning(
             "trace recording failed to initialize — spans disabled this process",
             event="trace",
@@ -500,7 +510,8 @@ def initialize_tracing() -> None:
     JSONL mirror and either fans out locally or relays to the gateway. If the
     sidecar itself is not answering at init, recording stays off temporarily:
     the episode is logged once and one daemon loop re-checks every five
-    minutes until init succeeds.
+    minutes until init succeeds or the single arm attempt fails
+    permanently (one arm attempt per process).
 
     Guards (each independently configurable):
     - compression (`_gzip_old_mirror`): rotated (non-active) mirror segments
