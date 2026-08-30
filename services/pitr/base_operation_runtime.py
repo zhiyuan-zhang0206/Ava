@@ -87,6 +87,16 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
             ("credentials_file", str(baidu_credentials)),
             ("token_file", str(baidu_token)),
         )
+    elif config.pitr_store_backend == "cos":
+        cos_credentials = config.pitr_cos_credentials_file
+        if cos_credentials is None:
+            raise RuntimeError("validated COS restore-proof secrets are missing")
+        store_args = (
+            ("bucket", config.pitr_cos_bucket),
+            ("region", config.pitr_cos_region),
+            ("credentials_file", str(cos_credentials)),
+            ("prefix", config.pitr_gcs_prefix),
+        )
     elif config.pitr_store_backend == "oss":
         # The OSS backend: the restricted worker carries only the viewer-only
         # AccessKey pair — the reader/inventory roles alone never need the

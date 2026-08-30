@@ -78,6 +78,48 @@ def test_validate_secrets_produces_baidu_evidence_for_the_baidu_backend(
     }
 
 
+def test_validate_secrets_produces_cos_evidence_for_the_cos_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.config import settings
+
+    credentials = tmp_path / "cos.json"
+    credentials.write_text(json.dumps({"secret_id": "AKIDcos", "secret_key": "secret-key"}))
+    credentials.chmod(0o600)
+    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "cos")
+    monkeypatch.setattr(settings.physical_backup, "pitr_backup_key_file", tmp_path / "backup.key")
+    (tmp_path / "backup.key").write_bytes(b"0" * 32)
+    (tmp_path / "backup.key").chmod(0o600)
+    monkeypatch.setattr(settings.physical_backup, "pitr_cos_credentials_file", credentials)
+    monkeypatch.setattr(settings.physical_backup, "pitr_cos_bucket", "ava-pitr-1250000000")
+    monkeypatch.setattr(settings.physical_backup, "pitr_cos_region", "ap-guangzhou")
+
+    evidence = activation._validate_secrets()
+
+    assert evidence == {
+        "backend": "cos",
+        "uploader_identity": "AKIDcos",
+        "viewer_identity": "AKIDcos",
+        "store_target": "ava-pitr-1250000000",
+        "object_prefix": settings.physical_backup.pitr_gcs_prefix,
+        "backup_key_id": settings.physical_backup.pitr_backup_key_id,
+        "backup_key_sha256": hashlib.sha256(b"0" * 32).hexdigest(),
+    }
+
+
+def test_validate_secrets_fails_closed_for_unknown_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "nope")
+    monkeypatch.setattr(settings.physical_backup, "pitr_backup_key_file", tmp_path / "backup.key")
+    (tmp_path / "backup.key").write_bytes(b"0" * 32)
+    (tmp_path / "backup.key").chmod(0o600)
+    with pytest.raises(RuntimeError, match="unhandled PITR store backend"):
+        activation._validate_secrets()
+
+
 def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
     digest = "0" * 64
     monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)

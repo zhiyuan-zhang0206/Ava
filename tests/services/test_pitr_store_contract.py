@@ -526,9 +526,26 @@ def test_factory_constructs_every_role_for_the_oss_backend(tmp_path: Path) -> No
     assert group.protected_manifest_publisher() is not None
 
 
+def test_factory_constructs_every_role_for_the_cos_backend(tmp_path: Path) -> None:
+    credentials = tmp_path / "cos.json"
+    credentials.write_text(json.dumps({"secret_id": "AKIDx", "secret_key": "SECRETy"}))
+    group = get_group_constructor_named("cos")(
+        bucket="ava-pitr-1250000000",
+        region="ap-guangzhou",
+        credentials_file=credentials,
+        prefix="ava-pitr",
+    )
+    assert group.object_store() is not None
+    assert group.restartable_streaming_object_store() is not None
+    assert group.viewer_object_store() is not None
+    assert group.generation_pinned_object_reader() is not None
+    assert group.retention_inventory_reader() is not None
+    assert group.protected_manifest_publisher() is not None
+
+
 def test_factory_rejects_unknown_backend_without_falling_back() -> None:
     with pytest.raises(
-        ValueError, match=r"unknown PITR store backend 's3' \(known: baidu, gcs, oss\)"
+        ValueError, match=r"unknown PITR store backend 's3' \(known: baidu, cos, gcs, oss\)"
     ):
         get_group_constructor_named("s3")
     with pytest.raises(ValueError, match="unknown PITR store backend"):
@@ -549,6 +566,13 @@ def test_factory_reads_the_configured_backend(
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "baidu")
     monkeypatch.setattr(settings.physical_backup, "pitr_baidu_credentials_file", credentials)
     monkeypatch.setattr(settings.physical_backup, "pitr_baidu_token_file", tmp_path / "token.json")
+    assert isinstance(get_store_group(), PitrStoreGroup)
+    cos_credentials = tmp_path / "cos.json"
+    cos_credentials.write_text(json.dumps({"secret_id": "AKIDx", "secret_key": "SECRETy"}))
+    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "cos")
+    monkeypatch.setattr(settings.physical_backup, "pitr_cos_bucket", "ava-pitr-1250000000")
+    monkeypatch.setattr(settings.physical_backup, "pitr_cos_region", "ap-guangzhou")
+    monkeypatch.setattr(settings.physical_backup, "pitr_cos_credentials_file", cos_credentials)
     assert isinstance(get_store_group(), PitrStoreGroup)
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "nope")
     with pytest.raises(ValueError, match="unknown PITR store backend"):
