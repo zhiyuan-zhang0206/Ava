@@ -8,8 +8,8 @@ one's ops server until it reports paused=false, provably stops
 see `shared.deploy_timing` for why that bound is not a number of its own:
 - `PollVerdict` + `_probe_verdict` + `_probe_one_until_unpaused` +
   `_poll_until_unpaused` — the poll loop (unreachable = expected mid-restart
-  reading, never a verdict; the early STALLED exit is what makes the deadline
-  affordable).
+  reading, never a verdict; the early STALLED and NO_PROGRESS exits are what
+  make the deadline affordable).
 - `_renew_lease_while_polling` — renews the cluster deploy lease beside the
   poll (the long pole) so the lease outlives the operation it protects.
 - `_gateway_ready_or_incomplete` — Phase B's gate: the gateway must actually be
@@ -43,7 +43,11 @@ from cli.commands._update_fanout import (
     _print_fan_out_results,
 )
 from cli.commands._update_recover import RolloutOutcome
-from shared.deploy_timing import HARVEST_GRACE_S, NO_PROGRESS_TIMEOUT_S
+from shared.deploy_timing import (
+    HARVEST_GRACE_S,
+    NO_PROGRESS_TIMEOUT_S,
+    STAGE_NO_PROGRESS_TIMEOUT_S,
+)
 from shared.host_deploy_state import POSTURE_IDLE, POSTURE_PAUSED, read
 
 _log = logging.getLogger(__name__)
@@ -57,14 +61,22 @@ _log = logging.getLogger(__name__)
 # makes a bound this generous affordable (`_probe_one_until_unpaused`).
 _POLL_TIMEOUT_S = NO_PROGRESS_TIMEOUT_S
 _POLL_INTERVAL_S = 2.0
+# How long one updater stage may be in flight before a probe's own evidence proves
+# no-progress (the family's STAGE_NO_PROGRESS_TIMEOUT_S — see shared.deploy_timing).
+# A module-level alias read through the `cli.commands` namespace so tests can shrink
+# it, exactly like _POLL_TIMEOUT_S.
+_STAGE_NO_PROGRESS_S = STAGE_NO_PROGRESS_TIMEOUT_S
 
 
-# Phase-B poll verdicts. Three facts, deliberately not one word: 'the poll ran out
-# of patience' and 'this host provably stopped trying' need different operator
-# responses (wait vs go look), and neither is 'the rollout finished cleanly'.
+# Phase-B poll verdicts. Four facts, deliberately not one word: 'the poll ran out
+# of patience', 'this host provably stopped trying' and 'this host's updater is
+# alive but its stage evidence stopped moving' need different operator responses
+# (wait / go look / check that machine), and none of them is 'the rollout finished
+# cleanly'.
 POLL_OK = "ok"  # reported paused=false: converged
 POLL_CONVERGING = "converging"  # patience ran out while it may still be working
 POLL_STALLED = "stalled"  # reachable, still paused, no updater running: not coming back
+POLL_NO_PROGRESS = "no_progress"  # updater alive, but its stage evidence has stopped moving
 
 # R1 (Task #1021): the stall fact is the host_deploy_state row, not a wire field.
 # The probe's `paused` alone cannot carry it — the updater's lease touch moves
@@ -134,20 +146,24 @@ class PollVerdict(NamedTuple):
 
 
 def _probe_verdict(
-    result: dict[str, Any] | None, stalls: int, machine: str
-) -> tuple[PollVerdict | None, int]:
-    """One status_probe response + this host's deploy-state row → (verdict, stalls).
+    result: dict[str, Any] | None,
+    stalls: int,
+    machine: str,
+    no_progress: int,
+) -> tuple[PollVerdict | None, int, int]:
+    """One status_probe response + this host's deploy-state row →
+    (verdict, stalls, no_progress).
 
     Verdict None = keep polling. A non-dict result (unreachable / failed are
-    swallowed by the caller and leave result None) clears the stall counter —
-    silence is the expected mid-restart reading, never evidence. The verdict
-    itself reads the host_deploy_state row (the R1 authority), not the probe's
-    `paused` field: posture `idle` is convergence; a live updater lease is
-    "still working"; `paused` with no lease is the fan-out window / a legacy
-    chain ("cannot tell", never a stall); `paused` with an expired lease or
-    `converging` with no live lease is the provable-stall fact, confirmed
-    `_STALL_CONFIRMATIONS` times before it ends the poll. A row read failure is
-    "cannot tell" (fail-soft — the poll keeps its deadline).
+    swallowed by the caller and leave result None) clears both counters — silence is
+    the expected mid-restart reading, never evidence. The verdict itself reads the
+    host_deploy_state row (the R1 authority), not the probe's `paused` field: posture
+    `idle` is convergence; a live updater lease is "still working"; `paused` with no
+    lease is the fan-out window / a legacy chain ("cannot tell", never a stall);
+    `paused` with an expired lease or `converging` with no live lease is the
+    provable-stall fact, confirmed `_STALL_CONFIRMATIONS` times before it ends the
+    poll. A row read failure is "cannot tell" (fail-soft — the poll keeps its
+    deadline, and neither counter advances).
 
     **The updater's own written verdict overrides both "keep polling" readings.**
     Those two read the lease, and a lease is one write at the run's start good for
@@ -161,49 +177,82 @@ def _probe_verdict(
     proof — the updater wrote its own ending — and it is only consulted once posture
     has already said this host is not converged.
 
-    The stall verdict carries the host's `last_updater_outcome` from *this same
+    **The no-progress fact (P1, 2026-08-30) is the live lease's missing half.** A
+    lease that never gets cleared reads as "still working" for the whole bound even
+    while the updater's own stage evidence shows it has been stuck inside one stage —
+    a hung `uv` download on the Windows runner is exactly that shape. The probe's
+    `last_updater_outcome` now carries `current_stage` / `current_stage_s` (the
+    tail's last `t=` marker and its age at read time — see `ops.updater_outcome`), so
+    the poll can read progress itself instead of trusting the lease alone:
+    consecutive probes reporting a current stage in flight beyond
+    `STAGE_NO_PROGRESS_TIMEOUT_S` end the poll with POLL_NO_PROGRESS — the same
+    bound, and the same evidence, the host's own reaper uses. A probe answering from
+    an older commit carries no stage fields, which reads as "cannot tell", never as
+    progress, so the judgment simply waits for the rollout that ships it.
+
+    The verdict carries the host's `last_updater_outcome` from *this same
     probe response*, which is why the reason costs no extra dial: the probe that
     proves the host stopped is the probe that says why.
     """
+    import cli.commands as _ns
     from ops.updater_outcome import UpdaterOutcome, updater_outcome_terminal
 
     if not isinstance(result, dict):
-        return None, 0
+        return None, 0, 0
     try:
         state = read(machine)
     except Exception:
         # "cannot tell", never convergence: reporting a host converged because
         # its row could not be read would release the deploy lease while the
-        # host is still mid-transition — the wrong polarity. Keep polling.
-        return None, stalls
+        # host is still mid-transition — the wrong polarity. Keep polling, and
+        # keep the no-progress streak too: an unreadable row is evidence-free.
+        return None, stalls, no_progress
     if state is None or state.posture == POSTURE_IDLE:
-        return PollVerdict(POLL_OK), stalls
+        return PollVerdict(POLL_OK), stalls, no_progress
     raw = result.get("last_updater_outcome")
     outcome = raw if isinstance(raw, dict) else None
     try:
-        finished = updater_outcome_terminal(
-            UpdaterOutcome.model_validate(outcome) if outcome else None
-        )
+        parsed = UpdaterOutcome.model_validate(outcome) if outcome else None
+        finished = updater_outcome_terminal(parsed)
     except Exception:
         # Read leniently, and never raise: this runs inside the gathered poll, so an
         # exception here abandons every host's poll, not just this one's. The runner
         # answering is on a different commit from this orchestrator for the whole
         # rollout by construction, so a field it phrases differently costs this pass
         # its short-cut and nothing more.
+        parsed = None
         finished = False
     if not finished:
         if state.updater_live:
-            return None, 0  # lease live: the updater is still working — reset the counter
+            # lease live: the updater is still working — reset the stall counter.
+            # But "working" is the lease's claim, and the lease is one write at the
+            # run's start; the stage evidence is the progress fact. Two consecutive
+            # probes naming a stage that has been in flight past the family's stage
+            # bound (an age that only grows while the same stage runs — a stage
+            # change resets it) prove the updater is not getting anywhere.
+            if (
+                parsed is not None
+                and parsed.current_stage is not None
+                and parsed.current_stage_s is not None
+                and parsed.current_stage_s > _ns._STAGE_NO_PROGRESS_S
+            ):
+                no_progress += 1
+                if no_progress >= _STALL_CONFIRMATIONS:
+                    return PollVerdict(POLL_NO_PROGRESS, outcome), stalls, no_progress
+            else:
+                no_progress = 0
+            return None, 0, no_progress
         if state.posture == POSTURE_PAUSED and not state.updater_expired:
             # Paused with no lease this pause window armed: the updater has not
             # touched yet (a session spawn plus a Python cold start), or a legacy
             # pre-lease chain, or a PREVIOUS run's uncleared expiry still sitting in
-            # the row. "Cannot tell", never a stall — see `updater_expired`.
-            return None, 0
+            # the row. "Cannot tell", never a stall — see `updater_expired`. Any
+            # stage evidence here belongs to an earlier run, so it never counts.
+            return None, 0, 0
     stalls += 1
     if stalls >= _STALL_CONFIRMATIONS:
-        return PollVerdict(POLL_STALLED, outcome), stalls
-    return None, stalls
+        return PollVerdict(POLL_STALLED, outcome), stalls, no_progress
+    return None, stalls, no_progress
 
 
 async def _probe_one_until_unpaused(
@@ -244,6 +293,7 @@ async def _probe_one_until_unpaused(
     from ops import cluster_rpc as cr
 
     stalls = 0
+    no_progress = 0
     started = time.monotonic()
     attempt = 0
     while time.monotonic() < deadline:
@@ -285,7 +335,7 @@ async def _probe_one_until_unpaused(
             time.monotonic() - started,
         )
         _capture_host_stages(host_outcomes, name, result)
-        verdict, stalls = _probe_verdict(result, stalls, name)
+        verdict, stalls, no_progress = _probe_verdict(result, stalls, name, no_progress)
         if verdict is not None:
             if (
                 verdict.status == POLL_OK
@@ -574,12 +624,13 @@ def _still_converging(polls: dict[str, PollVerdict]) -> list[str]:
     """The agent-runners left mid-transition now that the orchestration is done — the
     hosts whose Phase-B spawn was **acked** but which never reported `paused=false`.
 
-    Both non-OK poll verdicts qualify, and for the same reason: whether the host is
-    still working (`POLL_CONVERGING`) or has provably stopped (`POLL_STALLED`), its
-    checkout has moved and its processes have not, which is exactly the window a
-    second deploy must not start into. The verdicts differ in what an operator does
-    next, not in whether the cluster is mid-transition — so they differ in the report
-    (`_poll_verdict_detail`) and not here.
+    Every non-OK poll verdict qualifies, and for the same reason: whether the host is
+    still working (`POLL_CONVERGING`), has provably stopped (`POLL_STALLED`), or is
+    alive but stuck inside one stage (`POLL_NO_PROGRESS`), its checkout has moved and
+    its processes have not, which is exactly the window a second deploy must not
+    start into. The verdicts differ in what an operator does next, not in whether the
+    cluster is mid-transition — so they differ in the report (`_poll_verdict_detail`)
+    and not here.
 
     Acked-only is load-bearing — `_phase_b_and_poll` polls only acked hosts and folds
     the rest back in under their fan-out status (`'unreachable'` / `'fatal'`) — because
@@ -588,7 +639,9 @@ def _still_converging(polls: dict[str, PollVerdict]) -> list[str]:
     window on every rollout.
     """
     return [
-        name for name, verdict in polls.items() if verdict.status in (POLL_CONVERGING, POLL_STALLED)
+        name
+        for name, verdict in polls.items()
+        if verdict.status in (POLL_CONVERGING, POLL_STALLED, POLL_NO_PROGRESS)
     ]
 
 

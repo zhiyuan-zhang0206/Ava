@@ -149,6 +149,12 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.NO_PROGRESS_TIMEOUT_S,
         "the one definition of 'this host stopped making progress'",
     ),
+    "STAGE_NO_PROGRESS_TIMEOUT_S": Clock(
+        "deploy",
+        lambda: deploy.STAGE_NO_PROGRESS_TIMEOUT_S,
+        "how long one updater stage may be in flight before host reaper and Phase-B "
+        "poll call it no-progress",
+    ),
     "HARVEST_GRACE_S": Clock(
         "deploy",
         lambda: deploy.HARVEST_GRACE_S,
@@ -309,6 +315,13 @@ CONSTRAINTS: list[Constraint] = [
     ),
     Constraint(
         "<",
+        "STAGE_NO_PROGRESS_TIMEOUT_S",
+        "NO_PROGRESS_TIMEOUT_S",
+        "the stage judgment must fire while the whole-run patience still holds, or "
+        "a host stuck in one stage outlasts the poll that exists to wait for it",
+    ),
+    Constraint(
+        "<",
         "HARVEST_GRACE_S",
         "NO_PROGRESS_TIMEOUT_S",
         "the harvest re-probe reads the host's outcome through the same "
@@ -329,6 +342,14 @@ CONSTRAINTS: list[Constraint] = [
         "GATEWAY_PREFLIGHT_BUDGET_S",
         "NO_PROGRESS_TIMEOUT_S",
         "one preflight dial can never be what makes a host look stalled",
+    ),
+    Constraint(
+        "<",
+        "UV_SYNC_TIMEOUT_S",
+        "STAGE_NO_PROGRESS_TIMEOUT_S",
+        "the bounded sync's self-termination lands before the stage no-progress "
+        "judgment reaps the updater, so the updater's own recovery ladder wins the "
+        "race on its own stage",
     ),
     Constraint(
         "<",

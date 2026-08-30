@@ -192,8 +192,10 @@ def test_a_lease_less_session_is_not_judged(logs: Path, monkeypatch: pytest.Monk
 def test_a_live_lease_wins_over_any_log_evidence(
     logs: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The log is no longer evidence at all: a stale log beside a live lease must
-    never read as hung (the old file-comparison judgment is retired)."""
+    """The retired judgment stays retired: arbitrary old log TEXT beside a live
+    lease is not evidence (the file-mtime comparison is gone with the old-signal
+    sweep). Stage MARKERS are the new evidence — see the stage-bound tests — and a
+    log that carries none proves nothing."""
     backend = _Backend()
     _use(monkeypatch, backend)
     _lease(monkeypatch, expires_in_s=600.0)
@@ -201,6 +203,124 @@ def test_a_live_lease_wins_over_any_log_evidence(
 
     assert cluster_mod._updater_hung("ava-updater") is False
     assert backend.killed == []
+
+
+def test_a_live_lease_loses_to_a_stage_stuck_beyond_the_bound(
+    logs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The P1 (2026-08-30) shape: the updater lease is one write at the run's start,
+    so a host hung inside `uv` (a stalled download on the Windows runner) read as
+    "still working" until the lease expired — its host only reaped it at the full
+    bound. The updater's own stage markers are the progress fact: a current stage in
+    flight beyond STAGE_NO_PROGRESS_TIMEOUT_S is hung however young the lease is.
+    Same bound, same evidence as the Phase-B poll's POLL_NO_PROGRESS verdict."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="uv", current_stage_s=700.0
+        ),
+    )
+
+    assert cluster_mod._updater_hung("ava-updater") is True
+
+
+def test_a_stage_still_inside_the_bound_is_working(
+    logs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The slow-but-legitimate Windows leg: the same stage name, an age below the
+    bound — working, and the live lease's word stands. A measured win `uv` took
+    449 s; the bound sits at 1.5x that, and a stage inside it is never reaped."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="uv", current_stage_s=100.0
+        ),
+    )
+
+    assert cluster_mod._updater_hung("ava-updater") is False
+    assert backend.killed == []
+
+
+def test_stage_evidence_without_a_current_stage_proves_nothing(
+    logs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No `t=` marker in the tail means no in-flight stage to judge: an old commit's
+    log, an unreadable one, or a stage that just completed (tail ends in `dur=`).
+    Missing evidence is never a kill."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(kind="unknown", log="updater-178.log"),
+    )
+
+    assert cluster_mod._updater_hung("ava-updater") is False
+    assert backend.killed == []
+
+
+def test_an_idle_host_is_never_judged_on_stage_evidence(
+    logs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Posture idle means the transition finished; the only lingering shape there is
+    the ladder's final `done` marker behind a stuck lease clear, which a reap would
+    not improve. The stage judgment is scoped to hosts still mid-transition."""
+    from datetime import UTC, datetime, timedelta
+
+    from ops.updater_outcome import UpdaterOutcome
+    from shared.host_deploy_state import HostDeployState
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    now = datetime.now(UTC)
+
+    def _idle_row(_machine: str | None = None, **_k: object) -> HostDeployState:
+        return HostDeployState(
+            machine="test",
+            posture="idle",
+            updated_at=now,
+            updater_lease_expires_at=now + timedelta(seconds=600),
+            paused_at=now,
+        )
+
+    monkeypatch.setattr("shared.host_deploy_state.read", _idle_row)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="done", current_stage_s=700.0
+        ),
+    )
+
+    assert cluster_mod._updater_hung("ava-updater") is False
+
+
+def test_the_reap_clears_the_lease_it_killed(logs: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A killed updater cannot clear its own lease, and the lease is what keeps the
+    host reading "live updater" (and the Phase-B poll reading "still working") —
+    one write at the run's start, armed for the whole bound. The reap clears it, so
+    the host stops claiming liveness the moment the session is gone (P1,
+    2026-08-30). Fail-soft: a DB that is down only means the row keeps its expiry."""
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=-60.0)
+    cleared: list[int] = []
+    monkeypatch.setattr("shared.host_deploy_state.clear_updater_lease", lambda: cleared.append(1))
+
+    assert cluster_mod._reap_stalled_updater("ava-updater") is True
+    assert backend.killed == ["ava-updater"]
+    assert cleared == [1]
 
 
 # ─── a failed kill is ambiguous, and the two readings need opposite answers ───

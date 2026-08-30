@@ -44,18 +44,20 @@ def test_stage_prints_even_without_a_collector(capsys: pytest.CaptureFixture[str
     assert "[rollout-telemetry] stage=frontend_build dur=" in capsys.readouterr().out
 
 
-def test_updater_stage_prints_the_line_the_log_reader_parses(
+def test_updater_stage_prints_the_lines_the_log_reader_parses(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The updater-side line shape is a contract with
     `ops.updater_outcome._STAGE_LINE_RE`: an emitter that printed a shape the
     reader does not recognise would be a marker nothing reads, and that failure
-    is silent."""
+    is silent. Two lines now — the entry `t=` (the in-flight evidence the
+    no-progress judgment reads, P1 2026-08-30) and the exit `dur=`."""
     with rt.updater_stage("uv_sync"):
         pass
-    line = capsys.readouterr().out.strip()
-    assert line.startswith("[updater] stage=uv_sync dur=")
-    assert line.endswith("s")
+    entry, exit_ = capsys.readouterr().out.strip().splitlines()
+    assert entry.startswith("[updater] stage=uv_sync t=")
+    assert exit_.startswith("[updater] stage=uv_sync dur=")
+    assert exit_.endswith("s")
 
 
 def test_nested_stages_record_beside_the_outer_stage() -> None:

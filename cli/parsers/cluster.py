@@ -60,6 +60,12 @@ def _h_cluster_recover(_args: argparse.Namespace) -> int:
     return cmd_cluster_recover()
 
 
+def _h_cluster_cancel(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_cluster_cancel
+
+    return cmd_cluster_cancel()
+
+
 def _h_cluster_pitr_activate(args: argparse.Namespace) -> int:
     from cli.commands import cmd_pitr_activate
 
@@ -162,6 +168,7 @@ def _h_cluster_watchdog_probe_unregister(args: argparse.Namespace) -> int:
 
 def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # noqa: PLR0915
     from cli.main import (
+        _h_cluster_cancel,
         _h_cluster_destroy,
         _h_cluster_down,
         _h_cluster_ensure_db_role,
@@ -337,6 +344,15 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "window to land cleanly first.",
     )
     cluster_update_p.set_defaults(func=_h_cluster_update)
+
+    cluster_cancel_p = cluster_sub.add_parser(
+        "cancel",
+        help="[cluster] cancel a live rollout/restart orchestration by interrupting its "
+        "own process — its finally resumes paused hosts, releases (or settles) the "
+        "deploy lease and clears the maintenance marker. Runs in-process on the "
+        "orchestrating host; refuses when nothing provably live is there to cancel",
+    )
+    cluster_cancel_p.set_defaults(func=_h_cluster_cancel)
 
     cluster_recover_p = cluster_sub.add_parser(
         "recover",

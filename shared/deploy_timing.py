@@ -8,7 +8,7 @@ calibrated when every host in the fleet was POSIX:
   agent-runner to report `paused=false`.
 - `shared.cluster_lock.SETTLE_TTL_S` (900 s) — how long the lease stays held after
   an orchestration exits with hosts still converging.
-- `ops.cluster_deploy._UPDATER_STALL_TIMEOUT_S` (900 s) — when a host's own updater
+- `ops.updater_reap._UPDATER_STALL_TIMEOUT_S` (900 s) — when a host's own updater
   session is hung rather than slow.
 
 **They are not independent.** All three answer the same question — "has this host
@@ -60,6 +60,12 @@ Five of the remaining rounds spent the whole bound. So this number is not a
 first-principles ceiling any more; it is roughly 1.5x the longest leg observed, and
 the thing that has to stay true is the sentence below rather than the margin.
 
+`STAGE_NO_PROGRESS_TIMEOUT_S` is the one other clock in this family, and it is also
+a different question rather than a competitor: how long one *stage* may run, versus
+how long the whole run may. It shares the whole-run number's calibration convention
+(~1.5x the longest legitimate observation) and its consumer split — the host reaper
+and the Phase-B poll judge it together (see the constant's doc).
+
 `GATEWAY_READY_TIMEOUT_S` is **not** a fourth answer to that question and must not be
 folded into it. It bounds one local uvicorn binding its port before Phase B is allowed
 to fan out at all — a strictly smaller job than the remote checkout + sync + restart
@@ -87,7 +93,7 @@ from __future__ import annotations
 
 # The one definition of "this host has stopped making progress". Consumers:
 # `cli.commands.update._POLL_TIMEOUT_S`, `shared.cluster_lock.SETTLE_TTL_S`,
-# `ops.cluster_deploy._UPDATER_STALL_TIMEOUT_S`.
+# `ops.updater_reap._UPDATER_STALL_TIMEOUT_S`.
 NO_PROGRESS_TIMEOUT_S = 900.0
 
 # How long one production `uv sync` may run before the updater kills its whole
@@ -95,12 +101,39 @@ NO_PROGRESS_TIMEOUT_S = 900.0
 # Sized for the slowest healthy legs observed — full self-update syncs measured
 # 0.7-13.7 s on POSIX and ~76 s on the Windows agent-runner (2026-08 rollouts) —
 # with headroom for a genuinely slow download of a new runtime wheel. Registered
-# in the clock lattice BELOW NO_PROGRESS_TIMEOUT_S: a hung sync must fail itself
-# into a terminal outcome before the host is judged stalled, so the updater's own
-# recovery ladder — not the stalled-updater reap — gets to the host first. The
+# in the clock lattice BELOW NO_PROGRESS_TIMEOUT_S and BELOW
+# STAGE_NO_PROGRESS_TIMEOUT_S: a hung sync must fail itself into a terminal
+# outcome before the stage no-progress judgment reaps the updater, so the
+# updater's own recovery ladder — not the reap — gets to the host first. The
 # 2026-08-30 rollout's bare `uv sync` spent 449 s downloading a dev-only pyright
 # wheel on Windows and would have been bounded by this clock.
 UV_SYNC_TIMEOUT_S = 600.0
+
+# How long ONE updater stage may be in flight before both its host and the Phase-B
+# poll call it no-progress (P1, 2026-08-30 rollout-1788074072: the win uv stage).
+#
+# Deliberately NOT the whole-run `NO_PROGRESS_TIMEOUT_S`, and for the same reason
+# `GATEWAY_READY_TIMEOUT_S` is not folded into it: a different question. That one
+# bounds the whole leg (fetch + checkout + uv + restart, measured up to ~11 minutes
+# on the Windows runner); this one bounds a single stage, whose observed worst —
+# `uv` at 449.2s on 2026-08-30 — is one half of the leg. One definition, two
+# consumers, same as the family number above:
+#
+# - the host's hung-updater reaper (`ops.updater_reap._updater_hung`) kills an
+#   updater whose own log shows its current stage stuck beyond this bound;
+# - the Phase-B poll (`cli.commands._update_phase_b`) returns POLL_NO_PROGRESS
+#   for a host whose probes keep reporting that same stuck stage.
+#
+# The value is the family's own calibration convention — ~1.5x the longest
+# legitimate observation (449.2s x 1.5 = 673.8, rounded up to 675.0) — applied to
+# stages instead of legs, and must stay strictly inside NO_PROGRESS_TIMEOUT_S
+# (lattice): the stage judgment has to fire while the whole-run patience it draws
+# from is still there to matter. It must also stay ABOVE the longest stage a healthy
+# host has ever shown — and ABOVE `UV_SYNC_TIMEOUT_S` (lattice), so the bounded
+# sync's self-termination lands before the stage judgment does — which is the
+# false-positive line: a host reaped at this bound is one that has not finished a
+# stage for longer than any stage has ever legitimately taken.
+STAGE_NO_PROGRESS_TIMEOUT_S = 675.0
 
 # How long the Phase-B poll harvest waits before re-probing a host whose posture
 # just went idle but whose updater stage capture is missing its final `start`

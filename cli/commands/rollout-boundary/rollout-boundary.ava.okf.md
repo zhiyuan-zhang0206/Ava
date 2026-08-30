@@ -18,6 +18,13 @@ tags:
   `converging`. A pure agent-runner Phase-B child completes its host-local
   transition normally — restarter launched, posture `idle` — so the gateway's
   Phase-B poll can observe it as converged.
+- A rollout a stuck host is dragging has a formal cancel now (`ava cluster
+  cancel`, P1 2026-08-30): `ops.ops_cluster.cluster_cancel_op` SIGINTs the
+  orchestration's own pid — read from the deploy lease's holder string — never
+  the session, so the orchestration's `finally` runs its recovery (compensating
+  resume, lease release or settle hold over the unconverged, maintenance marker
+  cleared). It refuses on every unprovable reading; a settle hold and a dead
+  holder stay `ava cluster recover`'s job.
 - Failed-update schema recovery is the narrow exception to runtime-owner DB
   authentication: it targets this cluster's database through the gateway's
   local Postgres trust socket, so a partially applied credential transition
@@ -37,7 +44,14 @@ tags:
   when `ava cluster update` runs on that host.
 - `update.py`'s Phase-B poll answers a `PollVerdict` per host — the stall verdict
   reads the host's `host_deploy_state` row (idle → OK; live lease → working;
-  paused+expired / converging+no-lease → STALLED ×2). A POLL_* status plus the
+  paused+expired / converging+no-lease → STALLED ×2), and the no-progress
+  verdict (P1, 2026-08-30) reads the probe's own stage evidence: two consecutive
+  probes naming a `current_stage` in flight beyond `STAGE_NO_PROGRESS_TIMEOUT_S`
+  — the last `t=` marker the updater printed at the stage's entry and its age on
+  the host's monotonic clock — return `POLL_NO_PROGRESS` even while the lease is
+  still live, because a lease is one write at the run's start and cannot speak
+  for progress. The same bound and evidence drive the host's own hung-updater
+  reaper, whose kill now also clears the updater lease. A POLL_* status plus the
   `last_updater_outcome` the runner reported on the probe that settled it
   (`ops.updater_outcome`, read off that host's own updater log and anchored to
   its pause flag so a previous update's log is reported as *no record* rather

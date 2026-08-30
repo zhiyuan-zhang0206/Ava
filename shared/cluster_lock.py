@@ -193,6 +193,36 @@ class DeployLease:
         )
 
 
+def holder_pid_if_local(holder: str) -> int | None:
+    """The live local pid `holder` names, or None.
+
+    Parses the `<machine>:pid<N>` format `self_holder` builds. Refusals are the
+    point: a holder naming another machine must answer None (its pid is
+    meaningless in this host's namespace, and signalling it would hit an
+    unrelated local process), as must an unparseable string and a pid that is not
+    alive. Used by the stalled-rollout controller's interrupt and by the formal
+    cancel op (`ops.ops_cluster.cluster_cancel_op`), which ask "may I signal this
+    pid" — the opposite question from `ops.ops_cluster._lock_holder_is_live`,
+    which answers "no" on every doubt.
+    """
+    from shared.machine import machine_name
+    from shared.proc import process_alive
+
+    machine, sep, pid_str = holder.partition(":pid")
+    if sep == "":
+        return None
+    try:
+        if machine != machine_name():
+            return None
+    except Exception:
+        return None
+    try:
+        pid = int(pid_str)
+    except ValueError:
+        return None
+    return pid if process_alive(pid) else None
+
+
 def self_holder() -> str:
     """This process's holder string, `<machine>:pid<N>`.
 

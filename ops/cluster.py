@@ -55,13 +55,7 @@ from ops.cluster_deploy import (
     _UPDATE_LOG_KEEP as _UPDATE_LOG_KEEP,
 )
 from ops.cluster_deploy import (
-    _UPDATER_STALL_TIMEOUT_S as _UPDATER_STALL_TIMEOUT_S,
-)
-from ops.cluster_deploy import (
     _VALIDATE_FETCH_TIMEOUT_S as _VALIDATE_FETCH_TIMEOUT_S,
-)
-from ops.cluster_deploy import (
-    REAP_CLEARED_QUALIFIER as REAP_CLEARED_QUALIFIER,
 )
 from ops.cluster_deploy import (
     ClusterUpdateInProgress as ClusterUpdateInProgress,
@@ -74,15 +68,6 @@ from ops.cluster_deploy import (
 )
 from ops.cluster_deploy import (
     _new_update_log as _new_update_log,
-)
-from ops.cluster_deploy import (
-    _reap_stalled_updater as _reap_stalled_updater,
-)
-from ops.cluster_deploy import (
-    _updater_hung as _updater_hung,
-)
-from ops.cluster_deploy import (
-    reap_stalled_updater_if_hung as reap_stalled_updater_if_hung,
 )
 from ops.cluster_deploy import (
     spawn_restart as spawn_restart,
@@ -183,6 +168,21 @@ from ops.update_check import (
 )
 from ops.update_check import (
     update_check as update_check,
+)
+from ops.updater_reap import (
+    _UPDATER_STALL_TIMEOUT_S as _UPDATER_STALL_TIMEOUT_S,
+)
+from ops.updater_reap import (
+    REAP_CLEARED_QUALIFIER as REAP_CLEARED_QUALIFIER,
+)
+from ops.updater_reap import (
+    _reap_stalled_updater as _reap_stalled_updater,
+)
+from ops.updater_reap import (
+    _updater_hung as _updater_hung,
+)
+from ops.updater_reap import (
+    reap_stalled_updater_if_hung as reap_stalled_updater_if_hung,
 )
 
 __all__ = [

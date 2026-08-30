@@ -178,11 +178,12 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
     ): "LLM thinking-token budget, not a wall-clock constant",
     ("cli/commands/_update_phase_b.py", "POLL_STALLED"): "poll status value, not a clock",
+    ("cli/commands/_update_phase_b.py", "POLL_NO_PROGRESS"): "poll status value, not a clock",
     (
         "cli/commands/_update_phase_b.py",
         "_STALL_CONFIRMATIONS",
     ): "set of stalled confirmations, not a clock",
-    ("ops/cluster_deploy.py", "REAP_CLEARED_QUALIFIER"): "SQL qualifier string, not a clock",
+    ("ops/updater_reap.py", "REAP_CLEARED_QUALIFIER"): "SQL qualifier string, not a clock",
     (
         "ops/agent_launch.py",
         "_LAUNCH_CONFIRM_POLL_INTERVAL_SEC",
