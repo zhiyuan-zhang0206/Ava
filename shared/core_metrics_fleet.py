@@ -24,8 +24,11 @@ core_metrics.register_core_metric(
         # The absolute registry high-water mark, sampled by the gateway every
         # 60s (gateway/_agent_max_id.py, task #2010). Unit-"1" gauges export
         # with the `_ratio` suffix (same naming as the resolution_status
-        # tiles); read bare — the series is per gateway process.
-        query="ava_agent_registry_max_id_ratio",
+        # tiles). The gauge is per gateway process and the process restarts on
+        # every rollout, so a bare read draws one overlapping series per
+        # gateway lifetime; max() collapses them into the single high-water
+        # curve the panel promises.
+        query="max(ava_agent_registry_max_id_ratio)",
         query_type="promql",
         target_names=["max_id"],
     )
@@ -40,9 +43,11 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         # The growth curve's slope, extrapolated to agents per day — the
-        # deriv() over the last hour on the 60s gauge (task #2010). Shows
-        # batch-spawn intensity at a glance (e.g. +300/day).
-        query="deriv(ava_agent_registry_max_id_ratio[1h]) * 86400",
+        # deriv() over the last hour on the max()-collapsed 60s gauge (task
+        # #2010; the [1h:] subquery form — a bare [1h] range on a function
+        # call is a PromQL parse error). Shows batch-spawn intensity at a
+        # glance (e.g. +300/day).
+        query="deriv(max(ava_agent_registry_max_id_ratio)[1h:]) * 86400",
         query_type="promql",
         target_names=["agents/day"],
     )

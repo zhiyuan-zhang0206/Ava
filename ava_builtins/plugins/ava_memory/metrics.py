@@ -64,15 +64,16 @@ register_metric(
         name="ava_memory_recall_filter_runs",
         title="Memory recall filter runs",
         description=(
-            "Recall_filter INFO events over time — how often passive memory recall "
-            "filters retrieval results for relevance (event_name='recall_filter', "
-            "level='info', category='telemetry', 90d retention)."
+            "Recall_filter INFO events per minute (5-minute buckets / 5) — how "
+            "often passive memory recall filters retrieval results for relevance "
+            "(event_name='recall_filter', level='info', category='telemetry', 90d "
+            "retention)."
         ),
         event_name="recall_filter",
         category="telemetry",
         unit="ops",
         panel="timeseries",
-        query=_count(f'{_CAT} | event_name={{event_name}} | level="info"', "5m"),
+        query=_count(f'{_CAT} | event_name={{event_name}} | level="info"', "5m") + " / 5",
         query_type="logql",
         target_names=["runs"],
         output=["grafana"],
