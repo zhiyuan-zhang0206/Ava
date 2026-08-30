@@ -542,6 +542,93 @@ def test_ensure_init_resolved_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> N
     arm.join(timeout=5)
 
 
+def test_arm_thread_base_exception_marks_attempt_spent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The one-attempt contract holds for ANY arm-thread death: a
+    BaseException escape (SystemExit/GeneratorExit from inside the SDK — not
+    expected, but not impossible) must still set arm_failed, so a later
+    initialize_tracing() cannot re-spawn the arm thread past the dead
+    is_alive() guard (the QA #1060 corner: with `except Exception` only, a
+    dead arm thread carrying no flag left one-attempt-per-process bypassable).
+    """
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
+    _under_watermark(monkeypatch)
+    calls: list[int] = []
+
+    def _exit_sdk(**_kw: object) -> None:
+        calls.append(1)
+        raise SystemExit("sdk guard exit")
+
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _exit_sdk)
+
+    initialize_tracing()
+    _wait_init_resolved()
+
+    assert trace_mod._state["arm_failed"] is True
+    assert trace_mod._state["initialized"] is False
+
+    initialize_tracing()  # must be a no-op: the attempt was spent
+    assert calls == [1]
+
+
+def test_timeout_then_late_arm_recording_comes_up_midlife(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Timeout -> late-completion contract: the bounded wait gives up and the
+    first turn proceeds WITHOUT recording, but a slow (not hung) arm that
+    finishes afterwards still brings recording up mid-life — later turns get
+    spans; only the first turn's spans are lost (the documented price).
+    Also: a later ensure call skips the wait (already remembered), so the
+    timeout does not block the late-armed turn from opening its span."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
+    _under_watermark(monkeypatch)
+    monkeypatch.setattr(trace_mod, "_INIT_RESOLVED_TIMEOUT_S", 0.05)
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def _slow_init(**_kw: object) -> None:
+        entered.set()
+        release.wait(timeout=10.0)
+
+    from shared.trace import ensure_init_resolved
+
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
+    warnings: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _capture_warning(*a: object, **kw: object) -> None:
+        warnings.append((a, kw))
+
+    monkeypatch.setattr("shared.trace.logger.warning", _capture_warning)
+
+    initialize_tracing()
+    assert entered.wait(timeout=5.0), "arm thread must reach Traceloop.init"
+
+    # The arm is still in flight: the bounded wait gives up (one warning),
+    # recording stays off for now...
+    ensure_init_resolved()
+    assert len(warnings) == 1
+    assert warnings[0][1]["action"] == "init_resolved_timeout"
+    assert trace_mod._state["timeout_reported"] is True
+    assert trace_mod._state["initialized"] is False
+
+    # ...the arm completes late: recording comes up mid-life...
+    release.set()
+    _wait_init_resolved()
+    assert trace_mod._state["initialized"] is True
+
+    # ...and later calls skip the wait entirely, so the span opens for real.
+    ensure_init_resolved()
+    assert len(warnings) == 1
+    entered_spans: list[str] = []
+    with turn_span(name="t", session_id="s", turn=1):
+        entered_spans.append("open")
+    assert entered_spans == ["open"]
+
+
 def test_ensure_init_resolved_instant_without_arming(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
