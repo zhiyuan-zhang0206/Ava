@@ -95,10 +95,15 @@ def test_generate_config_two_state_observability_url(
     monkeypatch.setattr(
         "shared.config.settings.observability.observability_url", "http://100.78.137.46"
     )
+    # A remote observatory is a split-cluster shape: the relay authenticates
+    # with the cluster bearer, so the secret must be set (empty fails closed).
+    monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "cluster-token")
 
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
-    assert "loki: http://100.78.137.46:3100/otlp" in out
-    assert "prom: http://100.78.137.46:9090/api/v1/otlp" in out
+    # WP4: a remote observatory is reached through the station's ONE
+    # bearer-authenticated OTLP ingress, never the direct backend /otlp paths.
+    assert "loki: http://100.78.137.46:4318" in out
+    assert "prom: http://100.78.137.46:4318" in out
     assert "tempo: http://127.0.0.1:14318" in out
 
     monkeypatch.setattr("shared.config.settings.observability.observability_url", "")
@@ -231,6 +236,7 @@ def _render_real_template(
     cluster_secret: str = "cluster-token",  # noqa: S107 — fixture token
     self_metrics_port: int = 8888,
     otlp_enabled: bool = True,
+    observability_url: str = "",
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
     monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
@@ -244,6 +250,7 @@ def _render_real_template(
         "shared.config.settings.observability.otel_collector_metrics_port", self_metrics_port
     )
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", otlp_enabled)
+    monkeypatch.setattr("shared.config.settings.observability.observability_url", observability_url)
     monkeypatch.setattr("shared.machine.reachable_host", lambda: machine_host)
     monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
@@ -721,6 +728,92 @@ def test_gateway_has_separate_authenticated_reachable_receiver(
         assert cfg["exporters"][exporter_id]["endpoint"] == endpoint
 
 
+def test_station_has_separate_authenticated_reachable_receiver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pure observability-station exposes the same bearer-authenticated
+    remote OTLP ingress a gateway does — the surface remote gateway
+    collectors relay to (WP4, task #1946)."""
+    cfg = _render_real_template(monkeypatch, frozenset({"observability-station"}))
+
+    assert cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4318"}
+    assert cfg["receivers"]["otlp/remote"]["protocols"]["http"] == {
+        "endpoint": "100.64.0.10:4318",
+        "auth": {"authenticator": "bearertokenauth/cluster"},
+    }
+    assert cfg["extensions"]["bearertokenauth/cluster"] == {"token": "cluster-token"}
+    assert "bearertokenauth/cluster" in cfg["service"]["extensions"]
+    # Remote traces fan out to the station's own Tempo and never enter the
+    # station's local trace mirror; remote logs/metrics land in its Loki/Prom.
+    assert cfg["service"]["pipelines"]["traces/remote"]["exporters"] == ["otlphttp/tempo"]
+    assert cfg["service"]["pipelines"]["traces"]["exporters"] == [
+        "otlphttp/tempo",
+        "file/traces",
+    ]
+    assert "otlp/remote" in cfg["service"]["pipelines"]["logs"]["receivers"]
+    assert "otlp/remote" in cfg["service"]["pipelines"]["metrics"]["receivers"]
+    for exporter_id, endpoint in (
+        ("otlphttp/tempo", "http://127.0.0.1:14318"),
+        ("otlphttp/loki", "http://127.0.0.1:3100/otlp"),
+        ("otlphttp/prometheus", "http://127.0.0.1:9090/api/v1/otlp"),
+    ):
+        assert cfg["exporters"][exporter_id]["endpoint"] == endpoint
+
+
+def test_remote_observatory_gateway_relays_to_station_single_ingress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gateway consuming a remote observatory (AVA_OBSERVABILITY_URL set)
+    relays every signal to the station's single bearer-authenticated OTLP
+    ingress with the cluster bearer — it never dials the station's
+    loopback-bound backends directly (WP4, task #1946)."""
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway", "agent-runner"}),
+        observability_url="http://100.78.137.46",
+    )
+    exporters = cfg["exporters"]
+    for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
+        exporter = exporters[exporter_id]
+        assert exporter["endpoint"] == "http://100.78.137.46:4318"
+        assert exporter["headers"] == {"Authorization": "Bearer cluster-token"}
+    rendered = str(cfg)
+    assert "127.0.0.1:3100" not in rendered
+    assert "127.0.0.1:9090" not in rendered
+    assert "127.0.0.1:14318" not in rendered
+    # The gateway keeps its local trace mirror and its local loopback receiver.
+    assert "file/traces" in exporters
+    assert cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4318"}
+
+
+def test_remote_observatory_relay_without_secret_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remote observatory with no cluster secret cannot authenticate the
+    relay — converge must fail, not ship an unauthenticated fan-out."""
+    with pytest.raises(RuntimeError, match="cluster secret"):
+        _render_real_template(
+            monkeypatch,
+            frozenset({"gateway", "agent-runner"}),
+            cluster_secret="",
+            observability_url="http://100.78.137.46",
+        )
+
+
+def test_station_otlp_ingress_port_follows_single_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The station's advertised unit url (shared.machines.unit_dial_url) and
+    its remote receiver bind the SAME port — AVA_TELEMETRY_OTLP_PORT is the
+    single knob for both (WP4, task #1946)."""
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_port", 4321)
+    cfg = _render_real_template(monkeypatch, frozenset({"observability-station"}))
+    assert cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == ("100.64.0.10:4321")
+    from shared.machines import unit_dial_url
+
+    assert unit_dial_url(frozenset({"observability-station"})) == "http://100.64.0.10:4321"
+
+
 def test_otlp_ingress_port_single_source_renders_everywhere(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -844,6 +937,30 @@ def test_secret_set_single_box_still_collapses_remote_ingress_to_loopback(
             frozenset({"gateway"}),
             "http://[fd7a:115c:a1e0::10]:8000",
             "::",
+            "token",
+            "reachable host",
+        ),
+        # WP4: a pure observability-station fails closed exactly like a pure
+        # gateway — a station exists to serve remote consumers, so an empty
+        # secret, a loopback host, or a wildcard host is a misconfiguration.
+        (
+            frozenset({"observability-station"}),
+            "http://100.64.0.10:8000",
+            "localhost",
+            "token",
+            "reachable host",
+        ),
+        (
+            frozenset({"observability-station"}),
+            "http://100.64.0.10:8000",
+            "100.64.0.10",
+            "",
+            "cluster secret",
+        ),
+        (
+            frozenset({"observability-station"}),
+            "http://100.64.0.10:8000",
+            "0.0.0.0",  # noqa: S104 — rejection fixture
             "token",
             "reachable host",
         ),
