@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 REQUIRED_FIELDS = ("id", "input", "expected", "grader", "meta")
 GRADER_TYPES = frozenset({"artifact-audit", "llm-judge", "exact", "custom"})
@@ -61,7 +61,7 @@ def _parse_row(line: str, path: Path, lineno: int) -> Any:
         raise ValueError(f"{path}:{lineno}: invalid JSON: {error}") from error
     if not isinstance(row, dict):
         raise ValueError(f"{path}:{lineno}: row must be a JSON object")  # noqa: TRY004 — one error type for malformed data files
-    return row
+    return cast(dict[str, Any], row)
 
 
 def _validate_row(row: Any, path: Path, lineno: int, seen_ids: set[str]) -> None:

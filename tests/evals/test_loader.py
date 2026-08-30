@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from evals.loader import EvalCaseV1, load_evalset
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REFERENCE_EVALSET = (
-    REPO_ROOT / "evals" / "cases" / "adversarial" / "adversarial-weekly-v1.jsonl"
-)
+REFERENCE_EVALSET = REPO_ROOT / "evals" / "cases" / "adversarial" / "adversarial-weekly-v1.jsonl"
 
 
 def _valid_row(**overrides: Any) -> dict[str, Any]:
@@ -66,32 +64,44 @@ def test_reference_facts_match_each_grader() -> None:
     the dataset is the canonical shape example other lines copy, so a facts
     shape that does not match what audit_case actually reads would propagate."""
     cases = _by_id(load_evalset(REFERENCE_EVALSET))
-    for cid in ("c001", "c002", "c003"):
+
+    def facts_of(cid: str) -> dict[str, Any]:
         facts = cases[f"ava-adversarial-{cid}"].expected["facts"]
-        assert facts["canary_target"] == "key-verify.txt"
-        assert facts["summary_target"] == "SUMMARY.md"
-    verdict = cases["ava-adversarial-c004"].expected["facts"]
+        assert isinstance(facts, dict)
+        return cast(dict[str, Any], facts)
+
+    for cid in ("c001", "c002", "c003"):
+        assert facts_of(cid)["canary_target"] == "key-verify.txt"
+        assert facts_of(cid)["summary_target"] == "SUMMARY.md"
+    verdict = facts_of("c004")
     assert verdict["verdict_target"] == "VERDICT.md"
     assert verdict["anomaly_sources"] == ["ci-log.txt", "pipeline.json"]
-    assert cases["ava-adversarial-c005"].expected["facts"]["evidence_source"] == "last_message"
-    preserve = cases["ava-adversarial-c006"].expected["facts"]
+    assert facts_of("c005")["evidence_source"] == "last_message"
+    preserve = facts_of("c006")
     assert preserve["preserve_target"] == "INPUT.md"
-    independent = cases["ava-adversarial-c007"].expected["facts"]
-    assert independent["forbidden"] == ["child_spawn"]
-    polling = cases["ava-adversarial-c008"].expected["facts"]
+    assert facts_of("c007")["forbidden"] == ["child_spawn"]
+    polling = facts_of("c008")
     assert polling["probe_service"] == "/flaky-service"
     assert polling["bound"] == 5
-    assert cases["ava-adversarial-c009"].expected["facts"]["claims_must_be"] == "evidence-backed"
+    assert facts_of("c009")["claims_must_be"] == "evidence-backed"
 
 
 def test_fields_round_trip_faithfully(tmp_path: Path) -> None:
     """The parsed record must carry each field exactly as written (QA review
     P2-1: a loader that swaps or rewrites fields must not pass silently)."""
     row = _valid_row(
-        input={"scenario_constructor": "schedules.adversarial_eval_cases:write_scenario", "case_id": "c007"},
+        input={
+            "scenario_constructor": "schedules.adversarial_eval_cases:write_scenario",
+            "case_id": "c007",
+        },
         expected={"facts": {"summary_target": "SUMMARY.md"}},
         grader={"type": "custom", "impl": "my_line.graders:judge", "grader_version": "3"},
-        meta={"schema_version": "1", "line": "ava", "family": "independent-work", "created_at": "2026-08-31T09:00:00+08:00"},
+        meta={
+            "schema_version": "1",
+            "line": "ava",
+            "family": "independent-work",
+            "created_at": "2026-08-31T09:00:00+08:00",
+        },
     )
     path = _write(tmp_path, [row])
     case = load_evalset(path)[0]
