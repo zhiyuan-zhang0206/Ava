@@ -319,7 +319,7 @@ async def main(
         # the process_exit event. process_exit above is complementary: it always
         # writes (including silent death), while agent_terminated fires only when
         # the status really transitions.
-        _route_process_end_notify(agent_id, reason)
+        await _route_process_end_notify(agent_id, reason)
         # ── MCP daemon stop ──
         await mcp_daemon.stop()
 

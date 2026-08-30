@@ -184,3 +184,48 @@ async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
     stack = AsyncExitStack()
     stack.push_async_callback(session.close)
     return session, stack
+
+
+# Exit-hook release bound: one dial attempt, short timeout — the agent process
+# is already exiting and must not stall on this retry sequence if the daemon is
+# mid-restart. The daemon's own dead-page reaper is the second line of defense.
+_RELEASE_TIMEOUT_S = 3.0
+
+
+async def release_agent_chrome_pages(agent_id: int) -> bool:
+    """Best-effort: ask the browser-mcp service to close this agent's page.
+
+    Called from the agent process's exit hook so a terminated worker does not
+    leave its tab (usually a dev-server page pointing at a dead localhost port)
+    in the user's shared Chrome. The service closes exactly the agent's
+    affinity page — never another agent's or the user's — and is idempotent.
+    Never raises: a machine without the browser service (no socket), a daemon
+    that is down, or any protocol error returns False for the caller to log;
+    deaths that never reach the exit hook are covered by the service's periodic
+    dead-page reaper.
+    """
+    try:
+        from shared.paths import chrome_mcp_socket
+
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(path=str(chrome_mcp_socket()), limit=_LINE_LIMIT),
+            timeout=_RELEASE_TIMEOUT_S,
+        )
+    except Exception:
+        return False
+    try:
+        writer.write(
+            (
+                json.dumps({"id": 1, "method": "release_agent_page", "agent_id": agent_id}) + "\n"
+            ).encode()
+        )
+        await asyncio.wait_for(writer.drain(), timeout=_RELEASE_TIMEOUT_S)
+        line = await asyncio.wait_for(reader.readline(), timeout=_RELEASE_TIMEOUT_S)
+        if not line:
+            return False
+        resp: dict[str, Any] = json.loads(line)
+        return resp.get("ok") is True
+    except Exception:
+        return False
+    finally:
+        await _close_writer(writer)

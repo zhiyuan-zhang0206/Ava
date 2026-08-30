@@ -34,6 +34,7 @@ from agent.loop import (
     _mcp_socket_path,
     _MCPDaemon,
     _notify_exit,
+    _route_process_end_notify,
     run,
 )
 from shared import boot_timing
@@ -879,3 +880,47 @@ class TestRunEntry:
         assert main_calls and main_calls[0][1] == 777
         # asyncio.run received the coroutine returned by main(777)
         assert len(captured_coro) == 1
+
+    def test_swallows_gateway_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Gateway unreachable during a silent death → logged, not raised."""
+
+        def _boom(_aid: int) -> None:
+            raise RuntimeError("gateway down")
+
+        monkeypatch.setattr("ava._gateway_client.exited", _boom)
+        _notify_exit(42)  # must not raise
+
+
+class TestRouteProcessEndNotify:
+    """The process-exit hook notifies the gateway AND releases the agent's
+    browser page (structural piece of the dead-localhost-tab fix); the
+    release is best-effort and must never raise out of the exit finally."""
+
+    async def test_notifies_then_releases_browser_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        order: list[str] = []
+
+        def _record_exit(aid: int) -> None:
+            order.append(f"exit:{aid}")
+
+        monkeypatch.setattr("agent.lifecycle._notify_exit", _record_exit)
+
+        async def _release(aid: int) -> None:
+            order.append(f"release:{aid}")
+
+        monkeypatch.setattr("agent.lifecycle._release_agent_browser_page", _release)
+        await _route_process_end_notify(42, "normal")
+        assert order == ["exit:42", "release:42"]
+
+    async def test_release_failure_never_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _noop(_aid: int) -> None:
+            return None
+
+        monkeypatch.setattr("agent.lifecycle._notify_exit", _noop)
+
+        async def _boom(_aid: int) -> bool:
+            raise RuntimeError("browser service down")
+
+        monkeypatch.setattr("ava._mcp_browser.release_agent_chrome_pages", _boom)
+        await _route_process_end_notify(42, "normal")  # must not raise
