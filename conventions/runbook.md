@@ -600,10 +600,11 @@ base backups must use the separate restartable streaming contract delivered by
 the base-chain rollout and must never materialize a full ciphertext sibling.
 
 `AVA_PITR_STORE_BACKEND` selects the object-store backend for the whole PITR
-plane (default `gcs`). An unrecognized value fails fast at store construction —
-a typo never silently falls back to GCS. Switching backends is one env var +
-a restart; the GCS bucket remains the retained primary copy until the
-switchover runbook has been executed and observed. The full cut-over
+plane (default `gcs`); the other supported values are `baidu` (Baidu
+Netdisk) and `oss` (Aliyun OSS). An unrecognized value fails fast at store
+construction — a typo never silently falls back to GCS. Switching backends
+is one env var + a restart; the previously retained copy stays primary until
+the switchover runbook has been executed and observed. The full cut-over
 procedure (restore drills, migration script, rollback): see
 `conventions/pitr-backend-switchover.md`.
 
