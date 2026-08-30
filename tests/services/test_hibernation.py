@@ -613,3 +613,13 @@ class TestHeartbeatWakeChain:
         assert _status(db_conn, aid) == "idling"
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         assert _inbound_kinds(db_conn, aid) == ["heartbeat"]  # no resurrect/restart marker added
+
+
+def test_hibernate_reuses_heartbeat_stale_window() -> None:
+    """The hibernation controller must import the heartbeat daemon's pending
+    window single-source (`services.heartbeat.STALE_PENDING_S`) instead of a
+    documented-equal local constant (QA #952 b): same object, same value, so
+    the swap-out and check-in decisions cannot silently drift apart."""
+    from services.heartbeat import STALE_PENDING_S
+
+    assert hib.STALE_PENDING_S is STALE_PENDING_S
