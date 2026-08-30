@@ -26,16 +26,49 @@ from services.pitr.base_candidate import BaseCandidateError
 
 def _credentials() -> dict[str, str]:
     return {
-        "uploader_client_email": "u@example.test",
-        "uploader_project_id": "project",
-        "uploader_private_key_id": "u-key",
-        "viewer_client_email": "v@example.test",
-        "viewer_project_id": "project",
-        "viewer_private_key_id": "v-key",
-        "bucket_name": "bucket",
+        "backend": "gcs",
+        "uploader_identity": "u@example.test",
+        "viewer_identity": "v@example.test",
+        "store_target": "bucket",
         "object_prefix": "pitr",
         "backup_key_id": "key",
         "backup_key_sha256": "0" * 64,
+    }
+
+
+def test_validate_secrets_produces_baidu_evidence_for_the_baidu_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.config import settings
+
+    credentials = tmp_path / "baidu.json"
+    credentials.write_text(
+        json.dumps({"app_key": "app-key", "secret_key": "secret", "refresh_token": "refresh"})
+    )
+    credentials.chmod(0o600)
+    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "baidu")
+    monkeypatch.setattr(settings.physical_backup, "pitr_backup_key_file", tmp_path / "backup.key")
+    (tmp_path / "backup.key").write_bytes(b"0" * 32)
+    (tmp_path / "backup.key").chmod(0o600)
+    monkeypatch.setattr(settings.physical_backup, "pitr_baidu_credentials_file", credentials)
+    monkeypatch.setattr(settings.physical_backup, "pitr_baidu_token_file", tmp_path / "token.json")
+    monkeypatch.setattr(settings.physical_backup, "pitr_baidu_app_root", "/apps/ava/ava-pitr")
+
+    def probe(_path: Path) -> str:
+        return "/apps/ava/ava-pitr"
+
+    monkeypatch.setattr(activation, "probe_baidu_read_access", probe)
+
+    evidence = activation._validate_secrets()
+
+    assert evidence == {
+        "backend": "baidu",
+        "uploader_identity": "app-key",
+        "viewer_identity": "app-key",
+        "store_target": "/apps/ava/ava-pitr",
+        "object_prefix": settings.physical_backup.pitr_gcs_prefix,
+        "backup_key_id": settings.physical_backup.pitr_backup_key_id,
+        "backup_key_sha256": hashlib.sha256(b"0" * 32).hexdigest(),
     }
 
 
@@ -740,7 +773,7 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
     monkeypatch.setattr(
         activation,
         "_validate_secrets",
-        lambda: {**_credentials(), "viewer_client_email": "new@example.test"},
+        lambda: {**_credentials(), "viewer_identity": "new@example.test"},
     )
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
@@ -916,7 +949,7 @@ def test_frozen_pg_state_contract_with_real_reader(
         # Old defect shape: any extra credential-evidence key must fail.
         with pytest.raises(RuntimeError, match="changed"):
             activation._require_same_pg_state(
-                {**frozen, "uploader_client_email": "writer@example.test"}, "contract"
+                {**frozen, "uploader_identity": "writer@example.test"}, "contract"
             )
     finally:
         subprocess.run(  # noqa: S603

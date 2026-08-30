@@ -93,7 +93,7 @@ def _base_restore_object(candidate: CandidateManifest) -> RestoreObject:
     metadata = {
         "ava-candidate-sha256": candidate.base_object.source_sha256,
         "ava-ciphertext-size": str(candidate.base_object.ciphertext_size),
-        "ava-ciphertext-crc32c": candidate.base_object.ciphertext_checksum_value,
+        "ava-ciphertext-crc32c": candidate.base_object.ciphertext_crc32c,
         "ava-encryption-format": candidate.base_object.encryption_format,
         "ava-key-id": candidate.base_object.key_id,
         "ava-packer-version": "1",

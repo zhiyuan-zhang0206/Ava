@@ -27,7 +27,119 @@ from services.pitr.base_candidate import (
     _validate_replication_hba,
 )
 
-# ─── stderr diagnostics ──────────────────────────────────────────────────────
+# ─── completed-candidate reconciliation (QA #1147 C2) ────────────────────────
+
+
+def _reconcile_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    checksum_algo: str,
+    checksum_value: str,
+    crc32c: str,
+) -> tuple[Path, Path]:
+    import json
+    from dataclasses import asdict
+
+    from services.pitr.base_candidate import CandidateFacts
+    from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
+    from services.pitr.base_stream import BaseEncryptionPlan
+
+    chain_id = "chain-1"
+    root = tmp_path / "root"
+    ready = root / "base-candidates" / f"{chain_id}.ready"
+    ready.mkdir(parents=True)
+    (ready / "backup_manifest").write_text("{}")
+    (root / "base-facts").mkdir(parents=True)
+    facts = CandidateFacts(17, "sysid", 16 * 1024 * 1024, 1, "mig", "ava")
+    ranges = (WalRange(1, "0/1000000", "0/2000000"),)
+
+    def load_facts(_root: Path, _chain_id: str) -> CandidateFacts:
+        return facts
+
+    def parse_manifest(_path: Path) -> tuple[str, str, tuple[WalRange, ...]]:
+        return ("sysid", "0/1000000", ranges)
+
+    def snapshot(_ready: Path) -> tuple[list[object], str]:
+        return ([], "sha")
+
+    monkeypatch.setattr(base_candidate, "_load_facts", load_facts)
+    monkeypatch.setattr(base_candidate, "parse_native_manifest", parse_manifest)
+    monkeypatch.setattr(base_candidate, "snapshot_candidate", snapshot)
+
+    candidate = CandidateManifest(
+        schema_version=1,
+        chain_id=chain_id,
+        protected=False,
+        postgres_major=17,
+        database_name="ava",
+        system_identifier="sysid",
+        wal_segment_size=16 * 1024 * 1024,
+        timeline=1,
+        start_lsn="0/1000000",
+        end_lsn="0/2000000",
+        wal_ranges=ranges,
+        base_object=BaseObject(
+            "base", "1", 100, crc32c, checksum_algo, checksum_value, "sha", 90, "key", "AVAPITRB1"
+        ),
+        native_manifest_sha256="native",
+        native_manifest_member_path="backup_manifest",
+        native_manifest_container_object_name="base",
+        native_manifest_container_pin_token="1",  # noqa: S106 — test fixture
+        migration_set_sha256="mig",
+    )
+    (root / "base-manifests").mkdir(parents=True)
+    (root / "base-manifests" / f"{chain_id}.candidate.json").write_text(candidate.to_json())
+
+    plan = BaseEncryptionPlan(1, "sha", 100, "native", "nonce", "base", "key", 1, 100, "crc-plan")
+    plan_path = root / "base-plans" / f"{chain_id}.plan.json"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(json.dumps(asdict(plan)))
+
+    class Source:
+        ciphertext_size = 100
+
+    def load_source(*_a: object, **_k: object) -> tuple[Source, BaseEncryptionPlan]:
+        return (Source(), plan)
+
+    monkeypatch.setattr(base_candidate, "load_or_create_source", load_source)
+
+    return root, ready
+
+
+def test_reconcile_accepts_non_crc32c_ack_with_matching_local_crc32c(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QA #1147 C2: a Baidu-flavored candidate (md5 ACK) reconciles when the
+    local plan's crc32c matches — the algo-aware comparison never rejects a
+    non-crc32c vocabulary outright."""
+    root, ready = _reconcile_case(
+        tmp_path, monkeypatch, checksum_algo="md5", checksum_value="md5v", crc32c="crc-plan"
+    )
+    base_candidate.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
+    assert not ready.exists()
+
+
+def test_reconcile_rejects_mismatched_local_crc32c_for_non_crc32c_ack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, ready = _reconcile_case(
+        tmp_path, monkeypatch, checksum_algo="md5", checksum_value="md5v", crc32c="other"
+    )
+    with pytest.raises(BaseCandidateError, match="evidence does not match"):
+        base_candidate.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
+    assert ready.exists()
+
+
+def test_reconcile_rejects_crc32c_ack_differing_from_the_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, ready = _reconcile_case(
+        tmp_path, monkeypatch, checksum_algo="crc32c", checksum_value="other", crc32c="crc-plan"
+    )
+    with pytest.raises(BaseCandidateError, match="evidence does not match"):
+        base_candidate.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
+    assert ready.exists()
 
 
 def test_stderr_suffix_bounds_decodes_and_preserves_the_tail() -> None:

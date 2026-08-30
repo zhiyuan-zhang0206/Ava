@@ -88,13 +88,10 @@ _ROLLBACK_ENTRY_PHASES = frozenset(_FORWARD_PHASES[3:])
 _EVIDENCE_KEYS = {
     "pre_activation_credential_evidence": frozenset(
         {
-            "uploader_client_email",
-            "uploader_project_id",
-            "uploader_private_key_id",
-            "viewer_client_email",
-            "viewer_project_id",
-            "viewer_private_key_id",
-            "bucket_name",
+            "backend",
+            "uploader_identity",
+            "viewer_identity",
+            "store_target",
             "object_prefix",
             "backup_key_id",
             "backup_key_sha256",
@@ -229,6 +226,21 @@ class ActivationRecord:
             # resumable across the schema bump).
             raw = {**dict.fromkeys(cls.__dataclass_fields__), **raw}
             raw["schema_version"] = _SCHEMA_VERSION
+        evidence = raw.get("pre_activation_credential_evidence")
+        if isinstance(evidence, dict) and "viewer_client_email" in evidence:
+            # GCS-vocabulary credential evidence (pre-Baidu-backend records):
+            # the same identities under backend-neutral keys, so a live
+            # activation record stays readable across the backend field (QA #1147).
+            legacy = cast(dict[str, object], evidence)
+            raw["pre_activation_credential_evidence"] = {
+                "backend": "gcs",
+                "uploader_identity": str(legacy.get("uploader_client_email") or ""),
+                "viewer_identity": str(legacy.get("viewer_client_email") or ""),
+                "store_target": str(legacy.get("bucket_name") or ""),
+                "object_prefix": str(legacy.get("object_prefix") or ""),
+                "backup_key_id": str(legacy.get("backup_key_id") or ""),
+                "backup_key_sha256": str(legacy.get("backup_key_sha256") or ""),
+            }
         if set(raw) != set(cls.__dataclass_fields__):
             raise ValueError("PITR activation record fields differ")
         phase = raw["phase"]

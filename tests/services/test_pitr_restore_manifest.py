@@ -30,7 +30,9 @@ def _candidate() -> CandidateManifest:
             WalRange(1, "0/1000000", "0/2000000"),
             WalRange(2, "0/2000000", "0/3000000"),
         ),
-        base_object=BaseObject("base", "7", 100, "crc32c", "crc", "sha", 80, "key", "AVAPITRB1"),
+        base_object=BaseObject(
+            "base", "7", 100, "crc", "crc32c", "crc", "sha", 80, "key", "AVAPITRB1"
+        ),
         native_manifest_sha256="native",
         native_manifest_member_path="backup_manifest",
         native_manifest_container_object_name="base",

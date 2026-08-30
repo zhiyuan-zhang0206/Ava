@@ -4,7 +4,6 @@ from __future__ import annotations
 
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
 import hashlib
-import json
 import re
 import shutil
 import stat
@@ -14,15 +13,20 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import LiteralString, cast
+from typing import LiteralString
 
 import psutil
 import psycopg
-from google.cloud import storage
-from google.oauth2 import service_account
 from psycopg.conninfo import make_conninfo
 
 from cli.commands._pitr_activation_config import apply_wal_config, restore_archive_settings
+from services.pitr.activation_credentials import (
+    credential_app_key,
+    credential_identity,
+    probe_baidu_read_access,
+    probe_bucket_read_access,
+    require_store_config,
+)
 from services.pitr.activation_lease import run_while_renewing
 from services.pitr.activation_observability import save_error as _save_error
 from services.pitr.activation_runtime import (
@@ -85,22 +89,6 @@ def _mode(path: Path) -> int:
     return stat.S_IMODE(path.lstat().st_mode)
 
 
-def _credential_identity(path: Path) -> tuple[str, str, str]:
-    raw_value: object = json.loads(path.read_bytes())
-    if not isinstance(raw_value, dict):
-        raise TypeError(f"{path} is not a service-account credential")
-    value = cast(dict[str, object], raw_value)
-    if value.get("type") != "service_account":
-        raise RuntimeError(f"{path} is not a service-account credential")
-    fields: list[str] = []
-    for name in ("client_email", "project_id", "private_key_id"):
-        field = value[name]
-        if not isinstance(field, str) or not field:
-            raise RuntimeError(f"{path} service-account {name} is missing")
-        fields.append(field)
-    return fields[0], fields[1], fields[2]
-
-
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -109,50 +97,60 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _probe_bucket_read_access(credentials_path: Path) -> str:
-    credentials = service_account.Credentials.from_service_account_file(str(credentials_path))
-    client = storage.Client(
-        project=settings.physical_backup.pitr_gcs_project, credentials=credentials
-    )
-    bucket_name = settings.physical_backup.pitr_gcs_bucket
-    # objectViewer includes list/read, but deliberately not storage.buckets.get.
-    # Consuming one result authenticates the viewer against the configured bucket
-    # without creating a synthetic probe object or deleting retained evidence.
-    next(iter(client.list_blobs(bucket_name, max_results=1, timeout=30)), None)
-    return bucket_name
-
-
 def _validate_secrets() -> dict[str, str]:
     config = settings.physical_backup
     key = config.pitr_backup_key_file
-    uploader = config.pitr_gcs_credentials_file
-    viewer = config.pitr_restore_gcs_credentials_file
-    if key is None or uploader is None or viewer is None:
-        raise RuntimeError("backup key plus uploader and viewer credentials are required")
-    for secret in (key, uploader, viewer):
-        if not secret.is_file() or secret.is_symlink() or _mode(secret) != 0o600:
-            raise RuntimeError(f"PITR secret is unsafe: {secret}")
+    if key is None:
+        raise RuntimeError("backup key is required")
+    if not key.is_file() or key.is_symlink() or _mode(key) != 0o600:
+        raise RuntimeError(f"PITR secret is unsafe: {key}")
     if key.stat().st_size != 32:
         raise RuntimeError("PITR backup key must be exactly 32 bytes")
-    uploader_id = _credential_identity(uploader)
-    viewer_id = _credential_identity(viewer)
-    if uploader_id[0] == viewer_id[0]:
-        raise RuntimeError("uploader and viewer service-account identities must differ")
-    if uploader_id[1] != config.pitr_gcs_project or viewer_id[1] != config.pitr_gcs_project:
-        raise RuntimeError("PITR service-account project differs from configured GCS project")
-    # Data-plane uploader is objectCreator + objectViewer; no synthetic write/delete probe.
-    bucket_name = _probe_bucket_read_access(viewer)
-    return {
-        "uploader_client_email": uploader_id[0],
-        "uploader_project_id": uploader_id[1],
-        "uploader_private_key_id": uploader_id[2],
-        "viewer_client_email": viewer_id[0],
-        "viewer_project_id": viewer_id[1],
-        "viewer_private_key_id": viewer_id[2],
-        "bucket_name": bucket_name,
+    common = {
         "object_prefix": config.pitr_gcs_prefix,
         "backup_key_id": config.pitr_backup_key_id,
         "backup_key_sha256": _sha256(key),
+    }
+    if config.pitr_store_backend == "gcs":
+        uploader = config.pitr_gcs_credentials_file
+        viewer = config.pitr_restore_gcs_credentials_file
+        if uploader is None or viewer is None:
+            raise RuntimeError("uploader and viewer credentials are required")
+        for secret in (uploader, viewer):
+            if not secret.is_file() or secret.is_symlink() or _mode(secret) != 0o600:
+                raise RuntimeError(f"PITR secret is unsafe: {secret}")
+        uploader_id = credential_identity(uploader)
+        viewer_id = credential_identity(viewer)
+        if uploader_id[0] == viewer_id[0]:
+            raise RuntimeError("uploader and viewer service-account identities must differ")
+        if uploader_id[1] != config.pitr_gcs_project or viewer_id[1] != config.pitr_gcs_project:
+            raise RuntimeError("PITR service-account project differs from configured GCS project")
+        # Data-plane uploader is objectCreator + objectViewer; no synthetic write/delete probe.
+        bucket_name = probe_bucket_read_access(viewer)
+        return {
+            "backend": "gcs",
+            "uploader_identity": uploader_id[0],
+            "viewer_identity": viewer_id[0],
+            "store_target": bucket_name,
+            **common,
+        }
+    credentials_file = config.pitr_baidu_credentials_file
+    if credentials_file is None:
+        raise RuntimeError("Baidu credentials are required")
+    if (
+        not credentials_file.is_file()
+        or credentials_file.is_symlink()
+        or _mode(credentials_file) != 0o600
+    ):
+        raise RuntimeError(f"PITR secret is unsafe: {credentials_file}")
+    # One OAuth app serves both roles; the probe proves the token and read scope.
+    app_root = probe_baidu_read_access(credentials_file)
+    return {
+        "backend": "baidu",
+        "uploader_identity": credential_app_key(credentials_file),
+        "viewer_identity": credential_app_key(credentials_file),
+        "store_target": app_root,
+        **common,
     }
 
 
@@ -249,8 +247,7 @@ def _shadow_readiness() -> ShadowReadiness:
         if not directory.is_dir() or directory.is_symlink() or _mode(directory) != 0o700:
             raise RuntimeError(f"private PITR directory is unsafe: {directory}")
     credential_evidence = _validate_secrets()
-    if not config.pitr_gcs_bucket or not config.pitr_gcs_prefix:
-        raise RuntimeError("PITR bucket and prefix must be configured")
+    require_store_config(config)
     if config.pitr_enabled or config.pitr_base_backup_enabled or config.pitr_restore_proof_enabled:
         raise RuntimeError("shadow readiness requires all PITR service flags to remain off")
     pg_version = (ava_home() / "pg" / "PG_VERSION").read_text().strip()

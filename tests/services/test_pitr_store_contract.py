@@ -28,7 +28,11 @@ from services.pitr.checksums import (
     matches,
 )
 from services.pitr.object_store import RemoteObjectAck
-from services.pitr.store_factory import get_backend, get_backend_named
+from services.pitr.store_factory import (
+    PitrStoreGroup,
+    get_group_constructor_named,
+    get_store_group,
+)
 from services.pitr.token_manager import (
     TokenHealth,
     TokenState,
@@ -406,14 +410,26 @@ def test_legacy_ack_normalizes_to_pin_token_and_crc32c_checksum() -> None:
 def test_fresh_ack_shape_round_trips_untouched() -> None:
     raw = _legacy_raw()
     raw.pop("generation")
-    raw.pop("ciphertext_crc32c")
     raw["pin_token"] = "fs123:md5"  # noqa: S105 — test fixture identity
     raw["ciphertext_checksum_algo"] = MD5
     raw["ciphertext_checksum_value"] = "0" * 32
+    raw["ciphertext_crc32c"] = "crc32c-value"
     ack = ack_manifest_from_raw(raw)
     assert ack.pin_token == "fs123:md5"  # noqa: S105 — test fixture identity
     assert ack.ciphertext_checksum_algo == MD5
     assert ack.ciphertext_checksum_value == "0" * 32
+    assert ack.ciphertext_crc32c == "crc32c-value"
+
+
+def test_fresh_ack_without_local_digest_fails_closed_for_non_crc32c() -> None:
+    raw = _legacy_raw()
+    raw.pop("generation")
+    raw.pop("ciphertext_crc32c")
+    raw["pin_token"] = "fs123:md5"  # noqa: S105 — test fixture identity
+    raw["ciphertext_checksum_algo"] = MD5
+    raw["ciphertext_checksum_value"] = "0" * 32
+    with pytest.raises(TypeError, match="local ciphertext digest"):
+        ack_manifest_from_raw(raw)
 
 
 def test_ack_without_any_pin_identity_fails_closed() -> None:
@@ -457,48 +473,66 @@ def _service_account(email: str = "uploader@example.com") -> str:
 def test_factory_constructs_every_role_for_the_gcs_backend(tmp_path: Path) -> None:
     credentials = tmp_path / "gcs.json"
     credentials.write_text(_service_account())
-    backend = get_backend_named("gcs")
-    assert backend.name == "gcs"
-    assert backend.object_store(project="p", bucket="b", credentials_file=credentials) is not None
-    assert (
-        backend.restartable_streaming_object_store(
-            project="p", bucket="b", credentials_file=str(credentials)
-        )
-        is not None
+    group = get_group_constructor_named("gcs")(
+        project="p",
+        bucket="b",
+        prefix="ava-pitr",
+        uploader_credentials=credentials,
+        viewer_credentials=credentials,
     )
-    assert (
-        backend.generation_pinned_object_reader(
-            project="p", bucket="b", credentials_file=credentials
-        )
-        is not None
+    assert group.object_store() is not None
+    assert group.restartable_streaming_object_store() is not None
+    assert group.viewer_object_store() is not None
+    assert group.generation_pinned_object_reader() is not None
+    assert group.retention_inventory_reader() is not None
+    assert group.protected_manifest_publisher() is not None
+
+
+def test_factory_constructs_every_role_for_the_baidu_backend(tmp_path: Path) -> None:
+    credentials = tmp_path / "baidu.json"
+    credentials.write_text(
+        json.dumps({"app_key": "app", "secret_key": "secret", "refresh_token": "refresh"})
     )
-    assert (
-        backend.retention_inventory_reader(
-            project="p", bucket="b", prefix="ava-pitr", credentials_file=credentials
-        )
-        is not None
+    token_file = tmp_path / "token.json"
+    group = get_group_constructor_named("baidu")(
+        app_root="/apps/ava/ava-pitr",
+        prefix="ava-pitr",
+        credentials_file=credentials,
+        token_file=token_file,
     )
-    assert (
-        backend.protected_manifest_publisher(project="p", bucket="b", credentials_file=credentials)
-        is not None
-    )
+    assert group.object_store() is not None
+    assert group.restartable_streaming_object_store() is not None
+    assert group.viewer_object_store() is not None
+    assert group.generation_pinned_object_reader() is not None
+    assert group.retention_inventory_reader() is not None
+    assert group.protected_manifest_publisher() is not None
 
 
 def test_factory_rejects_unknown_backend_without_falling_back() -> None:
-    with pytest.raises(ValueError, match=r"unknown PITR store backend 's3' \(known: gcs\)"):
-        get_backend_named("s3")
+    with pytest.raises(ValueError, match=r"unknown PITR store backend 's3' \(known: baidu, gcs\)"):
+        get_group_constructor_named("s3")
     with pytest.raises(ValueError, match="unknown PITR store backend"):
-        get_backend_named("")
+        get_group_constructor_named("")
 
 
-def test_factory_reads_the_configured_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_factory_reads_the_configured_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from shared.config import settings
 
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "gcs")
-    assert get_backend().name == "gcs"
+    assert isinstance(get_store_group(), PitrStoreGroup)
+    credentials = tmp_path / "baidu.json"
+    credentials.write_text(
+        json.dumps({"app_key": "app", "secret_key": "secret", "refresh_token": "refresh"})
+    )
+    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "baidu")
+    monkeypatch.setattr(settings.physical_backup, "pitr_baidu_credentials_file", credentials)
+    monkeypatch.setattr(settings.physical_backup, "pitr_baidu_token_file", tmp_path / "token.json")
+    assert isinstance(get_store_group(), PitrStoreGroup)
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "nope")
     with pytest.raises(ValueError, match="unknown PITR store backend"):
-        get_backend()
+        get_store_group()
 
 
 # ── token manager skeleton ──

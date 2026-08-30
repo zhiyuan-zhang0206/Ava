@@ -81,7 +81,7 @@ def build_local_evidence(
                 "ava-archive-name": ack.archive_name,
                 "ava-source-sha256": ack.source_sha256,
                 "ava-source-size": str(ack.source_size),
-                "ava-ciphertext-crc32c": ack.ciphertext_checksum_value,
+                "ava-ciphertext-crc32c": ack.ciphertext_crc32c,
                 "ava-encryption-format": ack.encryption_format,
                 "ava-key-id": ack.key_id,
             }
