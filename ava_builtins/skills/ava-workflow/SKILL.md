@@ -1,6 +1,6 @@
 ---
 name: ava-workflow
-description: "Coordinates agents, the human, and reality through calibration, alignment, planning, and continuous evaluation. Use for any non-trivial task, even when the user does not explicitly ask for a workflow; large tasks need an independent adversarial review by a fresh agent."
+description: "Coordinates agents, the human, and reality through calibration, alignment, planning, and continuous evaluation. Use for any non-trivial task, even when the user does not explicitly ask for a workflow; large tasks need a fresh agent's adversarial review. Entry is lightweight: a one-question align or a five-line plan counts."
 ---
 
 # Ava Workflow — Three Actors, Three Phases, One Evaluation Thread
@@ -29,8 +29,8 @@ Work happens between **three actors** — the agents (us), the human (intent and
 | Phase | Syncs | Core Question | When Needed |
 |-------|-------|---------------|-------------|
 | **Calibrate** (optional) | agents & human ↔ reality | "Does our mental model match the real world?" | Someone's model of the subject is off |
-| **Align** | agents ↔ human | "What are we actually trying to do? What does success look like?" | Goal / constraints are fuzzy |
-| **Plan** | intent → executable spec | "How do we split this into tasks agents can execute?" | Task is very large, or needs parallel execution |
+| **Align** | agents ↔ human | "What are we actually trying to do? What does success look like?" | Goal / constraints are fuzzy; include [Capability Matching](#capability-matching) |
+| **Plan** | intent → executable spec | "How do we split this into tasks agents can execute?" | Task is very large, or needs parallel execution; carry [Capability Matching](#capability-matching) into task nodes |
 | **Evaluation** (threads through all) | every phase's quality | "What counts as good? How is reality doing? When and how do we check?" | Always — the question just lives inside each phase |
 
 ### Evaluation is a thread, not a phase
@@ -50,6 +50,19 @@ The Work & Evaluate skill is this thread made explicit during execution — but 
 - **Align only**: the request is vague; you need to clarify before deciding how to proceed
 - **Plan only**: requirements are already aligned, and the task is large enough (or parallel enough) to need decomposition into an executable spec
 - **Work & Eval only**: you already have a clear goal and acceptance criteria and need step-by-step execution with continuous self-verification
+
+## Capability Matching
+
+Every Align and Plan output includes a short capability list: name the relevant skills and MCP tools the task will use and the candidates deliberately not used, with a one-line reason for each.
+Include at least one `Use:` and one `Not used:` line; when every relevant capability is used, write `Not used: None — all relevant capabilities are required.`
+
+```text
+- Use: `align` skill — resolve the open product decisions.
+- Use: `chrome` MCP — drive the logged-in browser for a login-required page.
+- Not used: browser automation — repository evidence is sufficient.
+```
+
+Keep it to one line per capability. No ceremony: this is a selection heuristic, not a report.
 
 ## Plan's Scope Is Narrower Than You Think
 
