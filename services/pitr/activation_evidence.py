@@ -64,6 +64,9 @@ def validate_wal_remote_evidence(
     if any(ack[name] != viewer[name] for name in immutable):
         raise ValueError("PITR ACK and viewer immutable evidence differ")
     frozen = credential_evidence or {}
+    backend = frozen.get("backend", "gcs")
+    if backend not in {"gcs", "baidu"}:
+        raise ValueError("PITR credential evidence has an unknown backend")
     if exact is None or any(
         (
             ack["segment"] != exact["segment"],
@@ -81,11 +84,23 @@ def validate_wal_remote_evidence(
     )
     if ack["object_name"] != expected_object:
         raise ValueError("PITR remote object name is not canonical")
-    if int(ack["generation"]) <= 0 or int(ack["ciphertext_size"]) <= 0:
+    if backend == "baidu":
+        # Baidu pins an object with its PCS identity ("fs_id:content-md5"),
+        # not a monotonic generation number.
+        if not re.fullmatch(r"[0-9]+:[0-9a-f]{32}", ack["generation"]):
+            raise ValueError("PITR remote evidence has an invalid Baidu pin token")
+    elif int(ack["generation"]) <= 0:
+        raise ValueError("PITR remote identity must have positive generation and size")
+    if int(ack["ciphertext_size"]) <= 0:
         raise ValueError("PITR remote identity must have positive generation and size")
     if int(ack["source_size"]) <= 0 or not re.fullmatch(r"[0-9a-f]{64}", ack["source_sha256"]):
         raise ValueError("PITR remote evidence has invalid source identity")
-    if not re.fullmatch(r"[A-Za-z0-9+/]{6}==", ack["ciphertext_crc32c"]):
+    if backend == "baidu":
+        # The backend-verified checksum is the content MD5 in lowercase hex,
+        # not a CRC32C base64 digest.
+        if not re.fullmatch(r"[0-9a-f]{32}", ack["ciphertext_crc32c"]):
+            raise ValueError("PITR remote evidence has an invalid ciphertext MD5")
+    elif not re.fullmatch(r"[A-Za-z0-9+/]{6}==", ack["ciphertext_crc32c"]):
         raise ValueError("PITR remote evidence has invalid CRC32C")
     intent_at = datetime.fromisoformat(exact["switch_intent_at"])
     acknowledged = datetime.fromisoformat(ack["acknowledged_at"])

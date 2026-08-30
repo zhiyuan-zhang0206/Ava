@@ -17,6 +17,7 @@ from google.cloud import storage
 from google.oauth2 import service_account
 
 from shared.config import settings
+from shared.config.physical_backup import PhysicalBackupSettings
 
 
 def credential_identity(path: Path) -> tuple[str, str, str]:
@@ -69,3 +70,19 @@ def probe_baidu_read_access(credentials_path: Path) -> str:
     # without creating a synthetic probe object or deleting retained evidence.
     next(iter(client.list_dir(config.pitr_baidu_app_root.rstrip("/"), limit=1)), None)
     return config.pitr_baidu_app_root
+
+
+def require_store_config(config: PhysicalBackupSettings) -> None:
+    """Fail fast when the configured backend lacks its store target.
+
+    Both backends share the object prefix; GCS additionally needs its
+    bucket, Baidu its app root. Activation never falls back to another
+    backend, so a missing target must refuse before any mutation.
+    """
+    if not config.pitr_gcs_prefix:
+        raise RuntimeError("PITR object prefix must be configured")
+    if config.pitr_store_backend == "baidu":
+        if not config.pitr_baidu_app_root:
+            raise RuntimeError("PITR Baidu app root must be configured")
+    elif not config.pitr_gcs_bucket:
+        raise RuntimeError("PITR bucket must be configured")
