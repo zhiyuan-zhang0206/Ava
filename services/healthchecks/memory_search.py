@@ -41,12 +41,12 @@ def _post_search(uri: str) -> dict[str, object] | DaemonProbe:
     closed: any failure means "not alive", per the module docstring)."""
     import httpx
 
-    from services.memory_indexer.embedder import DIM
+    from services.memory_indexer.embeddings.factory import get_provider
 
     try:
         resp = httpx.post(
             f"{uri}/search",
-            json={"vector": [0.0] * DIM, "k": 1},
+            json={"vector": [0.0] * get_provider().dim, "k": 1},
             timeout=_TIMEOUT_S,
         )
         resp.raise_for_status()

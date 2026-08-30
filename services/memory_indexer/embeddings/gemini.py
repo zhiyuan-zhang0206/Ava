@@ -1,8 +1,12 @@
-"""Gemini Embedding 2 client — direct REST over httpx.
+"""Gemini Embedding 2 adapter — direct REST over httpx.
 
-Single thin wrapper over the Gemini Developer API `batchEmbedContents`
-endpoint. Both the indexer daemon (batch embed markdown files) and
-`ava.memory.search` (embed query) call into this module.
+The one implementation of the `EmbeddingProvider` contract today (the
+abstraction deliberately ships no second vendor; a new provider is a new
+class behind `embeddings.factory`). This is a thin wrapper over the
+Gemini Developer API `batchEmbedContents` endpoint, moved verbatim from
+the pre-abstraction `services/memory_indexer/embedder.py` — the wire
+contract (endpoint, payload, auth header, retry policies, dim, shape
+validation) is unchanged, pinned by `tests/services/test_embeddings.py`.
 
 Deliberately does NOT use the `google-genai` SDK: importing it eagerly
 pulls an MCP + ASGI (starlette / uvicorn) + aiohttp stack into the
@@ -33,12 +37,13 @@ from typing import Any
 import httpx
 import numpy as np
 
+from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from shared.config import settings
 from shared.resilience import ExponentialBackoff, Policy, aretry, http_classifier, retry
 
 _MODEL_ID = "gemini-embedding-2"
 DIM = 3072
-"""3072-dim default for Gemini Embedding 2 (text mode). Not reduced —
+"""3072-dim for Gemini Embedding 2 (text mode). Not reduced —
 12 KB/file is more than enough for memory pool scale (<10k files)."""
 
 # Gemini Developer API (mldev). The google-genai SDK targets exactly this
@@ -52,13 +57,6 @@ _ENDPOINT = (
 # (180s) sits well above the default 60s, so a slow-but-legit batch does not
 # trip the healthcheck. The retry policies are module constants (R2-D) —
 # two of them, split by call site, see `_EMBED_POLICY` / `_QUERY_EMBED_POLICY`.
-
-
-class EmbeddingAPIError(RuntimeError):
-    """Gemini API call still failed after N retries. The daemon skips
-    the current file and retries on the next watch event;
-    `ava.memory.search` wraps this as `IndexerUnavailable` and raises
-    to the caller."""
 
 
 # R2-D shared retry primitives (idempotent read; http_classifier makes
@@ -204,16 +202,33 @@ async def _embed_async(
     return _vectors_from_body(body, texts)
 
 
-def embed_documents(texts: list[str]) -> np.ndarray:
-    """Batch embed markdown file contents for indexing. (N, DIM) float32."""
-    return _embed(texts, task_type="RETRIEVAL_DOCUMENT")
+class GeminiEmbeddingProvider:
+    """`EmbeddingProvider` for Gemini Embedding 2 (text mode).
 
+    Behavior-identical to the legacy `embedder` module it replaced: the
+    same endpoint, payload, auth, per-site retry policies, dim, and shape
+    validation — pinned by the contract tests in
+    `tests/services/test_embeddings.py`.
+    """
 
-def embed_query(text: str) -> np.ndarray:
-    """Embed single query for search. (DIM,) float32."""
-    return _embed([text], task_type="RETRIEVAL_QUERY", policy=_QUERY_EMBED_POLICY)[0]
+    name = "gemini"
+    model_id = _MODEL_ID
+    dim = DIM
+    fingerprint = f"{name}:{_MODEL_ID}:dim={DIM}"
+    """Identifies this provider's semantic space for the indexer's
+    per-row reconcile — any change (provider, model, dim) re-embeds the
+    whole index."""
 
+    def embed_batch(self, texts: list[str]) -> np.ndarray:
+        """Batch embed markdown file contents for indexing. (N, DIM) float32."""
+        return _embed(texts, task_type="RETRIEVAL_DOCUMENT")
 
-async def embed_query_async(text: str) -> np.ndarray:
-    """Async embed of a single query for search. (DIM,) float32."""
-    return (await _embed_async([text], task_type="RETRIEVAL_QUERY", policy=_QUERY_EMBED_POLICY))[0]
+    def embed_query(self, text: str) -> np.ndarray:
+        """Embed single query for search. (DIM,) float32."""
+        return _embed([text], task_type="RETRIEVAL_QUERY", policy=_QUERY_EMBED_POLICY)[0]
+
+    async def embed_query_async(self, text: str) -> np.ndarray:
+        """Async embed of a single query for search. (DIM,) float32."""
+        return (
+            await _embed_async([text], task_type="RETRIEVAL_QUERY", policy=_QUERY_EMBED_POLICY)
+        )[0]

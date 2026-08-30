@@ -17,7 +17,6 @@ import numpy as np
 import pytest
 import uvicorn
 
-from services.memory_indexer import embedder
 from services.memory_indexer.backends import probe
 from services.memory_indexer.backends.numpy import NumPyBackend
 from services.memory_search.app import build_app
@@ -32,9 +31,13 @@ def _free_port() -> int:
     return port
 
 
+_DIM = 8
+_FP = "test:gemini:dim=8"
+
+
 def _vec(seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    return rng.standard_normal(embedder.DIM).astype(np.float32)
+    return rng.standard_normal(_DIM).astype(np.float32)
 
 
 @pytest.fixture(scope="session")
@@ -44,7 +47,7 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
     data_file = tmp_path_factory.mktemp("memory-search") / "vectors.npz"
     server = uvicorn.Server(
         uvicorn.Config(
-            build_app(MemoryStore(data_file)),
+            build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP)),
             host="127.0.0.1",
             port=port,
             log_level="critical",
@@ -76,17 +79,17 @@ def backend(memory_search_uri: str, monkeypatch: pytest.MonkeyPatch) -> Iterator
 
 
 def test_write_read_roundtrip(backend: NumPyBackend) -> None:
-    ones = np.ones(embedder.DIM, dtype=np.float32)
+    ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
-    assert backend.all_meta() == {"/a.md": (1.0, "ha"), "/b.md": (2.0, "hb")}
+    assert backend.all_meta() == {"/a.md": (1.0, "ha", _FP), "/b.md": (2.0, "hb", _FP)}
     assert backend.search_topk(ones, k=5) == ["/a.md", "/b.md"]
     backend.delete("/a.md")
-    assert backend.all_meta() == {"/b.md": (2.0, "hb")}
+    assert backend.all_meta() == {"/b.md": (2.0, "hb", _FP)}
 
 
 def test_search_topk_async_matches_sync(backend: NumPyBackend) -> None:
-    ones = np.ones(embedder.DIM, dtype=np.float32)
+    ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
     sync = backend.search_topk(ones, k=5)
