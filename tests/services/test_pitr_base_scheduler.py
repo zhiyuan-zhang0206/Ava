@@ -135,6 +135,16 @@ def test_restore_worker_store_args_validate_against_the_backend_constructor(
         )
     with pytest.raises(ValueError, match="required"):
         _construct_group(get_group_constructor_named("gcs"), {"project": "p"})
+    cos_group = _construct_group(
+        get_group_constructor_named("cos"),
+        {
+            "bucket": "ava-pitr-1250000000",
+            "region": "ap-guangzhou",
+            "credentials_file": str(tmp_path / "cos.json"),
+            "prefix": "ava-pitr",
+        },
+    )
+    assert cos_group.generation_pinned_object_reader is not None
 
 
 def test_restore_worker_input_builds_baidu_store_args(
@@ -163,6 +173,40 @@ def test_restore_worker_input_builds_baidu_store_args(
     assert inputs.backend == "baidu"
     assert set(dict(inputs.store_args)) == {"app_root", "prefix", "credentials_file", "token_file"}
     assert dict(inputs.store_args)["credentials_file"] == str(tmp_path / "creds.json")
+
+
+def test_restore_worker_input_builds_cos_store_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from services.pitr import base_operation_runtime as restore_runtime
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "cos")
+    monkeypatch.setattr(settings.physical_backup, "pitr_restore_proof_enabled", True)
+    monkeypatch.setattr(settings.physical_backup, "pitr_backup_key_file", tmp_path / "backup.key")
+    monkeypatch.setattr(
+        settings.physical_backup, "pitr_cos_credentials_file", tmp_path / "cos.json"
+    )
+    monkeypatch.setattr(settings.physical_backup, "pitr_cos_bucket", "ava-pitr-1250000000")
+    monkeypatch.setattr(settings.physical_backup, "pitr_cos_region", "ap-guangzhou")
+    monkeypatch.setattr(restore_runtime, "direct_db_url", lambda: "postgresql://x")
+    monkeypatch.setattr(restore_runtime, "live_data_directory", lambda: "/live/data")
+
+    def fake_pg_tool(_name: str) -> Path:
+        return Path("/usr/bin/true")
+
+    monkeypatch.setattr(restore_runtime, "pg_tool", fake_pg_tool)
+
+    inputs = restore_runtime.input_for(_candidate("cos-proof"))
+
+    assert inputs.backend == "cos"
+    assert set(dict(inputs.store_args)) == {
+        "bucket",
+        "region",
+        "credentials_file",
+        "prefix",
+    }
+    assert dict(inputs.store_args)["region"] == "ap-guangzhou"
 
 
 _LEGACY_CANDIDATE_JSON = (

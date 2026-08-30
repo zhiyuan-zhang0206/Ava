@@ -23,10 +23,12 @@ Backend identity vocabulary for one object:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
 import re
+import stat
 import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping
@@ -86,6 +88,16 @@ def credential_evidence(credentials_file: Path, *, region: str, bucket: str) -> 
     scope is proven at activation time by the viewer read-back, so no
     live probe is issued here.
     """
+    try:
+        info = credentials_file.lstat()
+    except OSError as exc:
+        raise CosPermanentError("COS credentials file is missing") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or credentials_file.is_symlink()
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
+        raise CosPermanentError("COS credentials file is unsafe")
     credentials = CosCredentials.from_file(credentials_file, region=region, bucket=bucket)
     return {
         "backend": "cos",
@@ -202,6 +214,13 @@ def response_metadata(headers: Mapping[str, str]) -> dict[str, str]:
             if header.startswith(prefix):
                 metadata[header[len(prefix) :]] = value
     return metadata
+
+
+def _content_md5_header(digest_hex: str) -> str:
+    """Content-MD5 must carry the Base64-encoded MD5 digest (COS docs
+    436/32467, 436/36427) — a 32-char hex string decodes to the wrong
+    byte length and the real API rejects it with 400 BadDigest."""
+    return base64.b64encode(bytes.fromhex(digest_hex)).decode("ascii")
 
 
 def _unquote_etag(value: str | None) -> str:
@@ -340,7 +359,9 @@ class CosClient:
         metadata: Mapping[str, str],
         if_none_match: bool = True,
     ) -> CosObjectRow:
-        headers = {"Content-MD5": hashlib.md5(body).hexdigest()}  # noqa: S324
+        headers = {
+            "Content-MD5": _content_md5_header(hashlib.md5(body).hexdigest())  # noqa: S324 — COS content digest
+        }
         headers.update(canonical_metadata(metadata))
         if if_none_match:
             headers["If-None-Match"] = "*"
@@ -365,7 +386,7 @@ class CosClient:
         if_none_match: bool = True,
     ) -> CosObjectRow:
         headers = {
-            "Content-MD5": content_md5,
+            "Content-MD5": _content_md5_header(content_md5),
             "x-amz-content-sha256": payload_sha256,
         }
         headers.update(canonical_metadata(metadata))
