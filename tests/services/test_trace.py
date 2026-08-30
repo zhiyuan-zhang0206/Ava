@@ -59,6 +59,12 @@ def _drain_background_trace_threads() -> None:
         if isinstance(init_resolved, threading.Event):
             init_resolved.wait(timeout=_THREAD_DRAIN_TIMEOUT_S)
         arm_thread.join(timeout=_THREAD_DRAIN_TIMEOUT_S)
+        assert not arm_thread.is_alive(), (
+            "trace arm thread still alive after the teardown drain — "
+            "a slow import/init escaped the bounds and leaked into the next "
+            "test (the guard in _arm_tracing keeps the survivor inert, but the "
+            "leak itself must be diagnosed here, not in a later assertion)"
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -393,6 +399,87 @@ def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp
     assert isinstance(arm_thread, threading.Thread)
     assert arm_thread.is_alive()
     # Intentionally no _wait_init_resolved(): the fixture teardown must drain.
+
+
+def test_arm_tracing_skips_init_when_already_resolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Traceloop.init runs at most once per process: _arm_tracing is a no-op
+    when a previous arm already succeeded (initialized) or failed
+    (arm_failed). A second arm thread is only reachable when test state was
+    reset while the first was in flight, but without this guard its init
+    would fake-succeed (the SDK's TracerWrapper singleton keeps the first
+    init's instrumentor set and reports success) AND land in whichever test
+    installed the current monkeypatch — the #1065 / post-#1068 2-call flake.
+    """
+    from shared.trace import _arm_tracing
+
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
+    _under_watermark(monkeypatch)
+    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+
+    trace_mod._state["initialized"] = True
+    trace_mod._state["arm_failed"] = False
+    _arm_tracing("http://127.0.0.1:4318")
+    assert calls == []
+
+    trace_mod._state["initialized"] = False
+    trace_mod._state["arm_failed"] = True
+    _arm_tracing("http://127.0.0.1:4318")
+    assert calls == []
+
+
+def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Two arm threads racing — a zombie escaped a test's teardown plus the
+    next test's own arm, both completing inside one test — run
+    Traceloop.init exactly once: the second thread reads the first's outcome
+    (under the init lock, after the import) before calling init. Without the
+    guard the SDK's TracerWrapper singleton would let both init calls run
+    (the second fake-succeeds), which is the #1065 / post-#1068 2-call flake.
+    """
+    from shared.trace import _arm_tracing
+
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
+    _under_watermark(monkeypatch)
+
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+
+    def _slow_init(**_kw: object) -> None:
+        entered.set()
+        assert release.wait(timeout=5.0), "test released the first arm's init"
+        calls.append(_kw)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
+
+    first = threading.Thread(target=_arm_tracing, args=("http://127.0.0.1:4318",), daemon=True)
+    first.start()
+    assert entered.wait(timeout=5.0), "first arm thread must reach Traceloop.init"
+
+    # State reset while the first arm is in flight — exactly what the fixture
+    # teardown does when a slow CI import outlives the drain.
+    trace_mod._state.clear()
+    trace_mod._state.update(
+        initialized=False,
+        collector_offline_reported=False,
+        retry_thread=None,
+        arm_thread=None,
+        init_resolved=threading.Event(),
+        arm_failed=False,
+        timeout_reported=False,
+    )
+
+    second = threading.Thread(target=_arm_tracing, args=("http://127.0.0.1:4318",), daemon=True)
+    second.start()
+    release.set()
+    first.join(timeout=5.0)
+    second.join(timeout=5.0)
+
+    assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_turn_span_waits_for_pending_arm(monkeypatch: pytest.MonkeyPatch) -> None:
