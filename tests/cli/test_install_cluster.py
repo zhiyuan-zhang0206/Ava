@@ -56,6 +56,11 @@ def noop_infra(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         lambda _rec, _secret, _identity, **_kw: 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(gw, "_provision", lambda _name, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        gw,
+        "_ensure_pgvector_extension",
+        lambda _name, **_kw: None,  # pyright: ignore[reportUnknownArgumentType]
+    )
     # The runner-role provisioning steps are real SQL against the cluster's pg —
     # stubbed like the rest of the birth (no live pg in these unit tests).
     monkeypatch.setattr(

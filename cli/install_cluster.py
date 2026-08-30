@@ -307,8 +307,9 @@ def _birth(*, home: Path, secret: str) -> int:
         # pgvector pre-created here with the bootstrap-superuser connection (its
         # control file is not `trusted`, so the NOSUPERUSER runtime roles cannot
         # install it themselves); a silent no-op when this Postgres lacks the
-        # extension binaries.
-        cl.ensure_pgvector_extension(
+        # extension binaries. Routed through the lifecycle wrapper so unit tests
+        # stub it with the other birth-side provisioning steps.
+        lifecycle._ensure_pgvector_extension(
             cl.DATA_PLANE_IDENTITY,
             base_admin_url=base_admin_url,
         )
