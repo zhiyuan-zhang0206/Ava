@@ -220,7 +220,7 @@ def test_run_enroll_writes_env_and_verifies(
             "--machine-name",
             "wsl",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
         ]
@@ -229,7 +229,7 @@ def test_run_enroll_writes_env_and_verifies(
     assert env_path.exists()
     # machine_host is persisted to the $AVA_HOME/machine_host file (not the .env)
     # so a re-enroll, which rewrites the .env, cannot wipe this host's address.
-    assert (tmp_path / "machine_host").read_text().strip() == "100.64.0.9"
+    assert (tmp_path / "machine_host").read_text().strip() == "10.0.0.9"
     assert "AVA_MACHINE_HOST" not in env_path.read_text()
     # the fetched cluster facts are NOT cached into .env (2026-08-01 refactor):
     # the runner re-fetches them at every process start
@@ -250,19 +250,19 @@ def test_run_enroll_reads_cluster_secret_from_environment(
         enroll,
         "_fetch_enroll_payload",
         lambda *_a, **_k: {  # pyright: ignore[reportUnknownArgumentType]
-            "AVA_DB_URL": "postgresql://ava@100.64.0.5:5433/ava",
-            "AVA_REDIS_URL": "redis://ava@100.64.0.5:6380/0",
+            "AVA_DB_URL": "postgresql://ava@10.0.0.5:5433/ava",
+            "AVA_REDIS_URL": "redis://ava@10.0.0.5:6380/0",
         },
     )
 
     rc = enroll.run_enroll(
         [
             "--gateway",
-            "https://100.64.0.5:8000",
+            "https://10.0.0.5:8000",
             "--machine-name",
             "runner",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
         ]
     )
 
@@ -356,16 +356,16 @@ def test_run_enroll_machine_host_survives_reenroll(
             "--machine-name",
             "wsl",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
         ]
     )
     host_file = tmp_path / "machine_host"
-    assert host_file.read_text().strip() == "100.64.0.9"
+    assert host_file.read_text().strip() == "10.0.0.9"
     # A re-enroll replaces the .env wholesale; the machine_host file is independent.
     enroll.write_bootstrap_env(env_path, gateway="https://cp", machine_name="wsl")
-    assert host_file.read_text().strip() == "100.64.0.9"
+    assert host_file.read_text().strip() == "10.0.0.9"
 
 
 def test_run_enroll_returns_1_on_fetch_failure(
@@ -388,7 +388,7 @@ def test_run_enroll_returns_1_on_fetch_failure(
             "--machine-name",
             "n",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
         ]
@@ -425,7 +425,7 @@ def test_run_enroll_surfaces_gateway_error_detail(
             "--machine-name",
             "n",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
         ]
@@ -527,7 +527,7 @@ def test_run_enroll_persists_no_cluster_facts(
             "--machine-name",
             "wsl",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
         ]
@@ -562,7 +562,7 @@ def test_run_enroll_verifies_connectivity_before_writing(
             "--machine-name",
             "wsl",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
         ]
@@ -592,7 +592,7 @@ def _enroll(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra_args: list[st
             "--machine-name",
             "wsl",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
             *(extra_args or []),
@@ -737,7 +737,7 @@ def test_run_enroll_refuses_loopback_data_plane_from_remote_gateway(
             "--machine-name",
             "wsl",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
         ]
@@ -759,18 +759,18 @@ def test_run_enroll_accepts_reachable_data_plane_from_remote_gateway(
         enroll,
         "_fetch_enroll_payload",
         lambda *_a, **_k: {  # pyright: ignore[reportUnknownArgumentType]
-            "AVA_DB_URL": "postgresql://ava@100.64.0.5:5433/ava",
-            "AVA_REDIS_URL": "redis://ava@100.64.0.5:6380/0",
+            "AVA_DB_URL": "postgresql://ava@10.0.0.5:5433/ava",
+            "AVA_REDIS_URL": "redis://ava@10.0.0.5:6380/0",
         },
     )
     rc = enroll.run_enroll(
         [
             "--gateway",
-            "https://100.64.0.5:8000",
+            "https://10.0.0.5:8000",
             "--machine-name",
             "wsl",
             "--machine-host",
-            "100.64.0.9",
+            "10.0.0.9",
             "--cluster-secret",
             "sek",
         ]
@@ -788,7 +788,7 @@ def test_run_enroll_requires_cluster_secret(
     monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
     with pytest.raises(SystemExit) as exc_info:
         enroll.run_enroll(
-            ["--gateway", "https://cp", "--machine-name", "n", "--machine-host", "100.64.0.9"]
+            ["--gateway", "https://cp", "--machine-name", "n", "--machine-host", "10.0.0.9"]
         )
     assert exc_info.value.code == 2
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]

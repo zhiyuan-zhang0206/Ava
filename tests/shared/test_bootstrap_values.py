@@ -142,15 +142,15 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)  # no .env overrides
     _write_runner_password(tmp_path)
-    monkeypatch.setattr(config, "_self_machine_host", lambda: "100.64.0.3")
+    monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
 
     db = str(config.settings.data_plane.db_url)
     redis = str(config.settings.data_plane.redis_url)
     vals = config.bootstrap_config_values()
     served_db, served_redis = urlsplit(vals["AVA_DB_URL"]), urlsplit(vals["AVA_REDIS_URL"])
     # host swapped to the reachable address; port + database kept verbatim
-    assert served_db.hostname == "100.64.0.3"
-    assert served_redis.hostname == "100.64.0.3"
+    assert served_db.hostname == "10.0.0.3"
+    assert served_redis.hostname == "10.0.0.3"
     assert served_db.port == urlsplit(db).port
     assert served_db.path == urlsplit(db).path
     assert served_redis.port == urlsplit(redis).port
@@ -186,10 +186,10 @@ def test_bootstrap_keeps_existing_reachable_url_host(
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     _write_runner_password(tmp_path)
-    monkeypatch.setattr(config, "_self_machine_host", lambda: "100.64.0.3")
+    monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
     dp = config.settings.data_plane
     # parts-built, scanner-safe (same convention as tests/cli/test_converge.py)
-    host_url = f"postgresql://ava_main:{'sek'}@100.64.0.2:5433/ava_main"
+    host_url = f"postgresql://ava_main:{'sek'}@10.0.0.2:5433/ava_main"
     monkeypatch.setattr(dp, "db_url", host_url)
 
     vals = config.bootstrap_config_values()

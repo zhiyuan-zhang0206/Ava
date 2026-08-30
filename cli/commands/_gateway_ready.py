@@ -17,7 +17,7 @@ So `rc == 0` from the local update means "the start process exited cleanly", nev
 "the gateway is serving". Fanning out on that is a race, and prod lost it repeatedly:
 a runner's updater log for the 2026-07-29 05:09 rollout ends
 
-    ✗ gateway unreachable at http://100.64.0.2:8000: [Errno 61] Connection refused
+    ✗ gateway unreachable at http://<the runner's gateway address>:8000: [Errno 61] Connection refused
     ✗ refusing self-update: preflight probes failed — host still serving
     [session-exit] rc=3
 

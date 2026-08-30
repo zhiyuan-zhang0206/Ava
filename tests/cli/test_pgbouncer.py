@@ -46,14 +46,14 @@ def test_public_probe_accepts_the_exact_reachable_host_in_the_socket_table(
 
     def _listener_addrs(port: int) -> set[str]:
         scanned.append(port)
-        return {"127.0.0.1", "100.64.0.5"}
+        return {"127.0.0.1", "10.0.0.5"}
 
     monkeypatch.setattr(
         pgbouncer,
         "_bind_addrs",
-        lambda _secret: ["127.0.0.1", "100.64.0.5"],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _secret: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
-    monkeypatch.setattr(pgbouncer, "reachable_host", lambda: "100.64.0.5")
+    monkeypatch.setattr(pgbouncer, "reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(port_preflight, "listener_addrs", _listener_addrs)
     monkeypatch.setattr(pgbouncer, "_admin_reachable", _fail_admin_dial)
 
@@ -85,9 +85,9 @@ def test_public_probe_interprets_socket_table_bindings(
     monkeypatch.setattr(
         pgbouncer,
         "_bind_addrs",
-        lambda _secret: ["127.0.0.1", "100.64.0.5"],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _secret: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
-    monkeypatch.setattr(pgbouncer, "reachable_host", lambda: "100.64.0.5")
+    monkeypatch.setattr(pgbouncer, "reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(port_preflight, "listener_addrs", _listener_addrs)
     monkeypatch.setattr(pgbouncer, "_admin_reachable", _fail_admin_dial)
 

@@ -25,11 +25,11 @@ from shared.http_dial import PinnedIPv4Transport
 from shared.log import _install_stdlib_intercept
 
 
-def test_gateway_health_pins_tailnet_ipv4_and_follows_redirects(
+def test_gateway_health_pins_private_ipv4_and_follows_redirects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The production probe selects the AF_INET-pinned transport for a raw
-    Tailnet IPv4 URL and preserves urllib's redirect-following behavior."""
+    private-network IPv4 URL and preserves urllib's redirect-following behavior."""
     transports: list[httpx.BaseTransport] = []
     requests: list[tuple[str, float, bool]] = []
 
@@ -47,7 +47,7 @@ def test_gateway_health_pins_tailnet_ipv4_and_follows_redirects(
             requests.append((url, timeout, follow_redirects))
             return httpx.Response(200)
 
-    url = "http://100.103.96.72:8000/api/health"
+    url = "http://10.0.0.72:8000/api/health"
 
     def _dns_forbidden(*_args: object, **_kwargs: object) -> Never:
         raise AssertionError("raw IPv4 health probe must not call getaddrinfo")

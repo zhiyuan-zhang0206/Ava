@@ -41,7 +41,7 @@ def _no_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hc.settings.observability, "telemetry_otlp_port", 4318)
 
 
-def _insert_station_unit(name: str = "station-test-a", url: str = "http://100.64.0.9:4318") -> None:
+def _insert_station_unit(name: str = "station-test-a", url: str = "http://10.0.0.9:4318") -> None:
     with shared.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
@@ -70,11 +70,11 @@ def test_main_is_noop_without_remote_observatory(monkeypatch: pytest.MonkeyPatch
 def test_resolve_target_uses_advertised_machine_units_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """The probe target is the station's ADVERTISED machine_units url — the
     reachability contract — not the configured base."""
-    monkeypatch.setattr(settings.observability, "observability_url", "http://100.64.0.9")
+    monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
     _insert_station_unit()
     target = hc.resolve_target()
     assert target is not None
-    assert target.url == "http://100.64.0.9:4318"
+    assert target.url == "http://10.0.0.9:4318"
     assert target.advertised is True
     assert target.name == "station-test-a"
 
@@ -84,10 +84,10 @@ def test_resolve_target_falls_back_to_configured_base_without_registration(
 ) -> None:
     """AVA_OBSERVABILITY_URL set but no station unit registered -> warn loudly
     and probe the configured base + OTLP port (fail-open: still give signal)."""
-    monkeypatch.setattr(settings.observability, "observability_url", "http://100.78.137.46")
+    monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
     target = hc.resolve_target()
     assert target is not None
-    assert target.url == "http://100.78.137.46:4318"
+    assert target.url == "http://10.0.0.46:4318"
     assert target.advertised is False
 
 
@@ -98,11 +98,11 @@ def test_resolve_target_skips_hybrid_gateway_station_units(
     lets the gateway capability win), not the OTLP ingress — probing it would
     hit the gateway API and alert forever (QA #1156 NIT-2). Only units whose
     advertised url carries the OTLP ingress port qualify."""
-    monkeypatch.setattr(settings.observability, "observability_url", "http://100.78.137.46")
-    _insert_station_unit(url="http://100.64.0.9:8000")  # gateway-form advertisement
+    monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
+    _insert_station_unit(url="http://10.0.0.9:8000")  # gateway-form advertisement
     target = hc.resolve_target()
     assert target is not None
-    assert target.url == "http://100.78.137.46:4318"
+    assert target.url == "http://10.0.0.46:4318"
     assert target.advertised is False
 
 
@@ -129,8 +129,8 @@ def test_station_answers_bearer_otlp_roundtrip(monkeypatch: pytest.MonkeyPatch) 
         return _Resp()
 
     monkeypatch.setattr(urllib.request, "urlopen", _open)
-    assert hc._station_answers("http://100.64.0.9:4318") is True
-    assert seen["url"] == "http://100.64.0.9:4318/v1/traces"
+    assert hc._station_answers("http://10.0.0.9:4318") is True
+    assert seen["url"] == "http://10.0.0.9:4318/v1/traces"
     assert seen["auth"] == "Bearer cluster-token"
 
 
@@ -142,7 +142,7 @@ def test_station_answers_http_error_is_not_alive(monkeypatch: pytest.MonkeyPatch
         raise urllib.error.HTTPError("http://x/v1/traces", 401, "unauthorized", {}, None)  # pyright: ignore[reportArgumentType]
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)
-    assert hc._station_answers("http://100.64.0.9:4318") is False
+    assert hc._station_answers("http://10.0.0.9:4318") is False
 
 
 def test_station_answers_connection_failure_is_not_alive(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,7 +150,7 @@ def test_station_answers_connection_failure_is_not_alive(monkeypatch: pytest.Mon
         raise OSError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)
-    assert hc._station_answers("http://100.64.0.9:4318") is False
+    assert hc._station_answers("http://10.0.0.9:4318") is False
 
 
 def test_station_answers_without_secret_warns_and_fails_open(
@@ -164,7 +164,7 @@ def test_station_answers_without_secret_warns_and_fails_open(
         pytest.fail("must not dial without a secret")
 
     monkeypatch.setattr(urllib.request, "urlopen", _fail_if_called)
-    assert hc._station_answers("http://100.64.0.9:4318") is True
+    assert hc._station_answers("http://10.0.0.9:4318") is True
 
 
 def test_alert_fires_after_two_consecutive_failures_and_resolves(
@@ -175,7 +175,7 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
     monkeypatch.setattr(hc.settings.alerts, "transition_warning_seconds", 0)
     monkeypatch.setattr(hc.settings.alerts, "transition_error_seconds", 3600)
     monkeypatch.setattr("shared.alerts.notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    target = hc._StationTarget(url="http://100.64.0.9:4318", advertised=True, name="station-test-a")
+    target = hc._StationTarget(url="http://10.0.0.9:4318", advertised=True, name="station-test-a")
     now = datetime.now(UTC)
 
     # first failure: below the consecutive-failure threshold — no alert yet
@@ -215,7 +215,7 @@ def test_main_probes_advertised_station_and_does_not_raise(
 ) -> None:
     """End-to-end: with a registered station and a healthy probe, main()
     runs clean and no alert fires."""
-    monkeypatch.setattr(settings.observability, "observability_url", "http://100.64.0.9")
+    monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
     _insert_station_unit()
     monkeypatch.setattr(hc, "_station_answers", lambda _url: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     hc.main()  # must not raise

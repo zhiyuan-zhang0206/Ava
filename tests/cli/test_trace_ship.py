@@ -489,7 +489,7 @@ def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
         "shared.config.settings.observability.telemetry_otlp_enabled", True
     )
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
-        "shared.config.settings.gateway.gateway_url", "http://100.64.0.10:8000"
+        "shared.config.settings.gateway.gateway_url", "http://10.0.0.10:8000"
     )
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         "shared.config.settings.data_plane.cluster_secret", "cluster-token"
@@ -524,7 +524,7 @@ def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
     assert cmd_trace_ship(since=None, until=None, dry_run=False) == 0
     assert posts == [
         (
-            "http://100.64.0.10:4318/v1/traces",
+            "http://10.0.0.10:4318/v1/traces",
             {
                 "Content-Type": "application/x-protobuf",
                 "Authorization": "Bearer cluster-token",

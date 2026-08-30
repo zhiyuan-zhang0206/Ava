@@ -52,8 +52,8 @@ def test_chrome_args_opens_frontend_as_first_tab_when_configured(tmp_path: Path)
     argument — the tab the user lands on. It must not disturb any flag the
     CDP probe / identity check keys on (--remote-debugging-port,
     --user-data-dir)."""
-    args = bd._chrome_args("/chrome", 9222, tmp_path / "prof", "http://100.103.96.72:3001")
-    assert args[-1] == "http://100.103.96.72:3001"
+    args = bd._chrome_args("/chrome", 9222, tmp_path / "prof", "http://10.0.0.72:3001")
+    assert args[-1] == "http://10.0.0.72:3001"
     assert "--remote-debugging-port=9222" in args
     assert f"--user-data-dir={tmp_path / 'prof'}" in args
     assert len([a for a in args if not a.startswith("--")]) == 2  # binary + the one tab
@@ -71,8 +71,8 @@ def test_frontend_url_reads_app_port_from_settings(monkeypatch: pytest.MonkeyPat
     (its private-network address, never localhost); an agent-runner-only
     host (app_port unset) or a host with no gateway URL gets no first tab."""
     monkeypatch.setattr(settings.services, "app_port", 3001)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://100.103.96.72:8000")
-    assert bd._frontend_url() == "http://100.103.96.72:3001"
+    monkeypatch.setattr(settings.gateway, "gateway_url", "http://10.0.0.72:8000")
+    assert bd._frontend_url() == "http://10.0.0.72:3001"
     # No gateway URL -> no first tab, not a dead loopback URL.
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     assert bd._frontend_url() is None

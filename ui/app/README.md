@@ -55,7 +55,13 @@ for the three Android signing secrets.
 
 The shared onboarding page has one primary server field. On Android, a bare
 host means `http://host:3000`, and a pasted default gateway URL (`:8000`)
-becomes that console URL. Paths, queries, and fragments are stripped; `https`
+becomes that console URL. Both bundled pre-auth screens (the onboarding page
+and the gate's login page) render in the device locale: English by default,
+Chinese when the webview language starts with `zh`, picked from
+`navigator.language` at load; the server/secret fields carry
+`autocomplete="username"` / `"current-password"` so password managers offer to
+fill an existing credential. The server field's placeholder is a neutral
+`host or http://host:port` — the cluster address is never a bundled default. Paths, queries, and fragments are stripped; `https`
 is preserved; other primary-field ports point the user to the advanced gateway
 override, which keeps existing manual `gatewayUrl` settings compatible. Desktop
 uses the same page without a secret field but preserves its existing arbitrary

@@ -239,15 +239,15 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     _mark_current(home)
     _redirect_plists(monkeypatch, tmp_path / "plists")
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "100.64.0.5")
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "10.0.0.5")
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_loki_url", "http://100.64.0.5:3100"
+        "shared.config.settings.observability.telemetry_loki_url", "http://10.0.0.5:3100"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_prometheus_url", "http://100.64.0.5:9090"
+        "shared.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.5:9090"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_grafana_url", "http://100.64.0.5:3003"
+        "shared.config.settings.observability.telemetry_grafana_url", "http://10.0.0.5:3003"
     )
     monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
@@ -262,10 +262,10 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
         job["job_name"]: job["static_configs"][0]["targets"] for job in prometheus["scrape_configs"]
     }
     assert targets == {
-        "prometheus": ["100.64.0.5:9090"],
+        "prometheus": ["10.0.0.5:9090"],
         "tempo": ["127.0.0.1:3200"],
-        "loki": ["100.64.0.5:3100"],
-        "grafana": ["100.64.0.5:3003"],
+        "loki": ["10.0.0.5:3100"],
+        "grafana": ["10.0.0.5:3003"],
     }
 
 

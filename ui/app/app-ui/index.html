@@ -97,10 +97,10 @@
   <body>
     <main>
       <section id="setup" hidden>
-        <h1>Connect to Ava</h1>
-        <p>Enter the Ava server address; the secret is optional — with it you land already signed in</p>
+        <h1 data-i18n="connectTitle">Connect to Ava</h1>
+        <p data-i18n="connectIntro">Enter the Ava server address; the secret is optional — with it you land already signed in</p>
         <form id="setup-form">
-          <label for="server">Server address</label>
+          <label for="server"><span data-i18n="serverLabel">Server address</span></label>
           <input
             id="server"
             name="server"
@@ -109,29 +109,29 @@
             autocapitalize="none"
             autocorrect="off"
             spellcheck="false"
-            placeholder="100.103.96.72"
+            placeholder="host or http://host:port" data-i18n-placeholder="serverPlaceholder" autocomplete="username"
             required
           />
           <div id="secret-field" style="margin-top: 14px">
-            <label for="cluster-secret">Cluster secret <span class="optional">(optional)</span></label>
+            <label for="cluster-secret"><span data-i18n="secretLabel">Cluster secret</span> <span class="optional" data-i18n="optionalTag">(optional)</span></label>
             <div class="secret-input">
               <input
                 id="cluster-secret"
                 name="cluster-secret"
                 type="password"
-                autocomplete="new-password"
+                autocomplete="current-password"
                 autocapitalize="none"
                 autocorrect="off"
                 spellcheck="false"
               />
-              <button type="button" class="secret-toggle" id="secret-visibility" aria-pressed="false">Show</button>
+              <button type="button" class="secret-toggle" id="secret-visibility" aria-pressed="false" data-i18n="showLabel">Show</button>
             </div>
-            <p class="hint">Leave empty to sign in on the web login page after connecting</p>
+            <p class="hint" data-i18n="secretHint">Leave empty to sign in on the web login page after connecting</p>
           </div>
           <details id="advanced-options">
-            <summary>Advanced options</summary>
+            <summary data-i18n="advancedTitle">Advanced options</summary>
             <div>
-              <label for="gateway">Gateway address override (optional)</label>
+              <label for="gateway"><span data-i18n="gatewayLabel">Gateway address override</span> <span class="optional" data-i18n="optionalTag">(optional)</span></label>
               <input
                 id="gateway"
                 name="gateway"
@@ -140,56 +140,74 @@
                 autocapitalize="none"
                 autocorrect="off"
                 spellcheck="false"
-                placeholder="Derived from the server address by default"
+                placeholder="Derived from the server address by default" data-i18n-placeholder="gatewayPlaceholder"
               />
               <label class="toggle">
                 <input id="background-service" type="checkbox" />
-                Run in background
+                <span data-i18n="backgroundLabel">Run in background</span>
               </label>
               <label class="toggle">
                 <input id="notifications" type="checkbox" />
-                Notifications
+                <span data-i18n="notificationsLabel">Notifications</span>
               </label>
             </div>
           </details>
           <p class="error" id="setup-error" aria-live="polite"></p>
-          <button type="submit" id="setup-submit">Connect</button>
-          <button type="button" class="secondary" id="setup-cancel" hidden>Cancel</button>
+          <button type="submit" id="setup-submit" data-i18n="connectButton">Connect</button>
+          <button type="button" class="secondary" id="setup-cancel" hidden data-i18n="cancelButton">Cancel</button>
         </form>
       </section>
 
       <section id="connecting" hidden style="text-align: center">
         <div class="spinner" style="margin-inline: auto"></div>
-        <h1>Connecting…</h1>
+        <h1 data-i18n="connectingTitle">Connecting…</h1>
         <p id="connecting-target"></p>
         <ol class="steps" id="connecting-steps">
-          <li>Probe the console</li>
-          <li>Exchange sessions</li>
-          <li>Load the UI</li>
+          <li data-i18n="stepProbe">Probe the console</li>
+          <li data-i18n="stepExchange">Exchange sessions</li>
+          <li data-i18n="stepLoad">Load the UI</li>
         </ol>
         <p class="countdown" id="connecting-countdown"></p>
       </section>
 
       <section id="unreachable" hidden style="text-align: center">
-        <h1>Connection failed</h1>
+        <h1 data-i18n="unreachableTitle">Connection failed</h1>
         <p id="unreachable-target"></p>
         <p id="unreachable-reason"></p>
-        <button type="button" id="retry">Retry</button>
-        <button type="button" class="secondary" id="change-server">Change address</button>
+        <button type="button" id="retry" data-i18n="retryButton">Retry</button>
+        <button type="button" class="secondary" id="change-server" data-i18n="changeServerButton">Change address</button>
       </section>
     </main>
 
+    <script src="locales/en.js"></script>
+    <script src="locales/zh.js"></script>
     <script>
       const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+      // Locale follows the webview language (the Android system locale is what
+      // Android WebView reports through navigator.language). English strings are
+      // the static HTML defaults; this table swaps every copy element when the
+      // device runs a Chinese system locale.
+      const I18N = window.AVA_APP_I18N || {};
+      const LOCALE = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
+      const t = (key) => (I18N[LOCALE] && I18N[LOCALE][key]) ?? I18N.en?.[key] ?? key;
+      function applyI18n() {
+        document.documentElement.lang = LOCALE === "zh" ? "zh-CN" : "en";
+        for (const el of document.querySelectorAll("[data-i18n]")) {
+          el.textContent = t(el.getAttribute("data-i18n"));
+        }
+        for (const el of document.querySelectorAll("[data-i18n-placeholder]")) {
+          el.placeholder = t(el.getAttribute("data-i18n-placeholder"));
+        }
+      }
       const SAVE_TIMEOUT_MS = 30_000;
       const SAVE_RESPONSE_TIMEOUT_MS = 2_500;
       const CONNECTING_DEADLINE_MS = 30_000;
       const AUTH_ERROR_PREFIX = "AUTH_FAILED:";
-      const failureCopy = {
-        unreachable: "This device cannot reach the address - check Tailscale login, the LAN, and that the address was copied correctly",
-        http: "The server is up but the console is not - retry shortly",
-        auth: "Wrong secret - re-enter it or clear it to fall through to the web login page",
-        "update-window": "The server may be upgrading or rolling back; retry shortly.",
+      const failureKeys = {
+        unreachable: "failureUnreachable",
+        http: "failureHttp",
+        auth: "failureAuth",
+        "update-window": "failureUpdateWindow",
       };
       let connectingTimer = null;
 
@@ -213,7 +231,7 @@
 
       function renderFailure() {
         const reason = failureReason();
-        document.getElementById("unreachable-reason").textContent = failureCopy[reason] || failureCopy.unreachable;
+        document.getElementById("unreachable-reason").textContent = t(failureKeys[reason] || "failureUnreachable");
       }
 
       function beginConnecting(target) {
@@ -227,7 +245,7 @@
           const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
           const activeStep = seconds > 20 ? 0 : seconds > 10 ? 1 : 2;
           steps.forEach((step, index) => step.classList.toggle("active", index === activeStep));
-          document.getElementById("connecting-countdown").textContent = `waiting at most ${seconds} more seconds`;
+          document.getElementById("connecting-countdown").textContent = t("countdown").replace("{seconds}", String(seconds));
         };
         update();
         connectingTimer = window.setInterval(update, 1_000);
@@ -280,7 +298,7 @@
         const visible = secret.type === "password";
         secret.type = visible ? "text" : "password";
         const button = document.getElementById("secret-visibility");
-        button.textContent = visible ? "Hide" : "Show";
+        button.textContent = visible ? t("hideLabel") : t("showLabel");
         button.setAttribute("aria-pressed", String(visible));
       });
 
@@ -309,7 +327,7 @@
             if (settled && window.location.hash !== "#connecting") return;
             timedOut = true;
             submit.disabled = false;
-            showSetupError("Connection timed out - please retry.");
+            showSetupError(t("timeoutMessage"));
           };
           if (document.visibilityState === "visible") {
             recover();
@@ -346,7 +364,7 @@
             if (timedOut) return;
             const message = String(outcome.error);
             const authFailed = message.startsWith(AUTH_ERROR_PREFIX);
-            showSetupError(authFailed ? failureCopy.auth : message, authFailed);
+            showSetupError(authFailed ? t("failureAuth") : message, authFailed);
             submit.disabled = false;
             return;
           }
@@ -361,7 +379,7 @@
           if (timedOut) return;
           const message = String(err);
           const authFailed = message.startsWith(AUTH_ERROR_PREFIX);
-          showSetupError(authFailed ? failureCopy.auth : message, authFailed);
+          showSetupError(authFailed ? t("failureAuth") : message, authFailed);
           submit.disabled = false;
         }
       });
@@ -389,6 +407,7 @@
           show(screen);
         }
       });
+      applyI18n();
       render();
     </script>
   </body>

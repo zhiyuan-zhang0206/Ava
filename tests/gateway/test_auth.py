@@ -195,14 +195,14 @@ def test_cors_allowed_origins_gateway_origin_matches_prod_url(
     monkeypatch.setattr(
         config.settings.gateway,
         "gateway_url",
-        "http://100.103.96.72:8000",
+        "http://10.0.0.72:8000",
     )
 
     assert cors_allowed_origins() == [
         "http://localhost:3100",
         "http://127.0.0.1:3100",
-        "http://100.103.96.72:8000",
-        "http://100.103.96.72:3100",
+        "http://10.0.0.72:8000",
+        "http://10.0.0.72:3100",
     ]
 
 
@@ -703,19 +703,19 @@ def test_cors_preflight_login_from_gateway_frontend_origin_passes(
     monkeypatch.setattr(
         config.settings.gateway,
         "gateway_url",
-        "http://100.103.96.72:8000",
+        "http://10.0.0.72:8000",
     )
     with _rebuilt_cors_middleware(), TestClient(app) as client:
         resp = client.options(
             "/api/auth/login",
             headers={
-                "Origin": "http://100.103.96.72:3000",
+                "Origin": "http://10.0.0.72:3000",
                 "Access-Control-Request-Method": "POST",
                 "Access-Control-Request-Headers": "content-type",
             },
         )
         assert resp.status_code != 400
-        assert resp.headers["access-control-allow-origin"] == "http://100.103.96.72:3000"
+        assert resp.headers["access-control-allow-origin"] == "http://10.0.0.72:3000"
 
 
 def test_cookie_authenticated_post_allows_gateway_frontend_origin(
@@ -734,7 +734,7 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
     monkeypatch.setattr(
         config.settings.gateway,
         "gateway_url",
-        "http://100.103.96.72:8000",
+        "http://10.0.0.72:8000",
     )
     with TestClient(app) as client:
         token = _login(client)
@@ -743,7 +743,7 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
             content=b"{}",
             headers={
                 **_session_cookie(token),
-                "Origin": "http://100.103.96.72:3000",
+                "Origin": "http://10.0.0.72:3000",
             },
         )
 
@@ -909,7 +909,7 @@ def test_cookie_authenticated_post_allows_gateway_own_origin(
     monkeypatch.setattr(
         config.settings.gateway,
         "gateway_url",
-        "http://100.103.96.72:8000",
+        "http://10.0.0.72:8000",
     )
     with TestClient(app) as client:
         token = _login(client)
@@ -918,7 +918,7 @@ def test_cookie_authenticated_post_allows_gateway_own_origin(
             content=b"{}",
             headers={
                 **_session_cookie(token),
-                "Origin": "http://100.103.96.72:8000",
+                "Origin": "http://10.0.0.72:8000",
             },
         )
 
