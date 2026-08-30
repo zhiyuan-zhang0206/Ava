@@ -11,10 +11,13 @@ the stall exposed:
 - ``--no-dev`` removes the dev group from the sync target set, so no dev wheel
   is ever downloaded by an update. Runtime dependencies stay complete (the
   project + non-dev groups remain the target set).
-- ``--frozen`` fails the sync instead of re-resolving when uv.lock drifts from
-  pyproject.toml (a lock change lands through the deliberate
-  ``uv lock`` + rollout flow, never silently mid-update). The committed
-  lockfile is the single source of the runtime pins.
+- ``--locked`` asserts lockfile freshness: the sync fails with an actionable
+  error when uv.lock drifts from pyproject.toml (``--frozen`` alone only skips
+  lockfile *updates* — uv's default — and would silently install the stale
+  lock's environment, exactly the silent-surprise class this seam exists to
+  kill). A lock change lands through the deliberate ``uv lock`` + rollout
+  flow, never silently mid-update; the committed lockfile stays the single
+  source of the runtime pins.
 - ``--inexact`` matters in the other direction: sync reconciles the venv to
   the target set and would otherwise UNINSTALL the dev packages a host already
   has. Agent sandboxes run out of this very venv and reach for pytest / pyright
@@ -28,10 +31,13 @@ the stall exposed:
   Windows stall took. Verbose mode emits a line per wheel download, which is
   how the updater log shows continuous progress during long downloads.
 
-On Windows the uv cache is pinned to a stable, non-temp directory
-(``%LOCALAPPDATA%\\ava\\uv-cache``) before the sync runs, so a lockfile that
-introduces a new wheel downloads it once instead of on every rollout; POSIX
-keeps uv's default cache location (already stable).
+On Windows the uv cache is pinned to an explicit directory
+(``%LOCALAPPDATA%\\ava\\uv-cache``) before the sync runs. uv's default Windows
+cache (``%LOCALAPPDATA%\\uv\\cache``) is already stable; the pin is
+defense-in-depth — the location is fixed regardless of uv defaults or the
+Task-Scheduler context the updater runs in, and the ``ava_home`` fallback
+covers a context without LOCALAPPDATA. POSIX keeps uv's default cache
+location (already stable).
 """
 
 from __future__ import annotations
@@ -48,17 +54,18 @@ from shared.paths import ava_home
 from shared.platform import IS_WINDOWS
 from shared.proc import run_bounded
 
-_PROD_SYNC_ARGS = ["uv", "sync", "--frozen", "--no-dev", "--inexact", "--verbose"]
+_PROD_SYNC_ARGS = ["uv", "sync", "--locked", "--no-dev", "--inexact", "--verbose"]
 
 
 def _uv_cache_dir() -> str | None:
     """Stable uv cache location for production sync, or None to keep uv's default.
 
     The Windows agent-runner's updater runs under the Task Scheduler; pinning
-    the cache to an explicit stable path (``%LOCALAPPDATA%\\ava\\uv-cache``,
-    falling back to the ava home) guarantees a lockfile that introduces a new
-    wheel pays the download once, not on every rollout. POSIX returns None —
-    uv's default (``~/.cache/uv``) is already a stable, non-temp directory.
+    the cache to an explicit path (``%LOCALAPPDATA%\\ava\\uv-cache``, falling
+    back to the ava home) fixes the location regardless of uv defaults or the
+    scheduler context (defense-in-depth — uv's default Windows cache is
+    already stable). POSIX returns None — uv's default (``~/.cache/uv``) is
+    already a stable, non-temp directory.
     """
     if not IS_WINDOWS:
         return None

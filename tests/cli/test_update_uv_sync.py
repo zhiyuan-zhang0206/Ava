@@ -1,10 +1,11 @@
-"""Production-scoped ``uv sync``: dev-group exclusion, frozen lock, bounded runtime, terminal outcomes.
+"""Production-scoped ``uv sync``: dev-group exclusion, locked lockfile, bounded runtime, terminal outcomes.
 
 The 2026-08-30 rollout stalled on the Windows agent-runner, whose updater ran a
 bare ``uv sync`` and spent 449 s downloading the dev-only pyright 1.1.411 wheel
 (RAM at 97.3%, uv log stuck at "Downloading pyright (5.9MiB)"). These tests pin
-the properties the fix ships: production sync excludes dev-only deps and never
-re-resolves a drifted lockfile (``--frozen``), the Windows cache is pinned to a
+the properties the fix ships: production sync excludes dev-only deps and
+asserts lockfile freshness (``--locked`` — a drifted lock fails loudly instead
+of silently installing the stale environment), the Windows cache is pinned to a
 stable path, every sync is bounded and leaves progress evidence, and every
 failure mode (including a hang) lands as a diagnosable terminal outcome instead
 of silence. The dependency-group boundary tests at the bottom lock the split
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import os
+import shutil
 import stat
 import subprocess
 import tomllib
@@ -26,7 +28,7 @@ import pytest
 from cli.commands import _update_uv_sync as _native_sync
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
-_EXPECTED_ARGS = ["uv", "sync", "--frozen", "--no-dev", "--inexact", "--verbose"]
+_EXPECTED_ARGS = ["uv", "sync", "--locked", "--no-dev", "--inexact", "--verbose"]
 
 
 def _read_only_pth(repo: Path) -> Path:
@@ -45,13 +47,13 @@ def test_prod_sync_argv_excludes_dev_group_and_carries_the_bound(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The sync argv must exclude the dev group (no dev wheel is ever downloaded
-    by an update), fail fast on a drifted lockfile (`--frozen` — the committed
-    uv.lock is the single source of runtime pins), keep the already-installed
-    dev packages (`--inexact`), carry a progress heartbeat (`--verbose`), and
-    run under `run_bounded` with the deploy-family ceiling. Only `--frozen` is
-    allowed: `--locked` would additionally require the lock to be in sync with
-    the pyproject *before* resolving, a stricter guarantee than the rollout
-    flow needs."""
+    by an update), assert lockfile freshness (`--locked` — the committed
+    uv.lock is the single source of runtime pins, and a drift must fail loudly
+    rather than silently install the stale environment), keep the
+    already-installed dev packages (`--inexact`), carry a progress heartbeat
+    (`--verbose`), and run under `run_bounded` with the deploy-family ceiling.
+    Only `--locked` is allowed: `--frozen` merely skips lockfile *updates*
+    (uv's default) and would not catch a drift."""
     repo = tmp_path / "source"
     seen: dict[str, object] = {}
 
@@ -71,12 +73,13 @@ def test_prod_sync_argv_excludes_dev_group_and_carries_the_bound(
     assert kwargs["cwd"] == repo
     assert kwargs["timeout"] == UV_SYNC_TIMEOUT_S
     assert kwargs["capture_output"] is False
-    # Lockfile semantics are frozen, not re-resolved: `--frozen` in, `--locked`
-    # out (a lock change lands through the deliberate `uv lock` + rollout flow).
+    # Lockfile semantics are asserted, never silently re-resolved or ignored:
+    # `--locked` in, `--frozen` out (a lock change lands through the deliberate
+    # `uv lock` + rollout flow).
     argv = seen["argv"]
     assert isinstance(argv, list)
-    assert "--frozen" in argv
-    assert "--locked" not in argv
+    assert "--locked" in argv
+    assert "--frozen" not in argv
 
 
 def test_timeout_becomes_a_failed_result_with_a_diagnosable_reason(
@@ -215,6 +218,60 @@ def test_posix_sync_keeps_uv_default_cache(monkeypatch: pytest.MonkeyPatch, tmp_
     assert "UV_CACHE_DIR" not in os.environ
 
 
+def test_win_sync_respects_an_explicit_uv_cache_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """setdefault, not assignment: an operator-pinned UV_CACHE_DIR wins over
+    the built-in pin — replacing setdefault with direct assignment must fail
+    this test (mutation-verified in adversarial QA)."""
+    monkeypatch.setattr(_native_sync, "IS_WINDOWS", True)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+    explicit = str(tmp_path / "explicit-cache")
+    monkeypatch.setenv("UV_CACHE_DIR", explicit)
+
+    def _run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(_native_sync, "run_bounded", _run)
+
+    assert _native_sync.run_uv_sync(tmp_path).returncode == 0
+    assert os.environ["UV_CACHE_DIR"] == explicit
+
+
+# ─── real uv integration: --locked fails on a drifted lockfile ───────────────
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
+def test_locked_fails_on_a_drifted_lockfile_with_real_uv(tmp_path: Path) -> None:
+    """End-to-end on the pinned toolchain: `uv sync --locked` must exit non-zero
+    with an actionable message when pyproject.toml drifts from uv.lock — the
+    exact silent-surprise class this seam exists to kill. `--frozen` alone
+    exits 0 and installs the stale environment on uv 0.10.2 (verified)."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    base = (
+        '[project]\nname = "drift-test"\nversion = "0.1.0"\n'
+        'requires-python = ">=3.12"\ndependencies = []\n'
+    )
+    (proj / "pyproject.toml").write_text(base)
+    subprocess.run(["uv", "lock"], cwd=proj, check=True, capture_output=True, timeout=120)
+    # Drift: a dependency is declared without re-locking.
+    (proj / "pyproject.toml").write_text(
+        '[project]\nname = "drift-test"\nversion = "0.1.0"\n'
+        'requires-python = ">=3.12"\ndependencies = ["click>=8.0"]\n'
+    )
+    result = subprocess.run(
+        ["uv", "sync", "--locked", "--no-dev", "--inexact"],
+        cwd=proj,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "needs to be updated" in result.stdout + result.stderr
+
+
 # ─── dependency-group boundary ───────────────────────────────────────────────
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -247,7 +304,10 @@ def test_dev_group_holds_the_dev_only_tools() -> None:
 def test_prod_source_never_imports_dev_only_modules() -> None:
     """Production code (everything outside tests/) must not import dev-only
     tooling — if it did, --no-dev production sync would leave the runtime
-    missing an import. Scans the import surface statically."""
+    missing an import. Scans the import surface statically (first dotted
+    component per statement; an indirect chain through a first-party module is
+    out of scope — it would surface as ModuleNotFoundError at `ava start` and
+    is caught by the readiness gate)."""
     dev_only_modules = {
         "pytest",
         "pyright",
