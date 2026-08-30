@@ -55,6 +55,7 @@ from urllib.parse import urlsplit
 
 from shared.cluster import ensure_cluster_redis_acl
 from shared.config import settings
+from shared.config.physical_backup import pitr_replication_hba_lines
 from shared.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_tools import PG_BIN_LINUX, brew_prefix, is_macos, pg_shm_args, pg_tool, pg_tz_args
@@ -191,6 +192,9 @@ def _pg_hba_body(cluster_secret: str) -> str:
     loopback alone (`_bind_addrs`), so no remote host can reach it anyway — the
     auth-less posture never extends past this machine.
 
+    PITR adds loopback `replication` rows for its role (see
+    `pitr_replication_hba_lines`): pg_basebackup's PHYSICAL replication
+    connection matches only the literal `replication` keyword, never `all`.
     `cluster_secret` is the CALLER-PASSED cluster secret, never read from
     `settings`: install-time birth has no `.env` yet, so `settings` would see an
     inherited sibling secret (a prod-sourced shell) and write scram lines into a
@@ -210,6 +214,7 @@ def _pg_hba_body(cluster_secret: str) -> str:
         lines.append(f"host all all {host}/32 scram-sha-256")
     for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
         lines.append(f"host all all {cidr} scram-sha-256")
+    lines += pitr_replication_hba_lines()
     return "\n".join(lines) + "\n"
 
 
