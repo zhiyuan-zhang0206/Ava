@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from services.pitr.base_manifest import CandidateManifest, WalRange, _lsn
-from services.pitr.uploader import AckManifest
+from services.pitr.checksums import KNOWN_CHECKSUM_ALGOS
+from services.pitr.uploader import ack_manifest_from_raw
 
 PROTECTED_SCHEMA_VERSION = 1
 
@@ -19,14 +20,17 @@ PROTECTED_SCHEMA_VERSION = 1
 class RestoreObject:
     archive_name: str
     object_name: str
-    generation: int
+    pin_token: str
     size: int
-    crc32c: str
+    checksum_algo: str
+    checksum_value: str
     metadata: tuple[tuple[str, str], ...]
 
     def __post_init__(self) -> None:
-        if self.generation <= 0 or self.size <= 0 or not self.crc32c:
-            raise ValueError("restore object lacks an immutable generation identity")
+        if not self.pin_token or self.size <= 0 or not self.checksum_value:
+            raise ValueError("restore object lacks an immutable pinned identity")
+        if self.checksum_algo not in KNOWN_CHECKSUM_ALGOS:
+            raise ValueError("restore object checksum algorithm is unsupported")
         if tuple(sorted(self.metadata)) != self.metadata:
             raise ValueError("restore object metadata must be canonical")
 
@@ -81,8 +85,8 @@ class ProtectedManifest:
             raise ValueError("protected candidate digest differs from the candidate")
         if self.base.object_name != self.candidate.base_object.object_name:
             raise ValueError("protected base differs from the candidate")
-        if self.base.generation != self.candidate.base_object.generation:
-            raise ValueError("protected base generation differs from the candidate")
+        if self.base.pin_token != self.candidate.base_object.pin_token:
+            raise ValueError("protected base pin token differs from the candidate")
         if _lsn(self.target_lsn) < _lsn(self.candidate.end_lsn):
             raise ValueError("restore proof did not reach the candidate target")
         if self.proof.target_lsn != self.target_lsn:
@@ -155,16 +159,16 @@ def wal_objects_from_acks(
         path = ack_dir / f"{archive_name}.ack.json"
         try:
             raw = json.loads(path.read_text())
-            ack = AckManifest(**raw)
+            ack = ack_manifest_from_raw(raw)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError(f"required archive lacks a valid ACK: {archive_name}") from exc
-        if ack.archive_name != archive_name or ack.generation <= 0:
+        if ack.archive_name != archive_name or not ack.pin_token:
             raise ValueError(f"required archive ACK identity differs: {archive_name}")
         metadata = {
             "ava-archive-name": ack.archive_name,
             "ava-source-sha256": ack.source_sha256,
             "ava-source-size": str(ack.source_size),
-            "ava-ciphertext-crc32c": ack.ciphertext_crc32c,
+            "ava-ciphertext-crc32c": ack.ciphertext_checksum_value,
             "ava-encryption-format": ack.encryption_format,
             "ava-key-id": ack.key_id,
         }
@@ -172,9 +176,10 @@ def wal_objects_from_acks(
             RestoreObject(
                 archive_name,
                 ack.object_name,
-                ack.generation,
+                ack.pin_token,
                 ack.ciphertext_size,
-                ack.ciphertext_crc32c,
+                ack.ciphertext_checksum_algo,
+                ack.ciphertext_checksum_value,
                 tuple(sorted(metadata.items())),
             )
         )

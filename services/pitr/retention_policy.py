@@ -65,7 +65,7 @@ def plan_retention(  # noqa: PLR0915
             blockers.add("protected proof lacks its exact candidate")
             continue
         if proof.chain_id in protected and protected[proof.chain_id] != proof:
-            blockers.add("ambiguous protected proof generation")
+            blockers.add("ambiguous protected proof pin token")
             continue
         protected[proof.chain_id] = proof
 
@@ -77,14 +77,14 @@ def plan_retention(  # noqa: PLR0915
     if len(retained_chains) < retain_chains:
         blockers.add("fewer than two protected chains")
 
-    remote_inventory = {(item.object_name, item.generation): item for item in evidence.inventory}
+    remote_inventory = {(item.object_name, item.pin_token): item for item in evidence.inventory}
     if len(remote_inventory) != len(evidence.inventory):
-        blockers.add("duplicate remote object generation")
-    by_name: dict[str, set[int]] = {}
+        blockers.add("duplicate remote object pin token")
+    by_name: dict[str, set[str]] = {}
     for item in evidence.inventory:
-        by_name.setdefault(item.object_name, set()).add(item.generation)
-    if any(len(generations) != 1 for generations in by_name.values()):
-        blockers.add("ambiguous remote object generation")
+        by_name.setdefault(item.object_name, set()).add(item.pin_token)
+    if any(len(tokens) != 1 for tokens in by_name.values()):
+        blockers.add("ambiguous remote object pin token")
 
     remote_by_archive = _archive_index(evidence.inventory, "remote", blockers)
     local_by_archive = _archive_index(evidence.local_acks, "local ACK", blockers)
@@ -100,14 +100,14 @@ def plan_retention(  # noqa: PLR0915
         if remote != local:
             blockers.add("local ACK conflicts with exact remote archive identity")
             continue
-        verified_inventory[(remote.object_name, remote.generation)] = remote
+        verified_inventory[(remote.object_name, remote.pin_token)] = remote
     cross_timeline = any(item.kind == "history" for item in evidence.inventory) or any(
         wal_range.timeline > 1 for item in candidates.values() for wal_range in item.wal_ranges
     )
     if cross_timeline:
         blockers.add("cross-timeline ancestry is not authenticated by this planner")
 
-    keep: dict[tuple[str, int], str] = {}
+    keep: dict[tuple[str, str], str] = {}
     for chain_id in unprotected_chains:
         candidate = candidates[chain_id]
         _pin_candidate(keep, candidate, verified_inventory, "unprotected candidate", blockers)
@@ -127,7 +127,7 @@ def plan_retention(  # noqa: PLR0915
                 keep[identity] = "cross-timeline ancestry pinned fail closed"
 
     protected_objects = {
-        (proof.base.object_name, proof.base.generation)
+        (proof.base.object_name, proof.base.pin_token)
         for chain_id, proof in protected.items()
         if chain_id not in retained_chains
     }
@@ -172,22 +172,24 @@ def plan_retention(  # noqa: PLR0915
 
 
 def _pin_candidate(
-    keep: dict[tuple[str, int], str],
+    keep: dict[tuple[str, str], str],
     candidate: CandidateManifest,
-    inventory: dict[tuple[str, int], RetentionObject],
+    inventory: dict[tuple[str, str], RetentionObject],
     reason: str,
     blockers: set[str],
 ) -> None:
-    base = (candidate.base_object.object_name, candidate.base_object.generation)
+    base = (candidate.base_object.object_name, candidate.base_object.pin_token)
     actual_base = inventory.get(base)
     if actual_base is None or (
         actual_base.size,
-        actual_base.crc32c,
+        actual_base.checksum_algo,
+        actual_base.checksum_value,
     ) != (
         candidate.base_object.ciphertext_size,
-        candidate.base_object.ciphertext_crc32c,
+        candidate.base_object.ciphertext_checksum_algo,
+        candidate.base_object.ciphertext_checksum_value,
     ):
-        blockers.add("candidate base generation is missing or changed")
+        blockers.add("candidate base pin token is missing or changed")
     keep[base] = reason
     required = set(required_archive_names(candidate.wal_ranges, candidate.wal_segment_size))
     seen: set[str] = set()
@@ -200,27 +202,33 @@ def _pin_candidate(
 
 
 def _pin_proof(
-    keep: dict[tuple[str, int], str],
+    keep: dict[tuple[str, str], str],
     proof: ProtectedManifest,
-    inventory: dict[tuple[str, int], RetentionObject],
+    inventory: dict[tuple[str, str], RetentionObject],
     reason: str,
     blockers: set[str],
 ) -> None:
     objects = (proof.base, *proof.wal)
     for expected in objects:
-        identity = (expected.object_name, expected.generation)
+        identity = (expected.object_name, expected.pin_token)
         actual = inventory.get(identity)
         if actual is None or (
             actual.size,
-            actual.crc32c,
+            actual.checksum_algo,
+            actual.checksum_value,
             actual.metadata,
-        ) != (expected.size, expected.crc32c, expected.metadata):
-            blockers.add("protected object generation is missing or changed")
+        ) != (
+            expected.size,
+            expected.checksum_algo,
+            expected.checksum_value,
+            expected.metadata,
+        ):
+            blockers.add("protected object pin token is missing or changed")
         keep[identity] = reason
 
 
 def _pin_contiguous_wal(
-    keep: dict[tuple[str, int], str],
+    keep: dict[tuple[str, str], str],
     oldest: CandidateManifest,
     inventory: tuple[RetentionObject, ...],
     *,
@@ -233,7 +241,7 @@ def _pin_contiguous_wal(
         if item is None:
             blockers.add("gap inside oldest retained recovery chain")
             continue
-        keep[(item.object_name, item.generation)] = (
+        keep[(item.object_name, item.pin_token)] = (
             "timeline ancestry" if item.kind == "history" else "continuous WAL recovery window"
         )
     wal = [item for item in inventory if item.kind == "wal" and item.archive_name is not None]
@@ -246,20 +254,20 @@ def _pin_contiguous_wal(
         item_timeline, segment = _segment(item.archive_name or "", segment_size)
         if item_timeline == timeline:
             if segment in on_timeline:
-                blockers.add("forked WAL generation at one segment")
+                blockers.add("forked WAL pin token at one segment")
             on_timeline[segment] = item
     current = start
     high_water = next((name for name in reversed(required) if not name.endswith(".history")), None)
     while current in on_timeline:
         item = on_timeline[current]
-        keep[(item.object_name, item.generation)] = "continuous WAL recovery window"
+        keep[(item.object_name, item.pin_token)] = "continuous WAL recovery window"
         high_water = item.archive_name
         current += 1
     if any(segment > current for segment in on_timeline):
         blockers.add("gap before remote ACK high-water")
     for item in inventory:
         if item.kind == "history":
-            keep[(item.object_name, item.generation)] = "timeline ancestry"
+            keep[(item.object_name, item.pin_token)] = "timeline ancestry"
     return high_water
 
 
@@ -281,9 +289,9 @@ def _before_frontier(item: RetentionObject, oldest: CandidateManifest) -> bool:
 
 
 def _canonical_decisions(items: list[RetentionDecision]) -> list[RetentionDecision]:
-    by_identity: dict[tuple[str, int], RetentionDecision] = {}
+    by_identity: dict[tuple[str, str], RetentionDecision] = {}
     for item in items:
-        by_identity[(item.object.object_name, item.object.generation)] = item
+        by_identity[(item.object.object_name, item.object.pin_token)] = item
     return [by_identity[key] for key in sorted(by_identity)]
 
 

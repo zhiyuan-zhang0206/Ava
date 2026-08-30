@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from services.pitr.retention_inventory import GCSRetentionInventoryReader
 from services.pitr.retention_planner import DryRunResult, write_dry_run_plan
+from services.pitr.store_factory import get_backend
 from shared.config.physical_backup import PhysicalBackupSettings
 from shared.health_schema import DEGRADED, OK, component
 from shared.paths import ava_home
@@ -75,7 +75,7 @@ def refresh(config: PhysicalBackupSettings) -> DryRunResult:
     return write_dry_run_plan(
         ava_home() / "physical-backup",
         retain_chains=config.pitr_retained_weekly_chains,
-        inventory_reader=GCSRetentionInventoryReader(
+        inventory_reader=get_backend().retention_inventory_reader(
             project=config.pitr_gcs_project,
             bucket=config.pitr_gcs_bucket,
             prefix=config.pitr_gcs_prefix,

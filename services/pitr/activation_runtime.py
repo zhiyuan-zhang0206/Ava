@@ -334,8 +334,8 @@ def probe_switch_privilege() -> None:
 def remote_wal_proof(
     record: ActivationRecord, stop: threading.Event | None = None
 ) -> tuple[dict[str, str], dict[str, str]]:
-    from services.pitr.gcs_store import GCSObjectStore
-    from services.pitr.uploader import AckManifest
+    from services.pitr.store_factory import get_backend
+    from services.pitr.uploader import ack_manifest_from_raw
     from shared.db import direct_db_url
 
     exact, deadline_text = record.wal_exact_evidence, record.wal_verification_deadline
@@ -366,7 +366,7 @@ def remote_wal_proof(
             and int(str(row[2])) > int(exact["archived_count"])
             and ack_path.is_file()
         ):
-            ack = AckManifest(**json.loads(ack_path.read_text()))
+            ack = ack_manifest_from_raw(json.loads(ack_path.read_text()))
             if ack.archive_name != archive_name:
                 raise RuntimeError("durable WAL ACK targets a different archive")
             acknowledged = datetime.fromisoformat(ack.acknowledged_at)
@@ -374,22 +374,32 @@ def remote_wal_proof(
                 raise RuntimeError("durable WAL ACK falls outside the activation window")
             if stop is not None and stop.is_set():
                 raise RuntimeError("PITR WAL proof lost its deployment lease")
-            remote = GCSObjectStore(
-                project=config.pitr_gcs_project,
-                bucket=config.pitr_gcs_bucket,
-                credentials_file=viewer_credentials,
-            ).stat(ack.object_name)
-            if remote is None or (remote.generation, remote.size, remote.crc32c) != (
-                ack.generation,
+            remote = (
+                get_backend()
+                .object_store(
+                    project=config.pitr_gcs_project,
+                    bucket=config.pitr_gcs_bucket,
+                    credentials_file=viewer_credentials,
+                )
+                .stat(ack.object_name)
+            )
+            if remote is None or (
+                remote.pin_token,
+                remote.size,
+                remote.checksum.algo,
+                remote.checksum.value,
+            ) != (
+                ack.pin_token,
                 ack.ciphertext_size,
-                ack.ciphertext_crc32c,
+                ack.ciphertext_checksum_algo,
+                ack.ciphertext_checksum_value,
             ):
                 raise RuntimeError("viewer observed WAL differs from durable ACK")
             metadata = {
                 "ava-archive-name": ack.archive_name,
                 "ava-source-sha256": ack.source_sha256,
                 "ava-source-size": str(ack.source_size),
-                "ava-ciphertext-crc32c": ack.ciphertext_crc32c,
+                "ava-ciphertext-crc32c": ack.ciphertext_checksum_value,
                 "ava-encryption-format": ack.encryption_format,
                 "ava-key-id": ack.key_id,
             }
@@ -404,9 +414,9 @@ def remote_wal_proof(
                 "bucket_name": str(config.pitr_gcs_bucket),
                 "object_prefix": config.pitr_gcs_prefix,
                 "object_name": ack.object_name,
-                "generation": str(ack.generation),
+                "generation": ack.pin_token,
                 "ciphertext_size": str(ack.ciphertext_size),
-                "ciphertext_crc32c": ack.ciphertext_crc32c,
+                "ciphertext_crc32c": ack.ciphertext_checksum_value,
                 "source_sha256": ack.source_sha256,
                 "source_size": str(ack.source_size),
                 "key_id": ack.key_id,

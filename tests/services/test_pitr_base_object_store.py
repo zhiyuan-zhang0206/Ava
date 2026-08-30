@@ -91,7 +91,8 @@ def test_stream_upload_verifies_exact_remote_identity() -> None:
     ack = store.put_base_if_absent(source=source, object_name="base/object", metadata=metadata)
 
     assert ack.size == len(source.value)
-    assert ack.crc32c == source.ciphertext_crc32c
+    assert ack.checksum.algo == "crc32c"
+    assert ack.checksum.value == source.ciphertext_crc32c
     assert source.opens == 1
 
 

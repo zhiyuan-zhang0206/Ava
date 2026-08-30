@@ -14,6 +14,7 @@ from google.cloud import storage
 from google.oauth2 import service_account
 
 from services.pitr.archive_shim import archive_name_is_valid
+from services.pitr.checksums import CRC32C
 from services.pitr.retention_manifest import RetentionObject
 
 
@@ -85,10 +86,11 @@ class GCSRetentionInventoryReader:
                 objects.append(
                     RetentionObject(
                         raw.name,
-                        int(raw.generation),
+                        str(raw.generation),
                         int(raw.size),
                         archive_name,
                         kind,
+                        CRC32C,
                         str(raw.crc32c or ""),
                         tuple(sorted(metadata.items())),
                     )

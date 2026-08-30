@@ -93,7 +93,7 @@ def _base_restore_object(candidate: CandidateManifest) -> RestoreObject:
     metadata = {
         "ava-candidate-sha256": candidate.base_object.source_sha256,
         "ava-ciphertext-size": str(candidate.base_object.ciphertext_size),
-        "ava-ciphertext-crc32c": candidate.base_object.ciphertext_crc32c,
+        "ava-ciphertext-crc32c": candidate.base_object.ciphertext_checksum_value,
         "ava-encryption-format": candidate.base_object.encryption_format,
         "ava-key-id": candidate.base_object.key_id,
         "ava-packer-version": "1",
@@ -101,9 +101,10 @@ def _base_restore_object(candidate: CandidateManifest) -> RestoreObject:
     return RestoreObject(
         "base.tar.zst.enc",
         candidate.base_object.object_name,
-        candidate.base_object.generation,
+        candidate.base_object.pin_token,
         candidate.base_object.ciphertext_size,
-        candidate.base_object.ciphertext_crc32c,
+        candidate.base_object.ciphertext_checksum_algo,
+        candidate.base_object.ciphertext_checksum_value,
         tuple(sorted(metadata.items())),
     )
 
@@ -466,7 +467,7 @@ def _publish_protected(
     require_ownership()
     if (
         ack.object_name != object_name
-        or ack.generation <= 0
+        or not ack.pin_token
         or ack.size != len(payload)
         or dict(ack.metadata) != metadata
     ):
@@ -657,7 +658,7 @@ def verify_candidate_proof(
     archive_names = required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
     authoritative_wal = wal_objects_from_acks(ack_dir=ack_dir, archive_names=archive_names)
     if protected.base != _base_restore_object(candidate) or protected.wal != authoritative_wal:
-        raise RestoreProofError("pending proof differs from authoritative object generations")
+        raise RestoreProofError("pending proof differs from authoritative object identities")
     return protected
 
 
