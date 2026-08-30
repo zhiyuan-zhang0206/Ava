@@ -125,14 +125,11 @@
     "costTitle": "Estimated LLM spend over the past {win} (current per-model pricing)",
     "costTitleDetail": "Estimated LLM spend over the past {win} at current per-model pricing: ${amount}",
     "avgTurnTitle": "Avg LLM call wall time over the past {win} (filters ok=true to exclude failed turns)",
-    "warningsTitle": "WARNING / ERROR over the past {win}: total / resolved / remaining (0 remaining = all clear)",
+    "warningsTitle": "Unresolved WARNING / ERROR over the past {win}",
     "expandStatistics": "Expand statistics",
     "collapseStatistics": "Collapse statistics",
     "noMatch": "No agents match “{query}”",
-    "searchAgent": "Search agent",
-    "warningLevel": "WARN",
-    "errorLevel": "ERR",
-    "statsAllClear": "All clear"
+    "searchAgent": "Search agent"
   },
   "spawn": {
     "models": "Models",

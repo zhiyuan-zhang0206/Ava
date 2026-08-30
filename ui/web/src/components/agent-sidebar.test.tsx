@@ -10,7 +10,7 @@
 
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BAR_HEIGHT_CLASS } from "@/lib/layout";
@@ -627,18 +627,38 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     expect(screen.getByText("80.00%")).toBeTruthy(); // cache hit, 2 decimals
     expect(screen.getByText("$1.23")).toBeTruthy(); // windowed cost
     expect(screen.getByText("3s")).toBeTruthy(); // avg turn
-    // warn / err rows: one unresolved number per level, scoped to the row
-    // (user ruling 2026-08-29); the error row is fully dismissed -> all-clear
-    const warnRow = document.querySelector<HTMLElement>('[data-level="warning"]');
-    expect(warnRow).not.toBeNull();
-    expect(within(warnRow!).getByText("1")).toBeTruthy(); // warning unresolved
-    const errRow = document.querySelector<HTMLElement>('[data-level="error"]');
-    expect(errRow).not.toBeNull();
-    expect(within(errRow!).getByText("All clear")).toBeTruthy(); // error all-clear
+    // warnings/errors card: one unresolved number per level rendered as a
+    // single "N / M" value in the original 2x3 card layout (restored per user
+    // feedback 2026-08-30); zero levels render as plain 0, so warnings_net=1
+    // with errors_net=0 shows the bare "1 / 0" value
+    expect(screen.getByText("1 / 0")).toBeTruthy();
     // no Total / Resolved / Remaining labels anywhere in the card
     expect(screen.queryByText(/Total/)).toBeNull();
     expect(screen.queryByText(/Resolved/)).toBeNull();
     expect(screen.queryByText(/Remaining/)).toBeNull();
+  });
+
+  it("both levels fully resolved → plain '0 / 0', no all-clear badge", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.stats = {
+      live_count: 5,
+      window_hours: 24,
+      tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
+      cost_usd: 1.2345,
+      avg_turn_seconds: 3.14,
+      warnings: 3,
+      errors: 2,
+      warnings_dismissed: 3,
+      warnings_net: 0,
+      errors_dismissed: 2,
+      errors_net: 0,
+      total_events: 100,
+    };
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+    // user ruling 2026-08-30: zero levels render as plain 0, no all-clear badge
+    expect(screen.getByText("0 / 0")).toBeTruthy();
+    expect(screen.queryByText("All clear")).toBeNull();
   });
 
   it("error without data shows retry and clicking it refetches", () => {
