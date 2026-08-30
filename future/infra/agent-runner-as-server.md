@@ -1,18 +1,21 @@
 # Agent-runner as server: agents as turn tasks, not processes
 
-> **Status: ratified; Phase 1 partially built, behind `AVA_RUNNER_MODE`.**
-> Phase 0 (per-turn graph invocation) is shipped. Of Phase 1: the per-turn
-> settings + plugin-config views, turn-scoped identity and log attribution, the
-> claim node's hosted idle branch, the wake dispatcher, and the `agent-host`
-> daemon that runs turns are all built (`services/agent_host/`). What is NOT
-> built is the lifecycle integration around them — spawn/resurrect are
-> hosted-aware (the launch op skips the fork and hands delivery to the
-> dispatcher via a wake; `ops/agent_wake` flips rows and wakes instead of
-> launching processes), but restart/terminate still route through the process
-> path, and hibernation, the per-agent lease renewer and the lease-zombie
-> reaper are untouched. So `hosted` is a runnable daemon but not yet an end-to-end cluster
-> mode; the flag defaults to `process` and the service is gated off the roster
-> until a cluster opts in. Migration step 3's deletions remain future work.
+> **Status: ratified; Phase 1 built end-to-end, behind `AVA_RUNNER_MODE`.**
+> Phase 0 (per-turn graph invocation) is shipped. Phase 1 is built
+> (`services/agent_host/`): the per-turn settings + plugin-config views,
+> turn-scoped identity and log attribution, the claim node's hosted idle
+> branch, the wake dispatcher, and the `agent-host` daemon that runs turns.
+> The lifecycle around the turns is hosted-aware too — spawn/resurrect skip
+> the fork and hand delivery to the dispatcher via a wake (`ops/ops_launch`,
+> `ops/agent_wake`), restart resolves in-process through the
+> `restart_requested` channel, terminate is the durable terminate inbound
+> plus a best-effort turn-task cancel, and cluster update quiesces the runner
+> instead of draining N agent processes. The hibernation chain (controller,
+> status, SIGUSR1 path, endpoint, config keys) is being deleted (Task #1976);
+> the per-agent lease renewer and the lease-zombie reaper remain process-mode
+> machinery, gated off a hosted cluster with the restarter. The flag defaults
+> to `process` and the service is gated off the roster until a cluster opts
+> in. Migration step 3's remaining deletions stay future work.
 >
 > One Phase 1 property was NOT achieved and is worth knowing before a soak: the
 > host builds ONE compiled graph per process, because `build_graph` mutates
