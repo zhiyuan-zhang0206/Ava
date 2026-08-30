@@ -183,6 +183,135 @@ def test_legacy_protected_manifest_normalizes_restore_objects() -> None:
     assert protected.candidate == candidate
 
 
+def test_resume_protected_publish_accepts_the_legacy_bytes_digest(tmp_path: Path) -> None:
+    """QA #1131 delta2: the durable resume path accepts a protected manifest
+    written before the abstraction — the embedded candidate keeps its legacy
+    serialization and the digest covers those raw bytes (ef05a1e7...).
+    from_json canonicalizes the field, so the resume check is a plain
+    canonical equality, never a re-hash of a digest string."""
+    import hashlib
+
+    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.restore_manifest import required_archive_names
+    from services.pitr.restore_proof import _resume_protected_publish
+
+    legacy_digest = hashlib.sha256(_LEGACY_CANDIDATE_JSON.encode()).hexdigest()
+    assert legacy_digest.startswith("ef05a1e7")  # the live-tree legacy bytes
+    candidate = CandidateManifest.from_json(_LEGACY_CANDIDATE_JSON)
+    names = required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
+    protected_raw: dict[str, Any] = {
+        "schema_version": 1,
+        "protected": True,
+        "chain_id": candidate.chain_id,
+        "candidate_sha256": legacy_digest,
+        "candidate": json.loads(_LEGACY_CANDIDATE_JSON),
+        "base": {
+            "archive_name": "base.tar.zst.enc",
+            "object_name": candidate.base_object.object_name,
+            "generation": int(candidate.base_object.pin_token),
+            "size": candidate.base_object.ciphertext_size,
+            "crc32c": candidate.base_object.ciphertext_checksum_value,
+            "metadata": [],
+        },
+        "wal": [
+            {
+                "archive_name": name,
+                "object_name": f"ava-pitr/wal/{name[:8]}/{name}.enc",
+                "generation": index + 1,
+                "size": 10,
+                "crc32c": "crc-value",
+                "metadata": [["ava-key-id", "v1"]],
+            }
+            for index, name in enumerate(names)
+        ],
+        "target_lsn": candidate.end_lsn,
+        "wal_segment_size": candidate.wal_segment_size,
+        "proof": RestoreProofFixture().__dict__,
+    }
+    root = tmp_path / "root"
+    (root / "protected-manifests").mkdir(parents=True)
+    (root / "protected-manifests" / f"{candidate.chain_id}.json").write_text(
+        json.dumps(protected_raw)
+    )
+
+    class Publisher:
+        def put_manifest_if_absent(
+            self, *, payload: bytes, object_name: str, metadata: dict[str, str]
+        ) -> RemoteObjectAck:
+            raise AssertionError("resume of a local manifest must not republish")
+
+    resumed = _resume_protected_publish(
+        root=root, candidate=candidate, prefix="ava-pitr", publisher=Publisher()
+    )
+    assert resumed is not None
+    assert resumed.candidate == candidate
+    assert resumed.candidate_sha256 == candidate_sha256_of(candidate)
+
+
+def test_resume_protected_publish_rejects_same_chain_different_candidate(
+    tmp_path: Path,
+) -> None:
+    """QA #1131 delta2 counterexample: a same-chain_id manifest whose
+    embedded candidate differs in content must be rejected — the previous
+    hash-of-hash check let every new-shape manifest through regardless of
+    what it embedded."""
+    import dataclasses
+
+    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.restore_manifest import required_archive_names
+    from services.pitr.restore_proof import RestoreProofError, _resume_protected_publish
+
+    candidate = CandidateManifest.from_json(_LEGACY_CANDIDATE_JSON)
+    tampered = dataclasses.replace(candidate, system_identifier="7656686487711429999")
+    names = required_archive_names(tampered.wal_ranges, tampered.wal_segment_size)
+    protected_raw: dict[str, Any] = {
+        "schema_version": 1,
+        "protected": True,
+        "chain_id": tampered.chain_id,
+        "candidate_sha256": candidate_sha256_of(tampered),
+        "candidate": json.loads(tampered.to_json()),
+        "base": {
+            "archive_name": "base.tar.zst.enc",
+            "object_name": tampered.base_object.object_name,
+            "pin_token": tampered.base_object.pin_token,
+            "size": tampered.base_object.ciphertext_size,
+            "checksum_algo": tampered.base_object.ciphertext_checksum_algo,
+            "checksum_value": tampered.base_object.ciphertext_checksum_value,
+            "metadata": [],
+        },
+        "wal": [
+            {
+                "archive_name": name,
+                "object_name": f"ava-pitr/wal/{name[:8]}/{name}.enc",
+                "generation": index + 1,
+                "size": 10,
+                "crc32c": "crc-value",
+                "metadata": [["ava-key-id", "v1"]],
+            }
+            for index, name in enumerate(names)
+        ],
+        "target_lsn": tampered.end_lsn,
+        "wal_segment_size": tampered.wal_segment_size,
+        "proof": RestoreProofFixture().__dict__,
+    }
+    root = tmp_path / "root"
+    (root / "protected-manifests").mkdir(parents=True)
+    (root / "protected-manifests" / f"{tampered.chain_id}.json").write_text(
+        json.dumps(protected_raw)
+    )
+
+    class Publisher:
+        def put_manifest_if_absent(
+            self, *, payload: bytes, object_name: str, metadata: dict[str, str]
+        ) -> RemoteObjectAck:
+            raise AssertionError("rejected resume must not republish")
+
+    with pytest.raises(RestoreProofError, match="does not match its candidate"):
+        _resume_protected_publish(
+            root=root, candidate=candidate, prefix="ava-pitr", publisher=Publisher()
+        )
+
+
 def test_legacy_retention_plan_normalizes_retention_objects() -> None:
     from services.pitr.retention_manifest import RetentionPlan
 
