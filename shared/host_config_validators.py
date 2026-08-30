@@ -82,6 +82,18 @@ def _validate_watchdog_interval_seconds(value: object) -> ValidationResult:
     return ValidationResult(ok=False, reason="must be > 0")
 
 
+_TRANSFER_BACKENDS = frozenset({"drive", "none"})
+
+
+def _validate_cross_machine_transfer_backend(value: object) -> ValidationResult:
+    """A closed set of backends — reject anything else rather than let a typo
+    land in .env (fail-fast at write time, not at the next settings load)."""
+    if value in _TRANSFER_BACKENDS:
+        return ValidationResult(ok=True)
+    known = ", ".join(sorted(_TRANSFER_BACKENDS))
+    return ValidationResult(ok=False, reason=f"must be one of: {known}")
+
+
 # Registry
 
 # Maps a host field name to its validator.  Only fields with a real local
@@ -91,6 +103,7 @@ VALIDATORS: dict[str, Callable[[object], ValidationResult]] = {
     "chrome_binary": _validate_chrome_binary,
     "ops_concurrency": _validate_ops_concurrency,
     "watchdog_interval_seconds": _validate_watchdog_interval_seconds,
+    "cross_machine_transfer_backend": _validate_cross_machine_transfer_backend,
     # "machine_description" has no entry: free text, always ok.
 }
 

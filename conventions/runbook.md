@@ -389,28 +389,32 @@ schedule on the spot) — see [`schedules/README.md`](../schedules/README.md).
 The schedule runner PROCESS is the exception: a code-change rollout bounces every live
 `ava-schedule-<id>` session after the gateway boots, so runners (and the script text
 they materialized at launch) always run the new checkout (Task #1746).
-On agent-runners it also runs capability preflights that fail loud rather than letting
-a missing capability surface later: a headed Chrome (when the browser is enabled, see
-below), a **writable shared Google Drive folder**, and **the ability to open and merge
-pull requests on the memory pool repo** (the nightly memory consolidation runs `gh` +
-`git push` on each machine; the gate `_ensure_github_pr` →
+On agent-runners it also runs capability preflights: a headed Chrome (when the browser
+is enabled, see below), a **probe of the configured cross-machine transfer backend**
+(`AVA_CROSS_MACHINE_TRANSFER_BACKEND`, `drive` by default), and **the ability to open
+and merge pull requests on the memory pool repo** (the nightly memory consolidation
+runs `gh` + `git push` on each machine; the gate `_ensure_github_pr` →
 `shared/github_pr.py:github_pr_blocker` fails loud unless `gh` is installed,
-authenticated, and has write access to the pool repo). The Drive + GitHub-PR gates are
-**split-deployment-only**: both are auto-skipped when this unit also carries `gateway`
-(a single box has no peer to hand files to and consolidates memory locally), and a split
-agent-runner that does not use them can opt out with `AVA_REQUIRE_GOOGLE_DRIVE=false` /
-`AVA_REQUIRE_GITHUB_PR=false`. A host whose memory must stay on-box instead runs
-`AVA_MEMORY_KEEP_LOCAL=true`: the pool becomes a local-only git repo (no remote, no
-push / pull / PR), and the GitHub-PR gate is skipped regardless of role. The Drive gate
-(`_ensure_google_drive` → `shared/google_drive.py:find_writable_google_drive`) is how
-the fleet does cross-machine file transfer without a relay: every agent-runner mounts the
-same Google Drive account, so an agent hands a file to another machine by dropping it in
-its local Drive folder (the synced `My Drive` area — the mount root is not writable) and
-passing the path; the peer reads it from its own Drive folder once it mirrors over. The
-gate verifies participation with a write+read+delete round-trip, so a split agent-runner
-with no signed-in Drive (or only an unwritable mount root) cannot `ava start` until Drive
-is set up — unless it opts out (above) or is a single box. It probes the per-OS Drive
-locations: macOS
+authenticated, and has write access to the pool repo). The transfer probe + GitHub-PR
+gate are **split-deployment-only**: both are auto-skipped when this unit also carries
+`gateway` (a single box has no peer to hand files to and consolidates memory locally);
+the GitHub-PR gate stays a hard fail (a missing memory-sync capability silently breaks
+consolidation), while the transfer backend is never a blocker — a split agent-runner
+that does not want the probe can set `AVA_CROSS_MACHINE_TRANSFER_BACKEND=none`
+(the old `AVA_REQUIRE_GOOGLE_DRIVE` opt-out was removed with the hard requirement). A
+host whose memory must stay on-box instead runs `AVA_MEMORY_KEEP_LOCAL=true`: the pool
+becomes a local-only git repo (no remote, no push / pull / PR), and the GitHub-PR gate
+is skipped regardless of role. The transfer probe
+(`_ensure_cross_machine_transfer` → `shared/google_drive.py:find_writable_google_drive`)
+is how the fleet does cross-machine file transfer without a relay when Drive is present:
+every agent-runner mounts the same Google Drive account, so an agent hands a file to
+another machine by dropping it in its local Drive folder (the synced `My Drive` area —
+the mount root is not writable) and passing the path; the peer reads it from its own
+Drive folder once it mirrors over. The
+probe verifies participation with a write+read+delete round-trip; a split agent-runner
+without a signed-in Drive starts anyway with a warning (files move via the gateway
+upload path, GitHub Releases, or IM file bridges instead). The probe checks the per-OS
+Drive locations: macOS
 `~/Library/CloudStorage/GoogleDrive-<account>/My Drive`, WSL the Windows Drive-letter
 mount surfaced under `/mnt/<letter>/My Drive` (identified by the `My Drive` subfolder, so
 a plain `/mnt/c` never matches), and native Linux an rclone / `~/GoogleDrive` mount.

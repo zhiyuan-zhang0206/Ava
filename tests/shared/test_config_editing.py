@@ -247,7 +247,7 @@ def test_parse_local_rejects_readonly_host_toggle() -> None:
 
 def test_parse_remote_rejects_writable_only_host_field() -> None:
     """The tightened corner: a writable-but-not-remote_writable host field
-    (require_google_drive / require_github_pr / pgbouncer_enabled /
+    (cross_machine_transfer_backend / require_github_pr / pgbouncer_enabled /
     memory_keep_local shape) is rejected at the gate on a machine-addressed PUT —
     the host-side op would reject it anyway, so the gate now fails before the
     dispatch. Locked at HTTP level by
