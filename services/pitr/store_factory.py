@@ -176,9 +176,81 @@ def baidu_pitr_store_group(
     )
 
 
+def oss_pitr_store_group(
+    *,
+    endpoint: str,
+    bucket: str,
+    prefix: str = "",
+    credentials_file: str | Path | None = None,
+    viewer_credentials_file: str | Path | None = None,
+    timeout_seconds: float = 300.0,
+) -> PitrStoreGroup:
+    """The Aliyun OSS backend: one AccessKey pair per role cluster, the
+    uploader for the publish roles and a separate viewer-only pair for the
+    restore/inventory roles (the restricted restore worker is handed a
+    viewer identity explicitly; ``viewer_credentials_file=None`` means the
+    uploader identity — the callers that need the split enforce it at
+    config validation)."""
+    from services.pitr.oss_inventory import OSSRetentionInventoryReader
+    from services.pitr.oss_publish_store import OSSProtectedManifestPublisher
+    from services.pitr.oss_restore_store import OSSGenerationPinnedObjectReader
+    from services.pitr.oss_store import OSSObjectStore
+
+    def require_uploader() -> str | Path:
+        if credentials_file is None:
+            raise RuntimeError("validated PITR OSS credential file is missing")
+        return credentials_file
+
+    def require_viewer() -> str | Path:
+        viewer = viewer_credentials_file or credentials_file
+        if viewer is None:
+            raise RuntimeError("validated PITR OSS viewer credential file is missing")
+        return viewer
+
+    def object_store(credentials: str | Path) -> OSSObjectStore:
+        return OSSObjectStore(
+            endpoint=endpoint,
+            bucket=bucket,
+            credentials_file=credentials,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def object_store_role() -> OSSObjectStore:
+        return object_store(require_uploader())
+
+    def viewer_role() -> OSSObjectStore:
+        return object_store(require_viewer())
+
+    return PitrStoreGroup(
+        object_store=object_store_role,
+        restartable_streaming_object_store=object_store_role,
+        viewer_object_store=viewer_role,
+        generation_pinned_object_reader=lambda: OSSGenerationPinnedObjectReader(
+            endpoint=endpoint,
+            bucket=bucket,
+            credentials_file=require_viewer(),
+            timeout_seconds=timeout_seconds,
+        ),
+        retention_inventory_reader=lambda: OSSRetentionInventoryReader(
+            endpoint=endpoint,
+            bucket=bucket,
+            prefix=prefix,
+            credentials_file=require_viewer(),
+            timeout_seconds=timeout_seconds,
+        ),
+        protected_manifest_publisher=lambda: OSSProtectedManifestPublisher(
+            endpoint=endpoint,
+            bucket=bucket,
+            credentials_file=require_uploader(),
+            timeout_seconds=timeout_seconds,
+        ),
+    )
+
+
 _GROUP_CONSTRUCTORS: dict[str, Callable[..., PitrStoreGroup]] = {
     "gcs": gcs_pitr_store_group,
     "baidu": baidu_pitr_store_group,
+    "oss": oss_pitr_store_group,
 }
 
 
@@ -213,13 +285,24 @@ def get_store_group() -> PitrStoreGroup:
             uploader_credentials=config.pitr_gcs_credentials_file,
             viewer_credentials=config.pitr_restore_gcs_credentials_file,
         )
-    credentials_file = config.pitr_baidu_credentials_file
-    token_file = config.pitr_baidu_token_file
-    if credentials_file is None or token_file is None:
-        raise RuntimeError("validated PITR Baidu credential/token path is missing")
-    return baidu_pitr_store_group(
-        app_root=config.pitr_baidu_app_root,
+    if name == "baidu":
+        credentials_file = config.pitr_baidu_credentials_file
+        token_file = config.pitr_baidu_token_file
+        if credentials_file is None or token_file is None:
+            raise RuntimeError("validated PITR Baidu credential/token path is missing")
+        return baidu_pitr_store_group(
+            app_root=config.pitr_baidu_app_root,
+            prefix=config.pitr_gcs_prefix,
+            credentials_file=credentials_file,
+            token_file=token_file,
+        )
+    credentials_file = config.pitr_oss_credentials_file
+    if credentials_file is None:
+        raise RuntimeError("validated PITR OSS credential file is missing")
+    return oss_pitr_store_group(
+        endpoint=config.pitr_oss_endpoint,
+        bucket=config.pitr_oss_bucket,
         prefix=config.pitr_gcs_prefix,
         credentials_file=credentials_file,
-        token_file=token_file,
+        viewer_credentials_file=config.pitr_oss_viewer_credentials_file,
     )

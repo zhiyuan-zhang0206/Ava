@@ -508,8 +508,28 @@ def test_factory_constructs_every_role_for_the_baidu_backend(tmp_path: Path) -> 
     assert group.protected_manifest_publisher() is not None
 
 
+def test_factory_constructs_every_role_for_the_oss_backend(tmp_path: Path) -> None:
+    credentials = tmp_path / "oss.json"
+    credentials.write_text(json.dumps({"access_key_id": "ak", "access_key_secret": "sk"}))
+    credentials.chmod(0o600)
+    group = get_group_constructor_named("oss")(
+        endpoint="https://oss-cn-shanghai.aliyuncs.com",
+        bucket="ava-pitr-store",
+        prefix="ava-pitr",
+        credentials_file=credentials,
+    )
+    assert group.object_store() is not None
+    assert group.restartable_streaming_object_store() is not None
+    assert group.viewer_object_store() is not None
+    assert group.generation_pinned_object_reader() is not None
+    assert group.retention_inventory_reader() is not None
+    assert group.protected_manifest_publisher() is not None
+
+
 def test_factory_rejects_unknown_backend_without_falling_back() -> None:
-    with pytest.raises(ValueError, match=r"unknown PITR store backend 's3' \(known: baidu, gcs\)"):
+    with pytest.raises(
+        ValueError, match=r"unknown PITR store backend 's3' \(known: baidu, gcs, oss\)"
+    ):
         get_group_constructor_named("s3")
     with pytest.raises(ValueError, match="unknown PITR store backend"):
         get_group_constructor_named("")

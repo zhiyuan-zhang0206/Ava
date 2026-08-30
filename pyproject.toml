@@ -83,6 +83,7 @@ dependencies = [
     "zstandard>=0.25.0",  # deterministic streaming compression for PITR base candidates
     "lark-oapi>=1.7.1",
     "websockets>=15.0.1",
+    "oss2>=2.19.1",
 ]
 
 [project.scripts]
