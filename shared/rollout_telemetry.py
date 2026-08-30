@@ -131,6 +131,31 @@ def record_host(host: str, stages: dict[str, float]) -> None:
         _active.value.record_host(host, stages)
 
 
+def settle_ended(*, dur_s: float | None, hosts: list[str]) -> None:
+    """Print the settle hold's duration as one parseable JSON line.
+
+    The settle phase is the one rollout phase that outlives the orchestration
+    process: `settle_update_lock` converts the lease after the gateway's
+    `ava cluster update` has returned, and the hold ends in a different process
+    (`ops.deploy_window`, the early convergence release) or on its TTL. So it
+    cannot ride the orchestration's aggregate summary line — this is its own
+    `[rollout-telemetry]` JSON line, printed the moment an early release happens:
+
+        [rollout-telemetry] {"settle": {"dur_s": 123.4, "hosts": ["wsl"]}}
+
+    `dur_s` is computed server-side (`now() - settle_started_at`, C3 task #2189)
+    so cross-host clock skew never distorts it; None when the hold predates the
+    column (its duration is unknowable — reported as null, never guessed). A
+    settle hold that lapses on its TTL prints nothing: no process executes at
+    that moment, so the duration there is the TTL itself, and the deployment
+    state row keeps the start time for anyone reconstructing it.
+    """
+    print(  # noqa: T201
+        f"[rollout-telemetry] "
+        f"{json.dumps({'settle': {'dur_s': dur_s, 'hosts': sorted(hosts)}}, sort_keys=True)}"
+    )
+
+
 @contextmanager
 def stage(name: str) -> Generator[None, None, None]:
     """Time one gateway-orchestration phase.

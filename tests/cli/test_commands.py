@@ -2983,6 +2983,161 @@ def test_stage_evidence_that_advances_keeps_polling(
     assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_CONVERGING}
 
 
+def test_continuous_progress_past_the_converging_bound_hands_the_host_to_settle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """C3: a host that is ALIVE AND MAKING PROGRESS must not burn the whole 900 s
+    poll bound — 340 probes on 2026-08-30's wsl runner — when the settle hold +
+    watchdog already cover its remaining convergence. Continuous progress past
+    `_CONVERGING_TIMEOUT_S` ends the poll early with POLL_CONVERGING (the same
+    verdict the deadline produces, so the settle set / report / resume need no
+    branching)."""
+    from datetime import UTC, datetime, timedelta
+
+    from ops import cluster_rpc as cr
+    from shared.host_deploy_state import HostDeployState
+
+    probes = {"n": 0}
+
+    async def _young_stage(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
+        probes["n"] += 1
+        return {
+            "last_updater_outcome": {
+                "kind": "unknown",
+                "rc": None,
+                "log": "updater-178.log",
+                "current_stage": "uv",
+                "current_stage_s": 100.0,
+            },
+        }
+
+    def _fake_read(machine=None, **_kw):
+        return HostDeployState(
+            machine=machine or "wsl",  # pyright: ignore[reportUnknownArgumentType]
+            posture="converging",
+            updated_at=datetime.now(UTC),
+            updater_lease_expires_at=datetime.now(UTC) + timedelta(seconds=800),
+        )
+
+    monkeypatch.setattr(cr, "dispatch_to_machine", _young_stage)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
+    # A generous absolute deadline, so the ONLY thing that can end the poll is the
+    # converging bound — the assertion is that the poll does NOT wait it out.
+    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_cli, "_CONVERGING_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+
+    out = _cli._poll_until_unpaused([("wsl", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"wsl": _cli.POLL_CONVERGING}
+    # ~6 probes at 0.01 s intervals reach the 0.05 s bound; the early exit must
+    # not spend anything like the 3600 s deadline. (Tight bounds would flake on
+    # monotonic drift, so assert the order of magnitude.)
+    assert probes["n"] < 50
+
+
+def test_a_restart_resets_the_converging_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """C3's patience is the CONTINUOUS progress streak, not total poll time: an
+    unreachable reading (the expected mid-restart silence) must reset the clock,
+    or a host that restarts midway through its leg would be handed to settle on
+    stale progress that predates the restart."""
+    from datetime import UTC, datetime, timedelta
+
+    from ops import cluster_rpc as cr
+    from shared.host_deploy_state import HostDeployState
+
+    probes = {"n": 0}
+
+    async def _stop_start(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
+        probes["n"] += 1
+        # One unreachable reading (the mid-restart silence) after two
+        # progressing ones: the streak must restart from the silence.
+        if probes["n"] == 3:
+            raise cr.ClusterOpUnreachable("restarting")
+        return {
+            "last_updater_outcome": {
+                "kind": "unknown",
+                "rc": None,
+                "log": "updater-178.log",
+                "current_stage": "uv",
+                "current_stage_s": 100.0,
+            },
+        }
+
+    def _fake_read(machine=None, **_kw):
+        return HostDeployState(
+            machine=machine or "wsl",  # pyright: ignore[reportUnknownArgumentType]
+            posture="converging",
+            updated_at=datetime.now(UTC),
+            updater_lease_expires_at=datetime.now(UTC) + timedelta(seconds=800),
+        )
+
+    monkeypatch.setattr(cr, "dispatch_to_machine", _stop_start)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_cli, "_CONVERGING_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+
+    out = _cli._poll_until_unpaused([("wsl", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"wsl": _cli.POLL_CONVERGING}
+    # Without the reset, ~6 probes (two 0.05 s streaks back to back) would end
+    # the poll; the reset at probe 3 forces the second streak to restart, so the
+    # poll needs meaningfully more probes before the bound accumulates.
+    assert probes["n"] >= 8
+
+
+def test_probe_verdict_names_the_progress_fact(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`progressing` is True only for the one shape the converging bound exists
+    for — a live lease with stage evidence that is not stuck. A paused pre-lease
+    window, a stuck stage's first reading, and an idle posture are not progress."""
+    from datetime import UTC, datetime, timedelta
+
+    from cli.commands._update_phase_b import _probe_verdict
+    from shared.host_deploy_state import HostDeployState
+
+    def _row(posture: str, lease: bool, stage_age: float | None):
+        def _read(machine=None, **_kw):
+            return HostDeployState(
+                machine=machine or "wsl",  # pyright: ignore[reportUnknownArgumentType]
+                posture=posture,
+                updated_at=datetime.now(UTC),
+                updater_lease_expires_at=(
+                    datetime.now(UTC) + timedelta(seconds=800) if lease else None
+                ),
+            )
+
+        monkeypatch.setattr("cli.commands._update_phase_b.read", _read)  # pyright: ignore[reportUnknownArgumentType]
+        probe: dict[str, object] = {}
+        if stage_age is not None:
+            probe["last_updater_outcome"] = {
+                "kind": "unknown",
+                "rc": None,
+                "log": "x.log",
+                "current_stage": "uv",
+                "current_stage_s": stage_age,
+            }
+        return _probe_verdict(probe, 0, "wsl", 0)
+
+    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+    # A live lease with a young stage is the progressing shape.
+    _v, _s, _n, progressing = _row("converging", True, 100.0)
+    assert _v is None and progressing is True
+    # A live lease with NO stage fields ("cannot tell", older commit) is not
+    # progress — it resets the streak like the no-progress rule's polarity.
+    _v, _s, _n, progressing = _row("converging", True, None)
+    assert _v is None and progressing is False
+    # A live lease with a stuck stage starts the no-progress streak instead.
+    _v, _s, _n, progressing = _row("converging", True, 700.0)
+    assert _v is None and _n == 1 and progressing is False
+    # A paused pre-lease window (no lease yet) is "cannot tell", not progress.
+    _v, _s, _n, progressing = _row("paused", False, None)
+    assert _v is None and progressing is False
+    # Idle is convergence, and it is not the progressing shape.
+    _v, _s, _n, progressing = _row("idle", False, None)
+    assert _v is not None and _v.status == _cli.POLL_OK and progressing is False
+
+
 def test_a_probe_from_an_older_commit_never_reads_as_no_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3067,10 +3222,12 @@ def test_db_read_failure_is_not_a_stall_confirmation(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("cli.commands._update_phase_b.read", _broken_read)  # pyright: ignore[reportUnknownArgumentType]
 
-    verdict, stalls, no_progress = _probe_verdict({}, 3, "air", 2)
+    verdict, stalls, no_progress, progressing = _probe_verdict({}, 3, "air", 2)
     assert verdict is None
     assert stalls == 3  # counter untouched — a read failure is not a stall observation
     assert no_progress == 2  # same rule: a read failure is not a no-progress observation
+    assert progressing is False  # and it is not progress either (C3): the converging
+    # clock must reset on evidence-free readings, or a DB hiccup would keep it running
 
 
 def test_a_stalled_host_carries_its_own_updater_outcome_off_the_box(
