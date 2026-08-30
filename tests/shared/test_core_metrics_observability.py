@@ -240,14 +240,18 @@ def test_syntax_fix_kind_buckets() -> None:
 def test_lifecycle_and_spawner_window_aggregates() -> None:
     _load_pack()
     spawner = _all_rendered()["ava_obs_spawn_by_spawner"]
+    # Per-minute normalization: bucketed at $__interval, divided by the
+    # bucket width in minutes so every bar is a rate (FleetView bucket
+    # transparency pass).
     assert spawner == [
         'sum by (source) (count_over_time({service_name="unknown_service"} | json | '
-        'category="audit" | event_name="spawn" [$__range]))'
+        'category="audit" | event_name="spawn" [$__interval])) / ($__interval_ms / 60000)'
     ]
     life = _all_rendered()["ava_obs_lifecycle_counts"]
     assert life == [
         'sum by (event_name) (count_over_time({service_name="unknown_service"} | json | '
-        'category="audit" | event_name=~"spawn|terminate|restart|resurrect|fork" [$__range]))'
+        'category="audit" | event_name=~"^(spawn|terminate|restart|resurrect|fork)$" '
+        "[$__interval])) / ($__interval_ms / 60000)"
     ]
 
 

@@ -49,15 +49,15 @@ register_metric(
         name="ava_code_syntax_fix_count",
         title="Syntax fix count",
         description=(
-            "Syntax_fix events over time — how often the repair pipeline fixes "
-            "syntax errors in LLM-produced code (event_name='syntax_fix', "
-            "category='telemetry', 90d retention)."
+            "Syntax_fix events per minute (5-minute buckets / 5) — how often "
+            "the repair pipeline fixes syntax errors in LLM-produced code "
+            "(event_name='syntax_fix', category='telemetry', 90d retention)."
         ),
         event_name="syntax_fix",
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=_count(f"{_CAT} | event_name={{event_name}}", "5m"),
+        query=_count(f"{_CAT} | event_name={{event_name}}", "5m") + " / 5",
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],

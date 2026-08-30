@@ -892,7 +892,7 @@
        },
        {
         "color": "red",
-        "value": 80.0
+        "value": 16.0
        }
       ]
      },
@@ -904,7 +904,7 @@
       "drawStyle": "line",
       "lineWidth": 1,
       "spanNulls": true,
-      "axisLabel": "events"
+      "axisLabel": "events/min"
      }
     }
    },
@@ -940,7 +940,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=~\"warning|error|critical\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=~\"warning|error|critical\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "warn+error"
@@ -951,12 +951,13 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "total"
     }
-   ]
+   ],
+   "description": "Per-minute event counts \u2014 5-minute count buckets normalized to per minute (bucket count / 5): warning+error+critical vs all telemetry/log events."
   },
   {
    "datasource": {
@@ -1038,19 +1039,7 @@
      "color": {
       "mode": "palette-classic"
      },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "red",
-        "value": 80.0
-       }
-      ]
-     },
+     "thresholds": null,
      "unit": "short",
      "custom": {
       "lineInterpolation": "smooth",
@@ -1063,7 +1052,7 @@
        "mode": "normal",
        "group": "A"
       },
-      "axisLabel": "tokens"
+      "axisLabel": "tokens/min"
      }
     }
    },
@@ -1099,12 +1088,13 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [5m]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "in"
     }
-   ]
+   ],
+   "description": "Tokens per minute (5-minute buckets / 5): input tokens."
   },
   {
    "datasource": {
@@ -1116,19 +1106,7 @@
      "color": {
       "mode": "palette-classic"
      },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "red",
-        "value": 80.0
-       }
-      ]
-     },
+     "thresholds": null,
      "unit": "short",
      "custom": {
       "lineInterpolation": "smooth",
@@ -1141,7 +1119,7 @@
        "mode": "normal",
        "group": "A"
       },
-      "axisLabel": "tokens"
+      "axisLabel": "tokens/min"
      }
     }
    },
@@ -1177,7 +1155,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [5m]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "out"
@@ -1188,12 +1166,13 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_reasoning [5m]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_reasoning [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "reasoning"
     }
-   ]
+   ],
+   "description": "Tokens per minute (5-minute buckets / 5): output and reasoning tokens."
   },
   {
    "datasource": {
@@ -1833,19 +1812,7 @@
      "color": {
       "mode": "palette-classic"
      },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "red",
-        "value": 80.0
-       }
-      ]
-     },
+     "thresholds": null,
      "unit": "short",
      "custom": {
       "stacking": {
@@ -1884,7 +1851,7 @@
     "xTickLabelRotation": 0,
     "xField": "Time"
    },
-   "title": "LLM calls / bucket",
+   "title": "LLM calls / minute",
    "type": "barchart",
    "targets": [
     {
@@ -1893,12 +1860,13 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" [30m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" [30m])) / 30",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "calls"
     }
-   ]
+   ],
+   "description": "LLM usage calls in 30-minute buckets, normalized to a per-minute rate (bucket count / 30)."
   },
   {
    "datasource": {
@@ -1955,7 +1923,7 @@
    },
    "title": "LLM cost (USD)",
    "type": "timeseries",
-   "description": "LLM call cost per bucket \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in shared/lm/pricing.py, unpriced models carry no cost_usd and are skipped). event_name='llm_usage', category='telemetry'.",
+   "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in shared/lm/pricing.py, unpriced models carry no cost_usd and are skipped); 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -1963,7 +1931,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [30m]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [30m])) / 30",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "cost usd"
@@ -2025,7 +1993,7 @@
    },
    "title": "LLM errors",
    "type": "timeseries",
-   "description": "LLM failure signals per bucket: llm_provider_error (provider rejection / classification error), stream_stalled_retry (stalled stream retry), llm_turn_aborted (turn aborted after retries exhausted), stream_overloaded_retry (overload retry). The event_name field is spec metadata; the query covers all 4 failure events (all telemetry).",
+   "description": "LLM failure signals per minute (5-minute buckets / 5): llm_provider_error (provider rejection / classification error), stream_stalled_retry (stalled stream retry), llm_turn_aborted (turn aborted after retries exhausted), stream_overloaded_retry (overload retry). The event_name field is spec metadata; the query covers all 4 failure events (all telemetry).",
    "targets": [
     {
      "datasource": {
@@ -2033,7 +2001,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_provider_error\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_provider_error\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "provider_error"
@@ -2044,7 +2012,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"stream_stalled_retry\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"stream_stalled_retry\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "stalled_retry"
@@ -2055,7 +2023,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_turn_aborted\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_turn_aborted\" [5m])) / 5",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "turn_aborted"
@@ -2066,7 +2034,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"stream_overloaded_retry\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"stream_overloaded_retry\" [5m])) / 5",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "overloaded_retry"
@@ -2573,7 +2541,7 @@
    },
    "title": "Exec outcomes",
    "type": "timeseries",
-   "description": "Exec outcome breakdown per bucket: ok = event_name='exec'; failures split by event_name (exec_failed / exec(timeout) / exec(cancelled) / exec_node_timeout, legacy parenthesized spellings counted in; unknown exec* events fall into other). event_name='exec', category='telemetry'.",
+   "description": "Exec outcome breakdown per minute (5-minute buckets / 5): ok = event_name='exec'; failures split by event_name (exec_failed / exec(timeout) / exec(cancelled) / exec_node_timeout, legacy parenthesized spellings counted in; unknown exec* events fall into other). event_name='exec', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -2581,7 +2549,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "ok"
@@ -2592,7 +2560,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_failed|exec[(]failed[)]\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_failed|exec[(]failed[)]\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "failed"
@@ -2603,7 +2571,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_timeout|exec[(]timeout[)]\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_timeout|exec[(]timeout[)]\" [5m])) / 5",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "timeout"
@@ -2614,7 +2582,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_cancelled|exec[(]cancelled[)]\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_cancelled|exec[(]cancelled[)]\" [5m])) / 5",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "cancelled"
@@ -2625,7 +2593,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec_node_timeout\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec_node_timeout\" [5m])) / 5",
      "refId": "E",
      "queryType": "range",
      "legendFormat": "node_timeout"
@@ -2636,7 +2604,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec.*\" | event_name!~\"exec|exec_failed|exec[(]failed[)]|exec_timeout|exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|exec_node_timeout\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec.*\" | event_name!~\"exec|exec_failed|exec[(]failed[)]|exec_timeout|exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|exec_node_timeout\" [5m])) / 5",
      "refId": "F",
      "queryType": "range",
      "legendFormat": "other"
@@ -2698,7 +2666,7 @@
    },
    "title": "Syntax fix triggers (by kind)",
    "type": "timeseries",
-   "description": "Syntax-fix trigger counts per bucket, bucketed by the fix kinds in attributes.fixes (substring regex matching; an event with several fix kinds counts once per kind, 'none'/null/unknown goes to other). event_name='syntax_fix', category='telemetry' (90d retention).",
+   "description": "Syntax-fix trigger counts per minute (5-minute buckets / 5), bucketed by the fix kinds in attributes.fixes (substring regex matching; an event with several fix kinds counts once per kind, 'none'/null/unknown goes to other). event_name='syntax_fix', category='telemetry' (90d retention).",
    "targets": [
     {
      "datasource": {
@@ -2706,7 +2674,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*ruff_format.*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*ruff_format.*\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "ruff_format"
@@ -2717,7 +2685,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*ruff.*\" | attributes_fixes!~\".*ruff_format.*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*ruff.*\" | attributes_fixes!~\".*ruff_format.*\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "ruff"
@@ -2728,7 +2696,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*invalid_escape.*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*invalid_escape.*\" [5m])) / 5",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "invalid_escape"
@@ -2739,7 +2707,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*missing_imports.*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*missing_imports.*\" [5m])) / 5",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "missing_imports"
@@ -2750,7 +2718,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*chinese_punct.*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*chinese_punct.*\" [5m])) / 5",
      "refId": "E",
      "queryType": "range",
      "legendFormat": "chinese_punct"
@@ -2761,7 +2729,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*bracket_matching.*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*bracket_matching.*\" [5m])) / 5",
      "refId": "F",
      "queryType": "range",
      "legendFormat": "bracket_matching"
@@ -2772,7 +2740,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes!~\".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes!~\".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*\" [5m])) / 5",
      "refId": "G",
      "queryType": "range",
      "legendFormat": "other"
@@ -2834,7 +2802,7 @@
    },
    "title": "Halt classes",
    "type": "timeseries",
-   "description": "Halt events classified by body per bucket: idle ('no tool_call (idle)'), compact ('system_halt (compact)'), lifecycle ('lifecycle AgentTermination / AgentRestart'), other. event_name='halt', category='telemetry'.",
+   "description": "Halt events classified by body per minute (5-minute buckets / 5): idle ('no tool_call (idle)'), compact ('system_halt (compact)'), lifecycle ('lifecycle AgentTermination / AgentRestart'), other. event_name='halt', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -2842,7 +2810,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=\"no tool_call (idle)\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=\"no tool_call (idle)\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "idle"
@@ -2853,7 +2821,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=~\".*compact.*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=~\".*compact.*\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "compact"
@@ -2864,7 +2832,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=~\"lifecycle .*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=~\"lifecycle .*\" [5m])) / 5",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "lifecycle"
@@ -2875,7 +2843,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body!=\"no tool_call (idle)\" | attributes_body!~\".*compact.*\" | attributes_body!~\"lifecycle .*\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body!=\"no tool_call (idle)\" | attributes_body!~\".*compact.*\" | attributes_body!~\"lifecycle .*\" [5m])) / 5",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "other"
@@ -3002,7 +2970,7 @@
    },
    "title": "Frontend interactions",
    "type": "timeseries",
-   "description": "Frontend interaction volume per bucket (total frontend_interaction events): the entry panel of user-modeling telemetry, doubling as volume monitoring \u2014 an abnormal interaction spike (an instrumentation loop bug) is immediately visible here. event_name='frontend_interaction', category='telemetry', source='user'.",
+   "description": "Frontend interaction volume per minute (5-minute buckets / 5, total frontend_interaction events): the entry panel of user-modeling telemetry, doubling as volume monitoring \u2014 an abnormal interaction spike (an instrumentation loop bug) is immediately visible here. event_name='frontend_interaction', category='telemetry', source='user'.",
    "targets": [
     {
      "datasource": {
@@ -3010,7 +2978,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"frontend_interaction\" | source=\"user\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"frontend_interaction\" | source=\"user\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "interactions"
@@ -3282,9 +3250,9 @@
     "xTickLabelRotation": 0,
     "xField": "Time"
    },
-   "title": "Agent spawns (window, by source)",
+   "title": "Agent spawns / minute (by source)",
    "type": "barchart",
-   "description": "Windowed spawn totals grouped by source. event_name='spawn', category='audit'.",
+   "description": "Spawn rate per minute: counts bucketed at $__interval and normalized (bucket count / interval seconds * 60). The source label carries the spawner and is rendered directly in the chart legend. event_name='spawn', category='audit'.",
    "targets": [
     {
      "datasource": {
@@ -3292,10 +3260,10 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum by (source) (count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"spawn\" [$__range]))",
+     "expr": "sum by (source) (count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"spawn\" [$__interval])) / ($__interval_ms / 60000)",
      "legendFormat": "{{source}}",
      "refId": "A",
-     "queryType": "instant"
+     "queryType": "range"
     }
    ]
   },
@@ -3356,9 +3324,9 @@
     "xTickLabelRotation": 0,
     "xField": "Time"
    },
-   "title": "Agent lifecycle (window)",
+   "title": "Agent lifecycle / minute",
    "type": "barchart",
-   "description": "Windowed lifecycle totals grouped by event name. category='audit'.",
+   "description": "Lifecycle-event rate per minute: counts bucketed at $__interval and normalized (bucket count / interval seconds * 60), grouped by event name: spawn / terminate / restart / resurrect / fork. category='audit'.",
    "targets": [
     {
      "datasource": {
@@ -3366,10 +3334,10 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum by (event_name) (count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=~\"spawn|terminate|restart|resurrect|fork\" [$__range]))",
+     "expr": "sum by (event_name) (count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=~\"^(spawn|terminate|restart|resurrect|fork)$\" [$__interval])) / ($__interval_ms / 60000)",
      "legendFormat": "{{event_name}}",
      "refId": "A",
-     "queryType": "instant"
+     "queryType": "range"
     }
    ]
   },
@@ -3418,7 +3386,7 @@
    },
    "title": "Delivery stalled (window)",
    "type": "stat",
-   "description": "Windowed delivery_stalled total. event_name='delivery_stalled', category='telemetry'.",
+   "description": "Windowed delivery_stalled total \u2014 the delivery watchdog's alert signal for over-age pending inbound (a raw window count, not a per-minute rate \u2014 explicit exception to the per-minute basis). event_name='delivery_stalled', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -3530,7 +3498,8 @@
      "queryType": "instant",
      "legendFormat": "stalled >600s"
     }
-   ]
+   ],
+   "description": "Window totals by stall-age bucket \u2014 explicit exception to the per-minute basis (categorized counts, not rates)."
   },
   {
    "datasource": {
@@ -3589,7 +3558,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "ava_agent_registry_max_id_ratio",
+     "expr": "max(ava_agent_registry_max_id_ratio)",
      "legendFormat": "max_id",
      "queryType": "range",
      "refId": "A"
@@ -3653,7 +3622,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "deriv(ava_agent_registry_max_id_ratio[1h]) * 86400",
+     "expr": "deriv(max(ava_agent_registry_max_id_ratio)[1h:]) * 86400",
      "legendFormat": "agents/day",
      "queryType": "range",
      "refId": "A"
@@ -3728,7 +3697,7 @@
    },
    "title": "Syntax fix count",
    "type": "timeseries",
-   "description": "Syntax_fix events over time \u2014 how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
+   "description": "Syntax_fix events per minute (5-minute buckets / 5) \u2014 how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
    "targets": [
     {
      "datasource": {
@@ -3736,7 +3705,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"syntax_fix\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"syntax_fix\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "fixes"
@@ -3929,7 +3898,7 @@
    },
    "title": "Memory recall filter runs",
    "type": "timeseries",
-   "description": "Recall_filter INFO events over time \u2014 how often passive memory recall filters retrieval results for relevance (event_name='recall_filter', level='info', category='telemetry', 90d retention).",
+   "description": "Recall_filter INFO events per minute (5-minute buckets / 5) \u2014 how often passive memory recall filters retrieval results for relevance (event_name='recall_filter', level='info', category='telemetry', 90d retention).",
    "targets": [
     {
      "datasource": {
@@ -3937,7 +3906,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" [5m]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "runs"
@@ -4886,7 +4855,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Usage-time LLM cost snapshots grouped into $__interval buckets over the dashboard time window.",
+   "description": "Usage-time LLM cost snapshots grouped into $__interval buckets, normalized to a per-minute USD rate (bucket sum / interval seconds * 60).",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -4924,7 +4893,7 @@
     "xField": "Time",
     "xTickLabelRotation": 0
    },
-   "title": "Daily LLM cost",
+   "title": "LLM cost / minute",
    "type": "barchart",
    "targets": [
     {
@@ -4933,7 +4902,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__interval]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "cost usd"
@@ -5057,5 +5026,6 @@
  "timezone": "Asia/Shanghai",
  "title": "Ava Ops",
  "uid": "ava-ops-main",
- "version": 5
+ "version": 5,
+ "preload": true
 }

@@ -41,7 +41,7 @@ Per-panel provenance:
   thresholds at all (``thresholds=[]`` suppresses the default green base).
   ``custom`` sets only the keys that differ from the generator defaults
   (fillOpacity 25 / axisLabel / stacking normal A on the two token-usage
-  panels); SSE backlog and LLM calls / bucket match the barchart defaults
+  panels); SSE backlog and LLM calls / minute match the barchart defaults
   and need no custom.
 - **event_name/category**: taken from each query's semantics (llm_usage/telemetry,
   delivery_stalled/telemetry, ...). The level/status-based queries (Warning,
@@ -293,16 +293,17 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_cost_daily",
-        title="Daily LLM cost",
+        title="LLM cost / minute",
         description=(
-            "Usage-time LLM cost snapshots grouped into $__interval buckets over "
-            "the dashboard time window."
+            "Usage-time LLM cost snapshots grouped into $__interval buckets, "
+            "normalized to a per-minute USD rate (bucket sum / interval "
+            "seconds * 60)."
         ),
         event_name="llm_usage",
         category="telemetry",
         unit="currencyUSD",
         panel="barchart",
-        query=_llm_cost("$__interval"),
+        query=_llm_cost("$__interval") + " / ($__interval_ms / 60000)",
         query_type="logql",
         target_names=["cost usd"],
         thresholds=[],
@@ -442,6 +443,7 @@ core_metrics.register_core_metric(
     MetricSpec(
         name="core_sse_backlog",
         title="SSE backlog — delivery_stalled (by stall seconds)",
+        description="Window totals by stall-age bucket — explicit exception to the per-minute basis (categorized counts, not rates).",
         event_name="delivery_stalled",
         category="telemetry",
         unit="short",
@@ -502,6 +504,7 @@ core_metrics.register_core_metric(
     MetricSpec(
         name="core_token_output_reasoning",
         title="Token usage — Output + Reasoning",
+        description="Tokens per minute (5-minute buckets / 5): output and reasoning tokens.",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -509,21 +512,21 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['out_total']} [5m]))"
+            f"unwrap {_LLM_ATTR['out_total']} [5m])) / 5"
         ),
         targets=[
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['reasoning']} [5m]))"
+            f"unwrap {_LLM_ATTR['reasoning']} [5m])) / 5"
         ],
         query_type="logql",
         target_names=["out", "reasoning"],
         custom={
             "fillOpacity": 25,
             "stacking": {"mode": "normal", "group": "A"},
-            "axisLabel": "tokens",
+            "axisLabel": "tokens/min",
         },
-        thresholds=[ThresholdStep(color="red", value=80.0)],
+        thresholds=[],
     )
 )
 
@@ -672,15 +675,19 @@ _tps(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_calls_per_bucket",
-        title="LLM calls / bucket",
+        title="LLM calls / minute",
+        description="LLM usage calls in 30-minute buckets, normalized to a per-minute rate (bucket count / 30).",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
         panel="barchart",
-        query=_count("category={category} | event_name={event_name}", "30m"),
+        query=_count("category={category} | event_name={event_name}", "30m") + " / 30",
         query_type="logql",
         target_names=["calls"],
-        thresholds=[ThresholdStep(color="red", value=80.0)],
+        # The legacy red-80 step was constant-red noise on the 30-minute
+        # bucket (mean 660); no meaningful per-minute red line — same
+        # suppress-the-default call as the TPS panels.
+        thresholds=[],
     )
 )
 
@@ -688,16 +695,19 @@ core_metrics.register_core_metric(
     MetricSpec(
         name="core_event_health",
         title="Event health — WARNING+ERROR vs total",
+        description="Per-minute event counts (5-minute buckets / 5): warning+error+critical vs all telemetry/log events.",
         event_name="event",
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=_count('category=~"{category_re}|log" | level=~"warning|error|critical"', "5m"),
-        targets=[_count('category=~"{category_re}|log"', "5m")],
+        query=_count('category=~"{category_re}|log" | level=~"warning|error|critical"', "5m")
+        + " / 5",
+        targets=[_count('category=~"{category_re}|log"', "5m") + " / 5"],
         query_type="logql",
         target_names=["warn+error", "total"],
-        custom={"axisLabel": "events"},
-        thresholds=[ThresholdStep(color="red", value=80.0)],
+        custom={"axisLabel": "events/min"},
+        # 80 per 5-minute bucket, rescaled to the per-minute basis (80 / 5).
+        thresholds=[ThresholdStep(color="red", value=16.0)],
     )
 )
 
@@ -705,6 +715,7 @@ core_metrics.register_core_metric(
     MetricSpec(
         name="core_token_input",
         title="Token usage — Input",
+        description="Tokens per minute (5-minute buckets / 5): input tokens.",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -712,16 +723,16 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [5m]))"
+            f"unwrap {_LLM_ATTR['in_total']} [5m])) / 5"
         ),
         query_type="logql",
         target_names=["in"],
         custom={
             "fillOpacity": 25,
             "stacking": {"mode": "normal", "group": "A"},
-            "axisLabel": "tokens",
+            "axisLabel": "tokens/min",
         },
-        thresholds=[ThresholdStep(color="red", value=80.0)],
+        thresholds=[],
     )
 )
 
