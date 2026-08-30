@@ -108,6 +108,12 @@ def _build_memory_graph(memory_root: Path) -> MemoryGraphResponse:
     "health/user-health-overview"); links between notes are resolved relative
     to the source file's directory (standard Markdown link resolution).
 
+    The graph's main structure is containment: one pseudo node per folder
+    (always including the pool root) with an edge from every note to its
+    folder, plus folder → parent-folder edges so the folder skeleton is a
+    connected tree. Cross-references between notes ride on top as
+    `reference` edges, which the frontend renders visually weaker.
+
     The pipeline is explicit — walk → parse → node → edge → filter — each
     stage a pure function over the previous stage's output; node ids are
     derived from the node set, not accumulated state.
@@ -117,21 +123,92 @@ def _build_memory_graph(memory_root: Path) -> MemoryGraphResponse:
 
     warnings: list[str] = []
     nodes: list[MemoryGraphNode] = []
-    edges: list[MemoryGraphEdge] = []
+    reference_edges: list[MemoryGraphEdge] = []
     for md_file, note in walk_notes(memory_root, skip_names=_RESERVED_NAMES, warnings=warnings):
         nodes.append(_node_from_note(note))
-        edges.extend(
-            MemoryGraphEdge(source=source, target=target)
+        reference_edges.extend(
+            MemoryGraphEdge(source=source, target=target, kind="reference")
             for source, target in extract_md_links(note.body, md_file.parent, memory_root, note.rel)
         )
 
-    # Drop edges whose target is not a known node.
-    node_ids = {node.id for node in nodes}
+    # Drop reference edges whose target is not a known note.
+    note_ids = {node.id for node in nodes}
+    reference_edges = [e for e in reference_edges if e.target in note_ids]
+
+    folder_nodes, containment_edges = _folder_structure(nodes, memory_root)
+
     return MemoryGraphResponse(
-        nodes=nodes,
-        edges=[e for e in edges if e.target in node_ids],
+        nodes=[*folder_nodes, *nodes],
+        edges=[*containment_edges, *reference_edges],
         warnings=warnings,
     )
+
+
+def _folder_id_of(rel_id: str) -> str:
+    """The folder pseudo-node id holding the note `rel_id`: its directory as
+    a posix path with a trailing slash; the pool root is "/"."""
+    parts = rel_id.split("/")
+    if len(parts) == 1:
+        return "/"
+    return "/".join(parts[:-1]) + "/"
+
+
+def _parent_folder_id(folder_id: str) -> str:
+    """The parent folder pseudo-node id ("a/b/" → "a/"; "/" → "/")."""
+    parts = folder_id.rstrip("/").split("/")
+    return "/" if len(parts) <= 1 else "/".join(parts[:-1]) + "/"
+
+
+def _folder_structure(
+    nodes: list[MemoryGraphNode], memory_root: Path
+) -> tuple[list[MemoryGraphNode], list[MemoryGraphEdge]]:
+    """Folder pseudo nodes + containment edges — the graph's main structure.
+
+    One pseudo node per folder that holds notes, closed under parent
+    directories (every ancestor of a note's folder becomes a node, so
+    folder → parent-folder edges always land on a node), plus the pool root
+    itself so the skeleton is a single connected tree even when the pool has
+    no root-level notes. An empty pool yields no nodes at all, so the
+    frontend's empty state still triggers.
+    """
+    if not nodes:
+        return [], []
+
+    folders: set[str] = {"/"}
+    for node in nodes:
+        folder = _folder_id_of(node.id)
+        while folder != "/":
+            folders.add(folder)
+            folder = _parent_folder_id(folder)
+
+    folder_nodes = [
+        MemoryGraphNode(
+            id=folder,
+            path=folder,
+            title=(
+                memory_root.name or "/" if folder == "/" else folder.rstrip("/").rsplit("/", 1)[-1]
+            ),
+            kind="folder",
+            description=None,
+            tags=[],
+            primary_tag="",
+            timestamp=None,
+            ava_agent=None,
+            ava_machine=None,
+        )
+        for folder in sorted(folders)
+    ]
+
+    edges = [
+        MemoryGraphEdge(source=node.id, target=_folder_id_of(node.id), kind="containment")
+        for node in nodes
+    ]
+    edges.extend(
+        MemoryGraphEdge(source=folder, target=_parent_folder_id(folder), kind="containment")
+        for folder in sorted(folders)
+        if folder != "/"
+    )
+    return folder_nodes, edges
 
 
 def _node_from_note(note: Note) -> MemoryGraphNode:
@@ -141,6 +218,7 @@ def _node_from_note(note: Note) -> MemoryGraphNode:
         id=note.rel,
         path=note.rel + ".md",
         title=note.title,
+        kind="note",
         description=note.description,
         tags=tags,
         primary_tag=_primary_tag(tags),
