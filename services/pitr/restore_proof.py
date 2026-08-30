@@ -19,7 +19,6 @@ from typing import Protocol, cast
 
 import psutil
 
-from services.pitr.activation_evidence import stored_digest_matches
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.base_restore_crypto import (
     authenticate_base_ciphertext,
@@ -492,19 +491,8 @@ def _resume_protected_publish(
         return None
     payload = source.read_bytes()
     protected = ProtectedManifest.from_json(payload.decode())
-    embedded_raw: object = json.loads(payload.decode())
-    embedded_candidate: object | None = None
-    if isinstance(embedded_raw, dict):
-        embedded_candidate = cast(dict[str, object], embedded_raw).get("candidate")
-    embedded_candidate_bytes = (
-        json.dumps(embedded_candidate, sort_keys=True, separators=(",", ":"))
-        if isinstance(embedded_candidate, dict)
-        else ""
-    )
-    if protected.chain_id != candidate.chain_id or not stored_digest_matches(
-        raw=embedded_candidate_bytes,
-        canonical=candidate_sha256(candidate),
-        expected=protected.candidate_sha256,
+    if protected.chain_id != candidate.chain_id or protected.candidate_sha256 != candidate_sha256(
+        candidate
     ):
         raise RestoreProofError("durable protected retry does not match its candidate")
     if source == pending:
