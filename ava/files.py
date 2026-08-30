@@ -17,6 +17,7 @@ from pathlib import Path
 from ava import _boot
 from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import is_flagged, scan_content
+from shared.log import logger
 from shared.paths import ava_home, workspace_dir
 
 # Module-load invariant assert: if `Path.home()` is unavailable
@@ -55,6 +56,29 @@ def _resolve(path: str | Path) -> Path:
     return p
 
 
+def _record_skill_read(path: Path) -> None:
+    """Best-effort `skill_invoked` attribution for a file that is a loaded
+    skill's SKILL.md (the `.path` + `files.read(SKILL.md)` pattern).
+
+    Reading a skill body through the generic file API is consumption exactly
+    like a `help()` render, but it bypasses the lazy proxy loader that carries
+    the attribution hook — so it used to go unrecorded and the `loaded` signal
+    was under-counted. The resolution happens in the skills module (only a
+    mounted skill's own SKILL.md qualifies); a non-matching file is a no-op.
+
+    Telemetry, never a failure path: any problem (the skills surface disabled
+    by `AVA_SDK_DISABLE`, an import hiccup, a scan error) is swallowed with a
+    warning — a file read must never break because attribution could not run."""
+    if path.name != "SKILL.md":
+        return
+    try:
+        from ava import skills as skills_mod
+
+        skills_mod._record_skill_invoked_by_path(path)
+    except Exception as e:  # best-effort telemetry; never break a read
+        logger.warning("skill attribution skipped for {}: {}", path, e)
+
+
 def read(
     path: str | Path,
     start: int | None = None,
@@ -83,7 +107,11 @@ def read(
     # context, so the returned text is scanned for injection patterns before it
     # leaves. Clean content is returned byte-for-byte (scan_content is a no-op).
     source = f"file.read:{path}"
-    text = _resolve(path).read_text(encoding="utf-8")
+    p = _resolve(path)
+    # A SKILL.md body entering the context is skill consumption — attribute
+    # it even though the generic file API bypasses the lazy proxy hook.
+    _record_skill_read(p)
+    text = p.read_text(encoding="utf-8")
     if start is None and end is None and not with_line_numbers:
         return scan_content(text, source=source)
     if start is not None and start < 1:

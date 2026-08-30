@@ -309,9 +309,10 @@ _WHAT_SKILLS = "reusable skills (playbooks)"
 _WHAT_MCPS = "live MCP tool servers"
 
 _SKILLS_HOWTO = (
-    "Before using a skill, load its full body with `ava.help(ava.skills.<path>)`; "
-    "that also prints the skill's directory path, where its other files live. "
-    "Paths nest like `ava.skills.web-ai:deep-research` — display form; the "
+    "Before using a skill, load its full body with `ava.help(ava.skills.<path>)` "
+    "or `ava.skills.read(<identifier>)` — both record the load; the read "
+    "returns the body plus the skill's directory path, where its other files "
+    "live. Paths nest like `ava.skills.web-ai:deep-research` — display form; the "
     "loadable spelling of the same path is `ava.skills.web_ai.deep_research`. "
     "This listing may be a subset of what is installed — "
     "`ava.help(ava.skills)` enumerates the full catalog, and an unlisted skill "
