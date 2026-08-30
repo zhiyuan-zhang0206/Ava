@@ -2047,8 +2047,35 @@ def test_inspect_heartbeat_idle_projects_next_at(db_conn: psycopg.Connection) ->
         hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % int(JITTER_SPAN_S)
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_inspect_heartbeat_zero_jitter_span_disables_jitter(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """JITTER_SPAN_S=0 must disable jitter exactly like the daemon's
+    `NULLIF(span, 0)` collapse (QA #952 b): the projection guards the modulo,
+    so the endpoint still serves next_at = last_active + idle_threshold with no
+    jitter term instead of ZeroDivisionError-ing the inspect response."""
+    monkeypatch.setattr("gateway.routers._inspect_live.JITTER_SPAN_S", 0)
+    aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
+    db_conn.commit()
+    with TestClient(app) as client:
+        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+    assert hb["paused_until"] is None
+    assert hb["heartbeat_pending"] is False
+    assert hb["next_at"] is not None
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_jitter_span_s_stays_whole_seconds() -> None:
+    """The jitter span must remain a whole-second count: the daemon SQL casts it
+    with Postgres' `::int` (rounds half away from zero) while the inspector
+    computes the offset in Python (`int` truncates) — a non-integral span would
+    split the two interpretations again into a 1s drift (QA #952 b)."""
+    assert int(JITTER_SPAN_S) == JITTER_SPAN_S
 
 
 def test_inspect_heartbeat_paused_shows_window(db_conn: psycopg.Connection) -> None:
@@ -2121,7 +2148,7 @@ def test_inspect_heartbeat_no_pending_projects_from_last_active(
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
     # next_at is based on last_active_at (120s ago) + per-agent jitter.
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % int(JITTER_SPAN_S)
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -2166,7 +2193,7 @@ def test_inspect_heartbeat_idle_family_projects_next_at(
     assert hb["paused_until"] is None
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % int(JITTER_SPAN_S)
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -2206,7 +2233,7 @@ def test_inspect_heartbeat_restarting_overdue_still_projects_raw_next_at(
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
     # Raw projection: 2h ago + idle_threshold + jitter — clearly in the past.
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 7200 + aid % int(JITTER_SPAN_S)
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 7200 + aid % JITTER_SPAN_S
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -2226,7 +2253,7 @@ def test_inspect_heartbeat_stale_pending_does_not_suppress(
         hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % int(JITTER_SPAN_S)
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 

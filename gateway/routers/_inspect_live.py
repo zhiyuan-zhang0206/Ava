@@ -166,7 +166,10 @@ def project_heartbeat(
             # Match the daemon's due-time exactly: idle clock + per-agent jitter
             # (id mod JITTER_SPAN_S) — the actual dispatch happens at the first
             # daemon tick at/after this, so next_at never overstates it.
-            jitter_s = agent_id % int(JITTER_SPAN_S)
+            # JITTER_SPAN_S is int-typed (whole seconds) so this matches the
+            # daemon's `NULLIF(span, 0)::int` cast exactly; the `0` guard mirrors
+            # the daemon's disabled-jitter collapse (mod never divides by zero).
+            jitter_s = agent_id % JITTER_SPAN_S if JITTER_SPAN_S else 0
             next_at = last_active_at + timedelta(seconds=idle_threshold_s + jitter_s)
     return HeartbeatInfo(
         interval_s=interval_s,

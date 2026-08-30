@@ -66,18 +66,20 @@ from psycopg_pool import ConnectionPool
 from ops.agent_identity import AgentProcessIdentity, probe_agent_process
 from ops.agents import swap_in_agent
 from ops.controllers.base import BlockScope, ReconcileResult
+
+# Freshness window for "pending inbound" / swap-out recency checks: a pending
+# inbound older than this no longer counts as "about to wake" — the swap-in /
+# swap-out decisions key on it. This is the SAME window as the heartbeat
+# daemon's guard, imported single-source (the check-in and the swap-out are
+# two sides of the same wake/swap decision, and one value must never drift
+# from the other). Deliberately NOT `shared.deploy_timing.NO_PROGRESS_TIMEOUT_S`:
+# same order of magnitude, but that one judges deployment progress, not stale
+# wake rows (2026-08-08 audit, P3-5).
+from services.heartbeat import STALE_PENDING_S
 from shared.config import settings
 from shared.machine import MachineRole, machine_name
 
 _log = logging.getLogger("ops.controllers.hibernate")
-
-# Freshness window for "pending inbound" / swap-out recency checks (seconds).
-# A pending inbound older than this no longer counts as "about to wake" — the
-# swap-in/swap-out decisions key on it. Same value and order of magnitude as
-# `shared.deploy_timing.NO_PROGRESS_TIMEOUT_S` but a DIFFERENT quantity: that
-# one judges deployment progress; this one ignores stale pending rows
-# (2026-08-08 audit, P3-5 — was a bare 900.0 inline in two queries).
-_PENDING_FRESH_WINDOW_S = 900.0
 
 
 def _select_local_swap_out_candidates(
@@ -123,7 +125,7 @@ def _select_local_swap_out_candidates(
             "  WHERE im.agent_id = ranked.id AND im.status = 'pending' "
             "    AND im.created_at >= now() - make_interval(secs => %s) "
             ")",
-            (local_machine, min_active, idle_threshold_s, _PENDING_FRESH_WINDOW_S),
+            (local_machine, min_active, idle_threshold_s, STALE_PENDING_S),
         )
         return cur.fetchall()
 
@@ -142,7 +144,7 @@ def _select_local_swap_in_candidates(pool: ConnectionPool, local_machine: str) -
             "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
             "    AND im.created_at >= now() - make_interval(secs => %s) "
             ")",
-            (local_machine, _PENDING_FRESH_WINDOW_S),
+            (local_machine, STALE_PENDING_S),
         )
         return [r[0] for r in cur.fetchall()]
 
