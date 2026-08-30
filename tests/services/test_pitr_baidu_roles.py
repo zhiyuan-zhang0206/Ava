@@ -39,7 +39,9 @@ def test_token_manager_refreshes_persists_and_reuses(
     state_path = tmp_path / "token.json"
     posts: list[dict[str, str]] = []
 
-    def fake_post(url: str, *, data: dict[str, str], timeout: float) -> FakeTokenResponse:
+    def fake_post(
+        url: str, *, data: dict[str, str], timeout: float, headers: dict[str, str]
+    ) -> FakeTokenResponse:
         posts.append(dict(data))
         return FakeTokenResponse(
             200,
@@ -74,7 +76,9 @@ def test_token_manager_refreshes_persists_and_reuses(
 def test_token_refresh_failure_raises_and_health_surfaces(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fake_post(url: str, *, data: dict[str, str], timeout: float) -> FakeTokenResponse:
+    def fake_post(
+        url: str, *, data: dict[str, str], timeout: float, headers: dict[str, str]
+    ) -> FakeTokenResponse:
         raise httpx.ConnectError("boom")
 
     monkeypatch.setattr(httpx, "post", fake_post)

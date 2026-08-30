@@ -397,6 +397,122 @@ def test_stat_reads_back_sidecar_identity(tmp_path: Path, monkeypatch: pytest.Mo
     assert ack.created is False
 
 
+def test_upload_rejects_tampered_read_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """QA #1147 C3: the create read-back is the only cross-check the engine
+    gets — a tampered read-back must fail the upload, not ACK it."""
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    fake.create_override[f"{APP_ROOT}/{OBJECT}"] = {
+        "fs_id": 500,
+        "path": f"{APP_ROOT}/{OBJECT}",
+        "size": 999,
+        "md5": "deadbeef",
+        "isdir": 0,
+    }
+    source = tmp_path / "wal.enc"
+    source.write_bytes(b"payload")
+
+    with pytest.raises(PermanentObjectStoreError, match="differs from the local archive"):
+        store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+
+
+def test_stat_rejects_row_that_differs_from_its_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QA #1147 C3: stat must cross-check the file row against the sidecar
+    identity — a drifted row is a permanent error, never a silent None."""
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    obj_path = f"{APP_ROOT}/{OBJECT}"
+    digest = _md5(b"x")
+    row = fake.seed_file(obj_path, size=101, md5=digest)
+    sidecar = {
+        "object_name": OBJECT,
+        "pin_token": f"{row['fs_id']}:{digest}",
+        "size": 100,
+        "checksum_algo": "md5",
+        "checksum_value": digest,
+        "metadata": {},
+    }
+    sidecar_data = json.dumps(sidecar, sort_keys=True, separators=(",", ":")).encode()
+    fake.seed_file(
+        f"{obj_path}.ack.json",
+        size=len(sidecar_data),
+        md5=_md5(sidecar_data),
+        dlink="https://dl.test/side",
+    )
+
+    def fake_get(_url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, content=sidecar_data)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    with pytest.raises(PermanentObjectStoreError, match="differs from its sidecar"):
+        store.stat(OBJECT)
+
+
+def test_sidecar_download_md5_mismatch_is_permanent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sidecar is downloaded over an unauthenticated data plane; its
+    bytes must match the PCS row md5 before any identity is trusted."""
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    obj_path = f"{APP_ROOT}/{OBJECT}"
+    fake.seed_file(obj_path, size=100, md5=_md5(b"x"))
+    sidecar_path = f"{obj_path}.ack.json"
+    payload = b'{"object_name": "other"}'
+    fake.seed_file(sidecar_path, size=len(payload), md5="deadbeef", dlink="https://dl.test/side")
+
+    def fake_get(_url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, content=payload)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    with pytest.raises(PermanentObjectStoreError, match="differs from its PCS row"):
+        store.stat(OBJECT)
+
+
+def test_file_lookup_pages_beyond_the_first_listing_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The parent-directory lookup pages with start/limit; an object beyond
+    the first 1000 rows must still resolve."""
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    directory = f"{APP_ROOT}/ava-pitr/wal/00000001"
+    for index in range(1005):
+        fake.seed_file(f"{directory}/filler-{index:04d}.enc", size=1, md5="m")
+    obj_path = f"{directory}/000000010000000000000001.enc"
+    digest = _md5(b"x")
+    row = fake.seed_file(obj_path, size=100, md5=digest)
+    sidecar = {
+        "object_name": "ava-pitr/wal/00000001/000000010000000000000001.enc",
+        "pin_token": f"{row['fs_id']}:{digest}",
+        "size": 100,
+        "checksum_algo": "md5",
+        "checksum_value": digest,
+        "metadata": {},
+    }
+    sidecar_data = json.dumps(sidecar, sort_keys=True, separators=(",", ":")).encode()
+    fake.seed_file(
+        f"{obj_path}.ack.json",
+        size=len(sidecar_data),
+        md5=_md5(sidecar_data),
+        dlink="https://dl.test/side",
+    )
+
+    def fake_get(_url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, content=sidecar_data)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    ack = store.stat("ava-pitr/wal/00000001/000000010000000000000001.enc")
+
+    assert ack is not None
+    assert ack.pin_token == f"{row['fs_id']}:{digest}"
+
+
 def test_stat_returns_none_without_sidecar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakePcs()
     store = make_store(fake, monkeypatch)

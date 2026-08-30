@@ -17,13 +17,10 @@ from services.pitr.activation_state import (
 
 def _credentials() -> dict[str, str]:
     return {
-        "uploader_client_email": "u@example.test",
-        "uploader_project_id": "project",
-        "uploader_private_key_id": "u-key",
-        "viewer_client_email": "v@example.test",
-        "viewer_project_id": "project",
-        "viewer_private_key_id": "v-key",
-        "bucket_name": "bucket",
+        "backend": "gcs",
+        "uploader_identity": "u@example.test",
+        "viewer_identity": "v@example.test",
+        "store_target": "bucket",
         "object_prefix": "pitr",
         "backup_key_id": "key",
         "backup_key_sha256": "0" * 64,
@@ -450,6 +447,43 @@ def test_restore_pending_accepts_legacy_candidate_manifest_and_digest(
     assert stored_digest_matches(
         raw=legacy_candidate, canonical=loaded_protected_canonical(loaded), expected=legacy_digest
     )
+
+
+def test_legacy_gcs_credential_evidence_normalizes_to_neutral_keys(tmp_path: Path) -> None:
+    """QA #1147 C1: records written before the backend field carried the GCS
+    vocabulary in the credential evidence; they must stay readable (the same
+    identities under backend-neutral keys)."""
+    from dataclasses import asdict
+
+    record = ActivationRecord.start(operation_id="op-1", origin="cli")
+    raw = asdict(record)
+    raw["pre_activation_credential_evidence"] = {
+        "uploader_client_email": "u@example.test",
+        "uploader_project_id": "project",
+        "uploader_private_key_id": "u-key",
+        "viewer_client_email": "v@example.test",
+        "viewer_project_id": "project",
+        "viewer_private_key_id": "v-key",
+        "bucket_name": "bucket",
+        "object_prefix": "pitr",
+        "backup_key_id": "key",
+        "backup_key_sha256": "0" * 64,
+    }
+    record_path(tmp_path).parent.mkdir(parents=True)
+    record_path(tmp_path).write_text(json.dumps(raw))
+
+    loaded = load_record(tmp_path)
+
+    assert loaded is not None
+    assert loaded.pre_activation_credential_evidence == {
+        "backend": "gcs",
+        "uploader_identity": "u@example.test",
+        "viewer_identity": "v@example.test",
+        "store_target": "bucket",
+        "object_prefix": "pitr",
+        "backup_key_id": "key",
+        "backup_key_sha256": "0" * 64,
+    }
 
 
 def loaded_protected_canonical(loaded: ActivationRecord) -> str:

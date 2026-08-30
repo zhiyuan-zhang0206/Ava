@@ -123,6 +123,7 @@ class BaiduTokenManager:
                         "client_id": self._credentials.app_key,
                         "client_secret": self._credentials.secret_key,
                     },
+                    headers={"User-Agent": "pan.baidu.com"},
                     timeout=30,
                 )
             except httpx.HTTPError as exc:
