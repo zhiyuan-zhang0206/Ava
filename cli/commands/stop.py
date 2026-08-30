@@ -597,10 +597,12 @@ def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool
     Designed for the detached updater session, where interactive confirmation
     of stop is not desirable and the start step runs without a tty.
 
-    `quiesce` (the updater's per-host self-heal path): signal this host's live
-    agents to restart (system:update), wait per `mode`, force-reap stragglers on
-    timeout — the same agent-drain contract a rollout's stop-the-world holds, so
-    a watchdog/standalone update no longer leaves every agent running old code.
+    `quiesce` (the updater's per-host self-heal path): pause this host's
+    restarter, signal its live agents to restart (system:update) and wait per
+    `mode`; stragglers are force-reaped in the separate force_reap stage that
+    follows, so the quiesce stage itself never exceeds the mode's budget — the
+    same agent-drain contract a rollout's stop-the-world holds, so a
+    watchdog/standalone update no longer leaves every agent running old code.
     `force_reap` (the rollout's Phase-B backstop): no signal, no wait — mark this
     host's still-live agents 'restarting' and kill them (the gateway-side
     quiesce already drained them; this catches the stragglers it timed out on).
@@ -659,15 +661,20 @@ def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool
         _release_self_heal_pause()
         return RESTART_DECLINED_EXIT_CODE
 
-    # Agent drain before the stop: quiesce (signal + wait per mode + timeout
-    # reap) for a standalone self-heal; force-reap for the rollout's Phase-B
-    # backstop. Both mark survivors 'restarting' so the restarter — paused by
-    # the caller (spawn_update / Phase A), resumed by the start below — respawns
-    # them on new code.
+    # Agent drain before the stop: quiesce (signal + wait per mode) for a
+    # standalone self-heal; force-reap for the rollout's Phase-B backstop and
+    # for the quiesce's own stragglers. The reap is its own stage, never part
+    # of the quiesce window — the quiesce stage must stay within the mode's
+    # budget, and the reap's SIGTERM grace is escalation time, not drain time
+    # (the quiesce stage ran 25.6s = budget 10s + reap 15s before the split,
+    # Task #2055). Both mark survivors 'restarting' so the restarter — paused
+    # by the quiesce itself, resumed by the start below — respawns them on new
+    # code.
+    drained = True
     if quiesce:
         with updater_stage("quiesce"):
-            _ns._quiesce_local_agents(mode)
-    if force_reap:
+            drained = _ns._quiesce_local_agents(mode)
+    if force_reap or (quiesce and not drained):
         with updater_stage("force_reap"):
             _ns._force_reap_local_agents()
 
@@ -678,6 +685,10 @@ def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool
     with updater_stage("stop"):
         rc = _ns._do_stop(repo, graceful=False, require_confirmation=False, keep_infra=True)
     if rc != 0:
+        # The quiesce paused this host; a failed stop means no `ava start` is
+        # coming to restore it. Release the pause unless a cluster update owns
+        # it (same contract as the refusal paths above).
+        _release_self_heal_pause()
         return rc
     # Internal restart: preserve the operator's durable --disable-service marker
     # (a no-flag operator start would rewrite it to empty and re-enable everything).
