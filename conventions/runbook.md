@@ -943,14 +943,19 @@ healthcheck dials) likewise cannot: absence of evidence is not failure.
 
 **The gate is tiered** (Task #2183, C2): the critical roster
 (`cli/commands/_probe.py:CRITICAL_SERVICE_SESSIONS` — gateway / frontend /
-restarter / agent-host) is the only one that can fail a start and the only one
-waited on for the full 180 s. Every other launched service gets a 45 s window
+restarter / agent-host / im-bridge / the two watchdogs; CTO ruling: critical =
+a failure cuts user-visible core function or the ops safety net) is the only
+one that can fail a start and the only one waited on for the full 180 s. Every
+other launched service gets a 45 s window
 (`shared/deploy_timing.py:NON_CRITICAL_SERVICE_READY_TIMEOUT_S`) and then stops
 blocking the start; one that missed the window is printed as a cross AND posted
-to the alerts store + IM (the same channel the health probes use), so the
-downgrade is a verdict change, never a silence. This is the 2026-08-30 rollout's
-lesson: its local start spent 182 of 197.5 s on a pitr-uploader healthz whose
-failure nothing downstream depended on.
+to the alerts store (the same channel the health probes use), so the downgrade
+is a verdict change, never a silence. The alert is one instance per service,
+reused while the failure stays open, resolved by the next start that finds the
+service up, and its IM push is suppressed under `--no-readiness-gate` (the
+boot job's uncapped retry must not spam the user's IM). This is the
+2026-08-30 rollout's lesson: its local start spent 182 of 197.5 s on a
+pitr-uploader healthz whose failure nothing downstream depended on.
 
 `ava start --no-readiness-gate` keeps the wait and the printed crosses but exits 0
 anyway. Two callers pass it and an operator normally should not:

@@ -245,16 +245,19 @@ SERVICE_READY_TIMEOUT_S = 180.0
 # How long `ava start` waits for a NON-CRITICAL service to pass its liveness
 # probe before it stops waiting on it (`cli.commands._probe`).
 #
-# The readiness gate is tiered: the critical roster (gateway / frontend /
-# restarter / the hosted agent-runner) keeps `SERVICE_READY_TIMEOUT_S`, because
-# a start that cannot serve the gateway, the UI, or the runners is a failed
-# start. Everything else — pitr-uploader, labeler, the browser, ... — shares
-# one short window instead, sized so a slow-but-healthy daemon still gets its
-# beat to bind its port while a dead one stops taxing every start. 2026-08-30
-# rollout-1788074072 spent 182 s of its 197.5 s local start waiting on a
-# pitr-uploader healthz that never answered; the service's failure did not
-# block the rollout's conclusion (the watchdog covers it), so the gate was
-# waiting on a service whose verdict nothing depended on.
+# The readiness gate is tiered: the critical roster keeps
+# `SERVICE_READY_TIMEOUT_S`, because a start that cannot serve the core
+# surface or the ops safety net is a failed start. The roster is the CTO
+# ruling (Task #2183, C2): gateway / frontend / restarter / the hosted
+# agent-runner / im-bridge / the two watchdogs (see
+# `cli.commands._probe.CRITICAL_SERVICE_SESSIONS`). Everything else —
+# pitr-uploader, labeler, the browser, ... — shares one short window instead,
+# sized so a slow-but-healthy daemon still gets its beat to bind its port
+# while a dead one stops taxing every start. 2026-08-30 rollout-1788074072
+# spent 182 s of its 197.5 s local start waiting on a pitr-uploader healthz
+# that never answered; the service's failure did not block the rollout's
+# conclusion (the watchdog covers it), so the gate was waiting on a service
+# whose verdict nothing depended on.
 #
 # Deliberately well below `SERVICE_READY_TIMEOUT_S`: the point of the tier is
 # that the short window ends long before the critical bound, so a healthy start

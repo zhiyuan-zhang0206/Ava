@@ -997,7 +997,17 @@ def test_critical_service_manifest_is_pinned_and_real() -> None:
     from ops.spec import services_for_capabilities_annotated
 
     assert (
-        frozenset({"gateway", "frontend", "restarter", "agent-host"})
+        frozenset(
+            {
+                "gateway",
+                "frontend",
+                "restarter",
+                "agent-host",
+                "gateway-watchdog",
+                "agent-runner-watchdog",
+                "im-bridge",
+            }
+        )
         == _probe_mod.CRITICAL_SERVICE_SESSIONS
     )
     real = {
@@ -1152,6 +1162,9 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
         "notify_im",
         lambda _text: calls["im"].append(_text) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
+    # No open instance yet: the alert DB lookup returns none, so the upsert
+    # proceeds as a fresh firing.
+    monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cli.cmd_start()
 
@@ -1159,7 +1172,7 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
     assert calls["upsert"], "an alerts row must be written"
     alert, source = calls["upsert"][0]  # type: ignore[misc]
     assert source == "start-readiness"
-    assert "pitr-uploader" in alert["labels"]["service"]  # type: ignore[operator]
+    assert alert["labels"]["service"] == "ava-pitr-uploader"  # type: ignore[index]
     assert calls["im"], "an IM notification must be sent"
     combined = "".join(capsys.readouterr())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert "non-critical" in combined, "the printed verdict must name the tier"
@@ -1183,5 +1196,156 @@ def test_non_critical_alert_failure_degrades_to_a_print(monkeypatch: pytest.Monk
         raise RuntimeError("db down")
 
     monkeypatch.setattr(_probe_mod, "_alert_db_connect", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    # Both rails degrade to a printed note; the start itself must not fail.
+    monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _cli.cmd_start() == 0
+
+
+# ─── the alert lifecycle: one instance per failure, resolved on recovery ──────
+#
+# QA #1196 P1-1: an alert instance keyed by (fingerprint, starts_at) must be
+# REUSED while the failure is still open — otherwise every `ava start` (the
+# boot job retries every 60 s with no cap) inserts a fresh row and a fresh IM.
+# And the instance must be resolved when the service recovers, so the
+# Inspector's unresolved panel never shows a fixed failure.
+
+
+class _FakeAlertConn:
+    """In-memory alerts connection for the lifecycle tests: `upsert_alert` rows
+    live in a dict, and the unresolved-lookup reads it back."""
+
+    def __init__(self) -> None:
+        self.rows: dict[tuple[str, str], dict[str, object]] = {}
+        self.notified: list[tuple[str, str]] = []
+        self.committed = 0
+
+    def __enter__(self) -> _FakeAlertConn:
+        return self
+
+    def __exit__(self, *_a: object) -> bool:
+        return False
+
+    def commit(self) -> None:
+        self.committed += 1
+
+
+def _wire_alert_store(monkeypatch: pytest.MonkeyPatch, conn: _FakeAlertConn) -> None:
+    """Route `_notify` / `_resolve` through the fake conn + shared.alerts."""
+    import shared.alerts as _alerts
+    from cli.commands import _probe as _probe_mod
+
+    monkeypatch.setattr(_probe_mod, "_alert_db_connect", lambda: conn)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _lookup(c: object, service: str) -> tuple[str, str] | None:
+        for (fp, starts_at), row in conn.rows.items():
+            if (
+                row.get("status") == "unresolved"
+                and row.get("labels", {}).get("service") == service  # type: ignore[union-attr]
+            ):
+                return starts_at, fp  # type: ignore[return-value]
+        return None
+
+    monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", _lookup)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _upsert(
+        _c: object, alert: dict[str, object], source: str
+    ) -> tuple[object, bool, bool, dict[str, object]]:
+        key = (str(alert["fingerprint"]), str(alert["starts_at"]))
+        old_row = conn.rows.get(key)
+        was_open = old_row is not None and old_row.get("status") == "unresolved"
+        # The real store normalizes to unresolved/resolved and keeps notified_at
+        # across updates; the fake mirrors both so the unresolved-lookup and the
+        # IM gate match the same way.
+        conn.rows[key] = {
+            **alert,
+            "status": "unresolved" if alert["status"] == "firing" else "resolved",
+            "notified_at": old_row.get("notified_at") if old_row else None,
+        }
+        status = alert["status"]
+        notified = conn.rows[key].get("notified_at") is not None
+        should = (status == "firing" and not notified) or (status == "resolved" and notified)
+        return key, not was_open, should, {"notified_at": conn.rows[key].get("notified_at")}
+
+    def _stamp(_c: object, keys: list[object]) -> None:
+        for k in keys:
+            if k in conn.rows:
+                conn.rows[k]["notified_at"] = "yes"  # type: ignore[index]
+        conn.notified.extend(keys)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_alerts, "upsert_alert", _upsert)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_alerts, "stamp_notified", _stamp)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_alerts, "display_language", lambda _c: "en")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _alerts,
+        "notify_text",
+        lambda _a, _l: f"TEXT:{_a['status']}:{_a['labels']['service']}",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(_alerts, "fingerprint", lambda labels: f"fp:{labels['service']}")  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_repeated_start_reuses_the_open_alert_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure that is still open when the next start runs is UPDATE d, not
+    re-inserted: one alerts row and one IM across N starts (the boot job retries
+    every 60 s — this is the anti-spam guarantee)."""
+    import shared.alerts as _alerts
+    from cli.commands import _probe as _probe_mod
+
+    conn = _FakeAlertConn()
+    _wire_alert_store(monkeypatch, conn)
+    ims: list[str] = []
+    monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
+
+    specs = (_spec("pitr-uploader"),)
+    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
+    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
+
+    assert len(conn.rows) == 1, "the second start must reuse the open instance"
+    assert len(ims) == 1, "only the first firing IM is sent"
+
+
+def test_recovered_service_resolves_its_open_alert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A start that finds the service up again closes the open instance — the
+    Inspector's unresolved panel must not keep a fixed failure (user ruling
+    2026-08-29)."""
+    import shared.alerts as _alerts
+    from cli.commands import _probe as _probe_mod
+
+    conn = _FakeAlertConn()
+    _wire_alert_store(monkeypatch, conn)
+    ims: list[str] = []
+    monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
+
+    specs = (_spec("pitr-uploader"),)
+    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
+    _probe_mod._resolve_recovered_non_critical_alerts(specs, im_enabled=True)
+
+    assert len(conn.rows) == 1, "the resolved edge updates the same instance"
+    (key,) = conn.rows
+    assert key[0] == "fp:ava-pitr-uploader"
+    assert conn.rows[key]["status"] == "resolved"
+    assert len(ims) == 2, "one firing IM + one resolved IM"
+
+
+def test_im_is_suppressed_under_no_readiness_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--no-readiness-gate` (the boot job's uncapped 60 s retry loop) writes
+    the alerts row but sends no IM — the store stays visible, the user's IM
+    stays quiet (QA #1196 P1-1)."""
+    import shared.alerts as _alerts
+    from cli.commands import _probe as _probe_mod
+
+    conn = _FakeAlertConn()
+    _wire_alert_store(monkeypatch, conn)
+    ims: list[str] = []
+    monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
+
+    _probe_mod._notify_non_critical_unready_services((_spec("pitr-uploader"),), im_enabled=False)
+
+    assert len(conn.rows) == 1, "the alerts row must still be written"
+    assert ims == [], "the IM push must be suppressed"
