@@ -328,9 +328,10 @@ async def _invoke_graph_with_lifecycle_logging(
     inbound; this loop then re-invokes on the same checkpointer thread
     (thread_id), so state carries across turns and the fresh invocation's
     claim does the long wait. Each invocation is wrapped in its own per-turn
-    root span (`turn_span`), so a trace = a turn and the root span exports
-    when the turn ends. The loop exits only when the returned state has
-    `exit_requested=True` — claim's terminate/restart winner or a lost
+    root span (`turn_span`), so a trace = a turn; the root is a placeholder
+    ended (and exported) at turn start, so a killed/crashed process still
+    leaves a complete root in Tempo (#1964). The loop exits only when the
+    returned state has `exit_requested=True` — claim's terminate/restart winner or a lost
     lifecycle CAS — which is what "process exits normally" means now; the
     turn-boundary END leaves it False. Both flags are reset in every
     invocation's input, so a stale checkpointed True (a resurrect onto the
@@ -390,8 +391,10 @@ async def _invoke_graph_with_lifecycle_logging(
 
     # Wrap each invocation (= one turn) in its own root span tagged with
     # session_id + the turn counter, so all LangGraph node + Anthropic SDK
-    # child spans of that turn inherit the OTel context and the trace exports
-    # the moment the turn ends; session.id groups an agent's turns on the viewer.
+    # child spans of that turn inherit the OTel context and parent under the
+    # root; the root is a placeholder ended at turn START so the trace always
+    # has its root even if this process dies mid-turn (#1964); session.id
+    # groups an agent's turns on the viewer.
     from shared.trace import turn_span
 
     # Track the input update to pass to graph.ainvoke. Starts empty; after
