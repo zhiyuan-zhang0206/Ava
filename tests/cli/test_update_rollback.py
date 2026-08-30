@@ -29,6 +29,7 @@ import pytest
 from cli import commands as _cli
 from cli.commands import _update_git as _git_mod
 from cli.commands import _update_recover as _rec
+from cli.commands import _update_uv_sync
 from cli.commands import update as _up
 from shared.migrations import MigrationFailed, RollbackBelowFloor
 
@@ -58,10 +59,6 @@ class _FakeSubprocess:
         argv = list(args)  # pyright: ignore[reportUnknownArgumentType]
         self.calls.append(argv)  # pyright: ignore[reportUnknownArgumentType]
         return SimpleNamespace(returncode=self._rc_for(argv))
-
-
-def _is_uv_sync(argv: list[str]) -> bool:
-    return argv[:2] == ["uv", "sync"]
 
 
 def _is_ava_start(argv: list[str]) -> bool:
@@ -198,10 +195,11 @@ def _patch_recover(monkeypatch: pytest.MonkeyPatch, *, rollback, sync_rc=0, star
     def _git_reset_hard(sha):  # type: ignore[no-untyped-def]
         order.append(f"reset:{sha}")
 
+    def _sync(_repo: Path) -> SimpleNamespace:
+        order.append("uv-sync")
+        return SimpleNamespace(returncode=sync_rc)
+
     def _rc_for(argv: list[str]) -> int:
-        if _is_uv_sync(argv):
-            order.append("uv-sync")
-            return sync_rc
         if _is_ava_start(argv):
             order.append("ava-start")
             return start_rc
@@ -210,6 +208,7 @@ def _patch_recover(monkeypatch: pytest.MonkeyPatch, *, rollback, sync_rc=0, star
     fake = _FakeSubprocess(_rc_for)
     monkeypatch.setattr(_rec, "rollback_schema_to", _rollback_schema_to)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rec, "git_reset_hard", _git_reset_hard)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rec, "run_uv_sync", _sync)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rec, "subprocess", fake)
     return order, fake
 
@@ -438,9 +437,12 @@ def _patch_local_update(
 
     monkeypatch.setattr(_up, "git_checkout_sha", _checkout)  # pyright: ignore[reportUnknownArgumentType]
 
+    def _sync(_repo: Path) -> SimpleNamespace:
+        return SimpleNamespace(returncode=sync_rc)
+
+    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", _sync)  # pyright: ignore[reportUnknownArgumentType]
+
     def _rc_for(argv: list[str]) -> int:
-        if _is_uv_sync(argv):
-            return sync_rc
         if _is_ava_start(argv):
             if start_interrupts:
                 # What a SIGINT arriving mid-`ava start` looks like from in here: the

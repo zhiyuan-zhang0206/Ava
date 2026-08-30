@@ -52,11 +52,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-import shared.editable_install
 from cli.commands._probe import _probe_judges_a_fresh_launch
 from cli.commands._repo import ServiceSpec, _repo_root, session_name
 from cli.commands._session_lifecycle import _launch_roster, _launch_sessions
 from cli.commands._setup import _print_missing_setup_error
+from cli.commands._update_uv_sync import run_uv_sync
 from cli.commands.migrations import cmd_migrations_apply
 from cli.commands.status import _update_in_flight, cmd_status
 from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
@@ -179,13 +179,7 @@ def _verify_source_integrity(repo: Path) -> int:
         f"   stale. Auto-healing: running `uv sync` now.\n",
         file=sys.stderr,
     )
-    with shared.editable_install.editable_pth_write_window(repo):
-        sync_result = subprocess.run(
-            ["uv", "sync"],
-            cwd=repo,
-            capture_output=False,
-            check=False,
-        )
+    sync_result = run_uv_sync(repo)
     if sync_result.returncode != 0:
         print(
             "  ✗ uv sync failed — refusing to start with a mismatched venv.\n"

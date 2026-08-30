@@ -235,7 +235,7 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
 
             print("\n→ uv sync")
             with updater_stage("uv_sync"):
-                sync_result = run_uv_sync(repo, runner=subprocess.run)
+                sync_result = run_uv_sync(repo)
             if sync_result.returncode != 0:
                 print("  ✗ uv sync failed", file=sys.stderr)
                 return 1
@@ -267,7 +267,7 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
             # The revert is another source switch — same window, same reason.
             with _source_switch_window():
                 git_checkout_sha(from_sha)
-                run_uv_sync(repo, runner=subprocess.run)
+                run_uv_sync(repo)
             return 1
 
     # 3) preflight: probe gateway + register machine BEFORE stopping services.
