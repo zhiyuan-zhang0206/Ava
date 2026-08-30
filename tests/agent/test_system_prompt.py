@@ -211,7 +211,7 @@ def test_missing_unregistered_expand_path_warns(
     """An unregistered missing path reaches the existing resolution warning."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["missing_sdk_namespace"])
     monkeypatch.setattr(settings.agent, "sdk_disable", [])
-    monkeypatch.setattr(ava, "_applied_disable_entries", set())
+    monkeypatch.setattr(ava, "_applied_disable_entries", set[str]())
 
     with caplog.at_level("WARNING", logger="agent.graph._system_prompt"):
         text = _sdk_expand_section()
