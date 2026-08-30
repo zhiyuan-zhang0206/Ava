@@ -269,7 +269,7 @@ $OTLP_EXPORTERS
   # max_days / max_backups bound the directory. `spans.jsonl` -> rotated
   # `spans-<ISO-timestamp>-size.jsonl` on size rotation (timberjack 1.4.5 in
   # otelcol-contrib 0.155.0 appends the trigger reason to the backup name;
-  # `shared/trace.py` parses both suffixed and unsuffixed shapes).
+  # `shared/trace_mirror.py` parses both suffixed and unsuffixed shapes).
   #
   # Segment size is the structural bound on the ACTIVE file (the file
   # exporter exposes no time-based rotation, so size is the only trigger):
@@ -277,13 +277,13 @@ $OTLP_EXPORTERS
   # max_backups counts BOTH plain and gzipped backups (timberjack parses the
   # `.gz` name), so it is the de-facto retention at peak volume: ~24 segments
   # = the last ~12h of a 2.9 GB/day mirror. The agent-side day retention
-  # (`trace_retention_days`, `shared/trace.py`'s `_prune_old_mirror` on every
+  # (`trace_retention_days`, `shared/trace_mirror.py`'s `_prune_old_mirror` on every
   # agent start) binds at low volume, when 24 segments span more days than
   # the setting; `_gzip_old_mirror` shrinks each kept segment ~5-10x, keeping
   # the whole mirror around a few hundred MiB at peak.
   #
   # No `localtime` key below — timberjack's default (false) stamps the
-  # rotated filename's timestamp in UTC. `shared/trace.py`'s `_prune_old_mirror`
+  # rotated filename's timestamp in UTC. `shared/trace_mirror.py`'s `_prune_old_mirror`
   # parses that embedded timestamp and treats it as UTC explicitly
   # (`tzinfo=UTC`); setting `localtime: true` here would silently break that
   # parse (retention would prune the wrong files, or none) without either
