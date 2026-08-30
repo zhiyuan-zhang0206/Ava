@@ -174,6 +174,11 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.GATEWAY_READY_TIMEOUT_S,
         "how long Phase B waits for its own gateway to serve before fan-out",
     ),
+    "UV_SYNC_TIMEOUT_S": Clock(
+        "deploy",
+        lambda: deploy.UV_SYNC_TIMEOUT_S,
+        "hard ceiling on one production uv sync inside the updater",
+    ),
     "GATEWAY_PREFLIGHT_BUDGET_S": Clock(
         "deploy",
         lambda: deploy.GATEWAY_PREFLIGHT_BUDGET_S,
@@ -324,6 +329,13 @@ CONSTRAINTS: list[Constraint] = [
         "GATEWAY_PREFLIGHT_BUDGET_S",
         "NO_PROGRESS_TIMEOUT_S",
         "one preflight dial can never be what makes a host look stalled",
+    ),
+    Constraint(
+        "<",
+        "UV_SYNC_TIMEOUT_S",
+        "NO_PROGRESS_TIMEOUT_S",
+        "a hung sync must fail itself into a terminal outcome before the host is "
+        "judged stalled, so the updater's recovery ladder beats the stalled-updater reap",
     ),
     Constraint(
         "==",
