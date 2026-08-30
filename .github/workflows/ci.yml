@@ -330,6 +330,36 @@ jobs:
           if-no-files-found: ignore
           path: tmp/pg-fixture-logs/
 
+  # Hard gate on the vendored-runtime provisioning path (CTO acceptance red
+  # line): the pinned Linux PG tree + injected pgvector deb must actually run
+  # `CREATE EXTENSION` + a distance query. Deliberately does NOT use the
+  # install-pg-redis action — the point is that the vendored tree alone
+  # suffices (initdb/pg_ctl/postgres come from the zonky jar). A standalone
+  # script, not a pytest test: the test suite's session fixture provisions its
+  # own Postgres via pg_tool, so a vendored-only job cannot run pytest at all.
+  backend-pgvector-smoke:
+    name: backend vendored pgvector smoke (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [classify]
+    if: ${{ needs.classify.outputs.backend == 'true' }}
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+
+      - name: Install Python deps
+        run: uv sync --frozen
+
+      - name: Vendored PG + injected pgvector smoke (CREATE EXTENSION + query)
+        run: uv run python scripts/pgvector_runtime_smoke.py
+
   backend:
     # The aggregator carrying the branch-protection / Mergify check name:
     # skipped (= satisfied) when the diff has no backend side; otherwise green
@@ -338,13 +368,13 @@ jobs:
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [classify, backend-static, backend-structure, backend-shard, backend-serial]
+    needs: [classify, backend-static, backend-structure, backend-shard, backend-serial, backend-pgvector-smoke]
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
     steps:
       - name: Verify shard results
-        if: ${{ needs.backend-static.result != 'success' || needs.backend-structure.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' }}
+        if: ${{ needs.backend-static.result != 'success' || needs.backend-structure.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' || needs.backend-pgvector-smoke.result != 'success' }}
         run: |
-          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }}"
+          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }}"
           exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

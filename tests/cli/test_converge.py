@@ -581,6 +581,12 @@ def test_cmd_converge_unconfigured_returns_zero(
     seeded_bin = rb.vendored_pg_dir() / "bin"
     seeded_bin.mkdir(parents=True)
     (seeded_bin / "initdb").write_text("#!/bin/sh\n")
+    # The pgvector injection shares the step: seed its detection file too so it
+    # takes the idempotent early return (the real injection is covered by
+    # scripts/pgvector_runtime_smoke.py).
+    seeded_ext = rb.vendored_pg_dir() / "share/postgresql/extension"
+    seeded_ext.mkdir(parents=True)
+    (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
     monkeypatch.setattr(_ns, "_repo_root", lambda: repo)
     monkeypatch.setattr(_ns, "_roles_or_none", lambda: None)
     # host-global wiring (the ava symlink) is prod-install only, so this test must

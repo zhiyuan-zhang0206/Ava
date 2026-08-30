@@ -124,12 +124,15 @@ def _probe_pgvector() -> ProbeResult:
             return ProbeResult(message=None)
         return ProbeResult(
             message=(
-                "pgvector is not installed in the cluster Postgres — the runtime "
-                "Postgres is the vendored relocatable build (~/.ava/runtime/pg/<ver>), "
-                "which scripts/provision/database.sh and CI's install-pg-redis do not "
-                "cover yet. pgvector is fallback-only / v2 until that provisioning "
-                "lands. Use AVA_MEMORY_SEARCH_BACKEND=milvus (default) or numpy "
-                "instead"
+                "pgvector is not installed in the cluster Postgres — the vendored "
+                "runtime Postgres (~/.ava/runtime/pg/<ver>) injects the pinned "
+                "pgvector files at converge time and `ava start` pre-creates the "
+                "extension, so a missing extension means this Postgres is not the "
+                "converged vendored tree: re-run `ava start` (converge + inject), or "
+                "install the pgvector package into a brew/apt Postgres, or provision "
+                "pgvector on a remote-managed plane. pgvector stays fallback-only "
+                "(milvus is the default) — use AVA_MEMORY_SEARCH_BACKEND=milvus or "
+                "numpy instead"
             ),
             fatal=True,
         )

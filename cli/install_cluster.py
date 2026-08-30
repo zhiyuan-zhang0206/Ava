@@ -304,6 +304,15 @@ def _birth(*, home: Path, secret: str) -> int:
             base_admin_url=base_admin_url,
             db_admin_password=db_admin_password,
         )
+        # pgvector pre-created here with the bootstrap-superuser connection (its
+        # control file is not `trusted`, so the NOSUPERUSER runtime roles cannot
+        # install it themselves); a silent no-op when this Postgres lacks the
+        # extension binaries. Routed through the lifecycle wrapper so unit tests
+        # stub it with the other birth-side provisioning steps.
+        lifecycle._ensure_pgvector_extension(
+            cl.DATA_PLANE_IDENTITY,
+            base_admin_url=base_admin_url,
+        )
         # The runner's least-privilege surface: checkpoint tables first (created
         # as the main role, so the gateway's own checkpoint readers keep working),
         # then the ava_runner role + grants — a fresh birth has no pre-existing
