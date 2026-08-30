@@ -109,6 +109,32 @@ NO_PROGRESS_TIMEOUT_S = 900.0
 # wheel on Windows and would have been bounded by this clock.
 UV_SYNC_TIMEOUT_S = 600.0
 
+# How long the Phase-B poll keeps waiting on a host that is ALIVE AND MAKING
+# PROGRESS before it hands the rest of that host's convergence to the settle hold
+# (C3, 2026-08-30 rollout-1788074072: the wsl runner stayed 'converging' for the
+# whole 900 s bound — 340 probes — while its convergence was already covered by
+# the settle hold + watchdog that follow the orchestration's exit).
+#
+# The family's `NO_PROGRESS_TIMEOUT_S` stays the poll's ABSOLUTE deadline (and
+# the stalled/no-progress verdicts still end a host's poll in seconds regardless
+# of either bound); this is the patience for the one shape that can otherwise
+# spend the whole bound without proving anything — a host whose updater lease is
+# live and whose stage evidence keeps moving, i.e. one that may be slow-but-
+# working. 900 s of *that* is the 15.7-minute CLI wait the operator cannot
+# interrupt; the 300 s value is the CTO ruling for this patience (rollout timing
+# report §3-C3, task #2189). Beyond it the remaining convergence is the settle
+# hold's job — the hold was built for exactly this ('SETTLE_TTL_S' docstring: an
+# orchestration that ends with hosts still converging calls settle_update_lock),
+# and the settle window (900 s) is untouched, so the cluster stays guarded for
+# the same total as before.
+#
+# Lattice: strictly inside NO_PROGRESS_TIMEOUT_S — the converging bound exists
+# to spend LESS of the absolute deadline, so a value at or beyond it would make
+# the early exit unreachable; and far above the poll interval + stall
+# confirmations, so the stuck/no-progress verdicts (which end a host in seconds)
+# always win the race to return before this bound does.
+CONVERGING_POLL_TIMEOUT_S = 300.0
+
 # How long ONE updater stage may be in flight before both its host and the Phase-B
 # poll call it no-progress (P1, 2026-08-30 rollout-1788074072: the win uv stage).
 #

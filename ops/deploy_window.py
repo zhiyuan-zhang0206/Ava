@@ -300,6 +300,14 @@ def _lease_hold() -> DeployWindow | None:
                 holder=lease.holder,
                 note=lease.note,
             )
+            # The settle phase's one telemetry record (C3, task #2189): the hold
+            # started in the orchestration process that has already exited and
+            # ends HERE, so this is the only place its duration can be printed.
+            # Server-side elapsed (`settle_elapsed_s`) — no cross-host clock
+            # skew — and the held host set read back from the note just released.
+            from shared.rollout_telemetry import settle_ended
+
+            settle_ended(dur_s=lease.settle_elapsed_s, hosts=settle_hosts(lease.note))
             return None
         # Another actor moved the lease between the read and the release; whatever it
         # holds now is not ours to reason about, so report the hold we saw.

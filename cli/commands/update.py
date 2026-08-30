@@ -182,6 +182,9 @@ from cli.commands._update_pause import (
     _stop_the_world,
 )
 from cli.commands._update_phase_b import (
+    _CONVERGING_TIMEOUT_S as _CONVERGING_TIMEOUT_S,
+)
+from cli.commands._update_phase_b import (
     _POLL_INTERVAL_S as _POLL_INTERVAL_S,
 )
 from cli.commands._update_phase_b import (

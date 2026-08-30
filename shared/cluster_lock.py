@@ -140,6 +140,13 @@ class DeployLease:
     # Optional keeps legacy/test-constructed snapshots readable; a real DB read
     # always supplies it.
     acquired_at: datetime | None = None
+    # When the settle hold started (server-side now() at settle_update_lock), and
+    # how long it has already been held, computed server-side like `held_for_s` so
+    # cross-host clock skew never distorts the number (C3, task #2189). Both None
+    # on a non-settle lease, and on a settle hold that predates the column — the
+    # duration of those is unknowable and is reported as such, never guessed.
+    settle_started_at: datetime | None = None
+    settle_elapsed_s: float | None = None
 
     def awaits(self, machine: str) -> bool:
         """True when this lease is a **settle hold whose recorded waiting set names
@@ -270,7 +277,7 @@ def acquire_update_lock(
         cur.execute(
             "UPDATE deployment_state "
             "SET holder = %s, acquired_at = now(), expires_at = now() + make_interval(secs => %s), "
-            "    note = NULL, settle_hosts = NULL, settle_note = NULL, "
+            "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'updating', kind = %s "
             "WHERE id = 1 AND (holder IS NULL OR expires_at < now())",
             (holder, ttl_s, kind),
@@ -358,7 +365,7 @@ def release_update_lock(holder: str) -> None:
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "
-            "    note = NULL, settle_hosts = NULL, settle_note = NULL, "
+            "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'stable', kind = NULL "
             "WHERE id = 1 AND holder = %s",
             (holder,),
@@ -400,7 +407,7 @@ def force_release_update_lock() -> str | None:
             "(SELECT holder FROM deployment_state WHERE id = 1 FOR UPDATE), "
             "cleared AS "
             "(UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "
-            "    note = NULL, settle_hosts = NULL, settle_note = NULL, "
+            "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'stable', kind = NULL "
             "WHERE id = 1) "
             "SELECT holder FROM prev"
@@ -449,7 +456,7 @@ def claim_recovery_lock(
             "), claimed AS ("
             "  UPDATE deployment_state SET holder = %s, acquired_at = now(), "
             "    expires_at = now() + make_interval(secs => %s), note = NULL, "
-            "    settle_hosts = NULL, settle_note = NULL, phase = 'updating', kind = NULL "
+            "    settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, phase = 'updating', kind = NULL "
             "  WHERE id = 1 AND EXISTS (SELECT 1 FROM prev) RETURNING 1"
             ") SELECT (SELECT count(*) FROM claimed), (SELECT holder FROM prev)",
             (
@@ -511,7 +518,7 @@ def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_T
         cur.execute(
             "UPDATE deployment_state "
             "SET expires_at = now() + make_interval(secs => %s), note = %s, "
-            "    settle_note = %s, settle_hosts = %s, phase = 'settling' "
+            "    settle_note = %s, settle_hosts = %s, settle_started_at = now(), phase = 'settling' "
             "WHERE id = 1 AND holder = %s",
             (ttl_s, note, note, sorted_hosts, holder),
         )
@@ -552,7 +559,7 @@ def release_settle_hold(holder: str) -> bool:
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, "
-            "    expires_at = NULL, note = NULL, settle_hosts = NULL, settle_note = NULL, "
+            "    expires_at = NULL, note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'stable', kind = NULL "
             "WHERE id = 1 AND holder = %s AND note IS NOT NULL",
             (holder,),
@@ -577,7 +584,8 @@ def read_update_lease() -> DeployLease | None:
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT holder, extract(epoch FROM now() - acquired_at), "
-            "       extract(epoch FROM expires_at - now()), note, kind, acquired_at "
+            "       extract(epoch FROM expires_at - now()), note, kind, acquired_at, "
+            "       settle_started_at, extract(epoch FROM now() - settle_started_at) "
             "FROM deployment_state WHERE id = 1 AND expires_at > now()"
         )
         row = cur.fetchone()
@@ -590,6 +598,8 @@ def read_update_lease() -> DeployLease | None:
             note=row[3],
             kind=row[4],
             acquired_at=row[5],
+            settle_started_at=row[6],
+            settle_elapsed_s=float(row[7]) if row[7] is not None else None,
         )
 
 

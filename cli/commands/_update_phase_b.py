@@ -4,8 +4,10 @@ Phase B of the gateway `ava cluster update` — fan out self-updates, poll back.
 Split out of `cli/commands/update.py` to keep that module within the file-size
 budget. Phase B tells every remote agent-runner to self-update, then polls each
 one's ops server until it reports paused=false, provably stops
-(POLL_STALLED), or the family's no-progress bound elapses (POLL_CONVERGING) —
-see `shared.deploy_timing` for why that bound is not a number of its own:
+(POLL_STALLED), the family's no-progress bound elapses (POLL_CONVERGING), or —
+for a host alive and making progress — the converging patience elapses and the
+host is handed to the settle hold (C3) — see `shared.deploy_timing` for why
+that bound is not a number of its own:
 - `PollVerdict` + `_probe_verdict` + `_probe_one_until_unpaused` +
   `_poll_until_unpaused` — the poll loop (unreachable = expected mid-restart
   reading, never a verdict; the early STALLED and NO_PROGRESS exits are what
@@ -44,6 +46,7 @@ from cli.commands._update_fanout import (
 )
 from cli.commands._update_recover import RolloutOutcome
 from shared.deploy_timing import (
+    CONVERGING_POLL_TIMEOUT_S,
     HARVEST_GRACE_S,
     NO_PROGRESS_TIMEOUT_S,
     STAGE_NO_PROGRESS_TIMEOUT_S,
@@ -52,15 +55,27 @@ from shared.host_deploy_state import POSTURE_IDLE, POSTURE_PAUSED, read
 
 _log = logging.getLogger(__name__)
 
-# How long Phase B waits for one agent-runner to come back. The family's single
-# no-progress definition (`shared.deploy_timing`), not a number of its own: the
-# gateway must not declare a host degraded while that host still believes its own
-# updater is slow-but-working, and the previous 120 s — 8x the measured POSIX leg but
-# far under a Windows one — is what made the deploy lease expire mid-transition.
-# A host that has provably stopped is cut loose in seconds regardless, which is what
-# makes a bound this generous affordable (`_probe_one_until_unpaused`).
+# How long Phase B waits for one agent-runner to come back — the ABSOLUTE deadline
+# (the family's no-progress definition, `shared.deploy_timing`), not a number of its
+# own: the gateway must not declare a host degraded while that host still believes
+# its own updater is slow-but-working, and the previous 120 s — 8x the measured
+# POSIX leg but far under a Windows one — is what made the deploy lease expire
+# mid-transition. A host that has provably stopped is cut loose in seconds
+# regardless, which is what makes a bound this generous affordable
+# (`_probe_one_until_unpaused`).
 _POLL_TIMEOUT_S = NO_PROGRESS_TIMEOUT_S
 _POLL_INTERVAL_S = 2.0
+# How long the poll keeps waiting on a host that is ALIVE AND MAKING PROGRESS (its
+# updater lease live, its stage evidence moving — the one shape that can otherwise
+# spend the whole 900 s bound without proving anything) before it hands the rest of
+# that host's convergence to the settle hold that follows the orchestration's exit
+# (C3, 2026-08-30: the wsl runner polled 340 probes across 900 s while settle +
+# watchdog already covered its convergence). The stalled / no-progress verdicts end
+# a host's poll in seconds regardless of either bound, and `_POLL_TIMEOUT_S` stays
+# the deadline for every host — this only spends less of it. A module-level alias
+# read through the `cli.commands` namespace so tests can shrink it, exactly like
+# `_POLL_TIMEOUT_S`.
+_CONVERGING_TIMEOUT_S = CONVERGING_POLL_TIMEOUT_S
 # How long one updater stage may be in flight before a probe's own evidence proves
 # no-progress (the family's STAGE_NO_PROGRESS_TIMEOUT_S — see shared.deploy_timing).
 # A module-level alias read through the `cli.commands` namespace so tests can shrink
@@ -150,9 +165,9 @@ def _probe_verdict(
     stalls: int,
     machine: str,
     no_progress: int,
-) -> tuple[PollVerdict | None, int, int]:
+) -> tuple[PollVerdict | None, int, int, bool]:
     """One status_probe response + this host's deploy-state row →
-    (verdict, stalls, no_progress).
+    (verdict, stalls, no_progress, progressing).
 
     Verdict None = keep polling. A non-dict result (unreachable / failed are
     swallowed by the caller and leave result None) clears both counters — silence is
@@ -193,12 +208,22 @@ def _probe_verdict(
     The verdict carries the host's `last_updater_outcome` from *this same
     probe response*, which is why the reason costs no extra dial: the probe that
     proves the host stopped is the probe that says why.
+
+    **The fourth return value is the converging-patience fact (C3).** `progressing`
+    is True exactly when this reading is "alive and making progress" — a live
+    updater lease whose stage evidence is not stuck (an older commit's missing
+    stage fields read as "cannot tell", which is NOT progress and resets the
+    streak, mirroring the no-progress rule's polarity). The caller uses it to
+    bound how long it keeps waiting on that shape before handing the host to the
+    settle hold; every other reading (unreachable, stalled evidence, a paused
+    pre-lease window, a DB read failure) is False, so a restart or a stall resets
+    the clock rather than letting stale progress keep counting.
     """
     import cli.commands as _ns
     from ops.updater_outcome import UpdaterOutcome, updater_outcome_terminal
 
     if not isinstance(result, dict):
-        return None, 0, 0
+        return None, 0, 0, False
     try:
         state = read(machine)
     except Exception:
@@ -206,9 +231,9 @@ def _probe_verdict(
         # its row could not be read would release the deploy lease while the
         # host is still mid-transition — the wrong polarity. Keep polling, and
         # keep the no-progress streak too: an unreadable row is evidence-free.
-        return None, stalls, no_progress
+        return None, stalls, no_progress, False
     if state is None or state.posture == POSTURE_IDLE:
-        return PollVerdict(POLL_OK), stalls, no_progress
+        return PollVerdict(POLL_OK), stalls, no_progress, False
     raw = result.get("last_updater_outcome")
     outcome = raw if isinstance(raw, dict) else None
     try:
@@ -238,21 +263,32 @@ def _probe_verdict(
             ):
                 no_progress += 1
                 if no_progress >= _STALL_CONFIRMATIONS:
-                    return PollVerdict(POLL_NO_PROGRESS, outcome), stalls, no_progress
-            else:
-                no_progress = 0
-            return None, 0, no_progress
+                    return PollVerdict(POLL_NO_PROGRESS, outcome), stalls, no_progress, False
+                # One stuck-stage reading is not yet the verdict, but it is also
+                # not progress — the converging clock must not keep counting while
+                # the no-progress streak is being confirmed.
+                return None, 0, no_progress, False
+            no_progress = 0
+            # Progress is the STAGE EVIDENCE, not the lease's claim: a lease is
+            # one write at the run's start, so a live lease alone cannot prove a
+            # host is getting anywhere. The converging clock (C3) counts only on
+            # a reading that carries a stage in flight below the stuck bound; a
+            # probe from an older commit with no stage fields is "cannot tell"
+            # (never progress), exactly like the no-progress rule's polarity.
+            if parsed is None or parsed.current_stage is None or parsed.current_stage_s is None:
+                return None, 0, no_progress, False
+            return None, 0, no_progress, True
         if state.posture == POSTURE_PAUSED and not state.updater_expired:
             # Paused with no lease this pause window armed: the updater has not
             # touched yet (a session spawn plus a Python cold start), or a legacy
             # pre-lease chain, or a PREVIOUS run's uncleared expiry still sitting in
             # the row. "Cannot tell", never a stall — see `updater_expired`. Any
             # stage evidence here belongs to an earlier run, so it never counts.
-            return None, 0, 0
+            return None, 0, 0, False
     stalls += 1
     if stalls >= _STALL_CONFIRMATIONS:
-        return PollVerdict(POLL_STALLED, outcome), stalls, no_progress
-    return None, stalls, no_progress
+        return PollVerdict(POLL_STALLED, outcome), stalls, no_progress, False
+    return None, stalls, no_progress, False
 
 
 async def _probe_one_until_unpaused(
@@ -262,8 +298,10 @@ async def _probe_one_until_unpaused(
     host_outcomes: dict[str, dict[str, float]] | None = None,
 ) -> tuple[str, PollVerdict]:
     """Repeatedly POST status_probe to one agent-runner's ops server until it
-    converges, provably stops, or the shared deadline expires. Returns
-    (name, verdict) — one of the three POLL_* above.
+    converges, provably stops, the shared deadline expires — or, for a host that
+    has been alive and making progress for `_CONVERGING_TIMEOUT_S` straight, the
+    converging-patience bound ends the poll early and hands the host to the
+    settle hold (C3). Returns (name, verdict) — one of the four POLL_* above.
 
     `host_outcomes` (optional out-dict) collects the host's updater stage times
     from every probe response that carried them (Task #1820): each response's
@@ -294,6 +332,13 @@ async def _probe_one_until_unpaused(
 
     stalls = 0
     no_progress = 0
+    # The moment this host was last read as "alive and making progress" (C3), or
+    # None while the current reading is anything else. The converging bound is
+    # measured on the CONTINUOUS streak: a restart (unreachable) or a stall
+    # reading resets it, so the 300 s is patience spent on a host that keeps
+    # proving it is working — not total poll time. `_POLL_TIMEOUT_S` stays the
+    # absolute deadline either way.
+    progressing_since: float | None = None
     started = time.monotonic()
     attempt = 0
     while time.monotonic() < deadline:
@@ -335,7 +380,9 @@ async def _probe_one_until_unpaused(
             time.monotonic() - started,
         )
         _capture_host_stages(host_outcomes, name, result)
-        verdict, stalls, no_progress = _probe_verdict(result, stalls, name, no_progress)
+        verdict, stalls, no_progress, progressing = _probe_verdict(
+            result, stalls, name, no_progress
+        )
         if verdict is not None:
             if (
                 verdict.status == POLL_OK
@@ -368,6 +415,26 @@ async def _probe_one_until_unpaused(
                 file=sys.stderr,
             )
             return name, verdict
+        # The converging-patience bound (C3): a host that keeps reading as alive
+        # and making progress for `_CONVERGING_TIMEOUT_S` straight is handed to
+        # the settle hold instead of polling out the full 900 s deadline — the
+        # remaining convergence is exactly what the hold + watchdog cover. The
+        # verdict is the same POLL_CONVERGING the deadline produces, so the
+        # settle set, the report and the compensating resume need no branching.
+        now = time.monotonic()
+        if progressing:
+            if progressing_since is None:
+                progressing_since = now
+            elif now - progressing_since >= _ns._CONVERGING_TIMEOUT_S:
+                print(
+                    f"  · {name}: Phase B {POLL_CONVERGING} after {attempt} probe(s) "
+                    f"in {now - started:.1f}s (alive and making progress past the "
+                    f"converging bound — the settle hold takes over)",
+                    file=sys.stderr,
+                )
+                return name, PollVerdict(POLL_CONVERGING)
+        else:
+            progressing_since = None
         # Pace the loop explicitly. `slice_timeout` bounds one *dial*, not one pass:
         # a host that answers instantly (which a paused-but-reachable one does) would
         # otherwise be re-dialled as fast as the event loop allows for the whole
@@ -431,7 +498,9 @@ def _poll_until_unpaused(
     host_outcomes: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, PollVerdict]:
     """Poll each agent-runner's paused state via direct status_probe POSTs to its
-    ops server until it converges, provably stops, or `_POLL_TIMEOUT_S` elapses.
+    ops server until it converges, provably stops, `_POLL_TIMEOUT_S` elapses, or
+    `_CONVERGING_TIMEOUT_S` of continuous progress hands a host to the settle
+    hold early (C3).
 
     Returns name -> verdict (one of the POLL_* above). The `gateway_url` field
     in the input tuple is unused but kept for caller-signature compatibility.
@@ -609,8 +678,9 @@ def _phase_b_and_poll(
     to_poll = [(name, url) for name, url in fanout_targets if name in acked_names]
     print(
         f"\n→ Poll {len(to_poll)} acked agent-runner(s) until /api/cluster/status reports "
-        f"paused=false (up to {_POLL_TIMEOUT_S / 60:.0f}m each, cut short the moment a host "
-        f"provably stops)"
+        f"paused=false (up to {_POLL_TIMEOUT_S / 60:.0f}m each — or "
+        f"{_CONVERGING_TIMEOUT_S / 60:.0f}m of continuous progress, C3 — cut short the "
+        f"moment a host provably stops)"
     )
     polls = _ns._poll_until_unpaused(to_poll, host_outcomes=host_outcomes)
     for name, status, _ in results:
@@ -694,10 +764,16 @@ def _phase_b_outcome(
     ]
     if mid_transition:
         outcome = RolloutOutcome.INCOMPLETE
+        # "did not come back within the poll window", never "never came back": a
+        # CONVERGING host handed to the settle hold is still working (C3), and
+        # reporting it as gone would misread the poll's early exit as a failure
+        # of the host. The per-verdict detail lines below say which is which.
         print(
             f"\n✗ rollout incomplete: {len(mid_transition)} of {len(polls)} agent-runner(s) "
-            f"acked the self-update and never came back ({', '.join(sorted(mid_transition))}). "
-            f"The gateway migrated and the pin advanced; those hosts have not.",
+            f"acked the self-update and did not come back within the poll window "
+            f"({', '.join(sorted(mid_transition))}). "
+            f"The gateway migrated and the pin advanced; those hosts have not — the "
+            f"deploy lease stays held over them while they settle.",
             file=sys.stderr,
         )
         return 1, outcome, hosts_to_resume
