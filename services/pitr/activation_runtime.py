@@ -423,7 +423,7 @@ def remote_wal_proof(
                 {
                     **common,
                     "viewer_id": str(
-                        (record.pre_activation_credential_evidence or {})["viewer_client_email"]
+                        (record.pre_activation_credential_evidence or {})["viewer_identity"]
                     ),
                     "observed_at": observed_at.isoformat(),
                 },

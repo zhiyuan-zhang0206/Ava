@@ -68,10 +68,10 @@ def validate_wal_remote_evidence(
         (
             ack["segment"] != exact["segment"],
             ack["timeline"] != exact["timeline"],
-            ack["bucket_name"] != frozen.get("bucket_name"),
+            ack["bucket_name"] != frozen.get("store_target"),
             ack["object_prefix"] != frozen.get("object_prefix"),
             ack["key_id"] != frozen.get("backup_key_id"),
-            viewer["viewer_id"] != frozen.get("viewer_client_email"),
+            viewer["viewer_id"] != frozen.get("viewer_identity"),
         )
     ):
         raise ValueError("PITR remote evidence differs from WAL intent")

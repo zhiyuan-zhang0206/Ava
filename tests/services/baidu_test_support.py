@@ -60,6 +60,7 @@ class FakePcs:
         self.collision_paths: set[str] = set()
         self.transient_paths: set[str] = set()
         self.missing_override: dict[str, list[str]] = {}
+        self.create_override: dict[str, dict[str, Any]] = {}
         self._next_fs_id = 100
         self._next_uploadid = 0
 
@@ -128,6 +129,8 @@ class FakePcs:
     def _create(self, params: dict[str, str], path: str) -> httpx.Response:
         if path in self.collision_paths:
             return httpx.Response(200, json={"errno": 2, "errmsg": "exists"})
+        if path in self.create_override:
+            return httpx.Response(200, json=dict(self.create_override[path]))
         block_count = len(json.loads(params["block_list"]))
         content = b"".join(self.parts.get(path, {}).get(i, b"") for i in range(block_count))
         row = self.seed_file(path, size=len(content), md5=_md5(content))
@@ -152,7 +155,9 @@ class FakePcs:
             for row in self.files.values()
             if row["path"] == directory or row["path"].startswith(f"{directory}/")
         ]
-        return httpx.Response(200, json={"list": rows})
+        start = int(params.get("start") or 0)
+        limit = int(params.get("limit") or 1000)
+        return httpx.Response(200, json={"list": rows[start : start + limit]})
 
 
 def _file_payload(content: bytes) -> bytes:

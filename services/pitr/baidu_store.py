@@ -405,6 +405,8 @@ class BaiduObjectStore:
         if row is None:
             return None
         data = self._download_bytes(row)
+        if _md5_hex(data) != str(row.md5):
+            raise PermanentObjectStoreError("Baidu object sidecar differs from its PCS row")
         try:
             payload = json.loads(data.decode())
         except (ValueError, UnicodeDecodeError) as exc:
@@ -451,6 +453,10 @@ class BaiduObjectStore:
 
 
 # ── digest helpers ──
+
+
+def _md5_hex(data: bytes) -> str:
+    return hashlib.md5(data).hexdigest()  # noqa: S324 — PCS row digest
 
 
 def _file_digests(path: Path, size: int) -> tuple[list[str], str]:
