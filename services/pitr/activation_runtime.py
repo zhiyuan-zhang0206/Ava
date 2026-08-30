@@ -21,6 +21,7 @@ from dotenv import dotenv_values
 
 from services.pitr.activation_evidence import stored_digest_matches
 from services.pitr.activation_state import ActivationRecord
+from services.pitr.restore_manifest import candidate_sha256
 from shared.config import settings
 from shared.paths import ava_home
 
@@ -469,11 +470,7 @@ def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[
     if (
         protected.chain_id != candidate.chain_id
         or protected.candidate != candidate
-        or not stored_digest_matches(
-            raw=canonical,
-            canonical=protected.candidate.to_json(),
-            expected=protected.candidate_sha256,
-        )
+        or protected.candidate_sha256 != candidate_sha256(candidate)
     ):
         raise RuntimeError("protected proof differs from exact activation candidate")
     payload = protected.to_json()

@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from services.pitr.activation_evidence import stored_digest_matches
 from services.pitr.base_manifest import CandidateManifest, WalRange, _lsn
 from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 from services.pitr.uploader import ack_manifest_from_raw
@@ -107,7 +108,26 @@ class ProtectedManifest:
         raw: dict[str, Any] = json.loads(value)
         if set(raw) != set(cls.__dataclass_fields__):
             raise ValueError("protected manifest fields do not match schema")
-        raw["candidate"] = CandidateManifest.from_json(json.dumps(raw["candidate"]))
+        embedded = raw["candidate"]
+        if not isinstance(embedded, dict):
+            raise TypeError("protected manifest lacks an embedded candidate")
+        # The embedded candidate keeps its raw bytes: a manifest written
+        # before the store abstraction carries the digest of the legacy
+        # serialization, while the parsed candidate re-serializes in the
+        # canonical shape — both byte forms must be accepted (QA #1131).
+        legacy_candidate_bytes = json.dumps(embedded, sort_keys=True, separators=(",", ":"))
+        raw["candidate"] = CandidateManifest.from_json(legacy_candidate_bytes)
+        candidate = raw["candidate"]
+        if not stored_digest_matches(
+            raw=legacy_candidate_bytes,
+            canonical=candidate.to_json(),
+            expected=str(raw["candidate_sha256"]),
+        ):
+            raise ValueError("protected candidate digest differs from the candidate")
+        # Canonicalize: every reader downstream compares this field against
+        # the parsed candidate, so the field carries the canonical digest
+        # from here on (the raw bytes remain in the stored manifest/record).
+        raw["candidate_sha256"] = candidate_sha256(candidate)
         raw["base"] = _restore_object(raw["base"])
         raw["wal"] = tuple(_restore_object(item) for item in raw["wal"])
         raw["proof"] = RestoreProof(**raw["proof"])
