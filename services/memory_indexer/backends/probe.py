@@ -101,7 +101,16 @@ def _probe_pgvector() -> ProbeResult:
     the backends that work today. Postgres unreachable = transient (the
     retry loop owns the wait, like milvus / numpy booting). Read-only —
     `pg_available_extensions`, never CREATE EXTENSION (a probe must not
-    mutate)."""
+    mutate). Dial bound (QA nit #1012, 2026-08-30): `shared.db.connect()`
+    is the sanctioned single entry point for DB dials and carries its own
+    resilience kwargs — the connect is bounded by
+    `PG_KEEPALIVE_KWARGS["connect_timeout"]` (5s) and the catalog query by
+    `PG_STATEMENT_TIMEOUT_KWARGS` (60s), so the probe is bounded even against
+    a black-holed peer. `_PROBE_TIMEOUT_S` (3s) intentionally applies only to
+    the RPC/HTTP probes (milvus, numpy): it is the probe layer's own timeout,
+    while the pgvector probe's bound comes from the DB layer by design, and a
+    probe-specific `connect_timeout` knob on `connect()` was deliberately not
+    added for a 2s difference in a one-shot boot check."""
     import psycopg
 
     import shared.db
