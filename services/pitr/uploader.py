@@ -114,22 +114,47 @@ class PitrUploader:
         self._max_source_bytes = max_source_bytes
 
     def disk_footprint(self) -> DiskFootprint:
-        """Return both plaintext spool and temporary ciphertext disk use."""
+        """Return both plaintext spool and temporary ciphertext disk use.
+
+        Entries may vanish between listing and stat: the upload daemon runs
+        ``upload_one`` in a worker thread, which unlinks acknowledged WAL
+        while the health handler is listing these same directories. A
+        vanished entry contributes 0 bytes.
+        """
+
+        def _dir_bytes(directory: Path) -> int:
+            total = 0
+            for entry in directory.iterdir():
+                try:
+                    if entry.is_file():
+                        total += entry.stat().st_size
+                except OSError:
+                    continue
+            return total
 
         return DiskFootprint(
-            spool_bytes=sum(
-                entry.stat().st_size for entry in self._spool.iterdir() if entry.is_file()
-            ),
-            staging_bytes=sum(
-                entry.stat().st_size for entry in self._staging.iterdir() if entry.is_file()
-            ),
+            spool_bytes=_dir_bytes(self._spool),
+            staging_bytes=_dir_bytes(self._staging),
         )
 
     def pending(self) -> list[Path]:
-        return sorted(
-            (entry for entry in self._spool.iterdir() if archive_name_is_valid(entry.name)),
-            key=lambda entry: entry.stat().st_mtime,
-        )
+        """Spool entries ordered oldest-first; vanished entries are skipped.
+
+        The worker thread unlinks a WAL the moment its ACK lands, which can
+        interleave with this listing once the upload loop runs off the event
+        loop; an entry that disappears mid-listing is simply no longer
+        pending.
+        """
+        with_mtime: list[tuple[float, Path]] = []
+        for entry in self._spool.iterdir():
+            if not archive_name_is_valid(entry.name):
+                continue
+            try:
+                with_mtime.append((entry.stat().st_mtime, entry))
+            except OSError:
+                continue
+        with_mtime.sort(key=lambda pair: pair[0])
+        return [entry for _mtime, entry in with_mtime]
 
     def _object_name(self, archive_name: str) -> str:
         return f"{self._prefix}/wal/{archive_name[:8]}/{archive_name}.enc"

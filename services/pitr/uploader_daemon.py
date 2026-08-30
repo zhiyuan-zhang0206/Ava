@@ -7,8 +7,12 @@ import contextlib
 import errno
 import json
 import logging
+import os
+import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.gcs_store import GCSObjectStore
@@ -57,7 +61,10 @@ def build_uploader() -> PitrUploader:
 
 
 _CRITICAL_BACKOFF_S = 300.0
-_BACKOFF_HEARTBEAT_S = 30.0
+# One heartbeat cadence for every loop wait — intentional backoff and an
+# in-flight upload alike: the loop never sits silently longer than this
+# without proving it is alive.
+_HEARTBEAT_S = 30.0
 _ACK_SUFFIX = ".ack.json"
 
 
@@ -192,7 +199,7 @@ async def _wait_with_heartbeat(
     delay: float,
     liveness: Liveness | None,
     *,
-    heartbeat_interval: float = _BACKOFF_HEARTBEAT_S,
+    heartbeat_interval: float = _HEARTBEAT_S,
 ) -> None:
     """Wait interruptibly while reporting that intentional backoff is alive."""
 
@@ -207,14 +214,51 @@ async def _wait_with_heartbeat(
             await asyncio.wait_for(stop.wait(), timeout=min(remaining, heartbeat_interval))
 
 
+async def _upload_off_loop(
+    uploader: PitrUploader,
+    source: Path,
+    *,
+    executor: ThreadPoolExecutor,
+    liveness: Liveness | None,
+) -> None:
+    """Run one blocking upload on the daemon's worker pool, heartbeating meanwhile.
+
+    ``upload_one`` is synchronous end-to-end — digest, encrypt, the GCS
+    network call (whose SDK retries can hold for the full 120 s RetryError
+    budget), the fsync'd ACK. Running it inline froze the event loop for
+    the whole call: /healthz stopped answering and `ava start` readiness
+    burned its full 180 s while every other service was already up (P0,
+    rollout f22f5eb1). On the pool the loop stays free to answer health
+    probes; the awaited future re-raises the upload's exceptions unchanged,
+    so the loop's transient/critical classification and the ACK chain are
+    untouched. The liveness lane is beaten on the heartbeat cadence while
+    the upload runs, so a legitimate slow upload never reads as a wedged
+    loop.
+    """
+    loop = asyncio.get_running_loop()
+    upload = loop.run_in_executor(executor, uploader.upload_one, source)
+    while True:
+        if liveness is not None:
+            liveness.beat()
+        done, _pending = await asyncio.wait({upload}, timeout=_HEARTBEAT_S)
+        if upload in done:
+            break
+    upload.result()  # re-raise any upload exception; the ACK is its success signal
+
+
 async def upload_loop(
     uploader: PitrUploader,
     *,
     stop: asyncio.Event,
     liveness: Liveness | None = None,
     errors: _LoopErrors | None = None,
+    executor: ThreadPoolExecutor,
 ) -> None:
     """Attempt one object per iteration; SDK and outer retries never nest.
+
+    Each attempt runs on the daemon's worker pool (``executor``): upload_one
+    is blocking IO and must never hold the event loop (see
+    ``_upload_off_loop`` — it froze /healthz for the whole GCS call).
 
     Critical failures (auth/config rejection, an immutable-object collision,
     permission-class IO errors) never crash the daemon: a raised exception
@@ -234,7 +278,7 @@ async def upload_loop(
             delay = 1.0
         else:
             try:
-                uploader.upload_one(pending[0])
+                await _upload_off_loop(uploader, pending[0], executor=executor, liveness=liveness)
                 failures = 0
                 delay = 0.0
             except TransientObjectStoreError:
@@ -289,6 +333,15 @@ async def run() -> None:
     stop = asyncio.Event()
     liveness = Liveness(timeout_s=120)
     errors = _LoopErrors()
+    # The upload's own worker pool, not asyncio's default executor.
+    # Default-executor threads are joined when the loop closes, and the
+    # interpreter's atexit joins this pool's workers with no bound at all —
+    # one wedged GCS call (the exact 2026-08-30 outage shape) would hold a
+    # SIGTERM'd daemon for minutes past the supervisor's 15 s graceful
+    # window. Owning the pool makes the threads nameable and lets the
+    # shutdown path drop it without waiting (see main()/_hard_exit; the
+    # same shape services/agent_ops adopted after its 2026-08-12 wedge).
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pitr-upload")
 
     def disk_health() -> dict[str, object]:
         footprint = uploader.disk_footprint()
@@ -313,16 +366,60 @@ async def run() -> None:
         extra=disk_health,
     )
     try:
-        await upload_loop(uploader, stop=stop, liveness=liveness, errors=errors)
+        await upload_loop(uploader, stop=stop, liveness=liveness, errors=errors, executor=executor)
     finally:
-        await stop_health_server(server)
+        # Sync cleanup first: on the SIGTERM path the pending await below can
+        # be cut short by cancellation, and the pidfile must be gone regardless.
+        executor.shutdown(wait=False)
         remove_pidfile(pidfile)
+        await stop_health_server(server)
+
+
+def _hard_exit(code: int) -> int:
+    """End the process now, skipping interpreter teardown. Never returns.
+
+    Teardown is precisely what hangs: the interpreter's atexit handler joins
+    every non-daemon worker in the upload pool with no bound (the ops daemon
+    measured the same shape after its 2026-08-12 wedge). One wedged GCS
+    upload would therefore hold a daemon that has already finished every
+    piece of cleanup it owns — run()'s finally layers run first (pool drop,
+    pidfile, health server), and what is skipped after them is bookkeeping
+    for an interpreter about to stop existing.
+
+    Logs are flushed first: they are the one thing a skipped teardown would
+    lose, and this log is where the next stall has to be legible.
+    """
+    with contextlib.suppress(Exception):
+        from loguru import logger as _loguru
+
+        _loguru.remove()  # closes (and so flushes) every sink
+    with contextlib.suppress(Exception):
+        logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.flush()
+    os._exit(code)
 
 
 def main() -> None:
     init_gateway_process(name="pitr-uploader")
     install_graceful_shutdown("pitr-uploader")
-    asyncio.run(run())
+    code = 0
+    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
+    # awaits `shutdown_default_executor` (bounded at 300 s, still far past
+    # the supervisor's 15 s graceful window), and the interpreter's atexit
+    # joins the upload pool's workers with no bound. The runner is therefore
+    # never closed: after run()'s own cleanup, _hard_exit skips the teardown
+    # that would hang. Same shape as services/agent_ops/daemon.py.
+    runner = asyncio.Runner()
+    try:
+        runner.run(run())
+    except KeyboardInterrupt:
+        _log.info("[pitr-uploader] interrupted, shutting down")
+    except Exception:
+        _log.exception("[pitr-uploader] daemon crashed — uncaught exception escaped run()")
+        code = 1
+    _hard_exit(code)
 
 
 if __name__ == "__main__":
