@@ -157,12 +157,19 @@ def updater_stage(name: str) -> Generator[None, None, None]:
     """Time one agent-runner updater stage (checkout / uv_sync / skills /
     quiesce / stop / start / preflight).
 
-    Prints `[updater] stage=<name> dur=..s` on exit — the line
+    Prints two lines — `[updater] stage=<name> t=<monotonic>` on entry and
+    `[updater] stage=<name> dur=..s` on exit. The exit line is what
     `ops.updater_outcome._parse_stages` reads back off the updater log, so
-    per-host stage times reach the rollout report. Printed unconditionally,
-    because the updater side has no ambient collector.
+    per-host stage times reach the rollout report. The entry line is the
+    in-flight evidence: a run that hangs inside a stage leaves it as the log's
+    last stage line, which is how `ops.updater_outcome` names the CURRENT stage
+    and its age at read time — the no-progress judgment (P1, 2026-08-30). The
+    cmd.exe ladder already prints the same marker at each step's start
+    (`cli.commands._updater_stage`). Printed unconditionally, because the
+    updater side has no ambient collector.
     """
     started = time.monotonic()
+    print(f"[updater] stage={name} t={started:.3f}")  # noqa: T201
     try:
         yield
     finally:

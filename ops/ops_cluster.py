@@ -326,6 +326,127 @@ def cluster_recover_op() -> dict[str, object]:
     return {"unlocked_holder": cleared}
 
 
+def cluster_cancel_op() -> dict[str, object]:
+    """Formally cancel this host's live rollout / restart orchestration.
+
+    The recovery for a cancelled rollout is the orchestration's own `finally`
+    (`cli.commands.update._run_gateway_orchestration`): it resumes every paused
+    host, releases the deploy lease — or converts it to a settle hold over the
+    hosts still mid-transition — and clears the durable maintenance marker. That
+    unwind is exactly the recovery the stalled-rollout controller triggers
+    unattended after its no-progress bound (`ops.controllers.stalled_rollout`,
+    stage 1); this op is the operator-triggered twin — a formal cancel instead of
+    a hand kill, which is what a rollout a hung Windows box is dragging used to
+    leave an operator with (P1, 2026-08-30).
+
+    The trigger is `SIGINT` to the orchestration's own pid, read out of the deploy
+    lease's holder string (`<machine>:pid<N>`) — never a session kill, because a
+    killed process cannot run its `finally` and the cluster would sit paused until
+    the lease lapses. Python turns `SIGINT` into `KeyboardInterrupt`, which no
+    `except Exception:` in the orchestration swallows, so the `finally` runs.
+
+    Refuses (`ClusterUpdateInProgress`, each refusal naming its own next step)
+    unless: a live orchestration session exists, the deploy lease is an
+    *executing* one (note NULL — a settle hold has nothing running), the holder
+    names THIS machine, and the pid is alive. The pid-liveness probe is the same
+    `holder_pid_if_local` the stalled-rollout controller uses, so a cancel and an
+    unattended reclaim can never disagree about who is signalable.
+
+    Returns {"cancelled": <holder>}. The orchestration may take tens of seconds
+    to finish unwinding — watch its rollout log, and `ava cluster status` after.
+    """
+    import signal
+
+    import shared.cluster
+    from ops.cluster_session import (
+        _CLUSTER_RESTART_SERVICE,
+        _ROLLOUT_SERVICE,
+        _UPDATER_SERVICE,
+        live_orchestration_session,
+    )
+    from shared.cluster_lock import holder_pid_if_local
+    from shared.last_update import UpdateOutcome, read_last_update
+
+    live = live_orchestration_session()
+    updater_session = shared.cluster.session_name(_UPDATER_SERVICE)
+    cluster_sessions = {
+        shared.cluster.session_name(_ROLLOUT_SERVICE),
+        shared.cluster.session_name(_CLUSTER_RESTART_SERVICE),
+    }
+    if live == updater_session:
+        raise ClusterUpdateInProgress(
+            "this host is mid self-update, not running a cluster orchestration — "
+            "nothing a cluster cancel owns. Its watchdog reaps a hung updater at the "
+            "no-progress bound; `ava cluster recover` clears a stranded state whose "
+            "owner is gone."
+        )
+    if live is None or live not in cluster_sessions:
+        raise ClusterUpdateInProgress(
+            "no rollout/restart orchestration is running on this host — the "
+            "orchestration runs on the gateway host, so run `ava cluster cancel` "
+            "there; `ava cluster recover` here clears a stranded state whose owner "
+            "is gone."
+        )
+    lease = read_update_lease()
+    if lease is not None and lease.note is not None:
+        raise ClusterUpdateInProgress(
+            f"the deploy lease is a settle hold, not an executing orchestration — "
+            f"{lease.describe()}. Nothing is running to cancel; `ava cluster recover` "
+            "breaks the hold once you have confirmed the hosts have converged."
+        )
+    if lease is not None and lease.kind not in ("rollout", "restart"):
+        raise ClusterUpdateInProgress(
+            f"the deploy lease {lease.describe()} carries no rollout/restart kind — "
+            "a rollback or legacy orchestration; cancel is scoped to rollout/restart. "
+            "Wait for it, or `ava cluster recover` once its holder is provably gone."
+        )
+    holder: str | None = None
+    if lease is not None:
+        holder = lease.holder
+    else:
+        # Pre-lease window (the child has not acquired yet) or a lease-less
+        # orchestration. The last-update row still names the process.
+        try:
+            record = read_last_update()
+        except Exception:
+            record = None
+        if record is not None and record.outcome is UpdateOutcome.RUNNING:
+            holder = record.holder
+    if holder is None:
+        raise ClusterUpdateInProgress(
+            "the orchestration has published neither a deploy lease nor a running "
+            "update record — it is still starting or already gone; retry in a few "
+            "seconds, or `ava cluster recover` once no owner remains."
+        )
+    pid = holder_pid_if_local(holder)
+    if pid is None:
+        from shared.machine import machine_name as _machine_name
+
+        machine = holder.split(":pid", 1)[0]
+        where = (
+            f"run `ava cluster cancel` on {machine}"
+            if machine != _machine_name()
+            else "the holder pid is gone — `ava cluster recover` clears the residue"
+        )
+        raise ClusterUpdateInProgress(
+            f"the orchestration holder {holder!r} is not a live process on this host — {where}"
+        )
+    try:
+        os.kill(pid, signal.SIGINT)
+    except OSError as exc:
+        raise ClusterUpdateInProgress(
+            f"could not interrupt the orchestration pid {pid}: {exc!r}"
+        ) from exc
+    logger.warning(
+        "[cluster] cancel: SIGINT sent to rollout holder %s (pid %d); its own finally "
+        "is unwinding — compensating resume, settle/release of the deploy lease, "
+        "maintenance marker cleared",
+        holder,
+        pid,
+    )
+    return {"cancelled": holder}
+
+
 def cluster_stopping_op(machine: str, home: str) -> dict[str, str]:
     """Record an intentional shutdown announced by the (machine, home) unit.
 

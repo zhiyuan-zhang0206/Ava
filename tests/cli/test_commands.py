@@ -2821,6 +2821,212 @@ def test_a_live_lease_with_no_written_ending_still_keeps_polling(
     assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_CONVERGING}
 
 
+def test_a_live_lease_with_stuck_stage_evidence_is_no_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The P1 (2026-08-30) shape: the updater lease is one write at the run's start,
+    so a host hung inside `uv` (a stalled network download on the Windows runner)
+    used to read "still working" for the whole 900 s bound while its own stage
+    evidence showed nothing completing. Two consecutive probes naming the same
+    stage in flight beyond STAGE_NO_PROGRESS_TIMEOUT_S end the poll with
+    POLL_NO_PROGRESS — the lease stays live, but the progress fact outranks the
+    claim."""
+    from datetime import UTC, datetime, timedelta
+
+    from ops import cluster_rpc as cr
+    from shared.host_deploy_state import HostDeployState
+
+    probes = {"n": 0}
+
+    async def _stuck(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
+        probes["n"] += 1
+        return {
+            "last_updater_outcome": {
+                "kind": "unknown",
+                "rc": None,
+                "log": "ava-updater.out.log",
+                "current_stage": "uv",
+                "current_stage_s": 700.0,
+            },
+        }
+
+    def _fake_read(machine=None, **_kw):
+        return HostDeployState(
+            machine=machine or "win",  # pyright: ignore[reportUnknownArgumentType]
+            posture="converging",
+            updated_at=datetime.now(UTC),
+            updater_lease_expires_at=datetime.now(UTC) + timedelta(seconds=800),
+        )
+
+    monkeypatch.setattr(cr, "dispatch_to_machine", _stuck)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+
+    out = _cli._poll_until_unpaused([("win", "http://unused")])
+
+    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_NO_PROGRESS}
+    assert probes["n"] == 2  # the same two confirmations, not one
+    assert out["win"].updater is not None
+    assert out["win"].updater["current_stage"] == "uv"
+
+
+def test_other_hosts_converged_while_one_is_stuck_in_a_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The poll is per host: a stuck Windows box must not drag the hosts that
+    converged. The two healthy hosts return ok at once; the stuck one returns
+    no_progress as soon as its evidence proves it — the poll does not wait out the
+    whole bound for it, and the caller's settle hold covers exactly the stuck
+    host."""
+    from datetime import UTC, datetime, timedelta
+
+    from ops import cluster_rpc as cr
+    from shared.host_deploy_state import HostDeployState
+
+    calls = {"air": 0, "mini": 0, "win": 0}
+
+    async def _probe(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
+        calls[target_machine] += 1
+        if target_machine == "win":
+            return {
+                "last_updater_outcome": {
+                    "kind": "unknown",
+                    "rc": None,
+                    "log": "ava-updater.out.log",
+                    "current_stage": "uv",
+                    "current_stage_s": 700.0,
+                },
+            }
+        return {}
+
+    def _fake_read(machine=None, **_kw):
+        if machine == "win":
+            posture = "converging"
+            lease = datetime.now(UTC) + timedelta(seconds=800)
+        else:
+            posture = "idle"
+            lease = None
+        return HostDeployState(
+            machine=machine or "air",  # pyright: ignore[reportUnknownArgumentType]
+            posture=posture,
+            updated_at=datetime.now(UTC),
+            updater_lease_expires_at=lease,
+        )
+
+    monkeypatch.setattr(cr, "dispatch_to_machine", _probe)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+
+    out = _cli._poll_until_unpaused(
+        [("air", "http://unused"), ("mini", "http://unused"), ("win", "http://unused")]
+    )
+
+    assert {n: v.status for n, v in out.items()} == {
+        "air": _cli.POLL_OK,
+        "mini": _cli.POLL_OK,
+        "win": _cli.POLL_NO_PROGRESS,
+    }
+    # The stuck host ends the poll on its own verdict; the converged hosts needed
+    # exactly one probe each and the stuck one its two confirmations.
+    assert calls["air"] == 1
+    assert calls["mini"] == 1
+    assert calls["win"] == 2
+
+
+def test_stage_evidence_that_advances_keeps_polling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stage in flight BELOW the bound, or a stage that changes between probes
+    (progress), is working — the no-progress streak must not fire. A slow Windows
+    uv leg is exactly this shape: the same stage name, an age that keeps growing,
+    and the poll's own deadline remains the patience."""
+    from datetime import UTC, datetime, timedelta
+
+    from ops import cluster_rpc as cr
+    from shared.host_deploy_state import HostDeployState
+
+    def _fake_read(machine=None, **_kw):
+        return HostDeployState(
+            machine=machine or "win",  # pyright: ignore[reportUnknownArgumentType]
+            posture="converging",
+            updated_at=datetime.now(UTC),
+            updater_lease_expires_at=datetime.now(UTC) + timedelta(seconds=800),
+        )
+
+    async def _young_stage(*, target_machine, kind, payload, timeout_s, ops_url=None, retries=None):
+        return {
+            "last_updater_outcome": {
+                "kind": "unknown",
+                "rc": None,
+                "log": "updater-178.log",
+                "current_stage": "uv",
+                "current_stage_s": 100.0,
+            },
+        }
+
+    monkeypatch.setattr(cr, "dispatch_to_machine", _young_stage)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+
+    out = _cli._poll_until_unpaused([("win", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_CONVERGING}
+
+
+def test_a_probe_from_an_older_commit_never_reads_as_no_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A runner answering from a commit that predates the stage fields reports no
+    `current_stage` — cannot tell, never progress, so the poll keeps going to its
+    deadline. The judgment applies from the rollout after the one that ships it,
+    the same one-rollout lag `last_updater_outcome` itself had."""
+    from datetime import UTC, datetime, timedelta
+
+    from ops import cluster_rpc as cr
+    from shared.host_deploy_state import HostDeployState
+
+    async def _older_commit(
+        *, target_machine, kind, payload, timeout_s, ops_url=None, retries=None
+    ):
+        return {"last_updater_outcome": {"kind": "unknown", "rc": None, "log": "x.log"}}
+
+    def _fake_read(machine=None, **_kw):
+        return HostDeployState(
+            machine=machine or "win",  # pyright: ignore[reportUnknownArgumentType]
+            posture="converging",
+            updated_at=datetime.now(UTC),
+            updater_lease_expires_at=datetime.now(UTC) + timedelta(seconds=800),
+        )
+
+    monkeypatch.setattr(cr, "dispatch_to_machine", _older_commit)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+
+    out = _cli._poll_until_unpaused([("win", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_CONVERGING}
+
+
+def test_no_progress_verdict_renders_its_own_next_step() -> None:
+    """POLL_NO_PROGRESS is a different fact from CONVERGING and STALLED — the host
+    is alive and stuck, and the operator's next move is to look at that machine's
+    network, not to wait or to restart it."""
+    verdict = _cli.PollVerdict(
+        _cli.POLL_NO_PROGRESS,
+        {"kind": "unknown", "current_stage": "uv", "current_stage_s": 700.0, "log": "x.log"},
+    )
+    detail = _poll_verdict_detail(verdict)
+    assert "NO PROGRESS" in detail
+    assert "uv" in detail
+    assert "network" in detail
+
+
 def test_db_read_failure_keeps_polling_never_reports_converged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2856,9 +3062,10 @@ def test_db_read_failure_is_not_a_stall_confirmation(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("cli.commands._update_phase_b.read", _broken_read)  # pyright: ignore[reportUnknownArgumentType]
 
-    verdict, stalls = _probe_verdict({}, 3, "air")
+    verdict, stalls, no_progress = _probe_verdict({}, 3, "air", 2)
     assert verdict is None
     assert stalls == 3  # counter untouched — a read failure is not a stall observation
+    assert no_progress == 2  # same rule: a read failure is not a no-progress observation
 
 
 def test_a_stalled_host_carries_its_own_updater_outcome_off_the_box(

@@ -26,6 +26,7 @@ import os
 import subprocess
 import time
 
+from cli.commands._cluster_cancel import cmd_cluster_cancel
 from cli.commands._cluster_cron import cmd_cron_register, cmd_cron_unregister
 from cli.commands._cluster_health import cmd_health_probe
 from cli.commands._cluster_recover import cmd_cluster_recover
@@ -158,7 +159,9 @@ from cli.commands.update import (
     _PHASE_B_TIMEOUT_S,
     _POLL_INTERVAL_S,
     _POLL_TIMEOUT_S,
+    _STAGE_NO_PROGRESS_S,
     POLL_CONVERGING,
+    POLL_NO_PROGRESS,
     POLL_OK,
     POLL_STALLED,
     GitPullFailed,
@@ -195,6 +198,7 @@ from shared.config import settings
 __all__ = [
     "GATEWAY_PROBE_PATH",
     "POLL_CONVERGING",
+    "POLL_NO_PROGRESS",
     "POLL_OK",
     "POLL_STALLED",
     "_PHASE_A_TIMEOUT_S",
@@ -202,6 +206,7 @@ __all__ = [
     "_POLL_INTERVAL_S",
     "_POLL_TIMEOUT_S",
     "_SETUP_FIELDS",
+    "_STAGE_NO_PROGRESS_S",
     "GatewayProbe",
     "GatewayReadiness",
     "GitPullFailed",
@@ -267,6 +272,7 @@ __all__ = [
     "_wait_for_services_ready",
     "apply_pending_migrations",
     "build_services",
+    "cmd_cluster_cancel",
     "cmd_cluster_destroy",
     "cmd_cluster_down",
     "cmd_cluster_ls",

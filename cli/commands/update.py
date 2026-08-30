@@ -188,7 +188,13 @@ from cli.commands._update_phase_b import (
     _POLL_TIMEOUT_S as _POLL_TIMEOUT_S,
 )
 from cli.commands._update_phase_b import (
+    _STAGE_NO_PROGRESS_S as _STAGE_NO_PROGRESS_S,
+)
+from cli.commands._update_phase_b import (
     POLL_CONVERGING as POLL_CONVERGING,
+)
+from cli.commands._update_phase_b import (
+    POLL_NO_PROGRESS as POLL_NO_PROGRESS,
 )
 from cli.commands._update_phase_b import (
     POLL_OK as POLL_OK,

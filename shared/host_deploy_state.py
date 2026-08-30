@@ -111,7 +111,7 @@ class HostDeployState:
         like a host whose updater died. Both readers of this fact act on it: Phase B
         abandons the host as `POLL_STALLED` (prod, `win`, 2026-08-06 and 08-12: both
         rounds the host went on to converge minutes later on its own), and
-        `ops.cluster_deploy._updater_hung` force-kills the session that was just
+        `ops.updater_reap._updater_hung` force-kills the session that was just
         spawned.
 
         A lease armed during this window expires at `armed + UPDATER_LEASE_TTL_S`, so
