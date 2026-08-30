@@ -2604,7 +2604,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=~\"exec.*\", event_name!~\"exec|exec_failed|exec[(]failed[)]|exec_timeout|exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|exec_node_timeout\"} | json | category=\"telemetry\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=~\"exec.*\", event_name!~\"exec|exec_envelope|exec_failed|exec[(]failed[)]|exec_timeout|exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|exec_node_timeout\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "F",
      "queryType": "range",
      "legendFormat": "other"

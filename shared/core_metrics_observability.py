@@ -94,16 +94,16 @@ _LLM_ERRORS = "|".join(family_events(LLM_ERROR_FAMILY))
 _SEL = '{service_name="unknown_service"}'
 
 
-def _count(pipeline: str, window: str, event: str | None = None) -> str:
+def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
     """One count_over_time series — every count wraps in sum(...): the
     unknown_service family has >500 streams over a day, and an unaggregated
     count_over_time hits Loki's per-query series cap (alert-rules note).
 
-    ``event`` carries the promoted event_name/agent_id stream-label matcher
+    ``matchers`` carries the promoted event_name/agent_id stream-label matcher
     (e.g. ``'event_name={event_name}'`` or ``'event_name=~"a|b"'``): indexed-era
     reads match those labels inside the stream selector
     (shared/loki_index_labels.py), not after ``| json``."""
-    selector = _SEL if event is None else f'{{service_name="unknown_service", {event}}}'
+    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
     return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
@@ -178,11 +178,13 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count("category={category}", "5m", event='event_name="llm_provider_error"') + " / 5",
+        query=_count("category={category}", "5m", matchers='event_name="llm_provider_error"')
+        + " / 5",
         targets=[
-            _count("category={category}", "5m", event='event_name="stream_stalled_retry"') + " / 5",
-            _count("category={category}", "5m", event='event_name="llm_turn_aborted"') + " / 5",
-            _count("category={category}", "5m", event='event_name="stream_overloaded_retry"')
+            _count("category={category}", "5m", matchers='event_name="stream_stalled_retry"')
+            + " / 5",
+            _count("category={category}", "5m", matchers='event_name="llm_turn_aborted"') + " / 5",
+            _count("category={category}", "5m", matchers='event_name="stream_overloaded_retry"')
             + " / 5",
         ],
         target_names=["provider_error", "stalled_retry", "turn_aborted", "overloaded_retry"],
@@ -206,8 +208,8 @@ core_metrics.register_core_metric(
         panel="timeseries",
         query_type="logql",
         query=(
-            f"100 * {_count(f'category={{category}} | {_TURN_ATTR["ok"]}="true"', '5m', event='event_name={event_name}')}"
-            f" / {_count('category={category}', '5m', event='event_name={event_name}')}"
+            f"100 * {_count(f'category={{category}} | {_TURN_ATTR["ok"]}="true"', '5m', matchers='event_name={event_name}')}"
+            f" / {_count('category={category}', '5m', matchers='event_name={event_name}')}"
         ),
         target_names=["ok_pct"],
         output=["grafana", "inspector"],
@@ -261,37 +263,42 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count("category={category}", "5m", event="event_name={event_name}") + " / 5",
+        query=_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
         targets=[
             _count(
                 "category={category}",
                 "5m",
-                event='event_name=~"exec_failed|exec[(]failed[)]"',
+                matchers='event_name=~"exec_failed|exec[(]failed[)]"',
             )
             + " / 5",
             _count(
                 "category={category}",
                 "5m",
-                event='event_name=~"exec_timeout|exec[(]timeout[)]"',
+                matchers='event_name=~"exec_timeout|exec[(]timeout[)]"',
             )
             + " / 5",
             _count(
                 "category={category}",
                 "5m",
-                event='event_name=~"exec_cancelled|exec[(]cancelled[)]"',
+                matchers='event_name=~"exec_cancelled|exec[(]cancelled[)]"',
             )
             + " / 5",
-            _count("category={category}", "5m", event='event_name="exec_node_timeout"') + " / 5",
+            _count("category={category}", "5m", matchers='event_name="exec_node_timeout"') + " / 5",
             # other: every exec* event outside the known spellings. Stream
             # selector matchers are full-string regexes, so the selector
             # keeps exactly the named spellings out (the pre-selector
             # pipeline form was substring-based and matched nothing).
+            # exec_envelope is excluded by PM ruling (2026-08-31): it is the
+            # execution envelope, not an outcome-accounting event — its
+            # volume (~3x the ok rate) would dominate and misread as unknown
+            # exec failures; its transfer-cost display is tracked separately
+            # (task #2174).
             _count(
                 "category={category}",
                 "5m",
-                event=(
+                matchers=(
                     'event_name=~"exec.*", '
-                    'event_name!~"exec|exec_failed|exec[(]failed[)]|exec_timeout|'
+                    'event_name!~"exec|exec_envelope|exec_failed|exec[(]failed[)]|exec_timeout|'
                     "exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|"
                     'exec_node_timeout"'
                 ),
@@ -331,38 +338,38 @@ core_metrics.register_core_metric(
         query=_count(
             f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*ruff_format.*"',
             "5m",
-            event="event_name={event_name}",
+            matchers="event_name={event_name}",
         )
         + " / 5",
         targets=[
             _count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*ruff.*" | {_FIX_ATTR["fixes"]}!~".*ruff_format.*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
             _count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*invalid_escape.*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
             _count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*missing_imports.*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
             _count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*chinese_punct.*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
             _count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*bracket_matching.*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
             # other: missing/none/unknown kinds — !~ matches lines where the
@@ -371,7 +378,7 @@ core_metrics.register_core_metric(
                 f"category={{category}} | "
                 f'{_FIX_ATTR["fixes"]}!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
         ],
@@ -527,20 +534,20 @@ core_metrics.register_core_metric(
         query=_count(
             f'category={{category}} | {_HALT_ATTR["body"]}="no tool_call (idle)"',
             "5m",
-            event="event_name={event_name}",
+            matchers="event_name={event_name}",
         )
         + " / 5",
         targets=[
             _count(
                 f'category={{category}} | {_HALT_ATTR["body"]}=~".*compact.*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
             _count(
                 f'category={{category}} | {_HALT_ATTR["body"]}=~"lifecycle .*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
             # other: not idle/compact/lifecycle (missing body matches too —
@@ -551,7 +558,7 @@ core_metrics.register_core_metric(
                 f'{_HALT_ATTR["body"]}!~".*compact.*" | '
                 f'{_HALT_ATTR["body"]}!~"lifecycle .*"',
                 "5m",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             )
             + " / 5",
         ],
@@ -577,7 +584,7 @@ core_metrics.register_core_metric(
         unit="short",
         panel="stat",
         query_type="logql",
-        query=_count("category={category}", "$__range", event="event_name={event_name}"),
+        query=_count("category={category}", "$__range", matchers="event_name={event_name}"),
         target_names=["stalled"],
         output=["grafana"],
     )
@@ -600,7 +607,7 @@ core_metrics.register_core_metric(
         query=_count(
             "category={category} | {{agent_id}}",
             "$__interval",
-            event="event_name={event_name}",
+            matchers="event_name={event_name}",
         ),
         target_names=["stalled"],
         output=["inspector"],
@@ -652,7 +659,7 @@ core_metrics.register_core_metric(
         query=_count(
             'category={category} | source="user"',
             "5m",
-            event="event_name={event_name}",
+            matchers="event_name={event_name}",
         )
         + " / 5",
         target_names=["interactions"],

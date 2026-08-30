@@ -88,12 +88,12 @@ def _llm_cost(window: str) -> str:
     )
 
 
-def _count(pipeline: str, window: str, event: str | None = None) -> str:
+def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
     """One count_over_time series — every count wraps in sum(...): the
     unknown_service family has >500 streams over a day, and an unaggregated
     count_over_time hits Loki's per-query series cap (alert-rules note).
     ``event`` = promoted event_name/agent_id matcher in the stream selector."""
-    selector = _SEL if event is None else f'{{service_name="unknown_service", {event}}}'
+    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
     return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
@@ -107,7 +107,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count("category={category}", "$__range", event="event_name={event_name}"),
+        query=_count("category={category}", "$__range", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["calls"],
         width=8,
@@ -453,18 +453,18 @@ core_metrics.register_core_metric(
         query=_count(
             f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} < 60',
             "$__range",
-            event="event_name={event_name}",
+            matchers="event_name={event_name}",
         ),
         targets=[
             _count(
                 f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 60 | {_DELIVERY_ATTR["age_s"]} < 600',
                 "$__range",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             ),
             _count(
                 f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 600',
                 "$__range",
-                event="event_name={event_name}",
+                matchers="event_name={event_name}",
             ),
         ],
         query_type="logql",
@@ -683,7 +683,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="barchart",
-        query=_count("category={category}", "30m", event="event_name={event_name}") + " / 30",
+        query=_count("category={category}", "30m", matchers="event_name={event_name}") + " / 30",
         query_type="logql",
         target_names=["calls"],
         # The legacy red-80 step was constant-red noise on the 30-minute

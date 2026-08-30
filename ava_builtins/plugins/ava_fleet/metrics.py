@@ -45,12 +45,12 @@ _SEL = '{service_name="unknown_service"}'
 _TASK_ATTR = {k: f"attributes_{k}" for k in TASK_UPDATE_KEYS}
 
 
-def _count(pipeline: str, window: str, event: str | None = None) -> str:
+def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
     """One count_over_time series — every count wraps in sum(...) (see the
-    module docstring for the series-cap note). ``event`` carries the promoted
+    module docstring for the series-cap note). ``matchers`` carries the promoted
     event_name stream-label matcher (e.g. ``'event_name={event_name}'``): it
     is matched inside the stream selector, not after ``| json``."""
-    selector = _SEL if event is None else f'{{service_name="unknown_service", {event}}}'
+    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
     return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
@@ -72,14 +72,14 @@ register_metric(
                 _count(
                     'category={category} | ' + _TASK_ATTR['status'] + '="done"',
                     '5m',
-                    event='event_name={event_name}',
+                    matchers='event_name={event_name}',
                 )
             }"
             f" / {
                 _count(
                     'category={category} | ' + _TASK_ATTR['status'] + '!=""',
                     '5m',
-                    event='event_name={event_name}',
+                    matchers='event_name={event_name}',
                 )
             }"
         ),
@@ -107,14 +107,14 @@ register_metric(
                 _count(
                     'category={category} | ' + _TASK_ATTR['status'] + '="done" | {{agent_id}}',
                     '$__interval',
-                    event='event_name={event_name}',
+                    matchers='event_name={event_name}',
                 )
             }"
             f" / {
                 _count(
                     'category={category} | ' + _TASK_ATTR['status'] + '!="" | {{agent_id}}',
                     '$__interval',
-                    event='event_name={event_name}',
+                    matchers='event_name={event_name}',
                 )
             }"
         ),

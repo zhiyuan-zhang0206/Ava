@@ -56,12 +56,12 @@ _RECALL_ATTR = {k: f"attributes_{k}" for k in RECALL_FILTER_KEYS}
 _CAT = 'category=~"{category_re}|log"'
 
 
-def _count(pipeline: str, window: str, event: str | None = None) -> str:
+def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
     """One count_over_time series — every count wraps in sum(...) (see the
-    module docstring for the series-cap note). ``event`` carries the promoted
+    module docstring for the series-cap note). ``matchers`` carries the promoted
     event_name stream-label matcher (e.g. ``'event_name={event_name}'``): it
     is matched inside the stream selector, not after ``| json``."""
-    selector = _SEL if event is None else f'{{service_name="unknown_service", {event}}}'
+    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
     return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
@@ -79,7 +79,7 @@ register_metric(
         category="telemetry",
         unit="ops",
         panel="timeseries",
-        query=_count(f'{_CAT} | level="info"', "5m", event="event_name={event_name}") + " / 5",
+        query=_count(f'{_CAT} | level="info"', "5m", matchers="event_name={event_name}") + " / 5",
         query_type="logql",
         target_names=["runs"],
         output=["grafana"],
@@ -105,10 +105,10 @@ register_metric(
                 _count(
                     _CAT + ' | level="info" | ' + _RECALL_ATTR['body'] + ' =~ ".*-> 0 kept.*"',
                     '5m',
-                    event='event_name={event_name}',
+                    matchers='event_name={event_name}',
                 )
             }"
-            f" / {_count(_CAT + ' | level="info"', '5m', event='event_name={event_name}')}"
+            f" / {_count(_CAT + ' | level="info"', '5m', matchers='event_name={event_name}')}"
         ),
         query_type="logql",
         target_names=["empty %"],
@@ -135,8 +135,8 @@ register_metric(
             ThresholdStep(color="red", value=25.0),
         ],
         query=(
-            f"100 * {_count(_CAT + ' | level="warning"', '5m', event='event_name={event_name}')}"
-            f" / {_count(_CAT, '5m', event='event_name={event_name}')}"
+            f"100 * {_count(_CAT + ' | level="warning"', '5m', matchers='event_name={event_name}')}"
+            f" / {_count(_CAT, '5m', matchers='event_name={event_name}')}"
         ),
         query_type="logql",
         target_names=["anomaly %"],
@@ -157,7 +157,7 @@ register_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count(f'{_CAT} | level="warning"', "$__range", event="event_name={event_name}"),
+        query=_count(f'{_CAT} | level="warning"', "$__range", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["failures"],
         output=["grafana"],
@@ -181,7 +181,7 @@ register_metric(
         query=_count(
             f'{_CAT} | level="info" | {{{{agent_id}}}}',
             "$__interval",
-            event="event_name={event_name}",
+            matchers="event_name={event_name}",
         ),
         query_type="logql",
         target_names=["runs"],
