@@ -39,7 +39,10 @@ from google.oauth2 import service_account
 
 from services.pitr.baidu_store import BaiduObjectStore
 from services.pitr.baidu_token import BaiduCredentials, BaiduTokenManager
+from services.pitr.base_manifest import CandidateManifest
 from services.pitr.checksums import MD5
+from services.pitr.restore_manifest import ProtectedManifest, candidate_sha256
+from services.pitr.uploader import ack_manifest_from_raw
 
 _RECORD_DIRS = ("base-manifests", "protected-manifests", "protected-pending", "ack")
 _TERMINAL_PHASES = {"protected", "rolled_back"}
@@ -222,6 +225,13 @@ def _rewrite_protected(raw: dict[str, Any], mapping: dict[str, dict[str, str]]) 
     if isinstance(candidate, dict):
         _rewrite_candidate(candidate, mapping)
         raw["candidate"] = candidate
+        # The digest pins the embedded candidate's canonical bytes; the
+        # identity rewrite changes those bytes, so the digest must follow
+        # or ProtectedManifest.from_json refuses the record (QA #1155).
+        parsed = CandidateManifest.from_json(
+            json.dumps(candidate, sort_keys=True, separators=(",", ":"))
+        )
+        raw["candidate_sha256"] = candidate_sha256(parsed)
 
 
 def _rewrite_ack(raw: dict[str, Any], mapping: dict[str, dict[str, str]]) -> None:
@@ -233,8 +243,10 @@ def _rewrite_ack(raw: dict[str, Any], mapping: dict[str, dict[str, str]]) -> Non
 def _rewrite_records(
     records_root: Path, mapping: dict[str, dict[str, str]], *, dry_run: bool
 ) -> None:
-    """Two-phase: every identity lookup resolves before a single file is
-    written, so a partial mapping can never leave half-rewritten records."""
+    """Two-phase: every identity lookup resolves and every rewritten
+    record re-parses before a single file is written, so a partial
+    mapping or a vocabulary slip can never leave half-rewritten or
+    unreadable records."""
     planned: list[tuple[Path, str]] = []
     for name in _RECORD_DIRS:
         directory = records_root / name
@@ -248,7 +260,20 @@ def _rewrite_records(
                 _rewrite_candidate(raw, mapping)
             else:
                 _rewrite_protected(raw, mapping)
-            planned.append((path, json.dumps(raw, sort_keys=True, separators=(",", ":"))))
+            content = json.dumps(raw, sort_keys=True, separators=(",", ":"))
+            # Fail-closed re-parse: the post-cut drill reads these records
+            # through the same parsers — a rewrite the parsers refuse must
+            # abort here, before any file is written (QA #1155).
+            try:
+                if name == "ack":
+                    ack_manifest_from_raw(json.loads(content))
+                elif name in ("base-manifests",):
+                    CandidateManifest.from_json(content)
+                else:
+                    ProtectedManifest.from_json(content)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise SystemExit(f"rewritten record does not re-parse: {path} ({exc})") from exc
+            planned.append((path, content))
     if dry_run:
         print(f"[dry-run] {len(planned)} records would be rewritten")
         return

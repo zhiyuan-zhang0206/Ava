@@ -54,6 +54,20 @@ with md5 verified on both ends, writes the generation->fs_id:md5 mapping, and
 rewrites ACK / candidate / protected records field-level. The GCS bucket is
 never mutated.
 
+**Pin the FIRST snapshot tarball before starting.** The script refuses to
+overwrite an existing snapshot, so re-running it writes another tarball;
+rolling back with a later one can restore half-rewritten records. Record
+the first tarball path and use exactly that one for any rollback.
+
+### Interrupted runs
+
+- Interrupted during the copy phase: safe to re-run — identical objects
+  are adopted via rapid transfer and the mapping converges.
+- Interrupted during the record-rewrite phase: do NOT continue. Restore
+  the FIRST snapshot tarball (see Rollback below), then re-run the
+  script from scratch. A half-rewritten record set must never reach the
+  config flip.
+
 ### 4. Config flip
 
 Set `AVA_PITR_STORE_BACKEND=baidu` plus the three Baidu fields through the
@@ -76,7 +90,8 @@ the uploader credentials away inside this window.
 ## Rollback (within the two-week window)
 
 1. Stop the PITR daemons.
-2. Restore the snapshot tarball over `~/.ava/physical-backup/`.
+2. Restore the FIRST snapshot tarball over `~/.ava/physical-backup/`
+   (the one pinned in §3 — not a later re-run's tarball).
 3. Point `AVA_PITR_STORE_BACKEND` back at `gcs`; restart.
 4. Verify with the GCS restore drill.
 
