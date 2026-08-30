@@ -2911,6 +2911,58 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(document.activeElement).toBe(screen.getByTestId("attach-lightbox"));
   });
 
+  it("mounts the lightbox at document.body so the backdrop is not clipped by the contained timeline row", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload,
+            images: [IMG1, IMG2],
+            image_captions: [LINE1, LINE2],
+          }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getAllByTestId("attach-thumbnail")[0]);
+    const lightbox = screen.getByTestId("attach-lightbox");
+    // Root cause (QA #1085): `.timeline-item` carries
+    // `content-visibility: auto` (globals.css), whose paint containment turns
+    // the row into the containing block of `fixed` descendants AND a stacking
+    // context — an inline dialog was clipped to the row's box (~440x861 vs
+    // the 1182x839 viewport) and its z-50 stayed under the z-30
+    // scroll-to-bottom button. Portal mounting escapes both: the overlay is
+    // hung off document.body, outside every row.
+    expect(document.body.contains(lightbox)).toBe(true);
+    expect(lightbox.closest("[data-item-id]")).toBeNull();
+    // Root stacking context: z-50 at body level paints above every app-layer
+    // control (header z-20, composer z-20, scroll-to-bottom z-30).
+    expect(lightbox.className).toContain("fixed inset-0 z-50");
+  });
+
+  it("enlarged image is capped at 80% of the viewport (contain, no upscale)", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload,
+            images: [IMG1, IMG2],
+            image_captions: [LINE1, LINE2],
+          }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getAllByTestId("attach-thumbnail")[0]);
+    const img = screen.getByTestId("attach-lightbox").querySelector("img");
+    // 60-80% viewport sizing (user ruling 2026-08-30): the caps are the 80%
+    // bound — a big image scales down to fit either axis, a small one keeps
+    // its natural size (max-* only ever shrinks), aspect ratio preserved.
+    expect(img?.className).toContain("max-h-[80vh]");
+    expect(img?.className).toContain("max-w-[80vw]");
+    expect(img?.className).toContain("object-contain");
+  });
+
   it("legacy attach (images without image_captions) still renders thumbnails without navigation", () => {
     render(
       <TimelineView
