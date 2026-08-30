@@ -139,6 +139,28 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(
     assert "dismiss_notice" not in section
 
 
+def test_prompt_section_queue_delivery_mandate(
+    _load_activity_plugin: None,
+):
+    """The Fleet section must make queue delivery mandatory: what the user
+    must decide (or should know) is delivered through the queue — never left
+    in chat for the user to discover later — and it is queued even when the
+    user cannot be reached (offline, or not in this dialog); pending decision
+    points merge into one numbered notice so a single reply settles them;
+    posting is delivery, no staging for a later moment. Phrased semantically
+    and self-contained — no skill names, no call names beyond the channel the
+    section already names."""
+    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+
+    section = _fleet_self_section()
+    assert "Queue delivery is mandatory" in section
+    assert "never left in the chat" in section
+    assert "offline" in section
+    assert "numbered notice" in section
+    assert "Posting IS delivery" in section
+    assert "reduce-context-switch" not in section
+
+
 def test_spawn_label_param_gated_on_plugin(_load_activity_plugin: None):
     # With the plugin enabled, spawn is wrapped and exposes the `label` arg. The
     # wrap fact lives in the introspectable stack (the chained callable mimics
