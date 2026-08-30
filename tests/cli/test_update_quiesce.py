@@ -480,12 +480,16 @@ def test_quiesce_local_agents_signals_only_this_machine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The per-host quiesce (agent-runner self-update / `ava restart --quiesce`)
-    signals this machine's live agents with source='system:update' and drains
-    them; mode='none' (rollout Phase B) is a no-op."""
+    pauses the local restarter, signals this machine's live agents with
+    source='system:update' and drains them; mode='none' (rollout Phase B) is a
+    no-op that pauses nothing. On timeout it returns False WITHOUT reaping —
+    the caller's force_reap stage owns the reap."""
     import shared.db as db_mod
     from shared import machine as machine_mod
 
     monkeypatch.setattr(machine_mod, "machine_name", lambda: "test-machine")
+    pauses: list[str] = []
+    monkeypatch.setattr("ops.cluster.pause_local_cluster", lambda: pauses.append("pause") or None)
     signalled: list[tuple[str, object]] = []
 
     def _signal(source: str, *, exclude_agent_ids=(), machine=None):  # type: ignore[no-untyped-def]
@@ -497,20 +501,26 @@ def test_quiesce_local_agents_signals_only_this_machine(
     monkeypatch.setattr(_up, "time", _FakeTime())
     monkeypatch.setattr(_up, "_quiesce_timeout_s", lambda _mode: 0.05)  # pyright: ignore[reportUnknownArgumentType]
 
-    # mode none: no signal, no wait
+    # mode none: no pause, no signal, no wait
     assert _up._quiesce_local_agents("none") is True
-    assert signalled == []
+    assert signalled == [] and pauses == []
 
-    # mode smooth: signals this machine and drains
+    # mode smooth: pauses the restarter, signals this machine, drains
     assert _up._quiesce_local_agents("smooth") is True
+    assert pauses == ["pause"]
     assert signalled == [("system:update", "test-machine")]
 
-    # mode force: signals, waits the short window, force-reaps the straggler
+    # mode force: pauses again (idempotent contract), signals, waits the short
+    # window, then reports the straggler instead of reaping it (the reap is the
+    # caller's force_reap stage — Task #2055: reaping here also ran the reap's
+    # 15s SIGTERM grace inside the quiesce stage, inflating it past the budget)
     monkeypatch.setattr(db_mod, "list_live_agent_ids", lambda **_kwargs: [1])  # pyright: ignore[reportUnknownArgumentType]
     reaped: list[str] = []
     monkeypatch.setattr(_up, "_force_reap_local_agents", lambda: reaped.append("reaped") or [])
+
     assert _up._quiesce_local_agents("force") is False
-    assert reaped == ["reaped"]
+    assert reaped == []
+    assert pauses == ["pause", "pause"]
 
 
 def test_force_reap_local_agents_marks_and_kills(
@@ -554,13 +564,15 @@ def test_force_reap_local_agents_noop_when_none_live(
 
 def test_quiesce_local_agents_hosted_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     """Hosted rows stay idling for life and there are no per-agent processes —
-    the local quiesce must signal nobody and report the skip as quiesced."""
+    the local quiesce must signal nobody, pause nothing (the hosted stop is the
+    service stop, not a restarter pause) and report the skip as quiesced."""
     monkeypatch.setattr("ops.runner_mode.is_hosted", lambda: True)
 
     def _boom(*_a: object, **_k: object) -> object:
         raise AssertionError("hosted mode must not signal agents")
 
     monkeypatch.setattr("shared.db.signal_live_agents_restart", _boom)
+    monkeypatch.setattr("ops.cluster.pause_local_cluster", _boom)
     assert _up._quiesce_local_agents("smooth") is True
 
 
@@ -594,11 +606,137 @@ def test_quiesce_all_agents_hosted_is_a_noop(monkeypatch: pytest.MonkeyPatch) ->
 def test_quiesce_local_agents_hosted_force_skips_reap(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force mode computes force_reap in the orchestration, but in hosted the
     leaf guard must make the reap a no-op — the composition that would
-    otherwise CAS-mark every hosted row 'restarting' on a force rollout."""
+    otherwise CAS-mark every hosted row 'restarting' on a force rollout. The
+    hosted guard also runs before the restarter pause (pausing has no hosted
+    meaning and would strand a posture row no hosted flow resumes)."""
     monkeypatch.setattr("ops.runner_mode.is_hosted", lambda: True)
 
     def _boom(*_a: object, **_k: object) -> object:
         raise AssertionError("hosted force quiesce must not reach the reap")
 
     monkeypatch.setattr(_up, "_force_reap_local_agents", _boom)
+    monkeypatch.setattr("ops.cluster.pause_local_cluster", _boom)
     assert _up._quiesce_local_agents("force") is True
+
+
+def test_quiesce_local_agents_pauses_restarter_before_signalling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The restarter pause must land BEFORE the first signal (Task #2055): an
+    unpaused restarter respawns every drained agent within its ~1s poll, the
+    convergence loop then burns the whole budget on agents that already
+    drained, and the deadline reap kills the freshly-respawned LIVE processes.
+    The pause is what makes 'still live at the deadline' mean 'never drained'."""
+    import shared.db as db_mod
+    from shared import machine as machine_mod
+
+    monkeypatch.setattr(machine_mod, "machine_name", lambda: "test-machine")
+    order: list[str] = []
+
+    def _pause() -> None:
+        order.append("pause")
+
+    def _signal(source: str, *, exclude_agent_ids=(), machine=None):  # type: ignore[no-untyped-def]
+        order.append(f"signal:{machine}")
+        return []
+
+    monkeypatch.setattr("ops.cluster.pause_local_cluster", _pause)
+    monkeypatch.setattr(db_mod, "signal_live_agents_restart", _signal)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(db_mod, "list_live_agent_ids", lambda **_kwargs: [])  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _up._quiesce_local_agents("smooth") is True
+    assert order == ["pause", "signal:test-machine"]
+
+
+def test_quiesce_local_agents_deadline_returns_false_without_reaping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deadline semantics (Task #2055): a live set that never drains exhausts
+    the budget, reports the stragglers, and returns False WITHOUT force-reaping.
+    The reap lives in the caller's force_reap stage, so the quiesce stage is
+    bounded by the budget (the pre-fix composition ran the reap's own 15s
+    SIGTERM grace inside the quiesce stage: 10s budget + 15s reap = the 25.6s
+    stage the incident reported)."""
+    import shared.db as db_mod
+    from shared import machine as machine_mod
+
+    monkeypatch.setattr(machine_mod, "machine_name", lambda: "test-machine")
+    monkeypatch.setattr("ops.cluster.pause_local_cluster", lambda: None)
+    monkeypatch.setattr(db_mod, "signal_live_agents_restart", lambda **_kw: [1])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(db_mod, "list_live_agent_ids", lambda **_kwargs: [1])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_quiesce_timeout_s", lambda _mode: 0.05)  # pyright: ignore[reportUnknownArgumentType]
+    fake = _FakeTime()
+    monkeypatch.setattr(_up, "time", fake)
+    reaped: list[str] = []
+    monkeypatch.setattr(_up, "_force_reap_local_agents", lambda: reaped.append("reaped") or [])
+
+    assert _up._quiesce_local_agents("force") is False
+    assert reaped == []
+    # The loop exits at the deadline: one pre-deadline check plus one final
+    # pass that crosses it — bounded by budget + one poll interval, no reap.
+    assert fake.now <= 0.05 + 1.0  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_cmd_restart_quiesce_reaps_stragglers_in_force_reap_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ava restart --quiesce` puts the straggler reap in the force_reap stage
+    AFTER the quiesce stage, never inside the quiesce window: a clean drain
+    reaps nothing; a quiesce that returns False reaps once; the rollout's
+    explicit --force-reap still reaps regardless of the drain outcome."""
+    import cli.commands as _cli
+
+    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    drained: list[bool] = [True]
+    reaped: list[str] = []
+
+    monkeypatch.setattr(_cli, "_quiesce_local_agents", lambda _mode: drained[0])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _cli,
+        "_force_reap_local_agents",
+        lambda **_: reaped.append("reap") or [],  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    # Clean drain → no reap.
+    drained[0] = True
+    assert _cli.cmd_restart(quiesce=True, mode="smooth") == 0
+    assert reaped == []
+
+    # Stragglers → the force_reap stage reaps them once, after the quiesce stage.
+    drained[0] = False
+    assert _cli.cmd_restart(quiesce=True, mode="smooth") == 0
+    assert reaped == ["reap"]
+
+    # The rollout's Phase-B backstop (--force-reap, no quiesce) is unchanged.
+    assert _cli.cmd_restart(force_reap=True) == 0
+    assert reaped == ["reap", "reap"]
+
+    # quiesce=False never reaps on its own (drained stays True — no quiesce ran).
+    drained[0] = False
+    assert _cli.cmd_restart() == 0
+    assert reaped == ["reap", "reap"]
+
+
+def test_cmd_restart_releases_its_quiesce_pause_when_the_stop_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed stop means no `ava start` is coming to restore the posture the
+    quiesce's restarter pause set — the standalone restart must release it
+    (the ownership check inside `_release_self_heal_pause` still leaves a
+    rollout-owned pause alone)."""
+    import cli.commands as _cli
+    from cli.commands import stop as _stop_mod
+
+    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_k: 3)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_force_reap_local_agents", lambda **_: [])  # pyright: ignore[reportUnknownArgumentType]
+    released: list[str] = []
+    monkeypatch.setattr(_stop_mod, "_release_self_heal_pause", lambda: released.append("release"))
+
+    assert _cli.cmd_restart(quiesce=True) == 3
+    assert released == ["release"]
