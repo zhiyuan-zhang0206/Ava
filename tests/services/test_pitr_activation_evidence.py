@@ -152,6 +152,21 @@ def test_gcs_wal_proof_keeps_validating_legacy_shapes() -> None:
     )
 
 
+def test_wal_proof_rejects_an_unknown_credential_backend() -> None:
+    """The fail-fast gate: an unrecognized backend must refuse the proof
+    before any vocabulary dispatch — a typo must never wedge a later gate
+    or silently fall back to the previous backend."""
+    ack, viewer = _pair()
+    with pytest.raises(ValueError, match="unknown backend"):
+        validate_wal_remote_evidence(
+            ack=ack,
+            viewer=viewer,
+            exact=_exact(),
+            verification_deadline="2026-08-30T04:00:00+00:00",
+            credential_evidence={**_baidu_credentials(), "backend": "s3"},
+        )
+
+
 def _ack_manifest() -> AckManifest:
     return AckManifest(
         archive_name=_SEGMENT,

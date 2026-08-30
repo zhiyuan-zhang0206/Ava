@@ -19,9 +19,14 @@ from services.pitr.activation_runtime import (
     archiver_reached_target,
     pitr_env_is_desired,
     rollback_effect_state,
+    wal_metadata,
 )
 from services.pitr.activation_state import ActivationRecord, load_record, write_record
 from services.pitr.base_candidate import BaseCandidateError
+from services.pitr.checksums import ObjectChecksum
+from services.pitr.object_store import RemoteObjectAck
+from services.pitr.uploader import ack_manifest_from_raw
+from shared.config import settings
 
 
 def _credentials() -> dict[str, str]:
@@ -118,7 +123,7 @@ def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("ops.cluster_deploy.spawn_restart", spawn_restart)
 
 
-def _wal_config_pending_record() -> ActivationRecord:
+def _wal_config_pending_record(credentials: dict[str, str] | None = None) -> ActivationRecord:
     return (
         ActivationRecord.start(operation_id="op-1", origin="cli")
         .advance(
@@ -130,16 +135,16 @@ def _wal_config_pending_record() -> ActivationRecord:
                 "wal_compression": "off",
                 "postmaster_started_at": "2026-08-29 00:00:00+00",
             },
-            pre_activation_credential_evidence=_credentials(),
+            pre_activation_credential_evidence=credentials or _credentials(),
         )
         .advance("snapshot_verified", pre_activation_snapshot="/verified.dump.enc")
         .advance("wal_config_pending")
     )
 
 
-def _wal_restart_pending_record() -> ActivationRecord:
+def _wal_restart_pending_record(credentials: dict[str, str] | None = None) -> ActivationRecord:
     return (
-        _wal_config_pending_record()
+        _wal_config_pending_record(credentials)
         .advance(
             "wal_config_applying",
             wal_config_before_digest="before",
@@ -960,8 +965,10 @@ def test_frozen_pg_state_contract_with_real_reader(
         shutil.rmtree(sock, ignore_errors=True)
 
 
-def _wal_ack_pending_record(**overrides: object) -> ActivationRecord:
-    record = _wal_restart_pending_record().advance(
+def _wal_ack_pending_record(
+    credentials: dict[str, str] | None = None, **overrides: object
+) -> ActivationRecord:
+    record = _wal_restart_pending_record(credentials).advance(
         "wal_ack_pending",
         wal_exact_evidence={
             "timeline": "1",
@@ -1169,3 +1176,229 @@ def test_probe_switch_privilege_against_real_pg(
             capture_output=True,
         )
         shutil.rmtree(sock, ignore_errors=True)
+
+
+def _baidu_credentials_evidence() -> dict[str, str]:
+    return {
+        "backend": "baidu",
+        "uploader_identity": "app-key",
+        "viewer_identity": "app-key",
+        "store_target": "/apps/ava/ava-pitr",
+        "object_prefix": "pitr",
+        "backup_key_id": "key",
+        "backup_key_sha256": "0" * 64,
+    }
+
+
+def _durable_ack_raw(*, backend: str) -> dict[str, object]:
+    """One durable WAL ACK payload, shaped for the backend under test."""
+    segment = "00000001000000A20000008C"
+    if backend == "gcs":
+        checksum, pin_token, checksum_algo = "AAAAAA==", "123", "crc32c"
+    else:
+        checksum = "b" * 32
+        pin_token = "123456789:" + checksum
+        checksum_algo = "md5"
+    return {
+        "archive_name": segment,
+        "source_sha256": "1" * 64,
+        "source_size": 1,
+        "object_name": f"pitr/wal/{segment[:8]}/{segment}.enc",
+        "pin_token": pin_token,
+        "ciphertext_size": 10,
+        "ciphertext_crc32c": checksum,
+        "ciphertext_checksum_algo": checksum_algo,
+        "ciphertext_checksum_value": checksum,
+        "encryption_format": "AVAPITR1",
+        "key_id": "key",
+        "acknowledged_at": "2026-08-30T03:30:00+00:00",
+    }
+
+
+class _ArchiverRow:
+    def __init__(self, values: tuple[str, str, str]) -> None:
+        self._values = values
+
+    def fetchone(self) -> tuple[str, str, str]:
+        return self._values
+
+
+class _ArchiverConn:
+    """A psycopg connection whose pg_stat_archiver row reports the target
+    segment archived with zero failures past the durable count."""
+
+    def __init__(self, segment: str) -> None:
+        self._segment = segment
+
+    def __enter__(self) -> _ArchiverConn:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def execute(self, _query: str) -> _ArchiverRow:
+        return _ArchiverRow((self._segment, "0", "2"))
+
+
+class _ViewerStore:
+    def __init__(self, observed: RemoteObjectAck) -> None:
+        self._observed = observed
+
+    def stat(self, object_name: str) -> RemoteObjectAck | None:
+        return self._observed
+
+
+class _ViewerStoreGroup:
+    def __init__(self, observed: RemoteObjectAck) -> None:
+        self._observed = observed
+
+    def viewer_object_store(self) -> _ViewerStore:
+        return _ViewerStore(self._observed)
+
+
+def _wire_proof_world(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    backend: str,
+    ack_raw: dict[str, object],
+    observed: RemoteObjectAck | None = None,
+) -> None:
+    """Wire the proof loop's external world onto a temp ava_home: the
+    backend config, the archiver stats row, the durable ACK file, and the
+    viewer store's stat observation."""
+    config = settings.physical_backup
+    monkeypatch.setattr(config, "pitr_store_backend", backend)
+    monkeypatch.setattr(config, "pitr_gcs_prefix", "pitr")
+    if backend == "gcs":
+        monkeypatch.setattr(config, "pitr_gcs_bucket", "bucket")
+        monkeypatch.setattr(config, "pitr_restore_gcs_credentials_file", tmp_path / "viewer.json")
+    else:
+        monkeypatch.setattr(config, "pitr_baidu_app_root", "/apps/ava/ava-pitr")
+
+    monkeypatch.setattr(activation_runtime, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "services.pitr.activation_runtime.psycopg.connect",
+        lambda _conninfo, **_kw: _ArchiverConn(str(ack_raw["archive_name"])),
+    )
+    if observed is None:
+        ack = ack_manifest_from_raw(ack_raw)
+        observed = RemoteObjectAck(
+            object_name=ack.object_name,
+            pin_token=ack.pin_token,
+            size=ack.ciphertext_size,
+            checksum=ObjectChecksum(
+                algo=ack.ciphertext_checksum_algo, value=ack.ciphertext_checksum_value
+            ),
+            metadata=wal_metadata(ack),
+            created=True,
+        )
+    monkeypatch.setattr(
+        "services.pitr.store_factory.get_store_group", lambda: _ViewerStoreGroup(observed)
+    )
+    ack_dir = tmp_path / "physical-backup" / "ack"
+    ack_dir.mkdir(parents=True)
+    (ack_dir / f"{ack_raw['archive_name']}.ack.json").write_text(json.dumps(ack_raw))
+
+
+def _remote_wal_proof_round_trips(
+    record: ActivationRecord,
+    ack_evidence: dict[str, str],
+    viewer_evidence: dict[str, str],
+) -> None:
+    """The transferred evidence must clear the durable record validator —
+    the same gate the CLI's advance-to-wal_remote_verified runs."""
+    verified = record.advance(
+        "wal_remote_verified",
+        wal_ack_evidence=ack_evidence,
+        wal_viewer_proof=viewer_evidence,
+    )
+    assert verified.phase == "wal_remote_verified"
+
+
+def test_remote_wal_proof_transfers_gcs_evidence_end_to_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The proof loop must transfer the durable ACK and the viewer stat into
+    the (ack, viewer) evidence pair, and that pair must round-trip through
+    the record validator's GCS vocabulary."""
+    from datetime import UTC, datetime, timedelta
+
+    deadline = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    record = _wal_ack_pending_record(wal_verification_deadline=deadline)
+    ack_raw = _durable_ack_raw(backend="gcs")
+    _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw)
+
+    ack_evidence, viewer_evidence = activation_runtime.remote_wal_proof(record)
+
+    assert ack_evidence["bucket_name"] == "bucket"
+    assert ack_evidence["generation"] == "123"
+    assert ack_evidence["ciphertext_crc32c"] == "AAAAAA=="
+    assert ack_evidence["acknowledged_at"] == "2026-08-30T03:30:00+00:00"
+    assert viewer_evidence["viewer_id"] == "v@example.test"
+    assert viewer_evidence["observed_at"] > ack_evidence["acknowledged_at"]
+    _remote_wal_proof_round_trips(record, ack_evidence, viewer_evidence)
+
+
+def test_remote_wal_proof_transfers_baidu_evidence_end_to_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Same transfer on the Baidu vocabulary: the app-root store target and
+    the fs_id:md5 pin token must flow through and re-validate."""
+    from datetime import UTC, datetime, timedelta
+
+    deadline = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    record = _wal_ack_pending_record(
+        _baidu_credentials_evidence(), wal_verification_deadline=deadline
+    )
+    ack_raw = _durable_ack_raw(backend="baidu")
+    _wire_proof_world(monkeypatch, tmp_path, backend="baidu", ack_raw=ack_raw)
+
+    ack_evidence, viewer_evidence = activation_runtime.remote_wal_proof(record)
+
+    assert ack_evidence["bucket_name"] == "/apps/ava/ava-pitr"
+    assert ack_evidence["generation"] == "123456789:" + "b" * 32
+    assert ack_evidence["ciphertext_crc32c"] == "b" * 32
+    assert viewer_evidence["viewer_id"] == "app-key"
+    _remote_wal_proof_round_trips(record, ack_evidence, viewer_evidence)
+
+
+def test_remote_wal_proof_refuses_viewer_evidence_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A viewer stat whose pin token drifted from the durable ACK must fail
+    the proof instead of transferring mismatched evidence."""
+    from datetime import UTC, datetime, timedelta
+
+    deadline = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    record = _wal_ack_pending_record(wal_verification_deadline=deadline)
+    ack_raw = _durable_ack_raw(backend="gcs")
+    ack = ack_manifest_from_raw(ack_raw)
+    drifted = RemoteObjectAck(
+        object_name=ack.object_name,
+        pin_token="456",  # noqa: S106 — test fixture drift value
+        size=ack.ciphertext_size,
+        checksum=ObjectChecksum(
+            algo=ack.ciphertext_checksum_algo, value=ack.ciphertext_checksum_value
+        ),
+        metadata=wal_metadata(ack),
+        created=True,
+    )
+    _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw, observed=drifted)
+    with pytest.raises(RuntimeError, match="viewer observed WAL differs"):
+        activation_runtime.remote_wal_proof(record)
+
+
+def test_remote_wal_proof_refuses_after_the_deadline_passed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An expired verification deadline must end the loop with the durable
+    deadline error instead of transferring stale evidence."""
+    from datetime import UTC, datetime, timedelta
+
+    expired = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    record = _wal_ack_pending_record(wal_verification_deadline=expired)
+    ack_raw = _durable_ack_raw(backend="gcs")
+    _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw)
+    with pytest.raises(RuntimeError, match="deadline expired"):
+        activation_runtime.remote_wal_proof(record)
