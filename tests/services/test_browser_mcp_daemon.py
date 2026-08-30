@@ -75,6 +75,11 @@ class FakeUpstream:
             return self._listing()
         if name == "list_pages":
             return self._listing()
+        if name == "navigate_page":
+            if self.selected is None:
+                return _err("No page selected")
+            self.pages[self.selected] = args.get("url", "about:blank")
+            return _ok(f"navigated page {self.selected}")
         # page-scoped op: acts on whatever is globally selected
         if self.selected is None:
             return _err("No page selected")
@@ -661,3 +666,57 @@ async def test_port_listening_stalled_connect_reads_alive(
     monkeypatch.setattr("services.browser.page_lifecycle.asyncio.open_connection", _stall)
     monkeypatch.setattr("services.browser.page_lifecycle._PORT_PROBE_TIMEOUT_S", 0.05)
     assert await port_listening("localhost", 9999) is True
+
+
+async def test_reap_dead_agent_pages_midpass_navigation_skips_live_repurpose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agent navigates its page to a LIVE target while the pass is probing
+    it: the close phase re-reads the listing under the lock, sees the URL has
+    changed, and must NOT close the page (mutation guard for the re-list URL
+    check)."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3111/old"}, 7)  # page 1
+    up.calls.clear()
+
+    async def fake_probe(host: str, port: int) -> bool:
+        # simulate the agent repurposing its page mid-pass (same page id)
+        await d.call_tool_for_agent("navigate_page", {"url": "http://localhost:3311/live"}, 7)
+        return False  # the OLD port is dead
+
+    monkeypatch.setattr("services.browser.page_lifecycle.port_listening", fake_probe)
+
+    await reap_dead_agent_pages(d)
+
+    # the re-list saw the new (live) URL: the page is left alone
+    assert up.pages == {1: "http://localhost:3311/live"}
+    closes = [c[:2] for c in up.calls if c[0] == "close_page"]
+    assert closes == []
+    assert _AGENT_AFFINITY[7] == 1
+
+
+async def test_reap_dead_agent_pages_midpass_slot_move_keeps_live_affinity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agent opens a NEW page (slot moves) while the pass probes the old
+    dead one: the dead page is closed, but the slot — now naming the live new
+    page — is preserved (mutation guard for the conditional slot clear)."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3111/old"}, 7)  # page 1
+    up.calls.clear()
+
+    async def fake_probe(host: str, port: int) -> bool:
+        # the agent's slot moves to a fresh page mid-pass
+        await d.call_tool_for_agent("new_page", {"url": "http://localhost:3311/live"}, 7)
+        return False  # the old port is dead
+
+    monkeypatch.setattr("services.browser.page_lifecycle.port_listening", fake_probe)
+
+    await reap_dead_agent_pages(d)
+
+    # old dead page closed; the new live page and its slot survive
+    assert 1 not in up.pages
+    assert up.pages == {2: "http://localhost:3311/live"}
+    closes = [c[:2] for c in up.calls if c[0] == "close_page"]
+    assert closes == [("close_page", {"pageId": 1})]
+    assert _AGENT_AFFINITY[7] == 2
