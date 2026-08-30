@@ -334,7 +334,9 @@ def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
             " via the shared Drive folder will not work. Install Google Drive for"
             " Desktop (macOS, or on the Windows side of a WSL host -- it then appears"
             " under /mnt/<letter>), sign in, and make sure the synced 'My Drive' area"
-            " is writable to enable it. Looked in: " + looked,
+            " is writable to enable it; set AVA_CROSS_MACHINE_TRANSFER_BACKEND=none"
+            " to skip this probe on a runner that moves files its own way."
+            " Looked in: " + looked,
             file=sys.stderr,
         )
 
