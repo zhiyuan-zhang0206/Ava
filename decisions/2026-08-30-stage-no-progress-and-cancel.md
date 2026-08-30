@@ -33,8 +33,11 @@ prevent.
      consecutive probes report a stage beyond the bound — the poll exits for
      that host, and the settle hold (lease safety) covers it;
    - the host's own hung-updater reaper kills an updater whose stage evidence
-     exceeds the same bound, and the reap now **clears the updater lease** so the
-     host stops reading "live updater" the moment the session is gone.
+     exceeds the same bound — on its second consecutive watchdog round reading
+     that same stage stuck (the reaper's half of the poll's two-probe
+     confirmation; `spawn_update`'s inline reap stays single-read) — and the
+     reap now **clears the updater lease** so the host stops reading "live
+     updater" the moment the session is gone.
    Old-commit hosts answering without the fields read as "cannot tell" — the
    judgment arrives with the rollout after the one that ships it, the same
    one-rollout lag `last_updater_outcome` itself had.
@@ -70,11 +73,15 @@ prevent.
 
 ## Consequences
 
-- A stage that legitimately runs past 675 s will be judged no-progress by both
-  consumers: the poll reports it and the host reaps the updater. The reap lands
-  before the stop stage, so the host keeps serving and the controllers
-  re-trigger the update — a retry, not an outage. The 449.2 s observed worst
-  keeps 1.5x margin; a fleet that grows slower stages retunes this one clock.
+- A stage that legitimately runs past 675 s is judged no-progress by the poll
+  after two consecutive probes; the host's reaper adds one watchdog round of
+  confirmation, so a stage that finishes inside that gap clears its own
+  evidence and is never reaped. When the reap does land — on a stage that has
+  been stuck for a full round past the bound — the host may already be
+  mid-stop (a stuck `restart` stage), so "keeps serving" is not guaranteed;
+  either way the controllers' stranded-pause / code ladder re-triggers the
+  update: a retry, not an outage. The 449.2 s observed worst keeps 1.5x
+  margin; a fleet that grows slower stages retunes this one clock.
 - The cancel verb is scoped to rollout/restart orchestration on the host that
   runs them; rollbacks, settle holds and host self-updates keep their existing
   recovery paths.

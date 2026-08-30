@@ -24,12 +24,26 @@ The evidence, both halves (R1, Task #1021 + P1 2026-08-30):
 arrives; `ops.controllers.stalled_updater` runs the scheduled half once a
 watchdog round. Everything the facade re-exports from `ops/cluster.py` keeps
 resolving.
+
+The scheduled reap trusts the two halves differently, because their failure
+modes differ: lease expiry is unambiguous (the run outlived the whole
+no-progress bound) and kills on sight; stage evidence is one snapshot of a
+host that may simply be slow — `fetch` / `checkout` / `restart` are not
+bounded by `UV_SYNC_TIMEOUT_S` the way `uv` is — so it kills only on the
+SECOND consecutive round that reads the same stage stuck (the ~60 s watchdog
+cadence is the gap a completing stage gets; see
+`_reap_on_confirmed_stage_stall`). `spawn_update`'s inline reap stays
+single-read: a new update arriving has an operator's intent behind it and
+cannot wait a round.
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 import shared.cluster
 from ops import cluster_session
@@ -43,10 +57,33 @@ _log = logging.getLogger(__name__)
 # ambiguity themselves, which is how one of them drifted into claiming a kill nobody made.
 REAP_CLEARED_QUALIFIER = "killed, or already exited by the recheck"
 
+# The two hung judgments, named so the scheduled reap can gate a kill on WHICH
+# evidence fired: lease expiry is unambiguous and kills on sight; stage evidence is
+# one snapshot and gets one watchdog round of confirmation first.
+_HUNG_LEASE = "lease"
+_HUNG_STAGE = "stage"
 
-def _updater_hung(session: str) -> bool:  # noqa: ARG001 — the session name is the judgment's subject; the evidence is the lease + stage markers
+
+@dataclass(frozen=True)
+class _HungVerdict:
+    """A hung judgment, carrying the facts the confirmation step keys on.
+
+    `evidence` is `_HUNG_LEASE` or `_HUNG_STAGE`; `stage` names the stuck stage
+    (stage evidence only); `paused_at` dates this update's pause window — the
+    run's episode, so a NEW update run never inherits a previous run's pending
+    confirmation.
+    """
+
+    evidence: str
+    stage: str | None
+    paused_at: datetime | None
+
+
+def _updater_hung_evidence(session: str) -> _HungVerdict | None:  # noqa: ARG001 — the session name is the judgment's subject; the evidence is the lease + stage markers
     """Whether this host's updater session is hung — the lease-expiry judgment,
-    plus the stage-evidence no-progress fact (P1, 2026-08-30).
+    plus the stage-evidence no-progress fact (P1, 2026-08-30) — split by WHICH
+    evidence fired, so the scheduled reap can confirm stage evidence over two
+    rounds while lease expiry kills on sight.
 
     R1 (Task #1021): liveness = the updater's lease in `host_deploy_state`
     (`shared.host_deploy_state.touch_updater_lease`, written first thing by the
@@ -75,14 +112,25 @@ def _updater_hung(session: str) -> bool:  # noqa: ARG001 — the session name is
     try:
         state = read()
     except Exception:
-        return False  # unreadable liveness -> not hung; the caller refuses instead
-    if state is None or state.updater_expired:
-        return state is not None and state.updater_expired
+        return None  # unreadable liveness -> not hung; the caller refuses instead
+    if state is None:
+        return None
+    if state.updater_expired:
+        return _HungVerdict(_HUNG_LEASE, None, None)
     if state.posture == POSTURE_IDLE:
-        return False
+        return None
     from ops.updater_outcome import stage_evidence_stuck
 
-    return stage_evidence_stuck()
+    stuck = stage_evidence_stuck()
+    if stuck is None:
+        return None
+    return _HungVerdict(_HUNG_STAGE, stuck, state.paused_at)
+
+
+def _updater_hung(session: str) -> bool:
+    """The bool form of `_updater_hung_evidence` — for the callers that need only
+    the judgment, not which evidence produced it (`spawn_update`'s inline reap)."""
+    return _updater_hung_evidence(session) is not None
 
 
 def _reap_stalled_updater(session: str) -> bool:
@@ -176,6 +224,14 @@ def reap_stalled_updater_if_hung() -> bool:
     the Phase-B poll does not touch that:
     the poll protects a rollout that *started*, and this refuses the start.
 
+    **Stage evidence is trusted one round at a time (P1, 2026-08-30).** Lease
+    expiry is unambiguous and reaps on sight; a stage reading is a snapshot of a
+    host that may simply be slow, so the kill waits for the next round to read
+    the same stage stuck again (`_reap_on_confirmed_stage_stall`) — the reaper's
+    half of the poll's two-probe `POLL_NO_PROGRESS` confirmation. `spawn_update`'s
+    inline reap stays single-read: a new update arriving has an operator's intent
+    behind it and cannot wait a round.
+
     Returns True when the hung session is gone on our account — killed here, or found
     already exited on the recheck after a kill that reported failure (see
     `_reap_stalled_updater`, which treats that benign race as cleared). False means
@@ -185,17 +241,83 @@ def reap_stalled_updater_if_hung() -> bool:
     try:
         session = shared.cluster.session_name(_UPDATER_SERVICE)
         if not cluster_session._has_orchestration_session(session):
+            _clear_pending_confirmation()
             return False
-        if not _updater_hung(session):
+        hung = _updater_hung_evidence(session)
+        if hung is None:
             return False
-        return _reap_stalled_updater(session)
+        if hung.evidence == _HUNG_LEASE:
+            return _reap_stalled_updater(session)
+        return _reap_on_confirmed_stage_stall(session, hung)
     except Exception:
         _log.exception("[cluster] stalled-updater reap failed; retrying next round")
         return False
 
 
-# The family's one no-progress definition (`shared.deploy_timing`), shared with the
-# settle-hold TTL and the gateway's Phase-B poll: three clocks that used to disagree
-# about when a host has stopped making progress, and the smallest of them decided
-# when the deploy lease stopped protecting the deploy.
+def _updater_reap_attempt_path() -> Path:
+    """This dimension's OWN persistent record (a sibling of the pin/schema/
+    stalled-rollout heal records): the pending stage-evidence confirmation, keyed
+    by run episode + stage name."""
+    from shared.paths import ava_home
+
+    return ava_home() / "updater_reap_attempt"
+
+
+def _clear_pending_confirmation() -> None:
+    """Drop any pending stage-evidence confirmation: the session it was about is
+    gone, so the next stuck stage — whenever it comes, whatever run it belongs to
+    — starts its confirmation over."""
+    from ops.controllers import _heal_record
+
+    _heal_record.clear(_updater_reap_attempt_path())
+
+
+def _reap_on_confirmed_stage_stall(session: str, hung: _HungVerdict) -> bool:
+    """Kill on stage evidence only after TWO consecutive watchdog rounds read the
+    same stage stuck beyond `STAGE_NO_PROGRESS_TIMEOUT_S` — the reaper's half of
+    the poll's two-probe `POLL_NO_PROGRESS` confirmation (QA #1122, P2).
+
+    One host-local read is enough for lease expiry (a run that outlived the whole
+    bound); it is not enough for a stage judgment: `fetch` / `checkout` /
+    `restart` are not bounded by `UV_SYNC_TIMEOUT_S`, so an ultra-slow stage can
+    legitimately outrun the bound by a hair and complete. A single-read kill
+    would reap it anyway, and the controllers would re-trigger the update
+    straight into the same slow stage — a reap→re-trigger loop that reads as an
+    outage. The first round therefore only records the observation (keyed on this
+    run's episode — the pause window — AND the stage name, so a stage that
+    advanced, or a new update run, restarts the confirmation) and the kill waits
+    for the next round to read the same stuck stage again. The ~60 s watchdog
+    cadence is the gap a completing stage gets; a genuinely hung one only reads
+    MORE stuck a round later, so the confirmation costs the corpse one round and
+    nothing else. A failed kill leaves the record: the next round retries without
+    re-confirming — the stage has only been stuck longer. `spawn_update`'s inline
+    reap deliberately does not confirm: a new update arriving has an operator's
+    intent behind it and cannot wait a round.
+    """
+    from ops.controllers import _heal_record
+
+    episode = hung.paused_at.isoformat() if hung.paused_at is not None else "no-pause"
+    target = f"{session}@{episode}#{hung.stage}"
+    path = _updater_reap_attempt_path()
+    prior = _heal_record.read_record(path)
+    if prior is None or prior.get("target") != target:
+        _heal_record.record_attempt(path, target, ok=True)
+        _log.warning(
+            "[cluster] %s has been stuck in stage %r past the no-progress bound — "
+            "confirming over the next watchdog round before killing",
+            session,
+            hung.stage,
+        )
+        return False
+    return _reap_stalled_updater(session)
+
+
+# The family's one whole-run no-progress definition (`shared.deploy_timing`),
+# shared with the settle-hold TTL and the gateway's Phase-B poll: three clocks that
+# used to disagree about when a host has stopped making progress, and the smallest
+# of them decided when the deploy lease stopped protecting the deploy. The stage
+# clock (`STAGE_NO_PROGRESS_TIMEOUT_S`, judged by `_updater_hung_evidence`) is the
+# family's second question — one stage, not the whole leg — and fires inside this
+# bound: that is why a host stuck in one stage now loses its updater before the
+# whole run outlives it.
 _UPDATER_STALL_TIMEOUT_S: float = NO_PROGRESS_TIMEOUT_S

@@ -80,12 +80,15 @@ from shared.log import logger
 LOCK_TTL_S = 1800.0
 
 # How long the lease is held after an orchestration exits with agent-runners still
-# converging (see the module docstring). The family's one no-progress definition:
-# the settle hold expires exactly when the host it is waiting for stops deserving
-# the benefit of the doubt, which is the same instant its own host-local reaper
-# would call its updater hung. Nobody is executing during a settle hold — it is a
-# stated waiting period, and `ava cluster recover` breaks it early once an operator
-# has looked.
+# converging (see the module docstring). The family's whole-run no-progress
+# definition: the bound after which the host the hold waits for can no longer be
+# "slow rather than stopped" over a full leg. The host-local reaper may end the
+# hold earlier than that — its per-stage clock (`STAGE_NO_PROGRESS_TIMEOUT_S`)
+# kills an updater stuck inside one stage well before this lapses, and the
+# convergence path releases the hold on the news — so this is the outer bound for
+# when nothing on the host ends the hold. Nobody is executing during a settle
+# hold — it is a stated waiting period, and `ava cluster recover` breaks it early
+# once an operator has looked.
 SETTLE_TTL_S = NO_PROGRESS_TIMEOUT_S
 
 

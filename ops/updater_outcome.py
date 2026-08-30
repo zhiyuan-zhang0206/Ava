@@ -569,9 +569,9 @@ def describe_updater_outcome(outcome: UpdaterOutcome | None) -> str:
     )
 
 
-def stage_evidence_stuck() -> bool:
-    """Whether this host's own stage markers prove its updater is stuck (P1,
-    2026-08-30).
+def stage_evidence_stuck() -> str | None:
+    """The stuck stage's name when this host's own stage markers prove its updater
+    stuck, else None (P1, 2026-08-30).
 
     The no-progress fact a live updater lease cannot speak for: the lease is one
     write at the run's start, so a host hung inside a single stage (a stalled `uv`
@@ -581,16 +581,20 @@ def stage_evidence_stuck() -> bool:
     against this host's monotonic clock at read time) growing past
     `STAGE_NO_PROGRESS_TIMEOUT_S` means no stage has completed for longer than any
     stage has ever legitimately taken. Same bound, same evidence as the Phase-B
-    poll's POLL_NO_PROGRESS verdict. False on every unreadable reading: missing
-    evidence is never a kill.
+    poll's POLL_NO_PROGRESS verdict. Returns the stage name rather than a bare
+    bool so the reaper's two-round confirmation can key on WHICH stage is stuck —
+    a stage that advanced restarts the confirmation. None on every unreadable
+    reading: missing evidence is never a kill.
     """
     try:
         outcome = last_updater_outcome()
     except Exception:
-        return False
+        return None
     if outcome is None or outcome.current_stage is None or outcome.current_stage_s is None:
-        return False
-    return outcome.current_stage_s > STAGE_NO_PROGRESS_TIMEOUT_S
+        return None
+    if outcome.current_stage_s > STAGE_NO_PROGRESS_TIMEOUT_S:
+        return outcome.current_stage
+    return None
 
 
 def updater_outcome_terminal(outcome: UpdaterOutcome | None) -> bool:
