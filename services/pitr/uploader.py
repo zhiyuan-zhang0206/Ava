@@ -392,7 +392,7 @@ class PitrUploader:
         staging_path: Path,
     ) -> None:
         if remote.object_name != object_name:
-            raise RemoteCollisionError("immutable GCS object differs from local archive")
+            raise RemoteCollisionError("immutable remote object differs from local archive")
         if remote.checksum.algo == CRC32C:
             expected = ObjectChecksum(CRC32C, expected_crc)
         else:
@@ -415,4 +415,4 @@ class PitrUploader:
         # same ciphertext. Source-only equality would silently accept a
         # different immutable object under the canonical name.
         if not exact_match:
-            raise RemoteCollisionError("immutable GCS object differs from local archive")
+            raise RemoteCollisionError("immutable remote object differs from local archive")
