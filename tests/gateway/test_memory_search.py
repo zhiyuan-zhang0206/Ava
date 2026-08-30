@@ -1378,3 +1378,43 @@ title: Secret
         with TestClient(app) as client:
             resp = client.get("/api/memory/note", params={"path": "plain.md"})
         assert resp.status_code == 404
+
+    def test_note_null_byte_path_is_404_not_500(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A path with an embedded null byte must be 404 (QA #1169 F3).
+
+        `Path.resolve()` / `is_file()` raise ValueError on such paths
+        (lstat: embedded null character); the endpoint's failure surface must
+        map every unresolvable path to 404 rather than escaping as a 500.
+        """
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        with TestClient(app) as client:
+            resp = client.get("/api/memory/note", params={"path": "ok%00.md"})
+        assert resp.status_code == 404
+
+    def test_note_traversal_slash_rules(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`foo.md/../bar.md` resolves inside the root and is a plain read —
+        a non-canonical-but-in-root path is legal, only escapes are 404."""
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        (tmp_path / "bar.md").write_text(
+            """---
+type: Memory
+title: Bar
+tags: [tech-ops]
+---
+
+# Bar
+""",
+            encoding="utf-8",
+        )
+        with TestClient(app) as client:
+            resp = client.get("/api/memory/note", params={"path": "bar.md/../bar.md"})
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Bar"
