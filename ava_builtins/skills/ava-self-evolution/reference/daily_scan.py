@@ -47,6 +47,8 @@ import collect  # sibling script, resolved via sys.path[0]
 
 from shared.paths import ava_home
 
+ORCHESTRATION_SKILLS = ("ava-workflow", "ava-dynamic-workflow", "ava-goal")
+
 
 def _why(rec: dict[str, Any]) -> list[str]:
     """Human-readable signals explaining a non-ok label. Display-only; the
@@ -126,15 +128,27 @@ def render(
     records: list[dict[str, Any]], path: Path, days: int, counts: dict[str, int] | None = None
 ) -> str:
     counts_by_label = Counter(r["label"] for r in records)
+    skill_counts = Counter(
+        skill for r in records if "skills_touched" in r for skill in r["skills_touched"]
+    )
     corrections = sum(len(r["corrections"]) for r in records)
     peer = sum(len(r["peer_feedback"]) for r in records)
     breached = sum(1 for r in records if r["breached"])
     execfail = sum(1 for r in records if r["exec_failed"])
+    top_skills = (
+        ", ".join(f"{skill} {count}" for skill, count in skill_counts.most_common(5)) or "none"
+    )
+    orchestration_counts = ", ".join(
+        f"{skill} {skill_counts[skill]}" for skill in ORCHESTRATION_SKILLS
+    )
     lines = [
         f"self-evolution daily scan — {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"window: {days} day(s) | runs: {len(records)} (ok {counts_by_label['ok']} / fumbled {counts_by_label['fumbled']} / failed {counts_by_label['failed']})"
         f" | corrections {corrections} | peer feedback {peer} | breached {breached} | exec-fail runs {execfail}",
         f"dataset: {path}",
+        "skills loaded:",
+        f"  top 5: {top_skills}",
+        f"  orchestration: {orchestration_counts}",
     ]
     if not records:
         if _is_test_only_window(records, counts):
