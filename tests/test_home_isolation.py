@@ -182,10 +182,9 @@ def test_the_e2e_fixture_restores_every_env_key_it_assigns() -> None:
     Correct scope only makes the restore fire at the right *time*; it says nothing
     about the restore being complete. `_env_keys` is a hand-written tuple sitting
     thirty lines above a body that assigns keys one at a time, and the two drifted:
-    `AVA_GATEWAY_HEALTH_URL`, `AVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS` and
-    `AVA_HIBERNATE_ENABLED` were assigned and never listed, so they leaked out of the
-    package exactly as `AVA_HOME` did — a correctly-scoped teardown restoring seven of
-    ten keys.
+    `AVA_GATEWAY_HEALTH_URL` and `AVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS` were assigned
+    and never listed, so they leaked out of the package exactly as `AVA_HOME` did —
+    a correctly-scoped teardown restoring seven of ten keys.
 
     Derived from the body by AST rather than compared against a second hand-written
     list, for the same reason the fixture derives `_health_port_keys` from

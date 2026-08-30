@@ -147,7 +147,7 @@ def _apply_e2e_seq_offset() -> None:
 
 
 @pytest.fixture(scope="package", autouse=True)
-def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:  # noqa: PLR0915 — one statement over: the auth alias declaration joined the cluster-scope .env seeding
+def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
     """Layer e2e-specific process config on the root conftest's session Postgres +
     Redis (provisioned by its autouse fixtures). The DB/Redis
     URLs are already in settings + os.environ (AVA_DB_URL / AVA_REDIS_URL), so the
@@ -196,7 +196,6 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
         "AVA_GATEWAY_CORS_ALLOWED_ORIGINS",
         "AVA_GATEWAY_URL",
         "AVA_GATEWAY_HEALTH_URL",
-        "AVA_HIBERNATE_ENABLED",
         "AVA_MACHINE_SERVE_GATEWAY",
         "AVA_MACHINE_SERVE_AGENT_RUNNER",
         "AVA_MACHINE_NAME",
@@ -251,11 +250,6 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # http://localhost:8000/api/health — but the e2e gateway runs on a dynamic
     # port. Point it at the e2e gateway so the health check can pass.
     os.environ["AVA_GATEWAY_HEALTH_URL"] = f"{GATEWAY_URL}/api/health"
-    # Disable the hibernation controller's spontaneous swap-out so a test whose
-    # agent idles past the default threshold is not swapped out from under it. The
-    # swap-IN poll still runs (it is unconditional), so the dedicated hibernation
-    # e2e drives swap-out itself (a real SIGUSR1) and relies on the real swap-in.
-    os.environ["AVA_HIBERNATE_ENABLED"] = "false"
     # e2e runs the PROD DEFAULT deployment shape: a single box. It is the one
     # place a real gateway spawns real agent subprocesses, so it exercises the
     # shape prod actually runs — issue #993 (every agent dead on a single box:

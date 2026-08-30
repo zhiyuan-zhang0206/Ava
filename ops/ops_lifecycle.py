@@ -62,9 +62,6 @@ from ops.ops_exit import (
 from ops.ops_exit import (
     mark_agent_exited_op as mark_agent_exited_op,
 )
-from ops.ops_exit import (
-    mark_agent_hibernating_op as mark_agent_hibernating_op,
-)
 
 # Re-exported (explicit-alias form) so the gateway routers and tests keep their
 # call sites unchanged after the Task #1999 split: the launch op cluster now

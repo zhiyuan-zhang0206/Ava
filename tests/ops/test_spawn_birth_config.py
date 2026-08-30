@@ -134,19 +134,6 @@ class TestReplayOnWake:
         resurrect_agent(agent_id, resurrected_by="user")
         assert launched_agents[-1].birth_config == stamp
 
-    def test_swap_in_replays_the_stamp(
-        self, db_conn: psycopg.Connection, launched_agents: list[LaunchCall]
-    ) -> None:
-        from ops.agent_wake import swap_in_agent
-
-        agent_id = _spawn_agent(spawner="test")
-        stamp = _birth_config(db_conn, agent_id)
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'hibernating' WHERE id = %s", (agent_id,))
-        db_conn.commit()
-        assert swap_in_agent(agent_id)
-        assert launched_agents[-1].birth_config == stamp
-
 
 class TestSelfRespawnFallback:
     """`agent/db.py:schedule_self_respawn` is the ONE launch path outside

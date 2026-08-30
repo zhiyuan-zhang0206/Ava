@@ -245,7 +245,7 @@ class DaemonSettings(EnvSettings):
     delivery_watchdog_threshold_seconds: float = Field(
         default=30.0,
         alias="AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS",
-        description="Delivery watchdog stall alert threshold (seconds): a chat inbound still pending longer than this whose owner is in a waiting/terminal state (idling/hibernating/terminated) is reported as a stalled delivery.",
+        description="Delivery watchdog stall alert threshold (seconds): a chat inbound still pending longer than this whose owner is in a waiting/terminal state (idling/terminated) is reported as a stalled delivery.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -263,48 +263,6 @@ class DaemonSettings(EnvSettings):
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
-        },
-    )
-
-    hibernate_enabled: bool = Field(
-        default=True,
-        alias="AVA_HIBERNATE_ENABLED",
-        description="Run the hibernation controller (agent-runner), which swaps idle agents' processes out to free RAM. Off disables swap-out cluster-wide but does not resurrect already-hibernating agents — a heartbeat/inbound still wakes them.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    hibernate_idle_threshold_seconds: float = Field(
-        default=450.0,
-        alias="AVA_HIBERNATE_IDLE_THRESHOLD_SECONDS",
-        description="Minimum idle time (seconds) since an agent's last completed turn before the hibernation controller swaps its process out to free RAM. Default 450s, deliberately above heartbeat_idle_threshold_seconds, so a normally-idling agent is woken by the heartbeat first and hibernation mainly reclaims heartbeat-paused agents. Lower it to also reclaim non-paused idle agents, at the cost of a cold start on the next wake.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    hibernate_min_active: int = Field(
-        default=100,
-        ge=0,
-        alias="AVA_HIBERNATE_MIN_ACTIVE",
-        description="Warm-pool floor: this host's N most recently active agents (by last activity, among running/idling) are exempt from swap-out no matter how long they idle. Candidates are drawn only from the tail beyond the floor. 0 disables the floor. Trades a little resident RAM for zero cold-start latency on the agents most likely to be messaged next; size it to the host's RAM.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
         },
     )
 

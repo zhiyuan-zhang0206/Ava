@@ -50,7 +50,6 @@ export function projectAgentStatusValue(status: WireAgentStatus): PublicAgentSta
       return "terminated";
     case "idling":
     case "restarting":
-    case "hibernating":
       return "idling";
     default: {
       const unknownStatus: never = status;

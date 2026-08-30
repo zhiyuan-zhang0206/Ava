@@ -135,19 +135,6 @@ class TestSelectIdleAgents:
         db_conn.commit()
         assert aid in _selected(pool)
 
-    def test_hosted_legacy_hibernating_row_stays_selected(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A legacy pre-hosted hibernating row (dead pid, parked status) is still
-        nudgeable in hosted mode — the dispatcher materializes the turn the same
-        way it does for an idling row."""
-        monkeypatch.setattr("ops.runner_mode.runner_mode", lambda: "hosted")
-        aid = _make_idle(db_conn, status_changed_s_ago=_THRESHOLD_S + 60, status="hibernating")
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (aid,))
-        db_conn.commit()
-        assert aid in _selected(pool)
-
     def test_preclaim_idling_row_is_not_selected(
         self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:
@@ -164,25 +151,6 @@ class TestSelectIdleAgents:
         db_conn.commit()
         assert aid not in _selected(pool)
 
-    def test_hibernating_is_selected_without_any_lease(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        """A hibernating agent has no process and no lease by design (swapped
-        out) — the nudge is exactly how it wakes, so it must stay selectable
-        even with a NULL lease (R1, Task #1021: reaper-exempt)."""
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status = 'hibernating', lease_expires_at = NULL, "
-                "last_active_at = now() - make_interval(secs => 400) WHERE id = %s",
-                (_make_idle(db_conn, status_changed_s_ago=400),),
-            )
-        db_conn.commit()
-        # sanity: the parked row has no lease
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT lease_expires_at FROM agents_meta WHERE status = 'hibernating'")
-            assert cur.fetchone() == (None,)
-        assert _selected(pool) != {}
-
     def test_idle_under_threshold_unpaused_excluded(
         self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:
@@ -197,40 +165,6 @@ class TestSelectIdleAgents:
         """Only idling agents get a check-in; a running one is active by definition."""
         aid = _make_idle(db_conn, status_changed_s_ago=400, status="running")
         assert aid not in _selected(pool)
-
-    def test_hibernating_agent_is_selected(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        """Hibernating agents get check-ins too — the heartbeat is the liveness
-        signal, so a swapped-out agent must still be woken (its check-in inbound is
-        then picked up by the hibernation controller's swap-in). last_active_at
-        survives the swap-out untouched, so its due-time is computed exactly as
-        when idling."""
-        aid = _make_idle(db_conn, status_changed_s_ago=400, status="hibernating")
-        assert aid in _selected(pool)
-
-    def test_hibernating_paused_agent_not_selected_until_pause_expires(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        """A hibernating agent that paused its heartbeat (H > heartbeat threshold
-        makes the dominant hibernating case the paused one) gets NO check-in while the
-        pause window is in the future — the pause is honoured even swapped out, so
-        the agent stays hibernating for the whole pause."""
-        aid = _make_idle(
-            db_conn, status_changed_s_ago=600, status="hibernating", paused_until_s_ahead=1800
-        )
-        assert aid not in _selected(pool)
-
-    def test_hibernating_agent_woken_when_pause_expires(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        """Once the pause window expires, the heartbeat checks in on the hibernating
-        agent (its check-in inbound then drives the controller swap-in). Covers the
-        pause-expired + hibernating combo the swap-in poll relies on."""
-        aid = _make_idle(
-            db_conn, status_changed_s_ago=600, status="hibernating", paused_until_s_ahead=-60
-        )
-        assert aid in _selected(pool)
 
     def test_pending_inbound_excluded(
         self, pool: ConnectionPool, db_conn: psycopg.Connection

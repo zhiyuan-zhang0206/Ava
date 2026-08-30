@@ -738,7 +738,7 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
 
 // The "next heartbeat" cell — mirrors the backend's mutually-exclusive states:
 // an active pause renders a clock time; an idle-family agent (idling /
-// hibernating / restarting — the statuses the fleet view projects to Idle)
+// restarting — the statuses the fleet view projects to Idle)
 // with a check-in already queued (the daemon won't send another while an
 // inbound is pending) renders "pending"; one with nothing queued renders its
 // projected next check-in, or "due" when the projection has passed (a

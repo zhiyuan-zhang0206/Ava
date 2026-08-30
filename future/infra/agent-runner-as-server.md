@@ -11,7 +11,8 @@
 > `restart_requested` channel, terminate is the durable terminate inbound
 > plus a best-effort turn-task cancel, and cluster update quiesces the runner
 > instead of draining N agent processes. The hibernation chain (controller,
-> status, SIGUSR1 path, endpoint, config keys) is being deleted (Task #1976);
+> status, SIGUSR1 path, endpoint, config keys) was deleted (Task #1976,
+> 2026-08);
 > the per-agent lease renewer and the lease-zombie reaper remain process-mode
 > machinery, gated off a hosted cluster with the restarter. The flag defaults
 > to `process` and the service is gated off the roster until a cluster opts
@@ -241,13 +242,16 @@ What Phase 1 **loses** relative to process-per-agent, stated honestly:
    dispatcher + turn-task scheduler; a cluster runs either all-process or
    all-hosted (no mixed mode — mixed would need double bookkeeping for the
    lease story). Dev worktree clusters soak first, prod flips last.
-3. **Delete after soak**: hibernation controller + status, SIGUSR1 path,
-   per-agent lease loop, idle-wait machinery, the per-agent respawn/zombie
-   logic — each deletion is its own reviewable PR.
+3. **Delete after soak — the hibernation chain already left**: the chain
+   (controller + status + SIGUSR1 path + `/hibernating` endpoint + config
+   keys) was deleted in 2026-08 (Task #1976), concurrent with the Phase 1
+   finish. The per-agent lease loop, idle-wait machinery, and the per-agent
+   respawn/zombie logic remain — each future deletion is its own reviewable
+   PR.
 4. **Rollback**: flip the mode flag back. Nothing in the DB schema changes
-   shape (agents_meta keeps status/lease columns until step 3's deletions,
-   which happen only after prod soak); a rollback is a runner restart in the
-   old mode.
+   shape on the flip (agents_meta keeps the status/lease columns; the
+   hibernation CHECK value left with the chain deletion above, not with the
+   mode flag); a rollback is a runner restart in the old mode.
 
 Test strategy per phase: Phase 0 carries its own suite (turn boundary,
 exit/compact edges, hibernate signal untouched). Phase 1's lock-in tests:

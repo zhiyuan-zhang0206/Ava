@@ -567,39 +567,6 @@
         }
       }
     },
-    "/api/agents/{agent_id}/hibernating": {
-      "post": {
-        "summary": "Post Agent Hibernating",
-        "description": "An agent process reports it is swapping out for hibernation — park its\nrow as 'hibernating' (its process is exiting to free RAM).\n\nCalled by the agent itself from its process-exit path when the exit was\ntriggered by the hibernation swap-out signal (SIGUSR1), not by a user/peer.\nDistinct from `/exited`: this parks the row 'hibernating' (guarded WHERE\nstatus IN running/idling), keeps the agent's pages OPEN, and writes no exit\nevent — the agent is not dying, it is being swapped out and will be\nrelaunched by the hibernation controller on the next heartbeat/inbound. The\nguard leaves a concurrent restart's 'restarting' / an already-'terminated'\nrow untouched (idempotent).\n\nNo cross-machine forwarding: the work is a status UPDATE + event publish,\nboth against the shared DB / events channel, so it runs on whichever gateway\nreceives it.",
-        "operationId": "post_agent_hibernating_api_agents__agent_id__hibernating_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/agents/{agent_id}/resurrect": {
       "post": {
         "summary": "Post Agent Resurrect",
@@ -5392,7 +5359,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)\n- `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail\n- average turn duration: Loki's unified event stream in 12-hour shards\n- warning/error counts: per-class counts via the resolution daemon's\n  grouped query (12h shards), split into total / dismissed / net with\n  the daemon's class arithmetic over the SELECTED window (task #1935)\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data\nscenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend\nshows \"—\"). Until the unlabeled legacy slice expires on 2026-08-30,\nthe ledger removes the fixed-cost full-window token scans; afterward the\nindexed Loki tail keeps the same self-healing late-write behavior.",
+        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting)\n- `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail\n- average turn duration: Loki's unified event stream in 12-hour shards\n- warning/error counts: per-class counts via the resolution daemon's\n  grouped query (12h shards), split into total / dismissed / net with\n  the daemon's class arithmetic over the SELECTED window (task #1935)\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data\nscenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend\nshows \"—\"). Until the unlabeled legacy slice expires on 2026-08-30,\nthe ledger removes the fixed-cost full-window token scans; afterward the\nindexed Loki tail keeps the same self-healing late-write behavior.",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -5640,7 +5607,7 @@
     "/api/fleet/graph": {
       "get": {
         "summary": "Get Fleet Graph",
-        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\nrestart-proof `total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`, so hibernating/restarting etc. stay), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10],\ndefault 0.5) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` counters in the window — read from\nPrometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,\nwindowed via `increase(...)`). `total_tokens` is the sum of the same two\ncounters over the retained 7d window, also using `increase(...)` so\nexporter process restarts do not reset it.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
+        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\nrestart-proof `total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`, so restarting etc. stay), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10],\ndefault 0.5) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` counters in the window — read from\nPrometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,\nwindowed via `increase(...)`). `total_tokens` is the sum of the same two\ncounters over the retained 7d window, also using `increase(...)` so\nexporter process restarts do not reset it.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
         "operationId": "get_fleet_graph_api_fleet_graph_get",
         "parameters": [
           {
@@ -6341,7 +6308,7 @@
           "exec_seconds"
         ],
         "title": "AgentActivity",
-        "description": "Active-rate: the share of an agent's alive wall-clock it spent actively\nworking versus idle-waiting for its next input. The complement\n(`1 - active_rate`) is how much of its life the agent sat blocked on a\nhuman/peer message — the metric's reason for being: surface how much an\nagent is gated on people. A project-lead agent that decides/approves every\nminute reads near 100%; one woken once a week reads near 0%; a worker that\nruns flat-out then terminates reads ~100%.\n\n`active_seconds` = Σ `duration_seconds` of every non-`claim` graph\n`node_exit` in the window — llm generation + execute_code + before/after\nhooks, i.e. all real processing. `llm_seconds` = Σ `duration_seconds` of\nevery `turn_end` event within the window — the model's generation wall-clock\n(reasoning + output). `exec_seconds` = Σ `duration_seconds` of every\n`node_exit` for the `exec` node — the code execution wall-clock. The `claim`\nnode is excluded because its wall-clock IS the idle-wait (it parks the agent\nin the inbound wait between turns); hibernation (swapped-out process) is\nlikewise not in any node, so both fall into the blocked remainder.\n`alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate\nintervals, open tail to now), clipped to the same window — the same lifecycle\nbasis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped\nat 1.0 (a node that began before the window's leading edge counts in full, so\nraw active can momentarily exceed windowed alive); 0.0 when alive is 0. All\nfields follow the request's `?hours=` / `?since_compact=` window."
+        "description": "Active-rate: the share of an agent's alive wall-clock it spent actively\nworking versus idle-waiting for its next input. The complement\n(`1 - active_rate`) is how much of its life the agent sat blocked on a\nhuman/peer message — the metric's reason for being: surface how much an\nagent is gated on people. A project-lead agent that decides/approves every\nminute reads near 100%; one woken once a week reads near 0%; a worker that\nruns flat-out then terminates reads ~100%.\n\n`active_seconds` = Σ `duration_seconds` of every non-`claim` graph\n`node_exit` in the window — llm generation + execute_code + before/after\nhooks, i.e. all real processing. `llm_seconds` = Σ `duration_seconds` of\nevery `turn_end` event within the window — the model's generation wall-clock\n(reasoning + output). `exec_seconds` = Σ `duration_seconds` of every\n`node_exit` for the `exec` node — the code execution wall-clock. The `claim`\nnode is excluded because its wall-clock IS the idle-wait (it parks the agent\nin the inbound wait between turns), so it falls into the blocked remainder.\n`alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate\nintervals, open tail to now), clipped to the same window — the same lifecycle\nbasis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped\nat 1.0 (a node that began before the window's leading edge counts in full, so\nraw active can momentarily exceed windowed alive); 0.0 when alive is 0. All\nfields follow the request's `?hours=` / `?since_compact=` window."
       },
       "AgentCost": {
         "properties": {
@@ -7175,8 +7142,7 @@
           "running",
           "idling",
           "restarting",
-          "terminated",
-          "hibernating"
+          "terminated"
         ],
         "title": "AgentStatus"
       },
@@ -8925,7 +8891,7 @@
           "interval_s"
         ],
         "title": "HeartbeatInfo",
-        "description": "Idle check-in heartbeat state for one agent — mutually-exclusive display\nstates the panel renders:\n\n- idle-family (idling / hibernating / restarting — the statuses the fleet\n  view projects to \"Idle\") & not paused & no fresh wake queued: `next_at` is\n  set — the daemon's projected check-in due time,\n  `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)`. The daemon\n  dispatches the actual check-in at its first poll tick at/after that (at\n  most one 15s dispatch step later), so `next_at` is the earliest possible\n  check-in, and never later than what the daemon does. An overdue\n  projection renders as \"due\" in the frontend, never as a past time;\n  everything else off.\n- idle-family & not paused & a *fresh* wake already queued (created within\n  the daemon's 900s `STALE_PENDING_S` freshness window): `heartbeat_pending`\n  is True — the daemon suppresses check-ins while a fresh inbound is pending\n  (its `NOT EXISTS` guard, windowed by `STALE_PENDING_S`), so no future\n  check-in is projected. This is the state a stuck agent sits in (a\n  heartbeat check-in it never woke to process); rendering it honestly is\n  what stops the panel from projecting a nonsensical past `next_at`. A\n  pending inbound older than the window is stale — the daemon checks in on\n  the agent anyway, so the panel projects `next_at` instead.\n- paused: `paused_until` is set (the active suppression end); `next_at` None.\n- running or terminated: all off — an active agent never gets a check-in,\n  and a dead one never will.\n\n`interval_s` is the cluster heartbeat interval in seconds (context for the\n`next_at` projection). `last_pause` is the most recent pause from history,\nindependent of the current state."
+        "description": "Idle check-in heartbeat state for one agent — mutually-exclusive display\nstates the panel renders:\n\n- idle-family (idling / restarting — the statuses the fleet view\n  projects to \"Idle\") & not paused & no fresh wake queued: `next_at` is\n  set — the daemon's projected check-in due time,\n  `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)`. The daemon\n  dispatches the actual check-in at its first poll tick at/after that (at\n  most one 15s dispatch step later), so `next_at` is the earliest possible\n  check-in, and never later than what the daemon does. An overdue\n  projection renders as \"due\" in the frontend, never as a past time;\n  everything else off.\n- idle-family & not paused & a *fresh* wake already queued (created within\n  the daemon's 900s `STALE_PENDING_S` freshness window): `heartbeat_pending`\n  is True — the daemon suppresses check-ins while a fresh inbound is pending\n  (its `NOT EXISTS` guard, windowed by `STALE_PENDING_S`), so no future\n  check-in is projected. This is the state a stuck agent sits in (a\n  heartbeat check-in it never woke to process); rendering it honestly is\n  what stops the panel from projecting a nonsensical past `next_at`. A\n  pending inbound older than the window is stale — the daemon checks in on\n  the agent anyway, so the panel projects `next_at` instead.\n- paused: `paused_until` is set (the active suppression end); `next_at` None.\n- running or terminated: all off — an active agent never gets a check-in,\n  and a dead one never will.\n\n`interval_s` is the cluster heartbeat interval in seconds (context for the\n`next_at` projection). `last_pause` is the most recent pause from history,\nindependent of the current state."
       },
       "HeartbeatLastPause": {
         "properties": {

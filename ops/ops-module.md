@@ -8,7 +8,7 @@ this describes the end state, and sequencing is left to the implementing agents.
 > unrealized** — `ops/identity.py` and the shared Drain primitive.
 > Landed: `ops/spec.py` (the desired-state expression), `ops/observe.py`, the
 > controller set under `ops/controllers/` (respawn, pin, schema, stranded-pause,
-> hibernate, resurrect, wedged, update-trigger, over a shared `base`), and
+> resurrect, wedged, update-trigger, over a shared `base`), and
 > `ops/manager.py` as the tick loop. `services/watchdog/daemon.py` shrank from the
 > ~680-line mix to a thin ~320-line main over that controller list. The
 > import-linter contract `shared < ops < {gateway, cli}` is enforced in
@@ -40,8 +40,8 @@ machine host, secrets — migrated from `Settings`, see
 
 Built: process-respawn (from restarter, incl. gateway health gating + orphan
 reapers), schema (migrations behind → trigger update), pin (checkout drift),
-stranded-pause, plus hibernate / resurrect / wedged, which the inventory did not
-anticipate. Not built: redis-acl and data-plane-config (bind addresses / auth as
+stranded-pause, plus resurrect / wedged, which the inventory did not
+anticipate (a later hibernation controller was deleted again in 2026-08). Not built: redis-acl and data-plane-config (bind addresses / auth as
 declared) — both still reconcile outside the controller set. Each controller:
 observe → diff against spec → act, with its own cooldown/backoff; every heal logs
 and surfaces in status; repeated healing of one dimension escalates to an alert. A

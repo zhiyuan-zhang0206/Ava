@@ -105,11 +105,10 @@ This module runs turns. The rest of the agent lifecycle is hosted-aware:
   roster gates the process-mode restarter off while this host runs
   (`ops/spec.py`).
 
-What stays process-mode machinery until the hibernate deletion lands (the flag
-keeps it behind `AVA_RUNNER_MODE=process`, where it belongs): the hibernation
-controller, the SIGUSR1 swap-out path, and the per-agent lease renewer /
-lease-zombie reaper. They are all gated off a hosted cluster — the restarter
-never starts, and a hosted row never carries a pid or a lease.
+The lease renewer and the lease-zombie reaper remain process-mode machinery
+(gated off a hosted cluster with the restarter); the hibernation chain
+(controller, status, SIGUSR1 path, endpoint, config keys) was deleted
+(2026-08, Task #1976).
 """
 
 from __future__ import annotations

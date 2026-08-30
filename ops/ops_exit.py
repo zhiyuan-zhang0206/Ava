@@ -4,9 +4,8 @@ Split out of `ops/ops_lifecycle.py` (Task #1999) when the lifecycle cluster
 crossed the 800-line ceiling. Owns the durable half of a force-terminate: the
 fence transaction (terminate inbound as the monotonic intent fence, the
 terminated flip, the optional process kill while the row lock is held), and
-the exit finalizers the agent / gateway call when a process reports it reached
-its own exit (`mark_agent_exited_op`) or a hibernation swap-out
-(`mark_agent_hibernating_op`).
+the exit finalizer the agent / gateway call when a process reports it
+reached its own exit (`mark_agent_exited_op`).
 """
 
 from __future__ import annotations
@@ -211,76 +210,6 @@ def _mark_exited_blocking(
         with db_pool.connection() as conn:
             publish_agent_updated_sync(conn, agent_id)
     return rowcount, page_names, actual_status
-
-
-async def mark_agent_hibernating_op(agent_id: int, db_pool: ConnectionPool) -> None:
-    """Finalize a hibernating agent process: guarded park to 'hibernating'.
-
-    POST /api/agents/{id}/hibernating calls this when an agent's process reaches
-    its exit finally block after the hibernation swap-out signal (SIGUSR1). It is
-    the swap-out twin of `mark_agent_exited_op`, differing in three deliberate
-    ways: the row lands 'hibernating' not 'terminated'; the agent's pages stay
-    OPEN (the cascade_close_agent_pages trigger fires only on 'terminated', so a
-    hibernating flip leaves them); and NO exit event_log is written (the agent is
-    not dying, just swapped out). `heartbeat_paused_until` is deliberately left
-    untouched — hibernation (free RAM) is orthogonal to a self-requested pause
-    (do-not-nudge); the pause window must survive a swap-out.
-
-    Guarded `WHERE status IN ('running','idling')`:
-    - 'idling' is the state the swap-out controller selects; the process was
-      parked in the inbound wait when SIGUSR1 landed.
-    - 'running' covers the phantom-running the idle-wait's own finally leaves:
-      SIGUSR1 delivered during `_wait_for_batch`'s inbound wait unwinds through
-      that finally, which flips IDLING->RUNNING before main()'s finally reaches
-      here — the same reason `mark_agent_exited_op` accepts 'running'.
-    - 'restarting' / 'terminated' / already-'hibernating' -> rowcount 0, benign
-      no-op (a concurrent restart / terminate / double-finalize won). An
-      unclaimed `idling` row cannot normally send this process callback.
-
-    rowcount==1: publish AgentUpdated so ops/frontend SSE reflect the parked row
-    (the frontend projects 'hibernating' -> 'idling', so no visible change). No
-    agent_terminated event, no PageClosed. rowcount==0: benign skip. other: the
-    PK guarantees <=1 row; anything else is table corruption -> raise.
-    """
-    rowcount = await asyncio.to_thread(_mark_hibernating_blocking, agent_id, db_pool)
-    if rowcount == 1:
-        logger.info(
-            "agent {agent_id} hibernating",
-            event="agent_hibernating",
-            agent_id=agent_id,
-        )
-        return
-    if rowcount == 0:
-        logger.debug(
-            "agent {agent_id} mark_agent_hibernating_op noop (not running/idling)",
-            agent_id=agent_id,
-        )
-        return
-    raise RuntimeError(
-        f"mark_agent_hibernating_op agent_id={agent_id} rowcount={rowcount} — "
-        f"PK invariant violated; agents_meta table integrity broken"
-    )
-
-
-def _mark_hibernating_blocking(agent_id: int, db_pool: ConnectionPool) -> int:
-    """Sync DB section of mark_agent_hibernating_op — via to_thread (guarded
-    park UPDATE + AgentUpdated publish). Returns the rowcount."""
-    with db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET status = %s, lease_expires_at = NULL "
-            "WHERE id = %s AND status IN (%s, %s)",
-            (
-                AgentStatus.HIBERNATING,
-                agent_id,
-                AgentStatus.RUNNING,
-                AgentStatus.IDLING,
-            ),
-        )
-        rowcount = cur.rowcount
-    if rowcount == 1:
-        with db_pool.connection() as conn:
-            publish_agent_updated_sync(conn, agent_id)
-    return rowcount
 
 
 # ─── spawn ─────────────────────────────────────────────────────────────────

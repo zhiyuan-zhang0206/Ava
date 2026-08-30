@@ -1,12 +1,12 @@
 """Agent lifecycle endpoints — /api/agents/* lifecycle surface.
 
-Compact / cancel / terminate / exited / hibernating / resurrect / restart.
+Compact / cancel / terminate / exited / resurrect / restart.
 
 Lifecycle operations that mutate physical host state (session / OS
 process) always run on the agent's home machine via its ops server
 (`_forward_to_home_machine`, routers/agents_forward.py) — no local shortcut
 even when the target is the co-located box. Operations that are durable
-DB-row + event-publish work (cancel / exited / hibernating) run on whichever
+DB-row + event-publish work (cancel / exited) run on whichever
 gateway receives them. CRUD + spawn live in routers/agents.py; message +
 state reads in routers/agents_state.py.
 """
@@ -158,28 +158,6 @@ async def post_agent_exited(agent_id: int, request: Request) -> Response:
     gateway receives it.
     """
     await _ops.mark_agent_exited_op(agent_id, request.app.state.db_pool)
-    return Response(status_code=204)
-
-
-@router.post("/api/agents/{agent_id}/hibernating", status_code=204)
-async def post_agent_hibernating(agent_id: int, request: Request) -> Response:
-    """An agent process reports it is swapping out for hibernation — park its
-    row as 'hibernating' (its process is exiting to free RAM).
-
-    Called by the agent itself from its process-exit path when the exit was
-    triggered by the hibernation swap-out signal (SIGUSR1), not by a user/peer.
-    Distinct from `/exited`: this parks the row 'hibernating' (guarded WHERE
-    status IN running/idling), keeps the agent's pages OPEN, and writes no exit
-    event — the agent is not dying, it is being swapped out and will be
-    relaunched by the hibernation controller on the next heartbeat/inbound. The
-    guard leaves a concurrent restart's 'restarting' / an already-'terminated'
-    row untouched (idempotent).
-
-    No cross-machine forwarding: the work is a status UPDATE + event publish,
-    both against the shared DB / events channel, so it runs on whichever gateway
-    receives it.
-    """
-    await _ops.mark_agent_hibernating_op(agent_id, request.app.state.db_pool)
     return Response(status_code=204)
 
 

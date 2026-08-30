@@ -34,14 +34,6 @@ class AgentStatus(StrEnum):
     IDLING = "idling"
     RESTARTING = "restarting"
     TERMINATED = "terminated"
-    # Ops-layer memory swap-out: the process was killed to free RAM while the
-    # agent sat idle; the row is parked here until a heartbeat/inbound wakes it
-    # (the hibernation controller relaunches it — clean restart, no marker). This
-    # is an operations-only state: the agent SDK and the frontend both project it
-    # to IDLING (a swapped-out agent is indistinguishable from an idle one — it is
-    # parked, will wake on a message), so no peer/agent ever observes it. Only ops
-    # tooling reading agents_meta / the raw gateway list sees the true value.
-    HIBERNATING = "hibernating"
 
 
 class TerminationSource(StrEnum):

@@ -112,8 +112,9 @@ export function upsertAgent(prev: AgentRow[] | undefined, next: AgentRow): Agent
 
 /** Fold one lifecycle event into the agents cache by id.
  *
- *  - agent_spawned / agent_updated → upsert the projected snapshot (hibernating
- *    → idling projection happens here, mirroring the listAgents fetch).
+ *  - agent_spawned / agent_updated → upsert the projected snapshot
+ *    (restarting → idling projection happens here, mirroring the listAgents
+ *    fetch).
  *  - label_updated → patch just the label on the existing row (instant rename,
  *    no fetch).
  *  The empty-cache guard refuses to seed a single-agent partial before the

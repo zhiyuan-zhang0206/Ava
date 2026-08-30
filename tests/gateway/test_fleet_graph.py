@@ -660,23 +660,23 @@ def test_edges_touching_terminated_agent_excluded_by_default(
     assert body["edges"] == []
 
 
-def test_hibernating_node_with_terminated_spawner_shows_isolated(
+def test_restarting_node_with_terminated_spawner_shows_isolated(
     db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """Task #1089/#1104 regression — the #2753 shape: a live (hibernating)
+    """Task #1089/#1104 regression — the #2753 shape: a live (restarting)
     agent whose spawner has since terminated. The live node renders on its
     own; the terminated partner is NOT a node and the spawn edge is NOT
     returned (user ruling 2026-08-09: terminated agents never appear in the
     graph; a live node with no live parent simply shows without the edge)."""
-    hibernating = _seed_agent(db_conn, status="hibernating")
+    restarting = _seed_agent(db_conn, status="restarting")
     dead = _seed_agent(db_conn, status="terminated")
-    _event_loki(fake_loki, source_agent=dead, target_agent=hibernating, event_type="spawn")
+    _event_loki(fake_loki, source_agent=dead, target_agent=restarting, event_type="spawn")
 
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
     assert resp.status_code == 200
     body = resp.json()
-    assert {n["agent_id"] for n in body["nodes"]} == {hibernating}
+    assert {n["agent_id"] for n in body["nodes"]} == {restarting}
     assert body["edges"] == []
 
 

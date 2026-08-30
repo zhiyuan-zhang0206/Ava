@@ -1467,7 +1467,6 @@ describe("public three-state agent status projection", () => {
     ["idling", "idling"],
     ["restarting", "idling"],
     ["terminated", "terminated"],
-    ["hibernating", "idling"],
   ] as const)("projects internal %s → public %s", (internal, expected) => {
     expect(projectAgentStatus({ ...base, status: internal }).status).toBe(expected);
   });

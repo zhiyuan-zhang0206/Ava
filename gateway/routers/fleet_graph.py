@@ -614,7 +614,7 @@ def get_fleet_graph(
     agent — are excluded by default (user ruling 2026-08-09 #1104: terminated
     agents never appear in the graph, mirroring the sidebar's agent tree). The
     filter ORDER is liveness first: the node set is live-only (`status !=
-    'terminated'`, so hibernating/restarting etc. stay), and edges only ever
+    'terminated'`, so restarting etc. stay), and edges only ever
     connect two live endpoints — a live node whose lineage partner has since
     terminated simply renders without that edge. Raw source rows are filtered
     during the merge; pass `?include_terminated=true` for the full graph.

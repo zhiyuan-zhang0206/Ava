@@ -8,11 +8,11 @@ LangGraph's checkpointer restores the message history, so the process resumes
 rather than starts over. Resurrection creates the detached session while its
 machine and agent row locks are held; the child cannot claim the row or process
 the inbound until that transaction commits. `resurrect_agent` comes from
-'terminated', `respawn_agent` from 'restarting'; the no-inbound wake paths
-(`swap_in_agent` from 'hibernating', `revive_agent` from a dead pid) live in
-`ops/agent_revive.py` (Task #1999 split, re-exported here). The *mechanics* of
-launching the child live in `ops/agent_launch.py`, reached via module-qualified
-access (`agent_launch._launch_or_force_terminated`).
+'terminated', `respawn_agent` from 'restarting'; the no-inbound wake path
+(`revive_agent` from a dead pid) lives in `ops/agent_revive.py` (Task #1999
+split, re-exported here). The *mechanics* of launching the child live in
+`ops/agent_launch.py`, reached via module-qualified access
+(`agent_launch._launch_or_force_terminated`).
 
 Hosted mode (`AVA_RUNNER_MODE=hosted`): the CAS and the inbound rows are the
 whole op — no process to launch. The hosted branches commit, publish the Redis
@@ -57,11 +57,10 @@ import psycopg
 import shared.db
 from ops import agent_launch, runner_mode
 
-# Re-exported so the existing importers (`ops.agents`, the restarter/hibernate
-# controllers, tests) keep their call sites unchanged after the Task #1999 split:
-# `swap_in_agent` / `revive_agent` now live in `ops/agent_revive.py`.
+# Re-exported so the existing importers (`ops.agents`, the restarter
+# controllers, tests) keep their call sites unchanged after the Task #1999
+# split: `revive_agent` now lives in `ops/agent_revive.py`.
 from ops.agent_revive import revive_agent as revive_agent
-from ops.agent_revive import swap_in_agent as swap_in_agent
 from ops.pages import list_open_page_names
 from shared.agents import (
     AgentNotFound,

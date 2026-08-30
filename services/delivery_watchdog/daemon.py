@@ -17,7 +17,7 @@ Four jobs on one fast tick (user-confirmed design, 2026-08-02 — see
 
 2. **Stall alerting** — WARNING each chat inbound still `pending` past
    `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is in a
-   waiting/terminal state (idling / hibernating / terminated). Once-per-row
+   waiting/terminal state (idling / terminated). Once-per-row
    while it stays pending: a memory set of already-alerted inbound ids is
    pruned each scan to the rows still pending, so a row that flips
    pending -> claimed -> pending (reconcile reset) alerts again. The set is
@@ -107,8 +107,7 @@ def select_stale_pending(
     turn with a queued user message is normal). 'restarting' has its own reaper
     (boot_reap_grace_seconds); alerting at the 30s threshold would fire
     during a mass rollout. Only waiting/terminal owners signal a real stall:
-    'idling' (lost wake), 'hibernating' (swap-in failure), 'terminated'
-    (delivery auto-resurrect failed).
+    'idling' (lost wake), 'terminated' (delivery auto-resurrect failed).
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -118,7 +117,7 @@ def select_stale_pending(
             "LEFT JOIN agents a ON a.id = m.agent_id "
             "JOIN agents_meta am ON am.id = m.agent_id "
             "WHERE m.status = 'pending' AND m.kind = 'chat' "
-            "  AND am.status IN ('idling', 'hibernating', 'terminated') "
+            "  AND am.status IN ('idling', 'terminated') "
             "  AND m.created_at < now() - make_interval(secs => %s) "
             "ORDER BY m.created_at ASC",
             (threshold_s,),
@@ -136,9 +135,9 @@ def select_pending_for_dispatch(
 
     All kinds (chat + lifecycle): a lost wake strands terminate/restart
     signals too, not just chat. `idling` only: a `running` owner queues
-    legitimately (turn-end SELECT picks up), `hibernating` / `terminated`
-    owners are woken by their own controllers (swap-in / auto-resurrect),
-    boot states by their boot SELECT.
+    legitimately (turn-end SELECT picks up), `terminated` owners are woken
+    by their own controller (auto-resurrect), boot states by their boot
+    SELECT.
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

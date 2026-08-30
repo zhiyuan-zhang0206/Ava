@@ -908,54 +908,6 @@ def test_unknown_slash_command_without_agent_errors() -> None:
     assert gateway.sent == []
 
 
-# --- v5: hibernating is live (ops-layer concept, projected to idling) ---
-
-
-def test_list_includes_hibernating_projected_to_idling() -> None:
-    """Hibernating agents are live on the IM surface (user ruling 2026-08-04):
-    they appear in /list and their status shows as idling."""
-    gateway = FakeGateway(
-        agents=[
-            _row(405, label="Ava \u8d1f\u8d23\u4eba", status="hibernating"),
-            _row(228, label="CEO", status="running"),
-            _row(999, label="gone", status="terminated"),  # still filtered
-        ]
-    )
-    core = _core(gateway)
-    core.register(FakeTypingAdapter())
-    out = asyncio.run(core._cmd_list("telegram"))
-    assert isinstance(out, Reply)
-    # projected: no "hibernating" anywhere user-facing
-    assert "hibernating" not in out.text
-    assert out.buttons is not None
-    labels = [b[0] for b in out.buttons]
-    assert labels == ["228 CEO [running]", "405 Ava \u8d1f\u8d23\u4eba [idling]"]
-    assert [b[1] for b in out.buttons] == ["/switch 228", "/switch 405"]
-
-
-def test_switch_accepts_hibernating() -> None:
-    """Tapping a hibernating agent's /list button must switch (it is live)."""
-    gateway = FakeGateway(
-        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba", status="hibernating")],
-        timeline=[{"kind": "agent_chat", "item_id": "3.1", "payload": "hello"}],
-    )
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "405"))
-    assert state.current_agent_id == 405
-    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in _text(out)
-
-
-def test_plain_channel_list_projects_hibernating_too() -> None:
-    gateway = FakeGateway(agents=[_row(7, label="x", status="hibernating")])
-    core = _core(gateway)
-    core.register(FakePlainAdapter())
-    out = asyncio.run(core._cmd_list("weixin"))
-    assert isinstance(out, Reply)
-    assert "7  x  [idling]" in out.text
-    assert "hibernating" not in out.text
-
-
 # --- Task #829: weixin push-failure alerting + recovered hint ---
 
 

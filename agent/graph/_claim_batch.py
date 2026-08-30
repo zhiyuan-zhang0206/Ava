@@ -38,9 +38,8 @@ from shared.log import logger
 
 class LifecycleCasLostError(Exception):
     """Claim-time lifecycle race: between the idle flip and the IDLING→RUNNING
-    claim flip, a concurrent op (terminate / hibernate swap-out / reaper)
-    moved the `agents_meta` row out of 'idling' and a retry from the live
-    state also lost.
+    claim flip, a concurrent op (terminate / reaper) moved the `agents_meta`
+    row out of 'idling' and a retry from the live state also lost.
 
     Raised by `_wait_for_batch` instead of letting mark_agent_status's
     RuntimeError kill the process: a crash during a network outage cannot be
@@ -89,9 +88,9 @@ async def _wait_for_batch(
             pool, agent_id, AgentStatus.RUNNING, expected_from=AgentStatus.IDLING
         )
     except RuntimeError:
-        # CAS lost — a concurrent lifecycle op (terminate / hibernate
-        # swap-out / reaper) moved the row between the idle flip and this
-        # flip. Re-read and adapt instead of crashing (a crash mid-outage
+        # CAS lost — a concurrent lifecycle op (terminate / reaper) moved
+        # the row between the idle flip and this flip. Re-read and adapt
+        # instead of crashing (a crash mid-outage
         # cannot be resurrected — agent 2147, 2026-08-03; Task #688; the
         # restart-path twin of this race was fixed in #1299): retry from a
         # live state, otherwise another op owns the row — log and signal the

@@ -506,8 +506,8 @@ async def _cluster_pause_middleware(
 
     Exempt: every route whose doorplate declares CONTROL_PLANE (the
     /api/cluster/* control plane, the Grafana alerting webhook, and the
-    agent self-reports /api/agents/{id}/exited + /hibernating — the
-    quiesce's drain signals). Everything else 503.
+    agent self-report /api/agents/{id}/exited — the quiesce's drain
+    signal). Everything else 503.
     """
     if await _cluster_is_paused(request) and not _pause_policy.should_bypass_pause(
         request.method, request.url.path
