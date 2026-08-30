@@ -1407,11 +1407,10 @@ async def test_claim_cas_loss_on_wake_flip_exits_cleanly(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """A concurrent lifecycle op winning the IDLING→RUNNING claim flip
-    (hibernate swap-out / terminate / reaper) used to raise RuntimeError out
-    of the graph and crash the process — and a crash during a network outage
-    cannot be resurrected (agent 2147, 2026-08-03: 4h dead; Task #688). The
-    claim node must END cleanly instead, leaving the row to the owning
-    controller."""
+    (terminate / reaper) used to raise RuntimeError out of the graph and
+    crash the process — and a crash during a network outage cannot be
+    resurrected (agent 2147, 2026-08-03: 4h dead; Task #688). The claim node
+    must END cleanly instead, leaving the row to the owning controller."""
     import agent.graph._claim_batch as claim_batch
 
     tid = spawn_agent()
@@ -3442,19 +3441,19 @@ async def test_flip_to_restarting_cas_lost_foreign_status_ends_normally(
     aops_pool: AsyncConnectionPool,
 ):
     """_flip_to_restarting loses the running→restarting CAS to a foreign status
-    (e.g. a hibernate swap-out parked the row 'hibernating' between the claim's
-    running-mark and the CAS) — it logs and returns without raising, leaving the
-    row untouched. Pre-fix code raised RuntimeError out of the graph and killed
-    the process; a crash during a network outage cannot be resurrected (audit
-    #689 G2, agent 2147 2026-08-03: 4h dead)."""
+    (e.g. a terminate parked the row 'terminated' between the claim's
+    running-mark and the CAS) — it logs and returns without raising, leaving
+    the row untouched. Pre-fix code raised RuntimeError out of the graph and
+    killed the process; a crash during a network outage cannot be resurrected
+    (audit #689 G2, agent 2147 2026-08-03: 4h dead)."""
     tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "hibernating")  # race: swap-out won
+    _set_agent_status(db_conn, tid, "terminated")  # race: terminate won
 
     from agent.graph._claim import _flip_to_restarting
 
     await _flip_to_restarting(aops_pool, tid)  # must not raise
 
-    await _await_status(aops_pool, tid, "hibernating")  # untouched
+    await _await_status(aops_pool, tid, "terminated")  # untouched
 
 
 async def test_flip_to_restarting_cas_lost_retries_from_idling(

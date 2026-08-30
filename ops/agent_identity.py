@@ -10,9 +10,10 @@ Liveness cannot see that. `shared.proc.process_alive` answers "does this number
 name a running process", which a recycled pid passes forever, so every consumer
 that used liveness as a proxy for "the agent behind this row is still there" was
 wrong in the same way: the restarter's corpse reapers left the row standing
-(2026-07-30 prod, issue #1123: five rows stuck 'idling' across a dozen scans) and
-the hibernation swap-out kept firing SIGUSR1 at whatever now owned the pid —
-default disposition *terminate*, aimed at an uninvolved process.
+(2026-07-30 prod, issue #1123: five rows stuck 'idling' across a dozen scans),
+and a pid-directed signal could land on whatever process the OS had reissued
+the number to — default disposition *terminate*, aimed at an uninvolved
+process.
 
 The identity evidence used here is the agent's own launch argv, read back from
 the OS process table. `ops/agent_launch.py` execs every agent as

@@ -17,7 +17,7 @@ tags:
 ## Core responsibilities
 
 ### Status and result enums
-- `AgentStatus` (StrEnum) lifecycle states: `RUNNING` (claimed process, including boot) → `IDLING` (waiting for wakeup between turns or unclaimed before boot) → `RESTARTING` (process replacement in progress) → `TERMINATED`. `HIBERNATING` remains an ops-only state projected to idling.
+- `AgentStatus` (StrEnum) lifecycle states: `RUNNING` (claimed process, including boot) → `IDLING` (waiting for wakeup between turns or unclaimed before boot) → `RESTARTING` (process replacement in progress) → `TERMINATED`.
 - `TerminationSource` (StrEnum) — who wrote `status='terminated'`: `USER`/`EXIT`/`REAPER`/`LAUNCH_CONFIRM`/`INTEGRITY`, stamped by EVERY terminated-write in the same statement (NULL is permanently unresurrectable — `scripts/lint_termination_source.py` enforces it). `resurrectable()` feeds the crash-resurrect allowlist ([[services/agent_runner_side/restarter/restarter.ava.okf.md]]).
 - Operation result enums: `TerminateResult` / `RestartResult` / `ResurrectResult` — encode idempotent operation outcomes (enqueued / already_terminated / force_killed / already_alive …) as wire strings.
 

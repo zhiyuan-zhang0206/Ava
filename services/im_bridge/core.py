@@ -34,14 +34,14 @@ _log = logging.getLogger("services.im_bridge.core")
 _DIALOG_KINDS = frozenset({"inbound_chat", "agent_chat"})
 _USER_SOURCE = "user"
 
-# Statuses the IM surface treats as "live" (hibernation is ops-layer, hidden).
-_LIVE_STATUSES = ("running", "idling", "hibernating")
+# Statuses the IM surface treats as "live".
+_LIVE_STATUSES = ("running", "idling")
 
 
 def _display_status(status: str) -> str:
-    """Frontend projection: hibernating shows as idling."""
+    """Pass-through kept so the display call sites read uniformly."""
 
-    return "idling" if status == "hibernating" else status
+    return status
 
 
 _PUSH_LIMIT = 2000  # per-message char cap before splitting

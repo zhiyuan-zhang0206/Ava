@@ -505,7 +505,7 @@ async def _invoke_graph_with_lifecycle_logging(
             continue
         except asyncio.CancelledError:
             logger.opt(exception=True).info(
-                "graph.ainvoke received CancelledError — agent process exiting (hibernate/restart/terminate)"
+                "graph.ainvoke received CancelledError — agent process exiting (restart/terminate)"
             )
             raise
         except (PoolTimeout, psycopg.OperationalError) as exc:

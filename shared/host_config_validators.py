@@ -82,15 +82,6 @@ def _validate_watchdog_interval_seconds(value: object) -> ValidationResult:
     return ValidationResult(ok=False, reason="must be > 0")
 
 
-def _validate_hibernate_min_active(value: object) -> ValidationResult:
-    """Must be a non-negative integer (0 disables the warm-pool floor)."""
-    if isinstance(value, bool) or not isinstance(value, int):
-        return ValidationResult(ok=False, reason="must be a non-negative integer")
-    if value >= 0:
-        return ValidationResult(ok=True)
-    return ValidationResult(ok=False, reason="must be a non-negative integer")
-
-
 # Registry
 
 # Maps a host field name to its validator.  Only fields with a real local
@@ -100,7 +91,6 @@ VALIDATORS: dict[str, Callable[[object], ValidationResult]] = {
     "chrome_binary": _validate_chrome_binary,
     "ops_concurrency": _validate_ops_concurrency,
     "watchdog_interval_seconds": _validate_watchdog_interval_seconds,
-    "hibernate_min_active": _validate_hibernate_min_active,
     # "machine_description" has no entry: free text, always ok.
 }
 

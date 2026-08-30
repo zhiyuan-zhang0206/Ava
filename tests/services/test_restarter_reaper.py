@@ -433,8 +433,8 @@ def test_reaps_live_status_row_whose_pid_was_recycled(
 ) -> None:
     """Issue #1123's stranded row: the agent died, the OS reissued its pid to an
     unrelated process, and so the pid is ALIVE. Liveness passed that forever and
-    the row sat 'idling' behind a dead agent across every reaper pass while
-    hibernation kept signalling the stranger. Identity reaps it."""
+    the row sat 'idling' behind a dead agent across every reaper pass. Identity
+    reaps it."""
     _stub_probe(monkeypatch, AgentProcessIdentity.FOREIGN)
     tid = _make_live_status(db_conn, status=status, pid=_DEAD_PID)
 
@@ -673,24 +673,22 @@ def test_collector_leaves_lease_live_rows_alone(
         assert cur.fetchone() == ("running",)  # type: ignore[index]
 
 
-def test_collector_ignores_hibernating_and_other_statuses(
+def test_collector_ignores_other_statuses(
     db_conn: psycopg.Connection,
     sync_pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """'hibernating' is reaper-exempt (swapped out, no renewal by design); the
-    other statuses are outside the zombie scan entirely."""
+    """'terminated' is outside the zombie scan entirely."""
     _stub_probe(monkeypatch, AgentProcessIdentity.OWNED)
-    hibernating = _make_lease_zombie(db_conn, status="hibernating", pid=4242, lease=None)
     terminated = _make_lease_zombie(db_conn, status="terminated", pid=4243, lease=None)
 
     assert rd._collect_local_lease_zombies(sync_pool, machine_name()) == []
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT status FROM agents_meta WHERE id IN (%s, %s) ORDER BY id",
-            (hibernating, terminated),
+            "SELECT status FROM agents_meta WHERE id = %s",
+            (terminated,),
         )
-        assert cur.fetchall() == [("hibernating",), ("terminated",)]
+        assert cur.fetchall() == [("terminated",)]
 
 
 class TestReviveAgent:
@@ -735,7 +733,7 @@ class TestReviveAgent:
         launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     ) -> None:
         """Revival is invisible to the agent — no resurrect / restart_completed
-        inbound, exactly like a hibernation swap-in (Task #689 G5)."""
+        inbound (Task #689 G5)."""
         from ops.agent_wake import revive_agent
 
         tid = _make_live_status(db_conn, status="running", pid=_DEAD_PID)
@@ -767,14 +765,14 @@ class TestReviveAgent:
         db_conn: psycopg.Connection,
         launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     ) -> None:
-        """Only 'running'/'idling' rows are revivable — a 'hibernating' row is
-        the hibernation controller's (swap-in on inbound), not this pass's."""
+        """Only 'running'/'idling' rows are revivable — a 'terminated' row is
+        crash-resurrect's business, not this pass's."""
         from ops.agent_wake import revive_agent
 
         tid = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agents_meta SET status = 'hibernating', pid = %s WHERE id = %s",
+                "UPDATE agents_meta SET status = 'terminated', pid = %s WHERE id = %s",
                 (_DEAD_PID, tid),
             )
         db_conn.commit()
@@ -784,7 +782,7 @@ class TestReviveAgent:
 
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-            assert cur.fetchone()[0] == "hibernating"  # type: ignore[index]
+            assert cur.fetchone()[0] == "terminated"  # type: ignore[index]
         assert launched_agents == []
 
     def test_double_revive_only_one_launches(

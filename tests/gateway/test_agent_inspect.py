@@ -2177,12 +2177,12 @@ def test_inspect_heartbeat_stuck_after_expired_pause_no_past_next_at(
     assert hb["heartbeat_pending"] is True
 
 
-@pytest.mark.parametrize("status", ["hibernating", "restarting"])
+@pytest.mark.parametrize("status", ["restarting"])
 def test_inspect_heartbeat_idle_family_projects_next_at(
     db_conn: psycopg.Connection, status: str
 ) -> None:
-    """The fleet view projects hibernating/restarting rows to "Idle", so their
-    page must show a computable next check-in like a plain idle agent (user
+    """The fleet view projects restarting rows to "Idle", so their page must
+    show a computable next check-in like a plain idle agent (user
     report 2026-08-28: a restarting agent rendered an empty cell). Parked 120s
     ago → next_at ≈ now + (idle_threshold - 120)s + jitter, exactly like
     idling."""
@@ -2197,7 +2197,7 @@ def test_inspect_heartbeat_idle_family_projects_next_at(
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
-@pytest.mark.parametrize("status", ["hibernating", "restarting"])
+@pytest.mark.parametrize("status", ["restarting"])
 def test_inspect_heartbeat_idle_family_pending_inbound_marks_heartbeat_pending(
     db_conn: psycopg.Connection, status: str
 ) -> None:

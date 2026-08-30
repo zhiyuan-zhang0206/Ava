@@ -162,7 +162,7 @@ directory) when the domain's shape changed:
 
 | Change | Domain node |
 |---|---|
-| Agent lifecycle / hibernation / crash-resurrect | `agent/agent.ava.okf.md` |
+| Agent lifecycle / crash-resurrect | `agent/agent.ava.okf.md` |
 | SDK surface (`ava/__init__.py`, new namespaces) | `ava/ava.ava.okf.md` |
 | Gateway routes / SSE / auth | `gateway/gateway.ava.okf.md` |
 | CLI commands / cluster lifecycle | `cli/cli.ava.okf.md` |

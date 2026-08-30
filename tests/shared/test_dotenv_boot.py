@@ -296,13 +296,16 @@ def test_enforce_overrides_leaked_derived_key(
 
 def test_enforce_ignores_non_enforced_keys(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Only the derived + identity keys are forced from the file — an
-    unrelated env var in the file never overrides the live environment."""
-    monkeypatch.setitem(os.environ, "AVA_HIBERNATE_MIN_ACTIVE", "15")
+    unrelated env var in the file never overrides the live environment.
+    AVA_LLM_OVERRIDE is deliberately chosen: an e2e-only override read straight
+    from os.environ, not a Settings field, so it has no owning sub-model to
+    enforce (a Settings-backed key like AVA_LABELER_MODEL would be forced)."""
+    monkeypatch.setitem(os.environ, "AVA_LLM_OVERRIDE", "env-live")
     env_file = tmp_path / ".env"
-    env_file.write_text("AVA_HIBERNATE_MIN_ACTIVE=3\n")
+    env_file.write_text("AVA_LLM_OVERRIDE=env-file\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
     dotenv_boot._enforce_cluster_env_authority()
-    assert os.environ["AVA_HIBERNATE_MIN_ACTIVE"] == "15"
+    assert os.environ["AVA_LLM_OVERRIDE"] == "env-live"
 
 
 def test_enforce_forces_identity_key_declared_in_env_file(

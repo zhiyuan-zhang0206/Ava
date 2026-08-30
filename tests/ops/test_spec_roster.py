@@ -475,9 +475,9 @@ def test_runner_daemons_keep_the_runner_marker() -> None:
 
 def test_restarter_gated_out_in_hosted_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hosted mode flip retires per-agent process supervision: the restarter
-    (respawn / hibernate / crash-resurrect / wedged — all process machinery)
-    drops out of the START roster, symmetric to how agent-host is gated out in
-    process mode. Exactly one of the two runs, by the same fail-closed read."""
+    (respawn / crash-resurrect / wedged — all process machinery) drops out of
+    the START roster, symmetric to how agent-host is gated out in process mode.
+    Exactly one of the two runs, by the same fail-closed read."""
     monkeypatch.setattr(spec, "runner_mode", lambda: "hosted")
     annotated = {
         s.session: r

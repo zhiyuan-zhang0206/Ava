@@ -353,7 +353,7 @@ describe("GraphView", () => {
     await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     expect(queryNodeLabel(2)).toBeNull(); // terminated never renders
-    expect(getNodeLabel(3)).toBeTruthy(); // hibernating is live
+    expect(getNodeLabel(3)).toBeTruthy(); // idling is live
     expect(screen.getByText("2 nodes · 1 edges")).toBeTruthy();
     const svg = container.querySelector(
       'svg[aria-label="Fleet relationship graph"]',

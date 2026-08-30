@@ -10,7 +10,7 @@ it, so every existing `from ops.agents import ...` keeps working:
 - `ops/agent_spawn.py` — **birth**: a new agents_meta row (`create_agent_row`, gateway-side),
   optionally forked from another agent's checkpoint (`latest_checkpoint_id`).
 - `ops/agent_wake.py` — **wake**: an existing row back into a running process
-  (`resurrect_agent` / `respawn_agent` / `swap_in_agent`).
+  (`resurrect_agent` / `respawn_agent`).
 
 Either way the *mechanics* of actually launching a detached native child
 process and confirming it came up live in `ops/agent_launch.py`
@@ -25,7 +25,7 @@ an agent id. `_launch_agent_process` confirms that the claim wrote a pid; a
 timeout leaves an unclaimed row for the boot reaper rather than adding a second
 status value for bootstrap.
 
-Spawn, resurrect, respawn, and swap-in clear pid, started_at, and lease before
+Spawn, resurrect, and respawn clear pid, started_at, and lease before
 launching a new child. The claim CAS re-fills those ownership columns atomically,
 so a prior process's values never masquerade as the new child.
 
@@ -63,9 +63,6 @@ from ops.agent_wake import (
 )
 from ops.agent_wake import (
     resurrect_agent as resurrect_agent,
-)
-from ops.agent_wake import (
-    swap_in_agent as swap_in_agent,
 )
 from shared.agents import AgentNotFound, AgentStatus
 

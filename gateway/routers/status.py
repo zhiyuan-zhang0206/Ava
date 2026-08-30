@@ -73,7 +73,7 @@ def get_stats_dashboard(
     """Pull all data for the sidebar-top stats card in one shot.
 
     Data sources:
-    - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
+    - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting)
     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
     - average turn duration: Loki's unified event stream in 12-hour shards
     - warning/error counts: per-class counts via the resolution daemon's

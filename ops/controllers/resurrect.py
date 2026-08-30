@@ -9,12 +9,12 @@ launcher's confirm poll, or by the child's own early-boot gate) and still
 has a work inbound in hand — one queued 'pending' OR one it had 'claimed' and was
 processing when it died — has a fresh process to handle that inbound. One reconcile
 action, machine-scoped (this host only resurrects its own agents, the same placement
-rule the respawn/hibernate reapers hold):
+rule the respawn reaper holds):
 
 - **crash-resurrect**: a local 'terminated' row whose ``termination_source`` is one
   of the two involuntary sources, with a 'pending' or 'claimed' inbound (excluding
   pure control-signal kinds), past its per-agent backoff window, is brought back via
-  ``resurrect_agent`` (the same synchronous primitive the restart/hibernate paths
+  ``resurrect_agent`` (the same synchronous primitive the restart path
   launch through — the gateway's async ``resurrect_if_terminated`` exists to forward
   a resurrect to a *remote*-homed agent's machine, but this scan is machine-scoped,
   so the local sync call it wraps is what runs here, exactly as RespawnController
@@ -88,7 +88,7 @@ crash-loop it. When the gateway is unhealthy the pass is deferred BEFORE the cla
 (nothing is stamped) — the corpses stay eligible and are retried once it is back.
 
 Extracted as a Controller so the restarter daemon runs it in the same loop as
-RespawnController + HibernateController; like them it is a non-blocking, always-run
+RespawnController + WedgedAgentController; like them it is a non-blocking, always-run
 reconcile (``blocks`` always ``BlockScope.NONE``). The scan is throttled to the reaper's
 cadence (``shared.timing.CONTROLLER_SCAN_INTERVAL_S``, 30s): a corpse is not even marked until the reaper's
 own 30s pass, so scanning faster finds nothing new, and it keeps the per-second loop

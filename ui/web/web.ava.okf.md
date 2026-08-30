@@ -12,7 +12,7 @@ Ava frontend subsystem—Next.js 16 web interface for fleet supervision, agent c
 
 The console exposes exactly three agent statuses: `running`, `idling`, and
 `terminated`. The gateway wire deliberately retains its finer control-plane
-states (`allocated`, `starting`, `restarting`, and `hibernating`); every
+states (`allocated`, `starting`, and `restarting`); every
 frontend ingest path (`/api/agents`, lifecycle SSE snapshots, and the fleet
 graph) exhaustively projects those non-executing transitions to `idling` before
 they enter a cache. Machine/process reachability remains the separate

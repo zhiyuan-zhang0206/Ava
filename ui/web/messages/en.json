@@ -431,7 +431,6 @@
     "statusIdling": "Idling",
     "statusRestarting": "Restarting",
     "statusTerminated": "Terminated",
-    "statusHibernating": "Idling",
     "statusOffline": "Offline — machine unreachable or process lost"
   },
   "contentToggle": {
@@ -500,7 +499,7 @@
       "config-memory": "Agent memory & compact",
       "config-sdk": "Agent SDK",
       "config-agent-infra": "Agent DB & infra",
-      "config-daemon-heartbeat": "Daemon: heartbeat & hibernate",
+      "config-daemon-heartbeat": "Daemon: heartbeat",
       "config-daemon-tasks": "Daemon: tasks & events",
       "config-gateway": "Gateway",
       "config-connection": "Connection",

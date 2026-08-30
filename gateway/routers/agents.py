@@ -2,7 +2,7 @@
 
 Covers list / get / spawn / label patch plus the model registry
 (`GET /api/models`) the spawn dialog renders. The lifecycle surface
-(compact / cancel / terminate / exited / hibernating / resurrect / restart)
+(compact / cancel / terminate / exited / resurrect / restart)
 lives in routers/agents_lifecycle.py; message + state reads (messages /
 trace / last-message / pending / activity / token-usage / context-breakdown)
 in routers/agents_state.py; the cross-machine forward helpers shared by all

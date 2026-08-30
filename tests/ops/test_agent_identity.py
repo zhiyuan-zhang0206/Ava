@@ -1,8 +1,7 @@
 """Agent process identity — `ops/agent_identity.py`.
 
-The unit under test answers "is this pid still that agent's process", which the
-restarter's corpse reapers and the hibernation swap-out both turn on. Two things
-are worth locking:
+The unit under test answers "is this pid still that agent's process", which
+the restarter's corpse reapers turn on. Two things are worth locking:
 
 - the **verdicts**, especially that `UNREADABLE` is not `FOREIGN`: only the latter
   may drive a reap or block a signal, because only the latter rests on a cmdline

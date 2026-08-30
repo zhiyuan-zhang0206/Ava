@@ -69,7 +69,6 @@ from .lifecycle import (
     _exit_reason,
     _install_lifecycle_signal_handlers,
     _notify_exit,
-    _notify_hibernate,
     _route_process_end_notify,
 )
 from .mcp_daemon import _MCP_SOCKET_DIR, _mcp_socket_path, _MCPDaemon
@@ -98,7 +97,6 @@ __all__ = [
     "_invoke_graph_with_lifecycle_logging",
     "_mcp_socket_path",
     "_notify_exit",
-    "_notify_hibernate",
     "_notify_screen_capture_at_startup",
     "_probe_db_reachable",
     "_reconcile_claimed_inbounds_at_startup",
@@ -317,11 +315,10 @@ async def main(
         # Pools close automatically via `async with`; listener owns a single
         # conn outside that lifecycle and must be closed explicitly.
         await inbound_listener.close()
-        # Notify the gateway this process has exited, routed by exit reason (a
-        # hibernation swap-out parks 'hibernating'; every other exit finalizes
-        # 'terminated'). process_exit above is complementary: it always writes
-        # (including silent death), while agent_terminated / hibernating fire only
-        # when status really transitions.
+        # Notify the gateway this process has exited; the exit-reason tag rides
+        # the process_exit event. process_exit above is complementary: it always
+        # writes (including silent death), while agent_terminated fires only when
+        # the status really transitions.
         _route_process_end_notify(agent_id, reason)
         # ── MCP daemon stop ──
         await mcp_daemon.stop()

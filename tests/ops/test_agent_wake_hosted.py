@@ -159,29 +159,6 @@ def test_respawn_agent_hosted_flips_and_wakes(
 # ── swap-in ──────────────────────────────────────────────────────────────────
 
 
-def test_swap_in_agent_hosted_flips_and_wakes(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
-) -> None:
-    """hibernating -> idling + one wake, no process (defensive until the
-    hibernate controller is deleted; a legacy hibernating row must wake, not
-    fork)."""
-    aid = _park(db_conn, status="hibernating", pid=_DEAD_PID)
-    assert agent_wake.swap_in_agent(aid) is True
-    assert _row(db_conn, aid) == ("idling", None)
-    assert wakes == [(aid, "0")]
-
-
-def test_swap_in_agent_hosted_lost_race_is_noop(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
-) -> None:
-    """The CAS still picks one winner: a non-hibernating row loses and neither
-    flips nor wakes."""
-    aid = _park(db_conn, status="terminated")
-    assert agent_wake.swap_in_agent(aid) is False
-    assert _row(db_conn, aid)[0] == "terminated"
-    assert wakes == []
-
-
 # ── revive ───────────────────────────────────────────────────────────────────
 
 

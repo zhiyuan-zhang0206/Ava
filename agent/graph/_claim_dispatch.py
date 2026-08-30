@@ -362,14 +362,12 @@ async def _flip_to_restarting(pool: AsyncConnectionPool, agent_id: int) -> None:
     A lost CAS used to raise RuntimeError straight out of the graph and kill
     the process (agent 2147, 2026-08-03: a lost CAS during a network outage
     crashed the agent, and a crash mid-outage cannot be resurrected -- 4h
-    dead, audit #689 G2). The realistic loser is a hibernate swap-out
-    (SIGUSR1 parks the row 'hibernating' between the claim's running-mark and
-    this CAS) or a re-entered claim that left the row 'idling'. Adapt instead
-    of dying: re-read the row and retry the flip from the actual live state
-    (running or idling -- the restarter respawns 'restarting' rows regardless
-    of which it came from); any other state (terminated / hibernating /
-    unclaimed idling) means another op owns the row, so the restart is
-    moot -- log and let the process END normally.
+    dead, audit #689 G2). The realistic loser is a re-entered claim that
+    left the row 'idling'. Adapt instead of dying: re-read the row and retry
+    the flip from the actual live state (running or idling -- the restarter
+    respawns 'restarting' rows regardless of which it came from); any other
+    state (terminated / unclaimed idling) means another op owns the row, so
+    the restart is moot -- log and let the process END normally.
     """
     try:
         await mark_agent_status(
@@ -377,9 +375,9 @@ async def _flip_to_restarting(pool: AsyncConnectionPool, agent_id: int) -> None:
         )
         return
     except RuntimeError:
-        # CAS lost -- a concurrent lifecycle op (hibernate swap-out, a
-        # re-entered claim's idle flip) moved the row between the claim's
-        # running-mark and this CAS. Re-read and adapt instead of crashing:
+        # CAS lost -- a concurrent lifecycle op (a re-entered claim's idle
+        # flip) moved the row between the claim's running-mark and this CAS.
+        # Re-read and adapt instead of crashing:
         # a crash during a network outage cannot be resurrected (agent 2147,
         # 2026-08-03: 4h dead; audit #689 G2).
         async with pool.connection() as conn, conn.cursor() as cur:

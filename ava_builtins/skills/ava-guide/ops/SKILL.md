@@ -225,7 +225,7 @@ constant:
 1. Watch the axes — latency percentiles (LLM, gateway, turn), error and
    warning volume, host utilization, data-plane saturation.
 2. When something is out of band, identify the consumer before acting.
-3. Then choose: investigate, hibernate idle agents to shed load, tell the
+3. Then choose: investigate, terminate idle agents to shed load, tell the
    user, or decide the machine is legitimately busy and leave it.
 
 Alert rules (R8-R12: sustained CPU, memory pressure, per-volume disk

@@ -88,7 +88,7 @@ def _notify_owner(
 ) -> None:
     """Insert a system-sourced inbound for a live owner; never resurrects.
 
-    Skipped for terminated/hibernating/restarting agents — a reclamation
+    Skipped for terminated/restarting agents — a reclamation
     notice is informational and must not wake a dead agent back up.
     """
     with conn.cursor() as cur:

@@ -498,8 +498,6 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "computer_use_session_idle_s",
         "delivery_watchdog_enabled",
         "heartbeat_enabled",
-        "hibernate_enabled",
-        "hibernate_min_active",
         "machine_description",
         "permissions_helper_enabled",
         "ops_concurrency",
@@ -567,29 +565,6 @@ def test_no_agent_scope_field_is_writable() -> None:
         f"Agent-scope fields with writable != False: {violations}. "
         "Agent-scope fields are per-process and must never be config-writable."
     )
-
-
-def test_hibernate_min_active_defaults_to_100() -> None:
-    """Warm-pool floor default: 100 most-recently-active agents stay resident.
-    0 would be the pre-floor unrestricted-swap-out behavior."""
-    from shared.config.daemon import DaemonSettings
-
-    assert DaemonSettings.model_fields["hibernate_min_active"].default == 100
-
-
-def test_hibernate_min_active_rejects_negative() -> None:
-    """A negative floor is nonsensical (there is no such thing as -N most-active
-    agents) — reject it fail-fast (the `ge=0` Field constraint) rather than
-    silently no-op it. Constructs directly rather than via monkeypatch.setenv:
-    Settings is a module-load singleton, so env changes after import never
-    reach it (lint-no-os-environ); direct construction exercises the same
-    Field(ge=0) validator regardless of source."""
-    from pydantic import ValidationError
-
-    from shared.config.daemon import DaemonSettings
-
-    with pytest.raises(ValidationError):
-        DaemonSettings.model_validate({"hibernate_min_active": -1})
 
 
 @pytest.mark.parametrize("bad", ["inf", "-inf", "nan", "Infinity"])
