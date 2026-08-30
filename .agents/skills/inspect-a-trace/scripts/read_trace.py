@@ -8,7 +8,7 @@ a text summary on stdout.
       "trace_id": "<hex-32>",
       "source": "mirror" | "tempo",
       "agent_id": "<session.id>" | null,
-      "checkpoint_id": "<ava.checkpoint_id>" | null,
+      "checkpoint_id": "<ava.checkpoint_id>" | null  (null on post-#1964 traces; resolve via --with-content),
       "workflow_name": str | null,
       "span_count": int, "duration_ms": int,
       "started_at": "<ISO-8601>",
@@ -62,7 +62,13 @@ def _load_raw(path: Path) -> dict:
 
 
 def _root_meta(spans: list[dict]) -> dict:
-    """Root span (no parent) attributes → agent / checkpoint / workflow."""
+    """Root span (no parent) attributes → agent / checkpoint / workflow.
+
+    `checkpoint_id` is read from the root's `ava.checkpoint_id` attribute —
+    only present on pre-#1964 traces; the root is a placeholder ended at turn
+    start since then, so the attribute no longer lands. Resolve it via
+    `--with-content` (checkpoints table through the gateway) on new traces.
+    """
     workflow = next(
         (
             sp["attributes"].get(_WORKFLOW_ATTR)
@@ -297,6 +303,12 @@ def main() -> int:
                     f"--with-content failed: HTTP {exc.code} "
                     f"(404 = agent gone; 401 = wrong/missing cluster secret)"
                 )
+            else:
+                # The gateway resolves the checkpoint from the checkpoints
+                # table by trace_id — the authoritative link since #1964, when
+                # the root stopped carrying ava.checkpoint_id.
+                if out["checkpoint_id"] is None and out["content"].get("checkpoint_id"):
+                    out["checkpoint_id"] = out["content"]["checkpoint_id"]
     if args.with_events:
         from_iso = (datetime.fromtimestamp(start_ns / 1e9, tz=UTC) - timedelta(hours=1)).isoformat()
         try:

@@ -629,7 +629,10 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
     **Placeholder root — exported at turn START, not at turn end (#1964).**
     The root span is ended immediately after creation, so the batch processor
     exports it within one flush (5 s in production, immediately under a
-    SimpleSpanProcessor in tests) while the turn is still running. A trace
+    SimpleSpanProcessor in tests) while the turn is still running. Residual
+    window: a turn shorter than the flush cadence whose process then dies
+    hard loses the whole unflushed batch (root and children together) — a
+    missing trace, never a rootless one. A trace
     therefore ALWAYS has its root, even when the process is killed mid-turn
     (SIGKILL / OOM / crash): the previous behaviour ended the root only when
     the turn's work finished, so a process that died with the root still open
