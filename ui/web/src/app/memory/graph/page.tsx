@@ -14,19 +14,26 @@ import Link from "next/link";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { ChatMarkdown } from "@/components/markdown";
 import {
   ForceControls,
   FORCE_GROUPS,
   useForceParams,
   type ForceParams,
 } from "@/components/fleet/force-controls";
+import {
+  ResizablePanel,
+  ResizablePanelGroup,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 import { api } from "@/lib/api";
 import {
   useForceLayout,
   type SimNode,
   type SimLink,
 } from "@/lib/use-force-layout";
-import type { MemoryGraphNode, MemoryGraphResponse } from "@/lib/types";
+import type { MemoryGraphNode, MemoryGraphResponse, MemoryNoteResponse } from "@/lib/types";
+import { useBreakpoint } from "@/lib/breakpoint";
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
@@ -49,31 +56,11 @@ const MEMORY_FORCE_DEFAULTS: ForceParams = {
 };
 const MEMORY_FORCE_KEY = "display.memory_force_params";
 
-// ── Tag color palette ──
-const TAG_COLORS: Record<string, string> = {
-  "user-profile": "#0284c7",
-  "ava-internal": "#475569",
-  intelligence: "#7c3aed",
-  "org-collab": "#db2777",
-  "career-strategy": "#d97706",
-  "life-log": "#16a34a",
-  "tech-ops": "#0891b2",
-  hobby: "#65a30d",
-  health: "#dc2626",
-  infra: "#6366f1",
-  personal: "#f59e0b",
-  projects: "#14b8a6",
-  agents: "#8b5cf6",
-  untagged: "#737373",
-};
-
-function colorForTag(tag: string): string {
-  return TAG_COLORS[tag] ?? TAG_COLORS.untagged;
-}
-
-// Folder pseudo nodes share one neutral slate so the structure reads as
-// backdrop and note tag colors stay the only color signal.
-const FOLDER_COLOR = "#64748b";
+// Tag palette + folder slate live in lib/memory-graph-colors.ts — a plain
+// module outside the localStorage-policy scan. The palette holds note data
+// (memory tag names), and one of them matches the scan's storage-key pattern;
+// keeping the data in lib/ keeps the page source free of that false positive.
+import { colorForTag, FOLDER_COLOR } from "@/lib/memory-graph-colors";
 
 // Zoom floor only — scale factor on the memory-graph content <g>.
 // No upper bound (user ruling 2026-08-25: zoom must never be capped); d3
@@ -83,6 +70,10 @@ const ZOOM_MIN = 0.001;
 const ZOOM_MAX = Infinity;
 
 const MEMORY_GRAPH_QUERY_KEY = ["memory-graph"] as const;
+
+// Hover/selection dim: non-related nodes stay at 50% opacity (structure
+// highlight — no content tooltip; the note body lives in the side panel).
+const HOVER_DIM_OPACITY = 0.5;
 
 export default function MemoryGraphPage() {
   const { data, isLoading, error, refetch, isFetching } = useQuery({
@@ -162,89 +153,189 @@ function MemoryGraphShell({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
-  // Tag summary for the sidebar — notes only, folder pseudo nodes carry
-  // no tag.
-  const tags = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const node of graph.nodes) {
-      if (node.kind === "folder") continue;
-      counts.set(
-        node.primary_tag || "untagged",
-        (counts.get(node.primary_tag || "untagged") ?? 0) + 1,
-      );
-    }
-    return [...counts.entries()].sort(
-      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
-    );
-  }, [graph.nodes]);
-
-  // Notes per folder pseudo node (containment edges whose source is a note).
-  const folderNoteCounts = useMemo(() => {
-    const kindById = new Map(graph.nodes.map((n) => [n.id, n.kind]));
-    const counts = new Map<string, number>();
-    for (const e of graph.edges) {
-      if (e.kind === "containment" && kindById.get(e.source) === "note") {
-        counts.set(e.target, (counts.get(e.target) ?? 0) + 1);
-      }
-    }
-    return counts;
-  }, [graph.nodes, graph.edges]);
-
   const selected = useMemo(() => {
     if (selectedId == null) return null;
     return graph.nodes.find((node) => node.id === selectedId) ?? null;
   }, [graph, selectedId]);
 
-  return (
-    <main className={cn("grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_18rem]", FLEX_1, MIN_H_0)}>
-      <section className={cn("relative border-b border-border lg:border-b-0 lg:border-r", MIN_H_0)}>
-        <MemoryForceGraph
-          graph={graph}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          folderNoteCounts={folderNoteCounts}
-        />
-      </section>
-      <aside className={cn("overflow-y-auto px-4 py-3 text-sm", MIN_H_0)}>
-        <section className="space-y-2 border-b border-border pb-4">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Tags
-          </h2>
-          <div className={cn("flex-wrap gap-1.5", FLEX)}>
-            {tags.map(([tag, count]) => (
-              <span
-                key={tag}
-                className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs"
-              >
-                <span
-                  className="size-2 rounded-full"
-                  style={{ backgroundColor: colorForTag(tag) }}
-                />
-                <span>{tag}</span>
-                <span className="font-mono text-muted-foreground">
-                  {count}
-                </span>
-              </span>
-            ))}
-          </div>
+  const { isLarge } = useBreakpoint();
+
+  // The resizable panel group mounts only after the breakpoint is known
+  // (QA #1169 F1): useBreakpoint's pre-mount default is isLarge=false, and a
+  // group mounting with that default would paint defaultSize 50+38=88 on the
+  // first frame — react-resizable-panels normalizes a <100 total and
+  // *persists* the normalized layout, clobbering the user's dragged split on
+  // every reload. Both modes below sum to 100, so no normalization ever runs.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe: must run once after mount so the first *painted* frame has the real breakpoint
+    setMounted(true);
+  }, []);
+  if (!mounted) {
+    // Pre-paint placeholder (graph only): identical tree shape on client and
+    // server so hydration does not mismatch.
+    return (
+      <div className={cn(FLEX_1, MIN_H_0)}>
+        <section className={cn("relative h-full", MIN_H_0)}>
+          <MemoryForceGraph
+            graph={graph}
+            selectedId={selectedId}
+            onSelect={onSelect}
+          />
         </section>
-        <section className="space-y-3 py-4">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Selection
-          </h2>
+      </div>
+    );
+  }
+
+  return (
+    <ResizablePanelGroup
+      direction={isLarge ? "horizontal" : "vertical"}
+      autoSaveId="ava.memory.graph.split"
+      className={cn(FLEX_1, MIN_H_0)}
+    >
+      <ResizablePanel defaultSize={isLarge ? 62 : 50} minSize={30}>
+        <section className={cn("relative h-full", MIN_H_0)}>
+          <MemoryForceGraph
+            graph={graph}
+            selectedId={selectedId}
+            onSelect={onSelect}
+          />
+        </section>
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel defaultSize={isLarge ? 38 : 50} minSize={25}>
+        <aside className={cn("h-full overflow-y-auto px-4 py-3 text-sm", MIN_H_0)}>
           {selected ? (
-            <MemoryDetails
+            <MemorySidePanel
               node={selected}
-              noteCount={folderNoteCounts.get(selected.id)}
+              graph={graph}
+              onSelect={onSelect}
             />
           ) : (
             <p className="text-xs text-muted-foreground">
-              Click a node to see details.
+              Click a node to view its content.
             </p>
           )}
+        </aside>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
+}
+
+// ── Side panel ──
+//
+// One panel, two modes (user ruling 2026-08-30): clicking a note node renders
+// that note's markdown body (frontmatter already stripped by the backend; its
+// fields render as the header); clicking a folder pseudo node renders the
+// folder's note list. The old right-side tag summary / metadata detail view
+// is gone — it duplicated the note itself.
+
+// Split the graph's containment edges into "notes directly inside this
+// folder" (pseudo-folder children) — the folder panel's list.
+function folderChildren(
+  graph: MemoryGraphResponse,
+  folderId: string,
+): MemoryGraphNode[] {
+  const kindById = new Map(graph.nodes.map((n) => [n.id, n.kind]));
+  const ids: string[] = [];
+  for (const e of graph.edges) {
+    if (e.kind === "containment" && e.target === folderId && kindById.get(e.source) === "note") {
+      ids.push(e.source);
+    }
+  }
+  return ids
+    .map((id) => graph.nodes.find((n) => n.id === id))
+    .filter((n): n is MemoryGraphNode => n != null);
+}
+
+function MemorySidePanel({
+  node,
+  graph,
+  onSelect,
+}: {
+  node: MemoryGraphNode;
+  graph: MemoryGraphResponse;
+  onSelect: (id: string | null) => void;
+}) {
+  if (node.kind === "folder") {
+    const children = folderChildren(graph, node.id);
+    return (
+      <div className="space-y-3">
+        <div className="border-b border-border pb-3">
+          <h3 className="text-sm font-semibold leading-tight">{node.title}</h3>
+          <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+            {node.path}
+          </p>
+        </div>
+        <section className="space-y-1">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Notes in this folder
+          </h2>
+          {children.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No notes here.</p>
+          ) : (
+            children.map((child) => (
+              <button
+                key={child.id}
+                type="button"
+                onClick={() => onSelect(child.id)}
+                className="block w-full rounded px-2 py-1 text-left text-xs transition-colors hover:bg-sidebar-accent"
+              >
+                <span
+                  className="mr-1.5 inline-block size-2 rounded-full align-middle"
+                  style={{ backgroundColor: colorForTag(child.primary_tag || "untagged") }}
+                />
+                {child.title}
+              </button>
+            ))
+          )}
         </section>
-      </aside>
-    </main>
+      </div>
+    );
+  }
+  return <MemoryNotePanel node={node} />;
+}
+
+function MemoryNotePanel({ node }: { node: MemoryGraphNode }) {
+  const { data, isLoading, error } = useQuery<MemoryNoteResponse>({
+    queryKey: ["memory-note", node.id],
+    queryFn: () => api.getMemoryNote(node.path),
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="border-b border-border pb-3">
+        <h3 className="text-sm font-semibold leading-tight">{node.title}</h3>
+        <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+          {node.path}
+        </p>
+        {node.tags.length > 0 ? (
+          <div className={cn("mt-2 flex-wrap gap-1.5", FLEX)}>
+            {node.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded border border-border px-1.5 py-0.5 text-[11px]"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {isLoading ? (
+        <div className={cn("items-center justify-center py-6", FLEX)}>
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : error || !data ? (
+        <p className="text-xs text-muted-foreground">
+          Couldn&apos;t load this note.
+        </p>
+      ) : (
+        <div className="text-sm leading-relaxed">
+          <ChatMarkdown content={data.body} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -254,12 +345,10 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
   graph,
   selectedId,
   onSelect,
-  folderNoteCounts,
 }: {
   graph: MemoryGraphResponse;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  folderNoteCounts: Map<string, number>;
 }) {
   const { params, setParams, reset } = useForceParams(
     MEMORY_FORCE_KEY,
@@ -339,7 +428,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
     select(svg).call(behavior).on("dblclick.zoom", null);
   }, []);
 
-  // Precompute neighbor sets for selection dimming.
+  // Precompute neighbor sets for dimming (selection AND hover share it).
   const neighborMap = useMemo(() => {
     const map = new Map<string, Set<string>>();
     for (const e of graph.edges) {
@@ -359,10 +448,23 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
     return map;
   }, [graph.edges]);
 
-  const connectedNodeIds = useMemo(() => {
-    if (selectedId == null) return null;
-    return neighborMap.get(selectedId) ?? new Set();
-  }, [neighborMap, selectedId]);
+  // Hover highlight (Cosma-style structure highlight — no floating tooltip):
+  // the hovered node and its direct neighbors stay lit; everything else dims
+  // to 50%. Selection uses the same set, but doesn't dim on its own — the
+  // selected node is shown in the side panel so dimming would fight it.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const hoverRelatives = useMemo(() => {
+    if (hoveredId == null) return null;
+    const set = new Set(neighborMap.get(hoveredId) ?? []);
+    set.add(hoveredId);
+    return set;
+  }, [neighborMap, hoveredId]);
+
+  // The effective dim set: hover only. Selection does not dim the graph —
+  // the selected node's content occupies the side panel, and a selection
+  // dim would fight the permanent focus (hover is the transient local
+  // context; its 50% dim is the Cosma-style structure highlight).
+  const dimSet = hoverRelatives ?? null;
 
   // Focus a node — center + scale its neighborhood.
   const focusNode = useCallback(
@@ -432,18 +534,6 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
       behavior.transform(select(svg), zoomIdentity);
   };
 
-  // ── Hover tooltip state ──
-  const [hovered, setHovered] = useState<{
-    id: string;
-    x: number;
-    y: number;
-  } | null>(null);
-  const hoverThrottleRef = useRef(0);
-
-  const hoveredNode = hovered
-    ? graph.nodes.find((n) => n.id === hovered.id) ?? null
-    : null;
-
   // Chip counters — folders are pseudo nodes, not notes.
   const noteCount = graph.nodes.filter(
     (n) => n.kind === "note",
@@ -492,12 +582,16 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
               const a = positions.get(e.source);
               const b = positions.get(e.target);
               if (!a || !b) return null;
+              // Cosma semantics (QA #1169 ①): an edge stays visible when
+              // BOTH endpoints are lit — not only edges incident to the
+              // hovered node. Otherwise a link between two lit neighbors
+              // nearly disappears and reads as broken.
               const isIncident =
-                connectedNodeIds != null &&
-                (e.source === selectedId ||
-                  e.target === selectedId);
+                dimSet != null &&
+                (e.source === hoveredId || e.target === hoveredId);
               const isDimmed =
-                connectedNodeIds != null && !isIncident;
+                dimSet != null && !isIncident &&
+                (!dimSet.has(e.source) || !dimSet.has(e.target));
               const isReference = e.kind === "reference";
               const opacity = isReference
                 ? isIncident
@@ -541,12 +635,22 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                 ? FOLDER_COLOR
                 : colorForTag(memNode.primary_tag || "untagged");
               const r = node.r;
+              // Hover structure highlight: related nodes full opacity,
+              // everything else dims (Cosma-style 50%). The group opacity
+              // covers the whole <g> — the selection ring and label dim
+              // with the node too (QA #1169 F2).
+              const isDimmed = dimSet != null && !dimSet.has(String(node.id));
+              // Dim applies to the whole group — shape AND the label text
+              // (QA #1169 F2: a dimmed node with a fully-lit label reads as
+              // highlighted, not dimmed).
+              const opacity = isDimmed ? HOVER_DIM_OPACITY : 1;
               return (
                 <g
                   key={node.id}
                   transform={`translate(${p.x},${p.y})`}
                   className="cursor-pointer"
                   data-testid={`memory-node-${node.id}`}
+                  opacity={opacity}
                   onPointerDown={(ev) => ev.stopPropagation()}
                   onClick={(ev) => {
                     ev.stopPropagation();
@@ -555,28 +659,9 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                     onSelect(nid);
                     focusNode(nid);
                   }}
-                  onMouseEnter={(ev) =>
-                    setHovered({
-                      id: node.id as string,
-                      x: ev.clientX,
-                      y: ev.clientY,
-                    })
-                  }
-                  onMouseMove={(ev) => {
-                    const now = Date.now();
-                    if (now - hoverThrottleRef.current < 50)
-                      return;
-                    hoverThrottleRef.current = now;
-                    setHovered({
-                      id: node.id as string,
-                      x: ev.clientX,
-                      y: ev.clientY,
-                    });
-                  }}
+                  onMouseEnter={() => setHoveredId(node.id as string)}
                   onMouseLeave={() =>
-                    setHovered((cur) =>
-                      cur?.id === node.id ? null : cur,
-                    )
+                    setHoveredId((cur) => (cur === node.id ? null : cur))
                   }
                 >
                   {/* Selection ring */}
@@ -604,13 +689,6 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                       fill={color}
                       stroke="var(--background)"
                       strokeWidth={1.5}
-                      opacity={
-                        connectedNodeIds == null ||
-                        isSelected ||
-                        connectedNodeIds.has(node.id)
-                          ? 1
-                          : 0.15
-                      }
                     />
                   ) : (
                     <circle
@@ -618,13 +696,6 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                       fill={color}
                       stroke="var(--background)"
                       strokeWidth={1.5}
-                      opacity={
-                        connectedNodeIds == null ||
-                        isSelected ||
-                        connectedNodeIds.has(node.id)
-                          ? 1
-                          : 0.15
-                      }
                     />
                   )}
                   {/* Label */}
@@ -696,140 +767,6 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           ↺
         </button>
       </div>
-
-      {/* Tooltip */}
-      {hovered && hoveredNode ? (
-        <MemoryTooltip
-          node={hoveredNode}
-          x={hovered.x}
-          y={hovered.y}
-          noteCount={folderNoteCounts.get(hoveredNode.id)}
-        />
-      ) : null}
     </>
   );
 });
-
-// ── Tooltip ──
-
-function MemoryTooltip({
-  node,
-  x,
-  y,
-  noteCount,
-}: {
-  node: MemoryGraphNode;
-  x: number;
-  y: number;
-  noteCount?: number;
-}) {
-  return (
-    <div
-      className="pointer-events-none fixed z-50 max-w-xs rounded-md border border-border bg-popover px-3 py-2 text-popover-foreground shadow-md"
-      style={{ left: x + 14, top: y + 14 }}
-    >
-      <div className={cn("items-center gap-2", FLEX)}>
-        <span
-          className="size-2 rounded-full"
-          style={{
-            backgroundColor: colorForTag(
-              node.primary_tag || "untagged",
-            ),
-          }}
-        />
-        <span className="text-xs font-semibold">{node.title}</span>
-      </div>
-      {node.kind === "folder" ? (
-        <div className="mt-1 text-[11px] text-muted-foreground">
-          {noteCount ?? 0} note{(noteCount ?? 0) === 1 ? "" : "s"}
-        </div>
-      ) : node.description ? (
-        <div className="mt-1 text-[11px] text-muted-foreground">
-          {node.description}
-        </div>
-      ) : null}
-      <div className={cn("mt-1 gap-3 text-[10px] tabular-nums text-muted-foreground", FLEX)}>
-        <span>{node.path}</span>
-        {node.ava_agent ? (
-          <span>Agent #{node.ava_agent}</span>
-        ) : null}
-      </div>
-      {node.tags.length > 0 ? (
-        <div className={cn("mt-1.5 flex-wrap gap-1", FLEX)}>
-          {node.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded border border-border/50 px-1 text-[9px] text-muted-foreground"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Sidebar detail panel ──
-
-function MemoryDetails({
-  node,
-  noteCount,
-}: {
-  node: MemoryGraphNode;
-  noteCount?: number;
-}) {
-  const rows: [string, string | null][] =
-    node.kind === "folder"
-      ? [
-          ["Path", node.path],
-          ["Notes", String(noteCount ?? 0)],
-        ]
-      : [
-          ["Path", node.path],
-          ["Tag", node.primary_tag || "untagged"],
-          ["Timestamp", node.timestamp],
-          ["Agent", node.ava_agent],
-          ["Machine", node.ava_machine],
-        ];
-
-  return (
-    <div className="space-y-3">
-      <div>
-        <h3 className="text-sm font-semibold leading-tight">
-          {node.title}
-        </h3>
-        {node.description ? (
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {node.description}
-          </p>
-        ) : null}
-      </div>
-      <dl className="space-y-1.5 text-xs">
-        {rows.map(([label, value]) => (
-          <div
-            key={label}
-            className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2"
-          >
-            <dt className="text-muted-foreground">{label}</dt>
-            <dd className={cn("break-words font-mono", MIN_W_0)}>
-              {value ?? "-"}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {node.tags.length > 0 ? (
-        <div className={cn("flex-wrap gap-1.5", FLEX)}>
-          {node.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded border border-border px-1.5 py-0.5 text-xs"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}

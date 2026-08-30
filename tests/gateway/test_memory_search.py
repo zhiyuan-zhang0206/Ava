@@ -1262,3 +1262,163 @@ def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
         assert _gw_memory._search_semaphore()._value == 7  # pyright: ignore[reportUnknownMemberType]
     finally:
         _gw_memory._search_semaphore.cache_clear()
+
+
+class TestMemoryNoteEndpoint:
+    """GET /api/memory/note — one parsed note by relative path."""
+
+    def test_note_returns_parsed_body_without_frontmatter(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The body is the markdown with the YAML frontmatter stripped, and
+        frontmatter values arrive as structured fields."""
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        (tmp_path / "alpha.md").write_text(
+            """---
+type: Memory
+title: Alpha
+description: First note
+tags: [ava-internal, tech-ops]
+timestamp: '2026-06-18T10:00:00Z'
+ava_agent: '7'
+ava_machine: test-host
+---
+
+# Alpha
+
+Body **with** markdown.
+""",
+            encoding="utf-8",
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/api/memory/note", params={"path": "alpha.md"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["path"] == "alpha.md"
+        assert body["title"] == "Alpha"
+        assert body["description"] == "First note"
+        assert body["tags"] == ["ava-internal", "tech-ops"]
+        assert body["timestamp"] == "2026-06-18T10:00:00Z"
+        assert body["ava_agent"] == "7"
+        assert body["ava_machine"] == "test-host"
+        # The parser contract: body starts right after the closing fence
+        # (a leading blank line is normal for a note's body).
+        assert body["body"] == "\n# Alpha\n\nBody **with** markdown.\n"
+        assert "---" not in body["body"]
+
+    def test_note_in_subdirectory(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Nested notes resolve by their relative path (the graph's node path)."""
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        (tmp_path / "health").mkdir()
+        (tmp_path / "health" / "overview.md").write_text(
+            """---
+type: Memory
+title: Overview
+tags: [health]
+---
+
+# Body
+""",
+            encoding="utf-8",
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/api/memory/note", params={"path": "health/overview.md"})
+
+        assert resp.status_code == 200
+        assert resp.json()["path"] == "health/overview.md"
+        assert resp.json()["body"] == "\n# Body\n"
+
+    def test_note_missing_returns_404(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        with TestClient(app) as client:
+            resp = client.get("/api/memory/note", params={"path": "missing.md"})
+        assert resp.status_code == 404
+
+    def test_note_traversal_returns_404(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Traversal paths are rejected, not resolved — no filesystem leak."""
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        (tmp_path / "secret.md").write_text(
+            """---
+type: Memory
+title: Secret
+---
+
+# S
+""",
+            encoding="utf-8",
+        )
+        # NOTE: no literal "%2F" in `bad` — httpx percent-encodes it again
+        # (%252F), so the server sees a plain filename and the test would pass
+        # against any implementation (empty pin). "..%2Fsecret.md" on the wire
+        # (from "../secret.md") exercises the real encoded-traversal case.
+        for bad in ("../secret.md", "/etc/passwd", "alpha"):
+            with TestClient(app) as client:
+                resp = client.get("/api/memory/note", params={"path": bad})
+            assert resp.status_code == 404, bad
+
+    def test_note_without_frontmatter_is_404(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A .md file that is not a note (no frontmatter) is not a note."""
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        (tmp_path / "plain.md").write_text("# Just a heading\n", encoding="utf-8")
+        with TestClient(app) as client:
+            resp = client.get("/api/memory/note", params={"path": "plain.md"})
+        assert resp.status_code == 404
+
+    def test_note_null_byte_path_is_404_not_500(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A path with an embedded null byte must be 404 (QA #1169 F3).
+
+        `Path.resolve()` / `is_file()` raise ValueError on such paths
+        (lstat: embedded null character); the endpoint's failure surface must
+        map every unresolvable path to 404 rather than escaping as a 500.
+        """
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        with TestClient(app) as client:
+            resp = client.get("/api/memory/note", params={"path": "ok\x00.md"})
+        assert resp.status_code == 404
+
+    def test_note_traversal_slash_rules(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`foo.md/../bar.md` resolves inside the root and is a plain read —
+        a non-canonical-but-in-root path is legal, only escapes are 404."""
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        (tmp_path / "bar.md").write_text(
+            """---
+type: Memory
+title: Bar
+tags: [tech-ops]
+---
+
+# Bar
+""",
+            encoding="utf-8",
+        )
+        with TestClient(app) as client:
+            resp = client.get("/api/memory/note", params={"path": "bar.md/../bar.md"})
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Bar"

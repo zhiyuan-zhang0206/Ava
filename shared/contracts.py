@@ -287,6 +287,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/routers/memory.py ───────────────────────────────────
     ("GET", "/api/memory/graph"): RouteContract(),
+    ("GET", "/api/memory/note"): RouteContract(note="pure read — one note by relative path"),
     ("GET", "/api/memory/pool"): RouteContract(
         note="pure read — consolidated pool git bundle for split-runner bootstrap"
     ),

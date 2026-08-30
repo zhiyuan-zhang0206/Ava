@@ -11,7 +11,9 @@ import remarkAutolinkDelimiter from "@/lib/remark-autolink-delimiter";
 import remarkCjkLinkBoundary from "@/lib/remark-cjk-link-boundary";
 import { cn } from "@/lib/utils";
 
-// Only used for chat items. user / info / error stay as plain text.
+// Renders agent chat items and the memory-note side panel body (same
+// markdown surface: GFM tables, fenced code, safe links). user / info /
+// error stay as plain text.
 //
 // Security:
 // - rehype-raw is disabled → any raw HTML (e.g. <script>) is treated as text

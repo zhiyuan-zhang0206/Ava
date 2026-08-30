@@ -5492,6 +5492,46 @@
         }
       }
     },
+    "/api/memory/note": {
+      "get": {
+        "summary": "Get Memory Note",
+        "description": "Return one parsed memory note by its **relative** path (sans frontmatter).\n\n`path` is a memory-pool-relative markdown path as the graph carries it\n(e.g. `health/user-health-overview.md`). Resolved inside the memory root\nonly — traversal (`..`, absolute paths) is rejected with 404 rather than\nleaking filesystem structure. A file that is not a note (no/invalid\nfrontmatter) is not a note either: 404. The response carries the parsed\nfields plus the markdown body with the YAML frontmatter already stripped.",
+        "operationId": "get_memory_note_api_memory_note_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryNoteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/memory/pool": {
       "get": {
         "summary": "Get Memory Pool",
@@ -10194,6 +10234,86 @@
         ],
         "title": "MemoryGraphResponse",
         "description": "GET /api/memory/graph response."
+      },
+      "MemoryNoteResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "ava_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ava Agent"
+          },
+          "ava_machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ava Machine"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "title",
+          "description",
+          "tags",
+          "timestamp",
+          "ava_agent",
+          "ava_machine",
+          "body"
+        ],
+        "title": "MemoryNoteResponse",
+        "description": "GET /api/memory/note response — one parsed memory note.\n\nMirrors MemoryGraphNode plus the parsed markdown body. The body is the\nmarkdown with the YAML frontmatter removed (shared.parse_note's body), so\nthe frontend renders the note itself rather than re-parsing frontmatter\n(frontmatter values arrive as structured fields: title / description /\ntags / timestamp / ava_agent / ava_machine)."
       },
       "MemoryRefreshResponse": {
         "properties": {
