@@ -342,7 +342,8 @@ def wal_evidence_common(
 
     ``bucket_name`` carries the backend's store target (the GCS bucket or
     the Baidu app root) and ``generation`` the backend's pin token (the GCS
-    object generation or the Baidu ``fs_id:content-md5`` identity);
+    object generation or the Baidu ``fs_id:server-md5`` row identity — the
+    server digest never equals the content md5);
     ``ciphertext_crc32c`` holds the backend-verified checksum, whose shape
     the evidence validator dispatches on by backend.
     """
