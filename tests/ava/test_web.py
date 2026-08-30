@@ -140,7 +140,7 @@ def test_http_error_raises_with_detail(monkeypatch: pytest.MonkeyPatch) -> None:
     diagnose (rate limit / invalid param / expired key)."""
     monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
     http_err = urllib.error.HTTPError(
-        url="https://api.search.brave.com/res/v1/web/search",
+        url=settings.web.web_brave_search_endpoint,
         code=429,
         msg="Too Many Requests",
         hdrs=None,  # type: ignore[arg-type]
@@ -168,7 +168,7 @@ def test_transient_429_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) ->
     upstream recovers — pre-R2 a 429 failed the whole search."""
     monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
     http_err = urllib.error.HTTPError(
-        url="https://api.search.brave.com/res/v1/web/search",
+        url=settings.web.web_brave_search_endpoint,
         code=429,
         msg="Too Many Requests",
         hdrs=None,  # type: ignore[arg-type]
@@ -195,7 +195,7 @@ def test_persistent_429_exhausts_retries(monkeypatch: pytest.MonkeyPatch) -> Non
     never silently swallowed (R2-D D3: idempotent reads fail loud)."""
     monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
     http_err = urllib.error.HTTPError(
-        url="https://api.search.brave.com/res/v1/web/search",
+        url=settings.web.web_brave_search_endpoint,
         code=429,
         msg="Too Many Requests",
         hdrs=None,  # type: ignore[arg-type]
@@ -274,6 +274,37 @@ def test_search_result_str_format() -> None:
     """The format of `print(r)` for later LLM context when concatenating multiple results — kind prefix + 3-line block stable."""
     r = ava.web.SearchResult(title="Foo", url="https://example.com", snippet="A foo page.")
     assert str(r) == "[web] Foo\n  https://example.com\n  A foo page."
+
+
+def test_endpoint_defaults_pin_before_literals() -> None:
+    """The settings defaults must stay byte-identical to the URLs the module
+    used to hard-code — a future default drift breaks the 'behavior unchanged'
+    contract that the other endpoint tests assume (they reference the settings
+    values, so they cannot catch it themselves)."""
+    assert (
+        settings.web.web_brave_search_endpoint == "https://api.search.brave.com/res/v1/web/search"
+    )
+    assert settings.web.web_jina_reader_base == "https://r.jina.ai/"
+
+
+def test_search_hits_configured_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Brave endpoint is configurable (`AVA_WEB_BRAVE_SEARCH_ENDPOINT`) —
+    the request must dial the configured URL, not a baked-in literal."""
+    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    monkeypatch.setattr(
+        settings.web, "web_brave_search_endpoint", "https://search.relay.example/api"
+    )
+    captured: dict[str, str] = {}
+
+    def _capture(req: Any, timeout: Any):
+        captured["url"] = req.full_url
+        return _FakeResp(
+            _make_brave_response([{"title": "t", "url": "https://a.com", "description": "d"}])
+        )
+
+    with patch("ava.web.urllib.request.urlopen", side_effect=_capture):
+        ava.web.search(["query"])
+    assert captured["url"].startswith("https://search.relay.example/api?")
 
 
 # ─── search signature ───
@@ -636,9 +667,27 @@ def test_fetch_url_encodes_target(
     with patch("ava.web.urllib.request.urlopen", side_effect=_capture):
         ava.web.fetch([("https://example.com/search?q=hello world", "summarize")])
     # spaces should become %20, other URL structure (scheme / :/ / ?&=) preserved
-    assert captured["url"].startswith("https://r.jina.ai/https://example.com/")
+    assert captured["url"].startswith(settings.web.web_jina_reader_base + "https://example.com/")
     assert "%20" in captured["url"]
     assert "?q=hello" in captured["url"]
+
+
+def test_fetch_hits_configured_reader_base(
+    monkeypatch: pytest.MonkeyPatch, mock_llm: dict[str, Any]
+) -> None:
+    """The Jina Reader base is configurable (`AVA_WEB_JINA_BASE_URL`) — the
+    request must dial the configured base, not a baked-in literal."""
+    monkeypatch.setattr(settings.web, "jina_api_key", None)
+    monkeypatch.setattr(settings.web, "web_jina_reader_base", "https://reader.relay.example/")
+    captured: dict[str, str] = {}
+
+    def _capture(req: Any, timeout: Any):
+        captured["url"] = req.full_url
+        return _FakeResp(_make_jina_response(content="ok"))
+
+    with patch("ava.web.urllib.request.urlopen", side_effect=_capture):
+        ava.web.fetch([("https://example.com", "summarize")])
+    assert captured["url"].startswith("https://reader.relay.example/https://example.com")
 
 
 def test_fetch_jina_business_error_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -658,7 +707,7 @@ def test_fetch_http_error_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """HTTP layer error (429 rate limit / 503 downstream down) must include upstream body in traceback."""
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     http_err = urllib.error.HTTPError(
-        url="https://r.jina.ai/...",
+        url=settings.web.web_jina_reader_base + "...",
         code=429,
         msg="Too Many Requests",
         hdrs=None,  # type: ignore[arg-type]
