@@ -445,8 +445,10 @@ def test_nonzero_indexed_slice_rewrites_day(
     )
 
     assert result == RollupResult(day, day, 1, 1)
-    assert _fetch_tokens(db)[(aid, str(day), "m1")] == (3, 3, 3, 3, 3, 3.0, 3, 0)
-    assert _fetch_metrics(db)[(aid, str(day))] == (3, 3, 3.0, 1.0, 2.0, {"1": 3}, 3, 3)
+    # LEGACY_READ_EXPIRES_AT (a fixed instant, already passed) makes the
+    # cutover day a single INDEXED slice, so only indexed_value=2.0 lands.
+    assert _fetch_tokens(db)[(aid, str(day), "m1")] == (2, 2, 2, 2, 2, 2.0, 2, 0)
+    assert _fetch_metrics(db)[(aid, str(day))] == (2, 2, 2.0, 2.0, 2.0, {"1": 2}, 2, 2)
 
 
 def test_retention_clamp_never_rewrites_archive_days(
