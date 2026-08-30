@@ -38,15 +38,9 @@ class CosProtectedManifestPublisher:
         digest = hashlib.md5(payload).hexdigest()  # noqa: S324 — manifest ACK digest
         created = True
         try:
-            row = self._client.put_object_bytes(object_name, body=payload, metadata=metadata)
+            self._client.put_object_bytes(object_name, body=payload, metadata=metadata)
         except CosPreconditionFailedError:
             created = False
-            existing = self._client.head_object(object_name)
-            if existing is None:
-                raise TransientObjectStoreError(
-                    "protected manifest precondition raced with a missing object"
-                ) from None
-            row = existing
         except CosTransientError as exc:
             raise TransientObjectStoreError(
                 "protected manifest publication temporarily failed"
@@ -55,10 +49,13 @@ class CosProtectedManifestPublisher:
             raise PermanentObjectStoreError(
                 f"protected manifest publication was rejected: {exc}"
             ) from exc
-        if row.etag != digest:
-            raise PermanentObjectStoreError(
-                "immutable protected manifest ETag differs from its payload"
+        row = self._client.head_object(object_name)
+        if row is None:
+            raise TransientObjectStoreError(
+                "protected manifest precondition raced with a missing object"
             )
+        if row.etag != digest or row.size != len(payload) or dict(row.metadata) != metadata:
+            raise PermanentObjectStoreError("immutable protected manifest differs from its payload")
         body = self._client.get_object_bytes(object_name)
         if body is None or body != payload:
             raise PermanentObjectStoreError("immutable protected manifest differs")
@@ -67,6 +64,6 @@ class CosProtectedManifestPublisher:
             pin_token=row.etag,
             size=len(payload),
             checksum=ObjectChecksum(MD5, digest),
-            metadata=dict(metadata),
+            metadata=dict(row.metadata),
             created=created,
         )
