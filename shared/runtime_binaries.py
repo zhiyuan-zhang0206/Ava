@@ -243,17 +243,23 @@ def ensure_pgvector() -> None:
     `share/postgresql/extension/`.
 
     Called by converge right after `ensure_pg_binaries()`, and by the CI smoke
-    gate. Detection is the version-named install SQL file, so a future
-    re-pin re-injects instead of silently leaving the old files in place.
+    gate. Detection is the version-named install SQL file PLUS the platform
+    module file — a future re-pin, or a partially deleted injection, re-injects
+    instead of silently leaving stale/absent files in place.
     """
     pg_dir = vendored_pg_dir()
-    if (pg_dir / "share/postgresql/extension" / _PGVECTOR_SQL).exists():
+    key = _pgvector_platform_key()
+    module_rel = (
+        "lib/postgresql/vector.dylib" if key.startswith("darwin") else "lib/postgresql/vector.so"
+    )
+    if (pg_dir / "share/postgresql/extension" / _PGVECTOR_SQL).exists() and (
+        pg_dir / module_rel
+    ).exists():
         return
     if not (pg_dir / "bin" / "initdb").exists():
         raise RuntimeError(
             f"vendored Postgres tree missing at {pg_dir} — ensure_pg_binaries() must run first"
         )
-    key = _pgvector_platform_key()
     url, expected_sha = _PGVECTOR_ARTIFACTS[key]
     logger.info(f"[runtime] fetching pgvector {_PGVECTOR_VERSION} ({key}) from {url}")
     blob = _download_ghcr_blob(url) if url.startswith("https://ghcr.io/") else _download(url)

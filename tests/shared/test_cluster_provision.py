@@ -269,3 +269,17 @@ def test_ensure_pgvector_extension_precreates_in_cluster_db(
     assert len(urls) == 2
     assert urlsplit(urls[1]).path == "/ava_ident"
     assert conns[1].executed == ["CREATE EXTENSION IF NOT EXISTS vector"]
+
+
+def test_ensure_pgvector_extension_noop_on_connect_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreachable admin connection is a logged no-op (the ensure re-runs on
+    every bring-up), never a birth-killing raise."""
+    from shared.cluster.provision import ensure_pgvector_extension
+
+    def boom(url: str, **_kw: object) -> _FakePgConn:
+        raise psycopg.OperationalError("connection is bad")
+
+    monkeypatch.setattr(psycopg, "connect", boom)
+    ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
