@@ -48,6 +48,11 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 - `install.sh --mirror cn`: route PyPI / npm / Homebrew through China mirrors.
 
 ### Changed
+- Cross-machine file transfer no longer hard-requires a shared Google Drive
+  folder: `AVA_REQUIRE_GOOGLE_DRIVE` is replaced by the configurable
+  `AVA_CROSS_MACHINE_TRANSFER_BACKEND` (`drive` | `none`, default `drive`), and
+  the agent-runner converge step probes the backend and warns instead of
+  blocking start when Drive is unavailable.
 - The local trace mirror now stays disk-bounded end to end: the collector's
   file exporter rotates `spans.jsonl` at 64 MiB (was 256) with 24 backups,
   old segments are gzipped to `.jsonl.gz` by an agent-start pass (5-10x
