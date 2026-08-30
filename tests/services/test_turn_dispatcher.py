@@ -87,6 +87,19 @@ class TestBasicDispatch:
 
         assert rec.started == [7, 7]
 
+    async def test_a_wake_materializes_the_task_without_any_await(self) -> None:
+        """The wake -> turn-task path is pure in-memory: `wake()` creates the
+        task synchronously, with no await between the wake and task creation.
+        That is the ms-level wake latency the hosted design calls for, asserted
+        structurally (a wall-clock bound would be CI flake bait)."""
+        rec = _Recorder()
+        sched = TurnScheduler(rec)
+
+        assert sched.active_agents == frozenset()
+        sched.wake(7)
+        assert 7 in sched.active_agents, "the turn task must exist before any await"
+        await _settle()
+
 
 class TestSerializationAndConcurrency:
     async def test_one_agents_turns_never_overlap(self) -> None:

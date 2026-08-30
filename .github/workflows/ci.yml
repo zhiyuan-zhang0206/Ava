@@ -579,14 +579,19 @@ jobs:
         run: uv run playwright install --with-deps chromium
 
       - name: Run hosted e2e tests
-        # Three tests, one worker: each test starts its own function-scoped
+        # Five tests, one worker: each test starts its own function-scoped
         # gateway + ops + agent-host, so serial keeps the run simple and the
-        # logs unambiguous.
+        # logs unambiguous. message_flow / self_restart / self_terminate are
+        # the original hosted net; compact and resurrect ride the same
+        # in-process channels (compact routes INIT_CONTEXT inside the turn;
+        # resurrect flips the row + wakes the dispatcher) and lock them too.
         run: >
           uv run pytest
           tests/e2e/test_message_flow.py
           tests/e2e/test_self_restart.py
           tests/e2e/test_self_terminate.py
+          tests/e2e/test_compact_flow.py
+          tests/e2e/test_self_resurrect.py
           -v -n 1
 
       - name: Upload e2e logs on failure
