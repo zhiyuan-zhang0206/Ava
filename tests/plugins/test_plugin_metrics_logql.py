@@ -198,15 +198,15 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
 
     specs = {spec.name: spec for spec in _load_core()}
     assert _METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
-    assert specs["core_agent_max_id"].query == (
-        f"ava_agent_registry_{_strip_unit_suffix('max_id')}_ratio"
-    )
+    gauge = f"ava_agent_registry_{_strip_unit_suffix('max_id')}_ratio"
+    # The gauge is per gateway process (a new series per restart), so the
+    # panels collapse it with max() — the visible curve is the registry
+    # high-water mark, not N overlapping per-lifetime series.
+    assert specs["core_agent_max_id"].query == f"max({gauge})"
     assert specs["core_agent_max_id"].query_type == "promql"
     assert specs["core_agent_max_id"].panel == "timeseries"
     assert specs["core_agent_max_id_growth_rate"].query_type == "promql"
-    assert "deriv(ava_agent_registry_max_id_ratio[1h])" in (
-        specs["core_agent_max_id_growth_rate"].query
-    )
+    assert f"deriv(max({gauge})[1h:])" in (specs["core_agent_max_id_growth_rate"].query)
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:
@@ -241,7 +241,7 @@ def test_cost_dashboard_windows_and_telemetry_contract() -> None:
         "Tokens",
         "LLM cost estimate — day pace",
         "LLM cost estimate — 30-day pace",
-        "Daily LLM cost",
+        "LLM cost / minute",
     ):
         assert "timeFrom" not in by_title[title]
         assert "interval" not in by_title[title]
@@ -250,7 +250,7 @@ def test_cost_dashboard_windows_and_telemetry_contract() -> None:
     for title in (
         "LLM cost estimate — day pace",
         "LLM cost estimate — 30-day pace",
-        "Daily LLM cost",
+        "LLM cost / minute",
         "LLM cost by model (Top 20)",
         "LLM cost by agent (Top 20)",
     ):
