@@ -426,16 +426,17 @@ def get_memory_note(path: str) -> MemoryNoteResponse:
     rel = Path(path)
     if rel.is_absolute() or rel.suffix != ".md":
         raise HTTPException(status_code=404, detail="memory note not found")
-    candidate = (root / rel).resolve()
+    # Everything below is one failure surface: a path that cannot be resolved
+    # (null bytes in lstat raise ValueError on POSIX), escapes the root, is
+    # missing, or is unreadable is uniformly "not a note" — 404, never 500
+    # (QA #1169 F3: `ok%00.md` used to escape as an uncaught ValueError).
     try:
+        candidate = (root / rel).resolve()
         candidate.relative_to(root)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="memory note not found") from None
-    if not candidate.is_file():
-        raise HTTPException(status_code=404, detail="memory note not found")
-    try:
+        if not candidate.is_file():
+            raise FileNotFoundError
         text = candidate.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    except (ValueError, OSError, UnicodeDecodeError):
         raise HTTPException(status_code=404, detail="memory note not found") from None
     note = parse_note(text, rel.with_suffix("").as_posix())
     if note is None:

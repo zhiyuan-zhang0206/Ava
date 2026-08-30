@@ -160,6 +160,33 @@ function MemoryGraphShell({
 
   const { isLarge } = useBreakpoint();
 
+  // The resizable panel group mounts only after the breakpoint is known
+  // (QA #1169 F1): useBreakpoint's pre-mount default is isLarge=false, and a
+  // group mounting with that default would paint defaultSize 50+38=88 on the
+  // first frame — react-resizable-panels normalizes a <100 total and
+  // *persists* the normalized layout, clobbering the user's dragged split on
+  // every reload. Both modes below sum to 100, so no normalization ever runs.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe: must run once after mount so the first *painted* frame has the real breakpoint
+    setMounted(true);
+  }, []);
+  if (!mounted) {
+    // Pre-paint placeholder (graph only): identical tree shape on client and
+    // server so hydration does not mismatch.
+    return (
+      <div className={cn(FLEX_1, MIN_H_0)}>
+        <section className={cn("relative h-full", MIN_H_0)}>
+          <MemoryForceGraph
+            graph={graph}
+            selectedId={selectedId}
+            onSelect={onSelect}
+          />
+        </section>
+      </div>
+    );
+  }
+
   return (
     <ResizablePanelGroup
       direction={isLarge ? "horizontal" : "vertical"}
@@ -176,7 +203,7 @@ function MemoryGraphShell({
         </section>
       </ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel defaultSize={38} minSize={25}>
+      <ResizablePanel defaultSize={isLarge ? 38 : 50} minSize={25}>
         <aside className={cn("h-full overflow-y-auto px-4 py-3 text-sm", MIN_H_0)}>
           {selected ? (
             <MemorySidePanel
@@ -555,10 +582,16 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
               const a = positions.get(e.source);
               const b = positions.get(e.target);
               if (!a || !b) return null;
+              // Cosma semantics (QA #1169 ①): an edge stays visible when
+              // BOTH endpoints are lit — not only edges incident to the
+              // hovered node. Otherwise a link between two lit neighbors
+              // nearly disappears and reads as broken.
               const isIncident =
                 dimSet != null &&
                 (e.source === hoveredId || e.target === hoveredId);
-              const isDimmed = dimSet != null && !isIncident;
+              const isDimmed =
+                dimSet != null && !isIncident &&
+                (!dimSet.has(e.source) || !dimSet.has(e.target));
               const isReference = e.kind === "reference";
               const opacity = isReference
                 ? isIncident
@@ -605,14 +638,18 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
               // Hover structure highlight: related nodes full opacity,
               // everything else dims (Cosma-style 50%). Native opacity is
               // only used here; selection keeps its ring without dimming.
-              const dimmed = dimSet != null && !dimSet.has(String(node.id));
-              const opacity = dimmed ? HOVER_DIM_OPACITY : 1;
+              const isDimmed = dimSet != null && !dimSet.has(String(node.id));
+              // Dim applies to the whole group — shape AND the label text
+              // (QA #1169 F2: a dimmed node with a fully-lit label reads as
+              // highlighted, not dimmed).
+              const opacity = isDimmed ? HOVER_DIM_OPACITY : 1;
               return (
                 <g
                   key={node.id}
                   transform={`translate(${p.x},${p.y})`}
                   className="cursor-pointer"
                   data-testid={`memory-node-${node.id}`}
+                  opacity={opacity}
                   onPointerDown={(ev) => ev.stopPropagation()}
                   onClick={(ev) => {
                     ev.stopPropagation();
@@ -651,7 +688,6 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                       fill={color}
                       stroke="var(--background)"
                       strokeWidth={1.5}
-                      opacity={opacity}
                     />
                   ) : (
                     <circle
@@ -659,7 +695,6 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                       fill={color}
                       stroke="var(--background)"
                       strokeWidth={1.5}
-                      opacity={opacity}
                     />
                   )}
                   {/* Label */}

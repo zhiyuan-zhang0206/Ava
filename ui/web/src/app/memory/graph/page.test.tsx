@@ -18,10 +18,6 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-// react-resizable-panels needs a layout with real panel sizes for the split
-// to settle; give the ResizableHandle an explicit size so the handle renders.
-
-
 // Breakpoint — desktop by default (horizontal side-by-side split).
 vi.mock("@/lib/breakpoint", () => ({
   useBreakpoint: () => ({ isLarge: true, isNarrow: false, tier: "xl" }),
@@ -221,28 +217,61 @@ describe("Memory graph page", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
     fireEvent.mouseEnter(node);
 
-    // Dimmed nodes get opacity 0.5 via the shape; the hovered node and its
-    // direct neighbors keep 1.
-    const shapeOf = (id: string) =>
-      container.querySelector(
-        `[data-testid="memory-node-${id}"] circle, [data-testid="memory-node-${id}"] rect`,
-      )!;
+    // Dimmed nodes get opacity 0.5 on the GROUP (shape + label together —
+    // QA #1169 F2); the hovered node and its direct neighbors keep 1.
+    const groupOf = (id: string) =>
+      container.querySelector(`[data-testid="memory-node-${id}"]`)!;
     await waitFor(() => {
-      expect(shapeOf("gamma.md").getAttribute("opacity")).toBe("0.5");
+      expect(groupOf("gamma.md").getAttribute("opacity")).toBe("0.5");
     });
-    expect(shapeOf("alpha.md").getAttribute("opacity")).toBe("1");
-    expect(shapeOf("beta.md").getAttribute("opacity")).toBe("1");
-    expect(shapeOf("/").getAttribute("opacity")).toBe("1");
+    expect(groupOf("alpha.md").getAttribute("opacity")).toBe("1");
+    expect(groupOf("beta.md").getAttribute("opacity")).toBe("1");
+    expect(groupOf("/").getAttribute("opacity")).toBe("1");
+    // The dimmed node's label text dims with it (group opacity, not shape).
+    const gammaLabel = groupOf("gamma.md").querySelector("text")!;
+    expect(gammaLabel.getAttribute("opacity")).toBeNull(); // inherits group
     // No tooltip ever renders.
     expect(screen.queryByRole("tooltip")).toBeNull();
 
     fireEvent.mouseLeave(node);
     await waitFor(() => {
-      expect(shapeOf("gamma.md").getAttribute("opacity")).toBe("1");
+      expect(groupOf("gamma.md").getAttribute("opacity")).toBe("1");
     });
   });
 
-  it("clicking a folder node lists its notes", async () => {
+    it("keeps edges between two LIT nodes visible even when non-incident", async () => {
+    // Hover alpha. alpha's one-hop neighborhood = {beta, /} (reference +
+    // containment edges). The beta→/ containment edge has BOTH endpoints in
+    // the lit set but touches neither the hovered node — under the old
+    // incident-only rule it dimmed to 0.06 and nearly vanished. Cosma rule
+    // (QA #1169 observation ①): both-lit edges stay visible.
+    mockGetMemoryGraph.mockResolvedValue(seed());
+    const { container } = wrap();
+    const node = await waitFor(
+      () => screen.getByTestId("memory-node-alpha.md"),
+      { timeout: 4000 },
+    );
+    fireEvent.mouseEnter(node);
+
+    const graphSvg = container.querySelector(
+      'svg[aria-label="Memory note graph"]',
+    )!;
+    const edges = [...graphSvg.querySelectorAll("line")];
+    // alpha↔beta reference: incident to hovered → bright (0.6).
+    const referenceEdges = edges.filter((l) =>
+      l.hasAttribute("stroke-dasharray"),
+    );
+    expect(referenceEdges).toHaveLength(1);
+    expect(referenceEdges[0].getAttribute("stroke-opacity")).toBe("0.6");
+    // Containment edges: alpha→/ is incident (0.85); beta→/ is both-lit AND
+    // non-incident — must NOT be dimmed (0.35 base, not 0.06).
+    const solidEdgeOpacities = edges
+      .filter((l) => !l.hasAttribute("stroke-dasharray"))
+      .map((l) => l.getAttribute("stroke-opacity"));
+    expect(solidEdgeOpacities.sort()).toEqual(["0.35", "0.85"]);
+  });
+
+it("clicking a folder node lists its notes", async () => {
     mockGetMemoryGraph.mockResolvedValue(seed());
     wrap();
 
