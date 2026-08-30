@@ -25,6 +25,7 @@ from services.pitr.activation_credentials import (
     credential_identity,
     probe_baidu_read_access,
     probe_bucket_read_access,
+    require_store_config,
 )
 from services.pitr.activation_lease import run_while_renewing
 from services.pitr.activation_observability import save_error as _save_error
@@ -246,8 +247,7 @@ def _shadow_readiness() -> ShadowReadiness:
         if not directory.is_dir() or directory.is_symlink() or _mode(directory) != 0o700:
             raise RuntimeError(f"private PITR directory is unsafe: {directory}")
     credential_evidence = _validate_secrets()
-    if not config.pitr_gcs_bucket or not config.pitr_gcs_prefix:
-        raise RuntimeError("PITR bucket and prefix must be configured")
+    require_store_config(config)
     if config.pitr_enabled or config.pitr_base_backup_enabled or config.pitr_restore_proof_enabled:
         raise RuntimeError("shadow readiness requires all PITR service flags to remain off")
     pg_version = (ava_home() / "pg" / "PG_VERSION").read_text().strip()
