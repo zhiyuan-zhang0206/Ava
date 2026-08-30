@@ -9,14 +9,19 @@ shapes and the fail-closed path.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
 import tarfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from services.pitr.checksums import MD5, ObjectChecksum
+from services.pitr.object_store import RemoteObjectAck
 
 _MOD_PATH = Path(__file__).resolve().parents[2] / "scripts" / "pitr_migrate_gcs_to_baidu.py"
 _MOD_NAME = "pitr_migrate_under_test"
@@ -147,64 +152,6 @@ def test_rewrite_candidate_legacy_shape() -> None:
 # ── protected rewrite ──
 
 
-def test_rewrite_protected_swaps_base_wal_and_embedded_candidate() -> None:
-    raw: dict[str, Any] = {
-        "schema_version": 1,
-        "protected": True,
-        "chain_id": "activation-20260830T043835Z-ab",
-        "candidate_sha256": "x",
-        "candidate": {
-            "schema_version": 1,
-            "chain_id": "activation-20260830T043835Z-ab",
-            "protected": False,
-            "base_object": {
-                "object_name": "ava-pitr/base/20260830T043835Z/ab/base.tar.zst.enc",
-                "generation": 1788085003231815,
-                "ciphertext_size": 6319665156,
-                "ciphertext_crc32c": "viqqbw==",
-                "source_sha256": "sha",
-                "source_size": 1,
-                "key_id": "key",
-                "encryption_format": "AVAPITRB1",
-            },
-            "native_manifest_sha256": "native",
-            "native_manifest_member_path": "backup_manifest",
-            "native_manifest_container_object_name": "ava-pitr/base/20260830T043835Z/ab/base.tar.zst.enc",
-            "native_manifest_container_generation": 1788085003231815,
-        },
-        "base": {
-            "archive_name": "base.tar.zst.enc",
-            "object_name": "ava-pitr/base/20260830T043835Z/ab/base.tar.zst.enc",
-            "generation": 1788085003231815,
-            "size": 6319665156,
-            "crc32c": "viqqbw==",
-            "metadata": [],
-        },
-        "wal": [
-            {
-                "archive_name": "000000010000000000000001",
-                "object_name": "ava-pitr/wal/00000001/000000010000000000000001.enc",
-                "generation": 999,
-                "size": 16777216,
-                "crc32c": "walcrc",
-                "metadata": [],
-            }
-        ],
-    }
-    migrate._rewrite_protected(raw, _mapping())
-    assert raw["base"]["pin_token"] == "100:basemd5"  # noqa: S105 — fixture identity
-    assert raw["base"]["checksum_algo"] == "md5"
-    assert raw["base"]["checksum_value"] == "basemd5"
-    assert "generation" not in raw["base"] and "crc32c" not in raw["base"]
-    wal = raw["wal"][0]
-    assert wal["pin_token"] == "200:wal-md5"  # noqa: S105 — fixture identity
-    assert wal["checksum_algo"] == "md5"
-    assert wal["checksum_value"] == "wal-md5"
-    assert "generation" not in wal and "crc32c" not in wal
-    embedded = raw["candidate"]["base_object"]
-    assert embedded["pin_token"] == "100:basemd5"  # noqa: S105 — fixture identity
-
-
 # ── fail-closed + snapshot + preflight ──
 
 
@@ -244,3 +191,172 @@ def test_preflight_rejects_in_flight_activation(tmp_path: Path) -> None:
     migrate._preflight(tmp_path)  # must not raise
     (tmp_path / "operation.json").unlink()
     migrate._preflight(tmp_path)  # must not raise
+
+
+# ── full re-parse (QA #1155) ──
+
+
+def _full_protected_fixture() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "protected": True,
+        "chain_id": "activation-20260830T043835Z-ab",
+        "candidate_sha256": "x",
+        "candidate": {
+            "schema_version": 1,
+            "chain_id": "activation-20260830T043835Z-ab",
+            "protected": False,
+            "postgres_major": 17,
+            "database_name": "ava_main",
+            "system_identifier": "7656686487711429617",
+            "wal_segment_size": 16777216,
+            "timeline": 1,
+            "start_lsn": "0/00000000",
+            "end_lsn": "0/01000000",
+            "wal_ranges": [{"end_lsn": "0/01000000", "start_lsn": "0/00000000", "timeline": 1}],
+            "migration_set_sha256": "m" * 64,
+            "base_object": {
+                "object_name": "ava-pitr/base/20260830T043835Z/ab/base.tar.zst.enc",
+                "generation": 1788085003231815,
+                "ciphertext_size": 6319665156,
+                "ciphertext_crc32c": "viqqbw==",
+                "source_sha256": "sha",
+                "source_size": 1,
+                "key_id": "key",
+                "encryption_format": "AVAPITRB1",
+            },
+            "native_manifest_sha256": "native",
+            "native_manifest_member_path": "backup_manifest",
+            "native_manifest_container_object_name": "ava-pitr/base/20260830T043835Z/ab/base.tar.zst.enc",
+            "native_manifest_container_generation": 1788085003231815,
+        },
+        "base": {
+            "archive_name": "base.tar.zst.enc",
+            "object_name": "ava-pitr/base/20260830T043835Z/ab/base.tar.zst.enc",
+            "generation": 1788085003231815,
+            "size": 6319665156,
+            "crc32c": "viqqbw==",
+            "metadata": [],
+        },
+        "wal": [
+            {
+                "archive_name": "000000010000000000000000",
+                "object_name": "ava-pitr/wal/00000001/000000010000000000000000.enc",
+                "generation": 777,
+                "size": 16777216,
+                "crc32c": "walcrc0",
+                "metadata": [],
+            }
+        ],
+        "target_lsn": "0/01000000",
+        "wal_segment_size": 16777216,
+        "proof": {
+            "run_id": "run-1",
+            "started_at": "2026-08-30T10:00:00+00:00",
+            "completed_at": "2026-08-30T10:05:00+00:00",
+            "target_lsn": "0/01000000",
+            "achieved_lsn": "0/01000000",
+            "live_postgres_pid": 1,
+            "live_probe_sha256": "p" * 64,
+            "candidate_verify_evidence_sha256": "c" * 64,
+            "replay_seconds": 1.0,
+            "smoke_seconds": 1.0,
+            "restored_verify_seconds": 1.0,
+            "downloaded_bytes": 100,
+            "restored_fingerprint_sha256": "f" * 64,
+        },
+    }
+
+
+def test_rewrite_protected_reparses_as_a_protected_manifest() -> None:
+    """QA #1155: the rewritten manifest must load through the very parser the
+    post-cut Baidu drill uses — the candidate digest is recomputed over the
+    rewritten canonical bytes, so ProtectedManifest.from_json accepts it."""
+    from services.pitr.restore_manifest import ProtectedManifest, candidate_sha256
+
+    mapping = {
+        **_mapping(),
+        "ava-pitr/wal/00000001/000000010000000000000000.enc": {
+            "object_name": "ava-pitr/wal/00000001/000000010000000000000000.enc",
+            "gcs_generation": "777",
+            "gcs_crc32c": "walcrc0",
+            "baidu_pin": "300:wal0-md5",
+            "size": "16777216",
+            "md5": "wal0-md5",
+        },
+    }
+    raw = _full_protected_fixture()
+    migrate._rewrite_protected(raw, mapping)
+    # GCS vocabulary is gone at every level (base / wal / embedded candidate)
+    assert "generation" not in raw["base"] and "crc32c" not in raw["base"]
+    assert "generation" not in raw["wal"][0] and "crc32c" not in raw["wal"][0]
+    embedded_base = raw["candidate"]["base_object"]
+    assert "generation" not in embedded_base
+    assert embedded_base["ciphertext_checksum_algo"] == "md5"
+    assert "native_manifest_container_generation" not in raw["candidate"]
+
+    parsed = ProtectedManifest.from_json(json.dumps(raw, sort_keys=True, separators=(",", ":")))
+    assert parsed.base.pin_token == "100:basemd5"  # noqa: S105 — fixture identity
+    assert parsed.wal[0].pin_token == "300:wal0-md5"  # noqa: S105 — fixture identity
+    assert parsed.candidate.base_object.pin_token == "100:basemd5"  # noqa: S105
+    # the digest now pins the rewritten canonical candidate bytes
+    assert raw["candidate_sha256"] == candidate_sha256(parsed.candidate)
+
+
+# ── object copy (QA #1155 fold-in) ──
+
+
+class _FakeGcsBlob:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+        self.name = "ava-pitr/wal/00000001/000000010000000000000000.enc"
+        self.generation = 123
+        self.crc32c = ""  # skipped GCS-side verify
+        self.size = len(payload)
+
+    def download_to_filename(self, path: str) -> None:
+        Path(path).write_bytes(self._payload)
+
+
+class _FakeBaiduStore:
+    def __init__(self, checksum_value: str) -> None:
+        self._checksum_value = checksum_value
+
+    def put_wal_ciphertext_if_absent(
+        self, path: Path, object_name: str, metadata: Mapping[str, str]
+    ) -> RemoteObjectAck:
+        return RemoteObjectAck(
+            object_name=object_name,
+            pin_token="300:wal0-md5",  # noqa: S106 — fixture identity
+            size=path.stat().st_size,
+            checksum=ObjectChecksum(MD5, self._checksum_value),
+            metadata=dict(metadata),
+            created=True,
+        )
+
+
+def test_migrate_object_returns_the_verified_mapping_row() -> None:
+    payload = b"wal-bytes" * 64
+    row = migrate._migrate_object(
+        baidu=_FakeBaiduStore(hashlib.md5(payload).hexdigest()),  # noqa: S324
+        blob=_FakeGcsBlob(payload),
+        object_name="ava-pitr/wal/00000001/000000010000000000000000.0000000000000000.enc",
+        size=len(payload),
+        metadata={"ava-speedtest": "1"},
+    )
+    assert row["baidu_pin"] == "300:wal0-md5"
+    assert row["md5"] == hashlib.md5(payload).hexdigest()  # noqa: S324
+    assert row["gcs_generation"] == "123"
+    assert row["size"] == str(len(payload))
+
+
+def test_migrate_object_aborts_when_the_baidu_read_back_differs() -> None:
+    payload = b"wal-bytes" * 64
+    with pytest.raises(SystemExit, match="read-back differs"):
+        migrate._migrate_object(
+            baidu=_FakeBaiduStore("not-the-md5"),
+            blob=_FakeGcsBlob(payload),
+            object_name="ava-pitr/wal/00000001/000000010000000000000000.0000000000000000.enc",
+            size=len(payload),
+            metadata={},
+        )
