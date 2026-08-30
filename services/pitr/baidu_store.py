@@ -394,12 +394,20 @@ class BaiduObjectStore:
                 return
             # Crash-retry artifact (live P0 smoke): create-on-existing
             # replaces the file object with a NEW fs_id, so a retry
-            # re-derives a pin that only the pin_token differs in. Adopt
-            # the new pin when the content identity (size, checksum,
-            # metadata) is unchanged; any other drift stays permanent.
+            # re-derives a pin whose fs_id part differs. Adopt it only
+            # when everything else — including the pin's encrypted
+            # server digest, which is content-derived — is unchanged;
+            # any other drift stays permanent.
+            try:
+                _existing_fs_id, existing_digest = str(existing["pin_token"]).split(":", 1)
+                _wanted_fs_id, wanted_digest = str(payload["pin_token"]).split(":", 1)
+            except (KeyError, ValueError) as exc:
+                raise PermanentObjectStoreError(
+                    "immutable Baidu object sidecar pin is malformed"
+                ) from exc
             same = {key: existing.get(key) for key in existing if key != "pin_token"}
             wanted = {key: payload.get(key) for key in payload if key != "pin_token"}
-            if set(existing) != set(payload) or same != wanted:
+            if set(existing) != set(payload) or same != wanted or existing_digest != wanted_digest:
                 raise PermanentObjectStoreError("immutable Baidu object sidecar differs")
         with tempfile.TemporaryDirectory(prefix="baidu-sidecar-") as scratch:
             staged = Path(scratch) / "sidecar.json"

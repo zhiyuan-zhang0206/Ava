@@ -19,7 +19,8 @@ from tests._pitr_fixtures import baidu_credential_evidence
 
 _SEGMENT = "00000001000000A20000008B"
 _MD5_HEX = "b" * 32
-_PIN_TOKEN = "123456789:" + _MD5_HEX
+# live-shaped: Baidu's encrypted server digest (non-hex, never the content md5)
+_PIN_TOKEN = "123456789:1bfd89f2frf619ce44912f39c96003d9"  # noqa: S105 — fixture identity
 _CRC32C = "AAAAAA=="
 
 
@@ -109,11 +110,11 @@ def test_baidu_wal_proof_rejects_gcs_shaped_pin_token() -> None:
         _validate(ack=ack, viewer=viewer)
 
 
-def test_baidu_wal_proof_rejects_pin_token_md5_that_differs_from_the_checksum() -> None:
-    """QA #1147 nit 2: the pin's embedded content md5 must equal the
-    checksum field's md5 — a drift between the two is evidence corruption."""
-    ack, viewer = _pair(generation="123456789:" + "c" * 32)
-    with pytest.raises(ValueError, match="differs from the ciphertext checksum"):
+def test_baidu_wal_proof_rejects_a_malformed_opaque_pin_token() -> None:
+    """Gate 2 keeps rejecting shapes that are not fs_id:server-digest —
+    an uppercase or non-alphanumeric digest fails the shape gate."""
+    ack, viewer = _pair(generation="123456789:UPPERCASE-IS-NOT-VALID-01")
+    with pytest.raises(ValueError, match="invalid Baidu pin token"):
         _validate(ack=ack, viewer=viewer)
 
 

@@ -30,6 +30,13 @@ def _md5(data: bytes) -> str:
     return hashlib.md5(data).hexdigest()  # noqa: S324 — fixture digest
 
 
+def _opaque(content: bytes) -> str:
+    """The honest fake for Baidu's encrypted server digest: deterministic
+    per content, 32 lowercase alphanumeric chars, never hex (live P0 smoke
+    shape, e.g. "1bfd89f2frf619ce44912f39c96003d9")."""
+    return ("opq" + _md5(content)[3:])[:32]
+
+
 class FakeTokenManager:
     """Protocol-compatible token supplier; no OAuth exchange."""
 
@@ -137,7 +144,7 @@ class FakePcs:
             return httpx.Response(200, json=dict(self.create_override[path]))
         block_count = len(json.loads(params["block_list"]))
         content = b"".join(self.parts.get(path, {}).get(i, b"") for i in range(block_count))
-        row = self.seed_file(path, size=len(content), md5=_md5(content))
+        row = self.seed_file(path, size=len(content), md5=_opaque(content))
         return httpx.Response(200, json=row)
 
     def _filemetas(self, params: dict[str, str]) -> httpx.Response:
@@ -256,10 +263,12 @@ def seed_restore_object(
 ) -> tuple[dict[str, Any], bytes]:
     digest = _md5(payload)
     obj_path = f"{APP_ROOT}/{OBJECT}"
-    row = fake.seed_file(obj_path, size=len(payload), md5=digest, dlink="https://dl.test/obj")
+    row = fake.seed_file(
+        obj_path, size=len(payload), md5=_opaque(payload), dlink="https://dl.test/obj"
+    )
     sidecar = {
         "object_name": OBJECT,
-        "pin_token": f"{row['fs_id']}:{digest}",
+        "pin_token": f"{row['fs_id']}:{_opaque(payload)}",
         "size": len(payload),
         "checksum_algo": "md5",
         "checksum_value": digest,

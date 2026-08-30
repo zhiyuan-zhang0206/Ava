@@ -24,6 +24,7 @@ from tests.services.baidu_test_support import (
     FakeTokenManager,
     FakeTokenResponse,
     _md5,
+    _opaque,
     credentials_file,
     make_reader,
     pcs_client_for,
@@ -119,7 +120,7 @@ def test_download_exact_streams_and_verifies(
     expected = RestoreObject(
         "000000010000000000000001",
         OBJECT,
-        f"{row['fs_id']}:{_md5(payload)}",
+        f"{row['fs_id']}:{_opaque(payload)}",
         len(payload),
         MD5,
         _md5(payload),
@@ -149,7 +150,7 @@ def test_download_exact_rejects_tampered_content(
     expected = RestoreObject(
         "000000010000000000000001",
         OBJECT,
-        f"{row['fs_id']}:{_md5(payload)}",
+        f"{row['fs_id']}:{_opaque(payload)}",
         len(payload),
         MD5,
         _md5(payload),
