@@ -58,45 +58,49 @@ class PhysicalBackupSettings(EnvSettings):
     pitr_enabled: bool = Field(
         default=False,
         alias="AVA_PITR_ENABLED",
-        description="Enable physical backup wiring. This foundation release never enables Postgres archiving.",
+        description="Enable physical backup wiring. This foundation release never enables Postgres archiving. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_base_backup_enabled: bool = Field(
         default=False,
         alias="AVA_PITR_BASE_BACKUP_ENABLED",
-        description="Enable weekly unprotected physical base-backup candidates.",
+        description="Enable weekly unprotected physical base-backup candidates. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_restore_proof_enabled: bool = Field(
         default=False,
         alias="AVA_PITR_RESTORE_PROOF_ENABLED",
-        description="Enable generation-pinned isolated restore drills for base candidates.",
+        description="Enable generation-pinned isolated restore drills for base candidates. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_retention_planner_enabled: bool = Field(
         default=False,
         alias="AVA_PITR_RETENTION_PLANNER_ENABLED",
-        description="Enable local dry-run PITR retention planning; this never deletes objects.",
+        description="Enable local dry-run PITR retention planning; this never deletes objects. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_gcs_project: str = Field(
