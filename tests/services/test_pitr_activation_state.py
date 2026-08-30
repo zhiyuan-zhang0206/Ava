@@ -503,7 +503,7 @@ def test_baidu_wal_remote_proof_loads_through_the_record_validator(
         "bucket_name": "/apps/ava/ava-pitr",
         "object_prefix": "pitr",
         "object_name": f"pitr/wal/{segment[:8]}/{segment}.enc",
-        "generation": "123456789:" + "a" * 32,
+        "generation": "123456789:" + "b" * 32,
         "ciphertext_size": "10",
         "ciphertext_crc32c": "b" * 32,
         "source_sha256": "1" * 64,
