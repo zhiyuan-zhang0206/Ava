@@ -33,6 +33,7 @@ def run(input_path: Path, output_path: Path) -> None:
         "viewer_credentials",
         "budget",
         "live_db_url",
+        "data_directory",
         "pg_ctl",
         "pg_verifybackup",
     }
@@ -52,6 +53,7 @@ def run(input_path: Path, output_path: Path) -> None:
         ),
         executor=IsolatedPostgresRestoreExecutor(
             live_db_url=str(raw["live_db_url"]),
+            data_directory=str(raw["data_directory"]),
             pg_ctl=Path(str(raw["pg_ctl"])),
             pg_verifybackup=Path(str(raw["pg_verifybackup"])),
         ),
