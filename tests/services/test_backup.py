@@ -14,6 +14,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,9 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
 from services import backup
+from services.pitr import store_factory
+from services.pitr.checksums import MD5, ObjectChecksum
+from services.pitr.object_store import RemoteObjectAck
 from shared.config import settings
 from shared.platform import LockTimeoutError
 
@@ -49,6 +53,17 @@ def _touch(directory: Path, name: str) -> Path:
     p = directory / name
     p.write_bytes(b"x")
     return p
+
+
+def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the off-site leg degrade ("store unavailable") in tests that only
+    exercise the local pipeline — the same failure mode a cluster without a
+    configured backup store hits."""
+
+    def _no_store_group() -> Any:
+        raise RuntimeError("no backup store configured")
+
+    monkeypatch.setattr(store_factory, "get_store_group", _no_store_group)
 
 
 def _spawn_backup_lock_holder(
@@ -461,7 +476,7 @@ def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPa
     for i in range(1, backup.BACKUP_KEEP + 1):
         _touch(bdir, f"test-2026060{i}-030000.dump")
 
-    monkeypatch.setattr(backup, "find_writable_google_drive", lambda: None)
+    _disable_offsite(monkeypatch)
     path = backup.run_backup(_dt(2026, 6, 10, 3, 0))
 
     assert path.parent == bdir
@@ -609,7 +624,7 @@ def test_encrypted_artifact_decrypts_to_original_dump(
         return real_run(cmd, **kwargs)  # type: ignore[arg-type, return-value]
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_pg_dump)
-    monkeypatch.setattr(backup, "find_writable_google_drive", lambda: None, raising=False)
+    _disable_offsite(monkeypatch)
     artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
 
     assert artifact.name.endswith(".dump.enc")
@@ -662,44 +677,119 @@ def test_gunzip_if_needed_decompresses_legacy_artifact_layer(
     assert plain.read_bytes() == raw
 
 
-def test_offsite_copy_prunes_old_managed_artifacts(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A Drive copy receives only the encrypted artifact and keeps the same
-    retention window as local storage, so off-site history does not grow forever."""
-    drive = tmp_path / "drive"
-    drive.mkdir()
-    monkeypatch.setattr(backup, "find_writable_google_drive", lambda: drive)
-    remote = cast(Path | None, cast(Any, backup)._offsite_directory())
-    assert remote is not None
-    old_names = [f"ava-202606{i:02d}-030000.dump" for i in range(1, backup.BACKUP_KEEP + 1)]
-    for name in old_names:
-        _touch(remote, name)
-
-    artifact = _touch(bdir, "ava-20260608T100000Z.dump.gz.enc")
-    artifact.write_bytes(b"encrypted artifact")
-    cast(Any, backup)._copy_offsite(artifact)
-
-    assert (remote / artifact.name).read_bytes() == b"encrypted artifact"
-    assert not (remote / old_names[0]).exists()
-    assert len(backup._managed_dumps(remote)) == backup.BACKUP_KEEP
-
-
-def test_offsite_directory_failure_keeps_local_artifact(
+def test_offsite_publish_goes_through_the_store_contract(
     bdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Drive is optional: a folder-creation failure cannot turn a successful
-    local backup into a failed backup or remove its only local artifact."""
-    artifact = _touch(bdir, "ava-20260608T100000Z.dump.gz.enc")
+    """The off-site leg publishes through the shared BlobStore contract: an
+    if-absent object under the logical root, store-verified ACK, and the store
+    source reads exactly the encrypted artifact bytes."""
+    artifact = _touch(bdir, "ava-20260608T100000Z.dump.enc")
+    artifact.write_bytes(b"encrypted artifact")
+    calls: list[dict[str, object]] = []
+
+    class _Store:
+        def put_base_if_absent(
+            self,
+            *,
+            source: object,
+            object_name: str,
+            metadata: Mapping[str, str],
+            cancelled: object = None,
+        ) -> RemoteObjectAck:
+            calls.append({"source": source, "object_name": object_name, "metadata": dict(metadata)})
+            return RemoteObjectAck(
+                object_name=object_name,
+                pin_token="gen-7",  # noqa: S106 — fake store identity, not a secret
+                size=artifact.stat().st_size,
+                checksum=ObjectChecksum(MD5, "0" * 32),
+                metadata=dict(metadata),
+                created=True,
+            )
+
+    class _Group:
+        def restartable_streaming_object_store(self) -> _Store:
+            return _Store()
+
+    monkeypatch.setattr(store_factory, "get_store_group", _Group)
+
+    published = backup._publish_offsite(artifact)
+
+    assert published == f"{backup._REMOTE_ROOT}/{artifact.name}"
+    assert calls[0]["object_name"] == published
+    assert calls[0]["metadata"] == {"ava-artifact-kind": "logical-backup"}
+    source = cast(Any, calls[0]["source"])
+    assert source.ciphertext_size == len(b"encrypted artifact")
+    assert b"".join(source.iter_chunks()) == b"encrypted artifact"
+    # The local artifact is still the primary copy after a successful publish.
+    assert artifact.read_bytes() == b"encrypted artifact"
+
+
+def test_offsite_store_unavailable_keeps_local_artifact(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The off-site leg is optional: an unconstructable store cannot turn a
+    successful local backup into a failed backup or remove its only local
+    artifact."""
+    artifact = _touch(bdir, "ava-20260608T100000Z.dump.enc")
     artifact.write_bytes(b"encrypted artifact")
 
-    def _drive_unavailable() -> Path | None:
-        raise OSError("Drive folder is unavailable")
+    def _no_store_group() -> Any:
+        raise RuntimeError("no backup store configured")
 
-    monkeypatch.setattr(backup, "_offsite_directory", _drive_unavailable, raising=False)
-    cast(Any, backup)._copy_offsite(artifact)
+    monkeypatch.setattr(store_factory, "get_store_group", _no_store_group)
 
+    assert backup._publish_offsite(artifact) is None
     assert artifact.read_bytes() == b"encrypted artifact"
+
+
+def test_run_backup_publishes_offsite_via_store_contract(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pipeline publishes the encrypted artifact through the store after
+    encryption; the published name mirrors the local managed name."""
+    published: list[str] = []
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
+        if cmd[0].endswith("pg_dump"):
+            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
+        else:
+            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
+        return _Ok()
+
+    class _Store:
+        def put_base_if_absent(
+            self,
+            *,
+            source: object,
+            object_name: str,
+            metadata: Mapping[str, str],
+            cancelled: object = None,
+        ) -> RemoteObjectAck:
+            published.append(object_name)
+            return RemoteObjectAck(
+                object_name=object_name,
+                pin_token="p",  # noqa: S106 — fake store identity, not a secret
+                size=13,
+                checksum=ObjectChecksum(MD5, "0" * 32),
+                metadata=dict(metadata),
+                created=True,
+            )
+
+    class _Group:
+        def restartable_streaming_object_store(self) -> _Store:
+            return _Store()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+    monkeypatch.setattr(store_factory, "get_store_group", _Group)
+
+    artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
+
+    assert published == [f"{backup._REMOTE_ROOT}/{artifact.name}"]
+    assert artifact.read_bytes() == b"encrypted dump"
 
 
 def test_run_backup_forwards_requested_timeout(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -25,8 +25,17 @@ Two clocks, deliberately different ones:
 
 Local dumps guard against bad migrations / accidental deletes / DB
 corruption. Storage interface: `run_backup` is
-`dump -> encrypt -> optional Drive copy -> prune`; a remote object
-store can replace the Drive-copy step — tracked in `future/infra/pg-backup.md`.
+`dump -> encrypt -> optional off-site publish -> prune`. The off-site leg
+publishes the encrypted artifact through the shared backup store contract
+(`services.pitr.store_factory`'s `RestartableStreamingObjectStore`
+`put_base_if_absent` — the same backend switch as the physical PITR plane),
+so the GCS / Baidu Netdisk adapters are shared and the Drive-sync-folder copy
+is gone. The publish is best-effort and immutable: it happens iff absent,
+the ACK (pin_token, size, checksum) is the store-verified identity, and a
+missing/unavailable/failed store warns and keeps the local artifact — it never
+discards it. Remote objects are append-only: the store contract deliberately
+has no delete verb (neither does the physical plane), so remote retention is a
+shared planner concern (dry-run today) — see `future/infra/pg-backup.md`.
 The dump is `pg_dump --format=custom` with zstd compression — custom format
 already compresses the archive, so the pre-2026-08-27 pipeline's extra `gzip`
 stage (a second compression pass over already-compressed bytes) is gone. The
@@ -56,11 +65,10 @@ import hashlib
 import logging
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -73,7 +81,6 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from shared.config import settings
 from shared.db import connect, direct_db_url
-from shared.google_drive import find_writable_google_drive
 from shared.pg_tools import pg_tool
 from shared.platform import file_lock
 from shared.private_storage import ensure_private_dir, ensure_private_file
@@ -85,6 +92,10 @@ BACKUP_KEEP = 7  # a week of daily dumps: a bad migration found a day later must
 ACTIVATION_KEEP = 2
 _PRE_UPDATE_MARKER = "pre-update"  # filename kind segment for `ava cluster update` snapshots
 _ACTIVATION_MARKER = "pitr-activation"
+# Off-site logical-dump namespace: a sibling of the PITR prefix (the
+# retention inventory scopes its listing to the PITR prefix, so these names
+# never surface as unknown inventory entries).
+_REMOTE_ROOT = "ava-logical"
 # Generous ceiling for one dump (the DB is far smaller); see the comment at the
 # subprocess.run call for why an unbounded pg_dump is not acceptable here.
 # 60 min: a full dump with checkpoint history takes about 6.3 min. This is
@@ -99,7 +110,6 @@ _NAME_RE = re.compile(
 )
 _TS_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC, offset-bearing by construction
 _LEGACY_TS_FORMAT = "%Y%m%d-%H%M%S"  # pre-cutover names: wall clock, no offset
-_OFFSITE_ROOT = "Ava Backups"
 _TARGET_NAME_ATTEMPTS = 60
 _backup_lock_guard = threading.RLock()
 _backup_lock_state = threading.local()
@@ -352,46 +362,74 @@ def gunzip_if_needed(path: Path, *, timeout_s: float = _DUMP_TIMEOUT_S) -> None:
             decompressed.unlink(missing_ok=True)
 
 
-def _offsite_directory() -> Path | None:
-    """The optional private Google Drive directory for this cluster's artifacts."""
-    drive = find_writable_google_drive()
-    if drive is None:
+class _EncryptedFileSource:
+    """A ``RestartableEncryptedSource`` over the published encrypted artifact.
+
+    The store re-iterates the source (the Baidu backend hashes once and
+    uploads once), so every iteration re-opens the seekable file: the bytes
+    are deterministic for the artifact's lifetime — the publisher alone owns
+    this path between the publish and the local prune.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._crc32c: str | None = None
+
+    @property
+    def ciphertext_size(self) -> int:
+        return self._path.stat().st_size
+
+    @property
+    def ciphertext_crc32c(self) -> str:
+        if self._crc32c is None:
+            from services.pitr.checksums import CRC32C, digest_file
+
+            self._crc32c = digest_file(CRC32C, str(self._path))
+        return self._crc32c
+
+    def iter_chunks(self) -> Iterable[bytes]:
+        with self._path.open("rb") as source:
+            while chunk := source.read(8 * 1024 * 1024):
+                yield chunk
+
+
+def _publish_offsite(artifact: Path) -> str | None:
+    """Best-effort BlobStore-contract publish; never sacrifice the local artifact.
+
+    Publishes the encrypted dump iff absent as ``{_REMOTE_ROOT}/{name}`` on
+    the configured backup store backend and logs the store-verified ACK. A
+    missing or unconfigured store, or a failed publish, warns and retains the
+    local artifact — the off-site leg stays optional, exactly as the Drive
+    copy it replaces.
+    """
+    from services.pitr.store_factory import get_store_group
+
+    try:
+        store = get_store_group().restartable_streaming_object_store()
+    except Exception:
+        _log.exception("[backup] off-site store unavailable; local artifact retained")
         return None
-    # A home path is the cluster identity. Hash it for a Drive-safe, stable
-    # directory name without exposing the local checkout layout to collaborators.
-    scope = hashlib.sha256(str(Path(settings.general.ava_home).expanduser()).encode()).hexdigest()[
-        :16
-    ]
-    directory = drive / _OFFSITE_ROOT / scope
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
-
-
-def _copy_offsite(artifact: Path) -> None:
-    """Best-effort encrypted Drive copy; never sacrifice the local artifact."""
+    object_name = f"{_REMOTE_ROOT}/{artifact.name}"
     try:
-        directory = _offsite_directory()
-    except OSError:
-        _log.exception("[backup] encrypted off-site directory unavailable; local artifact retained")
-        return
-    if directory is None:
-        _log.warning("[backup] no writable Google Drive folder; local artifact retained")
-        return
-    target = directory / artifact.name
-    partial = target.with_name(target.name + ".partial")
-    try:
-        shutil.copyfile(artifact, partial)
-        if partial.stat().st_size != artifact.stat().st_size:
-            with suppress(OSError):
-                partial.unlink(missing_ok=True)
-            _log.error("[backup] off-site copy byte count mismatch; local artifact retained")
-            return
-        partial.replace(target)
-        _prune(directory)
-    except OSError:
-        with suppress(OSError):
-            partial.unlink(missing_ok=True)
-        _log.exception("[backup] encrypted off-site copy failed; local artifact retained")
+        ack = store.put_base_if_absent(
+            source=_EncryptedFileSource(artifact),
+            object_name=object_name,
+            metadata={"ava-artifact-kind": "logical-backup"},
+        )
+    except Exception:
+        _log.exception(
+            "[backup] off-site publish of %s failed; local artifact retained", object_name
+        )
+        return None
+    _log.info(
+        "[backup] off-site published %s (size=%d, pin=%s, checksum=%s:%s)",
+        object_name,
+        ack.size,
+        ack.pin_token,
+        ack.checksum.algo,
+        ack.checksum.value,
+    )
+    return object_name
 
 
 def _available_target(
@@ -601,7 +639,7 @@ def _run_backup(
         for partial in (dump_partial, encrypted_partial):
             with suppress(OSError):
                 partial.unlink(missing_ok=True)
-    _copy_offsite(target)
+    _publish_offsite(target)
     removed = _prune(directory)
     _log.info(
         "[backup] wrote %s (%.1f MiB), pruned %d",

@@ -43,6 +43,13 @@
 > the local schedule. The watchdog probes and restarts that daemon but never
 > runs `pg_dump` in its supervision round.
 
+> **Update 2026-08-30 (audit P0-2):** the off-site leg no longer uses the
+> Google Drive sync folder — it publishes through the shared BlobStore store
+> group (`services.pitr.store_factory`), so GCS and Baidu Netdisk are the
+> shared adapters and the Drive copy is gone. Remote objects are append-only
+> (the store contract has no delete verb); a shared remote-retention planner
+> is the follow-up.
+
 ## Future work
 
 ### Physical PITR delivery
@@ -62,12 +69,16 @@ restores one operation-scoped base chain. Existing verified pre-update `pg_dump`
 remains mandatory and is never pruned by physical-backup retention.
 
 1. **Off-site encrypted copy — delivered.** After encryption and before local
-   pruning, the gateway copies the published artifact to the existing writable
-   Google Drive sync folder in a cluster-scoped backup directory, verifies its
-   byte count, and applies the same seven-artifact lifecycle there. The copy is
-   encrypted before it reaches Drive; a missing or non-writable sync folder
-   warns without discarding the local backup. Object storage remains a future
-   alternative when a host cannot use Drive.
+   pruning, the gateway publishes the artifact through the shared backup store
+   contract (`services.pitr.store_factory` -> `RestartableStreamingObjectStore
+   .put_base_if_absent`, the same backend switch as the physical PITR plane) as
+   `ava-logical/<name>`; the store-verified ACK (pin_token, size, checksum) is
+   the identity. The publish is if-absent and immutable; a missing/unconfigured
+   store or a failed publish warns without discarding the local backup, which
+   stays the primary copy. Remote objects are append-only for now: the store
+   contract deliberately has no delete verb (the physical plane's retention
+   planner is dry-run too), so remote retention of logical dumps is a shared
+   future concern — see the storage-abstraction effort's retention planner.
 2. **Restore drill — delivered.** `scripts/restore_drill.py` decrypts the
    latest managed artifact (or a supplied path), restores it into scratch
    Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
