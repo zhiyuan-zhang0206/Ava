@@ -116,8 +116,8 @@ def test_collect_core_metrics_includes_statistics_coverage() -> None:
 
 def _logql_spec(name: str = "core_loki", **overrides: Any) -> MetricSpec:
     query = overrides.pop("query", None) or (
-        'sum(count_over_time({service_name="unknown_service"} | json | '
-        'category=~"{category_re}|log" | event_name={event_name} [$__range]))'
+        'sum(count_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+        'category=~"{category_re}|log" [$__range]))'
     )
     return MetricSpec(
         name=name,
@@ -191,8 +191,8 @@ def test_render_logql_quotes_and_agent_placeholder() -> None:
     spec = _logql_spec(
         name="core_loki_render",
         query=(
-            'sum(count_over_time({service_name="unknown_service"} | json | '
-            'category=~"{category_re}|log" | event_name={event_name} | '
+            'sum(count_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+            'category=~"{category_re}|log" | '
             "{{agent_id}} [$__interval]))"
         ),
         output=["inspector"],
@@ -203,3 +203,8 @@ def test_render_logql_quotes_and_agent_placeholder() -> None:
     assert 'event_name="llm_usage"' in rendered
     assert 'agent_id="42"' in rendered
     assert "{event_name}" not in rendered
+    # event_name is a promoted stream label (2026-08-23 cutover): the matcher
+    # renders into the selector, before the | json stage
+    selector = rendered.split("| json")[0]
+    assert 'event_name="llm_usage"' in selector
+    assert "event_name" not in rendered.split("| json")[1]

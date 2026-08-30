@@ -162,8 +162,12 @@ of mass-editing targets.
    name is auto-filled from the import context; do not pass it.
 3. The `query` template is **LogQL** (`query_type="logql"`) — the live event
    stream in Loki. Every template must select `{service_name="unknown_service"}`
-   and pipeline `| json` before any event-field filter; the template
-   contract is validated by `shared/metrics_logql.py`. Use the fixed window
+   and pipeline `| json`; since the 2026-08-23 index-label cutover (task
+   #1467) the `event_name`/`agent_id` matchers go INSIDE the stream selector
+   (`{service_name="unknown_service", event_name=...}`) and `| json` stays
+   for the level/category/attributes filters (those fields are not stream
+   labels); the template contract is validated by `shared/metrics_logql.py`.
+   Use the fixed window
    that matches the panel's information density; stats and tables remain
    instant over `[$__range]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
