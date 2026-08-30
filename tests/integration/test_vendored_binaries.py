@@ -135,7 +135,7 @@ def test_ensure_pg_binaries_real_download(isolated_runtime: None) -> None:
 
 
 # ── pgvector injection unit coverage ───────────────────────────────────────
-# The real artifacts are covered by test_pgvector_runtime_smoke.py (the CI
+# The real artifacts are covered by scripts/pgvector_runtime_smoke.py (the CI
 # gate); these pin the extraction/injection mechanics with synthetic archives.
 
 

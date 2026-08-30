@@ -583,7 +583,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     (seeded_bin / "initdb").write_text("#!/bin/sh\n")
     # The pgvector injection shares the step: seed its detection file too so it
     # takes the idempotent early return (the real injection is covered by
-    # tests/integration/test_pgvector_runtime_smoke.py).
+    # scripts/pgvector_runtime_smoke.py).
     seeded_ext = rb.vendored_pg_dir() / "share/postgresql/extension"
     seeded_ext.mkdir(parents=True)
     (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
