@@ -19,7 +19,7 @@ def test_loopback_hosts(host: str) -> None:
 
 @pytest.mark.parametrize(
     "host",
-    ["100.64.0.87", "10.0.0.5", "runner.overlay.example.net", "example.com", "", "128.0.0.1"],
+    ["10.0.0.87", "10.0.0.5", "runner.overlay.example.net", "example.com", "", "128.0.0.1"],
 )
 def test_non_loopback_hosts(host: str) -> None:
     assert is_loopback_host(host) is False
@@ -45,7 +45,7 @@ def test_netutil_imports_without_config() -> None:
 
 @pytest.mark.parametrize(
     "host",
-    ["100.64.0.72", "127.0.0.1", "0.0.0.0", "10.0.0.5", "1.2.3.4", " 1.2.3.4 "],  # noqa: S104 — test data, classifying addresses, not binding
+    ["10.0.0.72", "127.0.0.1", "0.0.0.0", "10.0.0.5", "1.2.3.4", " 1.2.3.4 "],  # noqa: S104 — test data, classifying addresses, not binding
 )
 def test_ipv4_literal_hosts(host: str) -> None:
     assert is_ipv4_literal(host) is True

@@ -40,7 +40,7 @@ pub struct Endpoints {
 
 /// Parse a user-supplied server address.
 ///
-/// A bare host (`box.local`, `100.64.3.2`) or `host:port` is accepted and
+/// A bare host (`box.local`, `10.0.0.3`) or `host:port` is accepted and
 /// completed into `http://<host>:<port or 3000>`; anything with a scheme is
 /// parsed as-is. Returns `None` for input that cannot become an http(s) URL.
 pub fn parse_entry(raw: &str) -> Option<Url> {
@@ -303,8 +303,8 @@ mod tests {
     #[test]
     fn host_with_port_is_respected() {
         assert_eq!(
-            parse_entry("100.64.3.2:3100").map(|u| u.to_string()),
-            Some("http://100.64.3.2:3100/".to_string())
+            parse_entry("10.0.0.3:3100").map(|u| u.to_string()),
+            Some("http://10.0.0.3:3100/".to_string())
         );
     }
 
@@ -319,16 +319,16 @@ mod tests {
     #[test]
     fn server_address_normalization_uses_the_console_port() {
         assert_eq!(
-            normalize_entry_address("100.103.96.72"),
-            Ok("http://100.103.96.72:3000/".to_string())
+            normalize_entry_address("10.0.0.72"),
+            Ok("http://10.0.0.72:3000/".to_string())
         );
         assert_eq!(
             normalize_entry_address("http://box.local:3000"),
             Ok("http://box.local:3000/".to_string())
         );
         assert_eq!(
-            normalize_entry_address("http://100.103.96.72:8000"),
-            Ok("http://100.103.96.72:3000/".to_string())
+            normalize_entry_address("http://10.0.0.72:8000"),
+            Ok("http://10.0.0.72:3000/".to_string())
         );
         assert_eq!(
             normalize_entry_address("https://box.local/login"),
@@ -377,11 +377,8 @@ mod tests {
 
     #[test]
     fn gateway_is_the_entry_host_on_the_gateway_port() {
-        let entry = url("http://100.64.3.2:3000/some/path");
-        assert_eq!(
-            derive_gateway(&entry).to_string(),
-            "http://100.64.3.2:8000/"
-        );
+        let entry = url("http://10.0.0.3:3000/some/path");
+        assert_eq!(derive_gateway(&entry).to_string(), "http://10.0.0.3:8000/");
     }
 
     #[test]
@@ -483,7 +480,7 @@ mod tests {
         assert!(is_private_host(&url("http://10.1.2.3:3000/")));
         assert!(is_private_host(&url("http://172.16.0.9:3000/")));
         // 100.64.0.0/10 — the CGNAT / VPN-overlay range.
-        assert!(is_private_host(&url("http://100.101.102.103:3000/")));
+        assert!(is_private_host(&url("http://100.101.102.103:3000/"))); // tailnet-ip-ok: CGNAT in-range boundary fixture
     }
 
     #[test]

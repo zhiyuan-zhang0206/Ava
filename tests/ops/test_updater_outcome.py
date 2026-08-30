@@ -23,7 +23,7 @@ from ops import updater_outcome as uo
 # A real POSIX decline, as prod writes it (issue #995's own transcript).
 _DECLINED_LOG = """\
 [updater] force-checkout to abc1234
-  ✗ gateway unreachable at http://100.64.0.2:8000: [Errno 61] Connection refused.
+  ✗ gateway unreachable at http://10.0.0.2:8000: [Errno 61] Connection refused.
   ✗ refusing self-update: preflight probes failed — host still serving
 [updater] restart DECLINED by its own preflight — nothing was stopped and this host is still serving
 [session-exit] rc=3
@@ -122,7 +122,7 @@ def test_a_declined_preflight_is_reported_as_a_refusal_with_its_reason(home: Pat
     assert outcome is not None
     assert outcome.kind == "declined"
     assert outcome.rc == 3
-    assert "gateway unreachable at http://100.64.0.2:8000" in outcome.detail
+    assert "gateway unreachable at http://10.0.0.2:8000" in outcome.detail
     assert "still serving" in uo.describe_updater_outcome(outcome)
 
 
@@ -414,7 +414,7 @@ def test_this_runs_own_decline_still_travels_with_its_reason(windows_log: Path) 
         "  ✗ refusing self-update: a previous run said so\n"
         + _marker()
         + "\n[updater] restart DECLINED by its own preflight -- host still serving\n"
-        + "  ✗ gateway unreachable at http://100.64.0.2:8000\n",
+        + "  ✗ gateway unreachable at http://10.0.0.2:8000\n",
     )
 
     outcome = uo.last_updater_outcome()
@@ -816,7 +816,7 @@ def test_stage_lines_do_not_leak_into_the_detail(home: Path) -> None:
         home / "logs" / "updater-1785470000.log",
         "[updater] stage=fetch t=100.0\n"
         "[updater] stage=checkout t=103.1\n"
-        "  \u2717 gateway unreachable at http://100.64.0.2:8000: [Errno 61] Connection refused.\n"
+        "  \u2717 gateway unreachable at http://10.0.0.2:8000: [Errno 61] Connection refused.\n"
         "[updater] restart DECLINED by its own preflight -- host still serving, not starting over it\n",
     )
 

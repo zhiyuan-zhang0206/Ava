@@ -99,9 +99,9 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
 
     provider_plugin(key_env="AVA_DB_URL")
     _write_bootstrap_env(plugin_env, "AVA_DB_URL=postgresql://ava:pw@127.0.0.1:5433/ava\n")
-    monkeypatch.setattr(config, "_self_machine_host", lambda: "100.64.0.3")
+    monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
 
-    assert urlsplit(config.bootstrap_config_values()["AVA_DB_URL"]).hostname == "100.64.0.3"
+    assert urlsplit(config.bootstrap_config_values()["AVA_DB_URL"]).hostname == "10.0.0.3"
 
 
 def test_agent_child_env_forwards_only_enabled_plugin_keys(

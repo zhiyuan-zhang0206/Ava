@@ -432,14 +432,14 @@ def test_register_page_upsert_updates_serve_dir(db_conn: psycopg.Connection) -> 
 
     aid = create_agent(db_conn)
     r1 = register_page(db_conn, aid, "p", 8001, _HOST, None, serve_dir="/data/a")
-    r2 = register_page(db_conn, aid, "p", 8002, "100.64.0.2", "v2", serve_dir="/data/b")
+    r2 = register_page(db_conn, aid, "p", 8002, "10.0.0.2", "v2", serve_dir="/data/b")
     assert r2.id == r1.id  # UPDATE, not INSERT
     assert r2.port == 8002
     assert r2.title == "v2"
     assert r2.serve_dir == "/data/b"
     db_conn.rollback()
     rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-    assert rows == [("p", 8002, "100.64.0.2", "v2", "/data/b", None)]
+    assert rows == [("p", 8002, "10.0.0.2", "v2", "/data/b", None)]
 
 
 def test_register_page_without_serve_dir_leaves_null(db_conn: psycopg.Connection) -> None:
@@ -610,11 +610,11 @@ def test_register_page_allows_agents_own_machine_host(
     """A split-deployment agent registers its machine's advertised address —
     the gateway must keep proxying to it (machine_units.url is the authority
     for what the cluster reaches that machine at)."""
-    aid = _agent_with_machine(db_conn, "runner-a", url="http://100.64.0.1:8000", tmp_path=tmp_path)
+    aid = _agent_with_machine(db_conn, "runner-a", url="http://10.0.0.1:8000", tmp_path=tmp_path)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": 8001, "host": "100.64.0.1"},
+            json={"name": "p", "port": 8001, "host": "10.0.0.1"},
         )
     assert resp.status_code == 201, resp.text
 

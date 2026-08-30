@@ -147,11 +147,11 @@ def test_register_self_station_only_composes_row(  # pyright: ignore[reportMissi
     is invisible to `ava cluster status`. The composed row advertises the
     station's OTLP ingress URL (its reachable-host dial target, WP4) and
     stopped_at NULL (the unit is live)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.9")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.9")
     _machine_setup(name="station-a", role="observability-station")
     machines.register_self(url=machines.unit_dial_url(frozenset({"observability-station"})))
     gateway_url, role, _desc, stopped_at = _read_machine("station-a")  # pyright: ignore[reportUnknownVariableType]
-    assert gateway_url == "http://100.64.0.9:4318"
+    assert gateway_url == "http://10.0.0.9:4318"
     assert role == ["observability-station"]
     assert stopped_at is None
 
@@ -177,11 +177,9 @@ def test_unit_dial_url_pure_station_is_otlp_ingress(monkeypatch: pytest.MonkeyPa
     one station address remote consumers dial — derived from reachable_host
     and AVA_TELEMETRY_OTLP_PORT (single source, task #1945). No gateway URL is
     required (a station host does not have one)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.9")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.9")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    assert machines.unit_dial_url(frozenset({"observability-station"})) == (
-        "http://100.64.0.9:4318"
-    )
+    assert machines.unit_dial_url(frozenset({"observability-station"})) == ("http://10.0.0.9:4318")
 
 
 def test_unit_dial_url_gateway_station_is_reachable_host(
@@ -510,25 +508,23 @@ def test_unit_dial_url_gateway_runner_uses_reachable_host(
     page proxy's SSRF guard (which only dials registered machine addresses)
     rejects every page registration from agents on the gateway box
     (2026-08-12 serve outage)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
-    assert (
-        machines.unit_dial_url(frozenset({"gateway", "agent-runner"})) == "http://100.64.0.2:8600"
-    )
+    assert machines.unit_dial_url(frozenset({"gateway", "agent-runner"})) == "http://10.0.0.2:8600"
 
 
 def test_unit_dial_url_split_runner_is_reachable_ops(monkeypatch: pytest.MonkeyPatch) -> None:
     """agent-runner only: the remote gateway must reach it, so the URL carries
     `reachable_host()`, not loopback."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
-    assert machines.unit_dial_url(frozenset({"agent-runner"})) == "http://100.64.0.2:8600"
+    assert machines.unit_dial_url(frozenset({"agent-runner"})) == "http://10.0.0.2:8600"
 
 
 def test_unit_dial_url_gateway_only_is_reachable_host(
@@ -538,11 +534,11 @@ def test_unit_dial_url_gateway_only_is_reachable_host(
     bare gateway URL — a gateway_url naming loopback on a host with a
     reachable identity would advertise a self-dialing address that breaks
     page serves (WP4, 2026-08-30 serve 400)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("https://ava.example:8000")
-    assert machines.unit_dial_url(frozenset({"gateway"})) == "http://100.64.0.2:8000"
+    assert machines.unit_dial_url(frozenset({"gateway"})) == "http://10.0.0.2:8000"
 
 
 def test_unit_dial_url_gateway_only_defaults_port_when_url_unresolvable(
@@ -551,10 +547,10 @@ def test_unit_dial_url_gateway_only_defaults_port_when_url_unresolvable(
     """gateway-only with no resolvable gateway URL still advertises the
     reachable host, on the gateway bind-port setting — the advertisement no
     longer depends on gateway_url being configured (the 400-scenario fix)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
-    assert machines.unit_dial_url(frozenset({"gateway"})) == "http://100.64.0.2:8000"
+    assert machines.unit_dial_url(frozenset({"gateway"})) == "http://10.0.0.2:8000"
 
 
 def test_unit_dial_url_agrees_across_both_writers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -564,7 +560,7 @@ def test_unit_dial_url_agrees_across_both_writers(monkeypatch: pytest.MonkeyPatc
     """
     from shared.machine import machine_role, reset_identity, set_identity
 
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.7")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.7")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -576,7 +572,7 @@ def test_unit_dial_url_agrees_across_both_writers(monkeypatch: pytest.MonkeyPatc
         from_daemon = machines.unit_dial_url(machine_role())
     finally:
         reset_identity()
-    assert from_start == from_daemon == "http://100.64.0.7:8600"
+    assert from_start == from_daemon == "http://10.0.0.7:8600"
 
 
 # ─── co-located compose + downgrade ──────────────────────────────────────────

@@ -35,7 +35,7 @@ def test_ensure_agents_meta_row_refuses_prod_db(
     monkeypatch.setattr(
         settings.data_plane,
         "db_url",
-        "postgresql://ava_main:***@100.64.0.2:6433/ava_main",
+        "postgresql://ava_main:***@10.0.0.2:6433/ava_main",
     )
     with pytest.raises(RuntimeError, match="production database"):
         conftest._ensure_agents_meta_row(900_000)  # type: ignore[attr-defined]

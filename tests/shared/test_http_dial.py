@@ -79,7 +79,7 @@ class TestTransportForUrl:
     def test_ipv4_literal_gets_pinned_transport(self) -> None:
         from shared.http_dial import PinnedIPv4Transport
 
-        t = transport_for_url("http://100.64.0.72:8000/api/bootstrap")
+        t = transport_for_url("http://10.0.0.72:8000/api/bootstrap")
         assert isinstance(t, PinnedIPv4Transport)
 
     def test_ipv6_literal_gets_no_transport(self) -> None:

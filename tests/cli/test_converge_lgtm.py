@@ -230,12 +230,10 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     assert "http_addr = 0.0.0.0" in grafana_ini
     assert "http_port = 3003" in grafana_ini
 
-    monkeypatch.setattr(
-        "shared.config.settings.observability.lgtm_grafana_listen_host", "100.64.0.5"
-    )
+    monkeypatch.setattr("shared.config.settings.observability.lgtm_grafana_listen_host", "10.0.0.5")
     _lgtm_native._render_configs(repo, native_dir, home)
     grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
-    assert "http_addr = 100.64.0.5" in grafana_ini
+    assert "http_addr = 10.0.0.5" in grafana_ini
     assert "http_port = 3003" in grafana_ini
 
 
@@ -353,24 +351,24 @@ def test_native_provisioning_renders_remote_observatory_urls(
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
         "shared.config.settings.observability.observability_url",
-        "http://100.78.137.46",
+        "http://10.0.0.46",
     )
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.10")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
     monkeypatch.setattr(
         "shared.config.settings.data_plane.db_url",
-        "postgresql://grafana_ro@100.103.96.72:5433/ava_main",
+        "postgresql://grafana_ro@10.0.0.72:5433/ava_main",
     )
 
     _lgtm_native._render_configs(repo, native_dir, home)
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
-    assert "AVA_TELEMETRY_LOKI_URL=http://100.78.137.46:3100" in rendered_runtime_env
-    assert "AVA_TELEMETRY_PROMETHEUS_URL=http://100.78.137.46:9090" in rendered_runtime_env
+    assert "AVA_TELEMETRY_LOKI_URL=http://10.0.0.46:3100" in rendered_runtime_env
+    assert "AVA_TELEMETRY_PROMETHEUS_URL=http://10.0.0.46:9090" in rendered_runtime_env
     # PG is the cluster's own database (#3606): it follows the data-plane
     # db_url, NOT the observatory — stage C moves the observatory while PG
     # stays on the gateway.
-    assert "AVA_PG_URL=100.103.96.72:5433" in rendered_runtime_env
-    assert "AVA_ALERTS_WEBHOOK_URL=http://100.64.0.10:8000/api/alerts" in rendered_runtime_env
+    assert "AVA_PG_URL=10.0.0.72:5433" in rendered_runtime_env
+    assert "AVA_ALERTS_WEBHOOK_URL=http://10.0.0.10:8000/api/alerts" in rendered_runtime_env
     _assert_rendered_provisioning(
         native_dir,
         loki="$__env{AVA_TELEMETRY_LOKI_URL}",
@@ -393,13 +391,13 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
         "shared.config.settings.observability.observability_url",
         "",
     )
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.10")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
 
     _lgtm_native._render_configs(repo, native_dir, home)
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
     assert "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts" in rendered_runtime_env
-    assert "100.64.0.10" not in rendered_runtime_env
+    assert "10.0.0.10" not in rendered_runtime_env
     _assert_rendered_provisioning(native_dir, webhook="$__env{AVA_ALERTS_WEBHOOK_URL}")
 
 
@@ -564,15 +562,15 @@ def test_native_provisioning_pg_stays_on_data_plane_when_db_url_is_loopback(
     review of 3b523ab14; #3606's PG never follows the observatory)."""
     monkeypatch.setattr(
         "shared.config.settings.observability.observability_url",
-        "http://100.78.137.46",
+        "http://10.0.0.46",
     )
     monkeypatch.setattr(
         "shared.config.settings.data_plane.db_url",
         "postgresql:///ava_main?host=/tmp/ava-pg-ava-test&port=5433",
     )
     loki, prometheus, pg = _observatory_urls._observability_datasource_urls()
-    assert loki == "http://100.78.137.46:3100"
-    assert prometheus == "http://100.78.137.46:9090"
+    assert loki == "http://10.0.0.46:3100"
+    assert prometheus == "http://10.0.0.46:9090"
     assert pg == "127.0.0.1:5433"
     assert "data-plane db_url" in capsys.readouterr().err
 

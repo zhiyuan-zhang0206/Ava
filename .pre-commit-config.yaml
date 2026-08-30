@@ -119,6 +119,17 @@ repos:
         language: system
         pass_filenames: false
 
+      # Ban tailnet IP literals (100.64.0.0/10 host addresses) repo-wide — the
+      # cluster's user-visible URL derives from AVA_GATEWAY_URL / reachable_host(),
+      # never from a literal. CIDR range notation (100.64.0.0/10) stays allowed;
+      # a test that exercises the range boundary opts out inline with
+      # `# tailnet-ip-ok: <reason>`. See scripts/lint_no_tailnet.py header.
+      - id: lint-no-tailnet
+        name: lint no tailnet IP literals (repo-wide)
+        entry: .venv/bin/python scripts/lint_no_tailnet.py
+        language: system
+        pass_filenames: false
+
       # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
       # (cli/, ui/) and prose/content (skills/, docs/, ui/web/) are exempt and
       # not scanned. A line that genuinely needs the character uses an inline

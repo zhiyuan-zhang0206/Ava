@@ -235,7 +235,7 @@ def test_proxy_cookie_post_from_gateway_origin_passes(
     monkeypatch.setattr(
         config.settings.gateway,
         "gateway_url",
-        "http://100.103.96.72:8000",
+        "http://10.0.0.72:8000",
     )
     body = {"queries": [{"refId": "A"}]}
     with TestClient(app) as client:
@@ -244,7 +244,7 @@ def test_proxy_cookie_post_from_gateway_origin_passes(
         resp = client.post(
             "/grafana/api/ds/query",
             json=body,
-            headers={"Origin": "http://100.103.96.72:8000"},
+            headers={"Origin": "http://10.0.0.72:8000"},
         )
 
     assert resp.status_code == 200

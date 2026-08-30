@@ -31,7 +31,7 @@ optional `gatewayUrl` override keeps its existing custom-port capability (and
 maps a bare host or `:3000` to `:8000`). Desktop shares the one-field page but
 preserves its existing arbitrary entry and gateway URLs for worktree clusters.
 
-The bundled Chinese onboarding page immediately changes to a 30-second
+The bundled onboarding page (in the device locale from the webview language) immediately changes to a 30-second
 connecting state while saving. `app_save_settings` persists Android-normalized
 settings, then defers the window change until the asynchronous IPC reply flushes.
 Android refreshes the existing webview's prelude and navigates it rather than

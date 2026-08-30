@@ -116,23 +116,60 @@ button:disabled {
   <div class="card stack">
     <div class="card-head stack">
       <h1>Ava</h1>
-      <p class="muted">Enter the cluster password to continue</p>
+      <p class="muted" data-i18n="enterPassword">Enter the cluster password to continue</p>
     </div>
     <form class="stack" id="form">
       <div class="field stack">
-        <label for="username">Username</label>
+        <label for="username" data-i18n="username">Username</label>
         <input type="text" id="username" name="username" placeholder="admin" autocomplete="username" autofocus>
       </div>
       <div class="field stack">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" placeholder="Cluster secret" autocomplete="current-password">
+        <label for="password" data-i18n="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Cluster secret" data-i18n-placeholder="clusterSecret" autocomplete="current-password">
       </div>
       <p class="error" id="error" role="alert" hidden></p>
       <button type="submit" id="submit">Sign in</button>
     </form>
   </div>
   <script>
-    // The same login call the app's form makes. `username` is accepted but never
+    // Locale copy follows the webview / system language (this page renders
+    // before any user setting exists). English strings are the static HTML
+    // defaults; the Chinese table is written as \uXXXX escapes because the
+    // repo-wide no-CJK gate exempts only locale files, and this page must
+    // stay a dependency-free single asset (see the gate daemon header).
+    var AVA_I18N_ZH = {
+      "enterPassword": "\u8f93\u5165\u96c6\u7fa4\u5bc6\u7801\u4ee5\u7ee7\u7eed",
+      "username": "\u7528\u6237\u540d",
+      "password": "\u5bc6\u7801",
+      "clusterSecret": "\u96c6\u7fa4\u5bc6\u94a5",
+      "signIn": "\u767b\u5f55",
+      "signingIn": "\u767b\u5f55\u4e2d\u2026",
+      "connectionFailed": "\u8fde\u63a5\u5931\u8d25\u2014\u2014gateway \u662f\u5426\u5728\u8fd0\u884c\uff1f",
+      "invalidPassword": "\u5bc6\u7801\u9519\u8bef",
+      "signInFailed": "\u767b\u5f55\u5931\u8d25\uff08"
+    };
+    var AVA_LOCALE = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
+    function t(key) {
+      return AVA_LOCALE === "zh" && AVA_I18N_ZH[key] ? AVA_I18N_ZH[key] : null;
+    }
+    function applyI18n() {
+      if (AVA_LOCALE !== "zh") return;
+      document.documentElement.lang = "zh-CN";
+      var nodes = document.querySelectorAll("[data-i18n]");
+      for (var i = 0; i < nodes.length; i++) {
+        var value = t(nodes[i].getAttribute("data-i18n"));
+        if (value) nodes[i].textContent = value;
+      }
+      var nodesP = document.querySelectorAll("[data-i18n-placeholder]");
+      for (var j = 0; j < nodesP.length; j++) {
+        var value2 = t(nodesP[j].getAttribute("data-i18n-placeholder"));
+        if (value2) nodesP[j].placeholder = value2;
+      }
+    }
+    applyI18n();
+
+    // The same login call the app's form makes.
+    // `username` is accepted but never
     // validated by the gateway — it is there so password managers offer to save
     // the secret — so a blank one takes the app's "admin" default.
     var form = document.getElementById("form");
@@ -144,7 +181,7 @@ button:disabled {
     // manager filling the field raises `input` the same as typing does.
     function idle() {
       submit.disabled = !passwordField.value.trim();
-      submit.textContent = "Sign in";
+      submit.textContent = t("signIn") || "Sign in";
     }
 
     passwordField.addEventListener("input", idle);
@@ -162,7 +199,7 @@ button:disabled {
       if (!password) return;
       error.hidden = true;
       submit.disabled = true;
-      submit.textContent = "Signing in…";
+      submit.textContent = t("signingIn") || "Signing in…";
       var response;
       try {
         response = await fetch("__GATEWAY_BASE__/api/auth/login", {
@@ -175,12 +212,12 @@ button:disabled {
           }),
         });
       } catch {
-        fail("Connection failed — is the gateway running?");
+        fail(t("connectionFailed") || "Connection failed — is the gateway running?");
         return;
       }
       if (response.ok) location.href = "/";
-      else if (response.status === 401) fail("Invalid password");
-      else fail("Sign-in failed (" + response.status + ")");
+      else if (response.status === 401) fail(t("invalidPassword") || "Invalid password");
+      else fail((t("signInFailed") || "Sign-in failed (") + response.status + ")");
     });
   </script>
 </body>

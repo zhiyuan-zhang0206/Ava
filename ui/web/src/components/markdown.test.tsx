@@ -72,12 +72,12 @@ describe("ChatMarkdown", () => {
 
   it("renders the reported bold URL without swallowed delimiters", () => {
     const content =
-      "\u65b9\u6848\u62a5\u544a\u5728 **http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/**\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a**events drop / N-step canary / Loki archive 365d**——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002";
+      "\u65b9\u6848\u62a5\u544a\u5728 **http://10.0.0.72:8000/pages/3682-events-checkpoint-growth-p2/**\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a**events drop / N-step canary / Loki archive 365d**——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002";
     const { container } = render(<ChatMarkdown content={content} />);
 
     const link = container.querySelector("strong > a");
     expect(link?.getAttribute("href")).toBe(
-      "http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/",
+      "http://10.0.0.72:8000/pages/3682-events-checkpoint-growth-p2/",
     );
     expect(link?.textContent).not.toContain("**");
     expect(container.textContent).not.toContain("**");
