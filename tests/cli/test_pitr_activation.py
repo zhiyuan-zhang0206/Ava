@@ -27,6 +27,7 @@ from services.pitr.checksums import ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.uploader import ack_manifest_from_raw
 from shared.config import settings
+from tests._pitr_fixtures import baidu_credential_evidence
 
 
 def _credentials() -> dict[str, str]:
@@ -1178,18 +1179,6 @@ def test_probe_switch_privilege_against_real_pg(
         shutil.rmtree(sock, ignore_errors=True)
 
 
-def _baidu_credentials_evidence() -> dict[str, str]:
-    return {
-        "backend": "baidu",
-        "uploader_identity": "app-key",
-        "viewer_identity": "app-key",
-        "store_target": "/apps/ava/ava-pitr",
-        "object_prefix": "pitr",
-        "backup_key_id": "key",
-        "backup_key_sha256": "0" * 64,
-    }
-
-
 def _durable_ack_raw(*, backend: str) -> dict[str, object]:
     """One durable WAL ACK payload, shaped for the backend under test."""
     segment = "00000001000000A20000008C"
@@ -1263,6 +1252,7 @@ def _wire_proof_world(
     backend: str,
     ack_raw: dict[str, object],
     observed: RemoteObjectAck | None = None,
+    ack_file_stem: str | None = None,
 ) -> None:
     """Wire the proof loop's external world onto a temp ava_home: the
     backend config, the archiver stats row, the durable ACK file, and the
@@ -1276,10 +1266,11 @@ def _wire_proof_world(
     else:
         monkeypatch.setattr(config, "pitr_baidu_app_root", "/apps/ava/ava-pitr")
 
+    stem = ack_file_stem or str(ack_raw["archive_name"])
     monkeypatch.setattr(activation_runtime, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(
         "services.pitr.activation_runtime.psycopg.connect",
-        lambda _conninfo, **_kw: _ArchiverConn(str(ack_raw["archive_name"])),
+        lambda _conninfo, **_kw: _ArchiverConn(stem),
     )
     if observed is None:
         ack = ack_manifest_from_raw(ack_raw)
@@ -1298,7 +1289,7 @@ def _wire_proof_world(
     )
     ack_dir = tmp_path / "physical-backup" / "ack"
     ack_dir.mkdir(parents=True)
-    (ack_dir / f"{ack_raw['archive_name']}.ack.json").write_text(json.dumps(ack_raw))
+    (ack_dir / f"{stem}.ack.json").write_text(json.dumps(ack_raw))
 
 
 def _remote_wal_proof_round_trips(
@@ -1336,7 +1327,9 @@ def test_remote_wal_proof_transfers_gcs_evidence_end_to_end(
     assert ack_evidence["ciphertext_crc32c"] == "AAAAAA=="
     assert ack_evidence["acknowledged_at"] == "2026-08-30T03:30:00+00:00"
     assert viewer_evidence["viewer_id"] == "v@example.test"
-    assert viewer_evidence["observed_at"] > ack_evidence["acknowledged_at"]
+    assert datetime.fromisoformat(viewer_evidence["observed_at"]) > datetime.fromisoformat(
+        ack_evidence["acknowledged_at"]
+    )
     _remote_wal_proof_round_trips(record, ack_evidence, viewer_evidence)
 
 
@@ -1349,7 +1342,7 @@ def test_remote_wal_proof_transfers_baidu_evidence_end_to_end(
 
     deadline = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
     record = _wal_ack_pending_record(
-        _baidu_credentials_evidence(), wal_verification_deadline=deadline
+        baidu_credential_evidence(), wal_verification_deadline=deadline
     )
     ack_raw = _durable_ack_raw(backend="baidu")
     _wire_proof_world(monkeypatch, tmp_path, backend="baidu", ack_raw=ack_raw)
@@ -1386,6 +1379,55 @@ def test_remote_wal_proof_refuses_viewer_evidence_drift(
     )
     _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw, observed=drifted)
     with pytest.raises(RuntimeError, match="viewer observed WAL differs"):
+        activation_runtime.remote_wal_proof(record)
+
+
+def test_remote_wal_proof_refuses_viewer_metadata_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A viewer stat whose metadata drifted from the durable ACK's metadata
+    must fail the proof — the store's observed tags are part of the
+    evidence, not decoration."""
+    from datetime import UTC, datetime, timedelta
+
+    deadline = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    record = _wal_ack_pending_record(wal_verification_deadline=deadline)
+    ack_raw = _durable_ack_raw(backend="gcs")
+    ack = ack_manifest_from_raw(ack_raw)
+    drifted = RemoteObjectAck(
+        object_name=ack.object_name,
+        pin_token=ack.pin_token,
+        size=ack.ciphertext_size,
+        checksum=ObjectChecksum(
+            algo=ack.ciphertext_checksum_algo, value=ack.ciphertext_checksum_value
+        ),
+        metadata={"ava-archive-name": "tampered"},
+        created=True,
+    )
+    _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw, observed=drifted)
+    with pytest.raises(RuntimeError, match="metadata differs"):
+        activation_runtime.remote_wal_proof(record)
+
+
+def test_remote_wal_proof_refuses_an_ack_for_a_different_archive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A durable ACK whose archive_name differs from the activation's exact
+    segment must fail the proof — the file's name is not its identity."""
+    from datetime import UTC, datetime, timedelta
+
+    deadline = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    record = _wal_ack_pending_record(wal_verification_deadline=deadline)
+    ack_raw = _durable_ack_raw(backend="gcs")
+    ack_raw["archive_name"] = "00000001000000A20000008D"
+    _wire_proof_world(
+        monkeypatch,
+        tmp_path,
+        backend="gcs",
+        ack_raw=ack_raw,
+        ack_file_stem="00000001000000A20000008C",
+    )
+    with pytest.raises(RuntimeError, match="targets a different archive"):
         activation_runtime.remote_wal_proof(record)
 
 
