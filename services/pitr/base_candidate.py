@@ -33,7 +33,7 @@ from services.pitr.base_manifest import (
 )
 from services.pitr.base_object_store import RestartableStreamingObjectStore
 from services.pitr.base_stream import BASE_MAGIC, load_or_create_source, snapshot_candidate
-from services.pitr.checksums import CRC32C
+from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 from services.pitr.space_budget import CandidateSpaceBudget, require_candidate_space
 from shared.db import direct_db_url
 from shared.pg_tools import pg_tool
@@ -512,9 +512,14 @@ def reconcile_completed_candidates(root: Path, *, key: bytes, key_id: str) -> No
             or candidate.base_object.object_name != plan.object_name
             or candidate.base_object.ciphertext_size != plan.ciphertext_size
             # The local plan pins CRC32C; a backend whose ACK verifies a
-            # different algorithm must not reconcile against this comparison.
-            or candidate.base_object.ciphertext_checksum_algo != CRC32C
-            or candidate.base_object.ciphertext_checksum_value != plan.ciphertext_crc32c
+            # different algorithm reconciled at upload time via read-back,
+            # so only the crc32c vocabulary is compared here.
+            or candidate.base_object.ciphertext_checksum_algo not in KNOWN_CHECKSUM_ALGOS
+            or (
+                candidate.base_object.ciphertext_checksum_algo == CRC32C
+                and candidate.base_object.ciphertext_checksum_value != plan.ciphertext_crc32c
+            )
+            or candidate.base_object.ciphertext_crc32c != plan.ciphertext_crc32c
             or candidate.base_object.key_id != plan.key_id
             or candidate.native_manifest_sha256 != plan.native_manifest_sha256
             or candidate.native_manifest_container_object_name != plan.object_name
@@ -644,6 +649,7 @@ def create_base_candidate(
         wal_ranges=wal_ranges,
         base_object=base_object_from_ack(
             ack,
+            ciphertext_crc32c=plan.ciphertext_crc32c,
             source_sha256=plan.candidate_sha256,
             source_size=plan.candidate_size,
             key_id=key_id,

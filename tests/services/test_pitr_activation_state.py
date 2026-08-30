@@ -17,13 +17,10 @@ from services.pitr.activation_state import (
 
 def _credentials() -> dict[str, str]:
     return {
-        "uploader_client_email": "u@example.test",
-        "uploader_project_id": "project",
-        "uploader_private_key_id": "u-key",
-        "viewer_client_email": "v@example.test",
-        "viewer_project_id": "project",
-        "viewer_private_key_id": "v-key",
-        "bucket_name": "bucket",
+        "backend": "gcs",
+        "uploader_identity": "u@example.test",
+        "viewer_identity": "v@example.test",
+        "store_target": "bucket",
         "object_prefix": "pitr",
         "backup_key_id": "key",
         "backup_key_sha256": "0" * 64,
@@ -450,6 +447,122 @@ def test_restore_pending_accepts_legacy_candidate_manifest_and_digest(
     assert stored_digest_matches(
         raw=legacy_candidate, canonical=loaded_protected_canonical(loaded), expected=legacy_digest
     )
+
+
+def test_legacy_gcs_credential_evidence_normalizes_to_neutral_keys(tmp_path: Path) -> None:
+    """QA #1147 C1: records written before the backend field carried the GCS
+    vocabulary in the credential evidence; they must stay readable (the same
+    identities under backend-neutral keys)."""
+    from dataclasses import asdict
+
+    record = ActivationRecord.start(operation_id="op-1", origin="cli")
+    raw = asdict(record)
+    raw["pre_activation_credential_evidence"] = {
+        "uploader_client_email": "u@example.test",
+        "uploader_project_id": "project",
+        "uploader_private_key_id": "u-key",
+        "viewer_client_email": "v@example.test",
+        "viewer_project_id": "project",
+        "viewer_private_key_id": "v-key",
+        "bucket_name": "bucket",
+        "object_prefix": "pitr",
+        "backup_key_id": "key",
+        "backup_key_sha256": "0" * 64,
+    }
+    record_path(tmp_path).parent.mkdir(parents=True)
+    record_path(tmp_path).write_text(json.dumps(raw))
+
+    loaded = load_record(tmp_path)
+
+    assert loaded is not None
+    assert loaded.pre_activation_credential_evidence == {
+        "backend": "gcs",
+        "uploader_identity": "u@example.test",
+        "viewer_identity": "v@example.test",
+        "store_target": "bucket",
+        "object_prefix": "pitr",
+        "backup_key_id": "key",
+        "backup_key_sha256": "0" * 64,
+    }
+
+
+def test_baidu_wal_remote_proof_loads_through_the_record_validator(
+    tmp_path: Path,
+) -> None:
+    """QA #1147 C1: a wal_remote_verified record carrying Baidu-shaped ACK
+    and viewer proof must load — every gate (store target, pin token,
+    checksum) dispatches on the credential-evidence backend."""
+    from dataclasses import asdict
+
+    segment = "00000001000000A20000008B"
+    record = ActivationRecord.start(operation_id="op-1", origin="cli")
+    raw = asdict(record)
+    ack_evidence = {
+        "timeline": "1",
+        "segment": segment,
+        "bucket_name": "/apps/ava/ava-pitr",
+        "object_prefix": "pitr",
+        "object_name": f"pitr/wal/{segment[:8]}/{segment}.enc",
+        "generation": "123456789:" + "a" * 32,
+        "ciphertext_size": "10",
+        "ciphertext_crc32c": "b" * 32,
+        "source_sha256": "1" * 64,
+        "source_size": "1",
+        "key_id": "key",
+        "encryption_format": "AVAPITR1",
+        "acknowledged_at": "2026-08-30T03:30:00+00:00",
+    }
+    viewer_proof = {
+        **{k: v for k, v in ack_evidence.items() if k != "acknowledged_at"},
+        "viewer_id": "app-key",
+        "observed_at": "2026-08-30T03:31:00+00:00",
+    }
+    raw.update(
+        phase="wal_remote_verified",
+        pre_activation_snapshot="/verified.dump.enc",
+        pre_activation_pg_settings={"archive_mode": "off"},
+        pre_activation_credential_evidence={
+            "backend": "baidu",
+            "uploader_identity": "app-key",
+            "viewer_identity": "app-key",
+            "store_target": "/apps/ava/ava-pitr",
+            "object_prefix": "pitr",
+            "backup_key_id": "key",
+            "backup_key_sha256": "0" * 64,
+        },
+        wal_config_before_digest="before",
+        wal_config_desired_digest="desired",
+        pre_activation_pitr_env={"pitr_enabled": "__ABSENT__"},
+        pre_activation_pg_auto_conf={"archive_mode": "off"},
+        pre_activation_env_b64="YQ==",
+        pre_activation_env_digest="env-digest",
+        pre_activation_auto_conf_b64="Yg==",
+        pre_activation_auto_conf_digest="auto-digest",
+        restart_handoff="handoff",
+        restart_orchestration="orchestration",
+        rollback_expected_env_digest="env-digest",
+        rollback_expected_auto_conf_digest="auto-digest",
+        wal_exact_evidence={
+            "timeline": "1",
+            "segment": segment,
+            "switch_lsn": "0/1",
+            "failed_count": "0",
+            "archived_count": "0",
+            "switch_intent_at": "2026-08-30T03:00:00+00:00",
+        },
+        wal_verification_deadline="2026-08-30T04:00:00+00:00",
+        wal_ack_evidence=ack_evidence,
+        wal_viewer_proof=viewer_proof,
+    )
+    record_path(tmp_path).parent.mkdir(parents=True)
+    record_path(tmp_path).write_text(json.dumps(raw))
+
+    loaded = load_record(tmp_path)
+
+    assert loaded is not None
+    assert loaded.phase == "wal_remote_verified"
+    assert loaded.wal_ack_evidence == ack_evidence
+    assert loaded.wal_viewer_proof == viewer_proof
 
 
 def loaded_protected_canonical(loaded: ActivationRecord) -> str:

@@ -22,7 +22,9 @@ from dotenv import dotenv_values
 from services.pitr.activation_evidence import stored_digest_matches
 from services.pitr.activation_state import ActivationRecord
 from services.pitr.restore_manifest import candidate_sha256
+from services.pitr.uploader import AckManifest
 from shared.config import settings
+from shared.config.physical_backup import PhysicalBackupSettings
 from shared.paths import ava_home
 
 
@@ -333,18 +335,66 @@ def probe_switch_privilege() -> None:
         )
 
 
+def wal_evidence_common(
+    *, ack: AckManifest, exact: dict[str, str], config: PhysicalBackupSettings
+) -> dict[str, str]:
+    """The evidence shared by the durable WAL ACK and the viewer proof.
+
+    ``bucket_name`` carries the backend's store target (the GCS bucket or
+    the Baidu app root) and ``generation`` the backend's pin token (the GCS
+    object generation or the Baidu ``fs_id:content-md5`` identity);
+    ``ciphertext_crc32c`` holds the backend-verified checksum, whose shape
+    the evidence validator dispatches on by backend.
+    """
+    if config.pitr_store_backend == "baidu":
+        store_target = config.pitr_baidu_app_root
+    else:
+        store_target = str(config.pitr_gcs_bucket)
+    return {
+        "timeline": exact["timeline"],
+        "segment": exact["segment"],
+        "bucket_name": store_target,
+        "object_prefix": config.pitr_gcs_prefix,
+        "object_name": ack.object_name,
+        "generation": ack.pin_token,
+        "ciphertext_size": str(ack.ciphertext_size),
+        "ciphertext_crc32c": ack.ciphertext_checksum_value,
+        "source_sha256": ack.source_sha256,
+        "source_size": str(ack.source_size),
+        "key_id": ack.key_id,
+        "encryption_format": ack.encryption_format,
+    }
+
+
+def wal_metadata(ack: AckManifest) -> dict[str, str]:
+    """The metadata every WAL upload writes; the viewer proof compares the
+    store's stored metadata against it. Backend-neutral: the crc32c key
+    carries the local plan digest, not the backend-verified checksum
+    (which is a content MD5 on the Baidu backend)."""
+    return {
+        "ava-archive-name": ack.archive_name,
+        "ava-source-sha256": ack.source_sha256,
+        "ava-source-size": str(ack.source_size),
+        "ava-ciphertext-crc32c": ack.ciphertext_crc32c,
+        "ava-encryption-format": ack.encryption_format,
+        "ava-key-id": ack.key_id,
+    }
+
+
 def remote_wal_proof(
     record: ActivationRecord, stop: threading.Event | None = None
 ) -> tuple[dict[str, str], dict[str, str]]:
-    from services.pitr.store_factory import get_backend
+    from services.pitr.store_factory import get_store_group
     from services.pitr.uploader import ack_manifest_from_raw
     from shared.db import direct_db_url
 
     exact, deadline_text = record.wal_exact_evidence, record.wal_verification_deadline
     config = settings.physical_backup
-    viewer_credentials = config.pitr_restore_gcs_credentials_file
-    if exact is None or deadline_text is None or viewer_credentials is None:
+    if exact is None or deadline_text is None:
         raise RuntimeError("WAL verification state is incomplete")
+    if config.pitr_store_backend == "gcs" and config.pitr_restore_gcs_credentials_file is None:
+        raise RuntimeError("WAL verification state is incomplete")
+    viewer_store = get_store_group().viewer_object_store()
     archive_name = exact["segment"]
     deadline = datetime.fromisoformat(deadline_text)
     switch_intent = datetime.fromisoformat(exact["switch_intent_at"])
@@ -376,15 +426,7 @@ def remote_wal_proof(
                 raise RuntimeError("durable WAL ACK falls outside the activation window")
             if stop is not None and stop.is_set():
                 raise RuntimeError("PITR WAL proof lost its deployment lease")
-            remote = (
-                get_backend()
-                .object_store(
-                    project=config.pitr_gcs_project,
-                    bucket=config.pitr_gcs_bucket,
-                    credentials_file=viewer_credentials,
-                )
-                .stat(ack.object_name)
-            )
+            remote = viewer_store.stat(ack.object_name)
             if remote is None or (
                 remote.pin_token,
                 remote.size,
@@ -397,39 +439,19 @@ def remote_wal_proof(
                 ack.ciphertext_checksum_value,
             ):
                 raise RuntimeError("viewer observed WAL differs from durable ACK")
-            metadata = {
-                "ava-archive-name": ack.archive_name,
-                "ava-source-sha256": ack.source_sha256,
-                "ava-source-size": str(ack.source_size),
-                "ava-ciphertext-crc32c": ack.ciphertext_checksum_value,
-                "ava-encryption-format": ack.encryption_format,
-                "ava-key-id": ack.key_id,
-            }
+            metadata = wal_metadata(ack)
             if dict(remote.metadata) != metadata:
                 raise RuntimeError("viewer observed WAL metadata differs from durable ACK")
             observed_at = datetime.now(UTC)
             if observed_at > deadline:
                 raise RuntimeError("viewer WAL proof completed after the activation deadline")
-            common = {
-                "timeline": exact["timeline"],
-                "segment": archive_name,
-                "bucket_name": str(config.pitr_gcs_bucket),
-                "object_prefix": config.pitr_gcs_prefix,
-                "object_name": ack.object_name,
-                "generation": ack.pin_token,
-                "ciphertext_size": str(ack.ciphertext_size),
-                "ciphertext_crc32c": ack.ciphertext_checksum_value,
-                "source_sha256": ack.source_sha256,
-                "source_size": str(ack.source_size),
-                "key_id": ack.key_id,
-                "encryption_format": ack.encryption_format,
-            }
+            common = wal_evidence_common(ack=ack, exact=exact, config=config)
             return (
                 {**common, "acknowledged_at": ack.acknowledged_at},
                 {
                     **common,
                     "viewer_id": str(
-                        (record.pre_activation_credential_evidence or {})["viewer_client_email"]
+                        (record.pre_activation_credential_evidence or {})["viewer_identity"]
                     ),
                     "observed_at": observed_at.isoformat(),
                 },

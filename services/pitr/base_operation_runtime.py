@@ -29,7 +29,7 @@ from services.pitr.restore_proof import (
     publish_candidate_proof,
     verify_candidate_proof,
 )
-from services.pitr.store_factory import get_backend
+from services.pitr.store_factory import get_store_group
 from shared.config import settings
 from shared.db import direct_db_url
 from shared.paths import ava_home
@@ -46,9 +46,7 @@ class RestoreWorkerInput:
     ack_dir: Path
     key_path: Path
     backend: str
-    project: str
-    bucket: str
-    viewer_credentials: Path
+    store_args: tuple[tuple[str, str], ...]
     budget: RestoreSpaceBudget
     live_db_url: str
     data_directory: str
@@ -67,9 +65,28 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
     if not config.pitr_restore_proof_enabled:
         raise RuntimeError("restore proof cannot run while its flag is off")
     key_path = config.pitr_backup_key_file
-    read_credentials = config.pitr_restore_gcs_credentials_file
-    if key_path is None or read_credentials is None:
-        raise RuntimeError("validated viewer-only restore proof secrets are missing")
+    if key_path is None:
+        raise RuntimeError("validated viewer-only restore proof key is missing")
+    if config.pitr_store_backend == "gcs":
+        read_credentials = config.pitr_restore_gcs_credentials_file
+        if read_credentials is None:
+            raise RuntimeError("validated viewer-only restore proof secrets are missing")
+        store_args: tuple[tuple[str, str], ...] = (
+            ("project", config.pitr_gcs_project),
+            ("bucket", config.pitr_gcs_bucket),
+            ("viewer_credentials", str(read_credentials)),
+        )
+    else:
+        baidu_credentials = config.pitr_baidu_credentials_file
+        baidu_token = config.pitr_baidu_token_file
+        if baidu_credentials is None or baidu_token is None:
+            raise RuntimeError("validated Baidu restore-proof secrets are missing")
+        store_args = (
+            ("app_root", config.pitr_baidu_app_root),
+            ("prefix", config.pitr_gcs_prefix),
+            ("credentials_file", str(baidu_credentials)),
+            ("token_file", str(baidu_token)),
+        )
     root = ava_home() / "physical-backup"
     logical_peak = max(
         (item.stat().st_size for item in (ava_home() / "backups" / "db").glob("*.enc")),
@@ -81,9 +98,7 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
         root / "ack",
         key_path,
         config.pitr_store_backend,
-        config.pitr_gcs_project,
-        config.pitr_gcs_bucket,
-        read_credentials,
+        store_args,
         RestoreSpaceBudget(config.pitr_spool_hard_bytes, logical_peak, _EMERGENCY_FLOOR_BYTES),
         direct_db_url(),
         live_data_directory(),
@@ -121,9 +136,7 @@ def _request(inputs: RestoreWorkerInput) -> dict[str, object]:
         "ack_dir": str(inputs.ack_dir),
         "key_path": str(inputs.key_path),
         "backend": inputs.backend,
-        "project": inputs.project,
-        "bucket": inputs.bucket,
-        "viewer_credentials": str(inputs.viewer_credentials),
+        "store_args": dict(inputs.store_args),
         "budget": {
             "spool_and_pg_wal_reserve": inputs.budget.spool_and_pg_wal_reserve,
             "logical_backup_peak": inputs.budget.logical_backup_peak,
@@ -254,9 +267,6 @@ def publish(
     require_ownership: Callable[[], None] = lambda: None,
 ) -> None:
     config = settings.physical_backup
-    credentials = config.pitr_gcs_credentials_file
-    if credentials is None:
-        raise RuntimeError("validated PITR publisher credential is missing")
     root = ava_home() / "physical-backup"
     path = root / "base-manifests" / f"{candidate.chain_id}.candidate.json"
     authoritative = CandidateManifest.from_json(path.read_text())
@@ -273,9 +283,6 @@ def publish(
         candidate=authoritative,
         root=root,
         ack_dir=root / "ack",
-        project=config.pitr_gcs_project,
-        bucket=config.pitr_gcs_bucket,
-        credentials=credentials,
     )
     publish_candidate_proof(
         candidate=authoritative,
@@ -295,12 +302,7 @@ def verify_then_construct_publisher(
     candidate: CandidateManifest,
     root: Path,
     ack_dir: Path,
-    project: str,
-    bucket: str,
-    credentials: Path,
 ) -> tuple[ProtectedManifest, ProtectedManifestPublisher]:
     verified = verify_candidate_proof(candidate=candidate, root=root, ack_dir=ack_dir)
-    publisher = get_backend().protected_manifest_publisher(
-        project=project, bucket=bucket, credentials_file=credentials
-    )
+    publisher = get_store_group().protected_manifest_publisher()
     return verified, publisher

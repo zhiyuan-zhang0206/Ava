@@ -121,6 +121,55 @@ class PhysicalBackupSettings(EnvSettings):
             "bootstrap": False,
         },
     )
+    pitr_baidu_app_root: str = Field(
+        default="",
+        alias="AVA_PITR_BAIDU_APP_ROOT",
+        description=(
+            "Baidu Netdisk app data directory (e.g. /apps/<appname>); the PCS "
+            "API forbids writes outside this boundary. Required when the "
+            "store backend is baidu."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+    pitr_baidu_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_BAIDU_CREDENTIALS_FILE",
+        description=(
+            "0600 JSON holding the Baidu open-platform app identity: app_key, "
+            "secret_key, and the durable refresh_token. Never the cluster secret."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+            "bootstrap": False,
+        },
+    )
+    pitr_baidu_token_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_BAIDU_TOKEN_FILE",
+        description=(
+            "0600 JSON managed by the Baidu token manager: the access token "
+            "pair. May not exist yet (created on first refresh); when present "
+            "it must be a 0600 non-symlink regular file."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+            "bootstrap": False,
+        },
+    )
     pitr_gcs_project: str = Field(
         default="",
         alias="AVA_PITR_GCS_PROJECT",
@@ -309,16 +358,29 @@ class PhysicalBackupSettings(EnvSettings):
             raise ValueError(
                 "AVA_PITR_UNACKED_WARN_SECONDS must be below AVA_PITR_UNACKED_CRITICAL_SECONDS"
             )
-        if self.pitr_enabled and not (
-            self.pitr_gcs_project
-            and self.pitr_gcs_bucket
-            and self.pitr_backup_key_file
-            and self.pitr_gcs_credentials_file
-            and self.pitr_backup_key_id
+        if self.pitr_enabled and not (self.pitr_backup_key_file and self.pitr_backup_key_id):
+            raise ValueError(
+                "PITR enabled requires AVA_PITR_BACKUP_KEY_FILE and AVA_PITR_BACKUP_KEY_ID"
+            )
+        if (
+            self.pitr_enabled
+            and self.pitr_store_backend == "gcs"
+            and not (
+                self.pitr_gcs_project and self.pitr_gcs_bucket and self.pitr_gcs_credentials_file
+            )
         ):
             raise ValueError(
-                "PITR enabled requires AVA_PITR_GCS_PROJECT, AVA_PITR_GCS_BUCKET, "
-                "AVA_PITR_BACKUP_KEY_FILE, AVA_PITR_GCS_CREDENTIALS_FILE, and AVA_PITR_BACKUP_KEY_ID"
+                "the gcs store backend requires AVA_PITR_GCS_PROJECT, AVA_PITR_GCS_BUCKET, "
+                "and AVA_PITR_GCS_CREDENTIALS_FILE"
+            )
+        if (
+            self.pitr_enabled
+            and self.pitr_store_backend == "baidu"
+            and not (self.pitr_baidu_app_root and self.pitr_baidu_credentials_file)
+        ):
+            raise ValueError(
+                "the baidu store backend requires AVA_PITR_BAIDU_APP_ROOT and "
+                "AVA_PITR_BAIDU_CREDENTIALS_FILE"
             )
         if self.pitr_base_backup_enabled and not self.pitr_enabled:
             raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_ENABLED")
@@ -360,10 +422,20 @@ class PhysicalBackupSettings(EnvSettings):
                 raise ValueError(
                     "AVA_PITR_BACKUP_KEY_FILE must be a 32-byte, non-symlink regular file with mode 0600"
                 )
-            _require_private_regular_file(
-                self.pitr_gcs_credentials_file, "AVA_PITR_GCS_CREDENTIALS_FILE"
-            )
-            if self.pitr_restore_proof_enabled:
+            if self.pitr_store_backend == "gcs":
+                _require_private_regular_file(
+                    self.pitr_gcs_credentials_file, "AVA_PITR_GCS_CREDENTIALS_FILE"
+                )
+            if self.pitr_store_backend == "baidu":
+                _require_private_regular_file(
+                    self.pitr_baidu_credentials_file, "AVA_PITR_BAIDU_CREDENTIALS_FILE"
+                )
+                token_file = self.pitr_baidu_token_file
+                if token_file is None or not token_file.is_absolute():
+                    raise ValueError("AVA_PITR_BAIDU_TOKEN_FILE must be an absolute path")
+                if token_file.exists():
+                    _require_private_regular_file(token_file, "AVA_PITR_BAIDU_TOKEN_FILE")
+            if self.pitr_restore_proof_enabled and self.pitr_store_backend == "gcs":
                 _require_private_regular_file(
                     self.pitr_restore_gcs_credentials_file,
                     "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE",
