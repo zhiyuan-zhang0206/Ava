@@ -94,3 +94,25 @@ class MemoryGraphResponse(BaseModel):
     nodes: list[MemoryGraphNode]
     edges: list[MemoryGraphEdge]
     warnings: list[str] = Field(default_factory=list)
+
+
+class MemoryNoteResponse(BaseModel):
+    """GET /api/memory/note response — one parsed memory note.
+
+    Mirrors MemoryGraphNode plus the parsed markdown body. The body is the
+    markdown with the YAML frontmatter removed (shared.parse_note's body), so
+    the frontend renders the note itself rather than re-parsing frontmatter
+    (frontmatter values arrive as structured fields: title / description /
+    tags / timestamp / ava_agent / ava_machine).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    path: str
+    title: str
+    description: str | None
+    tags: list[str]
+    timestamp: str | None
+    ava_agent: str | None
+    ava_machine: str | None
+    body: str

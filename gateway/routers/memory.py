@@ -33,6 +33,7 @@ from gateway.schemas import (
     MemoryGraphEdge,
     MemoryGraphNode,
     MemoryGraphResponse,
+    MemoryNoteResponse,
     MemoryRefreshResponse,
     MemorySearchRequest,
     MemorySearchResponse,
@@ -408,6 +409,47 @@ async def post_memory_refresh() -> MemoryRefreshResponse:
 def get_memory_graph() -> MemoryGraphResponse:
     """Return concept notes and cross-links from the gateway memory bundle."""
     return _build_memory_graph(gateway_memory_dir())
+
+
+@router.get("/api/memory/note", response_model=MemoryNoteResponse)
+def get_memory_note(path: str) -> MemoryNoteResponse:
+    """Return one parsed memory note by its **relative** path (sans frontmatter).
+
+    `path` is a memory-pool-relative markdown path as the graph carries it
+    (e.g. `health/user-health-overview.md`). Resolved inside the memory root
+    only — traversal (`..`, absolute paths) is rejected with 404 rather than
+    leaking filesystem structure. A file that is not a note (no/invalid
+    frontmatter) is not a note either: 404. The response carries the parsed
+    fields plus the markdown body with the YAML frontmatter already stripped.
+    """
+    root = gateway_memory_dir().resolve()
+    rel = Path(path)
+    if rel.is_absolute() or rel.suffix != ".md":
+        raise HTTPException(status_code=404, detail="memory note not found")
+    candidate = (root / rel).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="memory note not found") from None
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="memory note not found")
+    try:
+        text = candidate.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        raise HTTPException(status_code=404, detail="memory note not found") from None
+    note = parse_note(text, rel.with_suffix("").as_posix())
+    if note is None:
+        raise HTTPException(status_code=404, detail="memory note not found")
+    return MemoryNoteResponse(
+        path=note.rel + ".md",
+        title=note.title,
+        description=note.description,
+        tags=list(note.tags),
+        timestamp=note.timestamp,
+        ava_agent=note.ava_agent,
+        ava_machine=note.ava_machine,
+        body=note.body,
+    )
 
 
 @router.get("/api/memory/pool", response_class=Response)

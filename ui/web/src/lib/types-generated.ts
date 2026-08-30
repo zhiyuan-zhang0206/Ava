@@ -3130,6 +3130,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/memory/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Memory Note
+         * @description Return one parsed memory note by its **relative** path (sans frontmatter).
+         *
+         *     `path` is a memory-pool-relative markdown path as the graph carries it
+         *     (e.g. `health/user-health-overview.md`). Resolved inside the memory root
+         *     only — traversal (`..`, absolute paths) is rejected with 404 rather than
+         *     leaking filesystem structure. A file that is not a note (no/invalid
+         *     frontmatter) is not a note either: 404. The response carries the parsed
+         *     fields plus the markdown body with the YAML frontmatter already stripped.
+         */
+        get: operations["get_memory_note_api_memory_note_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/memory/pool": {
         parameters: {
             query?: never;
@@ -5532,6 +5559,34 @@ export interface components {
             edges: components["schemas"]["MemoryGraphEdge"][];
             /** Warnings */
             warnings?: string[];
+        };
+        /**
+         * MemoryNoteResponse
+         * @description GET /api/memory/note response — one parsed memory note.
+         *
+         *     Mirrors MemoryGraphNode plus the parsed markdown body. The body is the
+         *     markdown with the YAML frontmatter removed (shared.parse_note's body), so
+         *     the frontend renders the note itself rather than re-parsing frontmatter
+         *     (frontmatter values arrive as structured fields: title / description /
+         *     tags / timestamp / ava_agent / ava_machine).
+         */
+        MemoryNoteResponse: {
+            /** Path */
+            path: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string | null;
+            /** Tags */
+            tags: string[];
+            /** Timestamp */
+            timestamp: string | null;
+            /** Ava Agent */
+            ava_agent: string | null;
+            /** Ava Machine */
+            ava_machine: string | null;
+            /** Body */
+            body: string;
         };
         /**
          * MemoryRefreshResponse
@@ -11138,6 +11193,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryGraphResponse"];
+                };
+            };
+        };
+    };
+    get_memory_note_api_memory_note_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryNoteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
