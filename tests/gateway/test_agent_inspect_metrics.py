@@ -324,8 +324,8 @@ def _logql_metric(
         "panel": panel,
         "query": query
         or (
-            'sum(sum_over_time({service_name="unknown_service"} | json | '
-            "category={category} | event_name={event_name} | {{agent_id}} | "
+            'sum(sum_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+            "category={category} | {{agent_id}} | "
             "unwrap attributes_cost_usd [$__interval]))"
         ),
         "output": output or ["inspector"],
@@ -430,8 +430,8 @@ def test_metrics_logql_stat_via_loki(
             name="stat_cost",
             panel="stat",
             query=(
-                'sum(sum_over_time({service_name="unknown_service"} | json | '
-                "category={category} | event_name={event_name} | {{agent_id}} | "
+                'sum(sum_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+                "category={category} | {{agent_id}} | "
                 "unwrap attributes_cost_usd [$__range]))"
             ),
         ),
