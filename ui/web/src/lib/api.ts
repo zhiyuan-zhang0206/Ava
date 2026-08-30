@@ -39,6 +39,7 @@ import type { NoticesFeed,
   SkillView,
   SkillsView,
   MemoryGraphResponse,
+  MemoryNoteResponse,
   ModelsResponse,
   PackageDraftResponse,
   PackageKind,
@@ -481,6 +482,13 @@ export const api = {
   // OKF concept-note graph rendered by /okf.
   getMemoryGraph: (): Promise<MemoryGraphResponse> => {
     return f("/api/memory/graph").then(ok<MemoryGraphResponse>);
+  },
+
+  // One parsed memory note (markdown body with frontmatter stripped) by its
+  // graph-carried relative path — the click-to-view side panel's data source.
+  getMemoryNote: (path: string): Promise<MemoryNoteResponse> => {
+    const q = new URLSearchParams({ path });
+    return f(`/api/memory/note?${q.toString()}`).then(ok<MemoryNoteResponse>);
   },
 
   // --- stats ---
