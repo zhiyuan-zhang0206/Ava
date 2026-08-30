@@ -25,6 +25,7 @@ Two invariants make one upstream safe for many clients:
 Wire protocol (JSON line per request, mirrors `ava._mcps_daemon`):
   Request:  {"id": 1, "method": "list_tools"}
             {"id": 2, "method": "call_tool", "tool": "click", "args": {...}}
+            {"id": 3, "method": "release_agent_page", "agent_id": 7}
   Response: {"id": 1, "ok": true,  "result": [...]}            # tool dicts
             {"id": 2, "ok": true,  "result": {...}}            # CallToolResult dump
             {"id": 2, "ok": false, "error": "message"}
@@ -53,6 +54,12 @@ from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from services.browser.page_lifecycle import (
+    _AGENT_AFFINITY,
+    _text_of,
+    dead_page_reaper,
+    handle_release_agent_page,
+)
 from services.browser.protocol import Request, Response
 from services.browser.session import (
     gateway_session_is_valid,
@@ -85,18 +92,6 @@ _LEAN_FLAGS = ["--usageStatistics=false"]
 # browser-global) and so must not be re-pinned to the connection's current page
 # before forwarding. Everything else is page-scoped and gets re-pinned.
 _MANAGEMENT_TOOLS = frozenset({"new_page", "select_page", "close_page", "list_pages"})
-
-# Per-agent page affinity — agent id -> that agent's current page. The
-# selected-page state belongs to the AGENT, not to a TCP connection: an exec
-# subprocess child re-connecting mid-turn (or the agent process itself after a
-# session rebuild) must land on the same tab the agent selected, not cold-start
-# with "No page selected" on every exec. Module-level on purpose: the
-# ChromeMcpDaemon object is replaced on upstream reconnect, and this registry
-# must survive that. One int per agent that has used the browser — bounded by
-# the machine's agent count; a closed/crashed page drops the slot naturally
-# via the existing re-pin failure path. Requests without an agent id (legacy
-# wrapper clients) keep the per-connection fallback in _handle_client.
-_AGENT_AFFINITY: dict[int, int | None] = {}
 
 # chrome-devtools-mcp's cold-start error: a page-scoped call with no selected
 # page. Matched verbatim from the upstream result; if upstream rewords it the
@@ -154,10 +149,6 @@ _UPSTREAM_WATCHDOG_TIMEOUT_S = 10.0
 # revoked session heals on the next gateway page instead of waiting out the
 # interval.
 _SESSION_REFRESH_INTERVAL_S = 6 * 3600
-
-
-def _text_of(result: types.CallToolResult) -> str:
-    return "".join(c.text for c in result.content if isinstance(c, types.TextContent))
 
 
 def _selected_id(result: types.CallToolResult) -> int | None:
@@ -388,6 +379,8 @@ async def _handle_client(
                                 "ok": True,
                                 "result": result.model_dump(mode="json"),
                             }
+                    elif method == "release_agent_page":
+                        resp = await handle_release_agent_page(daemon, req, req_id)
                     else:
                         resp = {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}
                 except Exception as e:  # one bad call must not drop the whole connection
@@ -687,9 +680,10 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
     # Tracks the current upstream stack so we can close it before reconnecting.
     current_stack: AsyncExitStack | None = None
     reconnect_delay = _RECONNECT_INITIAL_DELAY_S
-    # Hoisted out of the loop so the shutdown path can cancel it (P3: the
-    # stop path used to leave it running until its own next tick).
+    # Hoisted out of the loop so the shutdown path can cancel them (P3: the
+    # stop path used to leave the watchdog running until its own next tick).
     watchdog_task: asyncio.Task[None] | None = None
+    reaper_task: asyncio.Task[None] | None = None
 
     try:
         while not stop.is_set():
@@ -713,6 +707,7 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
             current_stack = stack
             daemon_ref[0] = ChromeMcpDaemon(session)
             watchdog_task = asyncio.create_task(_upstream_watchdog(daemon_ref[0], stop))
+            reaper_task = asyncio.create_task(dead_page_reaper(daemon_ref[0], stop))
             reconnect_delay = _RECONNECT_INITIAL_DELAY_S
             logger.info(f"[browser-mcp] upstream connected ({browser_url})")
 
@@ -731,6 +726,10 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
                 with suppress(BaseException):
                     await watchdog_task
                 watchdog_task = None
+                reaper_task.cancel()
+                with suppress(BaseException):
+                    await reaper_task
+                reaper_task = None
                 daemon_ref[0] = None
                 # Close the dead upstream stack NOW — its npx/node children
                 # used to linger until the next successful reconnect (audit
@@ -748,6 +747,10 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
             watchdog_task.cancel()
             with suppress(BaseException):
                 await watchdog_task
+        if reaper_task is not None:
+            reaper_task.cancel()
+            with suppress(BaseException):
+                await reaper_task
         session_task.cancel()
         with suppress(Exception):
             await session_task

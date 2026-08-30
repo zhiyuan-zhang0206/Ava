@@ -22,6 +22,7 @@ from mcp import types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from services.browser import page_lifecycle
 from services.browser.mcp_daemon import (
     _AGENT_AFFINITY,
     ChromeMcpDaemon,
@@ -29,6 +30,12 @@ from services.browser.mcp_daemon import (
     _no_page_result,
     _selected_id,
     _text_of,
+)
+from services.browser.page_lifecycle import (
+    local_host_port,
+    parse_page_listing,
+    port_listening,
+    reap_dead_agent_pages,
 )
 
 
@@ -415,3 +422,200 @@ async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
     server.close()
     await server.wait_closed()
     sock_path.unlink(missing_ok=True)
+    server.close()
+    await server.wait_closed()
+    sock_path.unlink(missing_ok=True)
+
+
+# ── Agent-terminate page release (process-exit hook) ─────────────────────
+
+
+async def test_release_agent_page_closes_only_that_agent() -> None:
+    """Releasing agent 7 closes exactly 7's page — agent 8's tab survives even
+    though it is the upstream's current global selection; 7's slot is cleared."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
+    await d.call_tool_for_agent("new_page", {"url": "b"}, 8)  # page 2, selected
+    up.calls.clear()
+
+    page_id = await page_lifecycle.release_agent_page(d, 7)
+
+    assert page_id == 1
+    assert ("close_page", {"pageId": 1}, 2) in up.calls
+    assert 1 not in up.pages
+    assert up.pages == {2: "b"}  # the other agent's tab untouched
+    assert _AGENT_AFFINITY[7] is None
+    assert _AGENT_AFFINITY[8] == 2
+
+
+async def test_release_agent_page_idempotent_and_no_slot() -> None:
+    """A second release is a no-op (slot already cleared) and an agent that
+    never opened a page is a no-op — no second close_page reaches upstream."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
+    up.calls.clear()
+
+    assert await page_lifecycle.release_agent_page(d, 7) == 1
+    assert await page_lifecycle.release_agent_page(d, 7) is None
+    assert await page_lifecycle.release_agent_page(d, 99) is None
+    assert [c[0] for c in up.calls] == ["close_page"]  # exactly one close
+
+
+async def test_release_agent_page_keeps_slot_when_upstream_down() -> None:
+    """The upstream dying mid-release must not clear the slot — the page is
+    still open and the reaper needs to find it after the reconnect."""
+    d = ChromeMcpDaemon(DeadUpstream())  # type: ignore[arg-type]
+    _AGENT_AFFINITY[7] = 1
+    with pytest.raises(RuntimeError, match="upstream session is down"):
+        await page_lifecycle.release_agent_page(d, 7)
+    assert _AGENT_AFFINITY[7] == 1  # slot survives for the reaper
+
+
+async def test_release_agent_page_wire_method() -> None:
+    """Wire-level: an agent's exit hook sends `release_agent_page`; the daemon
+    closes that agent's page and answers with the released page id. A missing
+    agent id is rejected at the protocol edge."""
+    import contextlib
+
+    up = FakeUpstream()
+    daemon_ref: list[ChromeMcpDaemon | None] = [ChromeMcpDaemon(up)]  # type: ignore[arg-type]
+    sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
+    server = await asyncio.start_unix_server(
+        lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
+    )
+    assert sock_path.exists()
+
+    async def roundtrip(payload: dict[str, Any]) -> dict[str, Any]:
+        reader, writer = await asyncio.open_unix_connection(path=sock_path)
+        writer.write((json.dumps(payload) + "\n").encode())
+        await writer.drain()
+        line = await reader.readline()
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        return json.loads(line)
+
+    await roundtrip(
+        {"id": 1, "method": "call_tool", "tool": "new_page", "args": {"url": "a"}, "agent_id": 7}
+    )
+    resp = await roundtrip({"id": 2, "method": "release_agent_page", "agent_id": 7})
+    assert resp["ok"] is True
+    assert resp["result"]["page_id"] == 1
+    assert _AGENT_AFFINITY[7] is None
+
+    bad = await roundtrip({"id": 3, "method": "release_agent_page"})
+    assert bad["ok"] is False
+    assert "agent_id" in bad["error"]
+
+    server.close()
+    await server.wait_closed()
+    sock_path.unlink(missing_ok=True)
+
+
+# ── Dead-page reaper (dead localhost port) ──────────────────────────────
+
+
+def test_parse_page_listing_extracts_urls() -> None:
+    text = "  1: http://localhost:3112/memory/graph\n  2: http://a [selected]\n   3: about:blank"
+    assert parse_page_listing(text) == {
+        1: "http://localhost:3112/memory/graph",
+        2: "http://a",
+        3: "about:blank",
+    }
+    assert parse_page_listing("") == {}
+
+
+def test_local_host_port_only_matches_local_http() -> None:
+    assert local_host_port("http://localhost:3112/x") == ("localhost", 3112)
+    assert local_host_port("http://127.0.0.1/") == ("127.0.0.1", 80)
+    assert local_host_port("https://localhost") == ("localhost", 443)
+    assert local_host_port("https://github.com/ava/ava") is None
+    assert local_host_port("chrome-error://chromewebdata/") is None
+    assert local_host_port("file:///tmp/x") is None
+    assert local_host_port("http://localhost:abc") is None
+
+
+async def test_port_listening_dead_refused_live_accepts() -> None:
+    """A refused port is dead; a live listener is alive (probe connects and
+    closes, sends no bytes)."""
+    server = await asyncio.start_server(lambda _r, w: w.close(), host="127.0.0.1", port=0)
+    port = server.sockets[0].getsockname()[1]  # type: ignore[index]
+    try:
+        assert await port_listening("127.0.0.1", port) is True
+    finally:
+        server.close()
+        await server.wait_closed()
+    # The listener is gone now — the port refuses.
+    assert await port_listening("127.0.0.1", port) is False
+
+
+async def test_reap_dead_agent_pages_closes_dead_local_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reaper closes agent-owned pages whose URL is localhost with no
+    listener, keeps pages on a live port, and never inspects non-local URLs
+    (or user tabs — only affinity slots are candidates)."""
+    probes: list[tuple[str, int]] = []
+
+    async def fake_probe(host: str, port: int) -> bool:
+        probes.append((host, port))
+        return (host, port) != ("localhost", 3111)  # 3111 dead; everything else alive
+
+    monkeypatch.setattr("services.browser.page_lifecycle.port_listening", fake_probe)
+
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3111/next"}, 7)
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3112/live"}, 8)
+    await d.call_tool_for_agent("new_page", {"url": "https://github.com/ava/ava"}, 9)
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3101/dead2"}, 10)
+    up.calls.clear()
+
+    await reap_dead_agent_pages(d)
+
+    # 7's dead tab closed + slot cleared; 8 (live port), 9 (foreign host) and
+    # 10 (live port 3101 per the probe) are untouched.
+    assert 1 not in up.pages
+    assert up.pages == {
+        2: "http://localhost:3112/live",
+        3: "https://github.com/ava/ava",
+        4: "http://localhost:3101/dead2",
+    }
+    assert _AGENT_AFFINITY[7] is None
+    assert _AGENT_AFFINITY[8] == 2
+    assert _AGENT_AFFINITY[9] == 3
+    assert _AGENT_AFFINITY[10] == 4
+    # exactly the local candidates were probed; the foreign URL was never touched
+    assert ("localhost", 3111) in probes and ("localhost", 3112) in probes
+    assert ("localhost", 3101) in probes
+    assert ("github.com", 443) not in probes
+    closed = [c[:2] for c in up.calls if c[0] == "close_page"]
+    assert closed == [("close_page", {"pageId": 1})]
+
+
+async def test_reap_dead_agent_pages_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second pass has nothing left to close — the slots are cleared, the
+    dead pages are gone from the listing."""
+
+    async def fake_probe(host: str, port: int) -> bool:
+        return False  # everything dead
+
+    monkeypatch.setattr("services.browser.page_lifecycle.port_listening", fake_probe)
+
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3111/a"}, 7)
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3112/b"}, 8)
+    up.calls.clear()
+
+    await reap_dead_agent_pages(d)
+    await reap_dead_agent_pages(d)
+
+    assert [c[:2] for c in up.calls if c[0] == "close_page"] == [
+        ("close_page", {"pageId": 1}),
+        ("close_page", {"pageId": 2}),
+    ]
+    assert up.pages == {}
+    # slots cleared to None (same shape as an agent closing its own page) —
+    # nothing left to sweep
+    assert _AGENT_AFFINITY == {7: None, 8: None}

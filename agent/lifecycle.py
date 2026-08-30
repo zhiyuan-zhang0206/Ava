@@ -115,10 +115,36 @@ def _notify_exit(agent_id: int) -> None:
         )
 
 
-def _route_process_end_notify(agent_id: int, _reason: str) -> None:
+async def _route_process_end_notify(agent_id: int, _reason: str) -> None:
     """Every exit finalizes 'terminated' (the exit-reason tag still rides the
-    `process_exit` event). A module helper (rather than inline in main's
-    finally) keeps main within its statement budget; it looks up `_notify_exit`
-    as a module global so test monkeypatches on `agent.lifecycle.*` are
-    honoured."""
+    `process_exit` event), then this agent's Chrome page is released so a
+    terminated worker leaves no dead tab in the user's shared browser. A module
+    helper (rather than inline in main's finally) keeps main within its
+    statement budget; it looks up both helpers as module globals so test
+    monkeypatches on `agent.lifecycle.*` are honoured."""
     _notify_exit(agent_id)
+    await _release_agent_browser_page(agent_id)
+
+
+async def _release_agent_browser_page(agent_id: int) -> None:
+    """Best-effort close of this agent's browser-mcp page at process exit.
+
+    Never raises — the exit path runs once and must not fail on a cleanup
+    nicety. A machine without the browser service (no socket) and a down daemon
+    both degrade to the service's own dead-page reaper, and the agent's
+    persistent shells keep the tab's dev server lifecycle untouched either way.
+    """
+    try:
+        from ava._mcp_browser import release_agent_chrome_pages
+
+        released = await release_agent_chrome_pages(agent_id)
+        if not released:
+            logger.debug(
+                "agent {agent_id} browser-page release skipped (no service / failed)",
+                agent_id=agent_id,
+            )
+    except Exception:
+        logger.opt(exception=True).debug(
+            "agent {agent_id} browser-page release failed (non-fatal)",
+            agent_id=agent_id,
+        )
