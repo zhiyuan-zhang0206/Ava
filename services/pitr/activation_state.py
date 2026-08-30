@@ -635,6 +635,23 @@ class ActivationRecord:
         raw["updated_at"] = datetime.now(UTC).isoformat()
         return ActivationRecord.from_json(json.dumps(raw))
 
+    def renew_wal_deadline(self, deadline_iso: str) -> ActivationRecord:
+        """Re-stamp the WAL verification deadline for THIS attempt.
+
+        The persisted absolute deadline lapsed once an earlier attempt crashed
+        (the 2026-08-30 failure: the CLI died at the switch step, nobody ran
+        the proof loop, and the non-renewable deadline forced a rollback +
+        full re-activation). The deadline is now a per-attempt window; the
+        switch intent inside `wal_exact_evidence` stays immutable (the ACK
+        lower bound), so a resume re-verifies the SAME target segment under a
+        fresh upper bound."""
+        if self.phase != "wal_ack_pending":
+            raise ValueError("PITR WAL deadline renew is only valid at wal_ack_pending")
+        raw = asdict(self)
+        raw["wal_verification_deadline"] = deadline_iso
+        raw["updated_at"] = datetime.now(UTC).isoformat()
+        return ActivationRecord.from_json(json.dumps(raw))
+
     def journal_rollback(self, **changes: object) -> ActivationRecord:
         allowed = {
             "rollback_setting_intent",

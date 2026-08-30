@@ -37,16 +37,23 @@ from services.pitr.activation_runtime import (
     _settings_digest,
     _shadow_pg_gate,
     capture_pitr_env_baseline,
+    probe_switch_privilege,
     rollback_effect_state,
 )
 from services.pitr.activation_runtime import (
     forced_candidate as _forced_candidate,
 )
 from services.pitr.activation_runtime import (
+    prepare_wal_switch as _prepare_wal_switch,
+)
+from services.pitr.activation_runtime import (
     remote_wal_proof as _remote_wal_proof,
 )
 from services.pitr.activation_runtime import (
     restore_candidate as _restore_candidate,
+)
+from services.pitr.activation_runtime import (
+    switch_wal as _switch_wal,
 )
 from services.pitr.activation_state import (
     ActivationPhase,
@@ -256,6 +263,7 @@ def _shadow_readiness() -> ShadowReadiness:
             f"PITR activation needs {required_free} free bytes for spool + emergency floor; "
             f"only {usage.free} available"
         )
+    probe_switch_privilege()
     current = _read_pg_state()
     if not _shadow_pg_gate(current):
         raise RuntimeError("shadow readiness requires archive_mode=off and no archive_command")
@@ -387,40 +395,6 @@ def _restart_ready(record: ActivationRecord, desired: dict[str, str]) -> bool:
     )
 
 
-def _prepare_wal_switch() -> dict[str, str]:
-    from shared.db import direct_db_url
-
-    with psycopg.connect(direct_db_url(), autocommit=True) as conn:
-        row = conn.execute(
-            "SELECT timeline_id::text, pg_walfile_name(pg_current_wal_lsn()), "
-            "pg_current_wal_lsn()::text, failed_count::text, archived_count::text "
-            "FROM pg_control_checkpoint(), pg_stat_archiver"
-        ).fetchone()
-    if row is None:
-        raise RuntimeError("PostgreSQL omitted WAL switch evidence")
-    evidence = {
-        "timeline": str(row[0]),
-        "segment": str(row[1]),
-        "switch_lsn": str(row[2]),
-        "failed_count": str(row[3]),
-        "archived_count": str(row[4]),
-        "switch_intent_at": datetime.now(UTC).isoformat(),
-    }
-    if (ava_home() / "physical-backup" / "ack" / f"{evidence['segment']}.ack.json").exists():
-        raise RuntimeError("WAL switch target already has an ACK from an older operation")
-    return evidence
-
-
-def _switch_wal() -> str:
-    from shared.db import direct_db_url
-
-    with psycopg.connect(direct_db_url(), autocommit=True) as conn:
-        row = conn.execute("SELECT pg_switch_wal()::text").fetchone()
-    if row is None:
-        raise RuntimeError("PostgreSQL omitted pg_switch_wal result")
-    return str(row[0])
-
-
 def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> ActivationRecord:
     if record.phase != "shadow":
         _require_same_credentials(
@@ -479,6 +453,14 @@ def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> Ac
             error=None,
         )
     if record.phase == "wal_ack_pending":
+        # The verification deadline is a per-attempt window: an earlier attempt
+        # that crashed before the proof loop (2026-08-30: the switch step died
+        # on a privilege gap) must not strand the operation at an expired
+        # non-renewable deadline. The switch intent stays immutable — the ACK
+        # lower bound — only the upper bound is re-stamped.
+        renewed = record.renew_wal_deadline((datetime.now(UTC) + timedelta(minutes=5)).isoformat())
+        write_record_cas(home, expected=record, replacement=renewed)
+        record = renewed
         # Reissuing a switch after a crash is safe: immutable naming and the
         # persisted target segment make proof exact; the extra segment is retained.
         _switch_wal()
