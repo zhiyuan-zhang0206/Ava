@@ -17,6 +17,7 @@
 
 import { useTranslations } from "next-intl";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { CopyButton } from "@/components/copy-button";
 import { ChatMarkdown } from "@/components/markdown";
@@ -113,27 +114,44 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
           className="max-h-48 max-w-[16rem] rounded border border-border object-contain"
         />
       </button>
-      {open ? (
-        <div
-          ref={dialogRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label={alt}
-          data-testid="attach-lightbox"
-          tabIndex={-1}
-          onClick={() => setOpen(false)}
-          className={cn("fixed inset-0 z-50 cursor-zoom-out items-center justify-center bg-black/80 p-4 outline-none", FLEX)}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
-          <img
-            src={src}
-            alt={alt}
-            crossOrigin="use-credentials"
-            loading="lazy"
-            className="max-h-[88vh] max-w-[92vw] rounded object-contain shadow-2xl"
-          />
-        </div>
-      ) : null}
+      {open
+        ? createPortal(
+            // Full-page image viewer (user ruling 2026-08-30, QA #1085): the
+            // overlay must cover the whole viewport and sit above every
+            // interactive control, and the enlarged image takes 60-80% of the
+            // screen (big images scale down to fit, small ones keep their
+            // natural size — contain, never stretched). It cannot be rendered
+            // inline inside the timeline row: `.timeline-item` carries
+            // `content-visibility: auto` (globals.css) and therefore
+            // paint+layout containment, which turns the row into the
+            // containing block of `fixed` descendants AND a stacking context
+            // — the backdrop was clipped to the row's box (~440x861 vs the
+            // 1182x839 viewport) and the z-30 scroll-to-bottom button painted
+            // above the z-50 backdrop. Mounting at document.body (same
+            // pattern the Radix dialogs use) restores viewport coverage +
+            // root stacking order.
+            <div
+              ref={dialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label={alt}
+              data-testid="attach-lightbox"
+              tabIndex={-1}
+              onClick={() => setOpen(false)}
+              className={cn("fixed inset-0 z-50 cursor-zoom-out items-center justify-center bg-black/80 p-4 outline-none", FLEX)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
+              <img
+                src={src}
+                alt={alt}
+                crossOrigin="use-credentials"
+                loading="lazy"
+                className="max-h-[80vh] max-w-[80vw] rounded object-contain shadow-2xl"
+              />
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }
