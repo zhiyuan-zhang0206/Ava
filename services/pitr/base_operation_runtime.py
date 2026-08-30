@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import NoReturn, cast
 
 import psutil
+import psycopg
 
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.restore_manifest import ProtectedManifest
@@ -48,6 +49,7 @@ class RestoreWorkerInput:
     viewer_credentials: Path
     budget: RestoreSpaceBudget
     live_db_url: str
+    data_directory: str
     pg_ctl: Path
     pg_verifybackup: Path
 
@@ -81,9 +83,32 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
         read_credentials,
         RestoreSpaceBudget(config.pitr_spool_hard_bytes, logical_peak, _EMERGENCY_FLOOR_BYTES),
         direct_db_url(),
+        live_data_directory(),
         pg_tool("pg_ctl"),
         pg_tool("pg_verifybackup"),
     )
+
+
+def live_data_directory() -> str:
+    """The live instance's PGDATA, certified on the admin connection.
+
+    The restore worker's live-identity probe runs on the runtime role
+    (AVA_DB_URL), which must stay free of settings-read privileges:
+    PG 17 gates `current_setting('data_directory')` behind
+    pg_read_all_settings, and the 2026-08-30 activation died on exactly that
+    grant gap. The controller reads the value once on the admin connection
+    and hands it to the worker in its request instead."""
+    from cli.commands._cluster_instance import pg_admin_url
+    from shared.cluster import get_record, record_postgres_port
+
+    record = get_record(ava_home())
+    if record is None:
+        raise RuntimeError("cluster registry record is missing")
+    with psycopg.connect(pg_admin_url(record_postgres_port(record))) as conn:
+        row = conn.execute("SELECT current_setting('data_directory')").fetchone()
+    if row is None:
+        raise RuntimeError("PostgreSQL omitted its data directory")
+    return str(row[0])
 
 
 def _request(inputs: RestoreWorkerInput) -> dict[str, object]:
@@ -101,6 +126,7 @@ def _request(inputs: RestoreWorkerInput) -> dict[str, object]:
             "emergency_floor": inputs.budget.emergency_floor,
         },
         "live_db_url": inputs.live_db_url,
+        "data_directory": inputs.data_directory,
         "pg_ctl": str(inputs.pg_ctl),
         "pg_verifybackup": str(inputs.pg_verifybackup),
     }

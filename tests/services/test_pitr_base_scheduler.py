@@ -77,6 +77,7 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
         tmp_path / "viewer.json",
         RestoreSpaceBudget(0, 0, 0),
         "postgresql://viewer@127.0.0.1:5433/ava",
+        "/live/data",
         Path("/usr/bin/true"),
         Path("/usr/bin/true"),
     )
