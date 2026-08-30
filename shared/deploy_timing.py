@@ -90,6 +90,18 @@ from __future__ import annotations
 # `ops.cluster_deploy._UPDATER_STALL_TIMEOUT_S`.
 NO_PROGRESS_TIMEOUT_S = 900.0
 
+# How long one production `uv sync` may run before the updater kills its whole
+# process tree and reports a terminal failure (`cli.commands._update_uv_sync`).
+# Sized for the slowest healthy legs observed — full self-update syncs measured
+# 0.7-13.7 s on POSIX and ~76 s on the Windows agent-runner (2026-08 rollouts) —
+# with headroom for a genuinely slow download of a new runtime wheel. Registered
+# in the clock lattice BELOW NO_PROGRESS_TIMEOUT_S: a hung sync must fail itself
+# into a terminal outcome before the host is judged stalled, so the updater's own
+# recovery ladder — not the stalled-updater reap — gets to the host first. The
+# 2026-08-30 rollout's bare `uv sync` spent 449 s downloading a dev-only pyright
+# wheel on Windows and would have been bounded by this clock.
+UV_SYNC_TIMEOUT_S = 600.0
+
 # How long the Phase-B poll harvest waits before re-probing a host whose posture
 # just went idle but whose updater stage capture is missing its final `start`
 # stage line (Task #1820). The updater's `start` line lands a few ms AFTER the

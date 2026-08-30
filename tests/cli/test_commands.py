@@ -22,6 +22,7 @@ import pytest
 
 from cli import commands as _cli
 from cli.commands import _collect_setup_values as _real_collect_setup_values
+from cli.commands import _update_uv_sync
 from cli.commands._setup import SetupValues
 from cli.commands.update import _poll_verdict_detail
 from shared.config import settings
@@ -2121,18 +2122,26 @@ def test_gateway_local_update_starts_in_fresh_process(
     monkeypatch.setattr(_up, "apply_pending_migrations", _no_inprocess_migrate)
     # `cmd_start` is no longer imported into the update module — the start runs
     # as a fresh `ava` subprocess, asserted via the subprocess sequence below.
+    # The uv sync itself runs through the production sync seam (run_uv_sync ->
+    # run_bounded), not subprocess.run, so it is recorded separately.
+
+    def _fake_sync(_repo: Path) -> _FakeResult:
+        calls.append("uv-sync")
+        return _FakeResult(returncode=0)
 
     def _fake_run(cmd, *_a, **_kw):
         cmds.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         return _FakeResult(returncode=0)
 
+    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", _fake_sync)
     monkeypatch.setattr(_up.subprocess, "run", _fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _up._run_gateway_local_update(repo, target_sha="bbbbbbb")
     assert rc == 0
-    assert calls == ["stop", "checkout"]
-    # uv sync, then the fresh `ava start`, both via subprocess.run (the start no
-    # longer needs a pty — the session PATH is forwarded authoritatively, so a plain
+    assert calls == ["stop", "checkout", "uv-sync"]
+    # uv sync runs through the production sync seam (run_uv_sync, recorded above),
+    # then the fresh `ava start` via subprocess.run (the start no longer needs a
+    # pty — the session PATH is forwarded authoritatively, so a plain
     # subprocess.run from the detached rollout works). --persist-services keeps this
     # internal restart from rewriting the operator's durable --disable-service marker.
     # The restarter stays down until the orchestration finally unpauses this host,
@@ -2141,16 +2150,15 @@ def test_gateway_local_update_starts_in_fresh_process(
     # off-box gateway gate, so the child must not also gate (and must not send a slow
     # non-gateway service into _recover_rc's rollback). See
     # tests/cli/test_start_readiness_gate.py.
-    assert cmds[0] == ["uv", "sync"]
     # Repo-native skills refresh on the just-landed tree (issue #1289), also as a
     # fresh subprocess so it runs the new revision's update table.
-    assert cmds[1][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
-    assert cmds[1][1:] == ["skill", "update"]
+    assert cmds[0][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
+    assert cmds[0][1:] == ["skill", "update"]
     # No Grafana provisioning sync step: the LGTM Grafana container mounts
     # deploy/lgtm/config/grafana/provisioning straight from the checkout,
     # so the checkout above already refreshed it.
-    assert cmds[2][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
-    assert cmds[2][1:] == [
+    assert cmds[1][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
+    assert cmds[1][1:] == [
         "start",
         "--persist-services",
         "--no-readiness-gate",

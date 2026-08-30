@@ -184,7 +184,7 @@ def _recover_gateway_local(
         _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
     print(f"  · git reset --hard {from_sha[:7]}", file=sys.stderr)
-    sync = run_uv_sync(repo, runner=subprocess.run)
+    sync = run_uv_sync(repo)
     if sync.returncode != 0:
         print(
             "  ✗✗ MANUAL INTERVENTION: recovery `uv sync` failed; gateway DOWN",

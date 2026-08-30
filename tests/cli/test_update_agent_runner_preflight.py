@@ -59,6 +59,7 @@ def test_agent_runner_reverts_and_skips_stop_on_broken_layout(
 
     monkeypatch.setattr(ar, "git_checkout_sha", _checkout)
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ar, "run_uv_sync", lambda _repo: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "validate_migrations_at_ref", _raise_layout)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -78,6 +79,7 @@ def test_agent_runner_proceeds_to_stop_on_valid_layout(
 
     monkeypatch.setattr(ar, "git_checkout_sha", lambda sha: checkouts.append(sha) or "oldsha0000")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ar, "run_uv_sync", lambda _repo: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "validate_migrations_at_ref", lambda _ref, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)  # skip real gateway probe
@@ -98,6 +100,7 @@ def test_agent_runner_aborts_when_preflight_probes_fail(
 
     monkeypatch.setattr(ar, "git_checkout_sha", lambda _sha: "oldsha0000")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ar, "run_uv_sync", lambda _repo: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "validate_migrations_at_ref", lambda _ref, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_preflight_probes", lambda: 1)  # simulate failure

@@ -279,12 +279,12 @@ def _run_rollback(
     git_reset_hard(target_sha)
 
     print("\n-> uv sync")
-    sync = run_uv_sync(repo, runner=subprocess.run)
+    sync = run_uv_sync(repo)
     if sync.returncode != 0:
         print("  . uv sync failed -- attempting recovery to pre-rollback state", file=sys.stderr)
         print(f"\n-> recover: git reset --hard {from_sha[:7]}")
         git_reset_hard(from_sha)
-        run_uv_sync(repo, runner=subprocess.run)
+        run_uv_sync(repo)
         print(
             f"  ** MANUAL INTERVENTION: rollback failed at uv sync; recovered to "
             f"pre-rollback state ({from_sha[:7]}). Schema was already rolled "
@@ -332,7 +332,7 @@ def _run_rollback(
             except Exception as e:
                 print(f"  . forward re-apply failed: {e}", file=sys.stderr)
         git_reset_hard(from_sha)
-        run_uv_sync(repo, runner=subprocess.run)
+        run_uv_sync(repo)
         subprocess.run(start_cmd, cwd=repo, check=False)
         print(
             f"  ** MANUAL INTERVENTION: rollback failed at ava start; attempted "

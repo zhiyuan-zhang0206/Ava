@@ -335,16 +335,19 @@ def test_postgres_password_mutation_cannot_block_adoption_failure_recovery(
     class _RecoverySubprocess:
         @staticmethod
         def run(argv: list[str], **_kwargs: object) -> _Result:
-            if argv[:2] == ["uv", "sync"]:
-                order.append("uv-sync")
-            elif len(argv) >= 2 and argv[0].endswith("ava") and argv[1] == "start":
+            if len(argv) >= 2 and argv[0].endswith("ava") and argv[1] == "start":
                 order.append("ava-start")
             return _Result()
+
+    def _sync(_repo: object) -> _Result:
+        order.append("uv-sync")
+        return _Result()
 
     monkeypatch.setattr(_local, "_boot_gateway_fresh", _boot)
     monkeypatch.setattr(_local, "_adopt_child_data_plane_credentials", _fail_adoption)
     monkeypatch.setattr(_recover, "rollback_schema_to", _rollback)
     monkeypatch.setattr(_recover, "git_reset_hard", _reset)
+    monkeypatch.setattr(_recover, "run_uv_sync", _sync)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_recover, "subprocess", _RecoverySubprocess)
 
     assert _local._run_gateway_local_update(tmp_path, target_sha="new-sha", pull=True) == 1

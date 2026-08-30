@@ -37,8 +37,8 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     pth = _read_only_pth(repo)
     modes_during_sync: list[int] = []
 
-    def run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == ["uv", "sync"]
+    def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        assert args == _native_sync._PROD_SYNC_ARGS
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
@@ -49,7 +49,7 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
         return None
 
     monkeypatch.setattr(_up, "git_checkout_sha", checkout)
-    monkeypatch.setattr(_up.subprocess, "run", run)
+    monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
     monkeypatch.setattr("shared.source_integrity.set_installed", ignore_installed)
 
     result = _local._checkout_and_sync(
@@ -74,13 +74,16 @@ def test_start_source_integrity_sync_restores_read_only_pth(
     installed: list[str] = []
 
     def run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        if args == ["git", "rev-parse", "HEAD"]:
-            return SimpleNamespace(returncode=0, stdout="target-sha\n")
-        assert args == ["uv", "sync"]
+        assert args == ["git", "rev-parse", "HEAD"]
+        return SimpleNamespace(returncode=0, stdout="target-sha\n")
+
+    def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        assert args == _native_sync._PROD_SYNC_ARGS
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(_start.subprocess, "run", run)
+    monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
     monkeypatch.setattr("shared.source_integrity.get", lambda: "installed-sha")
     monkeypatch.setattr("shared.source_integrity.set_installed", installed.append)
 
@@ -99,9 +102,13 @@ def test_gateway_recovery_restores_pth_before_start(
     pth = _read_only_pth(repo)
     observed: list[tuple[str, int]] = []
 
-    def run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        kind = "sync" if args == ["uv", "sync"] else "start"
-        observed.append((kind, _read_mode(pth)))
+    def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        assert args == _native_sync._PROD_SYNC_ARGS
+        observed.append(("sync", _read_mode(pth)))
+        return SimpleNamespace(returncode=0)
+
+    def start_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        observed.append(("start", _read_mode(pth)))
         return SimpleNamespace(returncode=0)
 
     def rollback_schema(_keep: set[str], *, local_admin: bool = False) -> list[str]:
@@ -112,7 +119,8 @@ def test_gateway_recovery_restores_pth_before_start(
 
     monkeypatch.setattr(_recover, "rollback_schema_to", rollback_schema)
     monkeypatch.setattr(_recover, "git_reset_hard", reset)
-    monkeypatch.setattr(_recover.subprocess, "run", run)
+    monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
+    monkeypatch.setattr(_recover.subprocess, "run", start_run)
 
     result = _recover._recover_gateway_local(
         repo,
@@ -134,8 +142,8 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
     pth = _read_only_pth(repo)
     modes_during_sync: list[int] = []
 
-    def run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == ["uv", "sync"]
+    def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        assert args == _native_sync._PROD_SYNC_ARGS
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=1)
 
@@ -144,7 +152,7 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
 
     monkeypatch.setattr(_runner, "_source_switch_window", contextlib.nullcontext)
     monkeypatch.setattr(_runner, "git_checkout_sha", checkout)
-    monkeypatch.setattr(_runner.subprocess, "run", run)
+    monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
 
     result = _runner._run_agent_runner_self_update_inner(
         repo,
@@ -166,12 +174,12 @@ def test_native_update_sync_entry_restores_read_only_pth(
     modes_during_sync: list[int] = []
     monkeypatch.setattr(_native_sync, "_repo_root", lambda: repo)
 
-    def run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == ["uv", "sync"]
+    def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        assert args == _native_sync._PROD_SYNC_ARGS
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(_native_sync.subprocess, "run", run)
+    monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
     assert _native_sync._main() == 0
 
     assert modes_during_sync == [0o644]
