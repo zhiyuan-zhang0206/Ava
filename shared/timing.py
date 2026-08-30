@@ -149,6 +149,12 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.NO_PROGRESS_TIMEOUT_S,
         "the one definition of 'this host stopped making progress'",
     ),
+    "STAGE_NO_PROGRESS_TIMEOUT_S": Clock(
+        "deploy",
+        lambda: deploy.STAGE_NO_PROGRESS_TIMEOUT_S,
+        "how long one updater stage may be in flight before host reaper and Phase-B "
+        "poll call it no-progress",
+    ),
     "HARVEST_GRACE_S": Clock(
         "deploy",
         lambda: deploy.HARVEST_GRACE_S,
@@ -309,6 +315,13 @@ CONSTRAINTS: list[Constraint] = [
     ),
     Constraint(
         "<",
+        "STAGE_NO_PROGRESS_TIMEOUT_S",
+        "NO_PROGRESS_TIMEOUT_S",
+        "the stage judgment must fire while the whole-run patience still holds, or "
+        "a host stuck in one stage outlasts the poll that exists to wait for it",
+    ),
+    Constraint(
+        "<",
         "HARVEST_GRACE_S",
         "NO_PROGRESS_TIMEOUT_S",
         "the harvest re-probe reads the host's outcome through the same "
@@ -333,6 +346,14 @@ CONSTRAINTS: list[Constraint] = [
     Constraint(
         "<",
         "UV_SYNC_TIMEOUT_S",
+        "STAGE_NO_PROGRESS_TIMEOUT_S",
+        "the bounded sync's self-termination lands before the stage no-progress "
+        "judgment reaps the updater, so the updater's own recovery ladder wins the "
+        "race on its own stage",
+    ),
+    Constraint(
+        "<",
+        "UV_SYNC_TIMEOUT_S",
         "NO_PROGRESS_TIMEOUT_S",
         "a hung sync must fail itself into a terminal outcome before the host is "
         "judged stalled, so the updater's recovery ladder beats the stalled-updater reap",
@@ -349,9 +370,11 @@ CONSTRAINTS: list[Constraint] = [
         "==",
         "SETTLE_TTL_S",
         "NO_PROGRESS_TIMEOUT_S",
-        "a settle hold waits exactly as long as the host it waits for deserves "
-        "the benefit of the doubt — the same instant its host-local reaper would "
-        "call its updater hung",
+        "the settle hold shares the whole-run no-progress definition — it lapses "
+        "when the host it waits for has outlived the longest legitimate leg, "
+        "never before; the reaper's earlier per-stage judgment "
+        "(STAGE_NO_PROGRESS_TIMEOUT_S) ends the hold through the convergence "
+        "path instead",
     ),
     Constraint(
         "<",

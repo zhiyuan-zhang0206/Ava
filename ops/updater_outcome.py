@@ -60,7 +60,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 import shared.paths
-from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
+from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S, STAGE_NO_PROGRESS_TIMEOUT_S
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.platform import IS_WINDOWS
 
@@ -133,6 +133,37 @@ def _parse_stages(tail: str) -> dict[str, float]:
     return stages
 
 
+def _parse_stage_evidence(tail: str) -> tuple[str | None, float | None]:
+    """The stage named by `tail`'s LAST `t=` marker and how long it has been in
+    flight, or (None, None) when the tail's last stage line is a `dur=` (that stage
+    completed) or there is no stage line at all.
+
+    A `t=` marker is written at a stage's START on both platforms — the cmd.exe
+    ladder's `cli.commands._updater_stage` between steps, the in-process legs'
+    `shared.rollout_telemetry.updater_stage` at entry — so a tail whose last stage
+    line is a `t=` names the stage the updater is inside right now. The age is
+    computed against this process's monotonic clock at read time: the same clock,
+    on the same host, that stamped the marker (the updater wrote it, the ops server
+    reads it), so the subtraction is sound across the two processes that bookend it.
+
+    The ONE boundary where a lingering `t=` tail does not mean "in flight" is the
+    final `done` marker, which the ladder prints after the restart has already
+    converged the host — a reader that acts on it must gate on posture first (the
+    Phase-B poll checks idle before any stage evidence; the host reaper refuses
+    stage judgments on an idle host).
+    """
+    last_marker: tuple[str, float] | None = None
+    for match in _STAGE_LINE_RE.finditer(tail):
+        if match.group(3) is not None:
+            last_marker = (match.group(1), float(match.group(3)))
+        else:
+            last_marker = None
+    if last_marker is None:
+        return None, None
+    name, stamped = last_marker
+    return name, round(time.monotonic() - stamped, 1)
+
+
 # Lines worth carrying off the box: the preflight's own `✗` complaints (which name
 # the gateway URL that was unreachable) and the updater's own narration.
 _DETAIL_PREFIXES = ("✗", "[updater]")
@@ -175,6 +206,17 @@ class UpdaterOutcome(BaseModel):
     # observational data — it rides the status probe, so a missing or partial
     # dict is a gap in the report, never a reason to refuse one.
     stages: dict[str, float] = Field(default_factory=dict)
+    # The stage the updater is inside RIGHT NOW, and how long it has been there:
+    # the tail's last `t=` marker and its age against this process's monotonic
+    # clock at read time (see `_parse_stage_evidence`). None when the last stage
+    # line is a completed `dur=` (nothing in flight) or the log predates the
+    # markers. This is the no-progress evidence (P1, 2026-08-30): the host's
+    # hung-updater reaper and the Phase-B poll compare it against
+    # STAGE_NO_PROGRESS_TIMEOUT_S. A host answering the probe from an older
+    # commit reports neither field — which reads as "cannot tell", never as
+    # progress, so the judgment simply waits for the rollout that ships it.
+    current_stage: str | None = None
+    current_stage_s: float | None = None
 
 
 def updater_log_candidates(session: str) -> list[Path]:
@@ -234,7 +276,7 @@ def mark_native_run(native_cmd: str) -> str:
 
     One deliberate side effect: this is the run's first write, so it stamps the
     shared log's mtime at spawn — the historical evidence the hung-updater reaper
-    used before liveness became the updater lease (`cluster_deploy._updater_hung`,
+    used before liveness became the updater lease (`updater_reap._updater_hung`,
     R1 old-signal sweep PR5). A native run therefore reads as alive from its own
     beginning rather than from whenever the *previous* run last wrote, which is the
     reading that was wanted anyway: a young updater blocked on its first `git fetch`
@@ -380,8 +422,15 @@ def _classify(tail: str, log: Path) -> UpdaterOutcome:
         kind = "exited"
     else:
         kind = "unknown"
+    current_stage, current_stage_s = _parse_stage_evidence(tail)
     return UpdaterOutcome(
-        kind=kind, rc=rc, detail=tail_detail, log=log.name, stages=_parse_stages(tail)
+        kind=kind,
+        rc=rc,
+        detail=tail_detail,
+        log=log.name,
+        stages=_parse_stages(tail),
+        current_stage=current_stage,
+        current_stage_s=current_stage_s,
     )
 
 
@@ -518,6 +567,34 @@ def describe_updater_outcome(outcome: UpdaterOutcome | None) -> str:
         f"updater left no exit verdict in {outcome.log} — it died mid-flight, before any "
         f"branch of its own chain could report one{reason}{_stages_clause(outcome)}"
     )
+
+
+def stage_evidence_stuck() -> str | None:
+    """The stuck stage's name when this host's own stage markers prove its updater
+    stuck, else None (P1, 2026-08-30).
+
+    The no-progress fact a live updater lease cannot speak for: the lease is one
+    write at the run's start, so a host hung inside a single stage (a stalled `uv`
+    download on the Windows runner) reads "still working" for the whole bound. The
+    markers are the progress evidence — the tail's last `t=` marker names the stage
+    the updater is inside right now, and its age (`current_stage_s`, computed
+    against this host's monotonic clock at read time) growing past
+    `STAGE_NO_PROGRESS_TIMEOUT_S` means no stage has completed for longer than any
+    stage has ever legitimately taken. Same bound, same evidence as the Phase-B
+    poll's POLL_NO_PROGRESS verdict. Returns the stage name rather than a bare
+    bool so the reaper's two-round confirmation can key on WHICH stage is stuck —
+    a stage that advanced restarts the confirmation. None on every unreadable
+    reading: missing evidence is never a kill.
+    """
+    try:
+        outcome = last_updater_outcome()
+    except Exception:
+        return None
+    if outcome is None or outcome.current_stage is None or outcome.current_stage_s is None:
+        return None
+    if outcome.current_stage_s > STAGE_NO_PROGRESS_TIMEOUT_S:
+        return outcome.current_stage
+    return None
 
 
 def updater_outcome_terminal(outcome: UpdaterOutcome | None) -> bool:

@@ -661,6 +661,105 @@ def test_parse_stages_keeps_the_last_dur_value_and_never_overwrites_with_markers
     assert uo._parse_stages(tail) == {"checkout": 9.0, "fetch": 10.0}
 
 
+def test_parse_stages_mixes_in_process_entry_markers_with_dur_lines() -> None:
+    """The in-process legs now print a `t=` marker at each stage's entry (P1,
+    2026-08-30 — the in-flight evidence) beside the `dur=` line at its exit. The
+    pairing must leave the self-contained durations untouched: a `t=` pair never
+    overwrites a `dur=` value, and the tail's own entry marker contributes nothing."""
+    tail = (
+        "[updater] stage=checkout t=100.000\n"
+        "[updater] stage=checkout dur=3.2s\n"
+        "[updater] stage=uv_sync t=103.200\n"
+        "[updater] stage=uv_sync dur=41.0s\n"
+    )
+    assert uo._parse_stages(tail) == {"checkout": 3.2, "uv_sync": 41.0}
+
+
+def test_parse_stage_evidence_names_the_stage_a_t_marker_tail_opens() -> None:
+    """A tail whose last stage line is a `t=` marker names the stage the updater is
+    inside right now; its age is the host's monotonic now minus the stamped
+    monotonic — computed at read time, so every probe reports a fresh value.
+
+    The stamp is floored at 1.0: the marker format carries no sign (a real updater
+    on a freshly booted machine stamps small POSITIVE monotonic values), and a CI
+    container whose monotonic clock is younger than the simulated 30 s would
+    otherwise stamp a negative number the regex cannot match — silently promoting
+    the previous marker to "current stage", the failure shape this test pins down."""
+    now = time.monotonic()
+    stamped = now - 30.0 if now > 31.0 else 1.0
+    tail = f"[updater] stage=fetch t=100.000\n[updater] stage=uv t={stamped:.3f}\n"
+
+    name, age = uo._parse_stage_evidence(tail)
+
+    assert name == "uv"
+    assert age is not None
+    assert 0.0 <= age <= 30.5
+
+
+def test_parse_stage_evidence_is_none_when_the_tail_ends_in_a_dur_line() -> None:
+    """The stage just completed: its `dur=` line is the tail's last stage line, and
+    nothing is in flight. (A killed-updater tail that ends mid-`t=` is the stuck
+    shape; this is the healthy one.)"""
+    tail = "[updater] stage=checkout t=100.000\n[updater] stage=checkout dur=3.2s\n"
+
+    assert uo._parse_stage_evidence(tail) == (None, None)
+
+
+def test_parse_stage_evidence_without_markers_is_none() -> None:
+    """A log that predates the markers, or a run that never printed one: no stage
+    evidence, never a guess."""
+    assert uo._parse_stage_evidence("[updater] working\n[session-exit] rc=0\n") == (None, None)
+
+
+def test_the_outcome_carries_the_current_stage_off_the_box(home: Path) -> None:
+    """The wire field the no-progress judgment reads: a host stuck inside `uv`
+    reports the stage name and its in-flight age with the same probe response that
+    carries the verdict.
+
+    The stamp is floored at 1.0 for the same reason as the parse test: the marker
+    format carries no sign, so a CI container whose monotonic clock is younger than
+    the simulated 700 s would stamp a negative number the regex drops — and the
+    previous `fetch` marker would read as the current stage, the exact CI failure
+    this regression test guards."""
+    now = time.monotonic()
+    stamped = now - 700.0 if now > 701.0 else 1.0
+    _paused(home)
+    _write_log(
+        home / "logs" / "updater-1785470000.log",
+        f"[updater] stage=fetch t=100.000\n[updater] stage=uv t={stamped:.3f}\n",
+    )
+
+    outcome = uo.last_updater_outcome()
+
+    assert outcome is not None
+    assert outcome.current_stage == "uv"
+    assert outcome.current_stage_s is not None
+    assert 0.0 <= outcome.current_stage_s <= 700.5
+
+
+def test_a_completed_run_reports_no_current_stage(home: Path) -> None:
+    """`dur=` tail = nothing in flight, even beside the `[session-exit]` verdict."""
+    _paused(home)
+    _write_log(
+        home / "logs" / "updater-1785470000.log",
+        "[updater] stage=checkout dur=3.2s\n[updater] stage=start dur=14.6s\n[session-exit] rc=0\n",
+    )
+
+    outcome = uo.last_updater_outcome()
+
+    assert outcome is not None
+    assert outcome.current_stage is None
+    assert outcome.current_stage_s is None
+
+
+def test_model_validate_accepts_a_wire_dict_without_stage_evidence() -> None:
+    """The older commit answering the probe sends no current-stage fields — defaulted,
+    never raised, exactly like `stages` (same mixed-commit reality)."""
+    outcome = uo.UpdaterOutcome.model_validate({"kind": "exited", "rc": 1})
+    assert outcome.current_stage is None
+    assert outcome.current_stage_s is None
+
+
 def test_parse_stages_ignores_unrelated_lines() -> None:
     tail = (
         "[updater] force-checkout to abc1234\n"

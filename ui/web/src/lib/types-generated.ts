@@ -7464,6 +7464,10 @@ export interface components {
             stages?: {
                 [key: string]: number;
             };
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Current Stage S */
+            current_stage_s?: number | null;
         };
         /**
          * UploadedBatch

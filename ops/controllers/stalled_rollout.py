@@ -227,38 +227,11 @@ def _stalled_rollout() -> _StalledRollout | None:
     )
 
 
-def _local_holder_pid(holder: str) -> int | None:
-    """The live local pid `holder` names, or None.
-
-    Same parse as `ops.ops_cluster._lock_holder_is_live` and the same refusals, with
-    the verdict inverted: that one asks "may I clobber this lock" and answers "no" on
-    every doubt, this one asks "may I signal this pid" and answers None on the same
-    ones. A holder naming another machine is the load-bearing refusal — its pid is
-    meaningless in this host's namespace, and signalling it would hit an unrelated
-    local process.
-    """
-    from shared.machine import machine_name
-    from shared.proc import process_alive
-
-    machine, sep, pid_str = holder.partition(":pid")
-    if sep == "":
-        return None
-    try:
-        if machine != machine_name():
-            return None
-    except Exception:
-        _log.warning("[ops.rollout] cannot resolve this machine's name; not signalling %s", holder)
-        return None
-    try:
-        pid = int(pid_str)
-    except ValueError:
-        return None
-    return pid if process_alive(pid) else None
-
-
 def _interrupt(stalled: _StalledRollout) -> bool:
     """Stage 1: `SIGINT` the orchestration so it runs its own recovery. True if sent."""
-    pid = _local_holder_pid(stalled.holder)
+    from shared.cluster_lock import holder_pid_if_local
+
+    pid = holder_pid_if_local(stalled.holder)
     if pid is None:
         _log.error(
             "[ops.rollout] rollout stalled %.0fs but its holder %r does not name a live process "

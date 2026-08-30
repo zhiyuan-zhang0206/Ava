@@ -167,7 +167,7 @@ class SessionBackend(abc.ABC):
 
         Asked by anything that decides whether a long-running session is still
         working from the freshness of what it has written — currently
-        ``ops.cluster_deploy._reap_stalled_updater``. A backend that keeps no file
+        ``ops.updater_reap._reap_stalled_updater``. A backend that keeps no file
         (the base default — a pane-shaped backend keeps no file) answers None; the
         native supervisors own their redirect and answer with it. A consumer that
         only knew about the tee'd file would have no liveness evidence at all on a
