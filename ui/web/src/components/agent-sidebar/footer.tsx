@@ -55,7 +55,7 @@ export function StatsCards({
   const windowedPlaceholder = windowMismatch ? "…" : placeholder;
   const windowedTitle = windowMismatch ? t("statisticsUpdatingFor", { win }) : null;
   const cards: (
-    | { kind?: undefined; label: string; value: string; title?: string; windowed?: boolean; wide?: boolean }
+    | { kind?: undefined; label: string; value: string; title?: string; windowed?: boolean }
     | { kind: "warnings"; title?: string; windowed?: boolean }
   )[] = [
     {
@@ -105,7 +105,6 @@ export function StatsCards({
     },
     {
       label: t("avgTurnTime"),
-      wide: true,
       windowed: true,
       value:
         windowMismatch
@@ -175,6 +174,7 @@ export function StatsCards({
               stats={windowMismatch ? undefined : stats}
               placeholder={windowedPlaceholder}
               placeholderClass={placeholderClass}
+              valueClass={valueClass}
               firstLoad={firstLoad}
               title={windowMismatch ? card.title : undefined}
             />
@@ -182,12 +182,7 @@ export function StatsCards({
             <div
               key={card.label}
               title={windowMismatch && card.windowed ? card.title : undefined}
-              className={cn(
-                "gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40",
-                card.wide && "col-span-2",
-                FLEX,
-                FLEX_COL,
-              )}
+              className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
             >
               <span className="text-[10px] tracking-wide text-muted-foreground">
                 {card.label}
@@ -303,42 +298,39 @@ function SidebarNavButton({
   );
 }
 
-// ── Warning / Error unresolved card (user ruling 2026-08-29) ──
+// ── Warning / Error unresolved card (ruling 2026-08-29, original card
+// layout restored per user feedback 2026-08-30) ──
 //
-// One unresolved number per level (the net of the daemon's class
-// resolution; the full total / resolved / net split lives on the Grafana
-// tiles). A zero remaining renders the positive all-clear state instead of
-// a bare 0. `stats` is passed undefined during a window transition so the
-// card shows the same "…" placeholder as the other cards instead of
-// displaying a previous window's numbers.
+// One unresolved number per level — "N / M" (warnings_net / errors_net) —
+// rendered like the other five cards: a small single-cell card in the 2×3
+// grid (the v0 layout from the initial public release). The full total /
+// resolved / net split lives on the Grafana tiles. Zero levels render as
+// plain 0 (no all-clear badge — user ruling 2026-08-30). `stats` is passed
+// undefined during a window transition so the card shows the same "…"
+// placeholder as the other cards instead of displaying a previous window's
+// numbers.
 function WarningErrorCard({
   stats,
   placeholder,
   placeholderClass,
+  valueClass,
   firstLoad,
   title,
 }: {
   stats: StatsDashboard | undefined;
   placeholder: string;
   placeholderClass: string;
+  valueClass: string;
   firstLoad: boolean;
   title: string | undefined;
 }) {
   const t = useTranslations("sidebar");
-  const rows = stats
-    ? [
-        { level: "warning", net: stats.warnings_net },
-        { level: "error", net: stats.errors_net },
-      ]
-    : null;
+  const value =
+    stats === undefined ? null : `${stats.warnings_net} / ${stats.errors_net}`;
   return (
     <div
       title={title}
-      className={cn(
-        "gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5 col-span-2",
-        FLEX,
-        FLEX_COL,
-      )}
+      className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5", FLEX, FLEX_COL)}
     >
       <span className="text-[10px] tracking-wide text-muted-foreground">
         {t("warningsErrors")}
@@ -348,27 +340,10 @@ function WarningErrorCard({
           className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
           aria-hidden
         />
-      ) : rows === null ? (
+      ) : value === null ? (
         <span className={placeholderClass}>{placeholder}</span>
       ) : (
-        rows.map((row) => (
-          <div
-            key={row.level}
-            data-level={row.level}
-            className={cn("items-center gap-1 font-mono text-[11px] tabular-nums", FLEX)}
-          >
-            <span className="w-7 shrink-0 text-muted-foreground">
-              {row.level === "warning" ? t("warningLevel") : t("errorLevel")}
-            </span>
-            {row.net === 0 ? (
-              <span className="rounded bg-emerald-500/15 px-1 text-emerald-600 dark:text-emerald-400">
-                {t("statsAllClear")}
-              </span>
-            ) : (
-              <span className="text-foreground">{row.net.toLocaleString()}</span>
-            )}
-          </div>
-        ))
+        <span className={valueClass}>{value}</span>
       )}
     </div>
   );
