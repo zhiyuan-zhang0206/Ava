@@ -59,10 +59,14 @@ of which are unreachable while the corpse holds the session name. The narrow act
 the point: the unattended power this adds is "kill one session that has been silent
 for 15 minutes", not "recover a host".
 
-The evidence bar is unchanged from the caller-side reap — the updater
-lease expired (R1, Task #1021; the same no-progress family as
-`_UPDATER_STALL_TIMEOUT_S`) — so this is a new clock asking an existing
-question, not a new judgement about when a deploy is dead.
+The evidence bar is the caller-side reap's — the updater lease expired (R1,
+Task #1021; the same no-progress family as `_UPDATER_STALL_TIMEOUT_S`) or the
+stage markers stuck past `STAGE_NO_PROGRESS_TIMEOUT_S` — with one difference on
+the stage half: the scheduled reap kills only on the second consecutive round
+that reads the same stage stuck (a slow-but-completing stage gets the gap),
+where `spawn_update`'s inline reap stays single-read. Either way this is a new
+clock asking an existing question, not a new judgement about when a deploy is
+dead.
 """
 
 from __future__ import annotations

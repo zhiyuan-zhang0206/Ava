@@ -678,15 +678,22 @@ def test_parse_stages_mixes_in_process_entry_markers_with_dur_lines() -> None:
 def test_parse_stage_evidence_names_the_stage_a_t_marker_tail_opens() -> None:
     """A tail whose last stage line is a `t=` marker names the stage the updater is
     inside right now; its age is the host's monotonic now minus the stamped
-    monotonic — computed at read time, so every probe reports a fresh value."""
-    stamped = time.monotonic() - 30.0
+    monotonic — computed at read time, so every probe reports a fresh value.
+
+    The stamp is floored at 1.0: the marker format carries no sign (a real updater
+    on a freshly booted machine stamps small POSITIVE monotonic values), and a CI
+    container whose monotonic clock is younger than the simulated 30 s would
+    otherwise stamp a negative number the regex cannot match — silently promoting
+    the previous marker to "current stage", the failure shape this test pins down."""
+    now = time.monotonic()
+    stamped = now - 30.0 if now > 31.0 else 1.0
     tail = f"[updater] stage=fetch t=100.000\n[updater] stage=uv t={stamped:.3f}\n"
 
     name, age = uo._parse_stage_evidence(tail)
 
     assert name == "uv"
     assert age is not None
-    assert 29.5 < age < 30.5
+    assert 0.0 <= age <= 30.5
 
 
 def test_parse_stage_evidence_is_none_when_the_tail_ends_in_a_dur_line() -> None:
@@ -707,8 +714,15 @@ def test_parse_stage_evidence_without_markers_is_none() -> None:
 def test_the_outcome_carries_the_current_stage_off_the_box(home: Path) -> None:
     """The wire field the no-progress judgment reads: a host stuck inside `uv`
     reports the stage name and its in-flight age with the same probe response that
-    carries the verdict."""
-    stamped = time.monotonic() - 700.0
+    carries the verdict.
+
+    The stamp is floored at 1.0 for the same reason as the parse test: the marker
+    format carries no sign, so a CI container whose monotonic clock is younger than
+    the simulated 700 s would stamp a negative number the regex drops — and the
+    previous `fetch` marker would read as the current stage, the exact CI failure
+    this regression test guards."""
+    now = time.monotonic()
+    stamped = now - 700.0 if now > 701.0 else 1.0
     _paused(home)
     _write_log(
         home / "logs" / "updater-1785470000.log",
@@ -720,7 +734,7 @@ def test_the_outcome_carries_the_current_stage_off_the_box(home: Path) -> None:
     assert outcome is not None
     assert outcome.current_stage == "uv"
     assert outcome.current_stage_s is not None
-    assert 699.5 < outcome.current_stage_s < 700.5
+    assert 0.0 <= outcome.current_stage_s <= 700.5
 
 
 def test_a_completed_run_reports_no_current_stage(home: Path) -> None:

@@ -370,9 +370,11 @@ CONSTRAINTS: list[Constraint] = [
         "==",
         "SETTLE_TTL_S",
         "NO_PROGRESS_TIMEOUT_S",
-        "a settle hold waits exactly as long as the host it waits for deserves "
-        "the benefit of the doubt — the same instant its host-local reaper would "
-        "call its updater hung",
+        "the settle hold shares the whole-run no-progress definition — it lapses "
+        "when the host it waits for has outlived the longest legitimate leg, "
+        "never before; the reaper's earlier per-stage judgment "
+        "(STAGE_NO_PROGRESS_TIMEOUT_S) ends the hold through the convergence "
+        "path instead",
     ),
     Constraint(
         "<",

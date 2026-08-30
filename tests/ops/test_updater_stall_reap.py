@@ -476,6 +476,222 @@ def test_the_round_reaps_a_session_whose_lease_expired(
     assert backend.killed == ["ava-updater"]
 
 
+# ─── stage evidence is confirmed over two rounds before it is trusted ─────────
+#
+# The poll's POLL_NO_PROGRESS needs two consecutive probes; the reaper's half of
+# the same judgment needs two consecutive WATCHDOG rounds. A stage that outruns
+# the bound by a hair and completes (fetch / checkout / restart are not bounded
+# by UV_SYNC_TIMEOUT_S the way uv is) clears its own evidence between the rounds
+# and is never reaped — a single-read kill would reap it and the controllers
+# would re-trigger the update straight into the same slow stage, a reap→
+# re-trigger loop that reads as an outage. A genuinely stuck stage only reads
+# MORE stuck a round later, so the confirmation costs the corpse one round and
+# nothing else. Lease expiry stays on sight: a run that outlived the whole bound
+# is not slow-but-working.
+
+
+def test_the_round_confirms_a_stuck_stage_before_it_kills(
+    logs: Path, alive: list[bool], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One stuck-stage reading records the observation and waits; the next round's
+    reading of the SAME stage stuck is the kill."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="uv", current_stage_s=700.0
+        ),
+    )
+
+    assert cluster_mod.reap_stalled_updater_if_hung() is False
+    assert backend.killed == []
+
+    assert cluster_mod.reap_stalled_updater_if_hung() is True
+    assert backend.killed == ["ava-updater"]
+
+
+def test_a_stage_that_advances_between_rounds_restarts_the_confirmation(
+    logs: Path, alive: list[bool], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The confirmation keys on the STAGE, not just the run: `uv` stuck for one
+    round and then finished does not condemn the fresh `restart` stage that
+    follows — each stage starts its own two-round confirmation."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+
+    class _Reading:
+        stage: str = "uv"
+        age_s: float = 700.0
+
+    reading = _Reading()
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown",
+            log="updater-178.log",
+            current_stage=reading.stage,
+            current_stage_s=reading.age_s,
+        ),
+    )
+
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # uv: round 1, recorded
+    reading.stage, reading.age_s = "restart", 10.0
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # uv finished — no kill
+    reading.age_s = 700.0  # restart now reads stuck — but it is a NEW stage
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # restart: round 1
+    assert backend.killed == []
+    assert cluster_mod.reap_stalled_updater_if_hung() is True  # restart: round 2
+    assert backend.killed == ["ava-updater"]
+
+
+def test_a_new_update_run_restarts_the_confirmation(
+    logs: Path, alive: list[bool], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The confirmation keys on this run's pause window too: the same stage name
+    stuck in a NEW run (a fresh pause) is a new observation, not a second one —
+    otherwise a run's first stuck reading would inherit the previous run's pending
+    confirmation and kill a stage that has only just crossed the bound."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="uv", current_stage_s=700.0
+        ),
+    )
+
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # run 1: round 1, recorded
+
+    _lease(monkeypatch, expires_in_s=600.0)  # a NEW pause window — the next run's episode
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # run 2: round 1, restarted
+    assert backend.killed == []
+    assert cluster_mod.reap_stalled_updater_if_hung() is True  # run 2: round 2
+    assert backend.killed == ["ava-updater"]
+
+
+def test_the_lease_path_kills_on_sight_while_a_confirmation_is_pending(
+    logs: Path, alive: list[bool], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The confirmation gates stage evidence only: a lease that expires while a
+    stage confirmation is pending reaps on that round anyway — expiry is
+    unambiguous, and the host has been stuck longer, not less."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="uv", current_stage_s=700.0
+        ),
+    )
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # recorded, waiting
+
+    _lease(monkeypatch, expires_in_s=-60.0)  # the lease runs out in the meantime
+    assert cluster_mod.reap_stalled_updater_if_hung() is True
+    assert backend.killed == ["ava-updater"]
+
+
+def test_the_pending_confirmation_is_dropped_when_the_session_is_gone(
+    logs: Path, alive: list[bool], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A corpse that exits on its own between rounds leaves the record behind; the
+    no-session path clears it, so the next stuck stage — whatever run it belongs
+    to — starts its confirmation over."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="uv", current_stage_s=700.0
+        ),
+    )
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # recorded
+
+    record = logs.parent / "updater_reap_attempt"
+    assert record.exists()
+
+    alive[0] = False  # the updater died on its own
+    assert cluster_mod.reap_stalled_updater_if_hung() is False
+    assert not record.exists()
+    assert backend.killed == []
+
+
+def test_a_failed_kill_is_retried_without_a_fresh_confirmation(
+    logs: Path, alive: list[bool], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record says "this stage of this run has been stuck across two rounds",
+    which stays true after a kill the session survived: the next round re-kills
+    without re-confirming — the stage has only been stuck longer."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend(kills=False)
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="uv", current_stage_s=700.0
+        ),
+    )
+
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # round 1: recorded
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # round 2: kill failed
+    assert backend.killed == ["ava-updater"]
+    assert cluster_mod.reap_stalled_updater_if_hung() is False  # round 3: retried, no re-confirm
+    assert backend.killed == ["ava-updater", "ava-updater"]
+
+
+def test_the_inline_reap_stays_single_read_on_stage_evidence(
+    logs: Path, alive: list[bool], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`spawn_update`'s reap cannot wait a round: a new update is arriving with an
+    operator's intent behind it, so ONE stuck-stage reading reaps on the spot — no
+    confirmation record is written or read. The confirmation belongs to the
+    unattended watchdog half."""
+    from ops.updater_outcome import UpdaterOutcome
+
+    backend = _Backend()
+    _use(monkeypatch, backend)
+    _lease(monkeypatch, expires_in_s=600.0)
+    monkeypatch.setattr(
+        "ops.updater_outcome.last_updater_outcome",
+        lambda: UpdaterOutcome(
+            kind="unknown", log="updater-178.log", current_stage="uv", current_stage_s=700.0
+        ),
+    )
+    reaped: list[str] = []
+
+    def _reap_refuse(_session: str) -> bool:
+        # The kill's own contract is `_reap_stalled_updater`'s tests above; here it
+        # reports failure so `spawn_update` refuses with the session still up — the
+        # observable end of the inline path, and where the reap call must land.
+        reaped.append(_session)
+        return False
+
+    monkeypatch.setattr(cluster_deploy, "_reap_stalled_updater", _reap_refuse)
+
+    with pytest.raises(cluster_deploy.ClusterUpdateInProgress):
+        cluster_deploy.spawn_update(restart_only=True)
+
+    assert reaped == ["ava-updater"]  # one stage reading -> the reap, no round skipped
+    assert not (logs.parent / "updater_reap_attempt").exists()
+
+
 def test_the_round_leaves_a_working_updater_alone(
     logs: Path, alive: list[bool], monkeypatch: pytest.MonkeyPatch
 ) -> None:
