@@ -1915,21 +1915,23 @@ def test_probe_survives_an_identity_probe_that_raises() -> None:
     assert "no socket for you" in probe.detail
 
 
-def test_register_gateway_requires_gateway_url(
+def test_register_gateway_advertises_without_gateway_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """gateway registration must fail before writing a NULL gateway_url.
+    """gateway registration no longer requires AVA_GATEWAY_URL.
 
-    The guard lives in the shared `unit_dial_url()` resolver, so it is armed for
-    the ops daemon's boot registration too, not only for `ava start`: with neither
-    the env var nor `$AVA_HOME/gateway_url` set there is no address to advertise,
-    and no row is written.
+    WP4 (conventions/reachability-and-credentials.md): the advertised URL is
+    built on `reachable_host()` — the machine's private-network address — not
+    on the bare gateway URL, so a gateway unit with a reachable identity
+    registers a dialable address even before `AVA_GATEWAY_URL` is configured
+    (a loopback gateway_url advertisement was what made the page proxy refuse
+    the host's page servers, the 2026-08-30 serve 400). The port falls back to
+    the gateway bind-port setting.
 
     The real `_register_machine_or_die` is used (autouse fixture replaces the
     module attribute with a noop; `_real_register_machine_or_die` captures the
     original at import time)."""
     from shared.config import settings
-    from shared.machines import GatewayUrlMissing
 
     calls: list[str | None] = []
 
@@ -1938,21 +1940,23 @@ def test_register_gateway_requires_gateway_url(
 
     monkeypatch.setattr("shared.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
+    monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
     monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
 
-    with pytest.raises(GatewayUrlMissing):
-        _real_register_machine_or_die(
-            cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
-        )
-    assert calls == []
+    rc = _real_register_machine_or_die(
+        cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
+    )
+    assert rc == 0
+    assert calls == ["http://100.64.0.2:8000"]
 
 
-def test_register_gateway_only_advertises_its_gateway_url(
+def test_register_gateway_only_advertises_reachable_host(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A gateway-only unit advertises its own gateway URL — read through the shared
-    resolver (env > `$AVA_HOME/gateway_url`), which is the same answer the value
-    `ava start` just persisted."""
+    """A gateway-only unit advertises `reachable_host` + the gateway URL's port —
+    NOT the bare gateway URL (WP4: the hostname is what the page proxy's SSRF
+    allowlist consumes; a loopback advertisement breaks page serves)."""
     from shared.config import settings
 
     calls: list[str | None] = []
@@ -1962,6 +1966,7 @@ def test_register_gateway_only_advertises_its_gateway_url(
 
     monkeypatch.setattr("shared.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
     monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("https://ava.example:8000")
 
@@ -1969,7 +1974,7 @@ def test_register_gateway_only_advertises_its_gateway_url(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
     )
     assert rc == 0
-    assert calls == ["https://ava.example:8000"]
+    assert calls == ["http://100.64.0.2:8000"]
 
 
 def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatch) -> None:
