@@ -72,7 +72,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "calls"
@@ -441,7 +441,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__range]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "llm cost"
@@ -501,7 +501,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [$__range]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "tokens"
@@ -561,7 +561,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__range]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "input"
@@ -621,7 +621,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [$__range]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "output"
@@ -682,7 +682,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__range]))",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "cache hit %"
@@ -743,7 +743,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"turn_end\" | attributes_ok=\"true\" | unwrap attributes_duration_seconds [$__range])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"turn_end\" | attributes_ok=\"true\" [$__range]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"turn_end\"} | json | category=\"telemetry\" | attributes_ok=\"true\" | unwrap attributes_duration_seconds [$__range])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"turn_end\"} | json | category=\"telemetry\" | attributes_ok=\"true\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "avg turn s"
@@ -1088,7 +1088,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [5m])) / 5",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "in"
@@ -1155,7 +1155,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [5m])) / 5",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "out"
@@ -1166,7 +1166,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_reasoning [5m])) / 5",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_reasoning [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "reasoning"
@@ -1241,7 +1241,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [5m]))",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "overall"
@@ -1252,7 +1252,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_in_total [5m])))",
+     "expr": "100 * max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m])))",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "max agent"
@@ -1263,7 +1263,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_in_total [5m])))",
+     "expr": "100 * min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m])))",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "min agent"
@@ -1333,7 +1333,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"turn_end\" | attributes_ok=\"true\" [5m])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"turn_end\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"turn_end\"} | json | category=\"telemetry\" | attributes_ok=\"true\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"turn_end\"} | json | category=\"telemetry\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "ok_pct"
@@ -1543,7 +1543,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(rate({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [1m])) + sum(rate({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [1m])) + sum(rate({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_reasoning [1m]))",
+     "expr": "sum(rate({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [1m])) + sum(rate({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [1m])) + sum(rate({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_reasoning [1m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "tokens/s"
@@ -1605,7 +1605,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "avg in tokens/s"
@@ -1616,7 +1616,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
+     "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "max in tokens/s"
@@ -1627,7 +1627,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
+     "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "min in tokens/s"
@@ -1689,7 +1689,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "avg out tokens/s"
@@ -1700,7 +1700,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
+     "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "max out tokens/s"
@@ -1711,7 +1711,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
+     "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "min out tokens/s"
@@ -1773,7 +1773,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "avg gen out tokens/s"
@@ -1784,7 +1784,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000)",
+     "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000)",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "max gen out tokens/s"
@@ -1795,7 +1795,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000)",
+     "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000)",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "min gen out tokens/s"
@@ -1860,7 +1860,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" [30m])) / 30",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" [30m])) / 30",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "calls"
@@ -1931,7 +1931,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [30m])) / 30",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [30m])) / 30",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "cost usd"
@@ -2001,7 +2001,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_provider_error\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_provider_error\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "provider_error"
@@ -2012,7 +2012,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"stream_stalled_retry\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"stream_stalled_retry\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "stalled_retry"
@@ -2023,7 +2023,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_turn_aborted\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_turn_aborted\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "turn_aborted"
@@ -2034,7 +2034,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"stream_overloaded_retry\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"stream_overloaded_retry\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "overloaded_retry"
@@ -2099,7 +2099,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum by (agent_id) (count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" [$__range]))",
+     "expr": "sum by (agent_id) (count_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{agent_id}}"
@@ -2110,7 +2110,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_in_total [$__range]))",
+     "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range]))",
      "refId": "B",
      "queryType": "instant",
      "legendFormat": "{{agent_id}}"
@@ -2121,7 +2121,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_out_total [$__range]))",
+     "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_out_total [$__range]))",
      "refId": "C",
      "queryType": "instant",
      "legendFormat": "{{agent_id}}"
@@ -2132,7 +2132,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_cost_usd [$__range]))",
+     "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))",
      "refId": "D",
      "queryType": "instant",
      "legendFormat": "{{agent_id}}"
@@ -2215,7 +2215,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max(max_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"gateway_latency\" | unwrap attributes_p50_ms [1m]))",
+     "expr": "max(max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p50_ms [1m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "p50"
@@ -2226,7 +2226,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max(max_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"gateway_latency\" | unwrap attributes_p95_ms [1m]))",
+     "expr": "max(max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p95_ms [1m]))",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "p95"
@@ -2237,7 +2237,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max(max_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"gateway_latency\" | unwrap attributes_p99_ms [1m]))",
+     "expr": "max(max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p99_ms [1m]))",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "p99"
@@ -2248,7 +2248,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max(max_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"gateway_latency\" | unwrap attributes_max_ms [1m]))",
+     "expr": "max(max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_max_ms [1m]))",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "max"
@@ -2318,7 +2318,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"gateway_latency\" | unwrap attributes_p95_ms [1m]))",
+     "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p95_ms [1m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "p95 {{attributes_route}}"
@@ -2329,7 +2329,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"gateway_latency\" | unwrap attributes_p99_ms [1m]))",
+     "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p99_ms [1m]))",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "p99 {{attributes_route}}"
@@ -2479,7 +2479,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"gateway_latency\" | unwrap attributes_count [1m]))",
+     "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_count [1m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "{{attributes_route}}"
@@ -2549,7 +2549,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"exec\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "ok"
@@ -2560,7 +2560,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_failed|exec[(]failed[)]\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=~\"exec_failed|exec[(]failed[)]\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "failed"
@@ -2571,7 +2571,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_timeout|exec[(]timeout[)]\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=~\"exec_timeout|exec[(]timeout[)]\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "timeout"
@@ -2582,7 +2582,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec_cancelled|exec[(]cancelled[)]\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=~\"exec_cancelled|exec[(]cancelled[)]\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "cancelled"
@@ -2593,7 +2593,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec_node_timeout\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"exec_node_timeout\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "E",
      "queryType": "range",
      "legendFormat": "node_timeout"
@@ -2604,7 +2604,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec.*\" | event_name!~\"exec|exec_failed|exec[(]failed[)]|exec_timeout|exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|exec_node_timeout\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=~\"exec.*\", event_name!~\"exec|exec_envelope|exec_failed|exec[(]failed[)]|exec_timeout|exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|exec_node_timeout\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "F",
      "queryType": "range",
      "legendFormat": "other"
@@ -2674,7 +2674,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*ruff_format.*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*ruff_format.*\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "ruff_format"
@@ -2685,7 +2685,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*ruff.*\" | attributes_fixes!~\".*ruff_format.*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*ruff.*\" | attributes_fixes!~\".*ruff_format.*\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "ruff"
@@ -2696,7 +2696,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*invalid_escape.*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*invalid_escape.*\" [5m])) / 5",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "invalid_escape"
@@ -2707,7 +2707,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*missing_imports.*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*missing_imports.*\" [5m])) / 5",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "missing_imports"
@@ -2718,7 +2718,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*chinese_punct.*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*chinese_punct.*\" [5m])) / 5",
      "refId": "E",
      "queryType": "range",
      "legendFormat": "chinese_punct"
@@ -2729,7 +2729,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes=~\".*bracket_matching.*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*bracket_matching.*\" [5m])) / 5",
      "refId": "F",
      "queryType": "range",
      "legendFormat": "bracket_matching"
@@ -2740,7 +2740,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"syntax_fix\" | attributes_fixes!~\".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes!~\".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*\" [5m])) / 5",
      "refId": "G",
      "queryType": "range",
      "legendFormat": "other"
@@ -2810,7 +2810,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=\"no tool_call (idle)\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"halt\"} | json | category=\"telemetry\" | attributes_body=\"no tool_call (idle)\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "idle"
@@ -2821,7 +2821,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=~\".*compact.*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"halt\"} | json | category=\"telemetry\" | attributes_body=~\".*compact.*\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "compact"
@@ -2832,7 +2832,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body=~\"lifecycle .*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"halt\"} | json | category=\"telemetry\" | attributes_body=~\"lifecycle .*\" [5m])) / 5",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "lifecycle"
@@ -2843,7 +2843,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"halt\" | attributes_body!=\"no tool_call (idle)\" | attributes_body!~\".*compact.*\" | attributes_body!~\"lifecycle .*\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"halt\"} | json | category=\"telemetry\" | attributes_body!=\"no tool_call (idle)\" | attributes_body!~\".*compact.*\" | attributes_body!~\"lifecycle .*\" [5m])) / 5",
      "refId": "D",
      "queryType": "range",
      "legendFormat": "other"
@@ -2908,7 +2908,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "topk(20, sum by (attributes_fn) (count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"sdk_call\" [$__range])) * 10)",
+     "expr": "topk(20, sum by (attributes_fn) (count_over_time({service_name=\"unknown_service\", event_name=\"sdk_call\"} | json | category=\"telemetry\" [$__range])) * 10)",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{attributes_fn}}"
@@ -2978,7 +2978,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"frontend_interaction\" | source=\"user\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"frontend_interaction\"} | json | category=\"telemetry\" | source=\"user\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "interactions"
@@ -3043,7 +3043,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "topk(15, sum by (attributes_element) (count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"frontend_interaction\" | source=\"user\" [$__range])))",
+     "expr": "topk(15, sum by (attributes_element) (count_over_time({service_name=\"unknown_service\", event_name=\"frontend_interaction\"} | json | category=\"telemetry\" | source=\"user\" [$__range])))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{attributes_element}}"
@@ -3108,7 +3108,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "topk(15, sum by (attributes_page) (count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"frontend_interaction\" | source=\"user\" | attributes_element=\"page-view\" [$__range])))",
+     "expr": "topk(15, sum by (attributes_page) (count_over_time({service_name=\"unknown_service\", event_name=\"frontend_interaction\"} | json | category=\"telemetry\" | source=\"user\" | attributes_element=\"page-view\" [$__range])))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{attributes_page}}"
@@ -3173,7 +3173,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "topk(15, sum by (attributes_key) (count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"frontend_interaction\" | source=\"user\" | attributes_element=\"setting-change\" [$__range])))",
+     "expr": "topk(15, sum by (attributes_key) (count_over_time({service_name=\"unknown_service\", event_name=\"frontend_interaction\"} | json | category=\"telemetry\" | source=\"user\" | attributes_element=\"setting-change\" [$__range])))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{attributes_key}}"
@@ -3260,7 +3260,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum by (source) (count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"spawn\" [$__interval])) / ($__interval_ms / 60000)",
+     "expr": "sum by (source) (count_over_time({service_name=\"unknown_service\", event_name=\"spawn\"} | json | category=\"audit\" [$__interval])) / ($__interval_ms / 60000)",
      "legendFormat": "{{source}}",
      "refId": "A",
      "queryType": "range"
@@ -3334,7 +3334,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum by (event_name) (count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=~\"^(spawn|terminate|restart|resurrect|fork)$\" [$__interval])) / ($__interval_ms / 60000)",
+     "expr": "sum by (event_name) (count_over_time({service_name=\"unknown_service\", event_name=~\"^(spawn|terminate|restart|resurrect|fork)$\"} | json | category=\"audit\" [$__interval])) / ($__interval_ms / 60000)",
      "legendFormat": "{{event_name}}",
      "refId": "A",
      "queryType": "range"
@@ -3394,7 +3394,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"delivery_stalled\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stalled\"} | json | category=\"telemetry\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "stalled"
@@ -3471,7 +3471,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"delivery_stalled\" | attributes_age_s < 60 [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stalled\"} | json | category=~\"telemetry|log\" | attributes_age_s < 60 [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "stalled <60s"
@@ -3482,7 +3482,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"delivery_stalled\" | attributes_age_s >= 60 | attributes_age_s < 600 [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stalled\"} | json | category=~\"telemetry|log\" | attributes_age_s >= 60 | attributes_age_s < 600 [$__range]))",
      "refId": "B",
      "queryType": "instant",
      "legendFormat": "stalled 60-600s"
@@ -3493,7 +3493,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"delivery_stalled\" | attributes_age_s >= 600 [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stalled\"} | json | category=~\"telemetry|log\" | attributes_age_s >= 600 [$__range]))",
      "refId": "C",
      "queryType": "instant",
      "legendFormat": "stalled >600s"
@@ -3705,7 +3705,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"syntax_fix\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry|log\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "fixes"
@@ -3766,7 +3766,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"syntax_fix\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry|log\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "fixes"
@@ -3836,7 +3836,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"task_update\" | attributes_status=\"done\" [5m])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"task_update\" | attributes_status!=\"\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status=\"done\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status!=\"\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "done %"
@@ -3906,7 +3906,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"info\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "runs"
@@ -3976,7 +3976,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" | attributes_body =~ \".*-> 0 kept.*\" [5m])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_body =~ \".*-> 0 kept.*\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"info\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "empty %"
@@ -4054,7 +4054,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"warning\" [5m])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"warning\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "anomaly %"
@@ -4115,7 +4115,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"warning\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"warning\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "failures"
@@ -4781,7 +4781,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "(sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "today est."
@@ -4843,7 +4843,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "(sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "month est."
@@ -4902,7 +4902,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "cost usd"
@@ -4951,7 +4951,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "topk(20, sum by (attributes_model) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | attributes_model!=\"\" | unwrap attributes_cost_usd [$__range])))",
+     "expr": "topk(20, sum by (attributes_model) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_model!=\"\" | unwrap attributes_cost_usd [$__range])))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{attributes_model}}"
@@ -5000,7 +5000,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "topk(20, sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_cost_usd [$__range])))",
+     "expr": "topk(20, sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range])))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{agent_id}}"
@@ -5026,6 +5026,6 @@
  "timezone": "Asia/Shanghai",
  "title": "Ava Ops",
  "uid": "ava-ops-main",
- "version": 5,
+ "version": 6,
  "preload": true
 }

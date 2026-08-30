@@ -66,11 +66,22 @@ def test_rendered_queries_target_the_event_stream() -> None:
     _load_all()
     for spec in registered_metrics():
         for template in render_targets(spec):
-            assert '{service_name="unknown_service"}' in template, (
+            assert 'service_name="unknown_service"' in template, (
                 f"{spec.name} lost the event-stream selector"
             )
             assert "| json" in template, f"{spec.name} lost the | json pipeline"
             assert "FROM events" not in template, f"{spec.name} still reads the frozen events table"
+            # event_name is a promoted stream label (2026-08-23 cutover): the
+            # matcher must sit in the stream selector ({... event_name=...}),
+            # never as a `| event_name` pipeline filter. The {{agent_id}}
+            # inspector placeholder stays in the pipeline (the gateway renders
+            # it per agent).
+            assert "| event_name" not in template, (
+                f"{spec.name} filters event_name after | json:\n{template}"
+            )
+            assert "| agent_id" not in template.replace("| {{agent_id}}", ""), (
+                f"{spec.name} filters agent_id after | json:\n{template}"
+            )
 
 
 def test_agent_placeholder_renders_per_agent() -> None:
