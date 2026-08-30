@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 REQUIRED_FIELDS = ("id", "input", "expected", "grader", "meta")
 GRADER_TYPES = frozenset({"artifact-audit", "llm-judge", "exact", "custom"})
+LINE_VALUES = frozenset({"ava", "monsora", "speechful", "research"})
 SCHEMA_VERSION = "1"
 _SEGMENT = re.compile(r"^[a-z0-9]+$")
 _SEQ = re.compile(r"^[a-z]*\d{3}$")
@@ -91,14 +93,33 @@ def _validate_row(row: Any, path: Path, lineno: int, seen_ids: set[str]) -> None
             f"{path}:{lineno}: meta.schema_version must be {SCHEMA_VERSION!r}, "
             f"got {meta.get('schema_version')!r}"
         )
-    if meta.get("line") != case_id.split("-", 1)[0]:
+    line = meta.get("line")
+    if line not in LINE_VALUES:
+        raise ValueError(
+            f"{path}:{lineno}: meta.line must be one of {sorted(LINE_VALUES)}, got {line!r}"
+        )
+    if line != case_id.split("-", 1)[0]:
         raise ValueError(
             f"{path}:{lineno}: meta.line must equal the id's first segment, "
-            f"got {meta.get('line')!r} for id {case_id!r}"
+            f"got {line!r} for id {case_id!r}"
         )
-    for field in ("family", "created_at"):
-        if not isinstance(meta.get(field), str) or not meta[field]:
-            raise ValueError(f"{path}:{lineno}: meta.{field} must be a non-empty string")
+    if not isinstance(meta.get("family"), str) or not meta["family"]:
+        raise ValueError(f"{path}:{lineno}: meta.family must be a non-empty string")
+    created_at = meta.get("created_at")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError(f"{path}:{lineno}: meta.created_at must be a non-empty string")
+    try:
+        parsed = datetime.fromisoformat(created_at)
+    except ValueError as error:
+        raise ValueError(
+            f"{path}:{lineno}: meta.created_at must be ISO-8601 with an explicit offset, "
+            f"got {created_at!r}"
+        ) from error
+    if parsed.utcoffset() is None:
+        raise ValueError(
+            f"{path}:{lineno}: meta.created_at must carry an explicit UTC offset, "
+            f"got {created_at!r}"
+        )
 
 
 def _validate_id(case_id: str, path: Path, lineno: int) -> None:

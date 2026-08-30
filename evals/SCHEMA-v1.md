@@ -82,19 +82,28 @@ model choices:
 ### meta (object, required)
 
 - `schema_version` (required): `"1"` for this shape.
-- `line` (required): must equal the first segment of `id`.
+- `line` (required): one of the shared line vocabulary
+  (`ava` / `monsora` / `speechful` / `research` — the same values the
+  billing-event schema will formalize) **and** equal to the first segment
+  of `id`. The loader enforces membership in this vocabulary.
 - `family` (required): the behavior-family vocabulary (aligns with the
   existing `CaseDefinition.family`).
-- `created_at` (required): ISO-8601 with offset.
+- `created_at` (required): ISO-8601 with an explicit UTC offset — naive
+  timestamps are rejected by the loader.
 - Optional: `difficulty`, `tags`, `migrated_from` (source id when a dataset
   is migrated into this format).
 
 ## Versioning
 
 Evalsets live in git and change through PRs. The schema evolves **add-only**:
-fields are added, never renamed or removed — the same contract discipline as
-API deployment, so an older loader keeps parsing a newer file. `id` reuse is
-forbidden; a changed case is a new id plus `meta.migrated_from`.
+fields are added, never renamed or removed. Additive changes do **not** bump
+`schema_version` — the shape stays `"1"` so an older loader keeps parsing a
+newer file (the same contract discipline as API deployment). A breaking shape
+change would require a new major version plus a coordinated loader rollout,
+and is not on the roadmap. `id` reuse is forbidden; a changed case is a new id
+plus `meta.migrated_from`. An empty or comment-only evalset file is legal and
+loads as zero cases — consumers must treat zero cases as an explicit
+condition, never as a silent pass.
 
 ## Runner pattern
 
