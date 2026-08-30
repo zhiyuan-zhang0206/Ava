@@ -1821,11 +1821,18 @@ def milvus_server() -> Iterator[str]:
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+_MILVUS_TEST_DIM = 8
+"""Test vector width — small, matches the embedding dummy vectors."""
+_MILVUS_TEST_FP = "test:gemini:dim=8"
+"""Test provider fingerprint — stamped on rows, compared by reconcile tests."""
+
+
 @pytest.fixture
 def milvus_client(milvus_server: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
     """Fresh MilvusClient connected to session server, after test drop collection for isolation.
 
-    Each test gets a clean collection —— `index.connect()` idempotently creates it, yields,
+    Each test gets a clean collection —— `MilvusBackend(dim=..., fingerprint=...)`'
+    connect() idempotently creates it, yields the underlying client,
     teardown drops so next test sees empty collection.
     """
     # Settings module-loaded once BaseSettings, setenv then settings.services.milvus_uri
@@ -1834,17 +1841,19 @@ def milvus_client(milvus_server: str, monkeypatch: pytest.MonkeyPatch) -> Iterat
     from shared.config import settings
 
     monkeypatch.setattr(settings.services, "milvus_uri", milvus_server)
-    from services.memory_indexer import index as _idx
+    from services.memory_indexer.backends.milvus import _COLLECTION, MilvusBackend
 
-    client = _idx.connect()
+    backend = MilvusBackend(dim=_MILVUS_TEST_DIM, fingerprint=_MILVUS_TEST_FP)
+    backend.connect()
+    client = backend._require_client()
     try:
         yield client
     finally:
         with contextlib.suppress(Exception):
             # pyright infers pymilvus client.has_collection as coroutine (stub noise),
             # actually sync bool. Keep suppress to avoid reportUnnecessaryComparison false positive.
-            if client.has_collection(_idx._COLLECTION):  # pyright: ignore[reportUnnecessaryComparison]
-                client.drop_collection(_idx._COLLECTION)
+            if client.has_collection(_COLLECTION):  # pyright: ignore[reportUnnecessaryComparison]
+                client.drop_collection(_COLLECTION)
         with contextlib.suppress(Exception):
             client.close()
 

@@ -9,7 +9,10 @@ rows the milvus backend keeps:
   backends 1:1
 - `path` VARCHAR(1024), `kind` VARCHAR(16), `chunk_idx` BIGINT,
   `mtime` DOUBLE PRECISION, `content_hash` VARCHAR(128)
-- `vector` vector(DIM) — pgvector, DIM from `embedder` checked at connect
+- `embedder` VARCHAR(64) — the embedding provider `fingerprint` the row
+  was produced with (semantic-space id; a change re-embeds the row)
+- `vector` vector(dim) — pgvector; dim = the provider's width, injected by
+  the factory and checked at connect (mismatch drops + recreates)
 
 The table is a **derived cache** (rebuildable from the memory pool by the
 cold-start reconcile), exactly like the milvus collection — so schema
@@ -41,7 +44,6 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services.memory_indexer.backends.base import KIND_BODY, pk_of
-from services.memory_indexer.embedder import DIM
 
 _log = logging.getLogger("services.memory_indexer.backends.pgvector")
 
@@ -53,7 +55,9 @@ read paths' contracts aligned)."""
 
 # The table name is a module constant and appears verbatim in every
 # statement (a plain LiteralString satisfies psycopg's execute typing); only
-# the vector dim is runtime data, composed with psycopg.sql.
+# the vector dim is runtime data (the provider's width), composed with
+# psycopg.sql. The table is a derived cache — width mismatch or a missing
+# column (a pre-provider-era table) drops + recreates, see `_ensure_schema`.
 _CREATE_TABLE_SQL = pgsql.SQL(
     """
 CREATE TABLE IF NOT EXISTS memory_embeddings (
@@ -63,26 +67,34 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
     chunk_idx    BIGINT NOT NULL,
     mtime        DOUBLE PRECISION NOT NULL,
     content_hash VARCHAR(128) NOT NULL,
+    embedder     VARCHAR(64) NOT NULL,
     vector       vector({dim}) NOT NULL
 )
 """
-).format(dim=pgsql.Literal(DIM))
+)
+
+
+def _create_table_sql(dim: int) -> pgsql.Composed:
+    """The CREATE TABLE statement at the provider's `dim`."""
+    return _CREATE_TABLE_SQL.format(dim=pgsql.Literal(dim))
+
 
 _UPSERT_SQL = """
-INSERT INTO memory_embeddings (pk, path, kind, chunk_idx, mtime, content_hash, vector)
-VALUES (%s, %s, %s, %s, %s, %s, %s::vector)
+INSERT INTO memory_embeddings (pk, path, kind, chunk_idx, mtime, content_hash, embedder, vector)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
 ON CONFLICT (pk) DO UPDATE SET
     path = EXCLUDED.path,
     kind = EXCLUDED.kind,
     chunk_idx = EXCLUDED.chunk_idx,
     mtime = EXCLUDED.mtime,
     content_hash = EXCLUDED.content_hash,
+    embedder = EXCLUDED.embedder,
     vector = EXCLUDED.vector
 """
 
 _DELETE_SQL = "DELETE FROM memory_embeddings WHERE path = %s"
 
-_ALL_META_SQL = "SELECT path, mtime, content_hash FROM memory_embeddings"
+_ALL_META_SQL = "SELECT path, mtime, content_hash, embedder FROM memory_embeddings"
 
 _SEARCH_SQL = """
 SELECT path, (vector <=> %s::vector) AS distance
@@ -118,37 +130,69 @@ def _dim_of(client: psycopg.Connection) -> int | None:
     return int(row[0])
 
 
-def _ensure_schema(client: psycopg.Connection) -> None:
+_EXPECTED_COLUMNS = {
+    "pk",
+    "path",
+    "kind",
+    "chunk_idx",
+    "mtime",
+    "content_hash",
+    "embedder",
+    "vector",
+}
+
+
+def _columns_of(client: psycopg.Connection) -> set[str]:
+    """The table's live column set, or empty when the table does not exist."""
+    rows = client.execute(
+        "SELECT attname FROM pg_attribute "
+        "WHERE attrelid = to_regclass(%s) AND attnum > 0 AND NOT attisdropped",
+        (_TABLE,),
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def _ensure_schema(client: psycopg.Connection, dim: int) -> None:
     """CREATE EXTENSION IF NOT EXISTS + table, with drop + recreate on dim
-    drift — the same derived-cache philosophy as the milvus collection: a
-    mismatched cache is rebuilt by the cold-start reconcile, never migrated."""
+    drift or a missing column — the same derived-cache philosophy as the
+    milvus collection: a mismatched cache (another provider's width, or a
+    pre-provider-era table without the `embedder` column) is rebuilt by the
+    cold-start reconcile, never migrated."""
     client.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    dim = _dim_of(client)
-    if dim is not None and dim != DIM:
+    table_dim = _dim_of(client)
+    stale: str | None = None
+    if table_dim is not None and table_dim != dim:
+        stale = f"vector dim mismatch ({table_dim} != {dim})"
+    elif table_dim is not None and _columns_of(client) != _EXPECTED_COLUMNS:
+        stale = "column set mismatch with the current schema"
+    if stale is not None:
         _log.warning(
-            "[pgvector] table %s vector dim mismatch (%d != %d) — dropping + "
-            "recreating; cold-start will rebuild the index",
+            "[pgvector] table %s %s — dropping + recreating; cold-start will rebuild the index",
             _TABLE,
-            dim,
-            DIM,
+            stale,
         )
         client.execute("DROP TABLE memory_embeddings")
-    client.execute(_CREATE_TABLE_SQL)
+    client.execute(_create_table_sql(dim))
     client.commit()
 
 
 class PGVectorBackend:
     """Protocol-compliant backend over the cluster Postgres + pgvector.
 
-    `connect()` opens a long-lived connection pool and ensures the schema —
-    the indexer daemon's path. The gateway's read path never calls
-    `connect()`; each `search_topk_async` opens one short-lived connection
-    instead (bounded by the caller's deadline, no pool lifecycle to leak).
+    The vector space is injected (factory wiring): `dim` is the table's
+    vector width and `fingerprint` is stamped on every row — no import of
+    provider constants. `connect()` opens a long-lived connection pool and
+    ensures the schema — the indexer daemon's path. The gateway's read path
+    never calls `connect()`; each `search_topk_async` opens one short-lived
+    connection instead (bounded by the caller's deadline, no pool lifecycle
+    to leak).
     """
 
     name = "pgvector"
 
-    def __init__(self) -> None:
+    def __init__(self, dim: int, fingerprint: str) -> None:
+        self._dim = dim
+        self._fingerprint = fingerprint
         self._pool: ConnectionPool | None = None
 
     @contextmanager
@@ -173,7 +217,7 @@ class PGVectorBackend:
         constructor (keepalives + statement ceiling)."""
         self._pool = shared.db.pool()
         with self._pool.connection() as conn:
-            _ensure_schema(conn)
+            _ensure_schema(conn, self._dim)
 
     def close(self) -> None:
         """Close the pool when one exists; idempotent."""
@@ -205,6 +249,7 @@ class PGVectorBackend:
                     int(chunk_idx),
                     float(mtime),
                     content_hash,
+                    self._fingerprint,
                     _vector_text(embedding),
                 ),
             )
@@ -217,22 +262,24 @@ class PGVectorBackend:
         with self._conn() as conn:
             conn.execute(_DELETE_SQL, (path,))
 
-    def all_meta(self) -> dict[str, tuple[float, str]]:
-        """Per-path (mtime, content_hash) — one entry per **file**, not per
-        chunk (aggregation keeps the max mtime; same contract as milvus).
+    def all_meta(self) -> dict[str, tuple[float, str, str]]:
+        """Per-path (mtime, content_hash, provider_fingerprint) — one entry
+        per **file**, not per chunk (aggregation keeps the max mtime; same
+        contract as milvus). The fingerprint is the reconcile key's third
+        element.
 
         No row cap: the milvus backend truncates its all_meta at 16384 chunk
         rows (a milvus-side quirk), so a pool past that size would show a
         spurious row-set diff in reconciliation — this side is the more
         correct one, not the regression."""
-        meta: dict[str, tuple[float, str]] = {}
+        meta: dict[str, tuple[float, str, str]] = {}
         with self._conn() as conn:
             rows = conn.execute(_ALL_META_SQL).fetchall()
         for row in rows:
-            path, mtime, hash_ = row
+            path, mtime, hash_, fingerprint = row
             prev = meta.get(path)
             if prev is None or mtime > prev[0]:
-                meta[path] = (mtime, hash_)
+                meta[path] = (mtime, hash_, fingerprint)
         return meta
 
     def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:

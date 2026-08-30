@@ -2,7 +2,8 @@
 
 After startup:
   1. Cold start: full scan `~/.ava/memory/**/*.md`, diff against the
-     backend index, embed missing / changed files, prune deleted entries.
+     backend index (mtime + content_hash + provider fingerprint), embed
+     missing / changed files, prune deleted entries.
   2. Start watchdog Observer to monitor fs events, push dirty paths to
      a queue.
   3. Main loop drains the queue every second (set dedup), batch
@@ -57,7 +58,6 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.memory_indexer import embedder
 from services.memory_indexer.backends.base import (
     KIND_BODY,
     KIND_DESC,
@@ -66,6 +66,8 @@ from services.memory_indexer.backends.base import (
 )
 from services.memory_indexer.backends.factory import get_backend
 from services.memory_indexer.backends.probe import probe_backend
+from services.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
+from services.memory_indexer.embeddings.factory import get_provider
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -265,7 +267,9 @@ def _file_rows(content: str) -> list[tuple[str, int, str]]:
     return rows
 
 
-def _process_paths(backend: MemorySearchBackend, paths: set[Path]) -> None:
+def _process_paths(
+    backend: MemorySearchBackend, paths: set[Path], provider: EmbeddingProvider
+) -> None:
     """Process a batch of dirty paths: missing/foreign -> delete; else embed+upsert.
 
     A path is deleted when it is missing on disk OR when it lies outside the
@@ -275,8 +279,14 @@ def _process_paths(backend: MemorySearchBackend, paths: set[Path]) -> None:
     them forever, and every search would show the note twice. The index is
     keyed by absolute path; only paths under the watched root belong in it.
 
+    Embeds go through `provider`; rows are stamped with its fingerprint,
+    and a row whose stored fingerprint differs from the configured
+    provider's is re-embedded even when content is unchanged — a provider
+    switch changes the semantic space, so old vectors must never be mixed
+    with new ones (same dim is not the same space).
+
     Embedding failures (`EmbeddingAPIError`) propagate after the
-    embedder's internal retries — the caller (main loop) catches + logs
+    provider's internal retries — the caller (main loop) catches + logs
     + continues (the next fs event re-triggers, indexer stays available).
 
     Sync function — the caller uses ``asyncio.to_thread`` so the event
@@ -299,8 +309,8 @@ def _process_paths(backend: MemorySearchBackend, paths: set[Path]) -> None:
         mtime = p.stat().st_mtime
         hash_ = content_hash(content)
         prev = existing_meta.get(str(p))
-        if prev is not None and prev[1] == hash_:
-            continue  # content unchanged, mtime touch only
+        if prev is not None and prev[1] == hash_ and prev[2] == provider.fingerprint:
+            continue  # content unchanged AND same provider space; mtime touch only
         to_embed.append((p, mtime, hash_, content))
 
     for p in to_delete:
@@ -321,7 +331,7 @@ def _process_paths(backend: MemorySearchBackend, paths: set[Path]) -> None:
     for i in range(0, len(rows), _BATCH_SIZE):
         batch = rows[i : i + _BATCH_SIZE]
         texts = [text for *_, text in batch]
-        vectors = embedder.embed_documents(texts)
+        vectors = provider.embed_batch(texts)
         last_path: str | None = None
         for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(batch, vectors, strict=True):
             backend.upsert(str(path), mtime, hash_, vector, kind=kind, chunk_idx=chunk_idx)
@@ -330,13 +340,18 @@ def _process_paths(backend: MemorySearchBackend, paths: set[Path]) -> None:
                 last_path = str(path)
 
 
-def _cold_start_reconcile(backend: MemorySearchBackend) -> None:
+def _cold_start_reconcile(backend: MemorySearchBackend, provider: EmbeddingProvider) -> None:
     """Diff disk vs index db; fill in gaps. Runs once on daemon start (in a thread executor).
 
     Rows whose path is outside the watched root are pruned even though the
     files still exist on disk (see `_process_paths`): they are leftovers
     from an era when the indexer embedded a different checkout, and they
     surface as stale duplicates in search results.
+
+    A row whose stored provider fingerprint differs from the configured
+    provider's is dirty even at the same mtime — the index was built in
+    another semantic space (a provider switch), so every row must be
+    re-embedded.
     """
     disk = _scan_disk(_MEMORY_ROOT)
     indexed = backend.all_meta()
@@ -349,7 +364,7 @@ def _cold_start_reconcile(backend: MemorySearchBackend) -> None:
     # _process_paths further filters by hash internally.
     for path, mtime in disk.items():
         prev = indexed.get(str(path))
-        if prev is None or prev[0] != mtime:
+        if prev is None or prev[0] != mtime or prev[2] != provider.fingerprint:
             dirty.add(path)
     # Deletions: indexed rows that vanished from disk, or that live outside
     # the watched root (stale-checkout leftovers) — _process_paths deletes
@@ -363,8 +378,8 @@ def _cold_start_reconcile(backend: MemorySearchBackend) -> None:
     if dirty:
         _log.info("[indexer] cold-start reconcile: %d dirty paths", len(dirty))
         try:
-            _process_paths(backend, dirty)
-        except embedder.EmbeddingAPIError as exc:
+            _process_paths(backend, dirty, provider)
+        except EmbeddingAPIError as exc:
             _log.error(
                 "[indexer] cold-start embed failed: %r — daemon continues; watchdog re-triggers later",
                 exc,
@@ -409,7 +424,10 @@ def _refresh_gateway_checkout() -> None:
 
 
 async def _drain_loop(
-    backend: MemorySearchBackend, dirty_queue: queue.Queue[Path], liveness: Liveness
+    backend: MemorySearchBackend,
+    dirty_queue: queue.Queue[Path],
+    liveness: Liveness,
+    provider: EmbeddingProvider,
 ) -> None:
     """Main loop: every _LOOP_INTERVAL_S drain queue, dedup, batch process.
 
@@ -435,9 +453,9 @@ async def _drain_loop(
         if not batch:
             continue
         try:
-            await asyncio.to_thread(_process_paths, backend, batch)
+            await asyncio.to_thread(_process_paths, backend, batch, provider)
             liveness.beat()  # embed batch returned -> loop is making progress
-        except embedder.EmbeddingAPIError as exc:
+        except EmbeddingAPIError as exc:
             # Name the blast radius: which/how many paths lost this round.
             _log.error(
                 "[indexer] embed failed for a batch of %d path(s) (%s): %r — "
@@ -449,14 +467,18 @@ async def _drain_loop(
 
 
 async def _connect_backend_with_retry(
-    deadline_s: float = 30.0, *, probe_message: str | None = None
+    provider: EmbeddingProvider,
+    deadline_s: float = 30.0,
+    *,
+    probe_message: str | None = None,
 ) -> MemorySearchBackend:
     """Connect to the configured backend at daemon startup — `ava start`
     spawns the storage service (e.g. the milvus session) and the
     memory_indexer session in order; server initialization takes a few
     seconds, and within that race window connect may hit connection
     refused. This function retries every 2s up to deadline to give the
-    backend time to come up.
+    backend time to come up. The backend is constructed for `provider`'s
+    vector space (dim + fingerprint) — see `backends.factory`.
 
     Runtime backend calls (`_process_paths` etc.) do **not** use this
     retry — those are the healthcheck's responsibility (if the backend
@@ -464,7 +486,7 @@ async def _connect_backend_with_retry(
     and exits, the healthcheck spawns a fresh process that goes through
     this retry).
     """
-    backend = get_backend()
+    backend = get_backend(dim=provider.dim, fingerprint=provider.fingerprint)
     start = time.time()
     last_exc: Exception | None = None
     while time.time() - start < deadline_s:
@@ -506,6 +528,15 @@ async def run() -> None:
     _log.info("[indexer] healthz listening on :%s", health_port("memory_indexer"))
 
     _MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
+    # Fail fast on an unknown embedding provider BEFORE anything else — an
+    # unrecognized AVA_EMBEDDING_BACKEND must not keep the old provider
+    # while the operator believes the switch happened.
+    try:
+        provider = get_provider()
+    except ValueError as exc:
+        _log.critical("[indexer] embedding provider config invalid: %s", exc)
+        sys.stderr.write(f"[memory_indexer] FATAL: {exc}\n")
+        sys.exit(1)
     # Preflight the selected backend BEFORE the retry loop: a backend that can
     # never work (fatal) fails fast with the actionable fix instead of a 30s
     # retry storm; a merely-unreachable one rides into the retry loop with its
@@ -525,7 +556,7 @@ async def run() -> None:
             settings.services.memory_search_backend,
             preflight.message,
         )
-    backend = await _connect_backend_with_retry(probe_message=preflight.message)
+    backend = await _connect_backend_with_retry(provider, probe_message=preflight.message)
     _log.info("[indexer] connected to %s backend", backend.name)
     dirty_queue: queue.Queue[Path] = queue.Queue()
     handler = _MarkdownEventHandler(dirty_queue)
@@ -535,8 +566,8 @@ async def run() -> None:
     _log.info("[indexer] watching %s", _MEMORY_ROOT)
 
     try:
-        await asyncio.to_thread(_cold_start_reconcile, backend)
-        await _drain_loop(backend, dirty_queue, liveness)
+        await asyncio.to_thread(_cold_start_reconcile, backend, provider)
+        await _drain_loop(backend, dirty_queue, liveness, provider)
     finally:
         observer.stop()
         observer.join(timeout=5.0)

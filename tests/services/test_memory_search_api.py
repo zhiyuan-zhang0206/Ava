@@ -13,18 +13,24 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from services.memory_indexer import embedder
 from services.memory_search.app import build_app
 from services.memory_search.store import MemoryStore
+
+_DIM = 8
+_FP = "test:gemini:dim=8"
 
 
 def _vec(seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    return rng.standard_normal(embedder.DIM).astype(np.float32)
+    return rng.standard_normal(_DIM).astype(np.float32)
+
+
+def _store(tmp_path: Path) -> MemoryStore:
+    return MemoryStore(tmp_path / "vectors.npz", dim=_DIM, fingerprint=_FP)
 
 
 def _client(tmp_path: Path) -> TestClient:
-    return TestClient(build_app(MemoryStore(tmp_path / "vectors.npz")))
+    return TestClient(build_app(_store(tmp_path)))
 
 
 def test_healthz(tmp_path: Path) -> None:
@@ -48,14 +54,14 @@ def test_upsert_delete_meta_roundtrip(tmp_path: Path) -> None:
             ).status_code
             == 200
         )
-        assert client.get("/meta").json() == {"/a.md": [1.0, "ha"]}
+        assert client.get("/meta").json() == {"/a.md": [1.0, "ha", _FP]}
         assert client.post("/delete", json={"path": "/a.md"}).status_code == 200
         assert client.get("/meta").json() == {}
 
 
 def test_search_returns_ordered_paths(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        ones = np.ones(embedder.DIM, dtype=np.float32)
+        ones = np.ones(_DIM, dtype=np.float32)
         for path, vector in [("/a.md", ones), ("/b.md", -ones)]:
             assert (
                 client.post(
@@ -78,7 +84,7 @@ def test_search_returns_ordered_paths(tmp_path: Path) -> None:
 def test_upsert_persists_before_ack(tmp_path: Path) -> None:
     """A row acked by the API must survive a store rebuild from disk."""
     with _client(tmp_path) as client:
-        ones = np.ones(embedder.DIM, dtype=np.float32)
+        ones = np.ones(_DIM, dtype=np.float32)
         assert (
             client.post(
                 "/upsert",
@@ -93,9 +99,9 @@ def test_upsert_persists_before_ack(tmp_path: Path) -> None:
             ).status_code
             == 200
         )
-    fresh = MemoryStore(tmp_path / "vectors.npz")
+    fresh = _store(tmp_path)
     fresh.load()
-    assert fresh.all_meta() == {"/a.md": (1.0, "ha")}
+    assert fresh.all_meta() == {"/a.md": (1.0, "ha", _FP)}
     assert fresh.search_topk(ones, k=5) == ["/a.md"]
 
 
@@ -171,7 +177,7 @@ def test_upsert_rejects_wrong_dim_vector(tmp_path: Path) -> None:
 
 
 def test_upsert_rejects_oversized_vector(tmp_path: Path) -> None:
-    """A vector longer than DIM is rejected by the model bound before numpy
+    """A vector longer than the provider dim is rejected by the model bound before numpy
     ever allocates (loopback hardening — the wire models carry size caps)."""
     with _client(tmp_path) as client:
         resp = client.post(
@@ -182,7 +188,7 @@ def test_upsert_rejects_oversized_vector(tmp_path: Path) -> None:
                 "content_hash": "h",
                 "kind": "body",
                 "chunk_idx": 0,
-                "vector": [0.0] * (embedder.DIM + 1),
+                "vector": [0.0] * (_DIM + 1),
             },
         )
         assert resp.status_code == 422
@@ -191,13 +197,7 @@ def test_upsert_rejects_oversized_vector(tmp_path: Path) -> None:
 def test_search_rejects_oversized_vector_and_bad_k(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         assert (
-            client.post("/search", json={"vector": [0.0] * (embedder.DIM + 1), "k": 5}).status_code
-            == 422
+            client.post("/search", json={"vector": [0.0] * (_DIM + 1), "k": 5}).status_code == 422
         )
-        assert (
-            client.post("/search", json={"vector": [0.0] * embedder.DIM, "k": 0}).status_code == 422
-        )
-        assert (
-            client.post("/search", json={"vector": [0.0] * embedder.DIM, "k": 1001}).status_code
-            == 422
-        )
+        assert client.post("/search", json={"vector": [0.0] * _DIM, "k": 0}).status_code == 422
+        assert client.post("/search", json={"vector": [0.0] * _DIM, "k": 1001}).status_code == 422

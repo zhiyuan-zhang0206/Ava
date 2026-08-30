@@ -86,11 +86,15 @@ class NumPyBackend:
         """Delete every chunk row of `path`; the service no-ops when absent."""
         self._require_client().post("/delete", json={"path": path}).raise_for_status()
 
-    def all_meta(self) -> dict[str, tuple[float, str]]:
-        """Per-path (mtime, content_hash) — see `backends.base`."""
+    def all_meta(self) -> dict[str, tuple[float, str, str]]:
+        """Per-path (mtime, content_hash, provider_fingerprint) — see
+        `backends.base`."""
         resp = self._require_client().get("/meta")
         resp.raise_for_status()
-        return {path: (float(mtime), str(hash_)) for path, (mtime, hash_) in resp.json().items()}
+        return {
+            path: (float(mtime), str(hash_), str(fingerprint))
+            for path, (mtime, hash_, fingerprint) in resp.json().items()
+        }
 
     def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
         """Exact cosine top-k paths — see `backends.base`."""
