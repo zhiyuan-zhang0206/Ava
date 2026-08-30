@@ -5509,17 +5509,27 @@ export interface components {
         };
         /**
          * MemoryGraphEdge
-         * @description One directed cross-link between OKF memory notes.
+         * @description One directed edge in the OKF memory graph.
+         *
+         *     `kind` separates the two edge families the frontend renders differently:
+         *     `containment` (note → folder, folder → parent folder — the main
+         *     structure) and `reference` (a markdown cross-link between two notes).
          */
         MemoryGraphEdge: {
             /** Source */
             source: string;
             /** Target */
             target: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "containment" | "reference";
         };
         /**
          * MemoryGraphNode
-         * @description One concept note node in the OKF memory graph.
+         * @description One node in the OKF memory graph — a concept note, or a folder pseudo
+         *     node (the graph's structural skeleton).
          */
         MemoryGraphNode: {
             /** Id */
@@ -5528,6 +5538,11 @@ export interface components {
             path: string;
             /** Title */
             title: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "note" | "folder";
             /** Description */
             description: string | null;
             /** Tags */
