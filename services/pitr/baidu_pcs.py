@@ -23,6 +23,11 @@ import httpx
 PCS_HOST = "https://pan.baidu.com"
 """xpan control-plane host (precreate / create / meta / list / manager)."""
 
+UPLOAD_HOST = "https://d.pcs.baidu.com"
+"""Upload data-plane host (superfile2) — the shard bytes go here, not to
+the control plane (live smoke: pan.baidu.com answers superfile2 with a
+WAF page)."""
+
 OAUTH_HOST = "https://openapi.baidu.com"
 """OAuth token host."""
 
@@ -58,6 +63,7 @@ class PcsPermanentError(PcsError):
 # errno sets are from the official docs; the live P0 smoke verifies them.
 _TRANSIENT_ERRNOS = {
     31198,  # called too frequently
+    20012,  # unreviewed-app hourly quota — back off, never a terminal error
     31061,  # uploadid missing/expired — re-precreate restarts the session
     31202,  # upload file missing (session lost)
     31203,  # upload block missing (session lost)
@@ -195,9 +201,10 @@ class PcsClient:
             "partseq": str(partseq),
         }
         payload = self._post(
-            f"{PCS_HOST}/rest/2.0/pcs/superfile2",
+            f"{UPLOAD_HOST}/rest/2.0/pcs/superfile2",
             params=params,
             files={"file": ("part", data, "application/octet-stream")},
+            headers={"User-Agent": DOWNLOAD_UA},
         )
         _check_errno(payload)
 
@@ -286,11 +293,17 @@ class PcsClient:
         params: dict[str, str],
         files: dict[str, tuple[str, bytes, str]] | None = None,
         data: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         try:
             with httpx.Client(transport=self._transport) as client:
                 response = client.post(
-                    url, params=params, files=files, data=data, timeout=self._timeout
+                    url,
+                    params=params,
+                    files=files,
+                    data=data,
+                    timeout=self._timeout,
+                    headers=headers,
                 )
         except httpx.HTTPError as exc:
             raise PcsTransientError(f"PCS POST {url} transport failure") from exc

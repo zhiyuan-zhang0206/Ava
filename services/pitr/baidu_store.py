@@ -249,7 +249,15 @@ class BaiduObjectStore:
             raise PermanentObjectStoreError(
                 "immutable Baidu object exists with different content under the canonical name"
             )
-        indexes = [self._block_index(block_md5s, digest) for digest in pre.missing_blocks]
+        # Live API: precreate reports the missing shards as part indexes
+        # ("0".."n-1"), not as md5s — the docs disagree, so both shapes are
+        # accepted and out-of-range indexes fail closed (P0 smoke finding).
+        indexes = [
+            int(digest) if digest.isdigit() else self._block_index(block_md5s, digest)
+            for digest in pre.missing_blocks
+        ]
+        if any(index < 0 or index >= len(block_md5s) for index in indexes):
+            raise PermanentObjectStoreError("Baidu precreate asked for an out-of-range shard index")
         try:
             upload_missing(pre.uploadid, indexes)
         except PcsError as exc:

@@ -53,6 +53,11 @@ def test_permanent_errnos_raise_permanent(errno: int) -> None:
         _check_errno({"errno": errno, "errmsg": "boom"})
 
 
+def test_unreviewed_quota_errno_is_transient() -> None:
+    with pytest.raises(PcsTransientError):
+        _check_errno({"errno": 20012, "errmsg": "quota"})
+
+
 def test_unknown_errno_raises_plain_and_zero_passes() -> None:
     with pytest.raises(PcsError):
         _check_errno({"errno": 424242, "errmsg": "boom"})
@@ -261,6 +266,40 @@ def test_precreate_transient_errno_maps_to_transient(
     source.write_bytes(b"payload")
 
     with pytest.raises(TransientObjectStoreError, match="precreate"):
+        store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+
+
+def test_precreate_numeric_index_missing_blocks_upload_by_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0 smoke: the live precreate reports missing shards as part indexes
+    ("0"), not md5s — the engine uploads those indexes directly."""
+    monkeypatch.setattr(baidu_store_module, "SVIP_SHARD_BYTES", 5)
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    payload = b"0123456789AB"
+    obj_path = f"{APP_ROOT}/ava-pitr/wal/x"
+    fake.parts[obj_path] = {0: payload[:5], 2: payload[10:]}
+    fake.missing_override[obj_path] = ["1"]
+    source = tmp_path / "wal.enc"
+    source.write_bytes(payload)
+
+    ack = store.put_wal_ciphertext_if_absent(source, "ava-pitr/wal/x", {})
+
+    assert ack.created is True
+    assert fake.parts[obj_path][1] == payload[5:10]
+
+
+def test_precreate_out_of_range_index_is_permanent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    fake.missing_override[f"{APP_ROOT}/{OBJECT}"] = ["7"]
+    source = tmp_path / "wal.enc"
+    source.write_bytes(b"payload")
+
+    with pytest.raises(PermanentObjectStoreError, match="out-of-range"):
         store.put_wal_ciphertext_if_absent(source, OBJECT, {})
 
 
