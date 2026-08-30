@@ -194,12 +194,20 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
     server that died under a still-alive agent (the tab is a dead link either
     way, and the agent re-opens its tab on the next navigate). A port the probe
     cannot confirm dead stays open.
+
+    Lock discipline: the port probes run OUTSIDE the serial lock (a pass with
+    many stale slots must not stall every agent's browser call for seconds),
+    and the closes re-read the page list under the lock first — a page the
+    agent navigated to a live target while the probe ran, or already closed,
+    is not touched. The slot is cleared only when it still names the closed
+    page, so a live page the agent opened meanwhile keeps its affinity.
     """
     async with daemon._lock:
         listing = await daemon._call("list_pages", {})
         if listing.is_error:
             return
         page_urls = parse_page_listing(_text_of(listing))
+        candidates: list[tuple[int, int, str]] = []
         for agent_id, page_id in list(_AGENT_AFFINITY.items()):
             if page_id is None:
                 continue
@@ -209,9 +217,28 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
             target = local_host_port(url)
             if target is None:
                 continue
-            host, port = target
-            if await port_listening(host, port):
-                continue
+            candidates.append((agent_id, page_id, url))
+    if not candidates:
+        return
+    dead: list[tuple[int, int, str]] = []
+    for agent_id, page_id, url in candidates:
+        target = local_host_port(url)
+        if target is None:
+            continue
+        host, port = target
+        if await port_listening(host, port):
+            continue
+        dead.append((agent_id, page_id, url))
+    if not dead:
+        return
+    async with daemon._lock:
+        listing = await daemon._call("list_pages", {})
+        if listing.is_error:
+            return
+        page_urls = parse_page_listing(_text_of(listing))
+        for agent_id, page_id, url in dead:
+            if page_urls.get(page_id) != url:
+                continue  # re-purposed to a live target (or closed) mid-pass
             result = await daemon._call("close_page", {"pageId": page_id})
             # The page is dead; clear the slot whatever the close says. On an
             # error the page may actually still be open (rare), so say so.
@@ -220,7 +247,8 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
                     f"[browser-mcp] reaper could not close dead page {page_id} ({url}): "
                     f"{_text_of(result)!r}"
                 )
-            _AGENT_AFFINITY[agent_id] = None
+            if _AGENT_AFFINITY.get(agent_id) == page_id:
+                _AGENT_AFFINITY[agent_id] = None
             logger.info(
                 f"[browser-mcp] reaper closed dead page {page_id} ({url}) for agent {agent_id}"
             )
