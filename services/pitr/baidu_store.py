@@ -270,7 +270,6 @@ class BaiduObjectStore:
                 size=size,
                 block_list=block_md5s,
                 uploadid=pre.uploadid,
-                rtype=_RTYPE_CONTENT_ADDRESSED,
             )
         except PcsError as exc:
             raise self._map_error("Baidu create", exc) from exc

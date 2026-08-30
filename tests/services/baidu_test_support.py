@@ -83,6 +83,10 @@ class FakePcs:
     def handler(self, request: httpx.Request) -> httpx.Response:
         params = dict(request.url.params)
         method = params.get("method")
+        # create carries its business params in the form body (live P0
+        # smoke: query-string params are rejected with errno 2 there).
+        if method == "create" and request.content:
+            params = {**params, **dict(httpx.QueryParams(request.content.decode()))}
         path = str(params.get("path") or "")
         self.calls.append(f"{method} {path}")
         if method == "precreate":
