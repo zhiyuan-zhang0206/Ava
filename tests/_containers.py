@@ -125,7 +125,22 @@ def redis_server() -> Generator[str]:
             # full-access user (the redis analog of the throwaway pg's peer-superuser
             # `ava_citest`) — otherwise that connection is rejected (WRONGPASS / no
             # such user).
-            r.execute_command("ACL", "SETUSER", "ava_citest", "on", "nopass", "~*", "&*", "+@all")
+            r.execute_command(
+                "ACL",
+                "SETUSER",
+                "ava_citest",
+                "on",
+                "nopass",
+                "~*",
+                # Prod-shaped channel grants (mirrors ensure_cluster_redis_acl):
+                # the wildcard `&*` masked the hosted dispatcher's need for the
+                # `&ava:inbound:*` subscription-pattern grant (soak startup bug
+                # 2026-08-30) — every redis consumer in this suite must live
+                # under the production channel scope.
+                "&ava:*",
+                "&ava:inbound:*",
+                "+@all",
+            )
         yield url
     finally:
         proc.terminate()

@@ -120,6 +120,13 @@ class ServiceSpec:
             flow through ``_gate_reason``.
         before_launch: optional preflight run immediately before creating the
             session, for a service-specific safe takeover.
+        profile: explicit ``AVA_PROCESS_PROFILE`` override for this service's
+            session (default None = derived, see below). Wins over the
+            derivation AND over ``no_profile_marker``. The agent-host uses it:
+            it is an agent-runner-capability service whose daemon runs the
+            agent kernel in-process, so its consumption matches the ``agent``
+            profile, not ``runner`` (settings.agent read crashes a runner
+            profile at import — 2026-08-30 soak startup).
         no_profile_marker: True = the launcher sets NO ``AVA_PROCESS_PROFILE``
             for this service's session, so the process boots profile-less (full
             Settings construction, no env-authority pop). Default False = the
@@ -146,6 +153,7 @@ class ServiceSpec:
     gate: Callable[[], str | None] | None = None
     identity_probe: Callable[[], DaemonProbe] | None = None
     before_launch: Callable[[], None] | None = None
+    profile: str | None = None
     no_profile_marker: bool = False
 
 
@@ -162,6 +170,8 @@ def profile_marker(spec: ServiceSpec) -> str | None:
     Returns:
         The marker value, or None when the launcher must set no marker.
     """
+    if spec.profile is not None:
+        return spec.profile
     if spec.no_profile_marker:
         return None
     if "gateway" in spec.capabilities and "agent-runner" not in spec.capabilities:
@@ -457,6 +467,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             session="agent-host",
             cmd=".venv/bin/python -m services.agent_host.daemon",
             capabilities=_AGENT_RUNNER,
+            profile="agent",  # the host runs the agent kernel in-process; the runner-derived marker crashes it at import
             requires_db=True,  # assert_schema_current at boot; every turn reads/writes agents_meta
             pidfile=settings.services.agent_host_pidfile,
             curl_url=_hz("agent_host"),

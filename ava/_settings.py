@@ -150,8 +150,9 @@ def _connect_redis() -> "redis.Redis":  # noqa: F821  # pyright: ignore[reportUn
     return _redis_lib.Redis.from_url(
         settings.data_plane.redis_url,
         decode_responses=True,
-        socket_timeout=10.0,
-        **_RESILIENCE_KWARGS,
+        # Merge so the explicit 10s read bound overrides the shared None
+        # instead of colliding with it as a duplicate keyword.
+        **{**_RESILIENCE_KWARGS, "socket_timeout": 10.0},
     )
 
 

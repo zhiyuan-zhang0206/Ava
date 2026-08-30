@@ -31,6 +31,13 @@ from shared.service_respawn import respawn_and_verify, run_keepalive
 
 _log = logging.getLogger("services.healthchecks.agent_host")
 
+# The host is the hosted-mode agent process: it runs the agent kernel + plugins
+# in-process, so its config consumption matches the `agent` profile (the
+# consumption-matrix guard walks services/agent_host/ under the agent kind).
+# A `runner` profile here crashes the daemon at import (settings.agent read —
+# 2026-08-30 soak startup).
+_HOST_PROCESS_PROFILE = "agent"
+
 _HEALTH_URL = f"http://localhost:{health_port('agent_host')}/healthz"
 
 
@@ -46,7 +53,7 @@ def _restart_daemon() -> DaemonProbe:
         "agent-host",
         ".venv/bin/python -m services.agent_host.daemon",
         project_root,
-        extra_env={"AVA_PROCESS_PROFILE": "runner"},
+        extra_env={"AVA_PROCESS_PROFILE": _HOST_PROCESS_PROFILE},
         verify=_probe,
     )
 

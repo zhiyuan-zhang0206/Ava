@@ -31,6 +31,19 @@ async def test_same_loop_returns_same_instance() -> None:
     assert a is b, "two calls in the same event loop must return the same client"
 
 
+async def test_open_async_redis_pins_socket_timeout_none() -> None:
+    """redis-py >= 5 defaults socket_timeout to 5s; a pub/sub listener's long
+    blocking read must not be cut by it (the hosted dispatcher reconnect-looped
+    every 5s of idle until pinned to None — 2026-08-30 soak startup)."""
+    client = mod.open_async_redis(settings.data_plane.redis_url)
+    kwargs = client.connection_pool.connection_kwargs  # pyright: ignore[reportUnknownMemberType]
+    # `in + is None`, not `.get()`: a MISSING key would silently pass the same
+    # assertion while the redis-py 5s default quietly applies.
+    assert "socket_timeout" in kwargs  # pyright: ignore[reportUnknownMemberType]
+    assert kwargs["socket_timeout"] is None  # pyright: ignore[reportUnknownMemberType]
+    await client.aclose()
+
+
 async def test_uses_settings_redis_url() -> None:
     client = mod.get_async_redis()
     pool = client.connection_pool
@@ -195,9 +208,12 @@ def _assert_resilient_kwargs(kwargs: dict) -> None:  # pyright: ignore[reportMis
     assert kwargs.get("health_check_interval", 0) > 0  # pyright: ignore[reportUnknownMemberType]
     # connect timeout bounds the TLS-MITM handshake.
     assert kwargs.get("socket_connect_timeout", 0) > 0  # pyright: ignore[reportUnknownMemberType]
-    # socket_timeout must stay UNSET — a blanket read timeout would periodically
-    # cut pubsub.listen()'s long blocking read (e.g. the SSE event stream).
-    assert kwargs.get("socket_timeout") is None  # pyright: ignore[reportUnknownMemberType]
+    # socket_timeout is pinned to None explicitly — a blanket read timeout
+    # would periodically cut pubsub.listen()'s long blocking read (e.g. the
+    # SSE event stream). `in + is None`, not `.get()`: a missing key would
+    # silently pass while the redis-py 5s default quietly applies.
+    assert "socket_timeout" in kwargs  # pyright: ignore[reportUnknownMemberType]
+    assert kwargs["socket_timeout"] is None  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_async_client_weak_network_resilient() -> None:
