@@ -192,6 +192,46 @@ class PhysicalBackupSettings(EnvSettings):
             "bootstrap": False,
         },
     )
+    pitr_cos_bucket: str = Field(
+        default="",
+        alias="AVA_PITR_COS_BUCKET",
+        description="Tencent Cloud COS bucket (name-appid form) for physical backup objects.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+    pitr_cos_region: str = Field(
+        default="",
+        alias="AVA_PITR_COS_REGION",
+        description="Tencent Cloud COS region (e.g. ap-guangzhou); also the SigV4 scope region.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+    pitr_cos_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_COS_CREDENTIALS_FILE",
+        description=(
+            "0600 JSON holding the Tencent Cloud SecretId/SecretKey pair "
+            "(keys: secret_id / secret_key). Never the cluster secret."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+            "bootstrap": False,
+        },
+    )
     pitr_gcs_project: str = Field(
         default="",
         alias="AVA_PITR_GCS_PROJECT",
@@ -482,6 +522,17 @@ class PhysicalBackupSettings(EnvSettings):
             and self.pitr_oss_credentials_file is None
         ):
             raise ValueError("the oss store backend requires AVA_PITR_OSS_CREDENTIALS_FILE")
+        if (
+            self.pitr_enabled
+            and self.pitr_store_backend == "cos"
+            and not (
+                self.pitr_cos_bucket and self.pitr_cos_region and self.pitr_cos_credentials_file
+            )
+        ):
+            raise ValueError(
+                "the cos store backend requires AVA_PITR_COS_BUCKET, AVA_PITR_COS_REGION, "
+                "and AVA_PITR_COS_CREDENTIALS_FILE"
+            )
         if self.pitr_base_backup_enabled and not self.pitr_enabled:
             raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_ENABLED")
         if self.pitr_restore_proof_enabled and not self.pitr_base_backup_enabled:
@@ -540,6 +591,10 @@ class PhysicalBackupSettings(EnvSettings):
                     raise ValueError("AVA_PITR_OSS_CREDENTIALS_FILE is required")
                 _aliyun_oss_identity(
                     self.pitr_oss_credentials_file, "AVA_PITR_OSS_CREDENTIALS_FILE"
+                )
+            if self.pitr_store_backend == "cos":
+                _require_private_regular_file(
+                    self.pitr_cos_credentials_file, "AVA_PITR_COS_CREDENTIALS_FILE"
                 )
             if self.pitr_restore_proof_enabled and self.pitr_store_backend == "gcs":
                 _require_private_regular_file(

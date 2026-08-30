@@ -76,6 +76,16 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
             ("bucket", config.pitr_gcs_bucket),
             ("viewer_credentials", str(read_credentials)),
         )
+    elif config.pitr_store_backend == "cos":
+        cos_credentials = config.pitr_cos_credentials_file
+        if cos_credentials is None:
+            raise RuntimeError("validated COS restore-proof secrets are missing")
+        store_args = (
+            ("bucket", config.pitr_cos_bucket),
+            ("region", config.pitr_cos_region),
+            ("credentials_file", str(cos_credentials)),
+            ("prefix", config.pitr_gcs_prefix),
+        )
     elif config.pitr_store_backend == "baidu":
         baidu_credentials = config.pitr_baidu_credentials_file
         baidu_token = config.pitr_baidu_token_file
