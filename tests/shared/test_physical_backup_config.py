@@ -182,3 +182,44 @@ def test_unacked_warning_must_precede_critical_age() -> None:
             AVA_PITR_UNACKED_WARN_SECONDS=7200,
             AVA_PITR_UNACKED_CRITICAL_SECONDS=7200,
         )
+
+
+def test_replication_hba_lines_render_the_role_from_the_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.config import settings
+    from shared.config.physical_backup import pitr_replication_hba_lines
+
+    monkeypatch.setattr(
+        settings.physical_backup,
+        "pitr_replication_db_url",
+        "postgresql://ava_pitr_repl:pw@127.0.0.1:5433/ava_main",
+    )
+    assert pitr_replication_hba_lines() == [
+        "host replication ava_pitr_repl 127.0.0.1/32 scram-sha-256",
+        "host replication ava_pitr_repl ::1/128 scram-sha-256",
+    ]
+
+
+def test_replication_hba_lines_empty_without_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared.config import settings
+    from shared.config.physical_backup import pitr_replication_hba_lines
+
+    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
+    assert pitr_replication_hba_lines() == []
+
+
+def test_replication_hba_lines_empty_when_url_has_no_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty user must yield no rows: `host replication  127.0.0.1/32 ...`
+    would be an invalid line and PG17 rejects the whole file (QA #1096 P2)."""
+    from shared.config import settings
+    from shared.config.physical_backup import pitr_replication_hba_lines
+
+    monkeypatch.setattr(
+        settings.physical_backup,
+        "pitr_replication_db_url",
+        "postgresql://:pw@127.0.0.1:5433/ava_main",
+    )
+    assert pitr_replication_hba_lines() == []
