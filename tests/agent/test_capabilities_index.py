@@ -276,22 +276,16 @@ def test_runtime_removed_surface_renders_nothing(
     assert "MCP" not in text
 
 
-def test_live_namespace_check_resolves_segment_by_segment(
+def test_applied_disable_registry_marks_runtime_removed_path(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The runtime half of `_disabled_by_sdk_config` walks the dotted path
-    against the live namespace: a present path is not disabled, a removed leaf
-    (the eval isolation shape — `agents.get_last_message`) is."""
+    """A registry-recorded runtime removal disables the exact dotted path."""
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
-
-    assert _disabled_by_sdk_config("skills") is False
-    assert _disabled_by_sdk_config("mcps") is False
 
     monkeypatch.delattr(ava.agents, "get_last_message", raising=False)
     monkeypatch.setattr(ava, "_applied_disable_entries", {"agents.get_last_message"})
     assert _disabled_by_sdk_config("agents.get_last_message") is True
-    assert _disabled_by_sdk_config("agents") is False  # the parent still resolves
 
 
 def test_unregistered_missing_path_is_not_sdk_disabled() -> None:

@@ -34,13 +34,12 @@ def _disabled_by_sdk_config(path: str) -> bool:
 
     Two disable sources, one rendering rule. `turn_settings.agent.sdk_disable`
     carries the env (`AVA_SDK_DISABLE`) and per-agent overlay entries; the
-    eval-isolation boundary (`_apply_per_agent_eval_isolation`) removes
-    surfaces at runtime via `ava._apply_sdk_disable` without touching
-    settings. Checked before any resolution attempt: the operator removed the
-    path from the SDK on purpose, so it must never be expanded into the prompt
-    regardless of what still resolves — so the live namespace is consulted too,
-    one segment at a time: a segment that no longer resolves means the path is
-    gone and nothing renders it."""
+    eval-isolation boundary (`_apply_per_agent_eval_isolation`) records surfaces
+    removed at runtime by `ava._apply_sdk_disable` in
+    `ava._applied_disable_entries` without touching settings. Only configured
+    entries and registry-recorded runtime removals count as disabled; an
+    unresolved path that appears in neither source remains eligible for the
+    expansion resolver's diagnostic warning."""
     if any(
         path == entry or path.startswith(entry + ".") for entry in turn_settings.agent.sdk_disable
     ):
