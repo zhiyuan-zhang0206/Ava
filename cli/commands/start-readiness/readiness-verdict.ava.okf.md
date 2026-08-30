@@ -27,17 +27,27 @@ tags:
   sessions-gone exit states an elapsed time the surrounding timestamps contradict.
 
   **The gate is tiered** (C2, Task #2183): `_probe.CRITICAL_SERVICE_SESSIONS`
-  (gateway / frontend / restarter / agent-host — the hosted agent-runner) is the
-  only roster that can fail a start and the only one that gets the full 180 s
-  bound. Every other launched service gets
-  `shared.deploy_timing.NON_CRITICAL_SERVICE_READY_TIMEOUT_S` (45 s) — the
-  2026-08-30 rollout spent 182 s of its 197.5 s local start on a pitr-uploader
-  whose verdict nothing downstream depended on. A non-critical service that
-  misses its window (or whose session is confirmed gone) leaves the wait and
-  lands in `ReadinessWait.non_critical_unready`: `start.py` prints it and posts
-  an alert (`_probe._notify_non_critical_unready_services` — the `alerts` store +
-  IM, the same channel the health probes use), so the demotion is a verdict
-  change, never a silence.
+  (gateway / frontend / restarter / agent-host — the hosted agent-runner —
+  im-bridge / the two watchdogs; the CTO ruling: critical = a failure cuts
+  user-visible core function or the ops safety net) is the only roster that can
+  fail a start and the only one that gets the full 180 s bound. Every other
+  launched service gets `shared.deploy_timing.NON_CRITICAL_SERVICE_READY_TIMEOUT_S`
+  (45 s) — the 2026-08-30 rollout spent 182 s of its 197.5 s local start on a
+  pitr-uploader whose verdict nothing downstream depended on. A non-critical
+  service that misses its window (or whose session is confirmed gone) leaves
+  the wait and lands in `ReadinessWait.non_critical_unready`: `start.py` prints
+  it and posts an alert (`_probe._notify_non_critical_unready_services` — the
+  `alerts` store + IM, the same channel the health probes use), so the demotion
+  is a verdict change, never a silence.
+
+  The alert has a full lifecycle (QA #1196 P1-1): one instance per service,
+  keyed by (fingerprint, starts_at); a re-firing start REUSES the open
+  instance's identity instead of inserting a duplicate (the boot job retries
+  every 60 s with no cap), and a start that finds the service up again resolves
+  it (`_probe._resolve_recovered_non_critical_alerts`), so the Inspector's
+  unresolved panel never shows a fixed failure. The IM push is gated on the
+  readiness flag: `--no-readiness-gate` callers (the boot job) write the alerts
+  row but stay quiet on IM.
 - Two callers pass `--no-readiness-gate`, which keeps the wait and the printed
   crosses but drops the exit code. The **boot job** on all three platforms
   (`cli/boot_retry.py` + the `shared/os_autostart.py` plist), because its retry has

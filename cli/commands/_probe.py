@@ -36,11 +36,9 @@ but a program reads `rc`, and every programmatic caller of `ava start` was readi
 `rc == 0` as "the services are serving". Prod lost that bet — see
 `cli/commands/_gateway_ready.py` for the rollout that stalled on it.
 
-The gate is tiered: `CRITICAL_SERVICE_SESSIONS` names the roster the wait holds
-the whole bound for and the only services that can fail a start; every other
-service gets `NON_CRITICAL_SERVICE_READY_TIMEOUT_S` and then stops blocking the
-wait — reported and alerted, not silenced (the 2026-08-30 rollout that spent
-182 s of its 197.5 s start waiting on a pitr-uploader no conclusion depended on).
+The gate is tiered (`CRITICAL_SERVICE_SESSIONS` vs the 45 s
+`NON_CRITICAL_SERVICE_READY_TIMEOUT_S` window): the 2026-08-30 rollout spent
+182 s of its 197.5 s start waiting on a pitr-uploader no conclusion depended on.
 """
 
 from __future__ import annotations
@@ -226,17 +224,27 @@ def _probe_service(spec: ServiceSpec) -> ServiceProbe:
 
 
 # The services the readiness gate holds the whole bound for — the only ones that
-# can fail a start. Everything else on the launched roster gets the short
-# non-critical window (`NON_CRITICAL_SERVICE_READY_TIMEOUT_S`) and then stops
-# blocking the wait (see `_wait_for_services_ready`). Single source of truth:
-# tests pin this exact set, so adding or removing a critical service turns the
-# suite red on purpose.
+# can fail a start. Everything else gets the short non-critical window
+# (`NON_CRITICAL_SERVICE_READY_TIMEOUT_S`). Single source of truth: tests pin
+# this exact set, so adding or removing a critical service turns the suite red.
 #
-# `agent-host` is the hosted agent-runner (the "agent-runner" of the critical
-# roster; gated off unless `AVA_RUNNER_MODE` is `hosted`). `frontend` is named
-# here even though `_SLOW_TO_SERVE_SESSIONS` below keeps it out of the wait
-# entirely — the roster contract says it is critical.
-CRITICAL_SERVICE_SESSIONS = frozenset({"gateway", "frontend", "restarter", "agent-host"})
+# The CTO ruling (Task #2183, C2): critical = a failure cuts user-visible core
+# function or the ops safety net. gateway / frontend are the serving surface;
+# restarter + agent-host (the hosted agent-runner; gated off unless
+# `AVA_RUNNER_MODE` is `hosted`) are the runners; im-bridge is the IM alert
+# channel; the two watchdogs are the revive safety net. `frontend` is named here
+# even though `_SLOW_TO_SERVE_SESSIONS` keeps it out of the wait entirely.
+CRITICAL_SERVICE_SESSIONS = frozenset(
+    {
+        "gateway",
+        "frontend",
+        "restarter",
+        "agent-host",
+        "gateway-watchdog",
+        "agent-runner-watchdog",
+        "im-bridge",
+    }
+)
 
 
 # The services whose probe says nothing about a launch that just happened. The
@@ -413,16 +421,13 @@ def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -
     nothing beyond the polls it takes to come up; the bound is only ever spent by a
     service that is alive and has bound nothing.
 
-    The roster is tiered by `CRITICAL_SERVICE_SESSIONS`. The critical services get
-    the whole `timeout_s` bound, and they are the only ones that can end the wait
+    The roster is tiered by `CRITICAL_SERVICE_SESSIONS`: the critical services get
+    the whole `timeout_s` bound and are the only ones that can end the wait
     unready. A non-critical service is waited on only for
-    `NON_CRITICAL_SERVICE_READY_TIMEOUT_S`: once it passes it is dropped from the
-    wait, once its session is confirmed gone waiting cannot help it, and when its
-    window ends it leaves the wait whether it is up or not — still-unready
-    non-critical services are returned in `non_critical_unready` for the caller to
-    report and alert, never as a failed start. That is the 2026-08-30 lesson: the
-    gate spent 182 s of a 197.5 s local start on a pitr-uploader whose verdict no
-    downstream step depended on (the watchdog covers it).
+    `NON_CRITICAL_SERVICE_READY_TIMEOUT_S`, then leaves the wait whether it is up
+    or not — still-unready ones land in `non_critical_unready` for the caller to
+    report and alert, never as a failed start (the 2026-08-30 lesson: 182 s of a
+    197.5 s local start went to a pitr-uploader whose verdict nothing depended on).
 
     Two things end the wait early, so the bound is affordable:
 
@@ -571,18 +576,26 @@ def _alert_db_connect() -> Any:
     return shared.db.connect()
 
 
-def _notify_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
-    """Post one alerts row + one IM for a start with non-critical services down.
+def _unresolved_alert_instance(conn: Any, service: str) -> tuple[str, str] | None:
+    """(starts_at, fingerprint) of one open `start-readiness` instance for `service`,
+    or None. Re-firing the same failure must UPDATE the open instance, not insert
+    a fresh one — the boot job retries every 60 s with no cap (health-probe
+    pattern, `services/heartbeat/liveness.py`)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT starts_at, fingerprint FROM alerts "
+            "WHERE labels->>'alertname' = %s AND labels->>'service' = %s "
+            "AND status = 'unresolved' ORDER BY starts_at DESC LIMIT 1",
+            (_NON_CRITICAL_ALERTNAME, service),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return str(row[0]), str(row[1])
 
-    The tier's second rail: the short window must not turn a real failure into a
-    silent one. Uses the same alerts store + IM fanout as the health probes
-    (`shared.alerts`) — a direct DB write plus the im_bridge `/send` RPC — so it
-    works from a start whose gateway is still booting, needs no agent row, and
-    lands where the user already reads alerts. A DB/IM failure degrades to a
-    printed note in this start's log, never to silence elsewhere.
-    """
-    from datetime import UTC, datetime
 
+def _alert_upsert_and_maybe_im(conn: Any, alert: dict[str, object], *, im_enabled: bool) -> None:
+    """One upsert + one IM (when the transition gate says so and IM is on)."""
     from shared.alerts import (
         display_language,
         notify_im,
@@ -590,45 +603,128 @@ def _notify_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> Non
         stamp_notified,
         upsert_alert,
     )
+
+    text = notify_text(alert, display_language(conn))
+    key, did_insert, should_notify, row = upsert_alert(conn, alert, source="start-readiness")
+    notified_at = row.get("notified_at") if isinstance(row, dict) else None
+    if (
+        (should_notify or (notified_at is None and not did_insert))
+        and im_enabled
+        and notify_im(text)
+    ):
+        stamp_notified(conn, [key])
+
+
+def _notify_non_critical_unready_services(
+    specs: tuple[ServiceSpec, ...], *, im_enabled: bool
+) -> None:
+    """Post one alerts row per non-critical service that missed its window.
+
+    The tier's second rail: the demotion must not go silent. One instance PER
+    SERVICE (so the resolved edge can match the recovered service), reused while
+    the failure stays open. `im_enabled` gates only the IM push — the alerts row
+    is always written: the boot job's uncapped 60 s retries run with
+    `--no-readiness-gate` and must not spam the user's IM (QA #1196 P1-1). A
+    DB/IM failure degrades to a printed note, never to silence elsewhere.
+    """
+    from datetime import UTC, datetime
+
     from shared.alerts import (
         fingerprint as compute_fingerprint,
     )
 
-    names = ", ".join(session_name(s.session) for s in specs)
-    alert: dict[str, object] = {
-        "status": "firing",
-        "labels": {
-            "alertname": _NON_CRITICAL_ALERTNAME,
-            "severity": "warning",
-            "service": names,
-        },
-        "annotations": {
-            "summary": (
-                f"non-critical service(s) not ready within "
-                f"{NON_CRITICAL_SERVICE_READY_TIMEOUT_S:.0f}s of ava start: {names}"
+    now = datetime.now(UTC)
+    for spec in specs:
+        service = session_name(spec.session)
+        alert: dict[str, object] = {
+            "status": "firing",
+            "labels": {
+                "alertname": _NON_CRITICAL_ALERTNAME,
+                "severity": "warning",
+                "service": service,
+            },
+            "annotations": {
+                "summary": (
+                    f"non-critical service not ready within "
+                    f"{NON_CRITICAL_SERVICE_READY_TIMEOUT_S:.0f}s of ava start: {service}"
+                )
+            },
+            "starts_at": now.isoformat(),
+            "fingerprint": compute_fingerprint(
+                {"alertname": _NON_CRITICAL_ALERTNAME, "service": service}
+            ),
+        }
+        try:
+            with _alert_db_connect() as conn:
+                open_instance = _unresolved_alert_instance(conn, service)
+                if open_instance is not None:
+                    # Same failure still open: reuse its identity so the upsert
+                    # updates the row instead of inserting a duplicate.
+                    alert["starts_at"] = open_instance[0]
+                    alert["fingerprint"] = open_instance[1]
+                _alert_upsert_and_maybe_im(conn, alert, im_enabled=im_enabled)
+                conn.commit()
+        except Exception as exc:
+            print(
+                f"  ! non-critical service alert failed ({type(exc).__name__}): "
+                f"see the start log — {service} is still down",
+                file=sys.stderr,
             )
-        },
-        "starts_at": datetime.now(UTC).isoformat(),
-        "fingerprint": compute_fingerprint(
-            {"alertname": _NON_CRITICAL_ALERTNAME, "service": names}
-        ),
-    }
-    try:
-        with _alert_db_connect() as conn:
-            text = notify_text(alert, display_language(conn))
-            key, did_insert, should_notify, row = upsert_alert(
-                conn, alert, source="start-readiness"
+
+
+def _recovered_non_critical_specs(
+    started: tuple[ServiceSpec, ...], failed: tuple[ServiceSpec, ...]
+) -> tuple[ServiceSpec, ...]:
+    """The launched non-critical services that are serving now (the resolved
+    edge's roster): started minus the critical manifest minus the failures the
+    wait just returned."""
+    failed_set = set(failed)
+    return tuple(
+        s for s in started if s.session not in CRITICAL_SERVICE_SESSIONS and s not in failed_set
+    )
+
+
+def _resolve_recovered_non_critical_alerts(
+    specs: tuple[ServiceSpec, ...], *, im_enabled: bool
+) -> None:
+    """Close the open `start-readiness` instances of services that are up again.
+
+    The resolved edge (QA #1196 P1-1): an instance left open would stay on the
+    Inspector's unresolved panel after the service recovered (user ruling
+    2026-08-29). Every start observes the roster, so the start that finds the
+    service up resolves it — same resolve-on-recovery pattern as the health
+    probes; a watchdog-only revival stays open until the next start.
+    """
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    for spec in specs:
+        service = session_name(spec.session)
+        try:
+            with _alert_db_connect() as conn:
+                open_instance = _unresolved_alert_instance(conn, service)
+                if open_instance is None:
+                    continue
+                alert: dict[str, object] = {
+                    "status": "resolved",
+                    "labels": {
+                        "alertname": _NON_CRITICAL_ALERTNAME,
+                        "severity": "warning",
+                        "service": service,
+                    },
+                    "annotations": {"summary": f"non-critical service is up again: {service}"},
+                    "starts_at": open_instance[0],
+                    "ends_at": now.isoformat(),
+                    "fingerprint": open_instance[1],
+                }
+                _alert_upsert_and_maybe_im(conn, alert, im_enabled=im_enabled)
+                conn.commit()
+        except Exception as exc:
+            print(
+                f"  ! non-critical service alert resolve failed ({type(exc).__name__}): "
+                f"see the start log — {service}",
+                file=sys.stderr,
             )
-            notified_at = row.get("notified_at") if isinstance(row, dict) else None
-            if (should_notify or (notified_at is None and not did_insert)) and notify_im(text):
-                stamp_notified(conn, [key])
-            conn.commit()
-    except Exception as exc:
-        print(
-            f"  ! non-critical service alert failed ({type(exc).__name__}): "
-            f"see the start log — {names} are still down",
-            file=sys.stderr,
-        )
 
 
 def _print_service_row(spec: ServiceSpec, name_w: int, skip_reason: str | None = None) -> None:
