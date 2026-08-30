@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, cast
@@ -546,9 +547,14 @@ def test_upload_loop_survives_oserror_enospc(monkeypatch: pytest.MonkeyPatch) ->
         await uploader_daemon.upload_loop(
             uploader,  # pyright: ignore[reportArgumentType]
             stop=stop,
+            executor=executor,
         )
 
-    asyncio.run(drive())
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        asyncio.run(drive())
+    finally:
+        executor.shutdown(wait=True)
     assert uploader.calls == 2, "first call hit ENOSPC, retry succeeded — loop stayed up"
 
 
@@ -595,9 +601,14 @@ def test_upload_loop_oserror_permission_backs_off_critically(
             uploader,  # pyright: ignore[reportArgumentType]
             stop=stop,
             errors=errors,
+            executor=executor,
         )
 
-    asyncio.run(drive())
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        asyncio.run(drive())
+    finally:
+        executor.shutdown(wait=True)
     assert uploader.calls == 2
     assert delays == [_CRITICAL_BACKOFF_S, _CRITICAL_BACKOFF_S], (
         "permission failures must back off on the critical cadence, not the transient 2s/4s ramp"
@@ -737,3 +748,112 @@ def test_disk_hard_bound_still_gates_readiness(tmp_path: Path) -> None:
     comps = _disk_components(uploader, warn_bytes=10**9, hard_bytes=10**9 + 1)
     status, _ = render({"name": "pitr_uploader"}, comps)
     assert status == 200
+
+
+# ── P0 regression (rollout f22f5eb1): upload must not block the health lane ─
+
+
+@pytest.mark.asyncio
+async def test_healthz_answers_while_upload_is_blocked(tmp_path: Path) -> None:
+    """A slow GCS upload must not freeze the event loop.
+
+    The upload used to run inline on the loop: while the store held the
+    call (the measured shape was a 120 s RetryError), /healthz stopped
+    answering and `ava start` readiness burned its full 180 s on the one
+    service that was actually healthy. The upload now runs on the daemon's
+    worker pool, so this test locks "a health probe answers while the
+    upload is still blocked" — promptly, with 200, on a fresh liveness
+    lane. Discriminator: with the call moved back inline, the loop is
+    wedged for the whole bounded block, so the probe can only answer after
+    the upload has unblocked and the in_put assertion goes red.
+    """
+    import json
+    import threading
+    import time
+
+    from services.pitr import uploader_daemon
+    from services.pitr.uploader_daemon import (
+        _disk_components,
+        _LoopErrors,
+        _unacked_components,
+    )
+    from shared.daemon_health import Liveness, start_health_server, stop_health_server
+
+    class _SlowStore:
+        """Fake GCS store whose put blocks until released (slow-client shape)."""
+
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.release = threading.Event()
+            self.puts = 0
+            self.in_put = False
+
+        def put_wal_ciphertext_if_absent(
+            self, path: Path, object_name: str, metadata: Mapping[str, str]
+        ) -> RemoteObjectAck:
+            import base64
+
+            import google_crc32c
+
+            self.puts += 1
+            self.in_put = True
+            try:
+                self.entered.set()
+                self.release.wait(timeout=5)
+            finally:
+                self.in_put = False
+            payload = path.read_bytes()
+            return RemoteObjectAck(
+                object_name,
+                1,
+                len(payload),
+                base64.b64encode(google_crc32c.Checksum(payload).digest()).decode(),
+                dict(metadata),
+                True,
+            )
+
+    store = _SlowStore()
+    uploader, source = _uploader(tmp_path, store)
+    errors = _LoopErrors()
+    liveness = Liveness(timeout_s=120)
+    port = _find_free_port()
+
+    def components() -> list[dict[str, object]]:
+        return _disk_components(
+            uploader,
+            warn_bytes=10**9,
+            hard_bytes=10**9 + 1,
+        ) + _unacked_components(uploader, errors)
+
+    server = await start_health_server(
+        "pitr_uploader", port=port, liveness=liveness, components=components
+    )
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pitr-upload-test")
+    stop = asyncio.Event()
+    loop_task = asyncio.create_task(
+        uploader_daemon.upload_loop(
+            uploader, stop=stop, liveness=liveness, errors=errors, executor=executor
+        )
+    )
+    try:
+        assert await asyncio.to_thread(store.entered.wait, 5), "upload never started"
+        # The worker thread is now blocked inside the store. The loop must
+        # still answer health probes fast (old code: the GET hangs here).
+        started = time.monotonic()
+        status, body = await asyncio.wait_for(_http_get_status(port), timeout=2)
+        assert time.monotonic() - started < 2.0, "healthz stalled while the upload was blocked"
+        assert status == 200, "healthz must stay 200 while an upload is in flight"
+        payload = json.loads(body)
+        assert payload["readiness"] == "ok"
+        assert liveness.is_alive(), "liveness lane must stay fresh during a slow upload"
+        assert store.in_put, "healthz only answered after the upload had unblocked"
+    finally:
+        store.release.set()
+        stop.set()
+        await asyncio.wait_for(loop_task, timeout=10)
+        executor.shutdown(wait=True)
+        await stop_health_server(server)
+    assert store.puts == 1
+    # The ACK chain survives the off-loop hop: ACK written, spool entry gone.
+    assert (tmp_path / "ack" / f"{NAME}.ack.json").exists()
+    assert not source.exists()
