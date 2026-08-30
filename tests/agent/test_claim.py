@@ -17,6 +17,7 @@ Not tested:
 """
 
 import asyncio
+import contextlib
 import os
 import time
 from pathlib import Path
@@ -2839,6 +2840,48 @@ async def test_wait_for_batch_resets_status_to_running_on_exception(
         row = cur.fetchone()
     assert row is not None
     assert row[0] == "running", f"finally didn't run / didn't mark RUNNING: status={row[0]!r}"
+
+
+async def test_wait_for_batch_records_wait_inside_claim_idle_wait_span(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_wait_for_batch` runs its wait loop inside `claim_idle_wait_span()`
+    (Task #1970): the end-the-node-span helper must wrap the while loop — the
+    idle park is what would otherwise be drawn as a giant `execute_task claim`
+    span."""
+    from agent.db import ClaimedInbound
+    from agent.graph._claim_batch import _wait_for_batch
+
+    tid = spawn_agent()
+    _set_agent_status(db_conn, tid, "running")
+    order: list[str] = []
+
+    @contextlib.contextmanager
+    def _fake_span():
+        order.append("span-enter")
+        yield
+        order.append("span-exit")
+
+    async def _fake_wait(pool, listener, *, agent_id):
+        order.append("wait")
+
+    async def _fake_claim(pool, agent_id):
+        return [ClaimedInbound(id=1, agent_id=tid, content="x", kind="chat", source="user")]
+
+    monkeypatch.setattr("agent.graph._claim_batch.claim_idle_wait_span", _fake_span)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._claim_batch.wait_for_inbound", _fake_wait)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._claim_batch.claim_inbound_batch", _fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+
+    batch: list[ClaimedInbound] = await _wait_for_batch(
+        _make_runtime(ops_pool=aops_pool, inbound_listener=MagicMock()).context, tid
+    )
+
+    # the wait round happened INSIDE the span helper's enter/exit pair
+    assert order == ["span-enter", "wait", "span-exit"]
+    assert len(batch) == 1
+    assert batch[0].agent_id == tid
 
 
 # ───────────── _claim_node_impl: container mode (ops_db None) ─────────────
