@@ -250,6 +250,42 @@ def _normalized_validate_issuer(oauth_metadata: Any, expected_issuer: str) -> No
         )
 
 
+def _install_token_auth_basic_shim() -> None:
+    """Drop the duplicate body ``client_id`` on client_secret_basic requests.
+
+    The SDK's ``OAuthContext.prepare_token_auth`` leaves the form body's
+    ``client_id`` in place when the registered auth method is
+    ``client_secret_basic`` (only ``client_secret`` is stripped; both the
+    authorization-code exchange and the refresh request seed ``client_id``
+    into the body). RFC 6749 §2.3.1 puts the client identity entirely in the
+    Basic header for that method, and Notion's token endpoint rejects the
+    duplicate outright (HTTP 400). Notion's /register endpoint returns
+    ``client_secret_basic`` + a real secret no matter what was requested, so
+    every Ava->Notion flow reaches this path. Tracked upstream:
+    modelcontextprotocol/python-sdk (2026-08-30, prepare_token_auth — still
+    unfixed on main as of 2026-08-30). Round-2 of the same class of fix as
+    ``_install_issuer_normalization``; patching is idempotent in effect.
+    """
+    import mcp.client.auth.oauth2 as _oauth2
+
+    original = _oauth2.OAuthContext.prepare_token_auth
+
+    def _patched(
+        self: Any, data: dict[str, str], headers: dict[str, str] | None = None
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        data, headers = original(self, data, headers)
+        info = self.client_info
+        if (
+            info is not None
+            and getattr(info, "token_endpoint_auth_method", None) == "client_secret_basic"
+            and getattr(info, "client_secret", None)
+        ):
+            data.pop("client_id", None)
+        return data, headers
+
+    _oauth2.OAuthContext.prepare_token_auth = _patched  # type: ignore[attr-defined]
+
+
 async def oauth_http_client(url: str, server: str) -> Any:
     """Build an httpx2.AsyncClient whose auth is the MCP OAuth provider.
 
@@ -270,6 +306,7 @@ async def oauth_http_client(url: str, server: str) -> Any:
     from mcp.shared.auth import OAuthClientMetadata
 
     _install_issuer_normalization()
+    _install_token_auth_basic_shim()
     lock = _oauth_locks.setdefault(server, asyncio.Lock())
     async with lock:
         storage = _FileTokenStorage(server)
