@@ -95,6 +95,12 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
       trigger?.focus();
     };
   }, [open]);
+  // Layout-shift guard (QA review-955): the button is the fixed-size layout node
+  // (16rem × 12rem — exactly the max-h-48 / max-w-[16rem] cap of the content
+  // below), so the row height is reserved from the first paint. The lazy <img> is
+  // absolutely centered inside it, so its own size growth (2×2px while unloaded →
+  // capped content size once decoded) never moves the flow — zero CLS on the
+  // scroll path. Keep the button size in sync with the img caps.
   return (
     <>
       <button
@@ -103,7 +109,7 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
         onClick={() => setOpen(true)}
         aria-label={alt}
         data-testid="attach-thumbnail"
-        className="cursor-zoom-in rounded border-0 bg-transparent p-0"
+        className="relative block h-48 w-64 cursor-zoom-in rounded border-0 bg-transparent p-0"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
         <img
@@ -111,7 +117,7 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
           alt={alt}
           crossOrigin="use-credentials"
           loading="lazy"
-          className="max-h-48 max-w-[16rem] rounded border border-border object-contain"
+          className="absolute inset-0 m-auto max-h-48 max-w-[16rem] rounded border border-border object-contain"
         />
       </button>
       {open
