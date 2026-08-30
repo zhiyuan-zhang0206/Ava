@@ -240,11 +240,12 @@ def test_reply_hint_names_next_agent_when_notice_agent_is_not_switched(
     asyncio.run(bridge.handle_callback("12345", "notice:reply:7:42"))
     out = asyncio.run(bridge.handle_inbound("12345", "\u56de\u590d\u5185\u5bb9"))
     assert gateway.resolved == [(7, 42, "answer", "\u56de\u590d\u5185\u5bb9")]
-    assert out == copy.REPLY_SENT_OTHER_AGENT.format(agent_id=7, switched=405)
-    assert out.startswith(copy.REPLY_SENT)
-    assert "\u26a0\ufe0f" not in out  # no warning emoji
-    assert "will not reach" not in out  # no warning framing
-    assert "agent #405" in out  # next message routes to the switched agent
+    response = copy.REPLY_SENT_OTHER_AGENT.format(agent_id=7, switched=405)
+    assert out == response
+    # same success presentation as the same-agent reply, plus the routing hint
+    assert response.startswith(copy.REPLY_SENT)
+    assert "Your next message will be sent to agent" in response
+    assert response.endswith("agent #405.")  # next message routes to the switched agent
 
     # same-agent notice: plain confirmation, no routing hint
     asyncio.run(bridge.handle_callback("12345", "notice:reply:405:43"))
