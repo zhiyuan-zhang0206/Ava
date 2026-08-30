@@ -56,8 +56,6 @@ describe("classifyItem", () => {
     expect(classifyItem(item("agent_chat"))).toBe("primary");
     expect(classifyItem(item("inbound_chat", "user"))).toBe("primary");
     expect(classifyItem(item("inbound_chat", "ui:page:board"))).toBe("primary");
-    // Attached media stays visible — never folded into a turn's details.
-    expect(classifyItem(item("attach"))).toBe("primary");
   });
 
   it("agent + system inbound are secondary", () => {
@@ -66,7 +64,7 @@ describe("classifyItem", () => {
     expect(classifyItem(item("inbound_chat", "watcher:1"))).toBe("secondary");
   });
 
-  it("thinking / code / output / compact / system_prompt are secondary", () => {
+  it("thinking / code / output / compact / system_prompt / attach are secondary", () => {
     for (const k of [
       "agent_reasoning",
       "agent_code",
@@ -74,6 +72,7 @@ describe("classifyItem", () => {
       "inbound_compact_summary",
       "inbound_compact_request",
       "system_prompt",
+      "attach",
     ] as const) {
       expect(classifyItem(item(k))).toBe("secondary");
     }
@@ -511,5 +510,27 @@ describe("groupIntoTurns", () => {
     const turn = groups[0];
     if (turn.kind !== "turn") throw new Error("expected turn");
     expect(turn.summary.total).toBe(5);
+  });
+
+  it("attach items fold into the turn's details block (user ruling 2026-08-30)", () => {
+    // ava.self.attach lands right after the exec output; it must group into
+    // the same work block instead of rendering as an always-visible card.
+    const items = [
+      item("agent_chat"), // 0 primary
+      item("agent_code"), // 1
+      item("code_output"), // 2
+      item("attach"), // 3
+      item("agent_chat"), // 4 primary
+    ];
+    const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
+    expect(kinds(groups)).toEqual([
+      "single(agent_chat@0)",
+      "turn(3@1)",
+      "single(agent_chat@4)",
+    ]);
+    const turn = groups[1];
+    if (turn.kind !== "turn") throw new Error("expected turn");
+    // The attach member lands in the systemNotes bucket.
+    expect(formatTurnSummary(turn.summary)).toBe("1 system note · 1 code · 1 output");
   });
 });

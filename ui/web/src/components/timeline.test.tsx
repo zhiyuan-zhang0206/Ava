@@ -2784,7 +2784,7 @@ describe("ItemView: inbound_chat images", () => {
 });
 
 describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
-  const NOTICE = "[system] Files attached during this turn (available for this turn only; re-attach if you need them again later):";
+  const NOTICE = "[system] Files attached during this turn:";
   const LINE1 = '- [1] screen.png (image/png, 12.3 KiB) — "shot A"';
   const LINE2 = '- [2] chart.png (image/png, 45.6 KiB) — "chart B"';
   const IMG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";

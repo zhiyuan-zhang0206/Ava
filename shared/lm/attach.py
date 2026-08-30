@@ -42,9 +42,9 @@ ATTACH_MAX_FILES_PER_TURN = 8
 ATTACH_MAX_TOTAL_BYTES = 48 * 1024 * 1024
 ATTACH_MAX_LABEL_CHARS = 120
 
-_ATTACH_NOTICE = (
-    "[system] Files attached during this turn (kept in the message history; no need to re-attach):"
-)
+# Keep the notice bare: attachments persist in the message history, so any
+# extra instruction is redundant copy (user ruling 2026-08-30).
+_ATTACH_NOTICE = "[system] Files attached during this turn:"
 
 
 @dataclass(frozen=True)

@@ -77,8 +77,10 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
     case "inbound_chat":
       return inboundKind(item.source) === "human" ? "primary" : "secondary";
     case "attach":
-      // Attached media stays visible — never folded into a turn's details.
-      return "primary";
+      // Attached media folds into the turn's details block like any other
+      // secondary item (user ruling 2026-08-30 — expand the details block
+      // to see it; the previous "always visible" primary pin is dropped).
+      return "secondary";
     case "agent_reasoning":
     case "agent_code":
     case "code_output":
@@ -227,8 +229,9 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       if (classifyMarker(it.source).kind === "memory") memories += 1;
       else systemNotes += 1; // lifecycle events + guidance notes
     } else {
-      // agent_chat never reaches a turn (primary); count defensively so the
-      // "every member is counted somewhere" invariant holds regardless.
+      // attach (secondary since 2026-08-30) and the defensive agent_chat
+      // (primary, never reaches a turn) land here so the "every member is
+      // counted somewhere" invariant holds regardless.
       systemNotes += 1;
     }
   }
