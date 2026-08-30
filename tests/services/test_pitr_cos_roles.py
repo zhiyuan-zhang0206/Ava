@@ -156,7 +156,7 @@ def test_publish_manifest_puts_and_reads_back_bytes(
 
 def test_publish_manifest_adopts_identical_existing(fake: FakeCos) -> None:
     payload = b'{"protected":true}'
-    fake.seed("ava-pitr/protected/x.json", payload, {})
+    fake.seed("ava-pitr/protected/x.json", payload, {"ava-candidate-sha256": "s"})
     publisher = make_publisher(fake)
 
     ack = publisher.put_manifest_if_absent(
@@ -175,7 +175,7 @@ def test_publish_manifest_rejects_different_existing_payload(
     fake.seed("ava-pitr/protected/x.json", b'{"protected":false}', {})
     publisher = make_publisher(fake)
 
-    with pytest.raises(PermanentObjectStoreError, match="ETag"):
+    with pytest.raises(PermanentObjectStoreError, match="differs"):
         publisher.put_manifest_if_absent(
             payload=b'{"protected":true}',
             object_name="ava-pitr/protected/x.json",
@@ -201,7 +201,22 @@ def test_publish_manifest_rejects_multipart_etag(fake: FakeCos) -> None:
     fake.etag_overrides["ava-pitr/protected/x.json"] = "abc-4"
     publisher = make_publisher(fake)
 
-    with pytest.raises(PermanentObjectStoreError, match="ETag"):
+    with pytest.raises(PermanentObjectStoreError, match="differs"):
+        publisher.put_manifest_if_absent(
+            payload=payload,
+            object_name="ava-pitr/protected/x.json",
+            metadata={},
+        )
+
+
+def test_publish_manifest_rejects_existing_object_with_divergent_metadata(
+    fake: FakeCos,
+) -> None:
+    payload = b'{"protected":true}'
+    fake.seed("ava-pitr/protected/x.json", payload, {"ava-other": "z"})
+    publisher = make_publisher(fake)
+
+    with pytest.raises(PermanentObjectStoreError, match="differs"):
         publisher.put_manifest_if_absent(
             payload=payload,
             object_name="ava-pitr/protected/x.json",
