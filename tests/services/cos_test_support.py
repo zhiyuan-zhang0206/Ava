@@ -8,6 +8,7 @@ the wire request and COS's Content-MD5 / If-None-Match semantics.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 from typing import Any
@@ -52,6 +53,7 @@ class FakeCos:
         self.reject_put_keys: set[str] = set()
         self.etag_overrides: dict[str, str] = {}
         self.corrupt_get_keys: set[str] = set()
+        self.corrupt_bytes_keys: set[str] = set()
         self.page_size = 1000
 
     def seed(self, key: str, body: bytes, metadata: dict[str, str] | None = None) -> str:
@@ -112,7 +114,7 @@ class FakeCos:
                 return httpx.Response(412)
         body = request.read()
         content_md5 = request.headers.get("content-md5", "")
-        if content_md5 and hashlib.md5(body).hexdigest() != content_md5:  # noqa: S324 — COS MD5 check
+        if content_md5 and hashlib.md5(body).digest() != base64.b64decode(content_md5):  # noqa: S324 — COS MD5 check
             return httpx.Response(400, text="BadDigest")
         metadata = _request_metadata(request)
         digest = hashlib.md5(body).hexdigest()  # noqa: S324 — COS ETag digest
@@ -136,6 +138,8 @@ class FakeCos:
         body = row["body"]
         if path in self.corrupt_get_keys:
             body = body + b"tampered"
+        if path in self.corrupt_bytes_keys and body:
+            body = body[:-1] + bytes([body[-1] ^ 0xFF])
         response = self._object_response(row, path)
         return httpx.Response(200, headers=response.headers, content=body)
 

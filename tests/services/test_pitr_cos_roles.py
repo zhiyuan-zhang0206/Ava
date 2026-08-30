@@ -222,3 +222,19 @@ def test_publish_manifest_rejects_existing_object_with_divergent_metadata(
             object_name="ava-pitr/protected/x.json",
             metadata={},
         )
+
+
+def test_download_exact_rejects_same_size_bitflip(fake: FakeCos, tmp_path: Path) -> None:
+    """A same-length corruption must trip the streamed MD5 check, not the
+    size check (the size guard would otherwise mask the checksum branch)."""
+    payload = b"restore-payload" * 8
+    fake.seed(OBJECT, payload, {"ava-key-id": "v1"})
+    fake.corrupt_bytes_keys.add(OBJECT)
+    reader = make_reader(fake)
+    destination = tmp_path / "out.enc"
+
+    with pytest.raises(PermanentObjectStoreError, match="content differs"):
+        reader.download_exact(_restore_object(payload), destination)
+
+    assert not destination.exists()
+    assert not (tmp_path / ".out.enc.partial").exists()

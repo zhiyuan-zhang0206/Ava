@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 from services.pitr.cos_client import _signature_v4
 
@@ -71,3 +72,34 @@ def test_signature_sorts_query_and_keeps_path_segments() -> None:
     )
     assert first == reordered
     assert "Credential=AK/20130524/ap-shanghai/s3/aws4_request" in first
+
+
+def test_credential_evidence_rejects_overexposed_file(tmp_path: Path) -> None:
+    import json
+
+    import pytest
+
+    from services.pitr.cos_client import CosPermanentError, credential_evidence
+
+    path = tmp_path / "cos.json"
+    path.write_text(json.dumps({"secret_id": "AKIDx", "secret_key": "s"}))
+    path.chmod(0o644)
+    with pytest.raises(CosPermanentError, match="unsafe"):
+        credential_evidence(path, region="ap-guangzhou", bucket="ava-pitr-1250000000")
+
+
+def test_credential_evidence_reports_cos_identity(tmp_path: Path) -> None:
+    import json
+
+    from services.pitr.cos_client import credential_evidence
+
+    path = tmp_path / "cos.json"
+    path.write_text(json.dumps({"secret_id": "AKIDx", "secret_key": "s"}))
+    path.chmod(0o600)
+    evidence = credential_evidence(path, region="ap-guangzhou", bucket="ava-pitr-1250000000")
+    assert evidence == {
+        "backend": "cos",
+        "uploader_identity": "AKIDx",
+        "viewer_identity": "AKIDx",
+        "store_target": "ava-pitr-1250000000",
+    }
