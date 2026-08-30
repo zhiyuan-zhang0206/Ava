@@ -48,6 +48,30 @@ class WebSettings(EnvSettings):
         },
     )
 
+    web_brave_search_endpoint: str = Field(
+        default="https://api.search.brave.com/res/v1/web/search",
+        alias="AVA_WEB_BRAVE_SEARCH_ENDPOINT",
+        description="Brave Search API endpoint used by `ava.web.search`. Override to point at a different search endpoint (e.g. a self-hosted relay or a provider mirror) without code changes.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_jina_reader_base: str = Field(
+        default="https://r.jina.ai/",
+        alias="AVA_WEB_JINA_BASE_URL",
+        description="Jina Reader base URL used by `ava.web.fetch` (the target URL is appended after it). Override to point at a different reader endpoint (e.g. a self-hosted mirror) without code changes.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     brave_api_key: SecretStr | None = Field(
         default=None,
         alias="BRAVE_API_KEY",
