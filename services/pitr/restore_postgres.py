@@ -33,16 +33,15 @@ def _migration_hash(conn: psycopg.Connection[tuple[object, ...]]) -> str:
     return hashlib.sha256("\n".join(names).encode()).hexdigest()
 
 
-def _live_identity(db_url: str) -> LivePostgresIdentity:
+def _live_identity(db_url: str, data_directory: str) -> LivePostgresIdentity:
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT current_setting('data_directory'), system_identifier, "
-            "pg_postmaster_start_time()::text FROM pg_control_system()"
+            "SELECT system_identifier, pg_postmaster_start_time()::text FROM pg_control_system()"
         )
         row = cur.fetchone()
         if row is None:
             raise RestoreProofError("live PostgreSQL omitted identity")
-        data_directory, system_identifier, started_at = (str(value) for value in row)
+        system_identifier, started_at = (str(value) for value in row)
         cur.execute("SELECT 1")
         if cur.fetchone() != (1,):
             raise RestoreProofError("live PostgreSQL read probe failed")
@@ -86,7 +85,7 @@ def _append_recovery_config(
     pgdata: Path, wal_dir: Path, socket_dir: Path, lsn: str, run_root: Path
 ) -> None:
     for path in (pgdata, wal_dir, socket_dir):
-        if path.is_symlink() or not path.resolve().is_relative_to(pgdata.parent.resolve()):
+        if path.is_symlink() or not path.resolve().is_relative_to(run_root.resolve()):
             raise RestoreProofError("restore path escaped its owned run directory")
     allowlist = _write_restore_allowlist(wal_dir, run_root)
     command = " ".join(
@@ -236,17 +235,19 @@ class IsolatedPostgresRestoreExecutor:
         self,
         *,
         live_db_url: str,
+        data_directory: str,
         pg_ctl: Path,
         pg_verifybackup: Path,
         timeout_seconds: int = 900,
     ) -> None:
         self._live_db_url = live_db_url
+        self._data_directory = data_directory
         self._pg_ctl = pg_ctl
         self._pg_verifybackup = pg_verifybackup
         self._timeout = timeout_seconds
 
     def live_identity(self) -> LivePostgresIdentity:
-        return _live_identity(self._live_db_url)
+        return _live_identity(self._live_db_url, self._data_directory)
 
     def run(
         self,

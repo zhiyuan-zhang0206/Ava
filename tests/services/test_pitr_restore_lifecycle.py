@@ -11,10 +11,15 @@ from services.pitr import restore_manifest, restore_proof
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.restore_manifest import RestoreObject
-from services.pitr.restore_postgres import _write_sandbox_config
+from services.pitr.restore_postgres import (
+    _append_recovery_config,
+    _live_identity,
+    _write_sandbox_config,
+)
 from services.pitr.restore_proof import (
     DrillResult,
     LivePostgresIdentity,
+    RestoreProofError,
     RestoreSpaceBudget,
     prove_candidate,
     publish_candidate_proof,
@@ -250,3 +255,64 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
         )
     assert pending_path.is_file()
     assert not local.exists()
+
+
+def test_append_recovery_config_accepts_production_partial_layout(tmp_path: Path) -> None:
+    """The 2026-08-30 activation died here: pgdata resolves inside
+    partial/sandbox while wal_dir and socket_dir resolve inside partial, and
+    the old check compared every path against pgdata.parent. The owned
+    boundary is run_root, not the extracted PGDATA's parent."""
+    partial = tmp_path / "restore" / ".run.partial"
+    pgdata = partial / "sandbox" / "data"
+    wal_dir = partial / "archive"
+    socket_dir = partial / "socket"
+    for directory in (pgdata, wal_dir, socket_dir):
+        directory.mkdir(parents=True)
+
+    _append_recovery_config(pgdata, wal_dir, socket_dir, "0/200", partial)
+
+    assert (partial / "restore-allowlist.json").is_file()
+    config = pgdata / "postgresql.auto.conf"
+    assert config.is_file()
+    assert "recovery_target_lsn = '0/200'" in config.read_text()
+    assert (pgdata / "recovery.signal").is_file()
+
+
+def test_append_recovery_config_rejects_path_outside_run_root(tmp_path: Path) -> None:
+    partial = tmp_path / "restore" / ".run.partial"
+    pgdata = partial / "sandbox" / "data"
+    socket_dir = partial / "socket"
+    for directory in (pgdata, socket_dir):
+        directory.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with pytest.raises(RestoreProofError, match="escaped"):
+        _append_recovery_config(pgdata, outside, socket_dir, "0/200", partial)
+
+
+def test_live_identity_probe_needs_no_settings_privilege() -> None:
+    """PG 17 gates current_setting('data_directory') behind
+    pg_read_all_settings; the worker probe must succeed on the runtime role
+    with no settings-read grant (the 2026-08-30 activation's InsufficientPrivilege)."""
+    import psycopg
+
+    from shared.pg_tools import throwaway_postgres
+
+    with throwaway_postgres() as url:
+        admin = url.rsplit("/", 1)[0] + "/postgres"
+        with psycopg.connect(admin, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("CREATE ROLE viewer LOGIN")
+            cur.execute("SELECT current_setting('data_directory')")
+            row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("throwaway PostgreSQL omitted its data directory")
+        data_directory = str(row[0])
+        viewer_url = url.replace("ava@", "viewer@", 1)
+
+        identity = _live_identity(viewer_url, data_directory)
+        pid_line = Path(data_directory, "postmaster.pid").read_text().splitlines()[0]
+
+    assert identity.data_directory == data_directory
+    assert identity.system_identifier
+    assert identity.pid == int(pid_line)
