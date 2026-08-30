@@ -41,12 +41,12 @@ _SEL = '{service_name="unknown_service"}'
 _CAT = 'category=~"{category_re}|log"'
 
 
-def _count(pipeline: str, window: str, event: str | None = None) -> str:
+def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
     """One count_over_time series — every count wraps in sum(...) (see the
-    module docstring for the series-cap note). ``event`` carries the promoted
+    module docstring for the series-cap note). ``matchers`` carries the promoted
     event_name stream-label matcher (e.g. ``'event_name={event_name}'``): it
     is matched inside the stream selector, not after ``| json``."""
-    selector = _SEL if event is None else f'{{service_name="unknown_service", {event}}}'
+    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
     return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
@@ -63,7 +63,7 @@ register_metric(
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=_count(_CAT, "5m", event="event_name={event_name}") + " / 5",
+        query=_count(_CAT, "5m", matchers="event_name={event_name}") + " / 5",
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],
@@ -82,7 +82,7 @@ register_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count(_CAT, "$__range", event="event_name={event_name}"),
+        query=_count(_CAT, "$__range", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],

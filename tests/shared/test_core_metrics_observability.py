@@ -193,10 +193,15 @@ def test_exec_breakdown_covers_legacy_spellings() -> None:
     # other: exec prefix minus every known spelling. Selector matchers are
     # full-string regexes, so the negated list excludes exactly the named
     # spellings (the pre-migration pipeline form was substring-based and
-    # matched nothing — exec.* rows all contain "exec").
-    assert 'event_name=~"exec.*"' in exprs[5]
-    assert "exec_node_timeout" in exprs[5]
-    assert "exec_thread_stuck" not in exprs[5]
+    # matched nothing — exec.* rows all contain "exec"). The FULL matcher is
+    # pinned: adding or removing an exclusion spelling is a deliberate panel
+    # semantic change and must fail here.
+    assert (
+        'event_name=~"exec.*", '
+        'event_name!~"exec|exec_envelope|exec_failed|exec[(]failed[)]|exec_timeout|'
+        "exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|"
+        'exec_node_timeout"'
+    ) in exprs[5]
 
 
 def test_turn_ok_rate_math_shape() -> None:
