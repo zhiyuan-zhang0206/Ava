@@ -21,10 +21,6 @@ from shared.lm._call import answer_text
 from shared.lm._effort import ReasoningEffort, coerce_effort
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
-BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
-JINA_READER_BASE = "https://r.jina.ai/"
-
-
 _log = logging.getLogger(__name__)
 
 # Web reads are idempotent — retry transient failures (429/5xx/transport)
@@ -71,6 +67,21 @@ def _fetch_timeout_s() -> float:
     JS + content-extraction server-side, significantly slower than a pure HTTP
     API; 30s covers a heavy SPA cold render."""
     return settings.web.web_fetch_timeout_seconds
+
+
+def _search_endpoint() -> str:
+    """`AVA_WEB_BRAVE_SEARCH_ENDPOINT` — Brave Search provider endpoint.
+
+    Read lazily like the other web settings: the web domain is
+    agent-profile-only and the gateway imports this module transitively via
+    `ava` (see the comment above `_max_count`)."""
+    return settings.web.web_brave_search_endpoint
+
+
+def _reader_base() -> str:
+    """`AVA_WEB_JINA_BASE_URL` — Jina Reader base URL; the target page URL is
+    appended after it."""
+    return settings.web.web_jina_reader_base
 
 
 # Python urllib default UA (`Python-urllib/3.x`) is blocked by Cloudflare
@@ -153,8 +164,8 @@ def _search_one(query: str, count: int) -> list[SearchResult]:
         )
 
     count = max(1, min(count, _max_count()))
-    url = f"{BRAVE_ENDPOINT}?{urllib.parse.urlencode({'q': query, 'count': count})}"
-    req = urllib.request.Request(  # noqa: S310 — endpoint is a hard-coded https:// literal
+    url = f"{_search_endpoint()}?{urllib.parse.urlencode({'q': query, 'count': count})}"
+    req = urllib.request.Request(  # noqa: S310 — endpoint comes from settings; default is an https:// literal
         url,
         headers={
             "X-Subscription-Token": settings.web.brave_api_key.get_secret_value(),
@@ -306,7 +317,7 @@ def _read_page(url: str, max_chars: int) -> tuple[str, str, str, bool]:
     # Safe keeps common URL characters to avoid double-encoding; special chars
     # (spaces / CJK query) get quoted to %xx
     encoded_target = urllib.parse.quote(url, safe=":/?#&=.@+_")
-    request_url = JINA_READER_BASE + encoded_target
+    request_url = _reader_base() + encoded_target
 
     headers: dict[str, str] = {
         "Accept": "application/json",
@@ -316,7 +327,7 @@ def _read_page(url: str, max_chars: int) -> tuple[str, str, str, bool]:
     if settings.web.jina_api_key is not None:
         headers["Authorization"] = f"Bearer {settings.web.jina_api_key.get_secret_value()}"
 
-    req = urllib.request.Request(request_url, headers=headers)  # noqa: S310 — r.jina.ai is a hard-coded literal
+    req = urllib.request.Request(request_url, headers=headers)  # noqa: S310 — base comes from settings; default is an https:// literal
 
     def _get() -> bytes:
         with urllib.request.urlopen(req, timeout=_fetch_timeout_s()) as resp:  # noqa: S310
