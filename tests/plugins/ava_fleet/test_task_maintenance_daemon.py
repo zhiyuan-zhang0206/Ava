@@ -584,6 +584,10 @@ class TestEscalate:
         assert delivered_owner == delegator
         assert "Stalled subtasks — owner(s) unresponsive after repeated reminders:" in message
         assert all(f"#{task_id}" in message for task_id in task_ids)
+        # _ESCALATE_SQL sorts nothing: row order is unspecified, and neither the
+        # digest message (checked membership-wise above) nor the telemetry makes
+        # an ordering claim — assert the id set, not the SQL's incidental row
+        # order. Exact-list equality here was a shard7 flake (task #2199).
         assert emitted_events == [
             (
                 "telemetry",
@@ -592,7 +596,7 @@ class TestEscalate:
                     "attributes": {
                         "owner_id": delegator,
                         "task_count": 2,
-                        "task_ids": task_ids,
+                        "task_ids": sorted(task_ids),
                         "leg": "delegator",
                     },
                     "agent_id": delegator,
