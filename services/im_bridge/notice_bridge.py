@@ -355,8 +355,10 @@ class NoticeBridge:
         self._reply_modes.pop(str(chat_id), None)
         # The reply lands in the notice's agent — if that is not the agent
         # this chat switched to, its follow-up reply will NOT be pushed here
-        # (the subscription only covers the switched agent). Tell the user
-        # instead of letting them wait for a reply that cannot arrive.
+        # (the subscription only covers the switched agent). The reply itself
+        # succeeded, so confirm it like any notice reply and add a neutral
+        # hint naming the agent the next message will go to (user ruling
+        # 2026-08-30).
         switched = self._switched_agent(chat_id)
         if switched is not None and switched != mode["agent_id"]:
             return copy.REPLY_SENT_OTHER_AGENT.format(agent_id=mode["agent_id"], switched=switched)
