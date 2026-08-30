@@ -19,8 +19,8 @@ contract is shared; case content stays per line — Ava evaluates agent
 behavior, Monsora evaluates product function, and the two never mix in one
 evalset file.
 
-- [[SCHEMA-v1.md]] — the contract: row fields, field rules, versioning, and
-  the runner pattern.
+- [SCHEMA-v1.md](SCHEMA-v1.md) — the contract: row fields, field rules,
+  versioning, and the runner pattern.
 - `loader.py` — the reference loader (`load_evalset`), with loud validation so
   a malformed row fails at load time, not mid-run.
 - `cases/<domain>/` — evalset files, one domain per directory.
@@ -38,10 +38,10 @@ loader keeps parsing a newer file (`meta.schema_version` gates the shape).
 
 ## Key dependencies
 
-- [[../schedules/schedules.ava.okf.md]] — the adversarial weekly batch whose
+- [schedules](../schedules/README.md) — the adversarial weekly batch whose
   case machinery the migrated example dataset references.
-- [[../shared/config/agent_eval.py]] — isolation switches every line's runner
-  reuses (eval isolation, network allowlist, container exec).
+- [agent_eval.py](../shared/config/agent_eval.py) — isolation switches every
+  line's runner reuses (eval isolation, network allowlist, container exec).
 
 ## Entry points
 
