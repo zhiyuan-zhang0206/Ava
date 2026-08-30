@@ -18,8 +18,8 @@ from shared.config import settings
 from tests._pitr_fixtures import baidu_credential_evidence
 
 _SEGMENT = "00000001000000A20000008B"
-_PIN_TOKEN = "123456789:" + "a" * 32
 _MD5_HEX = "b" * 32
+_PIN_TOKEN = "123456789:" + _MD5_HEX
 _CRC32C = "AAAAAA=="
 
 
@@ -106,6 +106,14 @@ def test_baidu_wal_proof_rejects_gcs_shaped_pin_token() -> None:
     """Gate 2: a bare generation number cannot serve as a Baidu pin token."""
     ack, viewer = _pair(generation="123")
     with pytest.raises(ValueError, match="invalid Baidu pin token"):
+        _validate(ack=ack, viewer=viewer)
+
+
+def test_baidu_wal_proof_rejects_pin_token_md5_that_differs_from_the_checksum() -> None:
+    """QA #1147 nit 2: the pin's embedded content md5 must equal the
+    checksum field's md5 — a drift between the two is evidence corruption."""
+    ack, viewer = _pair(generation="123456789:" + "c" * 32)
+    with pytest.raises(ValueError, match="differs from the ciphertext checksum"):
         _validate(ack=ack, viewer=viewer)
 
 

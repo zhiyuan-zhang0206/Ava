@@ -97,9 +97,12 @@ def validate_wal_remote_evidence(
         raise ValueError("PITR remote evidence has invalid source identity")
     if backend == "baidu":
         # The backend-verified checksum is the content MD5 in lowercase hex,
-        # not a CRC32C base64 digest.
+        # not a CRC32C base64 digest; the pin's embedded md5 is that same
+        # content digest, so the two must agree (QA #1147 nit 2).
         if not re.fullmatch(r"[0-9a-f]{32}", ack["ciphertext_crc32c"]):
             raise ValueError("PITR remote evidence has an invalid ciphertext MD5")
+        if ack["generation"].split(":", 1)[1] != ack["ciphertext_crc32c"]:
+            raise ValueError("PITR remote pin token md5 differs from the ciphertext checksum")
     elif not re.fullmatch(r"[A-Za-z0-9+/]{6}==", ack["ciphertext_crc32c"]):
         raise ValueError("PITR remote evidence has invalid CRC32C")
     intent_at = datetime.fromisoformat(exact["switch_intent_at"])
