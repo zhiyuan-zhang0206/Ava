@@ -9,5 +9,9 @@
 -- distorts the number. NULL on every non-settle row and on rows that entered a
 -- settle hold before this migration shipped (their duration is unknowable, and
 -- the release path reports it as such rather than guessing).
+--
+-- IF NOT EXISTS keeps the body idempotent on a fresh bootstrap, where
+-- db/schema.sql already carries the new shape (migration smoke replays every
+-- migration on a fresh schema.sql database).
 
-ALTER TABLE deployment_state ADD COLUMN settle_started_at TIMESTAMPTZ;
+ALTER TABLE deployment_state ADD COLUMN IF NOT EXISTS settle_started_at TIMESTAMPTZ;
