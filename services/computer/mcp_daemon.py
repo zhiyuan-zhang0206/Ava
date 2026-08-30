@@ -42,8 +42,11 @@ Coordinate contract: every tool coordinate is in PHYSICAL pixels — the same
 space as the `snapshot` PNG, so a caller can click exactly where it saw a
 pixel. The daemon divides by the backing scale before calling the helper,
 whose CGEvent space is logical points (Retina 2x on macOS; Windows reports
-scale 1, so the conversion is a no-op there). `snapshot` returns both the
-physical pixel size and the logical screen size + scale.
+scale 1, so the conversion is a no-op there). The scale is measured from the
+capture (PNG physical size vs logical screen size), not taken from the helper
+report — the helper holds no AppKit event loop and can serve a stale scale
+(2026-08-30: scale 2 on a 1x display, halving every click). `snapshot` returns
+the physical pixel size and the logical screen size + the measured scale.
 
 Run as a supervised daemon (ServiceSpec session "computer-mcp"):
     .venv/bin/python -m services.computer.mcp_daemon
@@ -93,8 +96,32 @@ def _png_size(path: Path) -> tuple[int, int]:
 
 def _to_logical(value: float, scale: float) -> float:
     """Physical-pixel coordinate -> helper's logical-point space (divide by the
-    backing scale; Windows reports scale 1, so this is a no-op there)."""
+    measured backing scale; scale 1 (1x display) is a no-op there)."""
     return value / scale if scale > 1 else value
+
+
+def _pixel_scale(pixels_w: int, logical_w: float) -> float:
+    """Measure the physical->logical scale from the captured PNG itself.
+
+    The PNG is the ground truth of the click space (IHDR width = physical
+    pixels of exactly the region the caller clicks); the helper's report is
+    not trusted here — a process without an AppKit event loop can hold stale
+    screen objects (2026-08-30: scale 2 on a 1x display, halving every click).
+    """
+    if pixels_w <= 0 or logical_w <= 0:
+        raise ComputerUseError(f"cannot compute screen scale from {pixels_w}px over {logical_w}pt")
+    return pixels_w / logical_w
+
+
+def _current_scale(measured: float | None) -> float:
+    """The physical->logical scale for coordinate conversion.
+
+    Prefers the daemon's own measurement (last snapshot, ``_pixel_scale``);
+    before any snapshot, falls back to the helper's live report.
+    """
+    if measured is not None:
+        return measured
+    return float(helper.screen_size()["scale"])
 
 
 def _snapshot_path(agent_id: int | None) -> Path:
@@ -231,13 +258,17 @@ def _mcp_result(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _execute(
-    tool: str, args: dict[str, Any], agent_id: int, pointer: tuple[float, float] | None = None
+    tool: str,
+    args: dict[str, Any],
+    agent_id: int,
+    pointer: tuple[float, float] | None = None,
+    scale: float | None = None,
 ) -> dict[str, Any]:
     """Run one tool against the permissions helper. Raises on failure.
 
-    `pointer` is the daemon's tracked cursor position in PHYSICAL pixels (from
-    the last click/scroll), the scroll fallback when the caller gives no
-    explicit x/y."""
+    `pointer` is the tracked cursor position in PHYSICAL pixels (last
+    click/scroll), the scroll fallback without explicit x/y; `scale` is the
+    last measured physical->logical scale, falling back to the helper report."""
     _require(tool, args)
     if tool == "snapshot":
         path = _snapshot_path(agent_id)
@@ -246,15 +277,26 @@ def _execute(
         # PNG comes out at physical resolution (Retina 2x), reported via IHDR.
         helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
         pw, ph = _png_size(path)
+        # Measure, don't trust: the PNG is the ground truth callers click
+        # against; the helper's reported scale can be stale (see _pixel_scale).
+        scale = _pixel_scale(pw, size["w"])
         result: dict[str, Any] = {
             "path": str(path),
-            "screen": {"width": size["w"], "height": size["h"], "scale": size["scale"]},
+            "screen": {"width": size["w"], "height": size["h"], "scale": scale},
             "pixels": {"width": pw, "height": ph},
         }
         if args.get("include_ax"):
             app = helper.frontmost_app()["app"]
             if app:
-                result["ax"] = helper.ax_window_info(app)
+                ax = helper.ax_window_info(app)
+                # AX geometry is logical; convert to the click space like OCR.
+                result["ax"] = {
+                    **ax,
+                    "x": ax["x"] * scale,
+                    "y": ax["y"] * scale,
+                    "w": ax["w"] * scale,
+                    "h": ax["h"] * scale,
+                }
         if args.get("include_ocr"):
             # Soft failure: snapshot stays usable without text recognition.
             try:
@@ -264,7 +306,7 @@ def _execute(
                 result["ocr_error"] = str(e)
         return result
     if tool == "click":
-        scale = helper.screen_size()["scale"]
+        scale = _current_scale(scale)
         clicked = helper.click(
             _to_logical(float(args["x"]), scale),
             _to_logical(float(args["y"]), scale),
@@ -288,17 +330,17 @@ def _execute(
         return {"pressed": echoed["key"], "cmd": echoed["cmd"]}
     if tool == "scroll":
         dy = int(args["dy"])
+        scale = _current_scale(scale)
         if "x" in args and "y" in args:
-            x, y = float(args["x"]), float(args["y"])
+            lx, ly = _to_logical(float(args["x"]), scale), _to_logical(float(args["y"]), scale)
         elif pointer is not None:
-            x, y = pointer
+            lx, ly = _to_logical(pointer[0], scale), _to_logical(pointer[1], scale)
         else:
             size = helper.screen_size()
-            x, y = size["w"] / 2, size["h"] / 2
-        scale = helper.screen_size()["scale"]
-        return {
-            "scrolled": helper.scroll(_to_logical(x, scale), _to_logical(y, scale), dy)["scrolled"]
-        }
+            # Center from the helper is already logical — never re-divide
+            # (that double conversion scrolled at a quarter of the screen).
+            lx, ly = size["w"] / 2, size["h"] / 2
+        return {"scrolled": helper.scroll(lx, ly, dy)["scrolled"]}
     if tool == "window_info":
         # owner is optional — the caller usually wants the focused window, and
         # defaulting here saves a frontmost_app round trip.
@@ -335,11 +377,11 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "snapshot",
         "description": (
             "Capture the full screen via the signed permissions helper. Returns the PNG "
-            "path (physical pixels), the logical screen size, and the backing scale — "
-            "divide physical pixel coordinates by scale to get click coordinates. "
-            "Optional include_ax adds the focused window's geometry; include_ocr adds "
-            "recognized text with physical-pixel boxes (same space as click) — OCR "
-            "failure degrades to ocr:[] + ocr_error, never failing the snapshot."
+            "path (physical pixels), the logical screen size, and the measured backing "
+            "scale, divide physical pixel coordinates by scale for click coordinates. "
+            "include_ax adds the focused window's geometry in physical pixels (same "
+            "space as click); include_ocr adds recognized text with physical-pixel "
+            "boxes — OCR failure degrades to ocr:[] + ocr_error, never failing it."
         ),
         "input_schema": {
             "type": "object",
@@ -355,8 +397,8 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "click",
         "description": (
             "Click the left mouse button at physical-pixel screen coordinates "
-            "(the daemon converts to the helper's logical-point space). double=True "
-            "double-clicks."
+            "(the daemon converts with the measured scale, falling back to the "
+            "helper's live report). double=True double-clicks."
         ),
         "input_schema": {
             "type": "object",
@@ -471,6 +513,9 @@ class ComputerMcpDaemon:
         # Last pointer position in PHYSICAL pixels (set by click / explicit
         # scroll); the scroll fallback when the caller gives no x/y.
         self._pointer: tuple[float, float] | None = None
+        # Last measured physical->logical scale (snapshot PNG vs logical size).
+        # None until the first snapshot; click/scroll use it via _current_scale.
+        self._scale: float | None = None
         # One lock around execute: a single desktop op at a time machine-wide,
         # and a snapshot's multi-step capture never interleaves with another
         # agent's click (same serial choice as browser-mcp).
@@ -547,7 +592,12 @@ class ComputerMcpDaemon:
             outcome = "ok"
             error: str | None = None
             try:
-                result = _execute(tool, args, agent_id or 0, pointer=self._pointer)
+                result = _execute(
+                    tool, args, agent_id or 0, pointer=self._pointer, scale=self._scale
+                )
+                if tool == "snapshot":
+                    # click/scroll convert with the scale the caller saw.
+                    self._scale = float(result["screen"]["scale"])
                 if tool == "click" or (tool == "scroll" and "x" in args and "y" in args):
                     self._pointer = (float(args["x"]), float(args["y"]))
             except (PermissionsHelperError, KeyError, TypeError, ValueError, OSError) as e:
