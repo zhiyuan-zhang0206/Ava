@@ -1,4 +1,10 @@
-"""Remote observatory-station healthcheck — called every 60s by the gateway watchdog.
+"""Remote observatory-station probe — run every 60s by the GATEWAY watchdog.
+
+Lives in services/heartbeat/ (not services/healthchecks/) on purpose: it consumes the
+`alerts` settings domain, which is gateway-owned — the runner watchdog imports the
+healthcheck roster too, so a module under services/healthchecks/ would drag the alerts
+domain into the runner profile (test_gateway_consumer_guard). The watchdog resolves it
+by dotted string, so the runner closure never contains it.
 
 The GATEWAY's probe of a REMOTE observatory station (WP4, task #1946;
 conventions/reachability-and-credentials.md). When `AVA_OBSERVABILITY_URL`
@@ -31,6 +37,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import psycopg
 
@@ -83,24 +90,34 @@ def _configured_observability_base() -> str:
 
 
 def _advertised_station_unit(conn: psycopg.Connection) -> tuple[str, str] | None:
-    """The (machine_name, url) of a live observability-station unit, or None.
+    """The (machine_name, url) of a live observability-station unit that
+    advertises the OTLP ingress, or None.
 
     The reachability contract: the address the station itself advertised at
     registration (`shared.machines.unit_dial_url`). Read from machine_units
     directly (not the composed machines row) because a co-located gateway
     unit's URL wins the composed `machines.gateway_url` — the station's own
     advertised address is what the probe must dial.
+
+    Only a unit whose advertised url carries the OTLP ingress port
+    (`AVA_TELEMETRY_OTLP_PORT`, single source) qualifies: a pure station
+    advertises exactly that, while a hybrid gateway+station unit advertises
+    its gateway URL (unit_dial_url lets the gateway capability win) — probing
+    that address would hit the gateway API and alert forever (QA #1156
+    NIT-2). No qualifying unit → None, and the caller falls back to the
+    configured observability base with a warning.
     """
+    ingress_port = settings.observability.telemetry_otlp_port
     with conn.cursor() as cur:
         cur.execute(
             "SELECT machine_name, url FROM machine_units "
             "WHERE serve_observability_station AND stopped_at IS NULL "
-            "AND url IS NOT NULL ORDER BY machine_name, home LIMIT 1"
+            "AND url IS NOT NULL ORDER BY machine_name, home"
         )
-        row = cur.fetchone()
-    if row is None:
-        return None
-    return str(row[0]), str(row[1])
+        for name, url in cur.fetchall():
+            if urlparse(str(url)).port == ingress_port:
+                return str(name), str(url)
+    return None
 
 
 def resolve_target() -> _StationTarget | None:
@@ -128,8 +145,10 @@ def resolve_target() -> _StationTarget | None:
         return _StationTarget(url=url, advertised=True, name=name)
     logger.bind(_no_emitter=True, component="station-healthcheck").warning(
         "station probe: AVA_OBSERVABILITY_URL is set but no observability-station "
-        "unit has advertised itself in machine_units — probing the configured base "
-        "until the station registers (reachability contract, "
+        "unit advertises the OTLP ingress in machine_units (a pure station's "
+        "unit_dial_url; a hybrid gateway+station unit advertises its gateway URL "
+        "and is not a probe target) — probing the configured base until the "
+        "station registers (reachability contract, "
         "conventions/reachability-and-credentials.md)"
     )
     return _StationTarget(
