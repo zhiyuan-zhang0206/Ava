@@ -196,7 +196,8 @@ def test_resume_protected_publish_accepts_the_legacy_bytes_digest(tmp_path: Path
     from services.pitr.restore_proof import _resume_protected_publish
 
     legacy_digest = hashlib.sha256(_LEGACY_CANDIDATE_JSON.encode()).hexdigest()
-    assert legacy_digest.startswith("ef05a1e7")  # the live-tree legacy bytes
+    # The full live-tree legacy-bytes digest, pinned verbatim (QA #1131 nit).
+    assert legacy_digest == "ef05a1e70c743e454be4e745fe04fd5e2becf12a55dfc84e8aafd7e576ef3f1d"
     candidate = CandidateManifest.from_json(_LEGACY_CANDIDATE_JSON)
     names = required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
     protected_raw: dict[str, Any] = {
