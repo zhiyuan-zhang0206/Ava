@@ -138,16 +138,20 @@ def test_register_self_agent_runner_stores_null(_machine_setup) -> None:  # pyri
         machines.lookup("test-agent-runner")
 
 
-def test_register_self_station_only_composes_row(_machine_setup) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_register_self_station_only_composes_row(  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    _machine_setup,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A pure observability-station unit (neither gateway nor agent-runner) must
     compose a machines row carrying its capability — otherwise the station host
-    is invisible to `ava cluster status`. The composed row keeps gateway_url
-    NULL (nothing dials a station for ops) and stopped_at NULL (the unit is
-    live)."""
+    is invisible to `ava cluster status`. The composed row advertises the
+    station's OTLP ingress URL (its reachable-host dial target, WP4) and
+    stopped_at NULL (the unit is live)."""
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.9")
     _machine_setup(name="station-a", role="observability-station")
-    machines.register_self(url=None)
+    machines.register_self(url=machines.unit_dial_url(frozenset({"observability-station"})))
     gateway_url, role, _desc, stopped_at = _read_machine("station-a")  # pyright: ignore[reportUnknownVariableType]
-    assert gateway_url is None
+    assert gateway_url == "http://100.64.0.9:4318"
     assert role == ["observability-station"]
     assert stopped_at is None
 
@@ -168,23 +172,30 @@ def test_register_self_co_located_station_composes_with_gateway(_machine_setup) 
     assert stopped_at is None
 
 
-def test_unit_dial_url_pure_station_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pure station advertises no dial target: unit_dial_url returns None
-    instead of falling back to the gateway URL (which a station host does not
-    have — setup does not require gateway_url for it)."""
+def test_unit_dial_url_pure_station_is_otlp_ingress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pure station advertises its bearer-authenticated OTLP ingress — the
+    one station address remote consumers dial — derived from reachable_host
+    and AVA_TELEMETRY_OTLP_PORT (single source, task #1945). No gateway URL is
+    required (a station host does not have one)."""
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.9")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    assert machines.unit_dial_url(frozenset({"observability-station"})) is None
+    assert machines.unit_dial_url(frozenset({"observability-station"})) == (
+        "http://100.64.0.9:4318"
+    )
 
 
-def test_unit_dial_url_gateway_station_is_gateway_url(
+def test_unit_dial_url_gateway_station_is_reachable_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """gateway + station (no runner) keeps the historical gateway-URL dial —
-    the station capability must not change the gateway unit's advertised
-    address."""
+    """gateway + station (no runner) advertises the reachable-host form of the
+    gateway URL — the station capability must not change the gateway unit's
+    advertised address, but the host is always reachable_host(), never the
+    bare gateway URL (WP4: a loopback advertisement makes the page proxy
+    refuse the host's page servers)."""
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw:8000")
     assert machines.unit_dial_url(frozenset({"gateway", "observability-station"})) == (
-        "http://gw:8000"
+        "http://10.0.0.5:8000"
     )
 
 
@@ -520,14 +531,30 @@ def test_unit_dial_url_split_runner_is_reachable_ops(monkeypatch: pytest.MonkeyP
     assert machines.unit_dial_url(frozenset({"agent-runner"})) == "http://100.64.0.2:8600"
 
 
-def test_unit_dial_url_gateway_only_is_the_gateway_url(
+def test_unit_dial_url_gateway_only_is_reachable_host(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """gateway only: no ops server runs, so it advertises its own gateway URL."""
+    """gateway-only advertises reachable_host + the gateway URL's port, NOT the
+    bare gateway URL — a gateway_url naming loopback on a host with a
+    reachable identity would advertise a self-dialing address that breaks
+    page serves (WP4, 2026-08-30 serve 400)."""
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("https://ava.example:8000")
-    assert machines.unit_dial_url(frozenset({"gateway"})) == "https://ava.example:8000"
+    assert machines.unit_dial_url(frozenset({"gateway"})) == "http://100.64.0.2:8000"
+
+
+def test_unit_dial_url_gateway_only_defaults_port_when_url_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gateway-only with no resolvable gateway URL still advertises the
+    reachable host, on the gateway bind-port setting — the advertisement no
+    longer depends on gateway_url being configured (the 400-scenario fix)."""
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr(settings.gateway, "gateway_url", "")
+    monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
+    assert machines.unit_dial_url(frozenset({"gateway"})) == "http://100.64.0.2:8000"
 
 
 def test_unit_dial_url_agrees_across_both_writers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -625,6 +652,36 @@ def test_register_self_rejects_loopback_ops_url_when_gateway_remote(
         machines.register_self(url="http://localhost:8600")
     # nothing landed in the table
     assert machines.list_all() == []
+
+
+def test_register_self_rejects_loopback_station_url_when_gateway_remote(
+    _machine_setup,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An observability-station-only unit whose gateway is REMOTE must not
+    register a loopback dial URL — the gateway would probe itself instead of
+    the station (WP4 tightening of the runner rule, same 2026-07-18 shape).
+    Raised before any DB write."""
+    _machine_setup(name="station-wsl", role="observability-station")
+    monkeypatch.setattr(
+        settings.gateway, "gateway_url", "https://gw.example.com:8000"
+    )  # remote gateway
+    with pytest.raises(machines.LoopbackDialUrlRefused):
+        machines.register_self(url="http://localhost:4318")
+    # nothing landed in the table
+    assert machines.list_all() == []
+
+
+def test_register_self_allows_loopback_station_url_when_gateway_colocated(
+    _machine_setup,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+) -> None:
+    """A station-only unit whose gateway is co-located (loopback gateway URL)
+    may register a loopback dial URL — the zero-config single-box posture."""
+    _machine_setup(name="station-local", role="observability-station")
+    machines.register_self(url="http://localhost:4318")
+    gateway_url, role, _desc, _stopped = _read_machine("station-local")  # pyright: ignore[reportUnknownVariableType]
+    assert gateway_url == "http://localhost:4318"
+    assert role == ["observability-station"]
 
 
 def test_register_self_allows_loopback_ops_url_when_gateway_colocated(

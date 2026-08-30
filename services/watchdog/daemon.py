@@ -167,7 +167,7 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
     60s; the durable operator surface is `ava status`), so a revive can never
     crash-loop a service `ava start` chose not to launch.
 
-    Four pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
+    Five pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
     added by hand — so they state their own
     ``requires_db`` right here, the same fact the other entries carry from their spec:
     - redis-acl FIRST — repairs the per-cluster redis ACL user; every daemon below
@@ -186,6 +186,13 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
       Homebrew pin set on any macOS unit. It is warning-only and host-local, so
       neither role ownership nor database availability should suppress it
       (``requires_db=False``).
+    - station-probe on the GATEWAY capability — the remote observatory
+      station's health (WP4, task #1946). Probe-only: never restarts anything,
+      alerts fail-open. ``requires_db=True`` because it resolves the station's
+      advertised address from machine_units; holding it back during a
+      DB-scoped block is exactly fail-open. The module lives in
+      services/heartbeat/ (not services/healthchecks/) because it consumes the
+      gateway-owned ``alerts`` domain — see the check's comment below.
     pg-backup is instead a regular DB-dependent `ServiceSpec` scheduler. Its
     healthcheck probes last-success age and never runs a dump in this round.
     """
@@ -234,6 +241,27 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
         # needs no Postgres: `requires_db=False` — the observability read path
         # must not be held hostage by a DB outage.
         checks.append(_Check("lgtm", lgtm_healthcheck, requires_db=False))
+        # station-probe: the REMOTE observatory station's health (WP4, task
+        # #1946) — no ServiceSpec, it is a probe-only check. Self-gating on
+        # AVA_OBSERVABILITY_URL (empty = local observatory, the lgtm check
+        # owns it; non-empty = the gateway dials the station's advertised
+        # OTLP ingress with the cluster bearer and alerts fail-open on
+        # failure). requires_db=True — it resolves the advertised address
+        # from machine_units; a DB block holds it back, which is exactly
+        # fail-open.
+        #
+        # Resolved by dotted string, NOT imported at module level: the module
+        # consumes the gateway-owned `alerts` settings domain, and a static
+        # import here would drag that domain into the runner profile
+        # (test_gateway_consumer_guard). The runner watchdog never runs this
+        # check — only the gateway branch appends it.
+        checks.append(
+            _Check(
+                "station-probe",
+                _resolve_healthcheck("services.heartbeat.station_probe"),
+                requires_db=True,
+            )
+        )
     elif _runner_watchdog_owns_lgtm():
         # A station-capable agent-runner (marker OR observability-station
         # capability, no gateway) also owns the host's native backends: its
