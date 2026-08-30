@@ -18,13 +18,34 @@ def _frontend_port() -> int:
     raise ValueError("AVA_FRONTEND_HEALTHCHECK_URL must include a port")
 
 
+def _scheme_default_port(scheme: str) -> int:
+    return 443 if scheme == "https" else 80
+
+
+def _origin_forms(scheme: str, hostname: str, port: int) -> list[str]:
+    """All origin strings a browser may send for one (scheme, host, port).
+
+    Browsers serialize the scheme's default port away, so a location whose
+    port is the scheme default yields BOTH the bare form and the explicit
+    default-port form — either can appear in an Origin header; any other
+    port is always present, so only the explicit form is needed.
+    """
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    explicit = f"{scheme}://{host}:{port}"
+    if port == _scheme_default_port(scheme):
+        return [explicit, f"{scheme}://{host}"]
+    return [explicit]
+
+
 def cors_allowed_origins() -> list[str]:
     """Return the exact browser origins allowed to call the gateway.
 
-    An explicit allowlist is authoritative. Otherwise derive the local frontend
-    origins and the gateway URL's own origin — its scheme, host, and port —
-    which is the Origin header a browser sends for same-origin requests to the
-    gateway itself (e.g. the Grafana proxy under /grafana).
+    An explicit allowlist is authoritative. Otherwise derive the local
+    frontend origins, the same frontend entry on the gateway URL's host (the
+    Origin the Gate UI sends when it lives on the gateway host but the
+    frontend port), and the gateway URL's own origin — its scheme, host, and
+    port — which is the Origin header a browser sends for same-origin
+    requests to the gateway itself (e.g. the Grafana proxy under /grafana).
     """
     explicit = settings.gateway.cors_allowed_origins
     if explicit:
@@ -43,19 +64,20 @@ def cors_allowed_origins() -> list[str]:
     if not parsed_gateway.scheme or parsed_gateway.hostname is None:
         raise ValueError("AVA_GATEWAY_URL must be an absolute URL")
     hostname = parsed_gateway.hostname
-    if ":" in hostname:
-        hostname = f"[{hostname}]"
-    gateway_origin = f"{parsed_gateway.scheme}://{hostname}"
-    if parsed_gateway.port is not None:
-        gateway_origin = f"{gateway_origin}:{parsed_gateway.port}"
-    else:
-        # The URL carries no explicit port. Browsers serialize the scheme's
-        # default port away, so the Origin header has no port — but keep the
-        # explicit default-port form too, for clients that do send one.
-        default_port = 443 if parsed_gateway.scheme == "https" else 80
-        origins.append(f"{gateway_origin}:{default_port}")
-    if gateway_origin not in origins:
-        origins.append(gateway_origin)
+    gateway_scheme = parsed_gateway.scheme
+    gateway_port = (
+        parsed_gateway.port
+        if parsed_gateway.port is not None
+        else _scheme_default_port(gateway_scheme)
+    )
+
+    for origin in (
+        # The gateway URL's own origin, then the frontend entry on the same host.
+        *_origin_forms(gateway_scheme, hostname, gateway_port),
+        *_origin_forms(gateway_scheme, hostname, frontend_port),
+    ):
+        if origin not in origins:
+            origins.append(origin)
     return origins
 
 
