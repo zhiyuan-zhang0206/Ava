@@ -111,11 +111,14 @@ def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
     assert "agents.AgentRow" not in fqs  # a class
     assert "self.AGENT_ID" not in fqs  # a constant
     assert "memory.PATH" not in fqs  # a constant
-    # ava.skills' __all_for_ava__ is the live skill index, whose entries are served
-    # by module __getattr__ — the static walk resolves none of them, so nothing under
-    # skills. is wrapped (skill use is attributed by skill_invoked events instead).
-    # Dynamic MCP server proxies are never recursed into either.
-    assert not any(fq.startswith("skills.") for fq in fqs)
+    # ava.skills' __all_for_ava__ is the live skill index plus one real utility
+    # (`read`). The index entries are served by module __getattr__ and the static
+    # walk resolves none of them, so they are never wrapped (skill use is
+    # attributed by skill_invoked events instead); `read` is a genuine routine
+    # and belongs in the metered surface. Dynamic MCP server proxies are never
+    # recursed into either.
+    assert "skills.read" in fqs
+    assert not any(fq.startswith("skills.") and fq != "skills.read" for fq in fqs)
     assert not any(fq.startswith("mcps.") and fq.count(".") > 1 for fq in fqs)
 
 
