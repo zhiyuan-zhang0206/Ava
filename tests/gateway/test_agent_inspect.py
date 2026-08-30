@@ -43,7 +43,7 @@ from gateway.routers import _agent_cost, _inspect_stats, agent_inspect
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from shared.config import settings
-from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
+from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT, retention_floor
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -408,7 +408,17 @@ def test_inspect_pre_cutover_agent_uses_indexed_lifecycle_window(
     db_conn: psycopg.Connection,
     fake_loki: _FakeLoki,
 ) -> None:
-    """The live lifecycle leg skips legacy rows without losing open alive-time."""
+    """The live lifecycle leg skips expired legacy rows without losing open
+    alive-time.
+
+    The fixed index-label cutover (2026-08-23T11:00Z) sits inside the
+    expired legacy zone once `now - EVENT_STREAM_RETENTION` (the rolling
+    retention floor) passes it — 2026-08-30T11:00Z onwards (the same
+    expiry the 8/20 Loki archive incident made visible). The retained
+    window therefore starts at the floor, not the cutover; the projected
+    Loki read asserts that landed behavior, and the request-window
+    alive-time stays intact (pinned separately below).
+    """
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -423,7 +433,11 @@ def test_inspect_pre_cutover_agent_uses_indexed_lifecycle_window(
     assert response.status_code == 200
     lifecycle_calls = _lifecycle_projected_calls(fake_loki)
     assert len(lifecycle_calls) == 1
-    assert lifecycle_calls[0]["from_"] == INDEX_LABEL_CUTOVER_AT
+    from_ = lifecycle_calls[0]["from_"]
+    # Legacy slice expired: the retained window is clipped at the rolling
+    # retention floor (a few seconds of wall-clock drift between the request
+    # and this read is allowed).
+    assert abs((from_ - retention_floor()).total_seconds()) < 10
     alive_seconds = response.json()["activity"]["alive_seconds"]
     assert alive_seconds == pytest.approx(24 * 60 * 60, abs=30)  # pyright: ignore[reportUnknownMemberType]
 
