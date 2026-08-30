@@ -1941,14 +1941,14 @@ def test_register_gateway_advertises_without_gateway_url(
     monkeypatch.setattr("shared.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
 
     rc = _real_register_machine_or_die(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
     )
     assert rc == 0
-    assert calls == ["http://100.64.0.2:8000"]
+    assert calls == ["http://10.0.0.2:8000"]
 
 
 def test_register_gateway_only_advertises_reachable_host(
@@ -1966,7 +1966,7 @@ def test_register_gateway_only_advertises_reachable_host(
 
     monkeypatch.setattr("shared.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("https://ava.example:8000")
 
@@ -1974,7 +1974,7 @@ def test_register_gateway_only_advertises_reachable_host(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
     )
     assert rc == 0
-    assert calls == ["http://100.64.0.2:8000"]
+    assert calls == ["http://10.0.0.2:8000"]
 
 
 def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1986,7 +1986,7 @@ def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatc
         calls.append(url)
 
     monkeypatch.setattr("shared.machines.register_self", fake_register_self)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
         lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
@@ -1996,7 +1996,7 @@ def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatc
         cast(SetupValues, {"machine_name": "wsl"}), frozenset({"agent-runner"})
     )
     assert rc == 0
-    assert calls == ["http://100.64.0.2:8106"]
+    assert calls == ["http://10.0.0.2:8106"]
 
 
 def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:

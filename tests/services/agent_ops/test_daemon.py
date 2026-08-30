@@ -853,7 +853,7 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
 
     calls: list[str | None] = []
     monkeypatch.setattr("shared.machines.register_self", lambda *, url=None: calls.append(url))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -864,7 +864,7 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
     finally:
         reset_identity()
 
-    assert calls == ["http://100.64.0.2:8600"]
+    assert calls == ["http://10.0.0.2:8600"]
 
 
 def test_register_boot_failure_does_not_stop_the_daemon(
@@ -880,7 +880,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
         raise RuntimeError("central postgres unreachable")
 
     monkeypatch.setattr("shared.machines.register_self", _boom)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -914,7 +914,7 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
     from shared.machine import reset_identity, set_identity
 
     monkeypatch.setattr("shared.machines.ava_home", lambda: "~/.ava")
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.9")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.9")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -926,14 +926,14 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
 
     set_identity(name="came-back", role="agent-runner")
     try:
-        machines.register_self(url="http://100.64.0.9:8600")
+        machines.register_self(url="http://10.0.0.9:8600")
         machines.mark_stopping("came-back", "~/.ava")
         assert machines.list_agent_runners() == []  # dropped from the fan-out
-        assert machines.list_stopped_agent_runners() == [("came-back", "http://100.64.0.9:8600")]
+        assert machines.list_stopped_agent_runners() == [("came-back", "http://10.0.0.9:8600")]
 
         daemon._register_boot()  # the daemon comes up on its own
 
-        assert machines.list_agent_runners() == [("came-back", "http://100.64.0.9:8600")]
+        assert machines.list_agent_runners() == [("came-back", "http://10.0.0.9:8600")]
         assert machines.list_stopped_agent_runners() == []
     finally:
         reset_identity()

@@ -20,7 +20,7 @@ def test_main_cluster_db_always_refused(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.delenv("AVA_TEST_DB", raising=False)
     with pytest.raises(RuntimeError, match="production database"):
         assert_test_db_url(
-            "postgresql://ava_main:***@100.64.0.2:6433/ava_main",
+            "postgresql://ava_main:***@10.0.0.2:6433/ava_main",
             context="test",
         )
     monkeypatch.setenv("AVA_TEST_DB", "1")

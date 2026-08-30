@@ -65,7 +65,7 @@ function paragraphChildren(markdown: string): PhrasingContent[] {
 describe("remarkAutolinkDelimiter", () => {
   it("restores both strong spans in the reported message", () => {
     const markdown =
-      "\u65b9\u6848\u62a5\u544a\u5728 **http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/**\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a**events drop / N-step canary / Loki archive 365d**——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002";
+      "\u65b9\u6848\u62a5\u544a\u5728 **http://10.0.0.72:8000/pages/3682-events-checkpoint-growth-p2/**\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a**events drop / N-step canary / Loki archive 365d**——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002";
 
     const children = paragraphChildren(markdown);
 
@@ -73,7 +73,7 @@ describe("remarkAutolinkDelimiter", () => {
       text("\u65b9\u6848\u62a5\u544a\u5728 "),
       wrappedLink(
         "strong",
-        "http://100.103.96.72:8000/pages/3682-events-checkpoint-growth-p2/",
+        "http://10.0.0.72:8000/pages/3682-events-checkpoint-growth-p2/",
       ),
       text("\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a"),
       {
@@ -88,7 +88,7 @@ describe("remarkAutolinkDelimiter", () => {
 
   it("restores a non-adjacent strong opener before a labeled URL", () => {
     const children = paragraphChildren(
-      "**Grafana\uff1ahttp://100.103.96.72:3003**\uff08\u533f\u540d viewer\uff0c\u65e0\u9700\u767b\u5f55\uff09",
+      "**Grafana\uff1ahttp://10.0.0.72:3003**\uff08\u533f\u540d viewer\uff0c\u65e0\u9700\u767b\u5f55\uff09",
     );
 
     expect(children).toMatchObject([
@@ -96,7 +96,7 @@ describe("remarkAutolinkDelimiter", () => {
         type: "strong",
         children: [
           text("Grafana\uff1a"),
-          link("http://100.103.96.72:3003"),
+          link("http://10.0.0.72:3003"),
         ],
       },
       text("\uff08\u533f\u540d viewer\uff0c\u65e0\u9700\u767b\u5f55\uff09"),

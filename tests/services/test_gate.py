@@ -611,8 +611,8 @@ def test_gateway_base_uses_reachable_host(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         daemon, "settings", types.SimpleNamespace(gateway=types.SimpleNamespace(gateway_port=8123))
     )
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.2")
-    assert daemon._gateway_base() == "http://100.64.0.2:8123"
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+    assert daemon._gateway_base() == "http://10.0.0.2:8123"
 
     # Single box: the localhost fallback keeps local browsers working verbatim.
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "localhost")

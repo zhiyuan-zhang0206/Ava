@@ -301,10 +301,10 @@ def test_set_identity_description_none_is_explicit(tmp_path: Path) -> None:
 
 
 def test_reachable_host_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(settings.general, "machine_host", "100.64.0.1")
+    monkeypatch.setattr(settings.general, "machine_host", "10.0.0.1")
     monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
     (tmp_path / "machine_host").write_text("100.0.0.9")  # overridden by env
-    assert _machine.reachable_host() == "100.64.0.1"
+    assert _machine.reachable_host() == "10.0.0.1"
 
 
 def test_reachable_host_file_when_env_empty(
@@ -312,8 +312,8 @@ def test_reachable_host_file_when_env_empty(
 ) -> None:
     monkeypatch.setattr(settings.general, "machine_host", "")
     monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_host").write_text("100.64.0.2\n")  # trailing \n trimmed
-    assert _machine.reachable_host() == "100.64.0.2"
+    (tmp_path / "machine_host").write_text("10.0.0.2\n")  # trailing \n trimmed
+    assert _machine.reachable_host() == "10.0.0.2"
 
 
 def test_reachable_host_defaults_to_localhost(
@@ -330,9 +330,9 @@ def test_reachable_host_defaults_to_localhost(
 def test_set_identity_host_injection() -> None:
     from shared.machine import reachable_host, reset_identity, set_identity
 
-    set_identity(host="100.64.0.5")
+    set_identity(host="10.0.0.5")
     try:
-        assert reachable_host() == "100.64.0.5"
+        assert reachable_host() == "10.0.0.5"
     finally:
         reset_identity()
 

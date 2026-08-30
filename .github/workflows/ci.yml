@@ -120,6 +120,9 @@ jobs:
       - name: Scan for raw CJK (i18n locale files exempt)
         run: python3 scripts/lint_no_cjk.py
 
+      - name: Scan for tailnet IP literals (CIDR range notation exempt)
+        run: python3 scripts/lint_no_tailnet.py
+
   backend-static:
     name: backend static (ruff + pyright + migration smoke)
     runs-on: ubuntu-24.04

@@ -25,7 +25,7 @@ def test_listener_addrs_reads_all_matching_psutil_listeners(
         _Connection("LISTEN", ("::", 6433)),
         _Connection("LISTEN", ("2001:db8::5", 6433)),
         _Connection("LISTEN", ("127.0.0.1", 6434)),
-        _Connection("ESTABLISHED", ("100.103.96.72", 6433)),
+        _Connection("ESTABLISHED", ("10.0.0.72", 6433)),
         _Connection("LISTEN", ()),
     ]
 
@@ -61,7 +61,7 @@ def test_listener_addrs_falls_back_to_lsof_name_fields(
             argv,
             0,
             stdout=(
-                "p101\nn100.103.96.72:6433\n"
+                "p101\nn10.0.0.72:6433\n"
                 "p102\nn*:6433\n"
                 "p103\nn127.0.0.1:6433\n"
                 "p104\nn192.0.2.1:6434\n"
@@ -73,7 +73,7 @@ def test_listener_addrs_falls_back_to_lsof_name_fields(
     monkeypatch.setattr(proc, "run_bounded", _run)
 
     assert port_preflight.listener_addrs(6433) == {
-        "100.103.96.72",
+        "10.0.0.72",
         "*",
         "127.0.0.1",
     }

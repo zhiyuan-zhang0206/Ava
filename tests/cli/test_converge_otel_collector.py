@@ -93,7 +93,7 @@ def test_generate_config_two_state_observability_url(
         "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.observability_url", "http://100.78.137.46"
+        "shared.config.settings.observability.observability_url", "http://10.0.0.46"
     )
     # A remote observatory is a split-cluster shape: the relay authenticates
     # with the cluster bearer, so the secret must be set (empty fails closed).
@@ -102,8 +102,8 @@ def test_generate_config_two_state_observability_url(
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
     # WP4: a remote observatory is reached through the station's ONE
     # bearer-authenticated OTLP ingress, never the direct backend /otlp paths.
-    assert "loki: http://100.78.137.46:4318" in out
-    assert "prom: http://100.78.137.46:4318" in out
+    assert "loki: http://10.0.0.46:4318" in out
+    assert "prom: http://10.0.0.46:4318" in out
     assert "tempo: http://127.0.0.1:14318" in out
 
     monkeypatch.setattr("shared.config.settings.observability.observability_url", "")
@@ -231,8 +231,8 @@ def _render_real_template(
     monkeypatch: pytest.MonkeyPatch,
     roles: frozenset[str] | None,
     *,
-    gateway_url: str = "http://100.64.0.10:8000",
-    machine_host: str = "100.64.0.10",
+    gateway_url: str = "http://10.0.0.10:8000",
+    machine_host: str = "10.0.0.10",
     cluster_secret: str = "cluster-token",  # noqa: S107 — fixture token
     self_metrics_port: int = 8888,
     otlp_enabled: bool = True,
@@ -689,7 +689,7 @@ def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queue
     assert set(exporters) == expected_ids
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         exporter = exporters[exporter_id]
-        assert exporter["endpoint"] == "http://100.64.0.10:4318"
+        assert exporter["endpoint"] == "http://10.0.0.10:4318"
         assert exporter["headers"] == {"Authorization": "Bearer cluster-token"}
     assert exporters["otlphttp/tempo"]["sending_queue"]["storage"] == "file_storage"
     assert exporters["otlphttp/loki"]["sending_queue"]["storage"] == "file_storage"
@@ -709,7 +709,7 @@ def test_gateway_has_separate_authenticated_reachable_receiver(
 
     assert cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4318"}
     assert cfg["receivers"]["otlp/remote"]["protocols"]["http"] == {
-        "endpoint": "100.64.0.10:4318",
+        "endpoint": "10.0.0.10:4318",
         "auth": {"authenticator": "bearertokenauth/cluster"},
     }
     assert cfg["extensions"]["bearertokenauth/cluster"] == {"token": "cluster-token"}
@@ -738,7 +738,7 @@ def test_station_has_separate_authenticated_reachable_receiver(
 
     assert cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4318"}
     assert cfg["receivers"]["otlp/remote"]["protocols"]["http"] == {
-        "endpoint": "100.64.0.10:4318",
+        "endpoint": "10.0.0.10:4318",
         "auth": {"authenticator": "bearertokenauth/cluster"},
     }
     assert cfg["extensions"]["bearertokenauth/cluster"] == {"token": "cluster-token"}
@@ -770,12 +770,12 @@ def test_remote_observatory_gateway_relays_to_station_single_ingress(
     cfg = _render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
-        observability_url="http://100.78.137.46",
+        observability_url="http://10.0.0.46",
     )
     exporters = cfg["exporters"]
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         exporter = exporters[exporter_id]
-        assert exporter["endpoint"] == "http://100.78.137.46:4318"
+        assert exporter["endpoint"] == "http://10.0.0.46:4318"
         assert exporter["headers"] == {"Authorization": "Bearer cluster-token"}
     rendered = str(cfg)
     assert "127.0.0.1:3100" not in rendered
@@ -796,7 +796,7 @@ def test_remote_observatory_relay_without_secret_fails_closed(
             monkeypatch,
             frozenset({"gateway", "agent-runner"}),
             cluster_secret="",
-            observability_url="http://100.78.137.46",
+            observability_url="http://10.0.0.46",
         )
 
 
@@ -808,10 +808,10 @@ def test_station_otlp_ingress_port_follows_single_source(
     single knob for both (WP4, task #1946)."""
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_port", 4321)
     cfg = _render_real_template(monkeypatch, frozenset({"observability-station"}))
-    assert cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == ("100.64.0.10:4321")
+    assert cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == ("10.0.0.10:4321")
     from shared.machines import unit_dial_url
 
-    assert unit_dial_url(frozenset({"observability-station"})) == "http://100.64.0.10:4321"
+    assert unit_dial_url(frozenset({"observability-station"})) == "http://10.0.0.10:4321"
 
 
 def test_otlp_ingress_port_single_source_renders_everywhere(
@@ -826,11 +826,11 @@ def test_otlp_ingress_port_single_source_renders_everywhere(
     gateway_cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
     assert gateway_cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4319"}
     assert gateway_cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == (
-        "100.64.0.10:4319"
+        "10.0.0.10:4319"
     )
     runner_cfg = _render_real_template(monkeypatch, frozenset({"agent-runner"}))
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
-        assert runner_cfg["exporters"][exporter_id]["endpoint"] == "http://100.64.0.10:4319"
+        assert runner_cfg["exporters"][exporter_id]["endpoint"] == "http://10.0.0.10:4319"
 
 
 def test_hybrid_gateway_runner_still_serves_remote_runners(
@@ -840,7 +840,7 @@ def test_hybrid_gateway_runner_still_serves_remote_runners(
     even when the same host also runs agents (the production Mac mini shape)."""
     cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
     remote = cfg["receivers"]["otlp/remote"]["protocols"]["http"]
-    assert remote["endpoint"] == "100.64.0.10:4318"
+    assert remote["endpoint"] == "10.0.0.10:4318"
     assert remote["auth"] == {"authenticator": "bearertokenauth/cluster"}
 
 
@@ -924,7 +924,7 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
             monkeypatch,
             roles,
             cluster_secret="",
-            machine_host="100.64.0.10",
+            machine_host="10.0.0.10",
         )
         assert "otlp/remote" not in no_secret["receivers"]
         assert "bearertokenauth/cluster" not in no_secret["extensions"]
@@ -945,20 +945,20 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
         (
             frozenset({"agent-runner"}),
             "http://localhost:8000",
-            "100.64.0.20",
+            "10.0.0.20",
             "token",
             "gateway URL",
         ),
-        (frozenset({"agent-runner"}), "http://0.0.0.0:8000", "100.64.0.20", "token", "gateway URL"),
-        (frozenset({"agent-runner"}), "http://[::]:8000", "100.64.0.20", "token", "gateway URL"),
+        (frozenset({"agent-runner"}), "http://0.0.0.0:8000", "10.0.0.20", "token", "gateway URL"),
+        (frozenset({"agent-runner"}), "http://[::]:8000", "10.0.0.20", "token", "gateway URL"),
         (
             frozenset({"agent-runner"}),
-            "http://100.64.0.10:8000",
-            "100.64.0.20",
+            "http://10.0.0.10:8000",
+            "10.0.0.20",
             "",
             "cluster secret",
         ),
-        (frozenset({"gateway"}), "http://100.64.0.10:8000", "0.0.0.0", "token", "reachable host"),  # noqa: S104 — rejection fixture
+        (frozenset({"gateway"}), "http://10.0.0.10:8000", "0.0.0.0", "token", "reachable host"),  # noqa: S104 — rejection fixture
         (
             frozenset({"gateway"}),
             "http://[fd7a:115c:a1e0::10]:8000",
@@ -975,7 +975,7 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
         # assertions in test_station_has_separate_authenticated_reachable_receiver).
         (
             frozenset({"observability-station"}),
-            "http://100.64.0.10:8000",
+            "http://10.0.0.10:8000",
             "0.0.0.0",  # noqa: S104 — rejection fixture
             "token",
             "reachable host",
@@ -1030,9 +1030,9 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     monkeypatch.setattr(
         "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
     )
-    monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://100.64.0.10:8000")
+    monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://10.0.0.10:8000")
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "cluster-token")
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "100.64.0.10")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
     repo = Path(__file__).resolve().parents[2]
 
     replace = Path.replace

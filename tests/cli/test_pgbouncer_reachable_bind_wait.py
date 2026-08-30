@@ -68,7 +68,7 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
     explicit message; the boot retry re-runs `ava start` once the network is up."""
     monkeypatch.setattr(_pb, "_running_pid", lambda: None)
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_pb, "reachable_host", lambda: "100.64.0.5")
+    monkeypatch.setattr(_pb, "reachable_host", lambda: "10.0.0.5")
     calls = _fake_start(monkeypatch)
 
     rc = _pb.ensure_pgbouncer(
@@ -110,7 +110,7 @@ def test_wait_gate_probes_when_reachable_is_bound(
 ) -> None:
     """With a secret the pooler binds loopback + the reachable address, so the
     wait consults `_wait_for_reachable_bind`."""
-    monkeypatch.setattr(_pb, "_bind_addrs", lambda _secret: ["127.0.0.1", "100.64.0.5"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_pb, "_bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind", lambda: True)
     assert _pb._wait_for_reachable_bind_gated(_SECRET) is True
 
@@ -128,7 +128,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
     monkeypatch.setattr(_pb, "_running_pid", lambda: None)
     monkeypatch.setattr(_pb, "_admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_pb, "reachable_host", lambda: "100.64.0.5")
+    monkeypatch.setattr(_pb, "reachable_host", lambda: "10.0.0.5")
     _fake_start(monkeypatch)
 
     rc = _pb.ensure_pgbouncer(
@@ -143,7 +143,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
     out = capsys.readouterr()
     assert "✓ pgbouncer started" not in out.out
     assert "NOT listening on the reachable address" in out.err
-    assert "100.64.0.5" in out.err
+    assert "10.0.0.5" in out.err
     assert "degraded to loopback-only" in out.err
 
 
@@ -242,7 +242,7 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
     )
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownVariableType]
     monkeypatch.setattr(_pb, "_admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_pb, "reachable_host", lambda: "100.64.0.5")
+    monkeypatch.setattr(_pb, "reachable_host", lambda: "10.0.0.5")
     _fake_start(monkeypatch)
 
     rc = _pb.ensure_pgbouncer(
