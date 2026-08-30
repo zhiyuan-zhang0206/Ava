@@ -51,7 +51,7 @@ from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._env import E2EEnv
 from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_URL
-from tests.e2e._proc import managed_proc, proc_log_tail, wait_for_port
+from tests.e2e._proc import managed_proc, proc_log_tail, sweep_stale_e2e_processes, wait_for_port
 
 # ---- module-level overrides (run after top-level conftest) ---------------------
 
@@ -70,6 +70,13 @@ def pytest_collection_modifyitems(
     skips the item before any fixture runs. This keeps a missing-node_modules
     local run from polluting later async tests (see playwright_runtime).
     """
+    # Reap residue of dead e2e runs BEFORE anything in this session starts. The
+    # sweep must also fire when prerequisites are missing (collection-time
+    # skip): a crashed run's stack is exactly what most needs reaping, and a
+    # node_modules-less session may still be the one that would otherwise never
+    # get a chance to clean it.
+    with contextlib.suppress(Exception):  # a cleanup failure must not abort collection
+        sweep_stale_e2e_processes()
     if shutil.which("npm") and (_REPO_ROOT / "ui" / "web" / "node_modules" / "next").exists():
         return
     for item in items:
@@ -147,7 +154,9 @@ def _apply_e2e_seq_offset() -> None:
 
 
 @pytest.fixture(scope="package", autouse=True)
-def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
+def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore sequence; each step is one statement
+    _provisioned_db: str, _provisioned_redis: str
+) -> Iterator[None]:
     """Layer e2e-specific process config on the root conftest's session Postgres +
     Redis (provisioned by its autouse fixtures). The DB/Redis
     URLs are already in settings + os.environ (AVA_DB_URL / AVA_REDIS_URL), so the
@@ -183,6 +192,12 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     tells you about the rest of the chain).
     """
     _gc_orphan_e2e()
+    # Belt over the collection-time reaping above: a session can reach package
+    # setup with residue that appeared since (e.g. a peer's run died mid-way).
+    # A reaper failure must not abort the session (same rule as collection) —
+    # and at teardown a failure must not skip the env restore below.
+    with contextlib.suppress(Exception):
+        sweep_stale_e2e_processes()
     _apply_e2e_seq_offset()
     # Every key assigned below, no exceptions — `tests/test_home_isolation.py`'s
     # `test_the_e2e_fixture_restores_every_env_key_it_assigns` derives the assigned set
@@ -314,6 +329,15 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     try:
         yield
     finally:
+        # Reap whatever OUR session left behind (an agent that ignored its
+        # terminate, a gateway child that escaped `managed_proc`). Runs at
+        # package teardown, when the session fixtures (frontend, browser) are
+        # still holding their own processes — those are also e2e-owned and
+        # get reaped here too, which their own teardowns simply find already
+        # dead instead of killing again. A reaper failure must never skip the
+        # env restore (the leak this file's scope contract exists to prevent).
+        with contextlib.suppress(Exception):
+            sweep_stale_e2e_processes(include_own=True)
         settings.data_plane.events_channel = prev_events
         for k, v in prev_env.items():
             if v is None:
