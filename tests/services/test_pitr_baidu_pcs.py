@@ -34,6 +34,7 @@ from tests.services.baidu_test_support import (
     ChunkSource,
     FakePcs,
     _md5,
+    _opaque,
     make_store,
     sidecar_json,
 )
@@ -183,7 +184,7 @@ def test_put_wal_ciphertext_three_phase_and_sidecar(
     assert ack.checksum == ObjectChecksum(MD5, whole_md5)
     assert ack.created is True
     obj_path = f"{APP_ROOT}/{OBJECT}"
-    assert ack.pin_token == f"{fake.files[obj_path]['fs_id']}:{whole_md5}"
+    assert ack.pin_token == f"{fake.files[obj_path]['fs_id']}:{_opaque(payload)}"
     assert fake.calls[:3] == [
         f"precreate {obj_path}",
         f"upload {obj_path}",
@@ -192,7 +193,7 @@ def test_put_wal_ciphertext_three_phase_and_sidecar(
     # The sidecar mirrors the ACK identity through the same engine.
     sidecar = fake.files[f"{obj_path}.ack.json"]
     expected = sidecar_json(OBJECT, ack)
-    assert sidecar["md5"] == _md5(expected)
+    assert sidecar["md5"] == _opaque(expected)
     assert sidecar["size"] == len(expected)
 
 
@@ -422,12 +423,13 @@ def test_retry_adopts_a_new_pin_when_only_the_pin_drifted(
     obj_path = f"{APP_ROOT}/{OBJECT}"
     payload = b"payload"
     digest = _md5(payload)
-    old_row = fake.seed_file(obj_path, size=len(payload), md5=digest)
+    opaque = _opaque(payload)
+    old_row = fake.seed_file(obj_path, size=len(payload), md5=opaque)
     old_sidecar = sidecar_json(
         OBJECT,
         RemoteObjectAck(
             object_name=OBJECT,
-            pin_token=f"{old_row['fs_id']}:{digest}",
+            pin_token=f"{old_row['fs_id']}:{opaque}",
             size=len(payload),
             checksum=ObjectChecksum(MD5, digest),
             metadata={},
@@ -451,10 +453,10 @@ def test_retry_adopts_a_new_pin_when_only_the_pin_drifted(
     ack = store.put_wal_ciphertext_if_absent(source, OBJECT, {})
 
     # the fake's create assigned a fresh fs_id — the retry adopted it
-    assert ack.pin_token != f"{old_row['fs_id']}:{digest}"
+    assert ack.pin_token != f"{old_row['fs_id']}:{opaque}"
     assert ack.checksum == ObjectChecksum(MD5, digest)
     rewritten = sidecar_json(OBJECT, ack)
-    assert fake.files[f"{obj_path}.ack.json"]["md5"] == _md5(rewritten)
+    assert fake.files[f"{obj_path}.ack.json"]["md5"] == _opaque(rewritten)
 
 
 def test_stat_reads_back_sidecar_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -619,3 +621,62 @@ def test_stat_returns_none_without_sidecar(tmp_path: Path, monkeypatch: pytest.M
     fake.seed_file(f"{APP_ROOT}/{OBJECT}", size=100, md5=_md5(b"x"))
 
     assert store.stat(OBJECT) is None
+
+
+def test_opaque_pin_flows_from_upload_into_wal_evidence_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QA #1201 P0/P2-1: the live-shaped opaque pin must survive the whole
+    chain — the store upload produces it and the WAL remote evidence
+    validator accepts it without any cross-check against the content md5."""
+    from services.pitr.activation_evidence import validate_wal_remote_evidence
+
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    payload = b"wal-ciphertext" * 256
+    source = tmp_path / "wal.enc"
+    source.write_bytes(payload)
+
+    ack = store.put_wal_ciphertext_if_absent(
+        source, OBJECT, {"ava-archive-name": "000000010000000000000001"}
+    )
+
+    assert ack.pin_token == f"{fake.files[f'{APP_ROOT}/{OBJECT}']['fs_id']}:{_opaque(payload)}"
+    segment = "000000010000000000000001"
+    evidence = {
+        "timeline": "1",
+        "segment": segment,
+        "bucket_name": "/apps/ava-pitr",
+        "object_prefix": "ava-pitr",
+        "object_name": ack.object_name,
+        "generation": ack.pin_token,
+        "ciphertext_size": str(ack.size),
+        "ciphertext_crc32c": ack.checksum.value,
+        "source_sha256": "1" * 64,
+        "source_size": str(len(payload)),
+        "key_id": "key",
+        "encryption_format": "AVAPITR1",
+        "acknowledged_at": "2026-08-31T03:30:00+00:00",
+    }
+    validate_wal_remote_evidence(
+        ack=evidence,
+        viewer={**evidence, "viewer_id": "app-key", "observed_at": "2026-08-31T03:31:00+00:00"},
+        exact={
+            "timeline": "1",
+            "segment": segment,
+            "switch_lsn": "0/1",
+            "failed_count": "0",
+            "archived_count": "0",
+            "switch_intent_at": "2026-08-31T03:00:00+00:00",
+        },
+        verification_deadline="2026-08-31T04:00:00+00:00",
+        credential_evidence={
+            "backend": "baidu",
+            "uploader_identity": "app-key",
+            "viewer_identity": "app-key",
+            "store_target": "/apps/ava-pitr",
+            "object_prefix": "ava-pitr",
+            "backup_key_id": "key",
+            "backup_key_sha256": "0" * 64,
+        },
+    )

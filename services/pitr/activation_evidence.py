@@ -85,9 +85,12 @@ def validate_wal_remote_evidence(
     if ack["object_name"] != expected_object:
         raise ValueError("PITR remote object name is not canonical")
     if backend == "baidu":
-        # Baidu pins an object with its PCS identity ("fs_id:content-md5"),
-        # not a monotonic generation number.
-        if not re.fullmatch(r"[0-9]+:[0-9a-f]{32}", ack["generation"]):
+        # Baidu pins an object with its PCS identity: a numeric fs_id plus
+        # Baidu's encrypted server digest (live P0 smoke: lowercase
+        # alphanumeric, never hex, never the content md5 — so there is no
+        # cross-check against the content checksum; the content is verified
+        # from the downloaded bytes at restore time).
+        if not re.fullmatch(r"[0-9]+:[0-9a-z]{32}", ack["generation"]):
             raise ValueError("PITR remote evidence has an invalid Baidu pin token")
     elif int(ack["generation"]) <= 0:
         raise ValueError("PITR remote identity must have positive generation and size")
@@ -97,12 +100,9 @@ def validate_wal_remote_evidence(
         raise ValueError("PITR remote evidence has invalid source identity")
     if backend == "baidu":
         # The backend-verified checksum is the content MD5 in lowercase hex,
-        # not a CRC32C base64 digest; the pin's embedded md5 is that same
-        # content digest, so the two must agree (QA #1147 nit 2).
+        # not a CRC32C base64 digest.
         if not re.fullmatch(r"[0-9a-f]{32}", ack["ciphertext_crc32c"]):
             raise ValueError("PITR remote evidence has an invalid ciphertext MD5")
-        if ack["generation"].split(":", 1)[1] != ack["ciphertext_crc32c"]:
-            raise ValueError("PITR remote pin token md5 differs from the ciphertext checksum")
     elif not re.fullmatch(r"[A-Za-z0-9+/]{6}==", ack["ciphertext_crc32c"]):
         raise ValueError("PITR remote evidence has invalid CRC32C")
     intent_at = datetime.fromisoformat(exact["switch_intent_at"])
