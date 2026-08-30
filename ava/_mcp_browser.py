@@ -186,9 +186,11 @@ async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
     return session, stack
 
 
-# Exit-hook release bound: one dial attempt, short timeout — the agent process
-# is already exiting and must not stall on this retry sequence if the daemon is
-# mid-restart. The daemon's own dead-page reaper is the second line of defense.
+# Exit-hook release bound: ONE total budget for the entire dial -> request ->
+# reply round-trip. The agent process is already exiting and must not stall on
+# this cleanup if the daemon happens to be wedged (three separate 3 s timeouts
+# would add up to ~9 s on the exit path). The service's own dead-page reaper is
+# the second line of defense for deaths that never reach the exit hook.
 _RELEASE_TIMEOUT_S = 3.0
 
 
@@ -207,25 +209,28 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
     try:
         from shared.paths import chrome_mcp_socket
 
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_unix_connection(path=str(chrome_mcp_socket()), limit=_LINE_LIMIT),
+        return await asyncio.wait_for(
+            _release_roundtrip(str(chrome_mcp_socket()), agent_id),
             timeout=_RELEASE_TIMEOUT_S,
         )
     except Exception:
         return False
+
+
+async def _release_roundtrip(sock: str, agent_id: int) -> bool:
+    """One dial -> request -> reply round-trip; the caller owns the timeout."""
+    reader, writer = await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
     try:
         writer.write(
             (
                 json.dumps({"id": 1, "method": "release_agent_page", "agent_id": agent_id}) + "\n"
             ).encode()
         )
-        await asyncio.wait_for(writer.drain(), timeout=_RELEASE_TIMEOUT_S)
-        line = await asyncio.wait_for(reader.readline(), timeout=_RELEASE_TIMEOUT_S)
+        await writer.drain()
+        line = await reader.readline()
         if not line:
             return False
         resp: dict[str, Any] = json.loads(line)
         return resp.get("ok") is True
-    except Exception:
-        return False
     finally:
         await _close_writer(writer)

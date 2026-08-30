@@ -422,9 +422,6 @@ async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
     server.close()
     await server.wait_closed()
     sock_path.unlink(missing_ok=True)
-    server.close()
-    await server.wait_closed()
-    sock_path.unlink(missing_ok=True)
 
 
 # ── Agent-terminate page release (process-exit hook) ─────────────────────
@@ -619,3 +616,48 @@ async def test_reap_dead_agent_pages_idempotent(
     # slots cleared to None (same shape as an agent closing its own page) —
     # nothing left to sweep
     assert _AGENT_AFFINITY == {7: None, 8: None}
+
+
+async def test_reap_dead_agent_pages_never_touches_slotless_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tab with NO affinity slot — the user's own tab, or an agent that never
+    went through the bridge — must be immune to the reaper even on a dead
+    localhost port. The registry is the ONLY thing that ever makes a page a
+    candidate (mutation guard: a reaper that swept all pages instead of slots
+    must fail this test)."""
+
+    async def fake_probe(host: str, port: int) -> bool:
+        return False  # everything dead
+
+    monkeypatch.setattr("services.browser.page_lifecycle.port_listening", fake_probe)
+
+    d, up = _daemon()
+    # a slotless tab seeded directly (never created via call_tool_for_agent)
+    up.pages[99] = "http://localhost:9999/user-own-tab"
+    up.calls.clear()
+
+    await reap_dead_agent_pages(d)
+
+    # the tab survives and no close_page ever reached the upstream
+    assert up.pages == {99: "http://localhost:9999/user-own-tab"}
+    assert up.calls == [("list_pages", {}, None)]
+    assert _AGENT_AFFINITY == {}
+
+
+# ── Port-probe timeouts ──────────────────────────────────────────────────
+
+
+async def test_port_listening_stalled_connect_reads_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A connect that neither completes nor refuses within the probe bound is
+    treated as ALIVE — the docstring's headline promise: never close a live tab
+    on a probe that could not decide (mutation guard for the timeout branch)."""
+
+    async def _stall(*_args: object, **_kwargs: object) -> object:
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr("services.browser.page_lifecycle.asyncio.open_connection", _stall)
+    monkeypatch.setattr("services.browser.page_lifecycle._PORT_PROBE_TIMEOUT_S", 0.05)
+    assert await port_listening("localhost", 9999) is True
