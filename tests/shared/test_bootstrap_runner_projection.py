@@ -119,3 +119,31 @@ def test_unknown_role_value_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     with pytest.raises(ValueError, match="not a known projection"):
         config.bootstrap_config_values(role="admin")
+
+
+def test_runner_projection_excludes_pitr_enablement_flags(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The physical-backup enablement flags are gateway-local facts. When the
+    activation wrote them into the gateway .env they rode the bootstrap
+    payload to agent-runners, which built PhysicalBackupSettings with
+    pitr_enabled=True but held no gateway-local GCS credentials — every
+    runner service then refused to start (2026-08-30 incident). Whatever the
+    gateway's .env says, these flags must never reach a runner."""
+    _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW)
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        env_path.read_text()
+        + "AVA_PITR_ENABLED=true\n"
+        + "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
+        + "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
+        + "AVA_PITR_RETENTION_PLANNER_ENABLED=true\n"
+    )
+    vals = _projected(monkeypatch, tmp_path)
+    for alias in (
+        "AVA_PITR_ENABLED",
+        "AVA_PITR_BASE_BACKUP_ENABLED",
+        "AVA_PITR_RESTORE_PROOF_ENABLED",
+        "AVA_PITR_RETENTION_PLANNER_ENABLED",
+    ):
+        assert alias not in vals
