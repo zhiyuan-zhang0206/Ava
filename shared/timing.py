@@ -195,6 +195,12 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.SERVICE_READY_TIMEOUT_S,
         "how long `ava start` waits for freshly launched services to pass liveness",
     ),
+    "NON_CRITICAL_SERVICE_READY_TIMEOUT_S": Clock(
+        "deploy",
+        lambda: deploy.NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
+        "how long `ava start` waits for a non-critical service before it stops "
+        "blocking the start (reported and alerted instead)",
+    ),
     "ORCHESTRATION_OWNER_WAIT_S": Clock(
         "deploy",
         lambda: deploy.ORCHESTRATION_OWNER_WAIT_S,
@@ -365,6 +371,14 @@ CONSTRAINTS: list[Constraint] = [
         "same physical job (a local daemon binds its port) and same value — but "
         "deliberately separate constants with different observers and escalation "
         "paths; retuning one is not automatically a reason to retune the other",
+    ),
+    Constraint(
+        "<",
+        "NON_CRITICAL_SERVICE_READY_TIMEOUT_S",
+        "SERVICE_READY_TIMEOUT_S",
+        "the tiered gate's premise: the non-critical window must end long before "
+        "the critical bound, so a healthy start is never held to the long number "
+        "by a straggling non-critical daemon",
     ),
     Constraint(
         "==",
