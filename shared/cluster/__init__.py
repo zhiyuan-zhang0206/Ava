@@ -164,6 +164,9 @@ from shared.cluster.provision import (
     ensure_cluster_role as ensure_cluster_role,
 )
 from shared.cluster.provision import (
+    ensure_pgvector_extension as ensure_pgvector_extension,
+)
+from shared.cluster.provision import (
     ensure_runner_role as ensure_runner_role,
 )
 from shared.cluster.provision import (

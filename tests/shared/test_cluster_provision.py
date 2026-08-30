@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import time
+from urllib.parse import urlsplit
 
 import psycopg
 import pytest
@@ -194,3 +195,77 @@ def _drop_db_and_role(admin_url: str, name: str) -> None:
         )
         conn.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
         conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))
+
+
+# ── ensure_pgvector_extension (superuser pre-create; availability-gated no-op) ──
+
+
+class _FakePgConn:
+    """One scripted connection: a single-row answer to the first query, then
+    records every statement (and the URL it dialed with)."""
+
+    def __init__(self, url: str, *, first_row: tuple[object, ...] | None) -> None:
+        self.url = url
+        self.first_row = first_row
+        self.executed: list[str] = []
+
+    def __enter__(self) -> _FakePgConn:
+        return self
+
+    def __exit__(self, *_a: object) -> bool:
+        return False
+
+    def execute(self, sql: str, params: tuple[object, ...] | None = None) -> _FakePgConn:  # pyright: ignore[reportUnusedParameter]
+        self.executed.append(sql)
+        return self
+
+    def fetchone(self) -> tuple[object, ...] | None:
+        row, self.first_row = self.first_row, None
+        return row
+
+
+def _patch_pg_connect(
+    monkeypatch: pytest.MonkeyPatch, rows: list[tuple[object, ...] | None]
+) -> tuple[list[str], list[_FakePgConn]]:
+    """psycopg.connect pops one scripted row per connection; returns
+    (dialed urls, connections)."""
+    urls: list[str] = []
+    conns: list[_FakePgConn] = []
+
+    def fake_connect(url: str, **_: object) -> _FakePgConn:
+        urls.append(url)
+        conn = _FakePgConn(url, first_row=rows.pop(0))
+        conns.append(conn)
+        return conn
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+    return urls, conns
+
+
+def test_ensure_pgvector_extension_noop_when_binaries_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Postgres without the extension binaries is a silent no-op — no
+    CREATE EXTENSION attempt, and the backend preflight owns the failure."""
+    from shared.cluster.provision import ensure_pgvector_extension
+
+    urls, conns = _patch_pg_connect(monkeypatch, [None])
+    ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+    assert urls == ["postgresql://admin@/postgres"]
+    assert conns[0].executed == ["SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"]
+
+
+def test_ensure_pgvector_extension_precreates_in_cluster_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the binaries available, CREATE EXTENSION IF NOT EXISTS runs in the
+    cluster identity database over the superuser connection."""
+    from shared.cluster.provision import ensure_pgvector_extension
+
+    urls, conns = _patch_pg_connect(monkeypatch, [(1,), None])
+    ensure_pgvector_extension(
+        "ava_ident", base_admin_url="postgresql://admin@/postgres?host=/tmp/x"
+    )
+    assert len(urls) == 2
+    assert urlsplit(urls[1]).path == "/ava_ident"
+    assert conns[1].executed == ["CREATE EXTENSION IF NOT EXISTS vector"]

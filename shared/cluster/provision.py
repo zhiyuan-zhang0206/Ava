@@ -194,6 +194,36 @@ def provision_database(identity: str, *, base_admin_url: str, db_admin_password:
     return True
 
 
+def ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
+    """Pre-create the pgvector extension in the cluster database with the
+    bootstrap-superuser connection (`base_admin_url`), so the NOSUPERUSER
+    runtime roles never need to: pgvector's `vector.control` ships without
+    `trusted = true`, which makes `CREATE EXTENSION` superuser-only by
+    Postgres' own policy (deliberately not overridden on the injected control
+    file). Idempotent — `ava start` runs it on every bring-up and install
+    birth runs it once, so an existing cluster picks the extension up on its
+    next start, and the indexer's NOSUPERUSER `CREATE EXTENSION IF NOT
+    EXISTS` stays a harmless no-op (verified against a real injected tree).
+
+    A Postgres that does not carry the extension binaries (a remote-managed
+    plane, a brew/apt install without the pgvector package, or a vendored
+    tree from before the injection landed) is a silent no-op — the memory
+    indexer's startup preflight owns that failure surface with its actionable
+    message. Deliberately not a migration: migrations must apply against
+    Postgres installations that have no pgvector at all.
+    """
+    import psycopg
+
+    with psycopg.connect(base_admin_url, autocommit=True) as conn:
+        available = conn.execute(
+            "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"
+        ).fetchone()
+    if available is None:
+        return
+    with psycopg.connect(_swap_db(base_admin_url, identity), autocommit=True) as conn:
+        conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+
 def drop_database(identity: str, *, base_admin_url: str) -> None:
     """DROP DATABASE `identity` + its owning role of the same name — the inverse
     of provision_database, and its half-built rollback. base_admin_url must
