@@ -54,7 +54,7 @@ from services.pitr.retention_scheduler import (
     refresh as refresh_retention_plan,
 )
 from services.pitr.space_budget import CandidateSpaceBudget
-from services.pitr.store_factory import get_backend
+from services.pitr.store_factory import get_store_group
 from services.pitr.worker_process import WorkerQueue as _WorkerQueue
 from services.pitr.worker_process import enable_child_subreaper as _enable_child_subreaper
 from services.pitr.worker_process import group_members as _group_members
@@ -199,11 +199,7 @@ def _build_candidate(stop: StopSignal) -> CandidateManifest:
         prefix=config.pitr_gcs_prefix,
         key=key_path.read_bytes(),
         key_id=config.pitr_backup_key_id,
-        store=get_backend().restartable_streaming_object_store(
-            project=config.pitr_gcs_project,
-            bucket=config.pitr_gcs_bucket,
-            credentials_file=str(credentials),
-        ),
+        store=get_store_group().restartable_streaming_object_store(),
         budget=budget,
         replication_db_url=config.pitr_replication_db_url,
         stop=stop,

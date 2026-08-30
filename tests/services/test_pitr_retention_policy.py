@@ -35,6 +35,7 @@ def _candidate(chain: str, start: int, end: int, *, timeline: int = 1) -> Candid
             f"pitr/base/{chain}/base",
             str(int(chain[-3:-1])),
             100,
+            "crc",
             "crc32c",
             "crc",
             "sha",
