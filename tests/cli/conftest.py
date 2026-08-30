@@ -20,6 +20,7 @@ from contextlib import AbstractContextManager, contextmanager
 
 import pytest
 
+from shared import disabled_services as ds
 from shared.config import settings
 
 
@@ -157,3 +158,23 @@ def as_machine(
                 reset_identity()
 
     return _enter
+
+
+@pytest.fixture(autouse=True)
+def _isolate_disabled_services_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Every CLI test's durable `--disable-service` marker lives in a per-test tmp
+    file, never in the worker's shared session home.
+
+    An operator `ava start --disable-service X` persists X to
+    `$AVA_HOME/disabled_services` (`persist_services=True` — the real, intended
+    behavior the start tests exercise). The suite's session home is shared by
+    every test in a worker, so an un-isolated marker outlives the test that wrote
+    it: a `cmd_start(disabled_services=("restarter",))` left "restarter durably
+    disabled" behind, and a later `unpause_local_cluster` test in the same worker
+    early-returned — neither respawning the restarter nor raising (CI #1172/#1173
+    shard-5 flake, task #2177). Same redirection `tests/shared/test_disabled_services.py`
+    uses: the marker is per-unit durable state, so each test gets a fresh one.
+    """
+    monkeypatch.setattr(ds, "disabled_services_file", lambda: tmp_path / "disabled_services")

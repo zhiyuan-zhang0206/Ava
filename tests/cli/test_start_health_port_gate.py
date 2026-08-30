@@ -27,6 +27,7 @@ eagerly is worse than none:
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -300,3 +301,30 @@ def test_a_disabled_service_cannot_block_the_start(
     )
 
     assert _cli.cmd_start(disabled_services=("restarter",)) == 0
+
+
+def test_disable_service_start_leaves_no_marker_in_the_session_home(
+    monkeypatch: pytest.MonkeyPatch, _hermetic_start
+) -> None:
+    """`--disable-service` is durable operator intent (persist=True), so this
+    start really writes the marker — the isolation must keep it OUT of the
+    worker's shared session home, where it would silently disable the restarter
+    for every later test that reads the marker (the `TestUnpauseLocalCluster`
+    respawn tests — CI #1172/#1173, task #2177)."""
+    from shared.config import settings
+
+    marker = Path(settings.general.ava_home) / "disabled_services"
+    marker.unlink(missing_ok=True)  # the suite home is freshly provisioned per worker
+    monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    _roster(monkeypatch, (_healthz_spec("restarter", 8102),))
+    _verdicts(monkeypatch, {"restarter": DaemonProbe.down("cold")})
+
+    assert _cli.cmd_start(disabled_services=("restarter",)) == 0
+
+    assert not marker.exists(), (
+        "a start test must not write the durable --disable-service marker into the "
+        "shared session home: with 'restarter' there, a later test calling the real "
+        "unpause_local_cluster sees it durably disabled and neither respawns nor raises"
+    )
