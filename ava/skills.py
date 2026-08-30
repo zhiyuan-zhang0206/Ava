@@ -22,7 +22,8 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 
 # Attribution timing: a `skill_invoked` row at depth `"loaded"` — the only
 # depth the producer writes — means the agent CONSUMED a skill's SKILL.md body
-# (a `help()` render or a direct `__doc__` read). Resolving a node
+# (a `help()` render, a direct `__doc__` read, or an `ava.files.read` of the
+# skill's SKILL.md — see `_record_skill_invoked_by_path`). Resolving a node
 # (`ava.skills.<name>` access) is exposure, not use: the system-prompt index
 # and every index render walk the same tree every turn and read only
 # frontmatter descriptions, so they must record nothing. `_SkillProxy` and
@@ -517,18 +518,8 @@ class _LazySkillDoc:
         cache the result in `_doc`. Runs at most once per proxy (the cache
         makes later reads free; the per-(agent, skill) dedup in
         `_record_skill_invoked` keeps repeated proxies to one row)."""
-        from pathlib import Path as _Path
-
-        info = self._info
-        content = (_Path(info["path"]) / "SKILL.md").read_text(encoding="utf-8")
-        _record_skill_invoked(info)
-        home = str(_Path.home())
-        short = (
-            f"~{info['path'][len(home) :]}" if info["path"].startswith(home + "/") else info["path"]
-        )
-        doc = f"{short}\n\n{content}"
-        self._doc = doc
-        return doc
+        self._doc = _consume_skill_body(self._info)
+        return self._doc
 
 
 class _SkillProxy(_LazySkillDoc, types.ModuleType):
@@ -608,6 +599,60 @@ class _Namespace(_LazySkillDoc, types.ModuleType):
 
     def __dir__(self) -> list[str]:
         return sorted(self._tree)
+
+
+def _consume_skill_body(skill: Skill) -> str:
+    """Read one skill's SKILL.md body, record the `skill_invoked` attribution,
+    and return the consumed shape — a path line (tilde-shortened) then the raw
+    body, the shape a proxy's `__doc__` carries. The one body-consumption
+    point shared by the lazy proxies and `read()` (dedup is in
+    `_record_skill_invoked`), so every access path records identically."""
+    from pathlib import Path as _Path
+
+    info = skill
+    content = (_Path(info["path"]) / "SKILL.md").read_text(encoding="utf-8")
+    _record_skill_invoked(info)
+    home = str(_Path.home())
+    short = f"~{info['path'][len(home) :]}" if info["path"].startswith(home + "/") else info["path"]
+    return f"{short}\n\n{content}"
+
+
+def _record_skill_invoked_by_path(path: str | Path) -> bool:
+    """Record the `skill_invoked` attribution for a direct SKILL.md file read.
+
+    The `.path` + `ava.files.read(SKILL.md)` pattern consumes a skill body like
+    a `help()` render, but never touches the lazy proxy hook that carries the
+    attribution — so it used to record nothing and under-counted `loaded`
+    (facility-wide scan: 68 agents / 3 days used the pattern, 13 with zero
+    rows). `ava.files.read` routes here. Only a loaded skill's own SKILL.md
+    qualifies (a SKILL.md outside the mount roots is not a skill the agent
+    loaded); best-effort end to end, so this never raises. Returns whether a
+    matching skill was found and attributed."""
+    p = Path(path).expanduser().absolute()
+    if p.name != "SKILL.md":
+        return False
+    for skill in _names():
+        if Path(skill["path"]).expanduser().absolute() == p.parent:
+            _record_skill_invoked(skill)
+            return True
+    return False
+
+
+def read(name: str) -> str:
+    """Read a skill's SKILL.md body by name and record the `skill_invoked`
+    attribution — the explicit API for consuming a skill body.
+
+    `name` accepts the display identifier (`"web-ai:deep-research"`) or any
+    spelling that folds to it (`"web_ai.deep_research"`, bare frontmatter name
+    for a flat skill). Returns the same shape a proxy's `__doc__` carries.
+    Unknown names raise ValueError."""
+    from ava._sdk_validation import coerce_str
+
+    key = match_key(coerce_str(name, "name"))
+    for skill in _names():
+        if match_key(identifier(skill)) == key or match_key(skill["name"]) == key:
+            return _consume_skill_body(skill)
+    raise ValueError(f"no skill named {name!r} — `ava.help(ava.skills)` lists the loaded catalog")
 
 
 def _record_skill_invoked(skill: Skill) -> None:
@@ -709,11 +754,11 @@ def __getattr__(name: str) -> _SkillProxy | _Namespace:
 
 def __dir__() -> list[str]:
     """`dir(ava.skills)` returns top-level skill attrs + namespace names +
-    public utility methods.
+    public utility methods (`read`).
 
     Parse failures propagate (fail-fast); don't silently hide broken skills.
     """
-    return sorted(_scan_tree())
+    return sorted({*_scan_tree(), "read"})
 
 
 class _SkillsModule(types.ModuleType):
@@ -732,11 +777,12 @@ class _SkillsModule(types.ModuleType):
 
     @property
     def __all_for_ava__(self) -> list[str]:
-        """Top-level skill and namespace names — the index a bare
-        `ava.help(ava.skills)` renders, one heading + one-line description per
-        entry. Bodies never render from here; `ava.help(ava.skills.<name>)`
-        opens one."""
-        return sorted(_scan_tree())
+        """Top-level skill and namespace names plus the `read` utility — the
+        index a bare `ava.help(ava.skills)` renders, one heading + one-line
+        description per entry, and the `read` function's contract. Bodies
+        never render from here; `ava.help(ava.skills.<name>)` /
+        `ava.skills.read(<name>)` open one."""
+        return sorted({*_scan_tree(), "read"})
 
 
 sys.modules[__name__].__class__ = _SkillsModule
