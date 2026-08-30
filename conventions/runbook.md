@@ -603,7 +603,9 @@ the base-chain rollout and must never materialize a full ciphertext sibling.
 plane (default `gcs`). An unrecognized value fails fast at store construction —
 a typo never silently falls back to GCS. Switching backends is one env var +
 a restart; the GCS bucket remains the retained primary copy until the
-switchover runbook has been executed and observed.
+switchover runbook has been executed and observed. The full cut-over
+procedure (restore drills, migration script, rollback): see
+`conventions/pitr-backend-switchover.md`.
 
 Activation is Ava-owned: use `ava cluster pitr status`, then
 `ava cluster pitr activate --origin operator:<name>`. The command validates the
