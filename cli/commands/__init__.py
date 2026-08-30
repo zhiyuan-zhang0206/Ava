@@ -159,6 +159,7 @@ from cli.commands.stop import (
 )
 from cli.commands.trace import cmd_trace_ship
 from cli.commands.update import (
+    _CONVERGING_TIMEOUT_S,
     _PHASE_A_TIMEOUT_S,
     _PHASE_B_TIMEOUT_S,
     _POLL_INTERVAL_S,
@@ -205,6 +206,7 @@ __all__ = [
     "POLL_NO_PROGRESS",
     "POLL_OK",
     "POLL_STALLED",
+    "_CONVERGING_TIMEOUT_S",
     "_PHASE_A_TIMEOUT_S",
     "_PHASE_B_TIMEOUT_S",
     "_POLL_INTERVAL_S",

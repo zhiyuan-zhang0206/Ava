@@ -875,6 +875,7 @@ CREATE TABLE deployment_state (
     expires_at   TIMESTAMPTZ,
     settle_hosts TEXT[],
     settle_note  TEXT,
+    settle_started_at TIMESTAMPTZ,
     -- The settle note in its legacy single-column format ("settling, waiting
     -- for: h1, h2" — shared.cluster_lock.settle_note / settle_hosts). Written
     -- alongside settle_hosts/settle_note by the same transition and retired

@@ -46,7 +46,8 @@ def _free_lock(db_conn: psycopg.Connection) -> Iterator[None]:
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
-                "note=NULL, settle_hosts=NULL, settle_note=NULL, phase='stable', kind=NULL "
+                "note=NULL, settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
+                "phase='stable', kind=NULL "
                 "WHERE id=1"
             )
         db_conn.commit()
@@ -176,6 +177,11 @@ def test_settle_hold_keeps_the_lease_past_the_holders_exit() -> None:
     assert settle_hosts(lease.note) == ["wsl"]
     assert lease.expires_in_s <= 900  # TTL shortened to the settle window
     assert "wsl" in lease.describe()  # the human still sees which host it waits for
+    # The settle start is recorded server-side (C3, task #2189): the hold outlives
+    # the orchestration process, so its duration is only computable from this
+    # column — the telemetry the release path prints.
+    assert lease.settle_started_at is not None
+    assert lease.settle_elapsed_s is not None and 0 <= lease.settle_elapsed_s < 900
     assert acquire_update_lock("gateway-host:pid99999") is False  # still guards the cluster
 
 
@@ -353,12 +359,14 @@ def test_settle_enters_settling_with_structured_hosts() -> None:
     assert settle_update_lock("A", hosts=["wsl", "mac"]) is True
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT phase, settle_hosts, settle_note, note FROM deployment_state WHERE id=1"
+            "SELECT phase, settle_hosts, settle_note, note, settle_started_at "
+            "FROM deployment_state WHERE id=1"
         )
-        phase, hosts, settle_note, note = cur.fetchone()  # type: ignore[misc]
+        phase, hosts, settle_note, note, settle_started_at = cur.fetchone()  # type: ignore[misc]
         assert phase == "settling"
         assert hosts == ["mac", "wsl"]  # sorted by settle_note()
         assert settle_note == note == "settling, waiting for: mac, wsl"
+        assert settle_started_at is not None  # the telemetry anchor (C3, task #2189)
 
 
 def test_release_returns_to_stable_and_clears_kind() -> None:
@@ -377,10 +385,13 @@ def test_release_settle_hold_returns_to_stable() -> None:
     assert settle_update_lock("A", hosts=["wsl"]) is True
     assert release_settle_hold("A") is True
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("SELECT phase, settle_hosts FROM deployment_state WHERE id=1")
-        phase, hosts = cur.fetchone()  # type: ignore[misc]
+        cur.execute(
+            "SELECT phase, settle_hosts, settle_started_at FROM deployment_state WHERE id=1"
+        )
+        phase, hosts, settle_started_at = cur.fetchone()  # type: ignore[misc]
         assert phase == "stable"
         assert hosts is None
+        assert settle_started_at is None  # the telemetry anchor clears with the hold
 
 
 def test_read_lease_carries_kind() -> None:
