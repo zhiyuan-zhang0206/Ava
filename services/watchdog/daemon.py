@@ -83,6 +83,7 @@ from services.healthchecks.brew_pin import main as brew_pin_healthcheck
 from services.healthchecks.lgtm import main as lgtm_healthcheck
 from services.healthchecks.pgbouncer import main as pgbouncer_healthcheck
 from services.healthchecks.redis_acl import main as redis_acl_healthcheck
+from services.healthchecks.station import main as station_healthcheck
 from shared.config import settings
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.disabled_services import is_skipped, read_skipped
@@ -234,6 +235,15 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
         # needs no Postgres: `requires_db=False` — the observability read path
         # must not be held hostage by a DB outage.
         checks.append(_Check("lgtm", lgtm_healthcheck, requires_db=False))
+        # station-probe: the REMOTE observatory station's health (WP4, task
+        # #1946) — no ServiceSpec, it is a probe-only check. Self-gating on
+        # AVA_OBSERVABILITY_URL (empty = local observatory, the lgtm check
+        # owns it; non-empty = the gateway dials the station's advertised
+        # OTLP ingress with the cluster bearer and alerts fail-open on
+        # failure). requires_db=True — it resolves the advertised address
+        # from machine_units; a DB block holds it back, which is exactly
+        # fail-open.
+        checks.append(_Check("station-probe", station_healthcheck, requires_db=True))
     elif _runner_watchdog_owns_lgtm():
         # A station-capable agent-runner (marker OR observability-station
         # capability, no gateway) also owns the host's native backends: its
