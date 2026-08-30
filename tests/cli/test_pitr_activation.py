@@ -747,12 +747,17 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
     and _alter_restore must interpolate the value as a quoted literal. The CI
     mocks previously hid this: the 2026-08-30 activation failed at
     wal_config_applying with a psycopg SyntaxError on `$1`."""
+    import shutil
     import subprocess
+    import tempfile
     from types import SimpleNamespace
 
     from shared.pg_tools import pg_tool
 
     port = 39617
+    # Short socket root: the default pytest tmp_path on macOS exceeds
+    # PostgreSQL's 103-byte unix-socket path limit (QA #1076 nit 7 class).
+    sock = Path(tempfile.mkdtemp(prefix="ava-pg-sock-", dir="/tmp"))
     data = tmp_path / "pg"
     log = tmp_path / "pg.log"
     subprocess.run(  # noqa: S603 — resolved pg binaries + static flags
@@ -772,7 +777,7 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
             "30",
             "start",
             "-o",
-            f"-p {port} -c listen_addresses='' -c unix_socket_directories={tmp_path} "
+            f"-p {port} -c listen_addresses='' -c unix_socket_directories={sock} "
             "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
         ],
         check=True,
@@ -788,7 +793,7 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
         monkeypatch.setattr(
             activation_config,
             "pg_admin_url",
-            lambda _pg_port: f"postgresql://ava@/postgres?host={tmp_path}&port={port}",
+            lambda _pg_port: f"postgresql://ava@/postgres?host={sock}&port={port}",
         )
 
         value = "cp %p /spool/%f --hard-bytes 123"
@@ -816,6 +821,7 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
             check=False,
             capture_output=True,
         )
+        shutil.rmtree(sock, ignore_errors=True)
 
 
 def test_frozen_pg_state_contract_with_real_reader(
@@ -831,7 +837,9 @@ def test_frozen_pg_state_contract_with_real_reader(
     shape the old `current.update(credential_evidence)` merge produced — must
     FAIL the same comparison, so a re-merge is caught instead of hidden by a
     mock that copies the defect."""
+    import shutil
     import subprocess
+    import tempfile
     from types import SimpleNamespace
 
     from shared.pg_tools import pg_tool
@@ -839,6 +847,9 @@ def test_frozen_pg_state_contract_with_real_reader(
     # TCP-free and isolated by this test's private socket directory. Releasing
     # an ephemeral TCP socket before pg_ctl binds it races every xdist worker.
     port = 39613
+    # Short socket root: the default pytest tmp_path on macOS exceeds
+    # PostgreSQL's 103-byte unix-socket path limit (QA #1076 nit 7 class).
+    sock = Path(tempfile.mkdtemp(prefix="ava-pg-sock-", dir="/tmp"))
     data = tmp_path / "pg"
     log = tmp_path / "pg.log"
     subprocess.run(  # noqa: S603 — resolved pg binaries + static flags
@@ -858,7 +869,7 @@ def test_frozen_pg_state_contract_with_real_reader(
             "30",
             "start",
             "-o",
-            f"-p {port} -c listen_addresses='' -c unix_socket_directories={tmp_path} "
+            f"-p {port} -c listen_addresses='' -c unix_socket_directories={sock} "
             "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
         ],
         check=True,
@@ -866,7 +877,7 @@ def test_frozen_pg_state_contract_with_real_reader(
     )
     try:
         subprocess.run(  # noqa: S603
-            [pg_tool("createdb"), "-h", str(tmp_path), "-p", str(port), "-U", "ava", "ava"],
+            [pg_tool("createdb"), "-h", str(sock), "-p", str(port), "-U", "ava", "ava"],
             check=True,
             capture_output=True,
         )
@@ -878,7 +889,7 @@ def test_frozen_pg_state_contract_with_real_reader(
         )
         monkeypatch.setattr(
             "cli.commands._cluster_instance.pg_admin_url",
-            lambda _pg_port: f"postgresql://ava@/postgres?host={tmp_path}&port={port}",
+            lambda _pg_port: f"postgresql://ava@/postgres?host={sock}&port={port}",
         )
 
         frozen = activation._read_pg_state()
@@ -900,6 +911,7 @@ def test_frozen_pg_state_contract_with_real_reader(
             check=False,
             capture_output=True,
         )
+        shutil.rmtree(sock, ignore_errors=True)
 
 
 def _wal_ack_pending_record(**overrides: object) -> ActivationRecord:
@@ -1021,14 +1033,23 @@ def test_wal_ack_attempt_renews_expired_deadline_before_switch(
     write_record(tmp_path, record)
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(activation, "_require_same_credentials", lambda *_a: None)
-    monkeypatch.setattr(activation, "_switch_wal", lambda: "switched-segment")
+
+    def fake_switch() -> str:
+        # The ordering lock: when the switch runs, the durable record must
+        # already carry the renewed deadline (renew happens BEFORE switch).
+        durable_at_switch = load_record(tmp_path)
+        assert durable_at_switch is not None
+        fresh_at_switch = datetime.fromisoformat(durable_at_switch.wal_verification_deadline or "")
+        assert fresh_at_switch > datetime.now(UTC) - timedelta(minutes=1)
+        raise RuntimeError("switch reached")
 
     def proof(_rec: ActivationRecord, _stop: object) -> tuple[dict[str, str], dict[str, str]]:
-        raise RuntimeError("proof reached")
+        raise RuntimeError("proof must not run before the switch")
 
+    monkeypatch.setattr(activation, "_switch_wal", fake_switch)
     monkeypatch.setattr(activation, "_remote_wal_proof", proof)
     monkeypatch.setattr(activation, "run_while_renewing", lambda _h, fn: fn(None))
-    with pytest.raises(RuntimeError, match="proof reached"):
+    with pytest.raises(RuntimeError, match="switch reached"):
         activation._advance_activation(tmp_path, record, "holder")
     durable = load_record(tmp_path)
     assert durable is not None
@@ -1045,11 +1066,18 @@ def test_probe_switch_privilege_against_real_pg(
     """Real-PG regression for the 2026-08-30 privilege gap: the probe passes on
     the admin (superuser) connection and fails closed on a role without the
     grant — the exact discrimination the old preflight missed."""
+    import shutil
     import subprocess
+    import tempfile
 
     from shared.pg_tools import pg_tool
 
     port = 39614
+    # The socket directory must live under a SHORT root: the default pytest
+    # tmp_path on macOS (/var/folders/...) exceeds PostgreSQL's 103-byte
+    # unix-socket path limit and fails every real-PG test locally, while CI's
+    # short /tmp path masks it (QA #1076 nit 7).
+    sock = Path(tempfile.mkdtemp(prefix="ava-pg-sock-", dir="/tmp"))
     data = tmp_path / "pg"
     log = tmp_path / "pg.log"
     subprocess.run(  # noqa: S603 — resolved pg binaries + static flags
@@ -1069,14 +1097,14 @@ def test_probe_switch_privilege_against_real_pg(
             "30",
             "start",
             "-o",
-            f"-p {port} -c listen_addresses='' -c unix_socket_directories={tmp_path} "
+            f"-p {port} -c listen_addresses='' -c unix_socket_directories={sock} "
             "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
         ],
         check=True,
         capture_output=True,
     )
     try:
-        admin_url = f"postgresql://ava@/postgres?host={tmp_path}&port={port}"
+        admin_url = f"postgresql://ava@/postgres?host={sock}&port={port}"
         monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: admin_url)
         activation_runtime.probe_switch_privilege()  # superuser: passes
         # A role without the grant: the probe must refuse (the prod failure shape).
@@ -1084,7 +1112,7 @@ def test_probe_switch_privilege_against_real_pg(
 
         with psycopg.connect(admin_url, autocommit=True) as conn:
             conn.execute("CREATE ROLE limited LOGIN")
-        limited_url = f"postgresql://limited@/postgres?host={tmp_path}&port={port}"
+        limited_url = f"postgresql://limited@/postgres?host={sock}&port={port}"
         monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: limited_url)
         with pytest.raises(RuntimeError, match="pg_switch_wal"):
             activation_runtime.probe_switch_privilege()
@@ -1094,3 +1122,4 @@ def test_probe_switch_privilege_against_real_pg(
             check=False,
             capture_output=True,
         )
+        shutil.rmtree(sock, ignore_errors=True)
