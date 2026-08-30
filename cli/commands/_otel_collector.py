@@ -307,9 +307,14 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
 
     Served by any unit that remote peers dial OTLP into: a gateway (pure
     runner relays) and an observability station (remote gateway collectors,
-    WP4, task #1946 — conventions/reachability-and-credentials.md). An empty
-    cluster secret is the zero-config single-box posture and keeps every
-    listener on loopback. Any gateway- or station-capable host with a
+    WP4, task #1946 — conventions/reachability-and-credentials.md). Remote
+    ingress exists only when the unit could actually have remote peers: an
+    empty cluster secret (the zero-config single-box posture) and a loopback
+    reachable host (co-located posture) both mean NO remote peers, so no
+    receiver is rendered — the same "legal when nothing remote dials it" rule
+    as the registration loopback guard (shared.machines._reject_loopback_dial_url,
+    conventions rule 2). A wildcard reachable host is a configuration error
+    either way and fails closed. Any gateway- or station-capable host with a
     non-empty secret and a non-loopback address may serve remote peers —
     including a hybrid gateway+runner+station such as production. Remote
     traces use a separate pipeline so they cannot be mirrored a second time.
@@ -329,32 +334,22 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     from shared.netutil import is_loopback_host
 
     secret = settings.data_plane.cluster_secret
-    if not secret:
-        if roles in (frozenset({"gateway"}), frozenset({"observability-station"})):
-            raise RuntimeError(
-                "cannot build split-gateway/station OTLP ingress without a cluster secret "
-                "(AVA_CLUSTER_SECRET); "
-                "remote ingress must fail closed"
-            )
-        return no_remote
     host = reachable_host()
-    if is_loopback_host(host):
-        if roles in (frozenset({"gateway"}), frozenset({"observability-station"})):
-            raise RuntimeError(
-                "cannot expose authenticated OTLP ingress: reachable host is "
-                "loopback; set AVA_MACHINE_HOST to this host's exact private address"
-            )
-        # A combined gateway+runner (and/or station) is a valid secret-set
-        # single box. Just as its data-plane binds collapse to loopback, it
-        # needs no remote OTLP receiver until AVA_MACHINE_HOST becomes a
-        # reachable address.
-        return no_remote
     if _unspecified_address(host):
+        # 0.0.0.0 / :: is never a reachable host (the loopback classifier
+        # treats 0.0.0.0 as loopback, so check the wildcard form first): a
+        # unit with a wildcard identity cannot serve remote peers at a
+        # meaningful address — fail closed, whichever roles it carries.
         raise RuntimeError(
             "cannot expose authenticated OTLP ingress: reachable host is "
             "wildcard; set AVA_MACHINE_HOST to this host's exact "
             "private address"
         )
+    if not secret or is_loopback_host(host):
+        # Empty secret or loopback host = no remote peers exist (single-box
+        # posture). No receiver, no error — same rule the registration guard
+        # applies (a co-located unit may advertise loopback).
+        return no_remote
     return {
         "REMOTE_OTLP_RECEIVER": f"""
   otlp/remote:

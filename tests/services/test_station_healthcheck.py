@@ -1,4 +1,4 @@
-"""`services.healthchecks.station` unit tests — the remote-station probe.
+"""`services.heartbeat.station_probe` unit tests — the remote-station probe.
 
 WP4 (task #1946): the gateway probes a REMOTE observatory station through
 the reachability contract (the address the station advertises in
@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 import pytest
 
 import shared.db
-from services.healthchecks import station as hc
+from services.heartbeat import station_probe as hc
 from shared.config import settings
 
 
@@ -80,11 +80,26 @@ def test_resolve_target_uses_advertised_machine_units_url(monkeypatch: pytest.Mo
 
 
 def test_resolve_target_falls_back_to_configured_base_without_registration(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AVA_OBSERVABILITY_URL set but no station unit registered -> warn loudly
     and probe the configured base + OTLP port (fail-open: still give signal)."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://100.78.137.46")
+    target = hc.resolve_target()
+    assert target is not None
+    assert target.url == "http://100.78.137.46:4318"
+    assert target.advertised is False
+
+
+def test_resolve_target_skips_hybrid_gateway_station_units(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hybrid gateway+station unit advertises its GATEWAY url (unit_dial_url
+    lets the gateway capability win), not the OTLP ingress — probing it would
+    hit the gateway API and alert forever (QA #1156 NIT-2). Only units whose
+    advertised url carries the OTLP ingress port qualify."""
+    monkeypatch.setattr(settings.observability, "observability_url", "http://100.78.137.46")
+    _insert_station_unit(url="http://100.64.0.9:8000")  # gateway-form advertisement
     target = hc.resolve_target()
     assert target is not None
     assert target.url == "http://100.78.137.46:4318"

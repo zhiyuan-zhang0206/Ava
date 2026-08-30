@@ -911,6 +911,34 @@ def test_secret_set_single_box_still_collapses_remote_ingress_to_loopback(
     assert cfg["receivers"]["otlp"]["protocols"]["http"]["endpoint"] == "127.0.0.1:4318"
 
 
+def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QA #1156 NIT-1: the converge guard matches the registration guard. A
+    pure gateway or pure station with an EMPTY secret or a LOOPBACK reachable
+    host has no remote peers (single-box posture) — no receiver is rendered
+    and converge does not fail, exactly like the combined single-box unit.
+    Only a wildcard host (a malformed identity) fails closed."""
+    for roles in (frozenset({"gateway"}), frozenset({"observability-station"})):
+        no_secret = _render_real_template(
+            monkeypatch,
+            roles,
+            cluster_secret="",
+            machine_host="100.64.0.10",
+        )
+        assert "otlp/remote" not in no_secret["receivers"]
+        assert "bearertokenauth/cluster" not in no_secret["extensions"]
+
+        loopback = _render_real_template(
+            monkeypatch,
+            roles,
+            cluster_secret="cluster-token",  # noqa: S106 — fixture token
+            machine_host="localhost",
+        )
+        assert "otlp/remote" not in loopback["receivers"]
+        assert "bearertokenauth/cluster" not in loopback["extensions"]
+
+
 @pytest.mark.parametrize(
     ("roles", "gateway_url", "machine_host", "cluster_secret", "message"),
     [
@@ -930,8 +958,6 @@ def test_secret_set_single_box_still_collapses_remote_ingress_to_loopback(
             "",
             "cluster secret",
         ),
-        (frozenset({"gateway"}), "http://100.64.0.10:8000", "localhost", "token", "reachable host"),
-        (frozenset({"gateway"}), "http://100.64.0.10:8000", "100.64.0.10", "", "cluster secret"),
         (frozenset({"gateway"}), "http://100.64.0.10:8000", "0.0.0.0", "token", "reachable host"),  # noqa: S104 — rejection fixture
         (
             frozenset({"gateway"}),
@@ -940,23 +966,13 @@ def test_secret_set_single_box_still_collapses_remote_ingress_to_loopback(
             "token",
             "reachable host",
         ),
-        # WP4: a pure observability-station fails closed exactly like a pure
-        # gateway — a station exists to serve remote consumers, so an empty
-        # secret, a loopback host, or a wildcard host is a misconfiguration.
-        (
-            frozenset({"observability-station"}),
-            "http://100.64.0.10:8000",
-            "localhost",
-            "token",
-            "reachable host",
-        ),
-        (
-            frozenset({"observability-station"}),
-            "http://100.64.0.10:8000",
-            "100.64.0.10",
-            "",
-            "cluster secret",
-        ),
+        # WP4: a pure observability-station fails closed on a wildcard host
+        # exactly like a pure gateway. Empty secret / loopback host are the
+        # single-box posture and render NO remote receiver instead (QA #1156
+        # NIT-1 — the converge guard now matches the registration guard's
+        # "legal when nothing remote dials it" rule; see
+        # test_single_box_*_collapses_remote_ingress and the no_remote
+        # assertions in test_station_has_separate_authenticated_reachable_receiver).
         (
             frozenset({"observability-station"}),
             "http://100.64.0.10:8000",
