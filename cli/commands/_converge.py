@@ -306,33 +306,38 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
         )
 
 
-def _ensure_google_drive(ctx: ConvergeCtx) -> None:
-    """Fail fast when this agent-runner has no writable Google Drive synced folder.
+def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
+    """Probe the configured cross-machine transfer backend; warn, never block.
 
-    Cross-machine file transfer drops files into a shared Google Drive folder
-    that mirrors to every machine; a host that cannot read/write its local Drive
-    folder cannot participate, so block start rather than fail silently later.
+    Cross-machine file transfer no longer hard-requires a shared Google Drive
+    synced folder. The configured backend is probed at start and used when
+    present; a missing backend degrades to a warning so the runner still starts
+    (files move through the gateway upload path, GitHub Releases, or IM file
+    bridges instead). `AVA_CROSS_MACHINE_TRANSFER_BACKEND=none` skips the probe
+    entirely.
 
-    Only enforced on a split deployment: a single box (this unit also carries
-    'gateway') has no peer to transfer to, so the requirement is skipped. A split
-    agent-runner that does not use the shared drive can opt out with
-    AVA_REQUIRE_GOOGLE_DRIVE=false.
+    Only probed on a split deployment: a single box (this unit also carries
+    'gateway') has no peer to transfer to, so the step is skipped.
     """
     if ctx.roles and "gateway" in ctx.roles:
         return
-    if not settings.general.require_google_drive:
+    backend = settings.general.cross_machine_transfer_backend
+    if backend == "none":
         return
     from shared.google_drive import candidate_drive_dirs, find_writable_google_drive
 
     if find_writable_google_drive() is None:
         looked = ", ".join(str(p) for p in candidate_drive_dirs()) or "(no candidate paths)"
-        raise RuntimeError(
-            "no writable Google Drive synced folder found on this agent-runner. "
-            "Cross-machine file transfer relies on a shared Google Drive: install "
-            "Google Drive for Desktop (macOS, or on the Windows side of a WSL host "
-            "-- it then appears under /mnt/<letter>) or mount Drive on native Linux "
-            "(e.g. via rclone), sign in, and make sure the synced 'My Drive' area is "
-            f"writable, then retry. Looked in: {looked}"
+        print(
+            "  ! cross-machine transfer backend 'drive' is unavailable on this"
+            " agent-runner: no writable Google Drive synced folder, so file transfer"
+            " via the shared Drive folder will not work. Install Google Drive for"
+            " Desktop (macOS, or on the Windows side of a WSL host -- it then appears"
+            " under /mnt/<letter>), sign in, and make sure the synced 'My Drive' area"
+            " is writable to enable it; set AVA_CROSS_MACHINE_TRANSFER_BACKEND=none"
+            " to skip this probe on a runner that moves files its own way."
+            " Looked in: " + looked,
+            file=sys.stderr,
         )
 
 
@@ -619,8 +624,8 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         requires_unit_config=True,
     ),
     ConvergeStep(
-        "google drive sync area",
-        _ensure_google_drive,
+        "cross-machine transfer backend",
+        _ensure_cross_machine_transfer,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),

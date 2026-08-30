@@ -262,7 +262,7 @@ def test_config_write_op_rejects_non_remote_writable(
 def test_config_write_op_local_accepts_writable_host_field(
     isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A writable-but-not-remote_writable host field (a capability bool) is editable
+    """A writable-but-not-remote_writable host field (a capability field) is editable
     on a local (self) write — `writable` means a human may edit it on its own host."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
@@ -270,9 +270,9 @@ def test_config_write_op_local_accepts_writable_host_field(
         "validate",
         lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
-    result = config_write_op({"require_google_drive": False}, local=True)
+    result = config_write_op({"cross_machine_transfer_backend": "none"}, local=True)
     assert result.applied is True
-    assert runtime_config.env_set_field_names() == {"require_google_drive"}
+    assert runtime_config.env_set_field_names() == {"cross_machine_transfer_backend"}
 
 
 def test_config_write_op_remote_rejects_writable_only_host_field(
@@ -281,9 +281,11 @@ def test_config_write_op_remote_rejects_writable_only_host_field(
     """The same field is rejected on a remote write (local defaults False) — the
     gateway may not edit a remote host's non-remote_writable field."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = config_write_op({"require_google_drive": False})
+    result = config_write_op({"cross_machine_transfer_backend": "none"})
     assert result.applied is False
-    assert "not remotely editable" in (result.results["require_google_drive"].reason or "")
+    assert "not remotely editable" in (
+        result.results["cross_machine_transfer_backend"].reason or ""
+    )
 
 
 def test_config_write_op_rejects_failing_validator(
@@ -296,6 +298,18 @@ def test_config_write_op_rejects_failing_validator(
     assert result.applied is False
     assert result.results["ops_concurrency"].ok is False
     assert result.results["ops_concurrency"].reason is not None
+
+
+def test_config_write_op_rejects_unknown_transfer_backend(
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backend selector is a closed set: a typo (or a stale value from a
+    removed option) is rejected at write time, never persisted to .env."""
+    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    result = config_write_op({"cross_machine_transfer_backend": "scp"}, local=True)
+    assert result.applied is False
+    assert result.results["cross_machine_transfer_backend"].ok is False
+    assert "must be one of" in (result.results["cross_machine_transfer_backend"].reason or "")
 
 
 def test_config_write_op_atomic_one_bad_writes_nothing(

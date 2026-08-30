@@ -268,10 +268,10 @@ class GeneralSettings(EnvSettings):
         },
     )
 
-    require_google_drive: bool = Field(
-        default=True,
-        alias="AVA_REQUIRE_GOOGLE_DRIVE",
-        description="Require a writable Google Drive synced folder on an agent-runner at start (cross-machine file transfer). Auto-skipped on a single box. Set false to opt out on a split agent-runner that doesn't use the shared drive.",
+    cross_machine_transfer_backend: Literal["drive", "none"] = Field(
+        default="drive",
+        alias="AVA_CROSS_MACHINE_TRANSFER_BACKEND",
+        description="Cross-machine file transfer backend on an agent-runner: `drive` probes a writable Google Drive synced folder at start and uses it when present (missing = warn, never block); `none` assumes no framework-managed backend. Auto-skipped on a single box.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
