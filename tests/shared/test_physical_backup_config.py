@@ -22,6 +22,13 @@ def test_pitr_is_disabled_without_credentials_or_cluster_secret() -> None:
     assert settings.pitr_backup_key_file is None
 
 
+def test_store_backend_defaults_to_gcs_and_accepts_the_env_alias() -> None:
+    settings = PhysicalBackupSettings()
+    assert settings.pitr_store_backend == "gcs"
+    configured = PhysicalBackupSettings(AVA_PITR_STORE_BACKEND="gcs")
+    assert configured.pitr_store_backend == "gcs"
+
+
 def test_retention_planner_requires_restore_proof_gate() -> None:
     with pytest.raises(ValidationError, match="RETENTION_PLANNER_ENABLED requires"):
         PhysicalBackupSettings(AVA_PITR_RETENTION_PLANNER_ENABLED=True)

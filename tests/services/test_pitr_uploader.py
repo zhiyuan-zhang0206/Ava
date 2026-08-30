@@ -11,6 +11,7 @@ from typing import ClassVar, cast
 import pytest
 from cryptography.exceptions import InvalidTag
 
+from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.crypto import create_plan, decrypt_archive, encrypt_archive, open_encrypted
 from services.pitr.object_store import ObjectStore, RemoteObjectAck
 from services.pitr.uploader import (
@@ -48,12 +49,14 @@ class FakeStore:
             return replace(existing, created=False)
         payload = path.read_bytes()
         ack = RemoteObjectAck(
-            object_name,
-            1,
-            len(payload),
-            base64.b64encode(google_crc32c.Checksum(payload).digest()).decode(),
-            dict(metadata),
-            True,
+            object_name=object_name,
+            pin_token="1",  # noqa: S106 — test fixture
+            size=len(payload),
+            checksum=ObjectChecksum(
+                CRC32C, base64.b64encode(google_crc32c.Checksum(payload).digest()).decode()
+            ),
+            metadata=dict(metadata),
+            created=True,
         )
         self.objects[object_name] = ack
         if self.crash_after_put:
@@ -158,7 +161,11 @@ def test_412_size_crc_or_metadata_mismatch_is_critical(
     if changed_field == "size":
         changed = replace(remote, size=cast(int, changed_value), created=False)
     elif changed_field == "crc32c":
-        changed = replace(remote, crc32c=cast(str, changed_value), created=False)
+        changed = replace(
+            remote,
+            checksum=ObjectChecksum(CRC32C, cast(str, changed_value)),
+            created=False,
+        )
     elif changed_field == "metadata":
         changed = replace(remote, metadata=cast(dict[str, str], changed_value), created=False)
     else:
@@ -405,7 +412,8 @@ def test_filename_adapter_uses_seekable_16mib_ciphertext(
     ack = uploader.upload_one(source)
     blob = client._bucket.blobs[ack.object_name]
     assert ack.ciphertext_size == blob.size == len(blob.data)
-    assert ack.ciphertext_crc32c == blob.crc32c
+    assert ack.ciphertext_checksum_value == blob.crc32c
+    assert ack.ciphertext_checksum_algo == "crc32c"
     assert not source.exists()
     assert not list(staging.iterdir()), "staging (plan + ciphertext) cleaned after ACK"
     assert blob.data.startswith(b"AVAPITR1"), "the stored object is the encrypted archive"
@@ -499,7 +507,7 @@ def test_real_sdk_resumable_transport_retries_16mib_upload(tmp_path: Path) -> No
         ack = uploader.upload_one(source)
         assert ResumableHandler.puts == 2
         assert len(ResumableHandler.uploaded) == ack.ciphertext_size
-        assert ack.ciphertext_crc32c == ResumableHandler._object()["crc32c"]
+        assert ack.ciphertext_checksum_value == ResumableHandler._object()["crc32c"]
     finally:
         server.shutdown()
         server.server_close()
@@ -804,13 +812,18 @@ async def test_healthz_answers_while_upload_is_blocked(tmp_path: Path) -> None:
                 self.in_put = False
             payload = path.read_bytes()
             return RemoteObjectAck(
-                object_name,
-                1,
-                len(payload),
-                base64.b64encode(google_crc32c.Checksum(payload).digest()).decode(),
-                dict(metadata),
-                True,
+                object_name=object_name,
+                pin_token="1",  # noqa: S106 — test fixture
+                size=len(payload),
+                checksum=ObjectChecksum(
+                    CRC32C, base64.b64encode(google_crc32c.Checksum(payload).digest()).decode()
+                ),
+                metadata=dict(metadata),
+                created=True,
             )
+
+        def stat(self, object_name: str) -> RemoteObjectAck | None:
+            raise NotImplementedError
 
     store = _SlowStore()
     uploader, source = _uploader(tmp_path, store)

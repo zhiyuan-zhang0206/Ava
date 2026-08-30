@@ -103,6 +103,23 @@ class PhysicalBackupSettings(EnvSettings):
             "bootstrap": False,
         },
     )
+    pitr_store_backend: str = Field(
+        default="gcs",
+        alias="AVA_PITR_STORE_BACKEND",
+        description=(
+            "Object-store backend for PITR uploads and restores — 'gcs' (default). "
+            "New backends land behind the same switch; an unrecognized value "
+            "fails fast at store construction (it never silently falls back to "
+            "GCS). Every PITR daemon reads it, so switching is one env var + a "
+            "restart."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
     pitr_gcs_project: str = Field(
         default="",
         alias="AVA_PITR_GCS_PROJECT",

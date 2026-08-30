@@ -46,18 +46,18 @@ def _candidate(chain_id: str) -> CandidateManifest:
         start_lsn="0/100",
         end_lsn="0/200",
         wal_ranges=(WalRange(1, "0/100", "0/200"),),
-        base_object=BaseObject("base", 1, 10, "crc", "sha", 5, "key", "AVAPITRB1"),
+        base_object=BaseObject("base", "1", 10, "crc32c", "crc", "sha", 5, "key", "AVAPITRB1"),
         native_manifest_sha256="manifest",
         native_manifest_member_path="backup_manifest",
         native_manifest_container_object_name="base",
-        native_manifest_container_generation=1,
+        native_manifest_container_pin_token="1",  # noqa: S106 — test fixture
         migration_set_sha256="migrations",
     )
 
 
 def _required_wal(candidate: CandidateManifest) -> tuple[RestoreObject, ...]:
     return tuple(
-        RestoreObject(name, "wal", 2 + index, 10, "crc", ())
+        RestoreObject(name, "wal", str(2 + index), 10, "crc32c", "crc", ())
         for index, name in enumerate(
             required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
         )
@@ -72,6 +72,7 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
         tmp_path,
         tmp_path / "ack",
         tmp_path / "backup.key",
+        "gcs",
         "project",
         "bucket",
         tmp_path / "viewer.json",
@@ -131,8 +132,18 @@ def test_authoritative_verify_precedes_publisher_construction(
             nonlocal constructed
             constructed = True
 
+    class Backend:
+        name = "gcs"
+
+        @staticmethod
+        def protected_manifest_publisher(**_kwargs: object) -> Publisher:
+            return Publisher()
+
+    def backend() -> Backend:
+        return Backend()
+
     monkeypatch.setattr(restore_runtime, "verify_candidate_proof", reject_mismatched_ack)
-    monkeypatch.setattr(restore_runtime, "GCSProtectedManifestPublisher", Publisher)
+    monkeypatch.setattr(restore_runtime, "get_backend", backend)
 
     with pytest.raises(ValueError, match="ACK generation mismatch"):
         restore_runtime.verify_then_construct_publisher(
@@ -299,8 +310,8 @@ def test_cold_start_health_recovers_real_durable_protected_manifest(tmp_path: Pa
         chain_id=candidate.chain_id,
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
-        base=RestoreObject("base", "base", 1, 10, "crc", ()),
-        wal=(RestoreObject(archive_name, "wal", 2, 10, "crc", ()),),
+        base=RestoreObject("base", "base", "1", 10, "crc32c", "crc", ()),
+        wal=(RestoreObject(archive_name, "wal", "2", 10, "crc32c", "crc", ()),),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
         proof=RestoreProof(
@@ -367,7 +378,7 @@ def test_cold_start_health_degrades_for_invalid_proof_semantics(
         chain_id=candidate.chain_id,
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
-        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        base=RestoreObject("base", "base", "1", 10, "crc32c", "crc", ()),
         wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
@@ -408,7 +419,7 @@ def test_cold_start_health_degrades_for_candidate_digest_mismatch(tmp_path: Path
         chain_id=candidate.chain_id,
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
-        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        base=RestoreObject("base", "base", "1", 10, "crc32c", "crc", ()),
         wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
@@ -451,7 +462,7 @@ def test_cold_start_health_keeps_valid_proof_when_another_manifest_is_corrupt(
         chain_id=candidate.chain_id,
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
-        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        base=RestoreObject("base", "base", "1", 10, "crc32c", "crc", ()),
         wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,

@@ -22,9 +22,10 @@ class WalRange:
 @dataclass(frozen=True)
 class BaseObject:
     object_name: str
-    generation: int
+    pin_token: str
     ciphertext_size: int
-    ciphertext_crc32c: str
+    ciphertext_checksum_algo: str
+    ciphertext_checksum_value: str
     source_sha256: str
     source_size: int
     key_id: str
@@ -48,7 +49,7 @@ class CandidateManifest:
     native_manifest_sha256: str
     native_manifest_member_path: str
     native_manifest_container_object_name: str
-    native_manifest_container_generation: int
+    native_manifest_container_pin_token: str
     migration_set_sha256: str
 
     def __post_init__(self) -> None:
@@ -92,9 +93,10 @@ def base_object_from_ack(
 ) -> BaseObject:
     return BaseObject(
         object_name=ack.object_name,
-        generation=ack.generation,
+        pin_token=ack.pin_token,
         ciphertext_size=ack.size,
-        ciphertext_crc32c=ack.crc32c,
+        ciphertext_checksum_algo=ack.checksum.algo,
+        ciphertext_checksum_value=ack.checksum.value,
         source_sha256=source_sha256,
         source_size=source_size,
         key_id=key_id,

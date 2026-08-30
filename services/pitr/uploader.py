@@ -10,10 +10,12 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import google_crc32c
 
 from services.pitr.archive_shim import archive_name_is_valid
+from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.crypto import MAGIC, EncryptionPlan, create_plan, open_encrypted
 from services.pitr.object_store import ObjectStore, RemoteObjectAck
 
@@ -39,12 +41,42 @@ class AckManifest:
     source_sha256: str
     source_size: int
     object_name: str
-    generation: int
+    pin_token: str
     ciphertext_size: int
-    ciphertext_crc32c: str
+    ciphertext_checksum_algo: str
+    ciphertext_checksum_value: str
     encryption_format: str
     key_id: str
     acknowledged_at: str
+
+
+def ack_manifest_from_raw(raw: dict[str, Any]) -> AckManifest:
+    """Parse one durable ACK; the pre-abstraction shape normalizes in place.
+
+    ACKs written before the store abstraction carry ``generation`` and
+    ``ciphertext_crc32c`` (the GCS vocabulary). They stay readable: GCS
+    objects pin by generation and verify with CRC32C, so the legacy keys
+    map one-to-one onto ``pin_token`` / ``ciphertext_checksum_*`` without
+    ambiguity. Fresh ACKs are written in the normalized shape only.
+    """
+    normalized = dict(raw)
+    if "pin_token" not in normalized:
+        legacy_generation = normalized.pop("generation", None)
+        if legacy_generation is None:
+            raise TypeError("ACK manifest lacks a pin token")
+        normalized["pin_token"] = str(legacy_generation)
+    else:
+        normalized.pop("generation", None)
+    if "ciphertext_checksum_algo" not in normalized:
+        normalized["ciphertext_checksum_algo"] = CRC32C
+    if "ciphertext_checksum_value" not in normalized:
+        legacy_crc32c = normalized.pop("ciphertext_crc32c", None)
+        if legacy_crc32c is None:
+            raise TypeError("ACK manifest lacks a ciphertext checksum")
+        normalized["ciphertext_checksum_value"] = legacy_crc32c
+    else:
+        normalized.pop("ciphertext_crc32c", None)
+    return AckManifest(**normalized)
 
 
 @dataclass(frozen=True)
@@ -162,7 +194,7 @@ class PitrUploader:
     def _read_ack(self, path: Path) -> AckManifest:
         try:
             raw = json.loads(path.read_text())
-            return AckManifest(**raw)
+            return ack_manifest_from_raw(raw)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise AckCorruptionError(f"invalid ACK manifest: {path.name}") from exc
 
@@ -264,8 +296,9 @@ class PitrUploader:
             if staging_path.exists():
                 crc32c = _verify_staged_ciphertext(staging_path, source, key=self._key, plan=plan)
                 if (
-                    staging_path.stat().st_size != ack.ciphertext_size
-                    or crc32c != ack.ciphertext_crc32c
+                    ack.ciphertext_checksum_algo != CRC32C
+                    or staging_path.stat().st_size != ack.ciphertext_size
+                    or crc32c != ack.ciphertext_checksum_value
                 ):
                     raise AckCorruptionError("acknowledged WAL stage differs from ACK")
                 staging_path.unlink()
@@ -297,7 +330,7 @@ class PitrUploader:
                 or ack.object_name != object_name
                 or ack.encryption_format != MAGIC.decode()
                 or ack.key_id != self._key_id
-                or ack.generation <= 0
+                or not ack.pin_token
             ):
                 raise AckCorruptionError("ACK does not describe the local spool object")
             self._cleanup_acknowledged_local_files(source, ack, object_name)
@@ -322,9 +355,10 @@ class PitrUploader:
             plan.source_sha256,
             plan.source_size,
             object_name,
-            remote.generation,
+            remote.pin_token,
             remote.size,
-            remote.crc32c,
+            remote.checksum.algo,
+            remote.checksum.value,
             MAGIC.decode(),
             self._key_id,
             datetime.now(UTC).isoformat(),
@@ -344,9 +378,9 @@ class PitrUploader:
         if remote.object_name != object_name:
             raise RemoteCollisionError("immutable GCS object differs from local archive")
         exact_match = (
-            remote.generation > 0
+            bool(remote.pin_token)
             and remote.size == ciphertext_size
-            and remote.crc32c == expected_crc
+            and remote.checksum == ObjectChecksum(CRC32C, expected_crc)
             and dict(remote.metadata) == metadata
         )
         if remote.created:

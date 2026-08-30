@@ -20,6 +20,7 @@ from google.api_core.exceptions import (
 from google.cloud import storage
 from google.oauth2 import service_account
 
+from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import (
     PermanentObjectStoreError,
     RemoteObjectAck,
@@ -108,9 +109,9 @@ class GCSRestartableStreamingObjectStore:
             raise TransientObjectStoreError("GCS object omitted verification properties")
         return RemoteObjectAck(
             object_name=str(blob.name),
-            generation=int(blob.generation),
+            pin_token=str(blob.generation),
             size=int(blob.size),
-            crc32c=blob.crc32c,
+            checksum=ObjectChecksum(CRC32C, blob.crc32c),
             metadata=dict(blob.metadata or {}),
             created=created,
         )
@@ -170,9 +171,9 @@ class GCSRestartableStreamingObjectStore:
             raise RuntimeError("GCS base upload lost ownership before local publication")
         if (
             ack.object_name != object_name
-            or ack.generation <= 0
+            or not ack.pin_token
             or ack.size != source.ciphertext_size
-            or ack.crc32c != source.ciphertext_crc32c
+            or ack.checksum != ObjectChecksum(CRC32C, source.ciphertext_crc32c)
             or dict(ack.metadata) != dict(metadata)
         ):
             raise PermanentObjectStoreError(

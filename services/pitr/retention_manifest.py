@@ -7,24 +7,29 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from services.pitr.checksums import KNOWN_CHECKSUM_ALGOS
+
 PLAN_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True, order=True)
 class RetentionObject:
     object_name: str
-    generation: int
+    pin_token: str
     size: int
     archive_name: str | None
     kind: str
-    crc32c: str
+    checksum_algo: str
+    checksum_value: str
     metadata: tuple[tuple[str, str], ...]
 
     def __post_init__(self) -> None:
-        if not self.object_name or self.generation <= 0 or self.size <= 0 or not self.crc32c:
+        if not self.object_name or not self.pin_token or self.size <= 0 or not self.checksum_value:
             raise ValueError("retention object lacks an exact immutable identity")
         if self.kind not in {"base", "wal", "history"}:
             raise ValueError("retention object kind is unsupported")
+        if self.checksum_algo not in KNOWN_CHECKSUM_ALGOS:
+            raise ValueError("retention object checksum algorithm is unsupported")
         if tuple(sorted(self.metadata)) != self.metadata:
             raise ValueError("retention object metadata must be canonical")
 

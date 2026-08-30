@@ -1,4 +1,11 @@
-"""Owned immutable-object boundary for the PITR data plane."""
+"""Owned immutable-object boundary for the PITR data plane.
+
+The ACK is backend-agnostic: ``pin_token`` is the backend's own
+pinned-read credential (GCS fills the object generation; Baidu Netdisk
+fills ``fs_id`` + content MD5), and ``checksum`` is an ``(algo, value)``
+pair dispatched through :mod:`services.pitr.checksums` (GCS verifies
+CRC32C, Baidu only exposes MD5).
+"""
 
 from __future__ import annotations
 
@@ -7,18 +14,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from services.pitr.checksums import ObjectChecksum
+
 
 @dataclass(frozen=True)
 class RemoteObjectAck:
+    """A store-verified identity for one immutable remote object."""
+
     object_name: str
-    generation: int
+    pin_token: str
     size: int
-    crc32c: str
+    checksum: ObjectChecksum
     metadata: Mapping[str, str]
     created: bool
 
 
 class ObjectStore(Protocol):
+    def stat(self, object_name: str) -> RemoteObjectAck | None:
+        """Re-observe an object's current identity, or None when absent.
+
+        The viewer-side activation proof uses this to confirm the durable
+        ACK against the backend before cut-over. Not a publish verb.
+        """
+        ...
+
     def put_wal_ciphertext_if_absent(
         self,
         path: Path,

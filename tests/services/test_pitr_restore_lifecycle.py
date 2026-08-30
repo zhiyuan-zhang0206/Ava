@@ -9,6 +9,7 @@ from pytest import MonkeyPatch
 
 from services.pitr import restore_manifest, restore_proof
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
+from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_postgres import _write_sandbox_config
@@ -110,11 +111,11 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
         "0/1000000",
         "0/2000000",
         (WalRange(1, "0/1000000", "0/2000000"),),
-        BaseObject("base", 7, 1, "crc", "sha", 1, "key", "AVAPITRB1"),
+        BaseObject("base", "7", 1, "crc32c", "crc", "sha", 1, "key", "AVAPITRB1"),
         "native",
         "backup_manifest",
         "base",
-        7,
+        "7",
         "migrations",
     )
     calls: list[str] = []
@@ -153,7 +154,14 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
         ) -> RemoteObjectAck:
             assert calls[-2:] == ["restore", "live"]
             calls.append("publish")
-            return RemoteObjectAck(object_name, 9, len(payload), "manifest-crc", metadata, True)
+            return RemoteObjectAck(
+                object_name=object_name,
+                pin_token="9",  # noqa: S106 — test fixture
+                size=len(payload),
+                checksum=ObjectChecksum(CRC32C, "manifest-crc"),
+                metadata=metadata,
+                created=True,
+            )
 
     class Process:
         pid = 1234
@@ -233,7 +241,14 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
             self, *, payload: bytes, object_name: str, metadata: dict[str, str]
         ) -> RemoteObjectAck:
             nonlocal lost
-            ack = RemoteObjectAck(object_name, 9, len(payload), "manifest-crc", metadata, True)
+            ack = RemoteObjectAck(
+                object_name=object_name,
+                pin_token="9",  # noqa: S106 — test fixture
+                size=len(payload),
+                checksum=ObjectChecksum(CRC32C, "manifest-crc"),
+                metadata=metadata,
+                created=True,
+            )
             lost = True
             return ack
 
