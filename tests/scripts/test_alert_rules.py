@@ -2,8 +2,11 @@
 
 The two rule groups moved from the retired Postgres events read path to the
 LGTM read side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as
-OTLP logs under {service_name="unknown_service"}; `| json` flattens each line
-to labels), R4 queries Prometheus (the ava_llm_usage_latency_milliseconds histogram).
+OTLP logs under {service_name="unknown_service"} with event_name/agent_id
+promoted to stream labels since the 2026-08-23 cutover (Task #1467); event
+filters live in the stream selector, `| json` flattens each line for the
+level/category/attributes filters), R4 queries Prometheus (the
+ava_llm_usage_latency_milliseconds histogram).
 Keeps the rules in sync with the emitter's LogQL/OTLP contract.
 
 R8-R12 (issue #46) are the infrastructure layer and query a DIFFERENT
@@ -178,16 +181,26 @@ def test_severity_is_critical_warning_error() -> None:
         )
 
 
-def test_loki_rules_pipeline_json_before_filters() -> None:
-    """Legacy chunks lack the promoted event_name/agent_id stream labels,
-    so rules retain the broad selector and parse JSON before field filters
-    until the migration after legacy history expires."""
+def test_loki_rules_match_event_labels_in_the_selector() -> None:
+    """Since the 2026-08-23 index-label cutover (Task #1467) event_name is a
+    promoted stream label: event-scoped rules must match it inside the stream
+    selector, BEFORE the `| json` stage — the pipeline stage stays for the
+    level/category/attributes filters only. (Legacy chunks without the index
+    labels expired at LEGACY_READ_EXPIRES_AT, so a pipeline-form event filter
+    would silently match nothing.)"""
     for rule in _load_rules():
-        if rule["uid"] == "ava-ops-events-freshness":
-            continue  # R6 is a whole-stream probe (absent_over_time), no field filters
         for expr in _exprs(rule, "loki"):
             assert "| json" in expr, f"{rule['uid']}: no | json stage:\n{expr}"
             assert "unknown_service" in expr, f"{rule['uid']}: wrong stream selector"
+            selector = expr.split("| json")[0]
+            assert "{" in selector and "}" in selector
+            pipeline = expr.split("| json")[1]
+            # event_name must never be filtered after the json stage; the only
+            # event_name tokens left there would be extracted-field leftovers.
+            assert "event_name" not in pipeline, (
+                f"{rule['uid']}: event_name filter after | json (must be a "
+                f"stream-selector matcher):\n{expr}"
+            )
 
 
 def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
@@ -212,10 +225,16 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
     ],
 )
 def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> None:
+    """The event_name matcher sits in the stream selector (before `| json`);
+    category stays a json-stage filter (it is not a stream label)."""
     rules = {r["uid"]: r for r in _load_rules()}
     exprs = _exprs(rules[uid], "loki")
     assert any(event_filter in e for e in exprs)
+    assert any(event_filter in e.split("| json")[0] for e in exprs), (
+        f"{uid}: event_name matcher must be a stream selector, got:\n{exprs}"
+    )
     assert any('category="telemetry"' in e for e in exprs)
+    assert any('category="telemetry"' in e.split("| json")[1] for e in exprs)
 
 
 def test_drop_backlog_rule_unwraps_payload_n() -> None:

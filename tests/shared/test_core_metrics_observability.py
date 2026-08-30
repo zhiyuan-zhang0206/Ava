@@ -123,6 +123,15 @@ def test_logql_queries_have_event_stream_and_json() -> None:
             assert 'service_name="unknown_service"' in expr, name
             assert "| json" in expr, name
             assert "{event_name}" not in expr and "{category}" not in expr, name
+            # event_name/agent_id are promoted stream labels: their matchers
+            # must sit in the stream selector ({... event_name=...}), never as
+            # `| event_name` pipeline filters (task #1467). The {{agent_id}}
+            # inspector placeholder is the one allowed pipeline exception —
+            # the gateway renders it per agent.
+            assert "| event_name" not in expr, f"{name}: event_name filter after | json:\n{expr}"
+            assert "| agent_id" not in expr.replace("| {{agent_id}}", ""), (
+                f"{name}: agent_id filter after | json:\n{expr}"
+            )
 
 
 def test_logql_template_validation_rejects_drift() -> None:
@@ -173,12 +182,18 @@ def test_exec_breakdown_covers_legacy_spellings() -> None:
     land in other — the thread backend stopped emitting them, PR3)."""
     _load_pack()
     exprs = _all_rendered()["ava_obs_exec_success_rate"]
-    assert 'event_name="exec" [5m]' in exprs[0]
+    # event_name is a promoted stream label (2026-08-23 cutover, task #1467):
+    # every matcher sits in the stream selector, before the | json stage.
+    assert all("event_name=" in e.split("| json")[0] for e in exprs), exprs
+    assert 'event_name="exec"' in exprs[0]
     assert 'event_name=~"exec_failed|exec[(]failed[)]"' in exprs[1]
     assert 'event_name=~"exec_timeout|exec[(]timeout[)]"' in exprs[2]
     assert 'event_name=~"exec_cancelled|exec[(]cancelled[)]"' in exprs[3]
     assert 'event_name="exec_node_timeout"' in exprs[4]
-    # other: exec prefix minus every known spelling (anchored regex)
+    # other: exec prefix minus every known spelling. Selector matchers are
+    # full-string regexes, so the negated list excludes exactly the named
+    # spellings (the pre-migration pipeline form was substring-based and
+    # matched nothing — exec.* rows all contain "exec").
     assert 'event_name=~"exec.*"' in exprs[5]
     assert "exec_node_timeout" in exprs[5]
     assert "exec_thread_stuck" not in exprs[5]
@@ -244,13 +259,13 @@ def test_lifecycle_and_spawner_window_aggregates() -> None:
     # bucket width in minutes so every bar is a rate (FleetView bucket
     # transparency pass).
     assert spawner == [
-        'sum by (source) (count_over_time({service_name="unknown_service"} | json | '
-        'category="audit" | event_name="spawn" [$__interval])) / ($__interval_ms / 60000)'
+        'sum by (source) (count_over_time({service_name="unknown_service", event_name="spawn"} | json | '
+        'category="audit" [$__interval])) / ($__interval_ms / 60000)'
     ]
     life = _all_rendered()["ava_obs_lifecycle_counts"]
     assert life == [
-        'sum by (event_name) (count_over_time({service_name="unknown_service"} | json | '
-        'category="audit" | event_name=~"^(spawn|terminate|restart|resurrect|fork)$" '
+        'sum by (event_name) (count_over_time({service_name="unknown_service", event_name=~"^(spawn|terminate|restart|resurrect|fork)$"} | json | '
+        'category="audit" '
         "[$__interval])) / ($__interval_ms / 60000)"
     ]
 

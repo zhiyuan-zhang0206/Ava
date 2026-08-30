@@ -14,16 +14,20 @@ Datasources are provisioned beside this file (`datasources.yml`, uids
 `loki` / `prometheus`; the `ops` Postgres datasource stays for the ava-ops
 dashboards).
 
-### LogQL migration timeline
+### LogQL migration (task #1467, complete)
 
-- Until pre-cutover chunks expire, every rule keeps the legacy selector
-  `{service_name="unknown_service"}` plus `| json`, because old chunks lack
-  the promoted `event_name` / `agent_id` stream labels.
-- After `LEGACY_READ_EXPIRES_AT` (2026-08-30T11:10Z), tracked task #1467 moves
-  `event_name` / `agent_id` filters into the stream selector while retaining
-  `| json` for level, category, and attributes filters.
-- Never promote those filters before legacy chunks expire: doing so silently
-  drops seven days of history.
+- Since the 2026-08-23 index-label cutover (shared/loki_index_labels.py) the
+  collector promotes `event_name` / `agent_id` to stream labels; event-scoped
+  rules match them INSIDE the stream selector
+  (`{service_name="unknown_service", event_name=...}`) and keep `| json` only
+  for the level/category/attributes filters (those fields are NOT stream
+  labels).
+- The legacy chunks without index labels expired at `LEGACY_READ_EXPIRES_AT`
+  (2026-08-30T11:10Z); promoting the filters before that expiry would have
+  silently dropped seven days of history.
+- Selector matchers are full-string regexes (unlike pipeline label filters,
+  which are substring searches), so multi-alternative `event_name=~"a|b"`
+  matches exact event names.
 
 ## Where these run (LGTM stack)
 

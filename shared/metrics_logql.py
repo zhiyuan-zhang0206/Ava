@@ -7,13 +7,15 @@ here instead — a lightweight contract rather than a grammar whitelist:
 
 - every template must select the event stream
   (``{service_name="unknown_service"}`` — the unified emitter's OTLP
-  resource, see gateway/loki_events.py) and pipeline ``| json``: event
-  fields (level / attributes.*) are structured metadata, NOT stream labels,
-  so their label filters before the json stage match nothing. ``event_name``
-  (and ``agent_id``) became index labels at the 2026-08-23 cutover
-  (shared/loki_index_labels.py); a template may additionally match them
-  inside the selector, but the base ``service_name`` selector and the
-  ``| json`` stage stay mandatory either way;
+  resource, see gateway/loki_events.py) and pipeline ``| json``:
+  ``event_name`` (and ``agent_id``) became index labels at the 2026-08-23
+  cutover (shared/loki_index_labels.py, task #1467), so event-scoped
+  templates match them INSIDE the stream selector
+  (``{service_name="unknown_service", event_name=...}``); the level /
+  category / attributes.* fields are NOT stream labels, so their filters
+  stay after the ``| json`` stage (before it they would match nothing).
+  The base ``service_name`` selector and the ``| json`` stage are
+  mandatory either way;
 - event_name/category filters must go through the {event_name}/{category}
   placeholders (registry metadata is the single source of truth) unless the
   query filters on neither (whole-stream queries are legitimate).
@@ -38,14 +40,16 @@ resource the unified emitter ships to (gateway/loki_events.py: _SELECTOR)."""
 
 def _validate_logql_template(template: str, name: str) -> None:
     """Lightweight LogQL template checks (task #1280): the query must select
-    the event stream and pipeline ``| json`` (event fields are structured
-    metadata, NOT stream labels — agent_id/event_name are promoted index
-    labels since the 2026-08-23 cutover, but the base ``service_name``
-    selector and the ``| json`` stage stay mandatory). Event_name/category
-    filters must go through the {event_name}/{category} placeholders (registry
-    metadata is the single source of truth) unless the query has no
-    event_name/category filter at all — whole-stream queries (e.g. the event
-    rate panel) legitimately filter on neither."""
+    the event stream and pipeline ``| json``. event_name/agent_id are promoted
+    index labels since the 2026-08-23 cutover, so event-scoped templates match
+    them inside the stream selector; the level/category/attributes filters
+    stay after ``| json`` (those fields are not stream labels). The base
+    ``service_name`` selector and the ``| json`` stage are mandatory either
+    way. Event_name/category filters must go through the
+    {event_name}/{category} placeholders (registry metadata is the single
+    source of truth) unless the query has no event_name/category filter at
+    all — whole-stream queries (e.g. the event rate panel) legitimately
+    filter on neither."""
     if _LOKI_EVENT_SELECTOR not in template:
         raise _plugin_metrics.InvalidMetricQuery(
             f"metric {name!r} LogQL query must select the event stream {{{_LOKI_EVENT_SELECTOR}}}"

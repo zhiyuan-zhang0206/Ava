@@ -9,13 +9,12 @@ the hand-maintained JSON remains the rendered dashboard source of truth.
 
 Query dialect (Task #1280): event panels read the stream from Loki instead of
 the retired PG ``events`` table — the same read the alert rules (R1-R7) use.
-Each LogQL template selects ``{service_name="unknown_service"}`` (the unified
-emitter's OTLP resource), pipelines ``| json`` (event fields are structured
-metadata, NOT stream labels — agent_id/event_name are promoted index labels
-since the 2026-08-23 cutover, see shared/loki_index_labels.py; these
-fleet-wide panels read every agent, so they keep the base selector), and
-filters on the flattened labels (``attributes.in_total`` ->
-``attributes_in_total``). The two unresolved tiles
+Since the 2026-08-23 index-label cutover (Task #1407 B2,
+shared/loki_index_labels.py) ``event_name``/``agent_id`` are promoted stream
+labels, so event-scoped templates match them inside the stream selector
+(``{service_name="unknown_service", event_name=...}``); ``| json`` stays for
+the level/category/attributes filters (not stream labels). The two
+unresolved tiles
 are the exception: their resolution count is computed by the events-maintenance
 daemon (task #1468) over a fixed six-hour window and published as a Prometheus
 gauge every five minutes. ``core_live_agents`` stays SQL because ``agents_meta``
@@ -70,8 +69,11 @@ from shared.plugin_metrics import MetricSpec, ThresholdStep
 # ── LogQL fragments (Task #1280) ──────────────────────────────────────────────
 # The event stream + json pipeline every template starts with. Attribute
 # labels are derived from the payload-key contract (a renamed payload key
-# fails loudly here instead of silently NULLing out).
-_SEL = '{service_name="unknown_service"} | json'
+# fails loudly here instead of silently NULLing out). event_name/agent_id
+# are promoted stream labels (2026-08-23 cutover): event-scoped queries
+# match them in the selector; | json stays for level/category/attributes.
+_SEL = '{service_name="unknown_service"}'
+_SEL_EV = '{service_name="unknown_service", event_name={event_name}}'
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
 _DELIVERY_ATTR = {k: f"attributes_{k}" for k in DELIVERY_STALLED_KEYS}
 _GATEWAY_ATTR = {k: f"attributes_{k}" for k in GATEWAY_LATENCY_KEYS}
@@ -80,19 +82,19 @@ _GATEWAY_ATTR = {k: f"attributes_{k}" for k in GATEWAY_LATENCY_KEYS}
 def _llm_cost(window: str) -> str:
     """Usage-time LLM cost snapshots over one Grafana/Loki range vector."""
     return (
-        f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-        f"category={{category}} | event_name={{event_name}} | "
+        f"sum(sum_over_time({_SEL_EV} | json | "
+        f"category={{category}} | "
         f"unwrap {_LLM_ATTR['cost_usd']} [{window}]))"
     )
 
 
-def _count(pipeline: str, window: str) -> str:
+def _count(pipeline: str, window: str, event: str | None = None) -> str:
     """One count_over_time series — every count wraps in sum(...): the
     unknown_service family has >500 streams over a day, and an unaggregated
-    count_over_time hits Loki's per-query series cap (alert-rules note)."""
-    return (
-        f'sum(count_over_time({{service_name="unknown_service"}} | json | {pipeline} [{window}]))'
-    )
+    count_over_time hits Loki's per-query series cap (alert-rules note).
+    ``event`` = promoted event_name/agent_id matcher in the stream selector."""
+    selector = _SEL if event is None else f'{{service_name="unknown_service", {event}}}'
+    return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
 # ── stat panels (8-wide, three per row) ───────────────────────────────
@@ -105,7 +107,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count("category={category} | event_name={event_name}", "$__range"),
+        query=_count("category={category}", "$__range", event="event_name={event_name}"),
         query_type="logql",
         target_names=["calls"],
         width=8,
@@ -229,11 +231,11 @@ core_metrics.register_core_metric(
         unit="short",
         panel="stat",
         query=(
-            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
-            f' + sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f' + sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
         ),
         query_type="logql",
@@ -323,8 +325,8 @@ core_metrics.register_core_metric(
         unit="currencyUSD",
         panel="table",
         query=(
-            f'topk(20, sum by (attributes_model) (sum_over_time({{service_name="unknown_service"}} '
-            f"| json | category={{category}} | event_name={{event_name}} | "
+            f'topk(20, sum by (attributes_model) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} '
+            f"| json | category={{category}} | "
             f'attributes_model!="" | unwrap {_LLM_ATTR["cost_usd"]} [$__range])))'
         ),
         query_type="logql",
@@ -343,8 +345,8 @@ core_metrics.register_core_metric(
         unit="currencyUSD",
         panel="table",
         query=(
-            f'topk(20, sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
-            f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
+            f'topk(20, sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+            f"| json | category={{category}} | "
             f"unwrap {_LLM_ATTR['cost_usd']} [$__range])))"
         ),
         query_type="logql",
@@ -362,8 +364,8 @@ core_metrics.register_core_metric(
         unit="short",
         panel="stat",
         query=(
-            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
         ),
         query_type="logql",
@@ -381,8 +383,8 @@ core_metrics.register_core_metric(
         unit="short",
         panel="stat",
         query=(
-            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
         ),
         query_type="logql",
@@ -400,11 +402,11 @@ core_metrics.register_core_metric(
         unit="percent",
         panel="stat",
         query=(
-            f'100 * sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['cache_read']} [$__range]))"
-            f' / sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
         ),
         query_type="logql",
@@ -423,11 +425,11 @@ core_metrics.register_core_metric(
         unit="s",
         panel="stat",
         query=(
-            'sum(sum_over_time({service_name="unknown_service"} | json | '
-            'category={category} | event_name={event_name} | attributes_ok="true" | '
+            'sum(sum_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+            'category={category} | attributes_ok="true" | '
             "unwrap attributes_duration_seconds [$__range]))"
-            ' / sum(count_over_time({service_name="unknown_service"} | json | '
-            'category={category} | event_name={event_name} | attributes_ok="true" [$__range]))'
+            ' / sum(count_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+            'category={category} | attributes_ok="true" [$__range]))'
         ),
         query_type="logql",
         field_defaults={"decimals": 1},
@@ -449,20 +451,20 @@ core_metrics.register_core_metric(
         unit="short",
         panel="barchart",
         query=_count(
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
-            f"{_DELIVERY_ATTR['age_s']} < 60",
+            f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} < 60',
             "$__range",
+            event="event_name={event_name}",
         ),
         targets=[
             _count(
-                f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
-                f"{_DELIVERY_ATTR['age_s']} >= 60 | {_DELIVERY_ATTR['age_s']} < 600",
+                f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 60 | {_DELIVERY_ATTR["age_s"]} < 600',
                 "$__range",
+                event="event_name={event_name}",
             ),
             _count(
-                f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
-                f"{_DELIVERY_ATTR['age_s']} >= 600",
+                f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 600',
                 "$__range",
+                event="event_name={event_name}",
             ),
         ],
         query_type="logql",
@@ -483,14 +485,14 @@ core_metrics.register_core_metric(
         # the per-second sum, the LogQL equivalent of
         # Σ(in+out+reasoning) ÷ interval_sec.
         query=(
-            f'sum(rate({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['in_total']} [1m]))"
-            f' + sum(rate({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f' + sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['out_total']} [1m]))"
-            f' + sum(rate({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f' + sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['reasoning']} [1m]))"
         ),
         query_type="logql",
@@ -510,13 +512,13 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query=(
-            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['out_total']} [5m])) / 5"
         ),
         targets=[
-            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['reasoning']} [5m])) / 5"
         ],
         query_type="logql",
@@ -539,29 +541,29 @@ core_metrics.register_core_metric(
         unit="percent",
         panel="timeseries",
         query=(
-            f'100 * sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-            f' / sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['in_total']} [5m]))"
         ),
         targets=[
             # max agent: per-agent ratio, then the max across agents per bucket
             (
-                f'100 * max(sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
-                f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
+                f'100 * max(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+                f"| json | category={{category}} | "
                 f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-                f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
-                f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
+                f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+                f"| json | category={{category}} | "
                 f"unwrap {_LLM_ATTR['in_total']} [5m])))"
             ),
             (
-                f'100 * min(sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
-                f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
+                f'100 * min(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+                f"| json | category={{category}} | "
                 f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-                f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
-                f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
+                f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+                f"| json | category={{category}} | "
                 f"unwrap {_LLM_ATTR['in_total']} [5m])))"
             ),
         ],
@@ -591,19 +593,19 @@ def _tps(
     tok = _LLM_ATTR[attr_key]
     timing = _LLM_ATTR[attr_label]
     avg = (
-        f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-        f'category={{category}} | event_name={{event_name}} | {timing}!="" | '
+        f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+        f'category={{category}} | {timing}!="" | '
         f"unwrap {tok} [5m]))"
-        f' / sum(sum_over_time({{service_name="unknown_service"}} | json | '
-        f'category={{category}} | event_name={{event_name}} | {timing}!="" | '
+        f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+        f'category={{category}} | {timing}!="" | '
         f"unwrap {timing} [5m])) * 1000"
     )
     per_agent = (
-        f'sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} | json | '
-        f'category={{category}} | event_name={{event_name}} | agent_id!="" | {timing}!="" | '
+        f'sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} | json | '
+        f'category={{category}} | {timing}!="" | '
         f"unwrap {tok} [5m]))"
-        f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} | json | '
-        f'category={{category}} | event_name={{event_name}} | agent_id!="" | {timing}!="" | '
+        f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} | json | '
+        f'category={{category}} | {timing}!="" | '
         f"unwrap {timing} [5m])) * 1000"
     )
     core_metrics.register_core_metric(
@@ -681,7 +683,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="barchart",
-        query=_count("category={category} | event_name={event_name}", "30m") + " / 30",
+        query=_count("category={category}", "30m", event="event_name={event_name}") + " / 30",
         query_type="logql",
         target_names=["calls"],
         # The legacy red-80 step was constant-red noise on the 30-minute
@@ -721,8 +723,8 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query=(
-            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
+            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f"category={{category}} | "
             f"unwrap {_LLM_ATTR['in_total']} [5m])) / 5"
         ),
         query_type="logql",
@@ -751,19 +753,19 @@ core_metrics.register_core_metric(
         unit="ms",
         panel="timeseries",
         query=(
-            f'max(max_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f'category=~"{{category_re}}|log" | '
             f"unwrap {_GATEWAY_ATTR['p50_ms']} [1m]))"
         ),
         targets=[
-            f'max(max_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f'category=~"{{category_re}}|log" | '
             f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))",
-            f'max(max_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f'category=~"{{category_re}}|log" | '
             f"unwrap {_GATEWAY_ATTR['p99_ms']} [1m]))",
-            f'max(max_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f'category=~"{{category_re}}|log" | '
             f"unwrap {_GATEWAY_ATTR['max_ms']} [1m]))",
         ],
         query_type="logql",
@@ -783,13 +785,13 @@ core_metrics.register_core_metric(
         # One series per route — the attributes_route label carries the name.
         query_type="logql",
         query=(
-            f'max by (attributes_route) (max_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f'max by (attributes_route) (max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f'category=~"{{category_re}}|log" | '
             f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))"
         ),
         targets=[
-            f'max by (attributes_route) (max_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f'max by (attributes_route) (max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+            f'category=~"{{category_re}}|log" | '
             f"unwrap {_GATEWAY_ATTR['p99_ms']} [1m]))"
         ],
         target_names=["p95 {{attributes_route}}", "p99 {{attributes_route}}"],
