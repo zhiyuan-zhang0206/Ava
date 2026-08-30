@@ -900,3 +900,197 @@ def test_frozen_pg_state_contract_with_real_reader(
             check=False,
             capture_output=True,
         )
+
+
+def _wal_ack_pending_record(**overrides: object) -> ActivationRecord:
+    record = _wal_restart_pending_record().advance(
+        "wal_ack_pending",
+        wal_exact_evidence={
+            "timeline": "1",
+            "segment": "00000001000000A20000008C",
+            "switch_lsn": "A2/8C896608",
+            "failed_count": "0",
+            "archived_count": "1",
+            "switch_intent_at": "2026-08-30T02:27:04.646291+00:00",
+        },
+        wal_verification_deadline="2026-08-30T02:32:04.646606+00:00",
+    )
+    deadline = overrides.pop("wal_verification_deadline", None)
+    if deadline is not None:
+        record = record.renew_wal_deadline(str(deadline))
+    assert not overrides, f"unhandled overrides: {overrides}"
+    return record
+
+
+def test_switch_wal_runs_on_pitr_admin_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 2026-08-30 failure: the switch ran on shared.db.direct_db_url (the
+    runtime identity, no pg_switch_wal) while every read-only preflight check
+    passed on the superuser connection. The mutation must dial the SAME admin
+    URL the privilege probe certifies."""
+    dialed: list[str] = []
+
+    class _FakeRow:
+        @staticmethod
+        def fetchone() -> tuple[str]:
+            return ("00000001000000A20000008D",)
+
+    class _FakeConn:
+        def __enter__(self) -> _FakeConn:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, query: str) -> _FakeRow:
+            assert "pg_switch_wal" in query
+            return _FakeRow()
+
+    monkeypatch.setattr(
+        activation_runtime,
+        "pitr_admin_url",
+        lambda: "postgresql://super@/postgres?host=/sock&port=5433",
+    )
+    monkeypatch.setattr(
+        "services.pitr.activation_runtime.psycopg.connect",
+        lambda conninfo, **_kw: (dialed.append(conninfo), _FakeConn())[1],
+    )
+    assert activation._switch_wal() == "00000001000000A20000008D"
+    assert dialed == ["postgresql://super@/postgres?host=/sock&port=5433"]
+
+
+def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A connection that cannot EXECUTE pg_switch_wal must refuse the shadow
+    gate BEFORE any config mutation — not crash the activation mid-flight."""
+    monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: "admin-url")
+    called: list[str] = []
+
+    class _FakeRow:
+        @staticmethod
+        def fetchone() -> list[bool]:
+            return [False]
+
+    class _FakeConn:
+        def __enter__(self) -> _FakeConn:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, query: str) -> _FakeRow:
+            called.append(query)
+            return _FakeRow()
+
+    def fake_connect(conninfo: str, **_kw: object) -> _FakeConn:
+        assert conninfo == "admin-url"
+        return _FakeConn()
+
+    monkeypatch.setattr(
+        "services.pitr.activation_runtime.psycopg.connect",
+        fake_connect,
+    )
+    with pytest.raises(RuntimeError, match="pg_switch_wal"):
+        activation_runtime.probe_switch_privilege()
+    assert "has_function_privilege" in called[0]
+
+
+def test_renew_wal_deadline_only_at_wal_ack_pending() -> None:
+    record = _wal_ack_pending_record()
+    fresh = "2026-08-30T10:40:00+00:00"
+    renewed = record.renew_wal_deadline(fresh)
+    assert renewed.wal_verification_deadline == fresh
+    assert renewed.phase == "wal_ack_pending"
+    # the switch intent is untouched — it is the ACK lower bound
+    assert renewed.wal_exact_evidence == record.wal_exact_evidence
+    with pytest.raises(ValueError, match="wal_ack_pending"):
+        _wal_config_pending_record().renew_wal_deadline(fresh)
+
+
+def test_wal_ack_attempt_renews_expired_deadline_before_switch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An attempt that crashed at the switch step left an expired persisted
+    deadline (2026-08-30). The next attempt re-stamps the window BEFORE the
+    switch so the proof loop gets a live upper bound — the operation resumes
+    instead of forcing rollback + full re-activation."""
+    from datetime import UTC, datetime, timedelta
+
+    expired = (datetime.now(UTC) - timedelta(minutes=3)).isoformat()
+    record = _wal_ack_pending_record(wal_verification_deadline=expired)
+    write_record(tmp_path, record)
+    monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(activation, "_require_same_credentials", lambda *_a: None)
+    monkeypatch.setattr(activation, "_switch_wal", lambda: "switched-segment")
+
+    def proof(_rec: ActivationRecord, _stop: object) -> tuple[dict[str, str], dict[str, str]]:
+        raise RuntimeError("proof reached")
+
+    monkeypatch.setattr(activation, "_remote_wal_proof", proof)
+    monkeypatch.setattr(activation, "run_while_renewing", lambda _h, fn: fn(None))
+    with pytest.raises(RuntimeError, match="proof reached"):
+        activation._advance_activation(tmp_path, record, "holder")
+    durable = load_record(tmp_path)
+    assert durable is not None
+    fresh = datetime.fromisoformat(durable.wal_verification_deadline or "")
+    assert (
+        datetime.now(UTC) - timedelta(minutes=1) < fresh < datetime.now(UTC) + timedelta(minutes=6)
+    )
+    assert durable.wal_exact_evidence == record.wal_exact_evidence
+
+
+def test_probe_switch_privilege_against_real_pg(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Real-PG regression for the 2026-08-30 privilege gap: the probe passes on
+    the admin (superuser) connection and fails closed on a role without the
+    grant — the exact discrimination the old preflight missed."""
+    import subprocess
+
+    from shared.pg_tools import pg_tool
+
+    port = 39614
+    data = tmp_path / "pg"
+    log = tmp_path / "pg.log"
+    subprocess.run(  # noqa: S603 — resolved pg binaries + static flags
+        [pg_tool("initdb"), "-D", str(data), "-U", "ava", "-A", "trust"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(  # noqa: S603
+        [
+            pg_tool("pg_ctl"),
+            "-D",
+            str(data),
+            "-l",
+            str(log),
+            "-w",
+            "-t",
+            "30",
+            "start",
+            "-o",
+            f"-p {port} -c listen_addresses='' -c unix_socket_directories={tmp_path} "
+            "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        admin_url = f"postgresql://ava@/postgres?host={tmp_path}&port={port}"
+        monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: admin_url)
+        activation_runtime.probe_switch_privilege()  # superuser: passes
+        # A role without the grant: the probe must refuse (the prod failure shape).
+        import psycopg
+
+        with psycopg.connect(admin_url, autocommit=True) as conn:
+            conn.execute("CREATE ROLE limited LOGIN")
+        limited_url = f"postgresql://limited@/postgres?host={tmp_path}&port={port}"
+        monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: limited_url)
+        with pytest.raises(RuntimeError, match="pg_switch_wal"):
+            activation_runtime.probe_switch_privilege()
+    finally:
+        subprocess.run(  # noqa: S603
+            [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
+            check=False,
+            capture_output=True,
+        )

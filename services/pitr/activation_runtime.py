@@ -257,6 +257,80 @@ def archiver_reached_target(*, last_archived: str, timeline: str, target: str) -
     )
 
 
+def pitr_admin_url() -> str:
+    """The admin-plane connection the activation's Postgres mutations run on:
+    the initdb superuser over the live unix socket (same face `_read_pg_state`
+    reads through).
+
+    Deliberately NOT `shared.db.direct_db_url()` — that derives from
+    `AVA_DB_URL`, whose identity is the runtime role, which lacks
+    `pg_switch_wal` (2026-08-30 activation failure: the WAL-switch step
+    crashed with InsufficientPrivilege while every read-only preflight check
+    had passed on the superuser connection). One URL for both the probe and
+    the mutation means the probe can never certify a different connection
+    than the switch runs on.
+    """
+    from cli.commands._cluster_instance import pg_admin_url
+    from shared.cluster import get_record, record_postgres_port
+
+    record = get_record(ava_home())
+    if record is None:
+        raise RuntimeError("cluster registry record is missing")
+    return pg_admin_url(record_postgres_port(record))
+
+
+def prepare_wal_switch() -> dict[str, str]:
+    """Capture the exact WAL segment the proof will demand, on the admin
+    connection the switch runs on (2026-08-30: the old runtime-identity dial
+    made this capture and the switch diverge from the certified connection)."""
+    with psycopg.connect(pitr_admin_url(), autocommit=True) as conn:
+        row = conn.execute(
+            "SELECT timeline_id::text, pg_walfile_name(pg_current_wal_lsn()), "
+            "pg_current_wal_lsn()::text, failed_count::text, archived_count::text "
+            "FROM pg_control_checkpoint(), pg_stat_archiver"
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("PostgreSQL omitted WAL switch evidence")
+    evidence = {
+        "timeline": str(row[0]),
+        "segment": str(row[1]),
+        "switch_lsn": str(row[2]),
+        "failed_count": str(row[3]),
+        "archived_count": str(row[4]),
+        "switch_intent_at": datetime.now(UTC).isoformat(),
+    }
+    if (ava_home() / "physical-backup" / "ack" / f"{evidence['segment']}.ack.json").exists():
+        raise RuntimeError("WAL switch target already has an ACK from an older operation")
+    return evidence
+
+
+def switch_wal() -> str:
+    """Force-rotate the current WAL segment on the admin connection — the
+    runtime identity lacks pg_switch_wal (2026-08-30 InsufficientPrivilege)."""
+    with psycopg.connect(pitr_admin_url(), autocommit=True) as conn:
+        row = conn.execute("SELECT pg_switch_wal()::text").fetchone()
+    if row is None:
+        raise RuntimeError("PostgreSQL omitted pg_switch_wal result")
+    return str(row[0])
+
+
+def probe_switch_privilege() -> None:
+    """Read-only privilege probe: the connection the activation's WAL switch
+    will run on must be able to EXECUTE pg_switch_wal.
+
+    The probe asks PostgreSQL rather than assuming the superuser role: a
+    future provisioning change that strips the grant fails the shadow gate
+    closed BEFORE any config mutation, instead of failing the activation
+    mid-flight (the 2026-08-30 failure mode)."""
+    with psycopg.connect(pitr_admin_url(), autocommit=True) as conn:
+        row = conn.execute("SELECT has_function_privilege('pg_switch_wal()', 'EXECUTE')").fetchone()
+    if row is None or not row[0]:
+        raise RuntimeError(
+            "PITR admin connection cannot execute pg_switch_wal — "
+            "activation refused before any config mutation"
+        )
+
+
 def remote_wal_proof(
     record: ActivationRecord, stop: threading.Event | None = None
 ) -> tuple[dict[str, str], dict[str, str]]:
