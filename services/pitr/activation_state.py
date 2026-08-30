@@ -31,7 +31,7 @@ ActivationPhase = Literal[
     "rolled_back",
 ]
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _V2_FIELDS = {
     "schema_version",
     "operation_id",
@@ -46,6 +46,7 @@ _V2_FIELDS = {
     "protected_manifest",
     "error",
 }
+
 _PHASES = frozenset(
     {
         "shadow",
@@ -184,6 +185,7 @@ class ActivationRecord:
     error: str | None = None
     error_code: str | None = None
     error_detail: str | None = None
+    error_message: str | None = None
 
     @classmethod
     def start(cls, *, operation_id: str, origin: str) -> ActivationRecord:
@@ -211,6 +213,15 @@ class ActivationRecord:
                 "wal_config_pending",
             }:
                 raise ValueError("PITR activation v2 operation cannot be safely upgraded")
+            raw = {**dict.fromkeys(cls.__dataclass_fields__), **raw}
+            raw["schema_version"] = _SCHEMA_VERSION
+        if (
+            set(raw) == set(cls.__dataclass_fields__) - {"error_message"}
+            and raw.get("schema_version") == 3
+        ):
+            # v3 -> v4 adds only the optional error_message field; every phase
+            # upgrades in place (a base_pending v3 operation must stay
+            # resumable across the schema bump).
             raw = {**dict.fromkeys(cls.__dataclass_fields__), **raw}
             raw["schema_version"] = _SCHEMA_VERSION
         if set(raw) != set(cls.__dataclass_fields__):
@@ -302,6 +313,7 @@ class ActivationRecord:
             error=optional_string("error"),
             error_code=optional_string("error_code"),
             error_detail=optional_string("error_detail"),
+            error_message=optional_string("error_message"),
         )
         if record.schema_version != _SCHEMA_VERSION:
             raise ValueError("unsupported PITR activation record schema")
@@ -590,7 +602,7 @@ class ActivationRecord:
 
     def advance(self, phase: ActivationPhase, **changes: object) -> ActivationRecord:
         if phase == self.phase:
-            if set(changes) - {"error", "error_code", "error_detail"}:
+            if set(changes) - {"error", "error_code", "error_detail", "error_message"}:
                 raise ValueError("same-phase PITR activation update may only change diagnostics")
         elif phase == "rollback_pending":
             if self.phase not in _ROLLBACK_ENTRY_PHASES:

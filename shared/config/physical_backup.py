@@ -384,3 +384,30 @@ class PhysicalBackupSettings(EnvSettings):
                         "restore proof requires a distinct viewer-only service-account identity"
                     )
         return self
+
+
+def pitr_replication_hba_lines() -> list[str]:
+    """Loopback pg_hba rows for PITR's physical replication connection, or []
+    when PITR is not configured. pg_basebackup dials dbname=`replication`,
+    which matches only the literal `replication` keyword — `all` never covers
+    it (2026-08-30 activation died exactly here). A malformed URL yields no
+    rows; the activation preflight fails closed later with the real reason."""
+    from psycopg.conninfo import conninfo_to_dict
+
+    from shared.config import settings
+
+    url = settings.physical_backup.pitr_replication_db_url
+    if not url:
+        return []
+    try:
+        role = str(conninfo_to_dict(url).get("user") or "")
+    except Exception:
+        return []
+    if not role:
+        # An empty user would render `host replication  127.0.0.1/32 ...` —
+        # an invalid line that makes PG17 reject the WHOLE file (QA #1096 P2).
+        return []
+    return [
+        f"host replication {role} 127.0.0.1/32 scram-sha-256",
+        f"host replication {role} ::1/128 scram-sha-256",
+    ]
