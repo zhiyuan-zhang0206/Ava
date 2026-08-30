@@ -360,3 +360,83 @@ def test_migrate_object_aborts_when_the_baidu_read_back_differs() -> None:
             size=len(payload),
             metadata={},
         )
+
+
+# ── QA #1155 nits: two-phase plan + GCS crc32c branch ──
+
+
+def test_rewrite_records_writes_nothing_when_planning_fails(tmp_path: Path) -> None:
+    """QA #1155 nit 1: the two-phase plan is the zero-write guarantee — a
+    record that fails planning (missing mapping object) must abort with
+    every other record byte-identical."""
+    ack_dir = tmp_path / "ack"
+    ack_dir.mkdir()
+    good = ack_dir / "000000010000000000000001.ack.json"
+    good.write_text(
+        json.dumps(
+            {
+                "archive_name": "000000010000000000000001",
+                "source_sha256": "a" * 64,
+                "source_size": 16,
+                "object_name": "ava-pitr/wal/00000001/000000010000000000000001.enc",
+                "pin_token": "999",
+                "ciphertext_size": 100,
+                "ciphertext_crc32c": "walcrc",
+                "ciphertext_checksum_algo": "crc32c",
+                "ciphertext_checksum_value": "walcrc",
+                "encryption_format": "AVAPITR1",
+                "key_id": "v1",
+                "acknowledged_at": "2026-08-30T10:00:00+00:00",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    bad = ack_dir / "000000010000000000000002.ack.json"
+    bad.write_text(
+        json.dumps(
+            {
+                "archive_name": "000000010000000000000002",
+                "object_name": "ava-pitr/wal/00000001/000000010000000000000009.enc",
+                "pin_token": "1",
+                "ciphertext_checksum_algo": "crc32c",
+                "ciphertext_checksum_value": "x",
+            }
+        )
+    )
+    before = {path: path.read_bytes() for path in (good, bad)}
+
+    with pytest.raises(SystemExit, match="missing from the migration"):
+        migrate._rewrite_records(tmp_path, _mapping(), dry_run=False)
+
+    assert {path: path.read_bytes() for path in (good, bad)} == before
+
+
+def test_migrate_object_verifies_the_gcs_crc32c_before_upload(tmp_path: Path) -> None:
+    """QA #1155 nit 2: the GCS-side crc32c gate — a blob whose declared
+    crc32c differs from the downloaded bytes must abort before the Baidu
+    upload."""
+    payload = b"wal-bytes" * 64
+    payload_path = tmp_path / "payload.bin"
+    payload_path.write_bytes(payload)
+    other_path = tmp_path / "other.bin"
+    other_path.write_bytes(b"different-bytes")
+
+    blob = _FakeGcsBlob(payload)
+    blob.crc32c = migrate._crc32c(other_path)
+    with pytest.raises(SystemExit, match="crc32c mismatch"):
+        migrate._migrate_object(
+            baidu=_FakeBaiduStore(hashlib.md5(payload).hexdigest()),  # noqa: S324
+            blob=blob,
+            object_name="ava-pitr/wal/00000001/000000010000000000000000.0000000000000000.enc",
+            size=len(payload),
+            metadata={},
+        )
+    blob.crc32c = migrate._crc32c(payload_path)
+    migrate._migrate_object(
+        baidu=_FakeBaiduStore(hashlib.md5(payload).hexdigest()),  # noqa: S324
+        blob=blob,
+        object_name="ava-pitr/wal/00000001/000000010000000000000000.0000000000000000.enc",
+        size=len(payload),
+        metadata={},
+    )
