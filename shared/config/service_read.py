@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Any, get_origin
+from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
 __all__ = [
     "_all_domains_settings",
@@ -141,14 +141,34 @@ def warn_deprecated_env_aliases() -> None:
             )
 
 
+@lru_cache(maxsize=1)
+def _domain_model_classes() -> dict[str, type[Any]]:
+    """`{domain attr: sub-model class}` — the registry's deferred class imports,
+    resolved once per process without constructing any Settings."""
+    from importlib import import_module
+
+    from shared.config_registry import _DOMAIN_MODELS, _MODEL_CLASSES
+
+    out: dict[str, type[Any]] = {}
+    for attr, _label, model_name, _capability in _DOMAIN_MODELS:
+        if isinstance(model_name, str):
+            out[attr] = getattr(import_module(_MODEL_CLASSES[model_name]), model_name)
+        else:
+            out[attr] = model_name
+    return out
+
+
 def current_field_values() -> dict[str, Any]:
     """Map every field name to its current value.
 
     For a field whose alias is set in this unit's `.env` FILE, the fresh file
-    value is used (coerced to the field type) — so a value written since startup
-    (e.g. a `ava config set`) is reflected without the process restarting. For a
-    field absent from the file, the boot-time value is used (the effective env
-    value, which already folds in os.environ + the Field default).
+    value is used — decoded through the field's OWN sub-model (one
+    `model_validate` per domain), so the model's field validators run exactly as
+    they do at Settings construction: a NoDecode comma-list ("weixin,feishu")
+    splits into the typed list instead of failing a bare
+    `TypeAdapter(list[str])`. For a field absent from the file, the boot-time
+    value is used (the effective env value, which already folds in os.environ +
+    the Field default).
 
     The config panel and the bootstrap payload both read through this, so an edit
     takes effect on the next consuming-process restart while `restart_required`
@@ -158,40 +178,90 @@ def current_field_values() -> dict[str, Any]:
     from shared import runtime_config
     from shared.config import _FIELDS, field_alias
 
-    _service_field_value_ref = _service_field_value
     aliases = runtime_config.read_env_aliases()
     out: dict[str, Any] = {}
+    # Group the file-present fields by owning domain: one model_validate per
+    # domain decodes them all through the sub-model's own validators.
+    pending: dict[str, list[tuple[str, str, str]]] = {}
     for name, ref in _FIELDS.items():
         alias = field_alias(name)
-        if alias in aliases:
-            try:
-                out[name] = TypeAdapter(ref.info.annotation).validate_python(aliases[alias])
-            except (TypeError, ValueError, ValidationError):
-                # The bare annotation can't decode this field the way
-                # pydantic-settings does. A NoDecode comma-list field (annotation
-                # list[...]) is split exactly like the model's _split_comma_list
-                # validator; anything else falls back to the boot-time value rather
-                # than store a silently mis-typed raw string.
-                # The fallback is never silent: the .env FILE still holds the bad
-                # value, and the next process start's Settings construction will
-                # fail on it — the operator must hear about it here or the panel
-                # shows a value that no process can actually boot with (audit
-                # round-2 config.md P2).
-                from shared.log import logger
-
-                logger.warning(
-                    f"current_field_values: {alias}={aliases[alias]!r} in .env cannot "
-                    f"be decoded as {ref.info.annotation}; serving the boot-time "
-                    f"value instead — fix or remove the line before the next process "
-                    f"start (Settings construction will fail on it)"
-                )
-                if get_origin(ref.info.annotation) is list and isinstance(aliases[alias], str):
-                    out[name] = [p.strip() for p in aliases[alias].split(",") if p.strip()]
-                else:
-                    out[name] = _service_field_value(name)
-        else:
+        if alias not in aliases:
             out[name] = _service_field_value(name)
+            continue
+        pending.setdefault(ref.domain, []).append((name, alias, aliases[alias]))
+    for domain, batch in pending.items():
+        _decode_env_file_values(domain, batch, out)
     return out
+
+
+def _isolated_domain_payload(model: type[Any], file_overrides: dict[str, str]) -> dict[str, Any]:
+    """A full-field payload that makes ``model_validate`` env-independent.
+
+    Every field of the sub-model carries its boot-time value; the ``file_overrides``
+    fields then override with their raw `.env` strings. Because EVERY field is
+    provided (keyed by field name — EnvSettings has populate_by_name=True),
+    pydantic-settings has nothing left to read from os.environ: a bad env value
+    for a field absent from the file can no longer poison the decode of a good
+    file value (QA #1090 repro — the batch and the per-field retry used to read
+    env for non-file fields, and one bad env value made a good file value get
+    dropped).
+    """
+    payload = {name: _service_field_value(name) for name in model.model_fields}
+    payload.update(file_overrides)
+    return payload
+
+
+def _decode_env_file_values(
+    domain: str, batch: list[tuple[str, str, str]], out: dict[str, Any]
+) -> None:
+    """Decode one domain's raw `.env` values through its owning sub-model.
+
+    The previous path validated the raw string against a bare
+    `TypeAdapter(annotation)` — which cannot see the model's field validators
+    (NoDecode metadata and the before-validators live on the class, not the
+    annotation) — so every NoDecode comma-list field warned "cannot be decoded"
+    on each panel read / agent spawn and fell back to a wrong-typed comma split
+    (a `list[float]` field came back `list[str]`). Validating through the model
+    reuses its validators and coercion, so comma lists and JSON arrays decode
+    silently and with the right types.
+
+    On a batch failure (a genuinely bad FILE value), each field is re-validated
+    alone — with the OTHER file fields reverted to their boot values so one bad
+    line hides nothing else: good values still land, the bad one warns and falls
+    back to the boot-time value.
+    """
+    model = _domain_model_classes()[domain]
+    file_values = {name: raw for name, _alias, raw in batch}
+    try:
+        decoded = model.model_validate(_isolated_domain_payload(model, file_values))
+    except ValidationError:
+        for name, alias, raw in batch:
+            try:
+                out[name] = getattr(
+                    model.model_validate(_isolated_domain_payload(model, {name: raw})),
+                    name,
+                )
+            except ValidationError:
+                _warn_undecodable_field(name, alias, raw)
+                out[name] = _service_field_value(name)
+        return
+    for name, _alias, _raw in batch:
+        out[name] = getattr(decoded, name)
+
+
+def _warn_undecodable_field(name: str, alias: str, raw: str) -> None:
+    """Warn about a `.env` value the owning model cannot decode — the next
+    process start's Settings construction will fail on it, so the operator must
+    hear about it at panel-read time rather than at the next boot (audit
+    round-2 config.md P2)."""
+    from shared.log import logger
+
+    logger.warning(
+        f"current_field_values: {alias}={raw!r} in .env cannot be decoded "
+        f"by the {name!r} config field; serving the boot-time value instead — "
+        f"fix or remove the line before the next process start (Settings "
+        f"construction will fail on it)"
+    )
 
 
 def bootstrap_config_values(role: str | None = None) -> dict[str, str]:

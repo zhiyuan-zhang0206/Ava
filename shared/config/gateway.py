@@ -326,6 +326,7 @@ class GatewaySettings(EnvSettings):
 
     auth_middleware_enabled: bool = Field(
         default=True,
+        alias="AVA_AUTH_MIDDLEWARE_ENABLED",
         validation_alias=AliasChoices("AVA_AUTH_MIDDLEWARE_ENABLED", "AVA_SKIP_AUTH"),
         description=(
             "Enable the gateway's HTTP API auth middleware. Set false for e2e "
