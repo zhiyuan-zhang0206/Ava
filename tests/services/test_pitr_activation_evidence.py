@@ -15,23 +15,12 @@ from services.pitr.activation_evidence import validate_wal_remote_evidence
 from services.pitr.activation_runtime import wal_evidence_common, wal_metadata
 from services.pitr.uploader import AckManifest
 from shared.config import settings
+from tests._pitr_fixtures import baidu_credential_evidence
 
 _SEGMENT = "00000001000000A20000008B"
 _PIN_TOKEN = "123456789:" + "a" * 32
 _MD5_HEX = "b" * 32
 _CRC32C = "AAAAAA=="
-
-
-def _baidu_credentials() -> dict[str, str]:
-    return {
-        "backend": "baidu",
-        "uploader_identity": "app-key",
-        "viewer_identity": "app-key",
-        "store_target": "/apps/ava/ava-pitr",
-        "object_prefix": "pitr",
-        "backup_key_id": "key",
-        "backup_key_sha256": "0" * 64,
-    }
 
 
 def _gcs_credentials() -> dict[str, str]:
@@ -89,7 +78,7 @@ def _validate(*, ack: dict[str, str], viewer: dict[str, str]) -> None:
         viewer=viewer,
         exact=_exact(),
         verification_deadline="2026-08-30T04:00:00+00:00",
-        credential_evidence=_baidu_credentials(),
+        credential_evidence=baidu_credential_evidence(),
     )
 
 
@@ -150,6 +139,21 @@ def test_gcs_wal_proof_keeps_validating_legacy_shapes() -> None:
         verification_deadline="2026-08-30T04:00:00+00:00",
         credential_evidence=_gcs_credentials(),
     )
+
+
+def test_wal_proof_rejects_an_unknown_credential_backend() -> None:
+    """The fail-fast gate: an unrecognized backend must refuse the proof
+    before any vocabulary dispatch — a typo must never wedge a later gate
+    or silently fall back to the previous backend."""
+    ack, viewer = _pair()
+    with pytest.raises(ValueError, match="unknown backend"):
+        validate_wal_remote_evidence(
+            ack=ack,
+            viewer=viewer,
+            exact=_exact(),
+            verification_deadline="2026-08-30T04:00:00+00:00",
+            credential_evidence={**baidu_credential_evidence(), "backend": "s3"},
+        )
 
 
 def _ack_manifest() -> AckManifest:
