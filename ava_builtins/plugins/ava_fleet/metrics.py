@@ -34,7 +34,10 @@ from shared.plugin_metrics import MetricSpec, register_metric
 
 # The event stream + json pipeline every template starts with. The selector
 # matches the unified emitter's OTLP resource (gateway/loki_events._SELECTOR).
-_SEL = '{service_name="unknown_service"} | json'
+# event_name/agent_id are promoted stream labels (2026-08-23 cutover), so
+# event-scoped queries match them inside the selector (via `_count`'s `event`
+# matcher); `| json` stays for the level/category/attributes fields.
+_SEL = '{service_name="unknown_service"}'
 
 # Attribute labels are derived from the payload-key contract (a renamed
 # payload key fails loudly here instead of silently NULLing out) — the same
@@ -42,10 +45,13 @@ _SEL = '{service_name="unknown_service"} | json'
 _TASK_ATTR = {k: f"attributes_{k}" for k in TASK_UPDATE_KEYS}
 
 
-def _count(pipeline: str, window: str) -> str:
+def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
     """One count_over_time series — every count wraps in sum(...) (see the
-    module docstring for the series-cap note)."""
-    return f"sum(count_over_time({_SEL} | {pipeline} [{window}]))"
+    module docstring for the series-cap note). ``matchers`` carries the promoted
+    event_name stream-label matcher (e.g. ``'event_name={event_name}'``): it
+    is matched inside the stream selector, not after ``| json``."""
+    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
+    return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
 register_metric(
@@ -64,18 +70,16 @@ register_metric(
         query=(
             f"100 * {
                 _count(
-                    'category={category} | event_name={event_name} | '
-                    + _TASK_ATTR['status']
-                    + '="done"',
+                    'category={category} | ' + _TASK_ATTR['status'] + '="done"',
                     '5m',
+                    matchers='event_name={event_name}',
                 )
             }"
             f" / {
                 _count(
-                    'category={category} | event_name={event_name} | '
-                    + _TASK_ATTR['status']
-                    + '!=""',
+                    'category={category} | ' + _TASK_ATTR['status'] + '!=""',
                     '5m',
+                    matchers='event_name={event_name}',
                 )
             }"
         ),
@@ -101,18 +105,16 @@ register_metric(
         query=(
             f"100 * {
                 _count(
-                    'category={category} | event_name={event_name} | '
-                    + _TASK_ATTR['status']
-                    + '="done" | {{agent_id}}',
+                    'category={category} | ' + _TASK_ATTR['status'] + '="done" | {{agent_id}}',
                     '$__interval',
+                    matchers='event_name={event_name}',
                 )
             }"
             f" / {
                 _count(
-                    'category={category} | event_name={event_name} | '
-                    + _TASK_ATTR['status']
-                    + '!="" | {{agent_id}}',
+                    'category={category} | ' + _TASK_ATTR['status'] + '!="" | {{agent_id}}',
                     '$__interval',
+                    matchers='event_name={event_name}',
                 )
             }"
         ),

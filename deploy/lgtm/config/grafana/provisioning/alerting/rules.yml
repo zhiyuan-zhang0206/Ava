@@ -10,7 +10,8 @@
 #
 # Evaluation engine: Grafana Unified Alerting over the LGTM read side
 # (Task #1224): rules R1-R3, R5-R7 and R13 query Loki (the events stream — every
-# event is one OTLP log line under {service_name="unknown_service"}, body =
+# event is one OTLP log line under {service_name="unknown_service"} with
+# event_name/agent_id promoted to stream labels since 2026-08-23; body =
 # the full event JSON, so `| json` flattens it to labels), and R4 plus the
 # infrastructure/delivery rules R8-R12 and R14-R16 query Prometheus. Datasources are provisioned
 # beside this file in datasources.yml (uids `loki` / `prometheus`). The
@@ -42,15 +43,16 @@
 # cluster-operator agent's judgment — see conventions/runbook.md, "The
 # operator's SRE loop".
 #
-# LogQL migration timeline:
-# - Until pre-cutover chunks expire, every rule keeps the legacy selector
-#   `{service_name="unknown_service"}` plus `| json`: old chunks lack the
-#   promoted event_name/agent_id stream labels.
-# - After LEGACY_READ_EXPIRES_AT (2026-08-30T11:10Z), tracked task #1467 moves
-#   event_name/agent_id filters into the stream selector while retaining
-#   `| json` for level/category/attributes filters.
-# - Never promote those filters before legacy chunks expire: doing so silently
-#   drops seven days of history.
+# Index-label selectors (task #1467): since the 2026-08-23 cutover
+# (shared/loki_index_labels.py, INDEX_LABEL_CUTOVER_AT) the collector promotes
+# event_name/agent_id to stream labels, so event-scoped rules match them
+# inside the stream selector (`{service_name="unknown_service", event_name=...}`)
+# and keep `| json` only for the level/category/attributes filters (those
+# fields are NOT stream labels). Legacy chunks without the index labels
+# expired at LEGACY_READ_EXPIRES_AT (2026-08-30T11:10Z); promoting the filters
+# before that expiry would have silently dropped seven days of history.
+# Selector matchers are full-string regexes, unlike pipeline label filters
+# (substring), so multi-alternative event_name regexes match exact names.
 # - Prod events carry cluster=".ava"; co-located cluster events must not
 #   participate in prod alert evaluation.
 # - Read side is strict: legacy records without a cluster dimension are excluded for up to the 7-day Loki retention, so aggregate counts may read low during rollout.
@@ -248,8 +250,8 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(sum_over_time({service_name="unknown_service"} | json | cluster=".ava" |
-                category="telemetry" | event_name=~"sse_drop|event_log_drop" |
+                sum(sum_over_time({service_name="unknown_service", event_name=~"sse_drop|event_log_drop"} | json | cluster=".ava" |
+                category="telemetry" |
                 unwrap attributes_n [10m]))
               instant: true
               queryType: instant
@@ -315,8 +317,8 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
-                category="telemetry" | event_name="agent_restarted" [15m]))
+                sum(count_over_time({service_name="unknown_service", event_name="agent_restarted"} | json | cluster=".ava" |
+                category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -456,8 +458,8 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
-                category="telemetry" | event_name="delivery_stalled" |
+                sum(count_over_time({service_name="unknown_service", event_name="delivery_stalled"} | json | cluster=".ava" |
+                category="telemetry" |
                 attributes_age_s < 600 [10m]))
               instant: true
               queryType: instant
@@ -1438,8 +1440,8 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
-                category="telemetry" | event_name="trace" |
+                sum(count_over_time({service_name="unknown_service", event_name="trace"} | json | cluster=".ava" |
+                category="telemetry" |
                 attributes_action="recording_disabled_disk_watermark" [24h]))
               instant: true
               queryType: instant
@@ -1542,8 +1544,8 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_vendor, attributes_model)
-                (count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
-                category="telemetry" | event_name="llm_provider_error" |
+                (count_over_time({service_name="unknown_service", event_name="llm_provider_error"} | json | cluster=".ava" |
+                category="telemetry" |
                 attributes_billing="true" [15m]))
               instant: true
               queryType: instant
@@ -1616,8 +1618,8 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                max by (attributes_route) (max_over_time({service_name="unknown_service"}
-                | json | cluster=".ava" | category=~"telemetry|log" | event_name="gateway_latency"
+                max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
+                | json | cluster=".ava" | category=~"telemetry|log"
                 | attributes_route_class="fast"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
@@ -1686,8 +1688,8 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                max by (attributes_route) (max_over_time({service_name="unknown_service"}
-                | json | cluster=".ava" | category=~"telemetry|log" | event_name="gateway_latency"
+                max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
+                | json | cluster=".ava" | category=~"telemetry|log"
                 | attributes_route_class="fast"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
@@ -1831,8 +1833,8 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                max by (attributes_route) (max_over_time({service_name="unknown_service"}
-                | json | cluster=".ava" | category=~"telemetry|log" | event_name="gateway_latency"
+                max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
+                | json | cluster=".ava" | category=~"telemetry|log"
                 | attributes_route_class="slow"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
@@ -1901,8 +1903,8 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                max by (attributes_route) (max_over_time({service_name="unknown_service"}
-                | json | cluster=".ava" | category=~"telemetry|log" | event_name="gateway_latency"
+                max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
+                | json | cluster=".ava" | category=~"telemetry|log"
                 | attributes_route_class="slow"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
