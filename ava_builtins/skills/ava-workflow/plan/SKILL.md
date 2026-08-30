@@ -24,6 +24,7 @@ Everything in this skill (decompose, estimate, mark dependencies, set checkpoint
 2. **Every step has clear output and acceptance criteria.** "Change the code" is not a step — "Modify module X so interface Y returns format Z, verified by unit tests" is a step.
 3. **Mark dependencies and parallelizability.** Which steps can run in parallel? Which must be serial? For parallel work this is the whole point of the plan.
 4. **Surface uncertainty.** Explicitly mark what you don't know — "needs investigation to determine approach" is itself a step.
+5. **Keep capability matching structural.** Every plan has a Capabilities section and every task node has `Skills / MCP`; brief plans use shorter entries or `None` rather than a reduced shape.
 
 ## Process
 
@@ -64,13 +65,21 @@ Set checkpoints at key milestones — stop at these points to verify the directi
 ## Overview
 [A paragraph: overall approach, key technical decisions]
 
+## Capabilities
+- Use: [skill or MCP] — [one-line reason]
+- Not used: [skill or MCP] — [one-line reason]
+Capabilities the Align phase marked *deliberately not used* carry over to this section's `Not used:` line unless execution proves otherwise.
+
 ## Task Breakdown
 
-| # | Task | Output | Estimate | Depends On | Risk | Priority | Parallelizable |
-|---|------|--------|----------|------------|------|----------|----------------|
-| 1 | ... | ... | ... | - | Low | P0 | - |
-| 2 | ... | ... | ... | #1 | Medium | P0 | - |
-| 3 | ... | ... | ... | #1 | Low | P1 | #2 |
+Each task node names the skills and MCP tools it depends on in the `Skills / MCP` field.
+The `Skills / MCP` field is required even in a short plan; use `None` when a task needs no named capability.
+
+| # | Task | Skills / MCP | Output | Estimate | Depends On | Risk | Priority | Parallelizable |
+|---|------|--------------|--------|----------|------------|------|----------|----------------|
+| 1 | ... | ... | ... | ... | - | Low | P0 | - |
+| 2 | ... | ... | ... | ... | #1 | Medium | P0 | - |
+| 3 | ... | ... | ... | ... | #1 | Low | P1 | #2 |
 
 ## Critical Path
 [The longest dependency chain, determining total timeline]
