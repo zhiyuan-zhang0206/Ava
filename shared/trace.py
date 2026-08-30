@@ -373,29 +373,46 @@ def _arm_tracing(endpoint: str) -> None:
         # pointed at the LOCAL sidecar (no api_endpoint/api_key, so the SDK
         # never dials a remote backend itself); `telemetry_enabled=False`
         # stops traceloop's own usage telemetry from phoning home.
-        Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
-            app_name="ava",
-            exporter=OtlpJsonHttpSpanExporter(endpoint=endpoint),
-            instruments=instruments,
-            disable_batch=False,
-            telemetry_enabled=False,
-            resource_attributes={"cluster": cluster_label()},
-        )
-
-        logger.info(
-            "trace recording enabled",
-            event="trace",
-            endpoint=endpoint,
-            mirror_dir=str(traces_dir()),
-        )
-        _state["collector_offline_reported"] = False
-        _state["initialized"] = True
+        #
+        # Idempotence guard, under the init lock: at most one Traceloop.init per
+        # process. A second arm thread is only reachable when the module state
+        # was reset while the first was still in flight (the tests reset _state
+        # between cases; production never does), but once two arm threads run,
+        # the SDK's TracerWrapper singleton makes a second init FAKE-SUCCEED
+        # without adding instrumentors — and in tests the second call lands in
+        # the next case's monkeypatch (the #1065 / post-#1068 flake: a second
+        # call counted by test_idempotent_second_call_is_noop). The check runs
+        # after the slow import on purpose: both threads serialize on the
+        # import lock, so the loser reaches here after the winner has recorded
+        # its outcome.
+        with _init_lock:
+            if _state["initialized"] or _state["arm_failed"]:
+                return
+            try:
+                Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
+                    app_name="ava",
+                    exporter=OtlpJsonHttpSpanExporter(endpoint=endpoint),
+                    instruments=instruments,
+                    disable_batch=False,
+                    telemetry_enabled=False,
+                    resource_attributes={"cluster": cluster_label()},
+                )
+                logger.info(
+                    "trace recording enabled",
+                    event="trace",
+                    endpoint=endpoint,
+                    mirror_dir=str(traces_dir()),
+                )
+                _state["collector_offline_reported"] = False
+                _state["initialized"] = True
+            except Exception:
+                _state["arm_failed"] = True
+                raise
     except Exception as exc:
         # One attempt per process: the retry loop only bridges
         # unreachable->reachable, and retrying Traceloop.init after a partial
         # failure would fake-succeed — the TracerWrapper singleton survives,
         # so a second init() adds no instrumentors yet reports success.
-        _state["arm_failed"] = True
         logger.warning(
             "trace recording failed to initialize — spans disabled this process",
             event="trace",
