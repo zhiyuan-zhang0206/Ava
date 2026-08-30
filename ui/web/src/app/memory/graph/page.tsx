@@ -501,10 +501,10 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
               const isReference = e.kind === "reference";
               const opacity = isReference
                 ? isIncident
-                  ? 0.55
+                  ? 0.6
                   : isDimmed
-                    ? 0.04
-                    : 0.2
+                    ? 0.05
+                    : 0.28
                 : isIncident
                   ? 0.85
                   : isDimmed
@@ -661,9 +661,9 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           {" · "}
           <span className="tabular-nums">{folderCount} folder{folderCount === 1 ? '' : 's'}</span>
           {" · "}
-          <span className="tabular-nums">{graph.edges.length} link{graph.edges.length === 1 ? '' : 's'}</span>
+          <span className="tabular-nums">{graph.edges.length} edge{graph.edges.length === 1 ? '' : 's'}</span>
         </span>
-        <span className="pointer-events-none ml-2 hidden items-center gap-3 text-[10px] text-muted-foreground md:flex">
+        <span className="ml-2 hidden items-center gap-3 rounded border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur md:flex">
           <span className={cn("items-center gap-1", FLEX)}>
             <svg width="18" height="4" aria-hidden="true">
               <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1" />
@@ -672,7 +672,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           </span>
           <span className={cn("items-center gap-1", FLEX)}>
             <svg width="18" height="4" aria-hidden="true">
-              <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeOpacity="0.2" strokeWidth="0.75" strokeDasharray="2 2" />
+              <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeOpacity="0.28" strokeWidth="0.75" strokeDasharray="2 4" />
             </svg>
             reference
           </span>

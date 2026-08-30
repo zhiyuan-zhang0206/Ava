@@ -87,7 +87,7 @@ describe("Memory graph page", () => {
 
     expect(screen.getByText("2 notes")).toBeTruthy();
     expect(screen.getByText("1 folder")).toBeTruthy();
-    expect(screen.getByText("3 links")).toBeTruthy();
+    expect(screen.getByText("3 edges")).toBeTruthy();
     expect(screen.getByText("user-profile")).toBeTruthy();
     expect(screen.getByText("tech-ops")).toBeTruthy();
     expect(screen.getByTestId("memory-node-alpha.md")).toBeTruthy();
