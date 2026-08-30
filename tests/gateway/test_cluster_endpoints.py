@@ -363,45 +363,48 @@ class TestPauseLocalCluster:
 # Subject under test: these call the real ops.cluster spawn entry points (with
 # subprocess.run faked), so they opt out of the autouse guard that refuses them
 # suite-wide (tests/conftest.py:_guard_cluster_spawn).
+def _assert_shared_disabled_marker_clean() -> None:
+    """Tripwire for `TestUnpauseLocalCluster`'s marker hermeticity (task #2181).
+
+    The durable `--disable-service` marker lives in the worker-shared session
+    home (`$AVA_HOME/disabled_services`, tests/conftest.py), and these tests call
+    the real `unpause_local_cluster`, which reads it before respawning — a
+    'restarter' entry there means some earlier test leaked operator intent into
+    the shared home, and every unpause test below would silently exercise that
+    leak (no respawn, no raise) instead of the respawn contract (CI #1172/#1173
+    shard-5 flakes; the writer-side isolation landed in #1185). Fail with a
+    diagnosis rather than a cryptic `[]` / `DID NOT RAISE`.
+    """
+    from shared import disabled_services as ds
+
+    leaked = sorted(ds.read_skipped())
+    if "restarter" in leaked:
+        pytest.fail(
+            "worker-shared $AVA_HOME/disabled_services already lists 'restarter' "
+            f"(marker: {leaked}): a test wrote the durable --disable-service "
+            "marker into the shared session home instead of a per-test file, so "
+            "the unpause tests below would exercise that leak (no respawn, no "
+            "raise) rather than the respawn contract. Fix the leaking writer — "
+            "redirect its marker to a per-test tmp like "
+            "tests/cli/conftest.py::_isolate_disabled_services_marker — instead "
+            "of the victim."
+        )
+
+
 @pytest.mark.real_cluster_spawn
 class TestUnpauseLocalCluster:
     @pytest.fixture(autouse=True)
     def _hermetic_disabled_marker(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """The unpause tests call the real `unpause_local_cluster`, and it reads
-        the durable `--disable-service` marker from `$AVA_HOME/disabled_services`
-        before respawning (`is_skipped("restarter", read_skipped())` -> early
-        return: no spawn, no raise). The suite's session home is worker-scoped and
-        shared (tests/conftest.py), so a marker written there by ANY earlier test
-        silently displaces this class' assertions — the respawn test sees
-        `spawned == []`, the genuine-failure test never raises (CI #1172/#1173
-        shard-5 flakes, task #2181; the writer-side isolation landed in #1185).
-
-        Defense-in-depth, two arms:
-        - validate: a marker already present in the REAL shared home means a
-          writer leaked durable operator intent there (the writer-side isolation
-          fixture in tests/cli/conftest.py should have kept it per-test). Fail
-          with a diagnosis instead of letting every test below silently exercise
-          the leak.
-        - self-isolate: redirect the marker read to a per-test tmp file — the
-          same redirection tests/shared/test_disabled_services.py and
-          tests/cli/conftest.py use — so these tests keep exercising the unpause
-          respawn contract no matter what any future test writes into the shared
-          home.
-        """
+        """Two arms keeping the unpause tests independent of the worker-shared
+        `--disable-service` marker: a tripwire (a 'restarter' entry already in the
+        shared home -> fail with a diagnosis: a writer leaked) and hermeticity
+        (the marker read is redirected to a per-test tmp file, as
+        tests/cli/conftest.py and tests/shared/test_disabled_services.py do).
+        Each arm is pinned by a dedicated test: test_tripwire_pin_raises_on_shared_marker_pollution
+        and test_hermeticity_pin_keeps_marker_out_of_the_shared_home."""
+        _assert_shared_disabled_marker_clean()
         from shared import disabled_services as ds
 
-        leaked = sorted(ds.read_skipped())
-        if "restarter" in leaked:
-            pytest.fail(
-                "worker-shared $AVA_HOME/disabled_services already lists 'restarter' "
-                f"(marker: {leaked}): a test wrote the durable --disable-service "
-                "marker into the shared session home instead of a per-test file, so "
-                "the unpause tests below would exercise that leak (no respawn, no "
-                "raise) rather than the respawn contract. Fix the leaking writer — "
-                "redirect its marker to a per-test tmp like "
-                "tests/cli/conftest.py::_isolate_disabled_services_marker — instead "
-                "of the victim."
-            )
         monkeypatch.setattr(ds, "disabled_services_file", lambda: tmp_path / "disabled_services")
 
     def test_writes_idle_posture_and_respawns_restarter(
@@ -464,6 +467,43 @@ class TestUnpauseLocalCluster:
         pause_backend.spawn_ok = False
         with pytest.raises(RuntimeError, match="could not respawn"):
             cluster_mod.unpause_local_cluster()
+
+    def test_hermeticity_pin_keeps_marker_out_of_the_shared_home(self) -> None:
+        """Pins the hermeticity arm: a marker write by a test in this class lands
+        in the per-test tmp file, never in the worker-shared session home — the
+        arm removed, this write leaks 'restarter' into the shared home and the
+        class is silently disabled again (CI #1172/#1173)."""
+        from shared import disabled_services as ds
+        from shared.config import settings
+
+        ds.write_skipped({"restarter"})
+
+        shared_marker = Path(settings.general.ava_home) / "disabled_services"
+        leaked = shared_marker.read_text() if shared_marker.exists() else ""
+        assert "restarter" not in leaked, (
+            "the hermeticity arm must keep the durable --disable-service marker "
+            "out of the worker-shared session home"
+        )
+        assert ds.read_skipped() == {"restarter"}  # the per-test marker still reads
+
+
+def test_tripwire_pin_raises_on_shared_marker_pollution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Pins the tripwire arm: a 'restarter' entry in the marker read must raise
+    the diagnosis (the read is redirected to a tmp file here, so the real shared
+    home stays untouched). Arm removed, a leak would silently displace every
+    unpause test's assertions without any test going red."""
+    from shared import disabled_services as ds
+
+    marker = tmp_path / "disabled_services"
+    marker.write_text("restarter\n")
+    monkeypatch.setattr(ds, "disabled_services_file", lambda: marker)
+    with pytest.raises(pytest.fail.Exception, match="worker-shared"):
+        _assert_shared_disabled_marker_clean()
+
+    marker.write_text("")
+    _assert_shared_disabled_marker_clean()  # a clean marker must not raise
 
 
 # Subject under test: these call the real ops.cluster spawn entry points (with
