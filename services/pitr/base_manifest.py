@@ -7,9 +7,39 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from services.pitr.checksums import CRC32C
 from services.pitr.object_store import RemoteObjectAck
 
 SCHEMA_VERSION = 1
+
+
+def base_object_from_legacy(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a pre-abstraction BaseObject shape in place.
+
+    Manifests written before the store abstraction carry ``generation``
+    and ``ciphertext_crc32c`` (the GCS vocabulary); the same renames that
+    produced the new fields must not make pre-existing on-disk manifests
+    unreadable. The legacy keys map one-to-one onto ``pin_token`` /
+    ``ciphertext_checksum_*`` without ambiguity.
+    """
+    normalized = dict(raw)
+    if "pin_token" not in normalized:
+        legacy_generation = normalized.pop("generation", None)
+        if legacy_generation is None:
+            raise TypeError("base object lacks a pin token")
+        normalized["pin_token"] = str(legacy_generation)
+    else:
+        normalized.pop("generation", None)
+    if "ciphertext_checksum_algo" not in normalized:
+        normalized["ciphertext_checksum_algo"] = CRC32C
+    if "ciphertext_checksum_value" not in normalized:
+        legacy_crc32c = normalized.pop("ciphertext_crc32c", None)
+        if legacy_crc32c is None:
+            raise TypeError("base object lacks a ciphertext checksum")
+        normalized["ciphertext_checksum_value"] = legacy_crc32c
+    else:
+        normalized.pop("ciphertext_crc32c", None)
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -74,7 +104,19 @@ class CandidateManifest:
 
     @classmethod
     def from_json(cls, value: str) -> CandidateManifest:
-        raw: dict[str, Any] = json.loads(value)
+        raw: dict[str, Any] = dict(json.loads(value))
+        # Legacy normalization (pre-store-abstraction shape): manifests
+        # already on disk must stay readable through the field renames —
+        # a live activation candidate predates them (QA #1131 block 1).
+        if "native_manifest_container_pin_token" not in raw:
+            legacy = raw.pop("native_manifest_container_generation", None)
+            if legacy is None:
+                raise ValueError("base candidate manifest lacks a container pin token")
+            raw["native_manifest_container_pin_token"] = str(legacy)
+        else:
+            raw.pop("native_manifest_container_generation", None)
+        if isinstance(raw.get("base_object"), dict):
+            raw["base_object"] = base_object_from_legacy(raw["base_object"])
         expected = set(cls.__dataclass_fields__)
         if set(raw) != expected:
             raise ValueError("base candidate manifest fields do not match schema")

@@ -81,6 +81,173 @@ def test_digest_of_unknown_algo_fails_fast() -> None:
         digest_bytes("sha256", b"x")
 
 
+# ── legacy manifest compat (QA #1131 P1: pre-abstraction shapes) ──
+
+_LEGACY_CANDIDATE_JSON = (
+    '{"base_object":{"ciphertext_crc32c":"viqqbw==","ciphertext_size":4101269456,'
+    '"encryption_format":"AVAPITRB1","generation":1788085003231815,'
+    '"key_id":"ava-pitr-backup-key-prod",'
+    '"object_name":"ava-pitr/base/activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40/'
+    '358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac/base.tar.zst.enc",'
+    '"source_sha256":"358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac",'
+    '"source_size":6319665156},'
+    '"chain_id":"activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40",'
+    '"database_name":"ava_main","end_lsn":"A4/89EC6820",'
+    '"migration_set_sha256":"63124a552737c95e0296cd29a5247cec07c1014d9eb474ea2d78116c73849f2e",'
+    '"native_manifest_container_generation":1788085003231815,'
+    '"native_manifest_container_object_name":'
+    '"ava-pitr/base/activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40/'
+    '358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac/base.tar.zst.enc",'
+    '"native_manifest_member_path":"backup_manifest",'
+    '"native_manifest_sha256":"5ee47ac3e20907e70894bf2761395256a78b94c116efe11f86ec26adff2153d2",'
+    '"postgres_major":17,"protected":false,"schema_version":1,'
+    '"start_lsn":"A4/7FC179B0","system_identifier":"7656686487711429617",'
+    '"timeline":1,'
+    '"wal_ranges":[{"end_lsn":"A4/89EC6820","start_lsn":"A4/7FC179B0","timeline":1}],'
+    '"wal_segment_size":16777216}'
+)
+
+
+def test_legacy_candidate_manifest_normalizes_to_the_new_shape() -> None:
+    """The exact pre-abstraction candidate JSON from the live tree must
+    parse, and its renamed fields must land where the new code reads them
+    (QA #1131 P1 — a deploy that rejects this file crash-loops the
+    base-candidate daemon at boot)."""
+    from services.pitr.base_manifest import CandidateManifest
+
+    candidate = CandidateManifest.from_json(_LEGACY_CANDIDATE_JSON)
+    assert candidate.base_object.pin_token == "1788085003231815"  # noqa: S105 — fixture
+    assert candidate.base_object.ciphertext_checksum_algo == CRC32C
+    assert candidate.base_object.ciphertext_checksum_value == "viqqbw=="
+    assert candidate.native_manifest_container_pin_token == "1788085003231815"  # noqa: S105 — fixture
+    assert candidate.chain_id == "activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40"
+    # The new canonical serialization is stable across the rename.
+    assert CandidateManifest.from_json(candidate.to_json()) == candidate
+
+
+def test_legacy_protected_manifest_normalizes_restore_objects() -> None:
+    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.restore_manifest import (
+        ProtectedManifest,
+        _restore_object,
+        required_archive_names,
+    )
+
+    legacy_restore_object = {
+        "archive_name": "000000010000000000000001",
+        "object_name": "ava-pitr/wal/00000001/000000010000000000000001.enc",
+        "generation": 123,
+        "size": 10,
+        "crc32c": "crc-value",
+        "metadata": [["ava-key-id", "v1"]],
+    }
+    normalized = _restore_object(legacy_restore_object)
+    assert normalized.pin_token == "123"  # noqa: S105 — test fixture identity
+    assert normalized.checksum_algo == CRC32C
+    assert normalized.checksum_value == "crc-value"
+    # A protected manifest embedding the legacy candidate parses end to end.
+    candidate = CandidateManifest.from_json(_LEGACY_CANDIDATE_JSON)
+    proof = RestoreProofFixture()
+    names = required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
+    protected_raw: dict[str, Any] = {
+        "schema_version": 1,
+        "protected": True,
+        "chain_id": candidate.chain_id,
+        "candidate_sha256": candidate_sha256_of(candidate),
+        "candidate": json.loads(_LEGACY_CANDIDATE_JSON),
+        "base": {
+            "archive_name": "base.tar.zst.enc",
+            "object_name": candidate.base_object.object_name,
+            "generation": int(candidate.base_object.pin_token),
+            "size": candidate.base_object.ciphertext_size,
+            "crc32c": candidate.base_object.ciphertext_checksum_value,
+            "metadata": [],
+        },
+        "wal": [
+            {
+                "archive_name": name,
+                "object_name": f"ava-pitr/wal/{name[:8]}/{name}.enc",
+                "generation": index + 1,
+                "size": 10,
+                "crc32c": "crc-value",
+                "metadata": [["ava-key-id", "v1"]],
+            }
+            for index, name in enumerate(names)
+        ],
+        "target_lsn": candidate.end_lsn,
+        "wal_segment_size": candidate.wal_segment_size,
+        "proof": proof.__dict__,
+    }
+    protected = ProtectedManifest.from_json(json.dumps(protected_raw))
+    assert protected.base.pin_token == str(candidate.base_object.pin_token)
+    assert protected.candidate == candidate
+
+
+def test_legacy_retention_plan_normalizes_retention_objects() -> None:
+    from services.pitr.retention_manifest import RetentionPlan
+
+    legacy_plan = {
+        "schema_version": 1,
+        "retained_chain_count": 2,
+        "evidence_sha256": "e" * 64,
+        "protected_chain_ids": ["a", "b"],
+        "unprotected_chain_ids": [],
+        "oldest_retained_chain_id": "a",
+        "ack_high_water": None,
+        "blocked_reasons": [],
+        "retained": [
+            {
+                "object": {
+                    "object_name": "ava-pitr/wal/00000001/x.enc",
+                    "generation": 7,
+                    "size": 10,
+                    "archive_name": "000000010000000000000001",
+                    "kind": "wal",
+                    "crc32c": "crc-value",
+                    "metadata": [["ava-key-id", "v1"]],
+                },
+                "reason": "continuous WAL recovery window",
+            }
+        ],
+        "eligible": [],
+        "retained_bytes": 10,
+        "eligible_bytes": 0,
+    }
+    plan = RetentionPlan.from_json(json.dumps(legacy_plan))
+    assert plan.retained[0].object.pin_token == "7"  # noqa: S105 — test fixture identity
+    assert plan.retained[0].object.checksum_algo == CRC32C
+    assert plan.retained[0].object.checksum_value == "crc-value"
+
+
+class RestoreProofFixture:
+    def __init__(self) -> None:
+        self.__dict__ = {
+            "run_id": "run",
+            "started_at": "2026-08-30T03:00:00+00:00",
+            "completed_at": "2026-08-30T03:01:00+00:00",
+            "target_lsn": "A4/89EC6820",
+            "achieved_lsn": "A4/89EC6820",
+            "live_postgres_pid": 1,
+            "live_probe_sha256": "live",
+            "candidate_verify_evidence_sha256": "candidate-verify",
+            "replay_seconds": 2,
+            "smoke_seconds": 3,
+            "restored_verify_seconds": 4,
+            "downloaded_bytes": 100,
+            "restored_fingerprint_sha256": "restored",
+        }
+
+
+def candidate_sha256_of(candidate: object) -> str:
+    import hashlib
+
+    from services.pitr.base_manifest import CandidateManifest
+
+    return hashlib.sha256(
+        CandidateManifest.to_json(candidate).encode()  # type: ignore[arg-type]
+    ).hexdigest()
+
+
 # ── legacy ACK compat (738 real on-disk ACKs predate the abstraction) ──
 
 

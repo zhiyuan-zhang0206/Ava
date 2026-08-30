@@ -98,6 +98,65 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
     assert completed.returncode == 0
 
 
+_LEGACY_CANDIDATE_JSON = (
+    '{"base_object":{"ciphertext_crc32c":"viqqbw==","ciphertext_size":4101269456,'
+    '"encryption_format":"AVAPITRB1","generation":1788085003231815,'
+    '"key_id":"ava-pitr-backup-key-prod",'
+    '"object_name":"ava-pitr/base/activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40/'
+    '358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac/base.tar.zst.enc",'
+    '"source_sha256":"358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac",'
+    '"source_size":6319665156},'
+    '"chain_id":"activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40",'
+    '"database_name":"ava_main","end_lsn":"A4/89EC6820",'
+    '"migration_set_sha256":"63124a552737c95e0296cd29a5247cec07c1014d9eb474ea2d78116c73849f2e",'
+    '"native_manifest_container_generation":1788085003231815,'
+    '"native_manifest_container_object_name":'
+    '"ava-pitr/base/activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40/'
+    '358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac/base.tar.zst.enc",'
+    '"native_manifest_member_path":"backup_manifest",'
+    '"native_manifest_sha256":"5ee47ac3e20907e70894bf2761395256a78b94c116efe11f86ec26adff2153d2",'
+    '"postgres_major":17,"protected":false,"schema_version":1,'
+    '"start_lsn":"A4/7FC179B0","system_identifier":"7656686487711429617",'
+    '"timeline":1,'
+    '"wal_ranges":[{"end_lsn":"A4/89EC6820","start_lsn":"A4/7FC179B0","timeline":1}],'
+    '"wal_segment_size":16777216}'
+)
+
+_LEGACY_WEEKLY_CANDIDATE_JSON = _LEGACY_CANDIDATE_JSON.replace(
+    "activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40",
+    "20260831T043835Z",
+)
+
+
+def _write_legacy_manifests(root: Path) -> Path:
+    manifests = root / "base-manifests"
+    manifests.mkdir(parents=True)
+    (manifests / "20260831T043835Z.candidate.json").write_text(_LEGACY_WEEKLY_CANDIDATE_JSON)
+    (
+        manifests
+        / "activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40.candidate.json"
+    ).write_text(_LEGACY_CANDIDATE_JSON)
+    return root
+
+
+def test_legacy_manifest_daemon_paths_parse_without_crashing(
+    tmp_path: Path,
+) -> None:
+    """QA #1131 P1: the pre-abstraction candidate shape on disk must keep
+    the four boot/loop paths of the base-candidate daemon alive."""
+    from datetime import UTC, datetime
+
+    root = _write_legacy_manifests(tmp_path)
+    # Path 1: boot-time scheduling gate.
+    assert not daemon.is_due(datetime.now(UTC), root / "base-manifests")
+    # Path 2: boot-time last-success read.
+    assert daemon._last_durable_success(root / "base-manifests") is not None
+    # Path 3: loop candidate scan.
+    assert daemon._candidate_manifests(root / "base-manifests")
+    # Path 4: pending-restore scan (the weekly candidate has no protected proof).
+    assert daemon._pending_restore_candidate(root) is not None
+
+
 def test_restricted_restore_group_reaps_orphan_descendant() -> None:
     script = (
         "import subprocess,sys,time; "

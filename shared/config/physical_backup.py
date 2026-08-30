@@ -118,6 +118,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_gcs_project: str = Field(

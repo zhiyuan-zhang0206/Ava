@@ -7,7 +7,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from services.pitr.checksums import KNOWN_CHECKSUM_ALGOS
+from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 
 PLAN_SCHEMA_VERSION = 1
 
@@ -89,6 +89,24 @@ class RetentionPlan:
 def _decision(raw: dict[str, Any]) -> RetentionDecision:
     if set(raw) != {"object", "reason"}:
         raise ValueError("retention decision fields do not match schema")
-    raw_object = raw["object"]
+    raw_object = dict(raw["object"])
+    # Legacy normalization: dry-run plans written before the store
+    # abstraction carry ``generation`` + ``crc32c`` (the GCS vocabulary).
+    if "pin_token" not in raw_object:
+        legacy_generation = raw_object.pop("generation", None)
+        if legacy_generation is None:
+            raise ValueError("retention object lacks a pin token")
+        raw_object["pin_token"] = str(legacy_generation)
+    else:
+        raw_object.pop("generation", None)
+    if "checksum_algo" not in raw_object:
+        raw_object["checksum_algo"] = CRC32C
+    if "checksum_value" not in raw_object:
+        legacy_crc32c = raw_object.pop("crc32c", None)
+        if legacy_crc32c is None:
+            raise ValueError("retention object lacks a checksum")
+        raw_object["checksum_value"] = legacy_crc32c
+    else:
+        raw_object.pop("crc32c", None)
     raw_object["metadata"] = tuple(tuple(item) for item in raw_object["metadata"])
     return RetentionDecision(RetentionObject(**raw_object), str(raw["reason"]))

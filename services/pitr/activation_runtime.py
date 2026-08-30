@@ -19,6 +19,7 @@ from typing import cast
 import psycopg
 from dotenv import dotenv_values
 
+from services.pitr.activation_evidence import stored_digest_matches
 from services.pitr.activation_state import ActivationRecord
 from shared.config import settings
 from shared.paths import ava_home
@@ -456,18 +457,23 @@ def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[
         raise RuntimeError("activation candidate evidence is incomplete")
     candidate = CandidateManifest.from_json(record.protected_manifest)
     canonical = candidate.to_json()
-    digest = hashlib.sha256(canonical.encode()).hexdigest()
     if (
         candidate.chain_id != record.candidate_chain_id
         or not candidate.chain_id.endswith(f"-{record.operation_id}")
-        or digest != record.candidate_digest
+        or not stored_digest_matches(
+            raw=record.protected_manifest, canonical=canonical, expected=record.candidate_digest
+        )
     ):
         raise RuntimeError("restore candidate differs from durable activation intent")
     protected = asyncio.run(restore_activation_candidate(candidate, stop))
     if (
         protected.chain_id != candidate.chain_id
         or protected.candidate != candidate
-        or (protected.candidate_sha256 != digest)
+        or not stored_digest_matches(
+            raw=canonical,
+            canonical=protected.candidate.to_json(),
+            expected=protected.candidate_sha256,
+        )
     ):
         raise RuntimeError("protected proof differs from exact activation candidate")
     payload = protected.to_json()
