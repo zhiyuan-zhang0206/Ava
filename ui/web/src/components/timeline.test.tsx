@@ -2962,6 +2962,37 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(img?.className).toContain("max-w-[80vw]");
     expect(img?.className).toContain("object-contain");
   });
+  it("reserves the thumbnail's max box so lazy img load never shifts layout (QA review-955)", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "attach",
+            payload,
+            images: [IMG1],
+            image_captions: [LINE1],
+          }),
+        ]}
+      />,
+    );
+    const thumb = screen.getByTestId("attach-thumbnail");
+    // The button is the fixed-size layout node — its box equals the img caps
+    // (max-w-[16rem] × max-h-48), so the row height is stable from first paint.
+    expect(thumb.className).toContain("relative");
+    expect(thumb.className).toContain("h-48");
+    expect(thumb.className).toContain("w-64");
+    // The img is absolutely positioned and centered: its own box (2x2px before
+    // decode -> capped content size after) is out of flow, so growth cannot move
+    // the content below — zero CLS on the scroll path.
+    const img = thumb.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.className).toContain("absolute");
+    expect(img!.className).toContain("inset-0");
+    expect(img!.className).toContain("m-auto");
+    expect(img!.className).toContain("max-h-48");
+    expect(img!.className).toContain("max-w-[16rem]");
+    expect(img!.className).toContain("object-contain");
+  });
 
   it("legacy attach (images without image_captions) still renders thumbnails without navigation", () => {
     render(
