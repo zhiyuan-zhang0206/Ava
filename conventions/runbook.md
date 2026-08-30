@@ -928,8 +928,8 @@ sequence ran" and "this host is serving" are different facts:
 
 | rc | Meaning | What to do |
 |---|---|---|
-| `0` | every step ran and every launched service passes its liveness probe | nothing |
-| `4` | every step ran; a launched service never passed its probe inside `SERVICE_READY_TIMEOUT_S` (180 s) | read the snapshot printed just above — the failing rows are named, with the session list repeated after the snapshot. The host is **up but incomplete**: the watchdog keepalive is already retrying, `ava status` re-checks, and `ava start` is idempotent to run again |
+| `0` | every step ran and every **critical** service passes its liveness probe (non-critical services get a 45 s window and then stop blocking the start — a straggler is reported and alerted, not a failure) | nothing, unless the printed verdict names non-critical services that missed their window — an alert was posted for those |
+| `4` | every step ran; a **critical** service never passed its probe inside `SERVICE_READY_TIMEOUT_S` (180 s) | read the snapshot printed just above — the failing rows are named, with the session list repeated after the snapshot. The host is **up but incomplete**: the watchdog keepalive is already retrying, `ava status` re-checks, and `ava start` is idempotent to run again |
 | `1` | a start *step* failed (converge, the data plane, migrations, the schema assertion, machine registration) | the host may have no services at all; the failing step printed why |
 
 The gated set is derived, not listed: it is `ops/spec.py`'s roster for this host's
@@ -940,6 +940,22 @@ the floor for every gateway start). **A service that is skipped is not a service
 that is unready** — it never reaches the gate and cannot fail a start. A service
 with no probe at all (`browser-mcp`, whose transport is a Unix socket only its
 healthcheck dials) likewise cannot: absence of evidence is not failure.
+
+**The gate is tiered** (Task #2183, C2): the critical roster
+(`cli/commands/_probe.py:CRITICAL_SERVICE_SESSIONS` — gateway / frontend /
+restarter / agent-host / im-bridge / the two watchdogs; CTO ruling: critical =
+a failure cuts user-visible core function or the ops safety net) is the only
+one that can fail a start and the only one waited on for the full 180 s. Every
+other launched service gets a 45 s window
+(`shared/deploy_timing.py:NON_CRITICAL_SERVICE_READY_TIMEOUT_S`) and then stops
+blocking the start; one that missed the window is printed as a cross AND posted
+to the alerts store (the same channel the health probes use), so the downgrade
+is a verdict change, never a silence. The alert is one instance per service,
+reused while the failure stays open, resolved by the next start that finds the
+service up, and its IM push is suppressed under `--no-readiness-gate` (the
+boot job's uncapped retry must not spam the user's IM). This is the
+2026-08-30 rollout's lesson: its local start spent 182 of 197.5 s on a
+pitr-uploader healthz whose failure nothing downstream depended on.
 
 `ava start --no-readiness-gate` keeps the wait and the printed crosses but exits 0
 anyway. Two callers pass it and an operator normally should not:

@@ -35,6 +35,10 @@ mattered enough to change: a human reads the status snapshot and sees the crosse
 but a program reads `rc`, and every programmatic caller of `ava start` was reading
 `rc == 0` as "the services are serving". Prod lost that bet — see
 `cli/commands/_gateway_ready.py` for the rollout that stalled on it.
+
+The gate is tiered (`CRITICAL_SERVICE_SESSIONS` vs the 45 s
+`NON_CRITICAL_SERVICE_READY_TIMEOUT_S` window): the 2026-08-30 rollout spent
+182 s of its 197.5 s start waiting on a pitr-uploader no conclusion depended on.
 """
 
 from __future__ import annotations
@@ -43,11 +47,12 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from cli.commands._repo import ServiceSpec, session_name
 from shared.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
 from shared.cluster_drift import prod_source_head_sha as _prod_source_head_sha
+from shared.deploy_timing import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
 from shared.proc import process_alive
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
@@ -218,6 +223,30 @@ def _probe_service(spec: ServiceSpec) -> ServiceProbe:
     return ServiceProbe(alive=alive, label="pid", detail=detail)
 
 
+# The services the readiness gate holds the whole bound for — the only ones that
+# can fail a start. Everything else gets the short non-critical window
+# (`NON_CRITICAL_SERVICE_READY_TIMEOUT_S`). Single source of truth: tests pin
+# this exact set, so adding or removing a critical service turns the suite red.
+#
+# The CTO ruling (Task #2183, C2): critical = a failure cuts user-visible core
+# function or the ops safety net. gateway / frontend are the serving surface;
+# restarter + agent-host (the hosted agent-runner; gated off unless
+# `AVA_RUNNER_MODE` is `hosted`) are the runners; im-bridge is the IM alert
+# channel; the two watchdogs are the revive safety net. `frontend` is named here
+# even though `_SLOW_TO_SERVE_SESSIONS` keeps it out of the wait entirely.
+CRITICAL_SERVICE_SESSIONS = frozenset(
+    {
+        "gateway",
+        "frontend",
+        "restarter",
+        "agent-host",
+        "gateway-watchdog",
+        "agent-runner-watchdog",
+        "im-bridge",
+    }
+)
+
+
 # The services whose probe says nothing about a launch that just happened. The
 # frontend is the whole list: `npm run build` runs for ~30-60 s before Next.js
 # answers, so its probe reads False for most of a perfectly good start.
@@ -361,24 +390,30 @@ class ReadinessWait(NamedTuple):
 
     `sessions_gone` is the early exit, so it is a fact about *every* spec in
     `unready`; the deadline exit implies at least one of them was still alive (the
-    early exit requires all of them to be gone).
+    early exit requires all of them to be gone). Both exits concern the CRITICAL
+    roster only: `non_critical_unready` carries the demoted services that missed
+    their short window — they must be reported and alerted, but they can never
+    decide the exit code.
     """
 
     unready: tuple[ServiceSpec, ...]
     elapsed_s: float
     sessions_gone: bool
+    # Defaulted so existing constructions (tests/conftest.py's guard included)
+    # keep meaning "nothing non-critical failed".
+    non_critical_unready: tuple[ServiceSpec, ...] = ()
 
 
 def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -> ReadinessWait:
     """Poll each spec's liveness probe until all pass, and report the ones that never do.
 
     Returns the specs still probing False when the wait stops — an empty `unready`
-    means every spec passed, which is the signal `ava start` turns into its exit
-    code — together with how long that took and which of the two exits ended it. A
-    spec counts as ready the moment its probe is no longer False: True, or `None`
-    for a probe-less spec, which can never be observed unready and therefore can
-    never gate (`browser-mcp` is the one such service on the roster — its transport
-    is a Unix socket that only its healthcheck dials).
+    means every critical spec passed, which is the signal `ava start` turns into its
+    exit code — together with how long that took and which of the two exits ended
+    it. A spec counts as ready the moment its probe is no longer False: True, or
+    `None` for a probe-less spec, which can never be observed unready and therefore
+    can never gate (`browser-mcp` is the one such service on the roster — its
+    transport is a Unix socket that only its healthcheck dials).
 
     The start path calls this just before its status snapshot, and the wait exists
     in the first place because the session spawn returns the instant the process
@@ -386,17 +421,26 @@ def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -
     nothing beyond the polls it takes to come up; the bound is only ever spent by a
     service that is alive and has bound nothing.
 
+    The roster is tiered by `CRITICAL_SERVICE_SESSIONS`: the critical services get
+    the whole `timeout_s` bound and are the only ones that can end the wait
+    unready. A non-critical service is waited on only for
+    `NON_CRITICAL_SERVICE_READY_TIMEOUT_S`, then leaves the wait whether it is up
+    or not — still-unready ones land in `non_critical_unready` for the caller to
+    report and alert, never as a failed start (the 2026-08-30 lesson: 182 s of a
+    197.5 s local start went to a pitr-uploader whose verdict nothing depended on).
+
     Two things end the wait early, so the bound is affordable:
 
-    - every remaining spec's probe passes (the normal exit, and the only one that
-      returns empty);
-    - every remaining spec's *session* is confirmed gone. A launched service whose
-      session died will never bind its port, so waiting cannot help. This is the
-      local form of `_gateway_ready`'s `GATEWAY_GONE`, and it is what keeps a
-      crashed daemon from costing an operator the full bound before the snapshot
-      prints. It requires ALL unready specs to be gone: one dead `browser` must not
-      cut short the wait of a gateway that is 20 s from serving and would then be
-      reported unready when it was merely slow.
+    - every remaining critical spec's probe passes (the normal exit, and the only
+      one that returns empty — non-critical stragglers ride along in
+      `non_critical_unready`);
+    - every remaining critical spec's *session* is confirmed gone. A launched
+      service whose session died will never bind its port, so waiting cannot help.
+      This is the local form of `_gateway_ready`'s `GATEWAY_GONE`, and it is what
+      keeps a crashed daemon from costing an operator the full bound before the
+      snapshot prints. It requires ALL unready critical specs to be gone: one dead
+      `browser` must not cut short the wait of a gateway that is 20 s from serving
+      and would then be reported unready when it was merely slow.
 
     The caller excludes the frontend (a ~30-60 s `npm run build`, which would set the
     floor for every start) and services gated out or `--disable-service`-skipped
@@ -409,17 +453,52 @@ def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -
 
     started_at = time.monotonic()
     deadline = started_at + timeout_s
+    non_critical_deadline = started_at + NON_CRITICAL_SERVICE_READY_TIMEOUT_S
+    critical = tuple(s for s in specs if s.session in CRITICAL_SERVICE_SESSIONS)
+    non_critical = {s.session: s for s in specs if s.session not in CRITICAL_SERVICE_SESSIONS}
     gone_streak: dict[str, int] = {}
+    non_critical_gone_streak: dict[str, int] = {}
+    non_critical_unready: list[ServiceSpec] = []
     while True:
-        unready = tuple(s for s in specs if _ns._probe_service(s).alive is False)
-        if not unready:
-            return ReadinessWait((), time.monotonic() - started_at, sessions_gone=False)
-        for spec in unready:
-            alive = _ns._has_session(session_name(spec.session))
-            gone_streak[spec.session] = 0 if alive else gone_streak.get(spec.session, 0) + 1
-        gone = all(gone_streak[s.session] >= _SESSION_GONE_CONFIRMATIONS for s in unready)
-        if gone or time.monotonic() >= deadline:
-            return ReadinessWait(unready, time.monotonic() - started_at, sessions_gone=gone)
+        # Non-critical services are waited on only inside their short window:
+        # drop the ready ones every poll, drop a session confirmed gone without
+        # spending the window, and at the window's end drop whatever is left.
+        for name, spec in list(non_critical.items()):
+            if _ns._probe_service(spec).alive is not False:
+                del non_critical[name]
+                continue
+            alive = _ns._has_session(session_name(name))
+            non_critical_gone_streak[name] = (
+                0 if alive else non_critical_gone_streak.get(name, 0) + 1
+            )
+            if non_critical_gone_streak[name] >= _SESSION_GONE_CONFIRMATIONS:
+                del non_critical[name]
+                non_critical_unready.append(spec)
+        if non_critical and time.monotonic() >= non_critical_deadline:
+            non_critical_unready.extend(non_critical.values())
+            non_critical.clear()
+        # The gate itself is critical-only: the exit code's verdict must not
+        # depend on a service the tier demoted. The wait still runs on while a
+        # non-critical service has not reached a verdict (ready, confirmed gone,
+        # or its window expired) — otherwise a session that dies on the very
+        # poll the critical roster clears would be dropped without a report.
+        unready = tuple(s for s in critical if _ns._probe_service(s).alive is False)
+        if not unready and not non_critical:
+            return ReadinessWait(
+                (),
+                time.monotonic() - started_at,
+                sessions_gone=False,
+                non_critical_unready=tuple(non_critical_unready),
+            )
+        if unready:
+            for spec in unready:
+                alive = _ns._has_session(session_name(spec.session))
+                gone_streak[spec.session] = 0 if alive else gone_streak.get(spec.session, 0) + 1
+            gone = all(gone_streak[s.session] >= _SESSION_GONE_CONFIRMATIONS for s in unready)
+            if gone or time.monotonic() >= deadline:
+                return ReadinessWait(
+                    unready, time.monotonic() - started_at, gone, tuple(non_critical_unready)
+                )
         _poll_sleep(_READY_POLL_INTERVAL_S)
 
 
@@ -460,6 +539,192 @@ def _print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
         f"`ava status` re-checks, and `ava start` is idempotent to retry.",
         file=sys.stderr,
     )
+
+
+def _print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
+    """Name the non-critical services that missed their short window.
+
+    The counterpart of `_print_unready_services` for the tier that cannot fail
+    the start. The cross must still appear — the tier downgrade is a verdict
+    change, never a silence — and it points at the alert that was posted.
+    """
+    names = ", ".join(session_name(s.session) for s in specs)
+    print(
+        f"\n✗ {len(specs)} non-critical service(s) not ready within "
+        f"{NON_CRITICAL_SERVICE_READY_TIMEOUT_S:.0f}s: {names}\n"
+        f"  They do not fail this start (the readiness gate waits for the critical roster "
+        f"only),\n"
+        f"  but an alert has been posted; the watchdog keeps trying to revive them and "
+        f"`ava start` is idempotent to retry.",
+        file=sys.stderr,
+    )
+
+
+_NON_CRITICAL_ALERTNAME = "non-critical service not ready after start"
+
+
+def _alert_db_connect() -> Any:
+    """The DB dial the non-critical alert uses — a named seam.
+
+    `shared.db.connect` is a process-wide entry a full `ava start` dials in
+    other steps too (the rollout-boundary lease read), so stubbing the alert's
+    data plane must not replace every caller's. Indirection costs one line and
+    keeps a test able to fake only this alert's DB.
+    """
+    import shared.db
+
+    return shared.db.connect()
+
+
+def _unresolved_alert_instance(conn: Any, service: str) -> tuple[str, str] | None:
+    """(starts_at, fingerprint) of one open `start-readiness` instance for `service`,
+    or None. Re-firing the same failure must UPDATE the open instance, not insert
+    a fresh one — the boot job retries every 60 s with no cap (health-probe
+    pattern, `services/heartbeat/liveness.py`)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT starts_at, fingerprint FROM alerts "
+            "WHERE labels->>'alertname' = %s AND labels->>'service' = %s "
+            "AND status = 'unresolved' ORDER BY starts_at DESC LIMIT 1",
+            (_NON_CRITICAL_ALERTNAME, service),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return str(row[0]), str(row[1])
+
+
+def _alert_upsert_and_maybe_im(conn: Any, alert: dict[str, object], *, im_enabled: bool) -> None:
+    """One upsert + one IM (when the transition gate says so and IM is on)."""
+    from shared.alerts import (
+        display_language,
+        notify_im,
+        notify_text,
+        stamp_notified,
+        upsert_alert,
+    )
+
+    text = notify_text(alert, display_language(conn))
+    key, did_insert, should_notify, row = upsert_alert(conn, alert, source="start-readiness")
+    notified_at = row.get("notified_at") if isinstance(row, dict) else None
+    if (
+        (should_notify or (notified_at is None and not did_insert))
+        and im_enabled
+        and notify_im(text)
+    ):
+        stamp_notified(conn, [key])
+
+
+def _notify_non_critical_unready_services(
+    specs: tuple[ServiceSpec, ...], *, im_enabled: bool
+) -> None:
+    """Post one alerts row per non-critical service that missed its window.
+
+    The tier's second rail: the demotion must not go silent. One instance PER
+    SERVICE (so the resolved edge can match the recovered service), reused while
+    the failure stays open. `im_enabled` gates only the IM push — the alerts row
+    is always written: the boot job's uncapped 60 s retries run with
+    `--no-readiness-gate` and must not spam the user's IM (QA #1196 P1-1). A
+    DB/IM failure degrades to a printed note, never to silence elsewhere.
+    """
+    from datetime import UTC, datetime
+
+    from shared.alerts import (
+        fingerprint as compute_fingerprint,
+    )
+
+    now = datetime.now(UTC)
+    for spec in specs:
+        service = session_name(spec.session)
+        alert: dict[str, object] = {
+            "status": "firing",
+            "labels": {
+                "alertname": _NON_CRITICAL_ALERTNAME,
+                "severity": "warning",
+                "service": service,
+            },
+            "annotations": {
+                "summary": (
+                    f"non-critical service not ready within "
+                    f"{NON_CRITICAL_SERVICE_READY_TIMEOUT_S:.0f}s of ava start: {service}"
+                )
+            },
+            "starts_at": now.isoformat(),
+            "fingerprint": compute_fingerprint(
+                {"alertname": _NON_CRITICAL_ALERTNAME, "service": service}
+            ),
+        }
+        try:
+            with _alert_db_connect() as conn:
+                open_instance = _unresolved_alert_instance(conn, service)
+                if open_instance is not None:
+                    # Same failure still open: reuse its identity so the upsert
+                    # updates the row instead of inserting a duplicate.
+                    alert["starts_at"] = open_instance[0]
+                    alert["fingerprint"] = open_instance[1]
+                _alert_upsert_and_maybe_im(conn, alert, im_enabled=im_enabled)
+                conn.commit()
+        except Exception as exc:
+            print(
+                f"  ! non-critical service alert failed ({type(exc).__name__}): "
+                f"see the start log — {service} is still down",
+                file=sys.stderr,
+            )
+
+
+def _recovered_non_critical_specs(
+    started: tuple[ServiceSpec, ...], failed: tuple[ServiceSpec, ...]
+) -> tuple[ServiceSpec, ...]:
+    """The launched non-critical services that are serving now (the resolved
+    edge's roster): started minus the critical manifest minus the failures the
+    wait just returned."""
+    failed_set = set(failed)
+    return tuple(
+        s for s in started if s.session not in CRITICAL_SERVICE_SESSIONS and s not in failed_set
+    )
+
+
+def _resolve_recovered_non_critical_alerts(
+    specs: tuple[ServiceSpec, ...], *, im_enabled: bool
+) -> None:
+    """Close the open `start-readiness` instances of services that are up again.
+
+    The resolved edge (QA #1196 P1-1): an instance left open would stay on the
+    Inspector's unresolved panel after the service recovered (user ruling
+    2026-08-29). Every start observes the roster, so the start that finds the
+    service up resolves it — same resolve-on-recovery pattern as the health
+    probes; a watchdog-only revival stays open until the next start.
+    """
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    for spec in specs:
+        service = session_name(spec.session)
+        try:
+            with _alert_db_connect() as conn:
+                open_instance = _unresolved_alert_instance(conn, service)
+                if open_instance is None:
+                    continue
+                alert: dict[str, object] = {
+                    "status": "resolved",
+                    "labels": {
+                        "alertname": _NON_CRITICAL_ALERTNAME,
+                        "severity": "warning",
+                        "service": service,
+                    },
+                    "annotations": {"summary": f"non-critical service is up again: {service}"},
+                    "starts_at": open_instance[0],
+                    "ends_at": now.isoformat(),
+                    "fingerprint": open_instance[1],
+                }
+                _alert_upsert_and_maybe_im(conn, alert, im_enabled=im_enabled)
+                conn.commit()
+        except Exception as exc:
+            print(
+                f"  ! non-critical service alert resolve failed ({type(exc).__name__}): "
+                f"see the start log — {service}",
+                file=sys.stderr,
+            )
 
 
 def _print_service_row(spec: ServiceSpec, name_w: int, skip_reason: str | None = None) -> None:

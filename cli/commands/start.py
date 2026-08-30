@@ -724,6 +724,23 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         )
     if wait.unready:
         _ns._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
+    # The tier's second rail: a non-critical service that missed its short window
+    # does not fail the start, but it is reported and alerted — the downgrade must
+    # never go silent (see `_probe._notify_non_critical_unready_services`). The
+    # IM push is gated on the readiness flag: the boot job's uncapped 60 s
+    # retries run with `--no-readiness-gate` and must not spam the user's IM,
+    # while the alerts store and this output stay visible.
+    if wait.non_critical_unready:
+        _ns._print_non_critical_unready_services(wait.non_critical_unready)
+        _ns._notify_non_critical_unready_services(
+            wait.non_critical_unready, im_enabled=readiness_gate
+        )
+    # The resolved edge: a non-critical service that is up again closes its open
+    # alert instance, so the Inspector never keeps showing a resolved failure
+    # (QA #1196 P1-1).
+    recovered = _ns._recovered_non_critical_specs(started, wait.non_critical_unready)
+    if recovered:
+        _ns._resolve_recovered_non_critical_alerts(recovered, im_enabled=readiness_gate)
     if wait.unready or launch.failed:
         waiver = _readiness_waiver(roles, readiness_gate=readiness_gate)
         if waiver is None:
