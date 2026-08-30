@@ -40,7 +40,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 
 ## Notes
 - Gateway capability only; `ava start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.
-- Protects against bad migrations / accidental deletion / DB corruption and makes a best-effort encrypted Google Drive copy before pruning; an unavailable Drive folder leaves the local artifact intact. Object storage remains a future alternative, see `future/infra/pg-backup.md`.
+- Protects against bad migrations / accidental deletion / DB corruption and makes a best-effort encrypted off-site publish through the shared backup store contract before pruning (`services.pitr.store_factory` — the same backend switch as the physical PITR plane, objects under `ava-logical/`); an unavailable store leaves the local artifact intact. See `future/infra/pg-backup.md`.
 - Restore: follow `.agents/skills/operating-ava-cluster/references/db-restore.md` to decrypt before `pg_restore --clean --if-exists`.
 - Physical PITR is disabled by default: converge publishes a private
   per-home spool and a source-independent, self-checked shim, while
