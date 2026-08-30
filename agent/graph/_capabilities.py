@@ -29,6 +29,9 @@ _DESC_MAX_CHARS = 300
 def _disabled_by_sdk_config(path: str) -> bool:
     """True when `path` or one of its dotted parents is SDK-disabled.
 
+    `path` is relative to the `ava` namespace and therefore has no `ava.`
+    prefix.
+
     Two disable sources, one rendering rule. `turn_settings.agent.sdk_disable`
     carries the env (`AVA_SDK_DISABLE`) and per-agent overlay entries; the
     eval-isolation boundary (`_apply_per_agent_eval_isolation`) removes
@@ -44,12 +47,9 @@ def _disabled_by_sdk_config(path: str) -> bool:
         return True
     import ava
 
-    node: object = ava
-    for segment in path.split("."):
-        node = getattr(node, segment, None)
-        if node is None:
-            return True
-    return False
+    return any(
+        path == entry or path.startswith(entry + ".") for entry in ava._applied_disable_entries
+    )
 
 
 # Namespaces `"*"` never expands. `ava.skills` and `ava.mcps` are *capability

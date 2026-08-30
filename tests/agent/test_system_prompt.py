@@ -15,6 +15,7 @@ that the rendered section reflects the wildcard, and that the field default is
 import pytest
 
 import ava
+from agent.graph import _capabilities
 from agent.graph._system_prompt import (
     _CAPABILITY_SURFACES,
     _discover_all_namespaces,
@@ -203,6 +204,21 @@ def test_legacy_explicit_list_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> N
     keep-first, no discovery."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell", "self"])
     assert effective_sdk_expand() == ["files", "shell", "self"]
+
+
+def test_missing_unregistered_expand_path_warns(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unregistered missing path reaches the existing resolution warning."""
+    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["missing_sdk_namespace"])
+    monkeypatch.setattr(settings.agent, "sdk_disable", [])
+    monkeypatch.setattr(ava, "_applied_disable_entries", set())
+
+    with caplog.at_level("WARNING", logger=_capabilities.__name__):
+        text = _sdk_expand_section()
+
+    assert text == ""
+    assert "ava.missing_sdk_namespace does not resolve" in caplog.text
 
 
 def test_plugin_registrations_lead_the_wildcard(

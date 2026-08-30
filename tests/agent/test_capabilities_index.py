@@ -264,11 +264,12 @@ def test_runtime_removed_surface_renders_nothing(
     `ava._apply_sdk_disable` (mcps, ui, tasks, ...) without touching
     `settings.agent.sdk_disable` — the boot of an isolated eval agent crashed
     in `_mcp_index_lines` when `ava.mcps` was gone but the config check could
-    not see it. The live namespace is the source of truth: a removed surface
-    renders no MCP lines and must not raise."""
+    not see it. The applied-disable registry records the removal, so a removed
+    surface renders no MCP lines and must not raise."""
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
     monkeypatch.delattr(ava, "mcps", raising=False)
+    monkeypatch.setattr(ava, "_applied_disable_entries", {"mcps"})
 
     text = capabilities_section()
     assert "- `ava.skills.alpha` — Alpha desc" in text
@@ -288,5 +289,11 @@ def test_live_namespace_check_resolves_segment_by_segment(
     assert _disabled_by_sdk_config("mcps") is False
 
     monkeypatch.delattr(ava.agents, "get_last_message", raising=False)
+    monkeypatch.setattr(ava, "_applied_disable_entries", {"agents.get_last_message"})
     assert _disabled_by_sdk_config("agents.get_last_message") is True
     assert _disabled_by_sdk_config("agents") is False  # the parent still resolves
+
+
+def test_unregistered_missing_path_is_not_sdk_disabled() -> None:
+    """A path that never existed must remain eligible for expansion diagnostics."""
+    assert _disabled_by_sdk_config("missing_sdk_namespace") is False
