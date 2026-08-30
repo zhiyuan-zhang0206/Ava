@@ -46,7 +46,7 @@ from shared.config import settings
 from shared.log import init_gateway_process, logger
 from shared.transition import transition_severity
 
-_log = logging.getLogger("services.healthchecks.station")
+_log = logging.getLogger("services.heartbeat.station_probe")
 
 # Consecutive failed probes before the alert fires. The pass runs once per
 # minute, so this is a ~2-minute anti-jitter window (a single dropped packet
