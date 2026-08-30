@@ -52,6 +52,28 @@ def _validate_service_account_payload(raw: object) -> None:
         raise ValueError("credential is not a service account")
 
 
+def _aliyun_oss_identity(path: Path, alias: str) -> tuple[str, str]:
+    """Validate a 0600 Aliyun OSS credential JSON and return its
+    (access_key_id, sha256) identity — the viewer/uploader distinction
+    proof for restore drills."""
+    _require_private_regular_file(path, alias)
+    try:
+        payload = path.read_bytes()
+        raw = json.loads(payload)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{alias} must contain an Aliyun OSS identity") from exc
+    if not isinstance(raw, dict):
+        raise TypeError("OSS credential payload must be an object")
+    credentials = cast(dict[str, object], raw)
+    key_id = credentials.get("access_key_id")
+    key_secret = credentials.get("access_key_secret")
+    if not isinstance(key_id, str) or not isinstance(key_secret, str):
+        raise TypeError("OSS credential identity fields are missing")
+    if not key_id or not key_secret:
+        raise ValueError("OSS credential identity fields must be non-empty")
+    return key_id, hashlib.sha256(payload).hexdigest()
+
+
 class PhysicalBackupSettings(EnvSettings):
     """Cluster-pinned settings for the disabled-by-default physical backup plane."""
 
@@ -201,6 +223,70 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+        },
+    )
+    pitr_oss_endpoint: str = Field(
+        default="",
+        alias="AVA_PITR_OSS_ENDPOINT",
+        description=(
+            "Aliyun OSS region endpoint (e.g. https://oss-cn-shanghai.aliyuncs.com). "
+            "Required when the store backend is oss."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+    pitr_oss_bucket: str = Field(
+        default="",
+        alias="AVA_PITR_OSS_BUCKET",
+        description=(
+            "Aliyun OSS bucket for physical-backup objects. Required when the store backend is oss."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+    pitr_oss_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_OSS_CREDENTIALS_FILE",
+        description=(
+            "0600 JSON holding the Aliyun OSS RAM AccessKey pair "
+            "(access_key_id, access_key_secret) used by the PITR uploader "
+            "roles. Never the cluster secret."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+            "bootstrap": False,
+        },
+    )
+    pitr_oss_viewer_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE",
+        description=(
+            "0600 JSON holding a viewer-only Aliyun OSS RAM AccessKey pair "
+            "for restore drills and retention inventory. Required with a "
+            "distinct identity when the store backend is oss and restore "
+            "proof is enabled."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+            "bootstrap": False,
         },
     )
     pitr_archive_timeout_seconds: int = Field(
@@ -382,6 +468,20 @@ class PhysicalBackupSettings(EnvSettings):
                 "the baidu store backend requires AVA_PITR_BAIDU_APP_ROOT and "
                 "AVA_PITR_BAIDU_CREDENTIALS_FILE"
             )
+        if self.pitr_enabled and self.pitr_store_backend == "oss":
+            if not (self.pitr_oss_endpoint and self.pitr_oss_bucket):
+                raise ValueError(
+                    "the oss store backend requires AVA_PITR_OSS_ENDPOINT and AVA_PITR_OSS_BUCKET"
+                )
+            parsed_endpoint = urlsplit(self.pitr_oss_endpoint)
+            if parsed_endpoint.scheme not in {"http", "https"} or not parsed_endpoint.hostname:
+                raise ValueError("AVA_PITR_OSS_ENDPOINT must be an http(s) region endpoint URL")
+        if (
+            self.pitr_enabled
+            and self.pitr_store_backend == "oss"
+            and self.pitr_oss_credentials_file is None
+        ):
+            raise ValueError("the oss store backend requires AVA_PITR_OSS_CREDENTIALS_FILE")
         if self.pitr_base_backup_enabled and not self.pitr_enabled:
             raise ValueError("AVA_PITR_BASE_BACKUP_ENABLED requires AVA_PITR_ENABLED")
         if self.pitr_restore_proof_enabled and not self.pitr_base_backup_enabled:
@@ -435,6 +535,12 @@ class PhysicalBackupSettings(EnvSettings):
                     raise ValueError("AVA_PITR_BAIDU_TOKEN_FILE must be an absolute path")
                 if token_file.exists():
                     _require_private_regular_file(token_file, "AVA_PITR_BAIDU_TOKEN_FILE")
+            if self.pitr_store_backend == "oss":
+                if self.pitr_oss_credentials_file is None:
+                    raise ValueError("AVA_PITR_OSS_CREDENTIALS_FILE is required")
+                _aliyun_oss_identity(
+                    self.pitr_oss_credentials_file, "AVA_PITR_OSS_CREDENTIALS_FILE"
+                )
             if self.pitr_restore_proof_enabled and self.pitr_store_backend == "gcs":
                 _require_private_regular_file(
                     self.pitr_restore_gcs_credentials_file,
@@ -473,6 +579,32 @@ class PhysicalBackupSettings(EnvSettings):
                     raise ValueError(
                         "restore proof requires a distinct viewer-only service-account identity"
                     )
+            if self.pitr_restore_proof_enabled and self.pitr_store_backend == "oss":
+                viewer = self.pitr_oss_viewer_credentials_file
+                if viewer is None:
+                    raise ValueError("restore proof requires a distinct viewer-only OSS credential")
+                uploader = self.pitr_oss_credentials_file
+                if uploader is None:
+                    raise ValueError("AVA_PITR_OSS_CREDENTIALS_FILE is required")
+                uploader_info = uploader.stat()
+                viewer_info = viewer.stat()
+                if (uploader_info.st_dev, uploader_info.st_ino) == (
+                    viewer_info.st_dev,
+                    viewer_info.st_ino,
+                ):
+                    raise ValueError(
+                        "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE must be a distinct "
+                        "viewer-only credential"
+                    )
+                uploader_identity = _aliyun_oss_identity(uploader, "AVA_PITR_OSS_CREDENTIALS_FILE")
+                viewer_identity = _aliyun_oss_identity(
+                    viewer, "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE"
+                )
+                if (
+                    uploader_identity[0] == viewer_identity[0]
+                    or uploader_identity[1] == viewer_identity[1]
+                ):
+                    raise ValueError("restore proof requires a distinct viewer-only OSS identity")
         return self
 
 

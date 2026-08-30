@@ -169,6 +169,122 @@ def test_enabled_pitr_rejects_overexposed_credentials(tmp_path: Path) -> None:
         )
 
 
+def _oss_key(tmp_path: Path) -> Path:
+    key = tmp_path / "backup.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    return key
+
+
+def _oss_credential(tmp_path: Path, *, key_id: str = "uploader-ak") -> Path:
+    path = tmp_path / f"{key_id}.json"
+    path.write_text(f'{{"access_key_id":"{key_id}","access_key_secret":"secret"}}')
+    path.chmod(0o600)
+    return path
+
+
+def test_oss_backend_requires_endpoint_and_bucket(tmp_path: Path) -> None:
+    with pytest.raises(
+        ValidationError, match="requires AVA_PITR_OSS_ENDPOINT and AVA_PITR_OSS_BUCKET"
+    ):
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_STORE_BACKEND="oss",
+            AVA_PITR_BACKUP_KEY_FILE=_oss_key(tmp_path),
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_OSS_CREDENTIALS_FILE=_oss_credential(tmp_path),
+        )
+
+
+def test_oss_backend_rejects_malformed_endpoint(tmp_path: Path) -> None:
+    with pytest.raises(
+        ValidationError, match=r"AVA_PITR_OSS_ENDPOINT must be an http.s. region endpoint URL"
+    ):
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_STORE_BACKEND="oss",
+            AVA_PITR_OSS_ENDPOINT="ftp://oss.example.com",
+            AVA_PITR_OSS_BUCKET="ava-pitr-store",
+            AVA_PITR_BACKUP_KEY_FILE=_oss_key(tmp_path),
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_OSS_CREDENTIALS_FILE=_oss_credential(tmp_path),
+        )
+
+
+def test_enabled_pitr_oss_accepts_the_fully_validated_contract(tmp_path: Path) -> None:
+    settings = PhysicalBackupSettings(
+        AVA_PITR_ENABLED=True,
+        AVA_PITR_STORE_BACKEND="oss",
+        AVA_PITR_OSS_ENDPOINT="https://oss-cn-shanghai.aliyuncs.com",
+        AVA_PITR_OSS_BUCKET="ava-pitr-store",
+        AVA_PITR_BACKUP_KEY_FILE=_oss_key(tmp_path),
+        AVA_PITR_BACKUP_KEY_ID="prod-v1",
+        AVA_PITR_OSS_CREDENTIALS_FILE=_oss_credential(tmp_path),
+    )
+    assert settings.pitr_store_backend == "oss"
+
+
+def test_oss_restore_proof_requires_a_distinct_viewer_credential(tmp_path: Path) -> None:
+    credentials = _oss_credential(tmp_path)
+    with pytest.raises(ValidationError, match="distinct viewer-only OSS credential"):
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_BASE_BACKUP_ENABLED=True,
+            AVA_PITR_RESTORE_PROOF_ENABLED=True,
+            AVA_PITR_STORE_BACKEND="oss",
+            AVA_PITR_OSS_ENDPOINT="https://oss-cn-shanghai.aliyuncs.com",
+            AVA_PITR_OSS_BUCKET="ava-pitr-store",
+            AVA_PITR_BACKUP_KEY_FILE=_oss_key(tmp_path),
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_OSS_CREDENTIALS_FILE=credentials,
+            AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
+        )
+    with pytest.raises(ValidationError, match="distinct viewer-only"):
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_BASE_BACKUP_ENABLED=True,
+            AVA_PITR_RESTORE_PROOF_ENABLED=True,
+            AVA_PITR_STORE_BACKEND="oss",
+            AVA_PITR_OSS_ENDPOINT="https://oss-cn-shanghai.aliyuncs.com",
+            AVA_PITR_OSS_BUCKET="ava-pitr-store",
+            AVA_PITR_BACKUP_KEY_FILE=_oss_key(tmp_path),
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_OSS_CREDENTIALS_FILE=credentials,
+            AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE=credentials,
+            AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
+        )
+    viewer = _oss_credential(tmp_path, key_id="viewer-ak")
+    settings = PhysicalBackupSettings(
+        AVA_PITR_ENABLED=True,
+        AVA_PITR_BASE_BACKUP_ENABLED=True,
+        AVA_PITR_RESTORE_PROOF_ENABLED=True,
+        AVA_PITR_STORE_BACKEND="oss",
+        AVA_PITR_OSS_ENDPOINT="https://oss-cn-shanghai.aliyuncs.com",
+        AVA_PITR_OSS_BUCKET="ava-pitr-store",
+        AVA_PITR_BACKUP_KEY_FILE=_oss_key(tmp_path),
+        AVA_PITR_BACKUP_KEY_ID="prod-v1",
+        AVA_PITR_OSS_CREDENTIALS_FILE=credentials,
+        AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE=viewer,
+        AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
+    )
+    assert settings.pitr_restore_proof_enabled is True
+
+
+def test_oss_credentials_rejects_overexposed_file(tmp_path: Path) -> None:
+    credentials = _oss_credential(tmp_path)
+    credentials.chmod(0o644)
+    with pytest.raises(ValidationError, match=r"OSS_CREDENTIALS_FILE.*mode 0600"):
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_STORE_BACKEND="oss",
+            AVA_PITR_OSS_ENDPOINT="https://oss-cn-shanghai.aliyuncs.com",
+            AVA_PITR_OSS_BUCKET="ava-pitr-store",
+            AVA_PITR_BACKUP_KEY_FILE=_oss_key(tmp_path),
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_OSS_CREDENTIALS_FILE=credentials,
+        )
+
+
 @pytest.mark.parametrize("prefix", ["/absolute", "../escape", "a//b", "a/./b"])
 def test_prefix_rejects_unsafe_paths(prefix: str) -> None:
     with pytest.raises(ValidationError, match="safe relative object prefix"):
