@@ -503,6 +503,28 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if rc != 0:
         return rc
 
+    # Pre-create the pgvector extension with the bootstrap-superuser socket
+    # connection while the data plane is up: pgvector's control file is not
+    # `trusted`, so the NOSUPERUSER runtime roles cannot install it themselves,
+    # and an existing cluster picks it up here (install birth covers fresh
+    # ones). A silent no-op when this Postgres lacks the extension binaries —
+    # the backend preflight probe owns that failure path. Local instances
+    # only: a remote-managed plane has no local admin socket, and its
+    # extension provisioning belongs to its owner.
+    from shared.config import settings
+
+    if "gateway" in roles and not settings.data_plane.is_remote:
+        from cli.commands._cluster_instance import pg_admin_url
+        from shared.cluster import db_identity, get_record
+        from shared.cluster.provision import ensure_pgvector_extension
+        from shared.paths import ava_home
+
+        rec = get_record(ava_home())
+        if rec is not None:
+            ensure_pgvector_extension(
+                db_identity(), base_admin_url=pg_admin_url(rec.ports["postgres"])
+            )
+
     # 2.65) a migration that CREATED a table left the ava_runner read grant
     # behind it: `GRANT SELECT ON ALL TABLES` is a point-in-time loop over what
     # existed at install birth, so a pure agent-runner — which dials as

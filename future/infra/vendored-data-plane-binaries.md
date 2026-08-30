@@ -1,8 +1,9 @@
 # Vendored data-plane binaries (drop the brew/apt prerequisite)
 
-**Status: Postgres leg landed; Redis leg is the only remaining work.**
+**Status: Postgres leg landed (pgvector injection included); Redis leg is the only remaining work.**
 `shared/runtime_binaries.py` fetches the pinned relocatable zonky distribution into
-`~/.ava/runtime/pg/` (a `cli/commands/_converge.py` step), and
+`~/.ava/runtime/pg/` and injects the pinned pgvector extension into it (a
+`cli/commands/_converge.py` step), and
 `shared/pg_tools.py:pg_tool()` prefers it over brew/apt. So `brew install
 postgresql@17` is no longer a prerequisite. `redis-server` is still resolved from
 brew/apt (`cli/commands/_cluster_instance.py`), which is what keeps a package
@@ -46,6 +47,26 @@ relocatable, reduced-size PG, used widely for embedded testing. Verified against
   The `.jar` URL on `repo1.maven.org` is stable + content-addressable; pin the
   version + a sha256.
 
+### pgvector extension injection (landed 2026-08-30)
+
+zonky ships core + contrib only — no third-party extensions (pgvector included:
+0 vector entries across every zonky version checked). pgvector has no official
+prebuilt releases, so the vendored tree gets its extension files by injection:
+`ensure_pgvector()` downloads a pinned artifact — Linux: the PGDG deb
+`postgresql-17-pgvector`; macOS: the Homebrew bottle (per-arch, content-addressed
+ghcr.io blob) — and copies the three files `CREATE EXTENSION vector` needs into
+`lib/postgresql/` (pkglibdir) + `share/postgresql/extension/`. Same discipline as
+the PG jar: sha256 pin, fail-fast download, atomic per-file injection. Verified
+layout facts: `$libdir` resolves to `<prefix>/lib/postgresql` and the macOS
+module suffix is `.dylib`.
+
+`ava start` then pre-creates the extension in the cluster DB with the
+bootstrap-superuser connection (pgvector's `vector.control` has no
+`trusted = true`, so the NOSUPERUSER runtime roles cannot install it) — the
+memory-indexer preflight turns green on its own once the binaries are present.
+The CI smoke job `backend-pgvector-smoke` is the hard gate: vendored Linux PG →
+injection → `CREATE EXTENSION` → query.
+
 ## Redis source: a prebuilt we publish (option A) — REMAINING
 
 Redis core has no external dependencies (bundles jemalloc/lua); built `BUILD_TLS=no`
@@ -82,11 +103,13 @@ half-present runtime). The redis leg reuses this step.
 
 ## Slices
 
-1. **✅ Done — Postgres vendoring.** zonky download + extract + checksum into
-   `~/.ava/runtime/pg` (`shared/runtime_binaries.py`), fetched by the converge step;
-   `pg_tool()` prefers the vendored tree, falling back to brew/apt when absent. Every
-   cluster instance (`_cluster_instance.py`) `initdb`s and serves via `pg_ctl`
-   directly, so the pg half of the per-cluster data plane is brew-free.
+1. **✅ Done — Postgres vendoring + pgvector injection.** zonky download +
+   extract + checksum into `~/.ava/runtime/pg` (`shared/runtime_binaries.py`),
+   fetched by the converge step, which then injects the pinned pgvector files
+   (see the subsection above); `pg_tool()` prefers the vendored tree, falling
+   back to brew/apt when absent. Every cluster instance
+   (`_cluster_instance.py`) `initdb`s and serves via `pg_ctl` directly, so the
+   pg half of the per-cluster data plane is brew-free, pgvector included.
 2. **Redis vendoring — remaining.** The CI build-and-publish pipeline (per-platform
    `redis-server`, `BUILD_TLS=no`, published as a release asset) + the download +
    the prefer-vendored resolution in `_cluster_instance.py`.

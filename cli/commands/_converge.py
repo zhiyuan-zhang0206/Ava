@@ -131,14 +131,17 @@ def _ensure_prod_editable_pth(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    """Fetch the vendored relocatable Postgres (idempotent — a no-op once the
-    host-level `~/.ava/runtime/` tree exists), so a gateway host needs no
-    `brew install postgresql@17` before the data plane comes up."""
+    """Fetch the vendored relocatable Postgres + inject the pinned pgvector
+    extension files (both idempotent — no-ops once the host-level
+    `~/.ava/runtime/` tree carries them), so a gateway host needs no
+    `brew install postgresql@17` before the data plane comes up and the
+    memory-search pgvector backend has its extension binaries."""
     if not get_backend().supports_data_plane():
         return  # Platform uses container-based pg, not vendored binaries
-    from shared.runtime_binaries import ensure_pg_binaries
+    from shared.runtime_binaries import ensure_pg_binaries, ensure_pgvector
 
     ensure_pg_binaries()
+    ensure_pgvector()
 
 
 def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
@@ -519,10 +522,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         _ensure_health_preflight,
         requires_unit_config=True,
     ),
-    # Fetch the vendored relocatable Postgres ahead of the data-plane bring-up, so a
-    # clean gateway host needs no `brew install postgresql@17`. Gateway-only.
+    # Fetch the vendored relocatable Postgres + inject pgvector ahead of the
+    # data-plane bring-up, so a clean gateway host needs no
+    # `brew install postgresql@17` (nor a pgvector package). Gateway-only.
     ConvergeStep(
-        "vendored Postgres binaries",
+        "vendored Postgres + pgvector binaries",
         _ensure_pg_binaries_step,
         roles=frozenset({"gateway"}),
     ),
