@@ -15,6 +15,12 @@ mirror) and the file_storage extension (persistent sending queue) live in
 contrib. The version is pinned to the collector release the LGTM stack
 (deploy/lgtm) was validated with, and each platform's release tarball is
 SHA256-pinned.
+
+Remote OTLP ingress is the bearer-authenticated machine-to-machine surface
+(conventions/reachability-and-credentials.md): a gateway sidecar accepts
+pure-runner relays, and an observability-station sidecar accepts remote
+gateway collectors — both through `otlp/remote` + `bearertokenauth/cluster`
+with the cluster secret.
 """
 
 from __future__ import annotations
@@ -259,6 +265,30 @@ def gateway_otel_ingress_endpoint() -> str:
     return f"http://{_host_port(host, _otlp_ingress_port())}"
 
 
+def station_otel_ingress_endpoint() -> str:
+    """The remote observatory station's authenticated OTLP/HTTP ingress.
+
+    `http://<AVA_OBSERVABILITY_URL host>:<OTLP port>` — the one station
+    address a remote gateway collector relays to (WP4, task #1946). The
+    station side authenticates the sender with the cluster bearer
+    (bearertokenauth/cluster on its `otlp/remote` receiver, rendered by
+    `_remote_receiver_fragments`); the port follows
+    AVA_TELEMETRY_OTLP_PORT (single source, task #1945), so the relay target
+    and the station's advertised unit url (shared.machines.unit_dial_url)
+    can never drift apart.
+    """
+    from cli.commands._observatory_urls import _validated_observability_base
+    from shared.config import settings
+
+    base = _validated_observability_base(settings.observability.observability_url)
+    if not base:
+        raise RuntimeError(
+            "cannot build the remote-station OTLP relay without a valid "
+            "AVA_OBSERVABILITY_URL (scheme://host, no port, no path)"
+        )
+    return f"{base}:{_otlp_ingress_port()}"
+
+
 def _cluster_bearer() -> str:
     from shared.config import settings
 
@@ -273,13 +303,21 @@ def _cluster_bearer() -> str:
 
 
 def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
-    """Template fragments for the gateway's authenticated remote ingress.
+    """Template fragments for the authenticated remote OTLP ingress.
 
-    An empty cluster secret is the zero-config single-box posture and keeps
-    every listener on loopback. Any gateway-capable host with a non-empty
-    secret and a non-loopback address may serve remote runners — including a
-    hybrid gateway+runner such as production. Remote traces use a separate
-    pipeline so they cannot be mirrored a second time on the gateway.
+    Served by any unit that remote peers dial OTLP into: a gateway (pure
+    runner relays) and an observability station (remote gateway collectors,
+    WP4, task #1946 — conventions/reachability-and-credentials.md). Remote
+    ingress exists only when the unit could actually have remote peers: an
+    empty cluster secret (the zero-config single-box posture) and a loopback
+    reachable host (co-located posture) both mean NO remote peers, so no
+    receiver is rendered — the same "legal when nothing remote dials it" rule
+    as the registration loopback guard (shared.machines._reject_loopback_dial_url,
+    conventions rule 2). A wildcard reachable host is a configuration error
+    either way and fails closed. Any gateway- or station-capable host with a
+    non-empty secret and a non-loopback address may serve remote peers —
+    including a hybrid gateway+runner+station such as production. Remote
+    traces use a separate pipeline so they cannot be mirrored a second time.
     """
     no_remote = {
         "REMOTE_OTLP_RECEIVER": "",
@@ -288,7 +326,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
         "REMOTE_OTLP_PIPELINE_RECEIVER": "",
         "REMOTE_TRACE_PIPELINE": "",
     }
-    if roles is None or "gateway" not in roles:
+    if roles is None or not (roles & {"gateway", "observability-station"}):
         return no_remote
 
     from shared.config import settings
@@ -296,31 +334,22 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     from shared.netutil import is_loopback_host
 
     secret = settings.data_plane.cluster_secret
-    if not secret:
-        if roles == frozenset({"gateway"}):
-            raise RuntimeError(
-                "cannot build split-gateway OTLP ingress without a cluster secret "
-                "(AVA_CLUSTER_SECRET); "
-                "remote ingress must fail closed"
-            )
-        return no_remote
     host = reachable_host()
-    if is_loopback_host(host):
-        if roles == frozenset({"gateway"}):
-            raise RuntimeError(
-                "cannot expose authenticated gateway OTLP ingress: reachable host is "
-                "loopback; set AVA_MACHINE_HOST to this gateway's exact private address"
-            )
-        # A combined gateway+runner is a valid secret-set single box. Just as
-        # its data-plane binds collapse to loopback, it needs no remote OTLP
-        # receiver until AVA_MACHINE_HOST becomes a reachable address.
-        return no_remote
     if _unspecified_address(host):
+        # 0.0.0.0 / :: is never a reachable host (the loopback classifier
+        # treats 0.0.0.0 as loopback, so check the wildcard form first): a
+        # unit with a wildcard identity cannot serve remote peers at a
+        # meaningful address — fail closed, whichever roles it carries.
         raise RuntimeError(
-            "cannot expose authenticated gateway OTLP ingress: reachable host is "
-            "wildcard; set AVA_MACHINE_HOST to this gateway's exact "
+            "cannot expose authenticated OTLP ingress: reachable host is "
+            "wildcard; set AVA_MACHINE_HOST to this host's exact "
             "private address"
         )
+    if not secret or is_loopback_host(host):
+        # Empty secret or loopback host = no remote peers exist (single-box
+        # posture). No receiver, no error — same rule the registration guard
+        # applies (a co-located unit may advertise loopback).
+        return no_remote
     return {
         "REMOTE_OTLP_RECEIVER": f"""
   otlp/remote:
@@ -337,9 +366,10 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
         "CLUSTER_AUTH_SERVICE_EXTENSION": ", bearertokenauth/cluster",
         "REMOTE_OTLP_PIPELINE_RECEIVER": ", otlp/remote",
         "REMOTE_TRACE_PIPELINE": """
-    # A runner already writes its own durable trace mirror. The remote pipeline
-    # therefore fans out only to Tempo; adding file/traces here duplicates every
-    # remote span in the gateway mirror and makes replay provenance ambiguous.
+    # A remote peer already writes its own durable trace mirror. The remote
+    # pipeline therefore fans out only to Tempo; adding file/traces here
+    # duplicates every remote span in the local mirror and makes replay
+    # provenance ambiguous.
     traces/remote:
       receivers: [otlp/remote]
       processors: [memory_limiter, batch]
@@ -390,13 +420,13 @@ _BACKEND_EXPORTERS = """
 """
 
 
-_RUNNER_RELAY_EXPORTERS = """
+_RELAY_EXPORTERS = """
   # Keep all three component IDs stable across the direct-backend -> relay
   # cutover. In particular, file_storage keys the Tempo/Loki persisted queues
   # by exporter ID; renaming either would strand the backlog this repair drains.
   # Prometheus stays stable too, while retaining its bounded in-memory policy.
   otlphttp/tempo:
-    endpoint: {gateway_endpoint}
+    endpoint: {endpoint}
     headers:
       Authorization: {authorization}
     tls:
@@ -411,7 +441,7 @@ _RUNNER_RELAY_EXPORTERS = """
       max_interval: 30s
       max_elapsed_time: 0s
   otlphttp/loki:
-    endpoint: {gateway_endpoint}
+    endpoint: {endpoint}
     headers:
       Authorization: {authorization}
     tls:
@@ -426,7 +456,7 @@ _RUNNER_RELAY_EXPORTERS = """
       max_interval: 30s
       max_elapsed_time: 0s
   otlphttp/prometheus:
-    endpoint: {gateway_endpoint}
+    endpoint: {endpoint}
     headers:
       Authorization: {authorization}
     tls:
@@ -443,15 +473,31 @@ _RUNNER_RELAY_EXPORTERS = """
 
 
 def _otlp_exporters(roles: MachineRoles | None) -> str:
-    """Role-specific fan-out with stable component/queue identities."""
+    """Role-specific fan-out with stable component/queue identities.
+
+    Three shapes (conventions/reachability-and-credentials.md):
+    - a pure agent-runner relays every signal to its gateway's authenticated
+      OTLP ingress (`otlp/remote` on the gateway sidecar);
+    - a unit that consumes a remote observatory (`AVA_OBSERVABILITY_URL` set)
+      relays every signal to the station's single bearer-authenticated OTLP
+      ingress — never dials the station's loopback-bound native backends
+      directly;
+    - everything else fans out to its local backends (loopback by default,
+      or the per-service settings URLs).
+    """
     from shared.config import settings
 
     if roles == frozenset({"agent-runner"}):
-        return _RUNNER_RELAY_EXPORTERS.format(
-            gateway_endpoint=_yaml_quote(gateway_otel_ingress_endpoint()),
+        return _RELAY_EXPORTERS.format(
+            endpoint=_yaml_quote(gateway_otel_ingress_endpoint()),
             authorization=_yaml_quote(_cluster_bearer()),
         )
     obs = settings.observability
+    if obs.observability_url:
+        return _RELAY_EXPORTERS.format(
+            endpoint=_yaml_quote(station_otel_ingress_endpoint()),
+            authorization=_yaml_quote(_cluster_bearer()),
+        )
     loki_base, prom_base = _lgtm_fanout_bases()
     return _BACKEND_EXPORTERS.format(
         tempo_endpoint=_yaml_quote(obs.telemetry_tempo_endpoint.rstrip("/")),
@@ -599,7 +645,10 @@ def _lgtm_fanout_bases() -> tuple[str, str]:
     obs = settings.observability
     base = _validated_observability_base(obs.observability_url)
     if base:
-        return f"{base}:3100/otlp", f"{base}:9090/api/v1/otlp"
+        # Remote observatory: every signal enters the station through ONE
+        # bearer-authenticated OTLP ingress (WP4) — the direct
+        # /otlp fan-out to the station's loopback-bound backends is gone.
+        return f"{base}:{_otlp_ingress_port()}", f"{base}:{_otlp_ingress_port()}"
     return (
         obs.telemetry_loki_url.rstrip("/") + "/otlp",
         obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp",
