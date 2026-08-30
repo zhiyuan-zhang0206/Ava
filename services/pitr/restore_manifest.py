@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from services.pitr.base_manifest import CandidateManifest, WalRange, _lsn
-from services.pitr.checksums import KNOWN_CHECKSUM_ALGOS
+from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 from services.pitr.uploader import ack_manifest_from_raw
 
 PROTECTED_SCHEMA_VERSION = 1
@@ -115,6 +115,26 @@ class ProtectedManifest:
 
 
 def _restore_object(raw: dict[str, Any]) -> RestoreObject:
+    raw = dict(raw)
+    # Legacy normalization: protected manifests written before the store
+    # abstraction carry ``generation`` + ``crc32c`` (the GCS vocabulary);
+    # they map one-to-one onto ``pin_token`` / ``checksum_*``.
+    if "pin_token" not in raw:
+        legacy_generation = raw.pop("generation", None)
+        if legacy_generation is None:
+            raise ValueError("restore object lacks a pin token")
+        raw["pin_token"] = str(legacy_generation)
+    else:
+        raw.pop("generation", None)
+    if "checksum_algo" not in raw:
+        raw["checksum_algo"] = CRC32C
+    if "checksum_value" not in raw:
+        legacy_crc32c = raw.pop("crc32c", None)
+        if legacy_crc32c is None:
+            raise ValueError("restore object lacks a checksum")
+        raw["checksum_value"] = legacy_crc32c
+    else:
+        raw.pop("crc32c", None)
     if set(raw) != set(RestoreObject.__dataclass_fields__):
         raise ValueError("restore object fields do not match schema")
     raw["metadata"] = tuple(tuple(str(value) for value in item) for item in raw["metadata"])
