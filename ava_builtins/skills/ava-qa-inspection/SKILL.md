@@ -28,6 +28,26 @@ You are auditing production. **Navigate and observe only.**
   by reading the DOM, not by triggering an action. When unsure whether a
   control mutates, do not click it.
 
+## Browser hygiene — leave the shared Chrome as you found it
+
+The shared Chrome is the user's desktop browser, and it does not clean up
+after us: a session that rides `ava.mcps.chrome` and never closes its tab
+leaves that tab behind forever (2026-08-30 — review-worker dev-server pages
+accumulated until the user reported the tab pile-up). Two rules, both about
+the page the bridge owns for this agent:
+
+- **One tab per session.** The bridge gives each agent one page
+  (`_AGENT_AFFINITY`), and a `navigate_page` with no page yet **bootstraps a
+  brand-new tab**. Capture your page id on the first call (`new_page`, or the
+  `list_pages` listing after the first navigate) and reuse that single tab for
+  every route in this sweep; do not let each run carve its own.
+- **Close it when done.** End the sweep with
+  `ava.mcps.chrome.close_page(pageId=<your page id>)` — the bridge then drops
+  that agent's affinity. Never leave a tab on a `localhost` / `127.0.0.1` URL:
+  the dev server or stub it pointed at dies with the session and the tab only
+  rots into a dead page. If the page id was lost, `list_pages`, find any
+  `localhost` / `127.0.0.1` entry this run created, and close exactly that one.
+
 ## What to inspect
 
 Work from `reference/checklist.md` — one row per defect class, each with how to
