@@ -10084,15 +10084,24 @@
           "target": {
             "type": "string",
             "title": "Target"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "containment",
+              "reference"
+            ],
+            "title": "Kind"
           }
         },
         "type": "object",
         "required": [
           "source",
-          "target"
+          "target",
+          "kind"
         ],
         "title": "MemoryGraphEdge",
-        "description": "One directed cross-link between OKF memory notes."
+        "description": "One directed edge in the OKF memory graph.\n\n`kind` separates the two edge families the frontend renders differently:\n`containment` (note → folder, folder → parent folder — the main\nstructure) and `reference` (a markdown cross-link between two notes)."
       },
       "MemoryGraphNode": {
         "properties": {
@@ -10107,6 +10116,14 @@
           "title": {
             "type": "string",
             "title": "Title"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "note",
+              "folder"
+            ],
+            "title": "Kind"
           },
           "description": {
             "anyOf": [
@@ -10169,6 +10186,7 @@
           "id",
           "path",
           "title",
+          "kind",
           "description",
           "tags",
           "primary_tag",
@@ -10177,7 +10195,7 @@
           "ava_machine"
         ],
         "title": "MemoryGraphNode",
-        "description": "One concept note node in the OKF memory graph."
+        "description": "One node in the OKF memory graph — a concept note, or a folder pseudo\nnode (the graph's structural skeleton)."
       },
       "MemoryGraphResponse": {
         "properties": {

@@ -20,9 +20,22 @@ function seed(): MemoryGraphResponse {
   return {
     nodes: [
       {
+        id: "/",
+        path: "/",
+        title: "memory",
+        kind: "folder",
+        description: null,
+        tags: [],
+        primary_tag: "",
+        timestamp: null,
+        ava_agent: null,
+        ava_machine: null,
+      },
+      {
         id: "alpha.md",
         path: "alpha.md",
         title: "Alpha",
+        kind: "note",
         description: "First note",
         tags: ["user-profile", "tech-ops"],
         primary_tag: "user-profile",
@@ -34,6 +47,7 @@ function seed(): MemoryGraphResponse {
         id: "beta.md",
         path: "beta.md",
         title: "Beta",
+        kind: "note",
         description: null,
         tags: ["tech-ops"],
         primary_tag: "tech-ops",
@@ -42,7 +56,11 @@ function seed(): MemoryGraphResponse {
         ava_machine: null,
       },
     ],
-    edges: [{ source: "alpha.md", target: "beta.md" }],
+    edges: [
+      { source: "alpha.md", target: "beta.md", kind: "reference" },
+      { source: "alpha.md", target: "/", kind: "containment" },
+      { source: "beta.md", target: "/", kind: "containment" },
+    ],
     warnings: [],
   };
 }
@@ -68,11 +86,32 @@ describe("Memory graph page", () => {
     await waitFor(() => expect(screen.getByText("Alpha")).toBeTruthy());
 
     expect(screen.getByText("2 notes")).toBeTruthy();
-    expect(screen.getByText("1 link")).toBeTruthy();
+    expect(screen.getByText("1 folder")).toBeTruthy();
+    expect(screen.getByText("3 links")).toBeTruthy();
     expect(screen.getByText("user-profile")).toBeTruthy();
     expect(screen.getByText("tech-ops")).toBeTruthy();
     expect(screen.getByTestId("memory-node-alpha.md")).toBeTruthy();
     expect(screen.getByTestId("memory-node-beta.md")).toBeTruthy();
+    expect(screen.getByTestId("memory-node-/")).toBeTruthy();
+  });
+
+  it("renders containment edges solid and reference edges weak (dashed)", async () => {
+    mockGetMemoryGraph.mockResolvedValue(seed());
+    const { container } = wrap();
+    await waitFor(() => screen.getByText("Alpha"), { timeout: 4000 });
+
+    const graphSvg = container.querySelector(
+      'svg[aria-label="Memory note graph"]',
+    )!;
+    const lines = graphSvg.querySelectorAll("line");
+    const dashed = [...lines].filter((line) =>
+      line.hasAttribute("stroke-dasharray"),
+    );
+    // The one cross-reference edge is dashed and thin; the two containment
+    // edges stay solid.
+    expect(dashed).toHaveLength(1);
+    expect(dashed[0].getAttribute("stroke-dasharray")).toBe("2 4");
+    expect(lines.length - dashed.length).toBe(2);
   });
 
   it("wheel zoom is not capped (scale can exceed the old 4x limit)", async () => {

@@ -71,6 +71,10 @@ function colorForTag(tag: string): string {
   return TAG_COLORS[tag] ?? TAG_COLORS.untagged;
 }
 
+// Folder pseudo nodes share one neutral slate so the structure reads as
+// backdrop and note tag colors stay the only color signal.
+const FOLDER_COLOR = "#64748b";
+
 // Zoom floor only — scale factor on the memory-graph content <g>.
 // No upper bound (user ruling 2026-08-25: zoom must never be capped); d3
 // clamps wheel zoom to this extent, so the non-functional floor keeps k
@@ -158,10 +162,12 @@ function MemoryGraphShell({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
-  // Tag summary for the sidebar.
+  // Tag summary for the sidebar — notes only, folder pseudo nodes carry
+  // no tag.
   const tags = useMemo(() => {
     const counts = new Map<string, number>();
     for (const node of graph.nodes) {
+      if (node.kind === "folder") continue;
       counts.set(
         node.primary_tag || "untagged",
         (counts.get(node.primary_tag || "untagged") ?? 0) + 1,
@@ -171,6 +177,18 @@ function MemoryGraphShell({
       (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
     );
   }, [graph.nodes]);
+
+  // Notes per folder pseudo node (containment edges whose source is a note).
+  const folderNoteCounts = useMemo(() => {
+    const kindById = new Map(graph.nodes.map((n) => [n.id, n.kind]));
+    const counts = new Map<string, number>();
+    for (const e of graph.edges) {
+      if (e.kind === "containment" && kindById.get(e.source) === "note") {
+        counts.set(e.target, (counts.get(e.target) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [graph.nodes, graph.edges]);
 
   const selected = useMemo(() => {
     if (selectedId == null) return null;
@@ -184,6 +202,7 @@ function MemoryGraphShell({
           graph={graph}
           selectedId={selectedId}
           onSelect={onSelect}
+          folderNoteCounts={folderNoteCounts}
         />
       </section>
       <aside className={cn("overflow-y-auto px-4 py-3 text-sm", MIN_H_0)}>
@@ -214,7 +233,10 @@ function MemoryGraphShell({
             Selection
           </h2>
           {selected ? (
-            <MemoryDetails node={selected} />
+            <MemoryDetails
+              node={selected}
+              noteCount={folderNoteCounts.get(selected.id)}
+            />
           ) : (
             <p className="text-xs text-muted-foreground">
               Click a node to see details.
@@ -232,10 +254,12 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
   graph,
   selectedId,
   onSelect,
+  folderNoteCounts,
 }: {
   graph: MemoryGraphResponse;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  folderNoteCounts: Map<string, number>;
 }) {
   const { params, setParams, reset } = useForceParams(
     MEMORY_FORCE_KEY,
@@ -420,6 +444,12 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
     ? graph.nodes.find((n) => n.id === hovered.id) ?? null
     : null;
 
+  // Chip counters — folders are pseudo nodes, not notes.
+  const noteCount = graph.nodes.filter(
+    (n) => n.kind === "note",
+  ).length;
+  const folderCount = graph.nodes.length - noteCount;
+
   if (!layout) {
     return (
       <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
@@ -455,7 +485,8 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
               setAnimateZoom(false);
           }}
         >
-          {/* Edges */}
+          {/* Edges — containment is the main structure; cross-references
+              between notes are deliberately weaker (thin, dashed, faint). */}
           <g>
             {graph.edges.map((e) => {
               const a = positions.get(e.source);
@@ -467,15 +498,22 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                   e.target === selectedId);
               const isDimmed =
                 connectedNodeIds != null && !isIncident;
-              const opacity = isIncident
-                ? 0.85
-                : isDimmed
-                  ? 0.06
-                  : 0.35;
-              const sw = isIncident ? 2.0 : 1.0;
+              const isReference = e.kind === "reference";
+              const opacity = isReference
+                ? isIncident
+                  ? 0.55
+                  : isDimmed
+                    ? 0.04
+                    : 0.2
+                : isIncident
+                  ? 0.85
+                  : isDimmed
+                    ? 0.06
+                    : 0.35;
+              const sw = isReference ? 0.75 : isIncident ? 2.0 : 1.0;
               return (
                 <line
-                  key={`${e.source}-${e.target}`}
+                  key={`${e.kind}-${e.source}-${e.target}`}
                   x1={a.x}
                   y1={a.y}
                   x2={b.x}
@@ -484,6 +522,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                   stroke="currentColor"
                   strokeOpacity={opacity}
                   strokeWidth={sw}
+                  strokeDasharray={isReference ? "2 4" : undefined}
                 />
               );
             })}
@@ -496,10 +535,11 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                 (n) => n.id === node.id,
               );
               if (!memNode) return null;
-                            const isSelected = selectedId === node.id;
-              const color = colorForTag(
-                memNode.primary_tag || "untagged",
-              );
+              const isSelected = selectedId === node.id;
+              const isFolder = memNode.kind === "folder";
+              const color = isFolder
+                ? FOLDER_COLOR
+                : colorForTag(memNode.primary_tag || "untagged");
               const r = node.r;
               return (
                 <g
@@ -551,26 +591,50 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                       strokeDasharray="4 3"
                     />
                   ) : null}
-                  {/* Node circle */}
-                  <circle
-                    r={r}
-                    fill={color}
-                    stroke="var(--background)"
-                    strokeWidth={1.5}
-                    opacity={
-                      connectedNodeIds == null ||
-                      isSelected ||
-                      connectedNodeIds.has(node.id)
-                        ? 1
-                        : 0.15
-                    }
-                  />
+                  {/* Node — folders render as rounded squares, notes as
+                      tag-colored circles, so the structure reads at a
+                      glance. */}
+                  {isFolder ? (
+                    <rect
+                      x={-r}
+                      y={-r}
+                      width={2 * r}
+                      height={2 * r}
+                      rx={r * 0.35}
+                      fill={color}
+                      stroke="var(--background)"
+                      strokeWidth={1.5}
+                      opacity={
+                        connectedNodeIds == null ||
+                        isSelected ||
+                        connectedNodeIds.has(node.id)
+                          ? 1
+                          : 0.15
+                      }
+                    />
+                  ) : (
+                    <circle
+                      r={r}
+                      fill={color}
+                      stroke="var(--background)"
+                      strokeWidth={1.5}
+                      opacity={
+                        connectedNodeIds == null ||
+                        isSelected ||
+                        connectedNodeIds.has(node.id)
+                          ? 1
+                          : 0.15
+                      }
+                    />
+                  )}
                   {/* Label */}
                   <text
                     y={-r - 6}
                     textAnchor="middle"
                     dominantBaseline="central"
-                    className="fill-foreground text-[7px] font-medium select-none"
+                    className={`fill-foreground text-[7px] select-none ${
+                      isFolder ? "font-semibold" : "font-medium"
+                    }`}
                     style={{ pointerEvents: "none" }}
                   >
                     {memNode.title.length > 24
@@ -593,9 +657,25 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           groups={FORCE_GROUPS}
         />
         <span className="rounded border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur tabular-nums">
-          <span className="tabular-nums">{graph.nodes.length} notes</span>
+          <span className="tabular-nums">{noteCount} notes</span>
+          {" · "}
+          <span className="tabular-nums">{folderCount} folder{folderCount === 1 ? '' : 's'}</span>
           {" · "}
           <span className="tabular-nums">{graph.edges.length} link{graph.edges.length === 1 ? '' : 's'}</span>
+        </span>
+        <span className="pointer-events-none ml-2 hidden items-center gap-3 text-[10px] text-muted-foreground md:flex">
+          <span className={cn("items-center gap-1", FLEX)}>
+            <svg width="18" height="4" aria-hidden="true">
+              <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1" />
+            </svg>
+            folder
+          </span>
+          <span className={cn("items-center gap-1", FLEX)}>
+            <svg width="18" height="4" aria-hidden="true">
+              <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeOpacity="0.2" strokeWidth="0.75" strokeDasharray="2 2" />
+            </svg>
+            reference
+          </span>
         </span>
       </div>
 
@@ -623,6 +703,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           node={hoveredNode}
           x={hovered.x}
           y={hovered.y}
+          noteCount={folderNoteCounts.get(hoveredNode.id)}
         />
       ) : null}
     </>
@@ -635,10 +716,12 @@ function MemoryTooltip({
   node,
   x,
   y,
+  noteCount,
 }: {
   node: MemoryGraphNode;
   x: number;
   y: number;
+  noteCount?: number;
 }) {
   return (
     <div
@@ -656,7 +739,11 @@ function MemoryTooltip({
         />
         <span className="text-xs font-semibold">{node.title}</span>
       </div>
-      {node.description ? (
+      {node.kind === "folder" ? (
+        <div className="mt-1 text-[11px] text-muted-foreground">
+          {noteCount ?? 0} note{(noteCount ?? 0) === 1 ? "" : "s"}
+        </div>
+      ) : node.description ? (
         <div className="mt-1 text-[11px] text-muted-foreground">
           {node.description}
         </div>
@@ -685,14 +772,26 @@ function MemoryTooltip({
 
 // ── Sidebar detail panel ──
 
-function MemoryDetails({ node }: { node: MemoryGraphNode }) {
-  const rows: [string, string | null][] = [
-    ["Path", node.path],
-    ["Tag", node.primary_tag || "untagged"],
-    ["Timestamp", node.timestamp],
-    ["Agent", node.ava_agent],
-    ["Machine", node.ava_machine],
-  ];
+function MemoryDetails({
+  node,
+  noteCount,
+}: {
+  node: MemoryGraphNode;
+  noteCount?: number;
+}) {
+  const rows: [string, string | null][] =
+    node.kind === "folder"
+      ? [
+          ["Path", node.path],
+          ["Notes", String(noteCount ?? 0)],
+        ]
+      : [
+          ["Path", node.path],
+          ["Tag", node.primary_tag || "untagged"],
+          ["Timestamp", node.timestamp],
+          ["Agent", node.ava_agent],
+          ["Machine", node.ava_machine],
+        ];
 
   return (
     <div className="space-y-3">
