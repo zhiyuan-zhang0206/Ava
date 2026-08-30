@@ -5,11 +5,15 @@ Split out of `cli/commands/update.py` to keep that module within the file-size
 budget. This is the convergence loop that drains every live agent before the
 schema migration: signal each live agent to restart (source='system:update',
 Redis-woken) and poll until none are left running or the mode's bounded window
-elapses. With every restarter paused by the caller (local before Phase A,
-remote in Phase A), a quiesced agent stays down until its host comes back on
-new code in Phase B. On timeout the stragglers are force-reaped
-(`_force_reap_local_agents`: CAS-mark 'restarting' + SIGTERM/SIGKILL) — the
-rollout must stay bounded.
+elapses. The quiesce pauses the local restarter itself and a quiesced
+agent stays down until its host comes back on new code (the gateway-side
+Phase A pauses the remote ones; `pause_local_cluster` below covers the
+local one for every entry path). On timeout the loop reports the
+stragglers and returns False — the CALLER then force-reaps them in its
+own force_reap stage (`_force_reap_local_agents`: CAS-mark 'restarting' +
+SIGTERM/SIGKILL), never inside the quiesce window: the configured budget
+bounds the drain, and the reap's own SIGTERM grace is a separate stage
+so the quiesce stage never overruns the budget (Task #2055).
 
 `_UPDATE_MODES` ('smooth' / 'force' / 'none') + the timeout derivation
 (`_quiesce_timeout_s`) live here with the loop they parameterize. The smooth
@@ -35,7 +39,9 @@ _QUIESCE_POLL_INTERVAL_S = 1.0
 # is deliberately short (user ruling 2026-08-26) — an agent mid-execute_code
 # is cut short and its work lost, accepted in exchange for a fast cluster
 # unblock; there is no minimum. Force mode waits only long enough for idle
-# agents to drain (~10s) and force-reaps whoever is still live regardless.
+# agents to drain (~10s) and reports whoever is still live — the caller's
+# force_reap stage then reaps them (force mode always reaps, matching the
+# gateway orchestration's `force_reap = mode == 'force' or not drained`).
 _FORCE_QUIESCE_TIMEOUT_S = 10.0
 
 # Update modes: 'smooth' (default) waits the configured short window then
@@ -238,27 +244,41 @@ def _force_reap_local_agents(*, defer_process_stop: bool = False) -> list[int]:
 def _quiesce_local_agents(mode: str) -> bool:
     """Per-host quiesce for the agent-runner self-update / `ava restart
     --quiesce`: signal THIS machine's live agents to restart
-    (source='system:update', Redis-woken), wait per mode, and force-reap
-    stragglers on timeout. 'none' (the rollout's Phase B, whose agents the
-    gateway-side quiesce already drained) is a no-op returning True.
+    (source='system:update', Redis-woken) and wait per mode. 'none' (the
+    rollout's Phase B, whose agents the gateway-side quiesce already drained)
+    is a no-op returning True.
 
-    With the restarter paused by the caller (spawn_update pauses before the
-    updater; the rollout pauses in Phase A), a quiesced agent stays down until
-    the host comes back on new code — exactly the rollout contract, now also
-    held by standalone self-heals.
+    The quiesce itself pauses the local restarter (idempotent — an owned
+    pause, e.g. the updater ladder's spawn-time one, is an unchanged repeat),
+    so a signalled agent that exits stays down instead of being respawned
+    mid-poll: without the pause every drained agent is instantly respawned on
+    old code, the convergence poll can never see an empty live set, and the
+    deadline reap would then kill freshly-respawned LIVE agents mid-turn —
+    the 2026-08-30 incident (Task #2055), where `ava restart --quiesce --mode
+    force` force-reaped 312/1818/3242 seconds after they had drained. The
+    caller's trailing `ava start` restores the posture and respawns the
+    restarter, so the quiesce never unpauses itself.
+
+    The poll is the whole budget: on timeout the loop reports the stragglers
+    and returns False WITHOUT reaping. The caller force-reaps in its own
+    force_reap stage (`cmd_restart`, or `_do_stop(force_reap_agents=True)` in
+    the self-update) — the reap's own SIGTERM grace window is not quiesce
+    time, so the quiesce stage never overruns the mode's budget (the same
+    run's quiesce stage took 25.6s = the 10s budget + the reap's 15s window).
 
     Returns True when every agent quiesced (or none were live).
 
-    Hosted mode is a no-op returning True: agents run inside the agent-host
-    and their rows stay `idling` for life, so there are no per-agent processes
-    to signal and no drain to poll. The hosted quiesce IS the service stop
-    that follows this function — the update flow's graceful stop SIGTERMs the
-    agent-host, whose dispatcher unwinds into `scheduler.aclose()` and
-    checkpoints every in-flight turn before exit; `ava restart`'s non-graceful
-    kill cuts in-flight turns at their last step checkpoint instead (the same
-    accepted degradation as a process-mode force-reap). Signalling here would
-    insert one restart inbound per agent for nothing, and the timeout reap
-    would CAS-mark rows 'restarting' that no restarter will ever respawn.
+    Hosted mode is a no-op returning True (and never pauses): agents run
+    inside the agent-host and their rows stay `idling` for life, so there are
+    no per-agent processes to signal and no drain to poll. The hosted quiesce
+    IS the service stop that follows this function — the update flow's
+    graceful stop SIGTERMs the agent-host, whose dispatcher unwinds into
+    `scheduler.aclose()` and checkpoints every in-flight turn before exit;
+    `ava restart`'s non-graceful kill cuts in-flight turns at their last step
+    checkpoint instead (the same accepted degradation as a process-mode
+    force-reap). Signalling here would insert one restart inbound per agent
+    for nothing, and a reap would CAS-mark rows 'restarting' that no
+    restarter will ever respawn.
     """
     import shared.db
     from cli.commands import update as _up_mod
@@ -275,6 +295,16 @@ def _quiesce_local_agents(mode: str) -> bool:
             "follows is the hosted quiesce"
         )
         return True
+    # Pause the local restarter BEFORE signalling: the drain contract is that
+    # a signalled agent stays down once it exits. An unpaused restarter
+    # respawns every drained agent within its ~1s poll, the convergence loop
+    # burns the whole budget on agents that already drained, and the deadline
+    # reap then kills the freshly-respawned LIVE processes (Task #2055).
+    # Idempotent: a caller-owned pause (spawn_update / Phase A) is a harmless
+    # repeat, and the caller's trailing `ava start` restores the posture.
+    from ops.cluster import pause_local_cluster
+
+    pause_local_cluster()
     timeout_s = _up_mod._quiesce_timeout_s(mode)
     signalled = shared.db.signal_live_agents_restart(source="system:update", machine=machine_name())
     print(f"  · signalled {len(signalled)} local agent(s) to restart")
@@ -292,8 +322,8 @@ def _quiesce_local_agents(mode: str) -> bool:
     stragglers = shared.db.list_live_agent_ids(machine=machine_name())
     print(
         f"  ⚠ local quiesce timed out after {timeout_s:.0f}s; "
-        f"{len(stragglers)} agent(s) still live — force-reaping",
+        f"{len(stragglers)} agent(s) still live: {stragglers} — the caller "
+        "force-reaps them in its force_reap stage",
         file=sys.stderr,
     )
-    _up_mod._force_reap_local_agents()
     return False

@@ -321,18 +321,21 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     #    cluster update` on a runner, watchdog pin/code self-heal, the management
     #    endpoint) used to skip this entirely: no signal, no wait, no kill — every
     #    agent rode the whole update on old code until the next rollout. Now:
-    #    signal each live agent to restart (system:update + Redis wake), wait per
-    #    mode (smooth: the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window,
-    #    default 10s; force: idle drain only), and force-reap stragglers on
-    #    timeout — marked 'restarting'
-    #    so the restarter respawns them on the new code once `ava start` unpauses.
+    #    the quiesce pauses this host's restarter, signals each live agent to
+    #    restart (system:update + Redis wake) and waits per mode (smooth: the
+    #    configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window, default 10s;
+    #    force: idle drain only). The quiesce stage stays within the mode's
+    #    budget; stragglers are reaped in the graceful stop's own force_reap
+    #    stage below — marked 'restarting' so the restarter respawns them on
+    #    the new code once `ava start` unpauses.
     #    `mode='none'` (the rollout's Phase B) skips this: the gateway-side
     #    quiesce already drained the fleet; only `force_reap` (the quiesce-timeout
     #    backstop) applies there.
+    drained = True
     if mode != "none":
         with updater_stage("quiesce"):
-            _ns._quiesce_local_agents(mode)
-    force_reap_agents = force_reap or mode == "force"
+            drained = _ns._quiesce_local_agents(mode)
+    force_reap_agents = force_reap or mode == "force" or not drained
 
     # 4) graceful stop. keep_infra=True: an internal self-update bounces this
     #    host's service sessions, never the shared pg/redis — on a co-located
