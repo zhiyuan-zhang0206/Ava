@@ -78,27 +78,38 @@ many agents they would be a lie. p1b already routes `ava._boot.agent_id()`,
 contextvar, so binding the turn is sufficient and establishing would be strictly
 worse than doing nothing.
 
-## What is NOT wired yet
+## The lifecycle around the turn
 
-This module runs turns. The rest of the agent lifecycle still assumes a process
-per agent, and hosted mode does not change it here:
+This module runs turns. The rest of the agent lifecycle is hosted-aware:
 
 - **spawn** — `POST /api/agents` no longer forks for hosted clusters: the
-  launch op (`ops/ops_lifecycle.launch_agent_op`) skips the fork and the
+  launch op (`ops/ops_launch.launch_agent_op`) skips the fork and the
   launch-confirm and just delivers the first prompt + a wake, which this host's
-  dispatcher turns into the first turn task. Resurrect / respawn / swap-in /
-  revive flip the row and publish a wake the same way.
+  dispatcher turns into the first turn task; a failed launch reclaims its own
+  row (no restarter reaper exists in hosted mode). Resurrect / respawn /
+  swap-in / revive flip the row and publish a wake the same way
+  (`ops/agent_wake.py`, `ops/agent_revive.py`).
 - **restart** — hosted restarts resolve in-process: claim skips the
   'restarting' flip (there is no restarter to pick it up) and sets the
   `restart_requested` channel; this host drops the runtime and ends the task
   without an exit-notify, so the row stays runnable and the next wake starts
   clean with a rebinded config view.
-- **hibernation, the lease renewer, and the lease-zombie reaper** are untouched.
+- **terminate** — graceful terminate is the durable terminate inbound, claimed
+  by the running turn (or the next wake of a still-runnable row); force
+  terminate marks the row dead without a kill and best-effort cancels the turn
+  task through this host's `/cancel-turn` route (`ops/ops_lifecycle.py`).
+- **cluster update** — the hosted-aware quiesce skips the per-agent drain
+  (hosted rows stay idling for life, so there is no straggler signal to wait
+  on); the stop-the-world is this host's own service stop, which checkpoints
+  every in-flight turn on SIGTERM (`cli/commands/_update_quiesce.py`). The
+  roster gates the process-mode restarter off while this host runs
+  (`ops/spec.py`).
 
-That is the migration path the design doc plans (Phase 1 behind the flag, then
-deletions), not an oversight — but it does mean `AVA_RUNNER_MODE=hosted` is not
-an end-to-end usable cluster mode yet. The flag stays off by default and the
-service is gated out of the roster until it is set.
+What stays process-mode machinery until the hibernate deletion lands (the flag
+keeps it behind `AVA_RUNNER_MODE=process`, where it belongs): the hibernation
+controller, the SIGUSR1 swap-out path, and the per-agent lease renewer /
+lease-zombie reaper. They are all gated off a hosted cluster — the restarter
+never starts, and a hosted row never carries a pid or a lease.
 """
 
 from __future__ import annotations
