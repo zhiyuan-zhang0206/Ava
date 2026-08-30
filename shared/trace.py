@@ -37,7 +37,10 @@ local recovery copy. A gap present in the mirror can be replayed with
 
 turn_span() in agent/_runloop.py wraps each graph.ainvoke — one invocation =
 one agent TURN — in a native OTel root span so every LLM/tool child span of
-that turn nests under it and the trace exports the moment the turn ends. The
+that turn nests under it. The root is a PLACEHOLDER: ended (and thus
+exported) at turn START, so a trace always has its root even when the process
+is killed mid-turn (#1964); children export as they end and parent under the
+already-ended root via the kept OTel context. The
 root carries the vendor-neutral `session.id` (Tempo/Grafana group one agent's
 turns into a session by it) plus `ava.turn` (the per-process turn counter).
 
@@ -617,12 +620,27 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
     The trace boundary is the turn: the runloop invokes the graph once per
     turn, so this span opens when the invocation starts — including claim's
     long wait for the turn's inbound (recorded separately, see
-    claim_idle_wait_span) — and closes (and exports) when the turn's work
-    is done. All child spans (LangGraph nodes, Anthropic calls, etc.)
-    inherit the OTel context and become children of this root, so the
+    claim_idle_wait_span). All child spans (LangGraph nodes, Anthropic calls,
+    etc.) inherit the OTel context and become children of this root, so the
     recorded mirror shows a proper span tree per turn. The session_id
     attribute groups one agent's turns into a session on the viewer; the turn
     attribute orders them within a process lifetime.
+
+    **Placeholder root — exported at turn START, not at turn end (#1964).**
+    The root span is ended immediately after creation, so the batch processor
+    exports it within one flush (5 s in production, immediately under a
+    SimpleSpanProcessor in tests) while the turn is still running. A trace
+    therefore ALWAYS has its root, even when the process is killed mid-turn
+    (SIGKILL / OOM / crash): the previous behaviour ended the root only when
+    the turn's work finished, so a process that died with the root still open
+    left a rootless trace in Tempo (children export as they end, the root
+    never does). The trade-off: the root's duration reads 0 and its end time
+    is the turn start — the turn's real duration is carried by the child
+    spans (the batch/LLM spans' min start .. max end), which is how
+    Grafana/Tempo compute the trace span anyway. The ended root stays the
+    current span in the OTel context for the whole turn (use_span,
+    end_on_exit=False), so children still parent under it; the context
+    detaches on exit without a second end call.
 
     No-op when trace_enabled=False or initialize_tracing hasn't run yet; a
     pending background init is awaited first (ensure_init_resolved) so the
@@ -638,9 +656,18 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
     from opentelemetry import trace as otel_trace
 
     tracer = otel_trace.get_tracer("ava.session")
-    with tracer.start_as_current_span(name) as span:
-        span.set_attribute(_ATTR_NEUTRAL_SESSION_ID, session_id)
-        span.set_attribute(_ATTR_TURN, turn)
+    # Placeholder root: created, attributed and ended at turn start so the
+    # trace has its root even if this process dies mid-turn. The context
+    # stays attached (end_on_exit=False) so every child span of the turn
+    # parents under this span; the CM exit only detaches the context and
+    # never ends the span a second time (Span.end is idempotent but warns).
+    root = tracer.start_span(name)
+    root.set_attribute(_ATTR_NEUTRAL_SESSION_ID, session_id)
+    root.set_attribute(_ATTR_TURN, turn)
+    root.end()
+    with otel_trace.use_span(
+        root, end_on_exit=False, record_exception=False, set_status_on_exception=False
+    ):
         yield
 
 

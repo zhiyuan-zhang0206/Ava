@@ -711,6 +711,95 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert spans == 2
 
 
+# --- turn_span placeholder-root export timing (#1964) ------------------------------
+
+
+def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPatch):
+    """The turn root is a PLACEHOLDER: ended (and exported) at turn START, so a
+    trace always has its root even when the process dies mid-turn.
+
+    Two export-timing assertions:
+    1. while the turn is still running (inside `turn_span`), the exporter has
+       ALREADY received the root span (carrying session.id + ava.turn);
+    2. exiting the turn does NOT export the root again — the span is ended
+       once, at turn start (use_span(end_on_exit=False) detaches the context
+       without a second end).
+
+    Plus the structural contract: a child span created inside the turn parents
+    under the already-ended root (same trace_id, parent_span_id == root id).
+    """
+    from opentelemetry import trace as otel_trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    trace_mod._state["initialized"] = True
+
+    posts: list[tuple[str, bytes, dict]] = []
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+    def _post(url, *, content, headers, timeout):  # pyright: ignore[reportUnknownParameterType]
+        posts.append((url, content, headers))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        return _Resp()
+
+    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    previous = otel_trace.get_tracer_provider()
+    otel_trace.set_tracer_provider(provider)
+    try:
+        from opentelemetry.proto.trace.v1.trace_pb2 import Span as OtlpSpan
+
+        def _received_spans() -> list[OtlpSpan]:
+            out: list[OtlpSpan] = []
+            for _url, raw, _h in posts:
+                from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+                    ExportTraceServiceRequest,
+                )
+
+                req = ExportTraceServiceRequest()
+                req.ParseFromString(raw)  # pyright: ignore[reportUnknownArgumentType]
+                for rs in req.resource_spans:
+                    for ss in rs.scope_spans:
+                        out.extend(ss.spans)
+            return out
+
+        with turn_span(name="ava-agent-7", session_id="7", turn=3):
+            # Assertion 1: the root is exported BEFORE the turn ends.
+            spans = _received_spans()
+            assert len(spans) == 1, f"root must export at turn start, got {len(spans)}"
+            root = spans[0]
+            assert root.name == "ava-agent-7"
+            attrs = {kv.key: kv.value.string_value or kv.value.int_value for kv in root.attributes}
+            assert attrs["session.id"] == "7"
+            assert attrs["ava.turn"] == 3
+            assert root.end_time_unix_nano > 0, "placeholder root must be ended when exported"
+            root_id = root.span_id
+            root_trace = root.trace_id
+
+            # A child created inside the turn must parent under the ended root.
+            tracer = otel_trace.get_tracer("ava.session")
+            with tracer.start_as_current_span("child"):
+                pass
+
+        # Assertion 2: exiting the turn does not re-export the root (and the
+        # child arrived, parented under the root).
+        spans = _received_spans()
+        roots = [s for s in spans if not s.parent_span_id]
+        assert len(roots) == 1, f"root must be exported exactly once, got {len(roots)}"
+        assert roots[0].span_id == root_id
+        children = [s for s in spans if s.parent_span_id]
+        assert len(children) == 1
+        assert children[0].parent_span_id == root_id
+        assert children[0].trace_id == root_trace
+    finally:
+        otel_trace.set_tracer_provider(previous)
+
+
 # --- retention prune ---------------------------------------------------------
 
 
@@ -919,15 +1008,25 @@ def test_prune_old_mirror_disabled_when_nonpositive(
 class _FakeSpan:
     def __init__(self):
         self.attributes: dict[str, object] = {}
+        self.ended = False
 
     def set_attribute(self, key: str, value: object) -> None:
         self.attributes[key] = value
+
+    def end(self) -> None:
+        self.ended = True
 
 
 class _FakeTracer:
     def __init__(self, span: _FakeSpan):
         self._span = span
         self.opened: list[str] = []
+
+    def start_span(self, name: str):
+        """turn_span uses start_span + use_span(end_on_exit=False) since the
+        placeholder-root change (#1964)."""
+        self.opened.append(name)
+        return self._span
 
     @contextmanager
     def start_as_current_span(self, name: str):
@@ -975,7 +1074,10 @@ def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
     with turn_span(name="ava-agent-42", session_id="42", turn=3):
-        pass
+        # The placeholder root is ended (exported) at turn START, while the
+        # turn is still running (#1964) — the trace has its root even when
+        # the process dies mid-turn.
+        assert span.ended is True
 
     assert tracer.opened == ["ava-agent-42"]
     assert span.attributes == {

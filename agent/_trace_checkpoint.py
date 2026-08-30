@@ -7,7 +7,9 @@ turn's ainvoke commits its checkpoint:
 
 - the root span (still current — the caller runs inside `turn_span`)
   gains `ava.checkpoint_id=<checkpoint_id>`, so any OTel viewer can jump
-  from a trace to its checkpoint;
+  from a trace to its checkpoint (best-effort since #1964: the root is ended
+  at turn start, so the attribute only lands while recording — production
+  roots are already ended and skip it silently);
 - the checkpoint row's metadata gains `trace_id=<trace_id>`, so the
   gateway endpoint `/api/agents/{id}/traces/{trace_id}/messages` resolves
   content by trace id.
@@ -57,7 +59,14 @@ async def attach_trace_checkpoint_ref(
         # No readable checkpoint yet (fresh thread, first super-step) — the
         # next turn's commit will carry the link.
         return
-    span.set_attribute("ava.checkpoint_id", checkpoint_id)
+    # The span-side write only lands while the span is still recording. The
+    # turn root is a placeholder ended at turn START (#1964), so in
+    # production this is skipped silently (an ended span would drop the
+    # attribute with a warning line every turn). The link that matters — the
+    # checkpoints.metadata.trace_id stamp below, read by the gateway trace
+    # endpoint — is DB-side and unaffected.
+    if span.is_recording():
+        span.set_attribute("ava.checkpoint_id", checkpoint_id)
     from shared.checkpoint import attach_trace_to_checkpoint
 
     await attach_trace_to_checkpoint(
