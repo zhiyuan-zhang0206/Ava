@@ -13,6 +13,7 @@ import base64
 import hashlib
 import hmac
 from dataclasses import dataclass
+from pathlib import Path
 
 import google_crc32c
 
@@ -54,3 +55,21 @@ def digest_bytes(algo: str, data: bytes) -> str:
 def matches(checksum: ObjectChecksum, data: bytes) -> bool:
     """Constant-time comparison of ``data`` against a stored digest."""
     return hmac.compare_digest(digest_bytes(checksum.algo, data), checksum.value)
+
+
+def digest_file(algo: str, path: str) -> str:
+    """Compute the canonical digest of a seekable file's bytes under ``algo``
+    (streamed — the file is never loaded whole)."""
+    if algo == CRC32C:
+        checksum = google_crc32c.Checksum()  # pyright: ignore[reportUnknownMemberType]
+        with Path(path).open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                checksum.update(chunk)  # pyright: ignore[reportUnknownMemberType]
+        return base64.b64encode(checksum.digest()).decode("ascii")  # pyright: ignore[reportUnknownMemberType]
+    if algo == MD5:
+        digest = hashlib.md5()  # noqa: S324
+        with Path(path).open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    raise ValueError(f"unsupported checksum algorithm {algo!r}")

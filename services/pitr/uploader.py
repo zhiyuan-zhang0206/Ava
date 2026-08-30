@@ -15,7 +15,7 @@ from typing import Any
 import google_crc32c
 
 from services.pitr.archive_shim import archive_name_is_valid
-from services.pitr.checksums import CRC32C, ObjectChecksum
+from services.pitr.checksums import CRC32C, ObjectChecksum, digest_file
 from services.pitr.crypto import MAGIC, EncryptionPlan, create_plan, open_encrypted
 from services.pitr.object_store import ObjectStore, RemoteObjectAck
 
@@ -43,6 +43,7 @@ class AckManifest:
     object_name: str
     pin_token: str
     ciphertext_size: int
+    ciphertext_crc32c: str
     ciphertext_checksum_algo: str
     ciphertext_checksum_value: str
     encryption_format: str
@@ -51,13 +52,15 @@ class AckManifest:
 
 
 def ack_manifest_from_raw(raw: dict[str, Any]) -> AckManifest:
-    """Parse one durable ACK; the pre-abstraction shape normalizes in place.
+    """Parse one durable ACK; older shapes normalize in place.
 
-    ACKs written before the store abstraction carry ``generation`` and
-    ``ciphertext_crc32c`` (the GCS vocabulary). They stay readable: GCS
-    objects pin by generation and verify with CRC32C, so the legacy keys
-    map one-to-one onto ``pin_token`` / ``ciphertext_checksum_*`` without
-    ambiguity. Fresh ACKs are written in the normalized shape only.
+    Pre-abstraction ACKs carry ``generation`` + ``ciphertext_crc32c`` (the
+    GCS vocabulary) and map one-to-one onto ``pin_token`` /
+    ``ciphertext_checksum_*``; the first abstraction shape (GCS-only)
+    dropped the crc32c field, which is reconstructable because every such
+    ACK verifies with CRC32C. ``ciphertext_crc32c`` is the local plan
+    digest — a non-crc32c backend still computes it locally, so fresh ACKs
+    carry it alongside the backend-verified ``checksum_*`` pair.
     """
     normalized = dict(raw)
     if "pin_token" not in normalized:
@@ -74,8 +77,10 @@ def ack_manifest_from_raw(raw: dict[str, Any]) -> AckManifest:
         if legacy_crc32c is None:
             raise TypeError("ACK manifest lacks a ciphertext checksum")
         normalized["ciphertext_checksum_value"] = legacy_crc32c
-    else:
-        normalized.pop("ciphertext_crc32c", None)
+    if "ciphertext_crc32c" not in normalized:
+        if normalized.get("ciphertext_checksum_algo") != CRC32C:
+            raise TypeError("ACK manifest lacks the local ciphertext digest")
+        normalized["ciphertext_crc32c"] = normalized["ciphertext_checksum_value"]
     return AckManifest(**normalized)
 
 
@@ -294,12 +299,19 @@ class PitrUploader:
             if plan.ciphertext_size != ack.ciphertext_size:
                 raise AckCorruptionError("acknowledged WAL plan differs from ACK")
             if staging_path.exists():
-                crc32c = _verify_staged_ciphertext(staging_path, source, key=self._key, plan=plan)
-                if (
-                    ack.ciphertext_checksum_algo != CRC32C
-                    or staging_path.stat().st_size != ack.ciphertext_size
-                    or crc32c != ack.ciphertext_checksum_value
-                ):
+                if ack.ciphertext_checksum_algo == CRC32C:
+                    crc32c = _verify_staged_ciphertext(
+                        staging_path, source, key=self._key, plan=plan
+                    )
+                    stage_matches = (
+                        crc32c == ack.ciphertext_checksum_value and crc32c == ack.ciphertext_crc32c
+                    )
+                else:
+                    stage_matches = (
+                        digest_file(ack.ciphertext_checksum_algo, str(staging_path))
+                        == ack.ciphertext_checksum_value
+                    )
+                if staging_path.stat().st_size != ack.ciphertext_size or not stage_matches:
                     raise AckCorruptionError("acknowledged WAL stage differs from ACK")
                 staging_path.unlink()
                 _fsync_dir(self._staging)
@@ -349,7 +361,9 @@ class PitrUploader:
             "ava-key-id": self._key_id,
         }
         remote = self._store.put_wal_ciphertext_if_absent(staging_path, object_name, metadata)
-        self._verify_remote(remote, object_name, plan.ciphertext_size, expected_crc, metadata)
+        self._verify_remote(
+            remote, object_name, plan.ciphertext_size, expected_crc, metadata, staging_path
+        )
         ack = AckManifest(
             source.name,
             plan.source_sha256,
@@ -357,6 +371,7 @@ class PitrUploader:
             object_name,
             remote.pin_token,
             remote.size,
+            expected_crc,
             remote.checksum.algo,
             remote.checksum.value,
             MAGIC.decode(),
@@ -374,13 +389,20 @@ class PitrUploader:
         ciphertext_size: int,
         expected_crc: str,
         metadata: dict[str, str],
+        staging_path: Path,
     ) -> None:
         if remote.object_name != object_name:
             raise RemoteCollisionError("immutable GCS object differs from local archive")
+        if remote.checksum.algo == CRC32C:
+            expected = ObjectChecksum(CRC32C, expected_crc)
+        else:
+            expected = ObjectChecksum(
+                remote.checksum.algo, digest_file(remote.checksum.algo, str(staging_path))
+            )
         exact_match = (
             bool(remote.pin_token)
             and remote.size == ciphertext_size
-            and remote.checksum == ObjectChecksum(CRC32C, expected_crc)
+            and remote.checksum == expected
             and dict(remote.metadata) == metadata
         )
         if remote.created:

@@ -46,7 +46,9 @@ def _candidate(chain_id: str) -> CandidateManifest:
         start_lsn="0/100",
         end_lsn="0/200",
         wal_ranges=(WalRange(1, "0/100", "0/200"),),
-        base_object=BaseObject("base", "1", 10, "crc32c", "crc", "sha", 5, "key", "AVAPITRB1"),
+        base_object=BaseObject(
+            "base", "1", 10, "crc", "crc32c", "crc", "sha", 5, "key", "AVAPITRB1"
+        ),
         native_manifest_sha256="manifest",
         native_manifest_member_path="backup_manifest",
         native_manifest_container_object_name="base",
@@ -68,19 +70,21 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
     uploader = tmp_path / "uploader.json"
     uploader.write_text("publisher-only")
     inputs = daemon._RestoreWorkerInput(
-        _candidate("viewer-only").to_json(),
-        tmp_path,
-        tmp_path / "ack",
-        tmp_path / "backup.key",
-        "gcs",
-        "project",
-        "bucket",
-        tmp_path / "viewer.json",
-        RestoreSpaceBudget(0, 0, 0),
-        "postgresql://viewer@127.0.0.1:5433/ava",
-        "/live/data",
-        Path("/usr/bin/true"),
-        Path("/usr/bin/true"),
+        candidate_json=_candidate("viewer-only").to_json(),
+        root=tmp_path,
+        ack_dir=tmp_path / "ack",
+        key_path=tmp_path / "backup.key",
+        backend="gcs",
+        store_args=(
+            ("project", "project"),
+            ("bucket", "bucket"),
+            ("viewer_credentials", str(tmp_path / "viewer.json")),
+        ),
+        budget=RestoreSpaceBudget(0, 0, 0),
+        live_db_url="postgresql://viewer@127.0.0.1:5433/ava",
+        data_directory="/live/data",
+        pg_ctl=Path("/usr/bin/true"),
+        pg_verifybackup=Path("/usr/bin/true"),
     )
     assert str(uploader) not in repr(inputs)
     environment = restricted_process_env()
@@ -97,6 +101,68 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
         check=False,
     )
     assert completed.returncode == 0
+
+
+def test_restore_worker_store_args_validate_against_the_backend_constructor(
+    tmp_path: Path,
+) -> None:
+    from services.pitr.restore_worker import _construct_group
+    from services.pitr.store_factory import get_group_constructor_named
+
+    gcs = _construct_group(
+        get_group_constructor_named("gcs"),
+        {
+            "project": "p",
+            "bucket": "b",
+            "viewer_credentials": str(tmp_path / "viewer.json"),
+        },
+    )
+    assert gcs.generation_pinned_object_reader is not None
+    baidu = _construct_group(
+        get_group_constructor_named("baidu"),
+        {
+            "app_root": "/apps/ava/ava-pitr",
+            "prefix": "ava-pitr",
+            "credentials_file": str(tmp_path / "creds.json"),
+            "token_file": str(tmp_path / "token.json"),
+        },
+    )
+    assert baidu.generation_pinned_object_reader is not None
+    with pytest.raises(ValueError, match="unknown"):
+        _construct_group(
+            get_group_constructor_named("gcs"),
+            {"project": "p", "bucket": "b", "nope": "x"},
+        )
+    with pytest.raises(ValueError, match="required"):
+        _construct_group(get_group_constructor_named("gcs"), {"project": "p"})
+
+
+def test_restore_worker_input_builds_baidu_store_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from services.pitr import base_operation_runtime as restore_runtime
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "baidu")
+    monkeypatch.setattr(settings.physical_backup, "pitr_restore_proof_enabled", True)
+    monkeypatch.setattr(settings.physical_backup, "pitr_backup_key_file", tmp_path / "backup.key")
+    monkeypatch.setattr(
+        settings.physical_backup, "pitr_baidu_credentials_file", tmp_path / "creds.json"
+    )
+    monkeypatch.setattr(settings.physical_backup, "pitr_baidu_token_file", tmp_path / "token.json")
+    monkeypatch.setattr(restore_runtime, "direct_db_url", lambda: "postgresql://x")
+    monkeypatch.setattr(restore_runtime, "live_data_directory", lambda: "/live/data")
+
+    def fake_pg_tool(_name: str) -> Path:
+        return Path("/usr/bin/true")
+
+    monkeypatch.setattr(restore_runtime, "pg_tool", fake_pg_tool)
+
+    inputs = restore_runtime.input_for(_candidate("baidu-proof"))
+
+    assert inputs.backend == "baidu"
+    assert set(dict(inputs.store_args)) == {"app_root", "prefix", "credentials_file", "token_file"}
+    assert dict(inputs.store_args)["credentials_file"] == str(tmp_path / "creds.json")
 
 
 _LEGACY_CANDIDATE_JSON = (
@@ -192,27 +258,22 @@ def test_authoritative_verify_precedes_publisher_construction(
             nonlocal constructed
             constructed = True
 
-    class Backend:
-        name = "gcs"
-
+    class Group:
         @staticmethod
-        def protected_manifest_publisher(**_kwargs: object) -> Publisher:
+        def protected_manifest_publisher() -> Publisher:
             return Publisher()
 
-    def backend() -> Backend:
-        return Backend()
+    def group() -> Group:
+        return Group()
 
     monkeypatch.setattr(restore_runtime, "verify_candidate_proof", reject_mismatched_ack)
-    monkeypatch.setattr(restore_runtime, "get_backend", backend)
+    monkeypatch.setattr(restore_runtime, "get_store_group", group)
 
     with pytest.raises(ValueError, match="ACK generation mismatch"):
         restore_runtime.verify_then_construct_publisher(
             candidate=_candidate("verify-first"),
             root=tmp_path,
             ack_dir=tmp_path / "ack",
-            project="project",
-            bucket="bucket",
-            credentials=tmp_path / "uploader.json",
         )
 
     assert constructed is False

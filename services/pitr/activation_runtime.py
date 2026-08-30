@@ -336,15 +336,17 @@ def probe_switch_privilege() -> None:
 def remote_wal_proof(
     record: ActivationRecord, stop: threading.Event | None = None
 ) -> tuple[dict[str, str], dict[str, str]]:
-    from services.pitr.store_factory import get_backend
+    from services.pitr.store_factory import get_store_group
     from services.pitr.uploader import ack_manifest_from_raw
     from shared.db import direct_db_url
 
     exact, deadline_text = record.wal_exact_evidence, record.wal_verification_deadline
     config = settings.physical_backup
-    viewer_credentials = config.pitr_restore_gcs_credentials_file
-    if exact is None or deadline_text is None or viewer_credentials is None:
+    if exact is None or deadline_text is None:
         raise RuntimeError("WAL verification state is incomplete")
+    if config.pitr_store_backend == "gcs" and config.pitr_restore_gcs_credentials_file is None:
+        raise RuntimeError("WAL verification state is incomplete")
+    viewer_store = get_store_group().viewer_object_store()
     archive_name = exact["segment"]
     deadline = datetime.fromisoformat(deadline_text)
     switch_intent = datetime.fromisoformat(exact["switch_intent_at"])
@@ -376,15 +378,7 @@ def remote_wal_proof(
                 raise RuntimeError("durable WAL ACK falls outside the activation window")
             if stop is not None and stop.is_set():
                 raise RuntimeError("PITR WAL proof lost its deployment lease")
-            remote = (
-                get_backend()
-                .object_store(
-                    project=config.pitr_gcs_project,
-                    bucket=config.pitr_gcs_bucket,
-                    credentials_file=viewer_credentials,
-                )
-                .stat(ack.object_name)
-            )
+            remote = viewer_store.stat(ack.object_name)
             if remote is None or (
                 remote.pin_token,
                 remote.size,

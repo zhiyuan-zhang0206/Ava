@@ -37,8 +37,7 @@ def base_object_from_legacy(raw: dict[str, Any]) -> dict[str, Any]:
         if legacy_crc32c is None:
             raise TypeError("base object lacks a ciphertext checksum")
         normalized["ciphertext_checksum_value"] = legacy_crc32c
-    else:
-        normalized.pop("ciphertext_crc32c", None)
+        normalized["ciphertext_crc32c"] = legacy_crc32c
     return normalized
 
 
@@ -54,6 +53,7 @@ class BaseObject:
     object_name: str
     pin_token: str
     ciphertext_size: int
+    ciphertext_crc32c: str
     ciphertext_checksum_algo: str
     ciphertext_checksum_value: str
     source_sha256: str
@@ -128,6 +128,7 @@ class CandidateManifest:
 def base_object_from_ack(
     ack: RemoteObjectAck,
     *,
+    ciphertext_crc32c: str,
     source_sha256: str,
     source_size: int,
     key_id: str,
@@ -137,6 +138,7 @@ def base_object_from_ack(
         object_name=ack.object_name,
         pin_token=ack.pin_token,
         ciphertext_size=ack.size,
+        ciphertext_crc32c=ciphertext_crc32c,
         ciphertext_checksum_algo=ack.checksum.algo,
         ciphertext_checksum_value=ack.checksum.value,
         source_sha256=source_sha256,

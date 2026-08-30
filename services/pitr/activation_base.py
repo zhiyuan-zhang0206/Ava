@@ -11,7 +11,7 @@ from services.pitr.base_manifest import CandidateManifest
 from services.pitr.base_operation_runtime import publish_restore, run_restore, tree_bytes
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.space_budget import CandidateSpaceBudget
-from services.pitr.store_factory import get_backend
+from services.pitr.store_factory import get_store_group
 from shared.config import settings
 from shared.paths import ava_home
 
@@ -45,11 +45,7 @@ def build_activation_candidate(
         prefix=config.pitr_gcs_prefix,
         key=key_path.read_bytes(),
         key_id=config.pitr_backup_key_id,
-        store=get_backend().restartable_streaming_object_store(
-            project=config.pitr_gcs_project,
-            bucket=config.pitr_gcs_bucket,
-            credentials_file=str(credentials),
-        ),
+        store=get_store_group().restartable_streaming_object_store(),
         budget=CandidateSpaceBudget(
             compressed_staging_estimate=tree_bytes(ava_home() / "pg"),
             spool_and_pg_wal_reserve=config.pitr_spool_hard_bytes,

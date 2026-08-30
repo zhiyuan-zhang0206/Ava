@@ -116,7 +116,7 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
         "0/1000000",
         "0/2000000",
         (WalRange(1, "0/1000000", "0/2000000"),),
-        BaseObject("base", "7", 1, "crc32c", "crc", "sha", 1, "key", "AVAPITRB1"),
+        BaseObject("base", "7", 1, "crc", "crc32c", "crc", "sha", 1, "key", "AVAPITRB1"),
         "native",
         "backup_manifest",
         "base",
