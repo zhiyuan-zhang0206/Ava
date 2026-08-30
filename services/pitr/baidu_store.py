@@ -390,9 +390,17 @@ class BaiduObjectStore:
         sidecar_name = f"{object_name}.ack.json"
         existing = self._read_sidecar(object_name)
         if existing is not None:
-            if existing != payload:
+            if existing == payload:
+                return
+            # Crash-retry artifact (live P0 smoke): create-on-existing
+            # replaces the file object with a NEW fs_id, so a retry
+            # re-derives a pin that only the pin_token differs in. Adopt
+            # the new pin when the content identity (size, checksum,
+            # metadata) is unchanged; any other drift stays permanent.
+            same = {key: existing.get(key) for key in existing if key != "pin_token"}
+            wanted = {key: payload.get(key) for key in payload if key != "pin_token"}
+            if set(existing) != set(payload) or same != wanted:
                 raise PermanentObjectStoreError("immutable Baidu object sidecar differs")
-            return
         with tempfile.TemporaryDirectory(prefix="baidu-sidecar-") as scratch:
             staged = Path(scratch) / "sidecar.json"
             staged.write_bytes(data)
