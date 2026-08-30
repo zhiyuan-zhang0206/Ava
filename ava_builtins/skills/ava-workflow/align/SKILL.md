@@ -94,6 +94,10 @@ After questioning, output a concise alignment document:
 - Tech: [language / framework / platform restrictions]
 - Scope: [explicitly out of scope]
 
+## Capabilities
+- Use: [skill or MCP] — [one-line reason]
+- Not used: [skill or MCP] — [one-line reason]
+
 ## Priorities
 1. [Highest priority]
 2. [Second priority]
