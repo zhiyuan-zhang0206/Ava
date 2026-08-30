@@ -4,6 +4,8 @@ Split out of the former monolithic ops/schemas.py; FastAPI registers these
 unchanged, so the OpenAPI codegen is byte-identical to the wire before.
 """
 
+from typing import Literal
+
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -52,13 +54,15 @@ class MemoryRefreshResponse(BaseModel):
 
 
 class MemoryGraphNode(BaseModel):
-    """One concept note node in the OKF memory graph."""
+    """One node in the OKF memory graph — a concept note, or a folder pseudo
+    node (the graph's structural skeleton)."""
 
     model_config = ConfigDict(frozen=True)
 
     id: str
     path: str
     title: str
+    kind: Literal["note", "folder"]
     description: str | None
     tags: list[str]
     primary_tag: str
@@ -68,12 +72,18 @@ class MemoryGraphNode(BaseModel):
 
 
 class MemoryGraphEdge(BaseModel):
-    """One directed cross-link between OKF memory notes."""
+    """One directed edge in the OKF memory graph.
+
+    `kind` separates the two edge families the frontend renders differently:
+    `containment` (note → folder, folder → parent folder — the main
+    structure) and `reference` (a markdown cross-link between two notes).
+    """
 
     model_config = ConfigDict(frozen=True)
 
     source: str
     target: str
+    kind: Literal["containment", "reference"]
 
 
 class MemoryGraphResponse(BaseModel):
