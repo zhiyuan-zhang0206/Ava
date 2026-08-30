@@ -280,6 +280,25 @@ class ServiceSettings(EnvSettings):
         },
     )
 
+    embedding_backend: str = Field(
+        default="gemini",
+        alias="AVA_EMBEDDING_BACKEND",
+        description=(
+            "Embedding provider for the memory index — 'gemini' (default: "
+            "the Gemini Embedding 2 REST adapter). Unknown values fail fast "
+            "at startup (never a silent fallback to the default). The vector "
+            "space is a provider property: switching providers changes the "
+            "semantic space even at the same dim, so the indexer detects the "
+            "provider-fingerprint change and rebuilds the index from scratch."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     memory_embed_timeout_seconds: float = Field(
         default=60.0,
         alias="AVA_EMBED_TIMEOUT_SECONDS",

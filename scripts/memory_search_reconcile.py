@@ -19,8 +19,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-from services.memory_indexer import embedder
 from services.memory_indexer.backends.factory import get_backend_named
+from services.memory_indexer.embeddings.base import EmbeddingAPIError
+from services.memory_indexer.embeddings.factory import get_provider
 from shared.notes import walk_notes
 from shared.paths import gateway_memory_dir
 
@@ -51,8 +52,9 @@ def main() -> int:
         return 1
     print(f"{len(queries)} sample queries, k={args.k}")
 
-    backend_a = get_backend_named(args.a)
-    backend_b = get_backend_named(args.b)
+    provider = get_provider()
+    backend_a = get_backend_named(args.a, dim=provider.dim, fingerprint=provider.fingerprint)
+    backend_b = get_backend_named(args.b, dim=provider.dim, fingerprint=provider.fingerprint)
     backend_a.connect()
     backend_b.connect()
     try:
@@ -75,8 +77,8 @@ def main() -> int:
         exact = 0
         for i, text in enumerate(queries, start=1):
             try:
-                vector = embedder.embed_query(text)
-            except embedder.EmbeddingAPIError as exc:
+                vector = provider.embed_query(text)
+            except EmbeddingAPIError as exc:
                 print(f"[{i}] embed failed, skipping: {exc}", file=sys.stderr)
                 continue
             paths_a = backend_a.search_topk(vector, args.k)
