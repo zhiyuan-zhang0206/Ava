@@ -125,14 +125,11 @@
     "costTitle": "过去 {win} 的预估 LLM 花费（当前按模型定价）",
     "costTitleDetail": "过去 {win} 按当前按模型定价的预估 LLM 花费：${amount}",
     "avgTurnTitle": "过去 {win} 的平均 LLM 调用墙钟时间（过滤 ok=true 排除失败轮次）",
-    "warningsTitle": "过去 {win} 的 WARNING / ERROR：总 / 已排解 / 净剩（净剩为 0 显示「全清」）",
+    "warningsTitle": "过去 {win} 的 WARNING / ERROR 净剩数",
     "expandStatistics": "展开统计",
     "collapseStatistics": "收起统计",
     "noMatch": "没有匹配“{query}”的 agent",
-    "searchAgent": "搜索 agent",
-    "warningLevel": "警告",
-    "errorLevel": "错误",
-    "statsAllClear": "全清"
+    "searchAgent": "搜索 agent"
   },
   "spawn": {
     "models": "模型",
