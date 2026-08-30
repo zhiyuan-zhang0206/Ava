@@ -266,25 +266,30 @@ func sessionInfo() -> [String: Any] {
     ]
 }
 
-/// Report the main display's geometry in LOGICAL points plus its backing scale
-/// factor. Computer-use callers map screenshot pixels (physical) to click
-/// coordinates (logical) via `scale`; Windows has no backing scale (physical ==
-/// logical, scale is always 1).
-/// Report the main display's geometry in LOGICAL points plus its backing scale
-/// factor. Computer-use callers map screenshot pixels (physical) to click
-/// coordinates (logical) via `scale`; Windows has no backing scale (physical ==
-/// logical, scale is always 1).
+/// Report the main display's geometry in LOGICAL points plus the
+/// physical<->logical scale factor. Computer-use callers map screenshot pixels
+/// (physical) to click coordinates (logical) via `scale`; Windows has no
+/// backing scale (physical == logical, scale is always 1).
+///
+/// The scale is derived from CoreGraphics' live display mode (pixel size vs
+/// point size) instead of `NSScreen.backingScaleFactor`: AppKit caches screen
+/// objects per process and only refreshes them on a screen-parameters
+/// notification, which a process without an event loop may never receive —
+/// the helper reported scale 2 while the live display, the same session's
+/// NSScreen, and the captured PNG all said 1x, halving every click
+/// (2026-08-30 probe). Measuring from the live display mode avoids the cache.
 func screenSize(_ req: [String: Any]) throws -> [String: Any] {
-    if let screen = NSScreen.main ?? NSScreen.screens.first {
-        let frame = screen.frame
-        let scale = screen.backingScaleFactor
-        return [
-            "x": Double(frame.minX), "y": Double(frame.minY),
-            "w": Double(frame.width), "h": Double(frame.height),
-            "scale": Double(scale),
-        ]
-    }
-    throw OpError.bad("no screen available")
+    let id = CGMainDisplayID()
+    let bounds = CGDisplayBounds(id)
+    let pixelW = CGDisplayPixelsWide(id)
+    let scale = (pixelW > 0 && bounds.width > 0)
+        ? Double(pixelW) / Double(bounds.width)
+        : 1.0
+    return [
+        "x": Double(bounds.minX), "y": Double(bounds.minY),
+        "w": Double(bounds.width), "h": Double(bounds.height),
+        "scale": scale,
+    ]
 }
 
 /// Report the frontmost application's display name, or "" when none is focused.

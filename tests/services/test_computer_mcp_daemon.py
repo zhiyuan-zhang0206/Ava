@@ -52,6 +52,9 @@ class FakeHelper:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.frontmost = "Finder"
         self.screen = {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
+        # PNG the fake screencapture produces (IHDR) — Retina 2x by default;
+        # a stale-helper regression sets it to the 1x 1920x1080 shape.
+        self.png_size: tuple[int, int] = (3024, 1964)
 
     def screen_size(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("screen_size", {}))
@@ -63,12 +66,13 @@ class FakeHelper:
 
     def screencapture_region(self, x: int, y: int, w: int, h: int, path: str, **kw: Any) -> Any:
         self.calls.append(("screencapture_region", {"x": x, "y": y, "w": w, "h": h, "path": path}))
+        pw, ph = self.png_size
         with Path(path).open("wb") as f:
             f.write(
                 b"\x89PNG\r\n\x1a\n"
                 + b"\x00\x00\x00\x0dIHDR"
-                + (3024).to_bytes(4, "big")
-                + (1964).to_bytes(4, "big")
+                + pw.to_bytes(4, "big")
+                + ph.to_bytes(4, "big")
                 + b"\x08\x06\x00\x00\x00"
             )
         return {"path": path, "bytes": 42}
@@ -229,8 +233,78 @@ async def test_snapshot_returns_path_and_geometry(
     assert result["path"] == "/tmp/snap-test.png"  # noqa: S108
     assert result["screen"] == {"width": 1512.0, "height": 982.0, "scale": 2.0}
     assert result["pixels"] == {"width": 3024, "height": 1964}
-    # include_ax adds the focused window geometry
-    assert result["ax"] == {"app": "Finder", "x": 0.0, "y": 0.0, "w": 800.0, "h": 600.0}
+    # include_ax adds the focused window geometry converted to physical
+    # pixels (same click space as the PNG — 2x here).
+    assert result["ax"] == {"app": "Finder", "x": 0.0, "y": 0.0, "w": 1600.0, "h": 1200.0}
+
+
+async def test_snapshot_and_click_measure_scale_not_helper_claim(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """Regression (2026-08-30 probe): the helper reported scale=2 on a 1x
+    display, and the daemon divided click coords by it — every click landed
+    at HALF the requested position. The snapshot must measure the scale from
+    the captured PNG (1920x1080 over 1920x1080 = 1), report it, and then
+    click/scroll must convert with that measured value."""
+    fh = fake_helper
+    fh.screen = {"x": 0.0, "y": 0.0, "w": 1920.0, "h": 1080.0, "scale": 2.0}  # stale claim
+    fh.png_size = (1920, 1080)
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/snap-1x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    snap = await _ok_result(d, "snapshot", {})
+    assert snap["screen"] == {"width": 1920.0, "height": 1080.0, "scale": 1.0}
+    assert snap["pixels"] == {"width": 1920, "height": 1080}
+
+    # the probe: click at (81, 15) landed on the Apple menu at (40, 7.5).
+    # the physical coords must pass through UNCHANGED on a 1x display.
+    await _call(d, "click", {"x": 81, "y": 15})
+    assert ("click", {"x": 81.0, "y": 15.0, "double": False}) in fh.calls
+
+    # scroll center: no re-division (1920x1080 → center 960,540).
+    await _call(d, "scroll", {"x": 81, "y": 15, "dy": -5})
+    assert ("scroll", {"x": 81.0, "y": 15.0, "dy": -5}) in fh.calls
+
+
+async def test_snapshot_measures_scale_on_2x_and_converts_ax(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """A genuine Retina 2x capture keeps the measured scale at 2 and converts
+    ax geometry into physical pixels (the click space)."""
+    fh = fake_helper
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/snap-2x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    snap = await _ok_result(d, "snapshot", {"include_ax": True})
+    assert snap["screen"]["scale"] == 2.0
+    assert snap["pixels"] == {"width": 3024, "height": 1964}
+    assert snap["ax"]["w"] == 1600.0
+    assert snap["ax"]["h"] == 1200.0
+
+    # click AFTER the snapshot converts with the measured 2x.
+    await _call(d, "click", {"x": 100, "y": 200})
+    assert ("click", {"x": 50.0, "y": 100.0, "double": False}) in fh.calls
+
+
+async def test_click_before_any_snapshot_falls_back_to_helper_scale(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """Before the first snapshot the daemon has no measurement; it uses the
+    helper's live screen report (also the only sane cold-start behavior)."""
+    d = _daemon()
+    await _call(d, "click", {"x": 100, "y": 200})
+    assert ("click", {"x": 50.0, "y": 100.0, "double": False}) in fake_helper.calls
 
 
 async def test_snapshot_include_ocr_adds_text_boxes(
@@ -433,8 +507,10 @@ async def test_scroll_without_pointer_uses_screen_center(
     d = _daemon()
     result = await _ok_result(d, "scroll", {"dy": 5})
     assert result == {"scrolled": 5}
-    # fake screen 1512x982 @2x → center (756, 491) → logical (378, 245.5)
-    assert ("scroll", {"x": 378.0, "y": 245.5, "dy": 5}) in fake_helper.calls
+    # fake screen 1512x982 @2x → the logical center (756, 491) is passed
+    # straight through — the old code divided it AGAIN by the scale and
+    # scrolled at the upper-left quarter of the screen.
+    assert ("scroll", {"x": 756.0, "y": 491.0, "dy": 5}) in fake_helper.calls
 
 
 async def test_scroll_explicit_xy_updates_tracked_pointer(
