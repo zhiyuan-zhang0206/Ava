@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from services.pitr.base_manifest import CandidateManifest
-from services.pitr.restore_object_store import GCSGenerationPinnedObjectReader
 from services.pitr.restore_postgres import IsolatedPostgresRestoreExecutor
 from services.pitr.restore_proof import RestoreSpaceBudget, prove_candidate
+from services.pitr.store_factory import get_backend_named
 
 
 def _object(value: object) -> dict[str, Any]:
@@ -28,6 +28,7 @@ def run(input_path: Path, output_path: Path) -> None:
         "root",
         "ack_dir",
         "key_path",
+        "backend",
         "project",
         "bucket",
         "viewer_credentials",
@@ -46,7 +47,7 @@ def run(input_path: Path, output_path: Path) -> None:
         root=Path(str(raw["root"])),
         ack_dir=Path(str(raw["ack_dir"])),
         key=Path(str(raw["key_path"])).read_bytes(),
-        reader=GCSGenerationPinnedObjectReader(
+        reader=get_backend_named(str(raw["backend"])).generation_pinned_object_reader(
             project=str(raw["project"]),
             bucket=str(raw["bucket"]),
             credentials_file=Path(str(raw["viewer_credentials"])),

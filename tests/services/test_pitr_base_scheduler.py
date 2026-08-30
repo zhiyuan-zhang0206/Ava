@@ -46,18 +46,18 @@ def _candidate(chain_id: str) -> CandidateManifest:
         start_lsn="0/100",
         end_lsn="0/200",
         wal_ranges=(WalRange(1, "0/100", "0/200"),),
-        base_object=BaseObject("base", 1, 10, "crc", "sha", 5, "key", "AVAPITRB1"),
+        base_object=BaseObject("base", "1", 10, "crc32c", "crc", "sha", 5, "key", "AVAPITRB1"),
         native_manifest_sha256="manifest",
         native_manifest_member_path="backup_manifest",
         native_manifest_container_object_name="base",
-        native_manifest_container_generation=1,
+        native_manifest_container_pin_token="1",  # noqa: S106 — test fixture
         migration_set_sha256="migrations",
     )
 
 
 def _required_wal(candidate: CandidateManifest) -> tuple[RestoreObject, ...]:
     return tuple(
-        RestoreObject(name, "wal", 2 + index, 10, "crc", ())
+        RestoreObject(name, "wal", str(2 + index), 10, "crc32c", "crc", ())
         for index, name in enumerate(
             required_archive_names(candidate.wal_ranges, candidate.wal_segment_size)
         )
@@ -72,6 +72,7 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
         tmp_path,
         tmp_path / "ack",
         tmp_path / "backup.key",
+        "gcs",
         "project",
         "bucket",
         tmp_path / "viewer.json",
@@ -96,6 +97,65 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
         check=False,
     )
     assert completed.returncode == 0
+
+
+_LEGACY_CANDIDATE_JSON = (
+    '{"base_object":{"ciphertext_crc32c":"viqqbw==","ciphertext_size":4101269456,'
+    '"encryption_format":"AVAPITRB1","generation":1788085003231815,'
+    '"key_id":"ava-pitr-backup-key-prod",'
+    '"object_name":"ava-pitr/base/activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40/'
+    '358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac/base.tar.zst.enc",'
+    '"source_sha256":"358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac",'
+    '"source_size":6319665156},'
+    '"chain_id":"activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40",'
+    '"database_name":"ava_main","end_lsn":"A4/89EC6820",'
+    '"migration_set_sha256":"63124a552737c95e0296cd29a5247cec07c1014d9eb474ea2d78116c73849f2e",'
+    '"native_manifest_container_generation":1788085003231815,'
+    '"native_manifest_container_object_name":'
+    '"ava-pitr/base/activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40/'
+    '358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac/base.tar.zst.enc",'
+    '"native_manifest_member_path":"backup_manifest",'
+    '"native_manifest_sha256":"5ee47ac3e20907e70894bf2761395256a78b94c116efe11f86ec26adff2153d2",'
+    '"postgres_major":17,"protected":false,"schema_version":1,'
+    '"start_lsn":"A4/7FC179B0","system_identifier":"7656686487711429617",'
+    '"timeline":1,'
+    '"wal_ranges":[{"end_lsn":"A4/89EC6820","start_lsn":"A4/7FC179B0","timeline":1}],'
+    '"wal_segment_size":16777216}'
+)
+
+_LEGACY_WEEKLY_CANDIDATE_JSON = _LEGACY_CANDIDATE_JSON.replace(
+    "activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40",
+    "20260831T043835Z",
+)
+
+
+def _write_legacy_manifests(root: Path) -> Path:
+    manifests = root / "base-manifests"
+    manifests.mkdir(parents=True)
+    (manifests / "20260831T043835Z.candidate.json").write_text(_LEGACY_WEEKLY_CANDIDATE_JSON)
+    (
+        manifests
+        / "activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40.candidate.json"
+    ).write_text(_LEGACY_CANDIDATE_JSON)
+    return root
+
+
+def test_legacy_manifest_daemon_paths_parse_without_crashing(
+    tmp_path: Path,
+) -> None:
+    """QA #1131 P1: the pre-abstraction candidate shape on disk must keep
+    the four boot/loop paths of the base-candidate daemon alive."""
+    from datetime import UTC, datetime
+
+    root = _write_legacy_manifests(tmp_path)
+    # Path 1: boot-time scheduling gate.
+    assert not daemon.is_due(datetime.now(UTC), root / "base-manifests")
+    # Path 2: boot-time last-success read.
+    assert daemon._last_durable_success(root / "base-manifests") is not None
+    # Path 3: loop candidate scan.
+    assert daemon._candidate_manifests(root / "base-manifests")
+    # Path 4: pending-restore scan (the weekly candidate has no protected proof).
+    assert daemon._pending_restore_candidate(root) is not None
 
 
 def test_restricted_restore_group_reaps_orphan_descendant() -> None:
@@ -132,8 +192,18 @@ def test_authoritative_verify_precedes_publisher_construction(
             nonlocal constructed
             constructed = True
 
+    class Backend:
+        name = "gcs"
+
+        @staticmethod
+        def protected_manifest_publisher(**_kwargs: object) -> Publisher:
+            return Publisher()
+
+    def backend() -> Backend:
+        return Backend()
+
     monkeypatch.setattr(restore_runtime, "verify_candidate_proof", reject_mismatched_ack)
-    monkeypatch.setattr(restore_runtime, "GCSProtectedManifestPublisher", Publisher)
+    monkeypatch.setattr(restore_runtime, "get_backend", backend)
 
     with pytest.raises(ValueError, match="ACK generation mismatch"):
         restore_runtime.verify_then_construct_publisher(
@@ -300,8 +370,8 @@ def test_cold_start_health_recovers_real_durable_protected_manifest(tmp_path: Pa
         chain_id=candidate.chain_id,
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
-        base=RestoreObject("base", "base", 1, 10, "crc", ()),
-        wal=(RestoreObject(archive_name, "wal", 2, 10, "crc", ()),),
+        base=RestoreObject("base", "base", "1", 10, "crc32c", "crc", ()),
+        wal=(RestoreObject(archive_name, "wal", "2", 10, "crc32c", "crc", ()),),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
         proof=RestoreProof(
@@ -368,7 +438,7 @@ def test_cold_start_health_degrades_for_invalid_proof_semantics(
         chain_id=candidate.chain_id,
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
-        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        base=RestoreObject("base", "base", "1", 10, "crc32c", "crc", ()),
         wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
@@ -409,7 +479,7 @@ def test_cold_start_health_degrades_for_candidate_digest_mismatch(tmp_path: Path
         chain_id=candidate.chain_id,
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
-        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        base=RestoreObject("base", "base", "1", 10, "crc32c", "crc", ()),
         wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,
@@ -452,7 +522,7 @@ def test_cold_start_health_keeps_valid_proof_when_another_manifest_is_corrupt(
         chain_id=candidate.chain_id,
         candidate_sha256=candidate_sha256(candidate),
         candidate=candidate,
-        base=RestoreObject("base", "base", 1, 10, "crc", ()),
+        base=RestoreObject("base", "base", "1", 10, "crc32c", "crc", ()),
         wal=_required_wal(candidate),
         target_lsn="0/200",
         wal_segment_size=candidate.wal_segment_size,

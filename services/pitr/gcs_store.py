@@ -23,6 +23,7 @@ from google.cloud import storage
 from google.cloud.storage.retry import DEFAULT_RETRY, DEFAULT_RETRY_IF_GENERATION_SPECIFIED
 from google.oauth2 import service_account
 
+from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import (
     PermanentObjectStoreError,
     RemoteObjectAck,
@@ -83,9 +84,10 @@ class GCSObjectStore:
             raise TransientObjectStoreError("GCS object omitted verification properties")
         return RemoteObjectAck(
             object_name=str(blob.name),
-            generation=int(blob.generation),
+            # The GCS pinned-read credential is the object generation.
+            pin_token=str(blob.generation),
             size=int(blob.size),
-            crc32c=blob.crc32c,
+            checksum=ObjectChecksum(CRC32C, blob.crc32c),
             metadata=dict(blob.metadata or {}),
             created=created,
         )

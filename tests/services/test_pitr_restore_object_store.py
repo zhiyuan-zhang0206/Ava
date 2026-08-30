@@ -26,9 +26,10 @@ def _expected(value: bytes = b"generation-pinned ciphertext") -> RestoreObject:
     return RestoreObject(
         archive_name="000000010000000000000001",
         object_name="ava-pitr/wal/00000001/000000010000000000000001.enc",
-        generation=17,
+        pin_token="17",  # noqa: S106 — test fixture
         size=len(value),
-        crc32c=_crc32c(value),
+        checksum_algo="crc32c",
+        checksum_value=_crc32c(value),
         metadata=(("ava-key-id", "prod-v1"), ("ava-source-size", "16")),
     )
 
@@ -42,9 +43,9 @@ class _Blob:
         before_download: Callable[[], None] | None = None,
     ) -> None:
         self.name = expected.object_name
-        self.generation: int | str | None = expected.generation
+        self.generation: int | str | None = int(expected.pin_token)
         self.size: int | str | None = expected.size
-        self.crc32c: str | None = expected.crc32c
+        self.crc32c: str | None = expected.checksum_value
         self.metadata: Mapping[str, str] | None = dict(expected.metadata)
         self.value = value
         self.before_download = before_download
@@ -93,9 +94,9 @@ def test_download_pins_lookup_and_read_to_the_exact_generation(tmp_path: Path) -
     assert destination.read_bytes() == value
     assert bucket.get_name == expected.object_name
     assert bucket.get_kwargs is not None
-    assert bucket.get_kwargs["generation"] == expected.generation
+    assert bucket.get_kwargs["generation"] == int(expected.pin_token)
     assert blob.download_kwargs is not None
-    assert blob.download_kwargs["if_generation_match"] == expected.generation
+    assert blob.download_kwargs["if_generation_match"] == int(expected.pin_token)
     assert blob.download_kwargs["checksum"] == "crc32c"
     assert not (destination.parent / f".{destination.name}.partial").exists()
 
@@ -124,6 +125,25 @@ def test_download_rejects_remote_property_mismatch_before_writing(
     assert not destination.exists()
     assert not (tmp_path / f".{destination.name}.partial").exists()
     assert blob.download_kwargs is None
+
+
+def test_non_gcs_pin_token_or_digest_fails_closed_before_lookup(
+    tmp_path: Path,
+) -> None:
+    expected = _expected()
+    blob = _Blob(expected, b"generation-pinned ciphertext")
+    bucket = _Bucket(blob)
+    reader = _reader(bucket)
+
+    from dataclasses import replace
+
+    foreign_pin = replace(expected, pin_token="fs123:md5")  # noqa: S106 — test fixture
+    with pytest.raises(PermanentObjectStoreError, match="not a GCS generation"):
+        reader.download_exact(foreign_pin, tmp_path / "out")
+    foreign_algo = replace(expected, checksum_algo="md5")
+    with pytest.raises(PermanentObjectStoreError, match="not GCS CRC32C"):
+        reader.download_exact(foreign_algo, tmp_path / "out")
+    assert bucket.get_name is None
 
 
 def test_download_rejects_short_content_and_removes_partial(tmp_path: Path) -> None:

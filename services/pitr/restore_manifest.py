@@ -9,8 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from services.pitr.activation_evidence import stored_digest_matches
 from services.pitr.base_manifest import CandidateManifest, WalRange, _lsn
-from services.pitr.uploader import AckManifest
+from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
+from services.pitr.uploader import ack_manifest_from_raw
 
 PROTECTED_SCHEMA_VERSION = 1
 
@@ -19,14 +21,17 @@ PROTECTED_SCHEMA_VERSION = 1
 class RestoreObject:
     archive_name: str
     object_name: str
-    generation: int
+    pin_token: str
     size: int
-    crc32c: str
+    checksum_algo: str
+    checksum_value: str
     metadata: tuple[tuple[str, str], ...]
 
     def __post_init__(self) -> None:
-        if self.generation <= 0 or self.size <= 0 or not self.crc32c:
-            raise ValueError("restore object lacks an immutable generation identity")
+        if not self.pin_token or self.size <= 0 or not self.checksum_value:
+            raise ValueError("restore object lacks an immutable pinned identity")
+        if self.checksum_algo not in KNOWN_CHECKSUM_ALGOS:
+            raise ValueError("restore object checksum algorithm is unsupported")
         if tuple(sorted(self.metadata)) != self.metadata:
             raise ValueError("restore object metadata must be canonical")
 
@@ -81,8 +86,8 @@ class ProtectedManifest:
             raise ValueError("protected candidate digest differs from the candidate")
         if self.base.object_name != self.candidate.base_object.object_name:
             raise ValueError("protected base differs from the candidate")
-        if self.base.generation != self.candidate.base_object.generation:
-            raise ValueError("protected base generation differs from the candidate")
+        if self.base.pin_token != self.candidate.base_object.pin_token:
+            raise ValueError("protected base pin token differs from the candidate")
         if _lsn(self.target_lsn) < _lsn(self.candidate.end_lsn):
             raise ValueError("restore proof did not reach the candidate target")
         if self.proof.target_lsn != self.target_lsn:
@@ -103,7 +108,26 @@ class ProtectedManifest:
         raw: dict[str, Any] = json.loads(value)
         if set(raw) != set(cls.__dataclass_fields__):
             raise ValueError("protected manifest fields do not match schema")
-        raw["candidate"] = CandidateManifest.from_json(json.dumps(raw["candidate"]))
+        embedded = raw["candidate"]
+        if not isinstance(embedded, dict):
+            raise TypeError("protected manifest lacks an embedded candidate")
+        # The embedded candidate keeps its raw bytes: a manifest written
+        # before the store abstraction carries the digest of the legacy
+        # serialization, while the parsed candidate re-serializes in the
+        # canonical shape — both byte forms must be accepted (QA #1131).
+        legacy_candidate_bytes = json.dumps(embedded, sort_keys=True, separators=(",", ":"))
+        raw["candidate"] = CandidateManifest.from_json(legacy_candidate_bytes)
+        candidate = raw["candidate"]
+        if not stored_digest_matches(
+            raw=legacy_candidate_bytes,
+            canonical=candidate.to_json(),
+            expected=str(raw["candidate_sha256"]),
+        ):
+            raise ValueError("protected candidate digest differs from the candidate")
+        # Canonicalize: every reader downstream compares this field against
+        # the parsed candidate, so the field carries the canonical digest
+        # from here on (the raw bytes remain in the stored manifest/record).
+        raw["candidate_sha256"] = candidate_sha256(candidate)
         raw["base"] = _restore_object(raw["base"])
         raw["wal"] = tuple(_restore_object(item) for item in raw["wal"])
         raw["proof"] = RestoreProof(**raw["proof"])
@@ -111,6 +135,26 @@ class ProtectedManifest:
 
 
 def _restore_object(raw: dict[str, Any]) -> RestoreObject:
+    raw = dict(raw)
+    # Legacy normalization: protected manifests written before the store
+    # abstraction carry ``generation`` + ``crc32c`` (the GCS vocabulary);
+    # they map one-to-one onto ``pin_token`` / ``checksum_*``.
+    if "pin_token" not in raw:
+        legacy_generation = raw.pop("generation", None)
+        if legacy_generation is None:
+            raise ValueError("restore object lacks a pin token")
+        raw["pin_token"] = str(legacy_generation)
+    else:
+        raw.pop("generation", None)
+    if "checksum_algo" not in raw:
+        raw["checksum_algo"] = CRC32C
+    if "checksum_value" not in raw:
+        legacy_crc32c = raw.pop("crc32c", None)
+        if legacy_crc32c is None:
+            raise ValueError("restore object lacks a checksum")
+        raw["checksum_value"] = legacy_crc32c
+    else:
+        raw.pop("crc32c", None)
     if set(raw) != set(RestoreObject.__dataclass_fields__):
         raise ValueError("restore object fields do not match schema")
     raw["metadata"] = tuple(tuple(str(value) for value in item) for item in raw["metadata"])
@@ -155,16 +199,16 @@ def wal_objects_from_acks(
         path = ack_dir / f"{archive_name}.ack.json"
         try:
             raw = json.loads(path.read_text())
-            ack = AckManifest(**raw)
+            ack = ack_manifest_from_raw(raw)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError(f"required archive lacks a valid ACK: {archive_name}") from exc
-        if ack.archive_name != archive_name or ack.generation <= 0:
+        if ack.archive_name != archive_name or not ack.pin_token:
             raise ValueError(f"required archive ACK identity differs: {archive_name}")
         metadata = {
             "ava-archive-name": ack.archive_name,
             "ava-source-sha256": ack.source_sha256,
             "ava-source-size": str(ack.source_size),
-            "ava-ciphertext-crc32c": ack.ciphertext_crc32c,
+            "ava-ciphertext-crc32c": ack.ciphertext_checksum_value,
             "ava-encryption-format": ack.encryption_format,
             "ava-key-id": ack.key_id,
         }
@@ -172,9 +216,10 @@ def wal_objects_from_acks(
             RestoreObject(
                 archive_name,
                 ack.object_name,
-                ack.generation,
+                ack.pin_token,
                 ack.ciphertext_size,
-                ack.ciphertext_crc32c,
+                ack.ciphertext_checksum_algo,
+                ack.ciphertext_checksum_value,
                 tuple(sorted(metadata.items())),
             )
         )

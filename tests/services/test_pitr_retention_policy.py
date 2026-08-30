@@ -32,12 +32,20 @@ def _candidate(chain: str, start: int, end: int, *, timeline: int = 1) -> Candid
         f"0/{end:X}",
         (WalRange(timeline, f"0/{start:X}", f"0/{end:X}"),),
         BaseObject(
-            f"pitr/base/{chain}/base", int(chain[-3:-1]), 100, "crc", "sha", 90, "key", "AVAPITRB1"
+            f"pitr/base/{chain}/base",
+            str(int(chain[-3:-1])),
+            100,
+            "crc32c",
+            "crc",
+            "sha",
+            90,
+            "key",
+            "AVAPITRB1",
         ),
         "native",
         "backup_manifest",
         f"pitr/base/{chain}/base",
-        int(chain[-3:-1]),
+        str(int(chain[-3:-1])),
         "migrations",
     )
 
@@ -47,15 +55,16 @@ def _wal_name(segment: int, *, timeline: int = 1) -> str:
 
 
 def _remote_wal(
-    segment: int, *, timeline: int = 1, generation: int | None = None
+    segment: int, *, timeline: int = 1, pin_token: str | None = None
 ) -> RetentionObject:
     name = _wal_name(segment, timeline=timeline)
     return RetentionObject(
         f"pitr/wal/{timeline:08X}/{name}.enc",
-        segment if generation is None else generation,
+        str(segment) if pin_token is None else pin_token,
         20,
         name,
         "wal",
+        "crc32c",
         "crc",
         _metadata(name),
     )
@@ -82,10 +91,11 @@ def _proof(candidate: CandidateManifest) -> ProtectedManifest:
         if name.endswith(".history"):
             item = RetentionObject(
                 f"pitr/wal/{name[:8]}/{name}.enc",
-                100 + candidate.timeline,
+                str(100 + candidate.timeline),
                 20,
                 name,
                 "history",
+                "crc32c",
                 "crc",
                 _metadata(name),
             )
@@ -96,9 +106,10 @@ def _proof(candidate: CandidateManifest) -> ProtectedManifest:
             RestoreObject(
                 item.archive_name or "",
                 item.object_name,
-                item.generation,
+                item.pin_token,
                 item.size,
-                item.crc32c,
+                item.checksum_algo,
+                item.checksum_value,
                 item.metadata,
             )
         )
@@ -111,9 +122,10 @@ def _proof(candidate: CandidateManifest) -> ProtectedManifest:
         RestoreObject(
             "base.tar.zst.enc",
             candidate.base_object.object_name,
-            candidate.base_object.generation,
+            candidate.base_object.pin_token,
             candidate.base_object.ciphertext_size,
-            "crc",
+            candidate.base_object.ciphertext_checksum_algo,
+            candidate.base_object.ciphertext_checksum_value,
             (),
         ),
         tuple(wal),
@@ -141,11 +153,12 @@ def _inventory(*candidates: CandidateManifest, tail: int = 5) -> tuple[Retention
     bases = tuple(
         RetentionObject(
             item.base_object.object_name,
-            item.base_object.generation,
+            item.base_object.pin_token,
             item.base_object.ciphertext_size,
             None,
             "base",
-            item.base_object.ciphertext_crc32c,
+            item.base_object.ciphertext_checksum_algo,
+            item.base_object.ciphertext_checksum_value,
             (),
         )
         for item in candidates
@@ -212,20 +225,20 @@ def test_unprotected_candidate_pins_its_base_and_wal() -> None:
     assert _remote_wal(1).object_name not in {item.object.object_name for item in plan.eligible}
 
 
-def test_gap_or_generation_replacement_blocks_every_eligible_object() -> None:
+def test_gap_or_pin_token_replacement_blocks_every_eligible_object() -> None:
     first = _candidate("20260801T000001Z", SEGMENT, 2 * SEGMENT)
     second = _candidate("20260808T000002Z", 2 * SEGMENT, 3 * SEGMENT)
     third = _candidate("20260815T000003Z", 3 * SEGMENT, 4 * SEGMENT)
     inventory = tuple(
         item for item in _inventory(first, second, third) if item.archive_name != _wal_name(4)
     )
-    inventory += (_remote_wal(5), replace(_remote_wal(3), generation=999))
+    inventory += (_remote_wal(5), replace(_remote_wal(3), pin_token="999"))  # noqa: S106 — test fixture
     plan = plan_retention(
         _evidence((first, second, third), tuple(map(_proof, (first, second, third))), inventory)
     )
     assert plan.eligible == ()
     assert "gap before remote ACK high-water" in plan.blocked_reasons
-    assert "ambiguous remote object generation" in plan.blocked_reasons
+    assert "ambiguous remote object pin token" in plan.blocked_reasons
 
 
 def test_unknown_or_concurrent_snapshot_blocks_fail_closed() -> None:
@@ -251,10 +264,11 @@ def test_later_timeline_history_is_always_ancestry_pinned() -> None:
     second = _candidate("20260808T000002Z", 2 * SEGMENT, 3 * SEGMENT, timeline=2)
     history = RetentionObject(
         "pitr/wal/00000002/00000002.history.enc",
-        30,
+        "30",
         20,
         "00000002.history",
         "history",
+        "crc32c",
         "crc",
         _metadata("00000002.history"),
     )
@@ -262,11 +276,12 @@ def test_later_timeline_history_is_always_ancestry_pinned() -> None:
     inventory = tuple(
         RetentionObject(
             obj.object_name,
-            obj.generation,
+            obj.pin_token,
             obj.size,
             obj.archive_name,
             "history" if obj.archive_name.endswith(".history") else "wal",
-            obj.crc32c,
+            obj.checksum_algo,
+            obj.checksum_value,
             obj.metadata,
         )
         for proof in proofs
@@ -277,11 +292,12 @@ def test_later_timeline_history_is_always_ancestry_pinned() -> None:
         *(
             RetentionObject(
                 candidate.base_object.object_name,
-                candidate.base_object.generation,
+                candidate.base_object.pin_token,
                 100,
                 None,
                 "base",
-                candidate.base_object.ciphertext_crc32c,
+                candidate.base_object.ciphertext_checksum_algo,
+                candidate.base_object.ciphertext_checksum_value,
                 (),
             )
             for candidate in (first, second)
@@ -323,7 +339,10 @@ def test_local_ack_and_remote_inventory_must_match_every_immutable_field() -> No
     )
     conflicted = replace(
         evidence,
-        local_acks=(replace(evidence.local_acks[0], crc32c="different"), *evidence.local_acks[1:]),
+        local_acks=(
+            replace(evidence.local_acks[0], checksum_value="different"),
+            *evidence.local_acks[1:],
+        ),
     )
     plan = plan_retention(conflicted)
     assert plan.eligible == ()
@@ -337,7 +356,9 @@ def test_missing_extra_or_duplicate_archive_identity_blocks() -> None:
         (first, second), (_proof(first), _proof(second)), _inventory(first, second)
     )
     duplicate = replace(
-        evidence.inventory[-1], object_name="pitr/wal/00000001/duplicate.enc", generation=999
+        evidence.inventory[-1],
+        object_name="pitr/wal/00000001/duplicate.enc",
+        pin_token="999",  # noqa: S106 — test fixture
     )
     changed = replace(
         evidence,

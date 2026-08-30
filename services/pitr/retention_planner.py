@@ -16,7 +16,7 @@ from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.retention_inventory import RetentionInventoryReader
 from services.pitr.retention_manifest import RetentionObject, RetentionPlan
 from services.pitr.retention_policy import RetentionEvidence, plan_retention
-from services.pitr.uploader import AckManifest
+from services.pitr.uploader import AckManifest, ack_manifest_from_raw
 
 
 @dataclass(frozen=True)
@@ -74,25 +74,26 @@ def build_local_evidence(
         protected.append(proof)
     for path in _strict_files(ack_dir, "*.ack.json", malformed):
         try:
-            ack = AckManifest(**json.loads(path.read_text()))
+            ack = ack_manifest_from_raw(json.loads(path.read_text()))
             _validate_ack_identity(ack)
             kind = "history" if ack.archive_name.endswith(".history") else "wal"
             metadata = {
                 "ava-archive-name": ack.archive_name,
                 "ava-source-sha256": ack.source_sha256,
                 "ava-source-size": str(ack.source_size),
-                "ava-ciphertext-crc32c": ack.ciphertext_crc32c,
+                "ava-ciphertext-crc32c": ack.ciphertext_checksum_value,
                 "ava-encryption-format": ack.encryption_format,
                 "ava-key-id": ack.key_id,
             }
             local_acks.append(
                 RetentionObject(
                     ack.object_name,
-                    ack.generation,
+                    ack.pin_token,
                     ack.ciphertext_size,
                     ack.archive_name,
                     kind,
-                    ack.ciphertext_crc32c,
+                    ack.ciphertext_checksum_algo,
+                    ack.ciphertext_checksum_value,
                     tuple(sorted(metadata.items())),
                 )
             )

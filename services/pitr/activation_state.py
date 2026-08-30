@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -12,6 +11,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
 
+from services.pitr.activation_evidence import (
+    _embedded_candidate_raw,
+    stored_digest_matches,
+    validate_wal_remote_evidence,
+)
+from services.pitr.base_manifest import CandidateManifest
 from shared.private_storage import ensure_private_dir
 
 ActivationPhase = Literal[
@@ -408,57 +413,14 @@ class ActivationRecord:
         ):
             raise ValueError("PITR rollback applied evidence differs from baseline")
         if record.wal_ack_evidence is not None and record.wal_viewer_proof is not None:
-            ack, viewer = record.wal_ack_evidence, record.wal_viewer_proof
-            immutable = (
-                "timeline",
-                "segment",
-                "bucket_name",
-                "object_prefix",
-                "object_name",
-                "generation",
-                "ciphertext_size",
-                "ciphertext_crc32c",
-                "key_id",
-                "encryption_format",
-                "source_sha256",
-                "source_size",
+            validate_wal_remote_evidence(
+                ack=record.wal_ack_evidence,
+                viewer=record.wal_viewer_proof,
+                exact=record.wal_exact_evidence,
+                verification_deadline=record.wal_verification_deadline,
+                credential_evidence=record.pre_activation_credential_evidence,
             )
-            if any(ack[name] != viewer[name] for name in immutable):
-                raise ValueError("PITR ACK and viewer immutable evidence differ")
-            frozen = record.pre_activation_credential_evidence or {}
-            if record.wal_exact_evidence is None or any(
-                (
-                    ack["segment"] != record.wal_exact_evidence["segment"],
-                    ack["timeline"] != record.wal_exact_evidence["timeline"],
-                    ack["bucket_name"] != frozen.get("bucket_name"),
-                    ack["object_prefix"] != frozen.get("object_prefix"),
-                    ack["key_id"] != frozen.get("backup_key_id"),
-                    viewer["viewer_id"] != frozen.get("viewer_client_email"),
-                )
-            ):
-                raise ValueError("PITR remote evidence differs from WAL intent")
-            expected_object = (
-                f"{frozen.get('object_prefix', '').rstrip('/')}/wal/"
-                f"{ack['segment'][:8]}/{ack['segment']}.enc"
-            )
-            if ack["object_name"] != expected_object:
-                raise ValueError("PITR remote object name is not canonical")
-            if int(ack["generation"]) <= 0 or int(ack["ciphertext_size"]) <= 0:
-                raise ValueError("PITR remote identity must have positive generation and size")
-            if int(ack["source_size"]) <= 0 or not re.fullmatch(
-                r"[0-9a-f]{64}", ack["source_sha256"]
-            ):
-                raise ValueError("PITR remote evidence has invalid source identity")
-            if not re.fullmatch(r"[A-Za-z0-9+/]{6}==", ack["ciphertext_crc32c"]):
-                raise ValueError("PITR remote evidence has invalid CRC32C")
-            intent_at = datetime.fromisoformat(record.wal_exact_evidence["switch_intent_at"])
-            acknowledged = datetime.fromisoformat(ack["acknowledged_at"])
-            observed = datetime.fromisoformat(viewer["observed_at"])
-            if record.wal_verification_deadline is None:
-                raise ValueError("PITR remote proof lacks its durable deadline")
-            deadline = datetime.fromisoformat(record.wal_verification_deadline)
-            if not intent_at <= acknowledged <= observed <= deadline:
-                raise ValueError("PITR remote evidence falls outside its durable deadline")
+
         if record.error_code is not None and record.error_code not in {
             "gcs_forbidden",
             "wal_deadline",
@@ -570,8 +532,6 @@ class ActivationRecord:
         ):
             raise ValueError("mutated PITR rollback is missing full ownership evidence")
         if record.phase == "restore_pending":
-            from services.pitr.base_manifest import CandidateManifest
-
             if record.protected_manifest is None:
                 raise ValueError("restore-pending PITR activation lacks candidate manifest")
             candidate = CandidateManifest.from_json(record.protected_manifest)
@@ -579,7 +539,11 @@ class ActivationRecord:
             if (
                 candidate.chain_id != record.candidate_chain_id
                 or not candidate.chain_id.endswith(f"-{record.operation_id}")
-                or hashlib.sha256(canonical.encode()).hexdigest() != record.candidate_digest
+                or not stored_digest_matches(
+                    raw=record.protected_manifest,
+                    canonical=canonical,
+                    expected=cast(str, record.candidate_digest),
+                )
             ):
                 raise ValueError("restore-pending candidate differs from activation evidence")
         if record.phase == "protected":
@@ -590,8 +554,16 @@ class ActivationRecord:
             if (
                 protected.chain_id != record.candidate_chain_id
                 or not protected.chain_id.endswith(f"-{record.operation_id}")
-                or protected.candidate_sha256 != record.candidate_digest
-                or hashlib.sha256(canonical.encode()).hexdigest() != record.protected_digest
+                or not stored_digest_matches(
+                    raw=_embedded_candidate_raw(cast(str, record.protected_manifest)),
+                    canonical=protected.candidate.to_json(),
+                    expected=cast(str, record.candidate_digest),
+                )
+                or not stored_digest_matches(
+                    raw=cast(str, record.protected_manifest),
+                    canonical=canonical,
+                    expected=cast(str, record.protected_digest),
+                )
                 or protected.candidate.system_identifier
                 != (record.pre_activation_pg_settings or {}).get("system_identifier")
                 or protected.candidate.base_object.key_id

@@ -13,6 +13,7 @@ from google.cloud import storage
 from google.cloud.storage.retry import DEFAULT_RETRY_IF_GENERATION_SPECIFIED
 from google.oauth2 import service_account
 
+from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import PermanentObjectStoreError, RemoteObjectAck
 
 
@@ -88,10 +89,10 @@ class GCSProtectedManifestPublisher:
         if body != payload or dict(blob.metadata or {}) != metadata:
             raise PermanentObjectStoreError("immutable protected manifest differs")
         return RemoteObjectAck(
-            blob.name,
-            int(blob.generation),
-            int(blob.size),
-            blob.crc32c,
-            dict(blob.metadata or {}),
-            created,
+            object_name=str(blob.name),
+            pin_token=str(blob.generation),
+            size=int(blob.size),
+            checksum=ObjectChecksum(CRC32C, blob.crc32c),
+            metadata=dict(blob.metadata or {}),
+            created=created,
         )

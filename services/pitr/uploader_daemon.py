@@ -15,9 +15,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from services._pidfile import acquire_pidfile, remove_pidfile
-from services.pitr.gcs_store import GCSObjectStore
 from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
 from services.pitr.state import ArchiveHealth, health_state
+from services.pitr.store_factory import get_backend
 from services.pitr.uploader import (
     AckCorruptionError,
     PitrUploader,
@@ -52,7 +52,7 @@ def build_uploader() -> PitrUploader:
         prefix=settings.physical_backup.pitr_gcs_prefix,
         key=key_path.read_bytes(),
         key_id=settings.physical_backup.pitr_backup_key_id,
-        store=GCSObjectStore(
+        store=get_backend().object_store(
             project=settings.physical_backup.pitr_gcs_project,
             bucket=settings.physical_backup.pitr_gcs_bucket,
             credentials_file=credentials,

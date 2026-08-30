@@ -30,17 +30,17 @@ def _candidate() -> CandidateManifest:
             WalRange(1, "0/1000000", "0/2000000"),
             WalRange(2, "0/2000000", "0/3000000"),
         ),
-        base_object=BaseObject("base", 7, 100, "crc", "sha", 80, "key", "AVAPITRB1"),
+        base_object=BaseObject("base", "7", 100, "crc32c", "crc", "sha", 80, "key", "AVAPITRB1"),
         native_manifest_sha256="native",
         native_manifest_member_path="backup_manifest",
         native_manifest_container_object_name="base",
-        native_manifest_container_generation=7,
+        native_manifest_container_pin_token="7",  # noqa: S106 — test fixture
         migration_set_sha256="migrations",
     )
 
 
-def _object(name: str, generation: int = 1) -> RestoreObject:
-    return RestoreObject(name, f"wal/{name}", generation, 10, "crc", (("key", "value"),))
+def _object(name: str, pin_token: str = "1") -> RestoreObject:  # noqa: S107 — test fixture
+    return RestoreObject(name, f"wal/{name}", pin_token, 10, "crc32c", "crc", (("key", "value"),))
 
 
 def test_archive_names_use_numeric_lsn_and_end_is_exclusive() -> None:
@@ -75,7 +75,7 @@ def test_protected_manifest_is_strict_and_requires_exact_wal_sequence() -> None:
         candidate.chain_id,
         candidate_sha256(candidate),
         candidate,
-        RestoreObject("base", "base", 7, 100, "crc", (("key", "value"),)),
+        RestoreObject("base", "base", "7", 100, "crc32c", "crc", (("key", "value"),)),
         tuple(_object(name) for name in names),
         candidate.end_lsn,
         candidate.wal_segment_size,
