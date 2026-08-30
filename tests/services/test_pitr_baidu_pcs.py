@@ -102,7 +102,14 @@ def test_precreate_parses_and_forwards_resume_uploadid() -> None:
 
 
 def test_create_parses_the_read_back_row() -> None:
+    captured: dict[str, str] = {}
+
     def handler(request: httpx.Request) -> httpx.Response:
+        # P0 smoke: create takes its business params in the form body —
+        # the query string carries only the method, and rtype is absent
+        # (a precreate-only policy).
+        assert dict(request.url.params) == {"method": "create"}
+        captured.update(dict(httpx.QueryParams(request.content.decode())))
         return httpx.Response(
             200,
             json={
@@ -116,9 +123,13 @@ def test_create_parses_the_read_back_row() -> None:
         )
 
     row = PcsClient("t", transport=httpx.MockTransport(handler)).create(
-        path="/apps/p", size=10, block_list=["m"], uploadid="u", rtype=3
+        path="/apps/p", size=10, block_list=["m"], uploadid="u"
     )
     assert row == RemoteFile(fs_id=5, path="/apps/p", size=10, md5="m", isdir=0)
+    assert captured["path"] == "/apps/p"
+    assert captured["uploadid"] == "u"
+    assert json.loads(captured["block_list"]) == ["m"]
+    assert "rtype" not in captured
 
 
 def test_filemetas_returns_none_when_absent_and_passes_dlink() -> None:

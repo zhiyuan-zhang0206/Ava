@@ -208,20 +208,28 @@ class PcsClient:
         )
         _check_errno(payload)
 
-    def create(
-        self, *, path: str, size: int, block_list: list[str], uploadid: str, rtype: int
-    ) -> RemoteFile:
-        """Phase 3. Materializes the file; the response is the read-back row."""
-        params = self._params() | {
-            "method": "create",
-            "path": path,
-            "size": str(size),
-            "isdir": "0",
-            "rtype": str(rtype),
-            "uploadid": uploadid,
-            "block_list": json.dumps(block_list, separators=(",", ":")),
-        }
-        payload = self._post(f"{PCS_HOST}/rest/2.0/xpan/file", params=params)
+    def create(self, *, path: str, size: int, block_list: list[str], uploadid: str) -> RemoteFile:
+        """Phase 3. Materializes the uploaded session into the file; the
+        response is the read-back row.
+
+        Business params travel in the POST body, not the query string: the
+        live P0 smoke showed query-string params rejected with errno 2 here
+        (precreate tolerates both positions). ``rtype`` is a precreate-only
+        collision policy, so create carries none — the precreate phase
+        already decided the iff-absent content-addressed path.
+        """
+        payload = self._post(
+            f"{PCS_HOST}/rest/2.0/xpan/file",
+            params={"method": "create"},
+            data={
+                "access_token": self._token,
+                "path": path,
+                "size": str(size),
+                "isdir": "0",
+                "uploadid": uploadid,
+                "block_list": json.dumps(block_list, separators=(",", ":")),
+            },
+        )
         _check_errno(payload)
         return _parse_file(payload)
 
