@@ -99,12 +99,13 @@ checkpoint conversation must be proved.
 
 ## Off-site encrypted copy
 
-The gateway checks the existing Google Drive sync folder for a writable target.
-After local encryption succeeds and before local pruning, it copies the
-`.dump.enc` artifact into `Ava Backups/<cluster-home-digest>/`, verifies its
-byte count, and retains the newest seven daily artifacts plus the newest
-pre-update snapshot there. The Drive copy
-is optional: an unavailable sync folder emits a warning but never discards the
-local artifact. Because only encrypted artifacts reach Drive, its access model
-does not expose database contents. An object store can replace this copy stage
-on hosts without a usable Drive sync folder.
+After local encryption succeeds and before local pruning, the gateway publishes
+the `.dump.enc` artifact through the shared backup store contract — the same
+backend switch as the physical PITR plane (`AVA_PITR_STORE_BACKEND`), under
+the `ava-logical/` namespace. The publish is if-absent and store-verified
+(ACK: pin_token, size, checksum). It is optional: a missing or unconfigured
+store, or a failed publish, emits a warning but never discards the local
+artifact — the local copy remains the primary. Because only encrypted
+artifacts reach the store, its access model does not expose database contents.
+Remote objects are append-only (the store contract has no delete verb); remote
+retention is a shared planner concern and a follow-up.
