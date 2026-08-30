@@ -113,6 +113,7 @@ def test_backend_only_runs_full_flow_without_frontend_restart(
         restart_frontend: bool,
         pull: bool = True,
         force_reap_agents: bool = False,
+        origin: str = "",
     ) -> int:
         captured["restart_frontend"] = restart_frontend
         captured["pull"] = pull
@@ -141,6 +142,7 @@ def test_both_changed_restarts_frontend_too(monkeypatch: pytest.MonkeyPatch) -> 
         restart_frontend: bool,
         pull: bool = True,
         force_reap_agents: bool = False,
+        origin: str = "",
     ) -> int:
         captured["restart_frontend"] = restart_frontend
         captured["pull"] = pull
@@ -235,6 +237,7 @@ def test_restart_only_skips_classify_pulls_nothing_and_fans_out_restart(
         restart_frontend: bool,
         pull: bool = True,
         force_reap_agents: bool = False,
+        origin: str = "",
     ) -> int:
         captured["restart_frontend"] = restart_frontend
         captured["pull"] = pull
@@ -270,6 +273,7 @@ def test_classify_failure_falls_back_to_full_restart(monkeypatch: pytest.MonkeyP
         restart_frontend: bool,
         pull: bool = True,
         force_reap_agents: bool = False,
+        origin: str = "",
     ) -> int:
         captured["restart_frontend"] = restart_frontend
         captured["pull"] = pull
