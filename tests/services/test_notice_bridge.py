@@ -222,12 +222,13 @@ def test_reply_mode_drops_on_resolve_failure(
     assert gateway.resolved == []
 
 
-def test_reply_hint_warns_when_notice_agent_is_not_switched(
+def test_reply_hint_names_next_agent_when_notice_agent_is_not_switched(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Task #1067: when the notice belongs to an agent other than the one
-    this chat switched to, its follow-up reply cannot be pushed here — the
-    resolve confirmation must say so instead of letting the user wait."""
+    """Task #2162 (user ruling 2026-08-30): replying to another agent's
+    notice succeeds — it is a normal confirmation, not a warning. The reply
+    confirmation matches the same-agent one and appends a neutral hint naming
+    the agent the next message will be sent to."""
     from services.im_bridge import copy
 
     gateway = FakeGateway()
@@ -239,9 +240,14 @@ def test_reply_hint_warns_when_notice_agent_is_not_switched(
     asyncio.run(bridge.handle_callback("12345", "notice:reply:7:42"))
     out = asyncio.run(bridge.handle_inbound("12345", "\u56de\u590d\u5185\u5bb9"))
     assert gateway.resolved == [(7, 42, "answer", "\u56de\u590d\u5185\u5bb9")]
-    assert out == copy.REPLY_SENT_OTHER_AGENT.format(agent_id=7, switched=405)
+    response = copy.REPLY_SENT_OTHER_AGENT.format(agent_id=7, switched=405)
+    assert out == response
+    # same success presentation as the same-agent reply, plus the routing hint
+    assert response.startswith(copy.REPLY_SENT)
+    assert "Your next message will be sent to agent" in response
+    assert response.endswith("agent #405.")  # next message routes to the switched agent
 
-    # same-agent notice: plain confirmation, no cross-agent warning
+    # same-agent notice: plain confirmation, no routing hint
     asyncio.run(bridge.handle_callback("12345", "notice:reply:405:43"))
     out2 = asyncio.run(bridge.handle_inbound("12345", "hi"))
     assert out2 == copy.REPLY_SENT

@@ -98,7 +98,7 @@ SPAWN_SWITCH_BUTTON = "Switch to #{agent_id}"
 
 REPLY_RESOLVE_FAILED = "⚠️ Reply failed to send (the notice may already be handled). Exited reply mode; the message was not lost."  # emoji-ok: failure hint (user-facing)
 REPLY_SENT = "✅ Sent as a reply to that notice"  # emoji-ok: reply confirmation (user-facing)
-REPLY_SENT_OTHER_AGENT = "⚠️ That notice belongs to agent #{agent_id} (this conversation is #{switched}) — its reply will not reach you here; /switch {agent_id} to talk to it"  # emoji-ok: cross-agent hint (user-facing)
+REPLY_SENT_OTHER_AGENT = "✅ Sent as a reply to that notice. Your next message will be sent to agent #{switched}."  # emoji-ok: reply confirmation + next-message routing hint (user-facing)
 
 # -- push watchdog ----------------------------------------------------------
 
