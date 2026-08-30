@@ -148,12 +148,13 @@ def _ar_member(name: str, payload: bytes) -> bytes:
 
 def _synthetic_deb() -> bytes:
     """A minimal deb-shaped ar archive carrying data.tar.xz with the three
-    pgvector files at the PGDG install paths for the pinned major."""
+    pgvector files at the PGDG install paths for the pinned major. Members
+    carry the `./` prefix like a real dpkg-deb data tar."""
     major = rb._PG_VERSION.split(".", 1)[0]
     payloads = {
-        f"usr/lib/postgresql/{major}/lib/vector.so": b"SO",
-        f"usr/share/postgresql/{major}/extension/vector.control": b"CTRL",
-        f"usr/share/postgresql/{major}/extension/{rb._PGVECTOR_SQL}": b"SQL",
+        f"./usr/lib/postgresql/{major}/lib/vector.so": b"SO",
+        f"./usr/share/postgresql/{major}/extension/vector.control": b"CTRL",
+        f"./usr/share/postgresql/{major}/extension/{rb._PGVECTOR_SQL}": b"SQL",
     }
     data_tar = io.BytesIO()
     with tarfile.open(fileobj=data_tar, mode="w") as tar:
@@ -208,7 +209,7 @@ def test_pgvector_extraction_fails_fast_on_missing_member() -> None:
     major = rb._PG_VERSION.split(".", 1)[0]
     data_tar = io.BytesIO()
     with tarfile.open(fileobj=data_tar, mode="w") as tar:
-        info = tarfile.TarInfo(f"usr/lib/postgresql/{major}/lib/vector.so")
+        info = tarfile.TarInfo(f"./usr/lib/postgresql/{major}/lib/vector.so")
         info.size = 2
         tar.addfile(info, io.BytesIO(b"SO"))
     deb = (
