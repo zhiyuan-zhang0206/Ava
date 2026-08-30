@@ -267,9 +267,14 @@ def _extract_meta(path: Path) -> tuple[str, list[str]]:
     return description, list(note.tags)
 
 
-async def _backend_topk(query_vector: Any, k: int, deadline: float) -> list[str]:
+async def _backend_topk(
+    query_vector: Any, k: int, deadline: float, dim: int, fingerprint: str
+) -> list[str]:
     """The storage half of a search: ask the configured backend for top-k
-    paths, every step handed an explicit deadline.
+    paths, every step handed an explicit deadline. `dim` + `fingerprint` are
+    the embedding provider's vector space (see `embeddings.factory`) — the
+    backend is constructed for it even though the read path never writes
+    rows.
 
     pymilvus (the default backend) leaves awaits unbounded when given no
     timeout, and serializes connect/close on one process-global
@@ -282,7 +287,9 @@ async def _backend_topk(query_vector: Any, k: int, deadline: float) -> list[str]
     """
     from services.memory_indexer.backends import factory
 
-    return await factory.get_backend().search_topk_async(query_vector, k, timeout=deadline)
+    return await factory.get_backend(dim=dim, fingerprint=fingerprint).search_topk_async(
+        query_vector, k, timeout=deadline
+    )
 
 
 @router.post(
@@ -309,13 +316,15 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
         IndexerUnavailable: embedder API / search backend unreachable, or the
             search exceeded its deadline (wire 503)
     """
-    from services.memory_indexer import embedder
+    from services.memory_indexer.embeddings import factory as _embedding_factory
 
-    # Both phases are native async I/O — httpx.AsyncClient for the Gemini
-    # embed, the backend's async client for the search — so a slow backend
+    provider = _embedding_factory.get_provider()
+
+    # Both phases are native async I/O — httpx.AsyncClient for the embed,
+    # the backend's async client for the search — so a slow backend
     # can never block the event loop (2026-08-03 freeze mechanism, see
     # `_search_semaphore` note). The semaphore still caps concurrency so
-    # a burst of searches cannot pile up in-flight Gemini requests.
+    # a burst of searches cannot pile up in-flight embedding requests.
     #
     # The deadline wraps the semaphore acquires as well as the two phases: a
     # request parked in acquire behind a stalled peer is just as stuck as one
@@ -331,7 +340,7 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
         async with asyncio.timeout(deadline):
             try:
                 async with _bounded_semaphore(_search_semaphore()):
-                    query_vector = await embedder.embed_query_async(body.query)
+                    query_vector = await provider.embed_query_async(body.query)
             except IndexerUnavailable:
                 # The gate was busy (`_bounded_semaphore`'s fast-fail) — a
                 # modelled state, not a backend failure; do not re-wrap it.
@@ -352,7 +361,9 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
 
             try:
                 async with _bounded_semaphore(_search_semaphore()):
-                    abs_paths = await _backend_topk(query_vector, body.k, deadline)
+                    abs_paths = await _backend_topk(
+                        query_vector, body.k, deadline, provider.dim, provider.fingerprint
+                    )
             except IndexerUnavailable:
                 raise
             except Exception as exc:

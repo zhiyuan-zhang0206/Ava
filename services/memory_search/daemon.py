@@ -21,6 +21,7 @@ import sys
 import uvicorn
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.memory_indexer.embeddings.factory import get_provider
 from services.memory_search.app import build_app
 from services.memory_search.store import MemoryStore
 from shared.config import settings
@@ -37,8 +38,14 @@ def _is_running() -> bool:
 
 
 async def run() -> None:
-    """Load the store, then serve until the graceful-shutdown signal fires."""
-    store = MemoryStore(_DATA_FILE)
+    """Load the store, then serve until the graceful-shutdown signal fires.
+
+    The provider config (`AVA_EMBEDDING_BACKEND`) is read at boot: the
+    store's matrix width and wire bound must match the provider that
+    produced the vectors, and an unknown provider value fails fast instead
+    of serving a half-mismatched search surface."""
+    provider = get_provider()
+    store = MemoryStore(_DATA_FILE, dim=provider.dim, fingerprint=provider.fingerprint)
     await asyncio.to_thread(store.load)
     server = uvicorn.Server(
         uvicorn.Config(
