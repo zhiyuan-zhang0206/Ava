@@ -636,8 +636,9 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                 : colorForTag(memNode.primary_tag || "untagged");
               const r = node.r;
               // Hover structure highlight: related nodes full opacity,
-              // everything else dims (Cosma-style 50%). Native opacity is
-              // only used here; selection keeps its ring without dimming.
+              // everything else dims (Cosma-style 50%). The group opacity
+              // covers the whole <g> — the selection ring and label dim
+              // with the node too (QA #1169 F2).
               const isDimmed = dimSet != null && !dimSet.has(String(node.id));
               // Dim applies to the whole group — shape AND the label text
               // (QA #1169 F2: a dimmed node with a fully-lit label reads as

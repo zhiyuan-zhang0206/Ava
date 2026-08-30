@@ -1362,7 +1362,11 @@ title: Secret
 """,
             encoding="utf-8",
         )
-        for bad in ("../secret.md", "..%2Fsecret.md", "/etc/passwd", "alpha"):
+        # NOTE: no literal "%2F" in `bad` — httpx percent-encodes it again
+        # (%252F), so the server sees a plain filename and the test would pass
+        # against any implementation (empty pin). "..%2Fsecret.md" on the wire
+        # (from "../secret.md") exercises the real encoded-traversal case.
+        for bad in ("../secret.md", "/etc/passwd", "alpha"):
             with TestClient(app) as client:
                 resp = client.get("/api/memory/note", params={"path": bad})
             assert resp.status_code == 404, bad
@@ -1392,7 +1396,7 @@ title: Secret
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
         with TestClient(app) as client:
-            resp = client.get("/api/memory/note", params={"path": "ok%00.md"})
+            resp = client.get("/api/memory/note", params={"path": "ok\x00.md"})
         assert resp.status_code == 404
 
     def test_note_traversal_slash_rules(
