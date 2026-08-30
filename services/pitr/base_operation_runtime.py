@@ -76,7 +76,7 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
             ("bucket", config.pitr_gcs_bucket),
             ("viewer_credentials", str(read_credentials)),
         )
-    else:
+    elif config.pitr_store_backend == "baidu":
         baidu_credentials = config.pitr_baidu_credentials_file
         baidu_token = config.pitr_baidu_token_file
         if baidu_credentials is None or baidu_token is None:
@@ -86,6 +86,23 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
             ("prefix", config.pitr_gcs_prefix),
             ("credentials_file", str(baidu_credentials)),
             ("token_file", str(baidu_token)),
+        )
+    elif config.pitr_store_backend == "oss":
+        # The OSS backend: the restricted worker carries only the viewer-only
+        # AccessKey pair — the reader/inventory roles alone never need the
+        # uploader identity.
+        read_credentials = config.pitr_oss_viewer_credentials_file
+        if read_credentials is None:
+            raise RuntimeError("validated viewer-only restore proof secrets are missing")
+        store_args = (
+            ("endpoint", config.pitr_oss_endpoint),
+            ("bucket", config.pitr_oss_bucket),
+            ("prefix", config.pitr_gcs_prefix),
+            ("viewer_credentials_file", str(read_credentials)),
+        )
+    else:
+        raise RuntimeError(
+            f"restore proof does not know the PITR store backend {config.pitr_store_backend!r}"
         )
     root = ava_home() / "physical-backup"
     logical_peak = max(
