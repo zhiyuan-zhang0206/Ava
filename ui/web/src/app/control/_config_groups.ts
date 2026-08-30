@@ -165,7 +165,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_MACHINE_DESCRIPTION",
     "AVA_MEMORY_REMOTE",
     "AVA_MEMORY_KEEP_LOCAL",
-    "AVA_REQUIRE_GOOGLE_DRIVE",
+    "AVA_CROSS_MACHINE_TRANSFER_BACKEND",
     "AVA_REQUIRE_GITHUB_PR",
   ],
   "config-observability": [

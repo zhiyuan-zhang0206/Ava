@@ -122,7 +122,7 @@ def test_write_bootstrap_env_preserves_machine_local_keys(tmp_path: Path) -> Non
         "AVA_GATEWAY_URL=http://old-gateway:8000\n"
         "# model credentials stay local (windows-setup.md)\n"
         "ANTHROPIC_API_KEY=sk-local\n"
-        "AVA_REQUIRE_GOOGLE_DRIVE=false\n"
+        "AVA_CROSS_MACHINE_TRANSFER_BACKEND=none\n"
         "AVA_DB_URL=postgresql://stale@old:5433/ava\n"
         "AVA_RESTARTER_HEALTH_PORT=18117\n"
     )
@@ -135,7 +135,7 @@ def test_write_bootstrap_env_preserves_machine_local_keys(tmp_path: Path) -> Non
     )
     text = p.read_text()
     assert "ANTHROPIC_API_KEY=sk-local" in text
-    assert "AVA_REQUIRE_GOOGLE_DRIVE=false" in text
+    assert "AVA_CROSS_MACHINE_TRANSFER_BACKEND=none" in text
     assert "# model credentials stay local (windows-setup.md)" in text
     assert "AVA_RESTARTER_HEALTH_PORT=18117" in text
     assert "AVA_DB_URL" not in text  # a cluster fact the runner must not cache
