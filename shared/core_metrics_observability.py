@@ -104,10 +104,11 @@ core_metrics.register_core_metric(
         name="ava_obs_llm_cost_usd",
         title="LLM cost (USD)",
         description=(
-            "LLM call cost per bucket — unwrap of the cost_usd field every "
+            "LLM call cost per minute — unwrap of the cost_usd field every "
             "llm_usage payload carries (task #2626; the producer computes it "
-            "from one versioned-catalog quote in shared/lm/pricing.py, unpriced models "
-            "carry no cost_usd and are skipped). "
+            "from one versioned-catalog quote in shared/lm/pricing.py, unpriced "
+            "models carry no cost_usd and are skipped); 30-minute buckets "
+            "normalized to per-minute USD (bucket sum / 30). "
             "event_name='llm_usage', category='telemetry'."
         ),
         event_name="llm_usage",
@@ -118,7 +119,7 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['cost_usd']} [30m]))"
+            f"unwrap {_LLM_ATTR['cost_usd']} [30m])) / 30"
         ),
         target_names=["cost usd"],
         output=["grafana"],
@@ -155,23 +156,23 @@ core_metrics.register_core_metric(
         name="ava_obs_llm_error_rate",
         title="LLM errors",
         description=(
-            "LLM failure signals per bucket: llm_provider_error (provider "
-            "rejection / classification error), stream_stalled_retry (stalled "
-            "stream retry), llm_turn_aborted (turn aborted after retries "
-            "exhausted), stream_overloaded_retry (overload retry). The "
-            "event_name field is spec metadata; the query covers all 4 "
-            "failure events (all telemetry)."
+            "LLM failure signals per minute (5-minute buckets / 5): "
+            "llm_provider_error (provider rejection / classification error), "
+            "stream_stalled_retry (stalled stream retry), llm_turn_aborted "
+            "(turn aborted after retries exhausted), stream_overloaded_retry "
+            "(overload retry). The event_name field is spec metadata; the "
+            "query covers all 4 failure events (all telemetry)."
         ),
         event_name="llm_usage",
         category="telemetry",
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count('category={category} | event_name="llm_provider_error"', "5m"),
+        query=_count('category={category} | event_name="llm_provider_error"', "5m") + " / 5",
         targets=[
-            _count('category={category} | event_name="stream_stalled_retry"', "5m"),
-            _count('category={category} | event_name="llm_turn_aborted"', "5m"),
-            _count('category={category} | event_name="stream_overloaded_retry"', "5m"),
+            _count('category={category} | event_name="stream_stalled_retry"', "5m") + " / 5",
+            _count('category={category} | event_name="llm_turn_aborted"', "5m") + " / 5",
+            _count('category={category} | event_name="stream_overloaded_retry"', "5m") + " / 5",
         ],
         target_names=["provider_error", "stalled_retry", "turn_aborted", "overloaded_retry"],
         output=["grafana", "inspector"],
@@ -238,9 +239,9 @@ core_metrics.register_core_metric(
         name="ava_obs_exec_success_rate",
         title="Exec outcomes",
         description=(
-            "Exec outcome breakdown per bucket: ok = event_name='exec'; "
-            "failures split by event_name (exec_failed / exec(timeout) / "
-            "exec(cancelled) / exec_node_timeout, legacy "
+            "Exec outcome breakdown per minute (5-minute buckets / 5): ok = "
+            "event_name='exec'; failures split by event_name (exec_failed / "
+            "exec(timeout) / exec(cancelled) / exec_node_timeout, legacy "
             "parenthesized spellings counted in; unknown exec* events fall "
             "into other). event_name='exec', category='telemetry'."
         ),
@@ -249,21 +250,24 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count("category={category} | event_name={event_name}", "5m"),
+        query=_count("category={category} | event_name={event_name}", "5m") + " / 5",
         targets=[
             _count(
                 'category={category} | event_name=~"exec_failed|exec[(]failed[)]"',
                 "5m",
-            ),
+            )
+            + " / 5",
             _count(
                 'category={category} | event_name=~"exec_timeout|exec[(]timeout[)]"',
                 "5m",
-            ),
+            )
+            + " / 5",
             _count(
                 'category={category} | event_name=~"exec_cancelled|exec[(]cancelled[)]"',
                 "5m",
-            ),
-            _count('category={category} | event_name="exec_node_timeout"', "5m"),
+            )
+            + " / 5",
+            _count('category={category} | event_name="exec_node_timeout"', "5m") + " / 5",
             # other: every exec* event outside the known spellings (the
             # regex is anchored, so "exec.*" is a prefix match).
             _count(
@@ -272,7 +276,8 @@ core_metrics.register_core_metric(
                 "exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|"
                 'exec_node_timeout"',
                 "5m",
-            ),
+            )
+            + " / 5",
         ],
         target_names=[
             "ok",
@@ -293,11 +298,11 @@ core_metrics.register_core_metric(
         name="ava_obs_syntax_fix_by_kind",
         title="Syntax fix triggers (by kind)",
         description=(
-            "Syntax-fix trigger counts per bucket, bucketed by the fix kinds "
-            "in attributes.fixes (substring regex matching; an event with "
-            "several fix kinds counts once per kind, 'none'/null/unknown "
-            "goes to other). event_name='syntax_fix', category='telemetry' "
-            "(90d retention)."
+            "Syntax-fix trigger counts per minute (5-minute buckets / 5), "
+            "bucketed by the fix kinds in attributes.fixes (substring regex "
+            "matching; an event with several fix kinds counts once per kind, "
+            "'none'/null/unknown goes to other). event_name='syntax_fix', "
+            "category='telemetry' (90d retention)."
         ),
         event_name="syntax_fix",
         category="telemetry",
@@ -307,35 +312,42 @@ core_metrics.register_core_metric(
         query=_count(
             f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*ruff_format.*"',
             "5m",
-        ),
+        )
+        + " / 5",
         targets=[
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*ruff.*" | {_FIX_ATTR["fixes"]}!~".*ruff_format.*"',
                 "5m",
-            ),
+            )
+            + " / 5",
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*invalid_escape.*"',
                 "5m",
-            ),
+            )
+            + " / 5",
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*missing_imports.*"',
                 "5m",
-            ),
+            )
+            + " / 5",
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*chinese_punct.*"',
                 "5m",
-            ),
+            )
+            + " / 5",
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*bracket_matching.*"',
                 "5m",
-            ),
+            )
+            + " / 5",
             # other: missing/none/unknown kinds — !~ matches lines where the
             # label is absent (empty), which is the SQL `IS NULL` branch.
             _count(
                 f"category={{category}} | event_name={{event_name}} | "
                 f'{_FIX_ATTR["fixes"]}!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"',
                 "5m",
-            ),
+            )
+            + " / 5",
         ],
         target_names=[
             "ruff_format",
@@ -355,11 +367,12 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_spawn_by_spawner",
-        title="Agent spawns (window, by source)",
+        title="Agent spawns / minute (by source)",
         description=(
-            "Windowed spawn totals grouped by source. The source label carries "
-            "the spawner and is rendered directly in the chart legend. "
-            "event_name='spawn', category='audit'."
+            "Spawn rate per minute: counts bucketed at $__interval and "
+            "normalized (bucket count / interval seconds * 60). The source "
+            "label carries the spawner and is rendered directly in the chart "
+            "legend. event_name='spawn', category='audit'."
         ),
         event_name="spawn",
         category="audit",
@@ -368,7 +381,8 @@ core_metrics.register_core_metric(
         query_type="logql",
         query=(
             'sum by (source) (count_over_time({service_name="unknown_service"} | json | '
-            "category={category} | event_name={event_name} [$__range]))"
+            "category={category} | event_name={event_name} [$__interval])) "
+            "/ ($__interval_ms / 60000)"
         ),
         output=["grafana"],
     )
@@ -377,10 +391,12 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_lifecycle_counts",
-        title="Agent lifecycle (window)",
+        title="Agent lifecycle / minute",
         description=(
-            "Windowed lifecycle totals grouped by event name: spawn / terminate / "
-            "restart / resurrect / fork. category='audit'."
+            "Lifecycle-event rate per minute: counts bucketed at $__interval and "
+            "normalized (bucket count / interval seconds * 60), grouped by event "
+            "name: spawn / terminate / restart / resurrect / fork. "
+            "category='audit'."
         ),
         event_name="spawn",
         category="audit",
@@ -389,7 +405,8 @@ core_metrics.register_core_metric(
         query_type="logql",
         query=(
             'sum by (event_name) (count_over_time({service_name="unknown_service"} | json | '
-            'category={category} | event_name=~"spawn|terminate|restart|resurrect|fork" [$__range]))'
+            'category={category} | event_name=~"^(spawn|terminate|restart|resurrect|fork)$" '
+            "[$__interval])) / ($__interval_ms / 60000)"
         ),
         output=["grafana"],
     )
@@ -471,10 +488,10 @@ core_metrics.register_core_metric(
         name="ava_obs_halt_breakdown",
         title="Halt classes",
         description=(
-            "Halt events classified by body per bucket: idle ('no tool_call "
-            "(idle)'), compact ('system_halt (compact)'), lifecycle "
-            "('lifecycle AgentTermination / AgentRestart'), other. "
-            "event_name='halt', category='telemetry'."
+            "Halt events classified by body per minute (5-minute buckets / "
+            "5): idle ('no tool_call (idle)'), compact ('system_halt "
+            "(compact)'), lifecycle ('lifecycle AgentTermination / "
+            "AgentRestart'), other. event_name='halt', category='telemetry'."
         ),
         event_name="halt",
         category="telemetry",
@@ -484,16 +501,19 @@ core_metrics.register_core_metric(
         query=_count(
             f'category={{category}} | event_name={{event_name}} | {_HALT_ATTR["body"]}="no tool_call (idle)"',
             "5m",
-        ),
+        )
+        + " / 5",
         targets=[
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_HALT_ATTR["body"]}=~".*compact.*"',
                 "5m",
-            ),
+            )
+            + " / 5",
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_HALT_ATTR["body"]}=~"lifecycle .*"',
                 "5m",
-            ),
+            )
+            + " / 5",
             # other: not idle/compact/lifecycle (missing body matches too —
             # the SQL `body IS NULL` branch).
             _count(
@@ -502,7 +522,8 @@ core_metrics.register_core_metric(
                 f'{_HALT_ATTR["body"]}!~".*compact.*" | '
                 f'{_HALT_ATTR["body"]}!~"lifecycle .*"',
                 "5m",
-            ),
+            )
+            + " / 5",
         ],
         target_names=["idle", "compact", "lifecycle", "other"],
         output=["grafana"],
@@ -517,8 +538,9 @@ core_metrics.register_core_metric(
         title="Delivery stalled (window)",
         description=(
             "Windowed delivery_stalled total — the delivery watchdog's alert "
-            "signal for over-age pending inbound. event_name='delivery_stalled', "
-            "category='telemetry'."
+            "signal for over-age pending inbound (a raw window count, not a "
+            "per-minute rate — explicit exception to the per-minute basis). "
+            "event_name='delivery_stalled', category='telemetry'."
         ),
         event_name="delivery_stalled",
         category="telemetry",
@@ -584,11 +606,11 @@ core_metrics.register_core_metric(
         name="ava_obs_frontend_interactions",
         title="Frontend interactions",
         description=(
-            "Frontend interaction volume per bucket (total "
-            "frontend_interaction events): the entry panel of user-modeling "
-            "telemetry, doubling as volume monitoring — an abnormal "
-            "interaction spike (an instrumentation loop bug) is immediately "
-            "visible here. event_name='frontend_interaction', "
+            "Frontend interaction volume per minute (5-minute buckets / 5, "
+            "total frontend_interaction events): the entry panel of "
+            "user-modeling telemetry, doubling as volume monitoring — an "
+            "abnormal interaction spike (an instrumentation loop bug) is "
+            "immediately visible here. event_name='frontend_interaction', "
             "category='telemetry', source='user'."
         ),
         event_name="frontend_interaction",
@@ -599,7 +621,8 @@ core_metrics.register_core_metric(
         query=_count(
             'category={category} | event_name={event_name} | source="user"',
             "5m",
-        ),
+        )
+        + " / 5",
         target_names=["interactions"],
         output=["grafana"],
     )
