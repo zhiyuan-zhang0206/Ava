@@ -724,6 +724,12 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         )
     if wait.unready:
         _ns._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
+    # The tier's second rail: a non-critical service that missed its short window
+    # does not fail the start, but it is reported and alerted — the downgrade must
+    # never go silent (see `_probe._notify_non_critical_unready_services`).
+    if wait.non_critical_unready:
+        _ns._print_non_critical_unready_services(wait.non_critical_unready)
+        _ns._notify_non_critical_unready_services(wait.non_critical_unready)
     if wait.unready or launch.failed:
         waiver = _readiness_waiver(roles, readiness_gate=readiness_gate)
         if waiver is None:
