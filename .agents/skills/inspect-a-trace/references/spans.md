@@ -62,15 +62,20 @@ All verified against Tempo 3.0.2.
 Search parameters: `limit` (traces), `spss` (spans per span set, max 100),
 `start`/`end` (unix seconds). Dotted attribute names work inside `span.*`.
 
-Span attributes worth knowing: the root carries `session.id` (the agent id),
-`ava.turn` (the per-process turn counter) and `ava.checkpoint_id` (the
-checkpoint the turn committed); children carry
+Span attributes worth knowing: the root carries `session.id` (the agent id)
+and `ava.turn` (the per-process turn counter); children carry
 `traceloop.association.properties.langgraph_node` / `.langgraph_step` /
 `.langgraph_path`, `traceloop.association.properties.ls_model_name`, and
-`gen_ai.operation.name`. These come from OpenLLMetry's auto-instrumentation of
-the LLM SDKs and LangChain/LangGraph, not from explicit calls in this repo — so
-a library upgrade can rename them. Check what a real span carries before
-building a query on an attribute you have not seen.
+`gen_ai.operation.name`. Since #1964 the root is a placeholder ended at turn
+START (so a trace always has its root even when the process dies mid-turn),
+which means it can no longer carry `ava.checkpoint_id` (an ended span drops
+attribute writes) — the trace↔checkpoint link now lives DB-side only
+(`checkpoints.metadata.trace_id`; `read_trace.py --with-content` joins it via
+the gateway trace endpoint). These attributes come from OpenLLMetry's
+auto-instrumentation of the LLM SDKs and LangChain/LangGraph, not from
+explicit calls in this repo — so a library upgrade can rename them. Check
+what a real span carries before building a query on an attribute you have not
+seen.
 
 ## Fetch
 
@@ -108,7 +113,9 @@ need Tempo, not the mirror.
 
 Produces the span tree (parent/child, ordered), per-span offsets and durations,
 the LLM span list (names ending `.chat`), the langgraph node sequence, and the
-root's `session.id` / `ava.checkpoint_id`.
+root's `session.id`. `checkpoint_id` comes from the root's `ava.checkpoint_id`
+on pre-#1964 traces; on newer traces the root no longer carries it — pass
+`--with-content` to resolve it from the checkpoints table via the gateway.
 
 - `--with-content` fetches the messages from
   `GET /api/agents/{agent}/traces/{trace_id}/messages` — the checkpoint's full
