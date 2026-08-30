@@ -364,3 +364,49 @@ async def test_call_tool_wire_omits_agent_id_when_unset() -> None:
     assert writer.requests() == [
         {"id": 1, "method": "call_tool", "tool": "take_snapshot", "args": {}}
     ]
+
+
+async def test_release_agent_chrome_pages_sends_release_and_reports_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exit-hook release dials the service once and sends the release
+    request carrying the agent id; a truthful `ok` is returned."""
+    from shared import paths
+
+    sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
+    with contextlib.suppress(OSError):
+        sock_path.unlink()
+    received: list[dict[str, Any]] = []
+
+    async def _answer(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+        line = await r.readline()
+        received.append(json.loads(line))
+        w.write((json.dumps({"id": 1, "ok": True, "result": {"page_id": 1}}) + "\n").encode())
+        await w.drain()
+        w.close()
+
+    server = await asyncio.start_unix_server(_answer, path=str(sock_path))
+    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda: sock_path)
+    try:
+        assert await browser_mod.release_agent_chrome_pages(7) is True
+    finally:
+        server.close()
+        await server.wait_closed()
+        with contextlib.suppress(OSError):
+            sock_path.unlink()
+    assert received == [{"id": 1, "method": "release_agent_page", "agent_id": 7}]
+
+
+async def test_release_agent_chrome_pages_no_service_returns_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No browser service on this machine (socket absent) must degrade to a
+    clean False — the exit path never raises on the cleanup nicety."""
+    from shared import paths
+
+    sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
+    with contextlib.suppress(OSError):
+        sock_path.unlink()
+    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda: sock_path)
+    monkeypatch.setattr(browser_mod, "_RELEASE_TIMEOUT_S", 0.5)
+    assert await browser_mod.release_agent_chrome_pages(7) is False
