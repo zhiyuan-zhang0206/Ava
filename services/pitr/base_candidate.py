@@ -33,6 +33,7 @@ from services.pitr.base_manifest import (
 )
 from services.pitr.base_object_store import RestartableStreamingObjectStore
 from services.pitr.base_stream import BASE_MAGIC, load_or_create_source, snapshot_candidate
+from services.pitr.checksums import CRC32C
 from services.pitr.space_budget import CandidateSpaceBudget, require_candidate_space
 from shared.db import direct_db_url
 from shared.pg_tools import pg_tool
@@ -510,11 +511,14 @@ def reconcile_completed_candidates(root: Path, *, key: bytes, key_id: str) -> No
             or plan.candidate_sha256 != candidate_sha
             or candidate.base_object.object_name != plan.object_name
             or candidate.base_object.ciphertext_size != plan.ciphertext_size
-            or candidate.base_object.ciphertext_crc32c != plan.ciphertext_crc32c
+            # The local plan pins CRC32C; a backend whose ACK verifies a
+            # different algorithm must not reconcile against this comparison.
+            or candidate.base_object.ciphertext_checksum_algo != CRC32C
+            or candidate.base_object.ciphertext_checksum_value != plan.ciphertext_crc32c
             or candidate.base_object.key_id != plan.key_id
             or candidate.native_manifest_sha256 != plan.native_manifest_sha256
             or candidate.native_manifest_container_object_name != plan.object_name
-            or candidate.native_manifest_container_generation != candidate.base_object.generation
+            or candidate.native_manifest_container_pin_token != candidate.base_object.pin_token
             or candidate.postgres_major != facts.postgres_major
             or candidate.system_identifier != facts.system_identifier
             or candidate.wal_segment_size != facts.wal_segment_size
@@ -648,7 +652,7 @@ def create_base_candidate(
         native_manifest_sha256=plan.native_manifest_sha256,
         native_manifest_member_path="backup_manifest",
         native_manifest_container_object_name=ack.object_name,
-        native_manifest_container_generation=ack.generation,
+        native_manifest_container_pin_token=ack.pin_token,
         migration_set_sha256=facts.migration_set_sha256,
     )
     manifest_path = root / "base-manifests" / f"{chain_id}.candidate.json"

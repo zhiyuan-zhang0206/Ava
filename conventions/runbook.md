@@ -599,6 +599,12 @@ The uploader's seekable staging contract is restricted to bounded WAL files;
 base backups must use the separate restartable streaming contract delivered by
 the base-chain rollout and must never materialize a full ciphertext sibling.
 
+`AVA_PITR_STORE_BACKEND` selects the object-store backend for the whole PITR
+plane (default `gcs`). An unrecognized value fails fast at store construction —
+a typo never silently falls back to GCS. Switching backends is one env var +
+a restart; the GCS bucket remains the retained primary copy until the
+switchover runbook has been executed and observed.
+
 Activation is Ava-owned: use `ava cluster pitr status`, then
 `ava cluster pitr activate --origin operator:<name>`. The command validates the
 disabled shadow posture, creates the mandatory verified logical recovery floor,

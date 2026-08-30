@@ -344,6 +344,121 @@ def test_v3_record_upgrades_to_v4_with_null_error_message(tmp_path: Path) -> Non
     assert loaded.error_message is None
 
 
+def test_restore_pending_accepts_legacy_candidate_manifest_and_digest(
+    tmp_path: Path,
+) -> None:
+    """QA #1131 P1: an in-flight activation whose operation.json embeds the
+    pre-abstraction candidate shape (with its digest over the legacy bytes)
+    must load and validate instead of wedging the activation."""
+    import hashlib
+    from dataclasses import asdict
+
+    from services.pitr.base_manifest import CandidateManifest
+
+    legacy_candidate = (
+        '{"base_object":{"ciphertext_crc32c":"viqqbw==","ciphertext_size":4101269456,'
+        '"encryption_format":"AVAPITRB1","generation":1788085003231815,'
+        '"key_id":"ava-pitr-backup-key-prod",'
+        '"object_name":"ava-pitr/base/activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40/'
+        '358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac/base.tar.zst.enc",'
+        '"source_sha256":"358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac",'
+        '"source_size":6319665156},'
+        '"chain_id":"activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40",'
+        '"database_name":"ava_main","end_lsn":"A4/89EC6820",'
+        '"migration_set_sha256":"63124a552737c95e0296cd29a5247cec07c1014d9eb474ea2d78116c73849f2e",'
+        '"native_manifest_container_generation":1788085003231815,'
+        '"native_manifest_container_object_name":'
+        '"ava-pitr/base/activation-20260830T043835Z-c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40/'
+        '358fa8fd6b547520bfe14f134e1420aa683e2a3393575ebe5c07cbf7320ea2ac/base.tar.zst.enc",'
+        '"native_manifest_member_path":"backup_manifest",'
+        '"native_manifest_sha256":"5ee47ac3e20907e70894bf2761395256a78b94c116efe11f86ec26adff2153d2",'
+        '"postgres_major":17,"protected":false,"schema_version":1,'
+        '"start_lsn":"A4/7FC179B0","system_identifier":"7656686487711429617",'
+        '"timeline":1,'
+        '"wal_ranges":[{"end_lsn":"A4/89EC6820","start_lsn":"A4/7FC179B0","timeline":1}],'
+        '"wal_segment_size":16777216}'
+    )
+    candidate = CandidateManifest.from_json(legacy_candidate)
+    legacy_digest = hashlib.sha256(legacy_candidate.encode()).hexdigest()
+
+    record = ActivationRecord.start(
+        operation_id="c1cfa2ee-de51-4d9e-ba5b-6e31d97f1c40", origin="cli"
+    )
+    raw = asdict(record)
+    segment = "00000001000000A20000008B"
+    ack_evidence = {
+        "timeline": "1",
+        "segment": segment,
+        "bucket_name": "bucket",
+        "object_prefix": "pitr",
+        "object_name": f"pitr/wal/{segment[:8]}/{segment}.enc",
+        "generation": "123",
+        "ciphertext_size": "10",
+        "ciphertext_crc32c": "AAAAAA==",
+        "source_sha256": "1" * 64,
+        "source_size": "1",
+        "key_id": "key",
+        "encryption_format": "AVAPITR1",
+        "acknowledged_at": "2026-08-30T03:30:00+00:00",
+    }
+    viewer_proof = {
+        **{k: v for k, v in ack_evidence.items() if k != "acknowledged_at"},
+        "viewer_id": "v@example.test",
+        "observed_at": "2026-08-30T03:31:00+00:00",
+    }
+    raw.update(
+        phase="restore_pending",
+        pre_activation_snapshot="/verified.dump.enc",
+        pre_activation_pg_settings={"archive_mode": "off"},
+        pre_activation_credential_evidence=_credentials(),
+        wal_config_before_digest="before",
+        wal_config_desired_digest="desired",
+        pre_activation_pitr_env={"pitr_enabled": "__ABSENT__"},
+        pre_activation_pg_auto_conf={"archive_mode": "off"},
+        pre_activation_env_b64="YQ==",
+        pre_activation_env_digest="env-digest",
+        pre_activation_auto_conf_b64="Yg==",
+        pre_activation_auto_conf_digest="auto-digest",
+        restart_handoff="handoff",
+        restart_orchestration="orchestration",
+        rollback_expected_env_digest="env-digest",
+        rollback_expected_auto_conf_digest="auto-digest",
+        wal_exact_evidence={
+            "timeline": "1",
+            "segment": segment,
+            "switch_lsn": "0/1",
+            "failed_count": "0",
+            "archived_count": "0",
+            "switch_intent_at": "2026-08-30T03:00:00+00:00",
+        },
+        wal_verification_deadline="2026-08-30T04:00:00+00:00",
+        wal_ack_evidence=ack_evidence,
+        wal_viewer_proof=viewer_proof,
+        candidate_chain_id=candidate.chain_id,
+        candidate_digest=legacy_digest,
+        protected_manifest=legacy_candidate,
+    )
+    record_path(tmp_path).parent.mkdir(parents=True)
+    record_path(tmp_path).write_text(json.dumps(raw))
+
+    loaded = load_record(tmp_path)
+    assert loaded is not None
+    assert loaded.phase == "restore_pending"
+    # The digest recorded over the legacy bytes still validates.
+    from services.pitr.activation_evidence import stored_digest_matches
+
+    assert stored_digest_matches(
+        raw=legacy_candidate, canonical=loaded_protected_canonical(loaded), expected=legacy_digest
+    )
+
+
+def loaded_protected_canonical(loaded: ActivationRecord) -> str:
+    from services.pitr.base_manifest import CandidateManifest
+
+    assert loaded.protected_manifest is not None
+    return CandidateManifest.from_json(loaded.protected_manifest).to_json()
+
+
 def test_same_phase_update_may_set_error_message(tmp_path: Path) -> None:
     record = ActivationRecord.start(operation_id="op-1", origin="cli")
     advanced = record.advance(

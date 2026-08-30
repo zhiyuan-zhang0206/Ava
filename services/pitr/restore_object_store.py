@@ -27,6 +27,7 @@ from google.cloud import storage
 from google.cloud.storage.retry import DEFAULT_RETRY_IF_GENERATION_SPECIFIED
 from google.oauth2 import service_account
 
+from services.pitr.checksums import CRC32C
 from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
 from services.pitr.restore_manifest import RestoreObject
 
@@ -98,9 +99,10 @@ class GCSGenerationPinnedObjectReader:
             raise FileExistsError("restore download partial already exists")
         owned_partial = False
         try:
+            generation = self._pin_generation(expected)
             blob = self._bucket.get_blob(
                 expected.object_name,
-                generation=expected.generation,
+                generation=generation,
                 retry=DEFAULT_RETRY_IF_GENERATION_SPECIFIED,
                 timeout=self._timeout,
             )
@@ -115,7 +117,7 @@ class GCSGenerationPinnedObjectReader:
                 sink = _ChecksummedWriter(output, checksum)
                 blob.download_to_file(
                     cast(BinaryIO, sink),
-                    if_generation_match=expected.generation,
+                    if_generation_match=generation,
                     checksum="crc32c",
                     retry=DEFAULT_RETRY_IF_GENERATION_SPECIFIED,
                     timeout=self._timeout,
@@ -124,7 +126,7 @@ class GCSGenerationPinnedObjectReader:
                 output.flush()
                 os.fsync(output.fileno())
             crc32c = base64.b64encode(checksum.digest()).decode("ascii")
-            if size != expected.size or crc32c != expected.crc32c:
+            if size != expected.size or crc32c != expected.checksum_value:
                 raise PermanentObjectStoreError("pinned restore object content differs")
             os.link(partial, destination, follow_symlinks=False)
             _fsync_dir(destination.parent)
@@ -140,14 +142,29 @@ class GCSGenerationPinnedObjectReader:
                 partial.unlink(missing_ok=True)
 
     @staticmethod
+    def _pin_generation(expected: RestoreObject) -> int:
+        # The GCS reader pins and verifies GCS vocabulary only; a manifest
+        # carrying another backend's pin token or digest algorithm must
+        # fail fast instead of comparing across vocabularies.
+        if expected.checksum_algo != CRC32C:
+            raise PermanentObjectStoreError("pinned restore object checksum is not GCS CRC32C")
+        try:
+            return int(expected.pin_token)
+        except ValueError as exc:
+            raise PermanentObjectStoreError(
+                "pinned restore object pin token is not a GCS generation"
+            ) from exc
+
+    @staticmethod
     def _verify_properties(blob: _ReadableBlob, expected: RestoreObject) -> None:
+        generation = GCSGenerationPinnedObjectReader._pin_generation(expected)
         if (
             blob.name != expected.object_name
             or blob.generation is None
-            or int(blob.generation) != expected.generation
+            or int(blob.generation) != generation
             or blob.size is None
             or int(blob.size) != expected.size
-            or blob.crc32c != expected.crc32c
+            or blob.crc32c != expected.checksum_value
             or dict(blob.metadata or {}) != dict(expected.metadata)
         ):
             raise PermanentObjectStoreError("pinned restore object properties differ")

@@ -23,11 +23,11 @@ def _manifest() -> CandidateManifest:
             WalRange(1, "0/1000000", "0/2000000"),
             WalRange(2, "0/2000000", "0/3000000"),
         ),
-        base_object=BaseObject("base", 1, 10, "crc", "sha", 5, "key", "AVAPITRB1"),
+        base_object=BaseObject("base", "1", 10, "crc32c", "crc", "sha", 5, "key", "AVAPITRB1"),
         native_manifest_sha256="manifest",
         native_manifest_member_path="backup_manifest",
         native_manifest_container_object_name="base",
-        native_manifest_container_generation=1,
+        native_manifest_container_pin_token="1",  # noqa: S106 — test fixture
         migration_set_sha256="migrations",
     )
 

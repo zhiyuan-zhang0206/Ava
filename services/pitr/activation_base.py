@@ -8,10 +8,10 @@ from contextlib import suppress
 
 from services.pitr.base_candidate import create_base_candidate
 from services.pitr.base_manifest import CandidateManifest
-from services.pitr.base_object_store import GCSRestartableStreamingObjectStore
 from services.pitr.base_operation_runtime import publish_restore, run_restore, tree_bytes
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.space_budget import CandidateSpaceBudget
+from services.pitr.store_factory import get_backend
 from shared.config import settings
 from shared.paths import ava_home
 
@@ -45,7 +45,7 @@ def build_activation_candidate(
         prefix=config.pitr_gcs_prefix,
         key=key_path.read_bytes(),
         key_id=config.pitr_backup_key_id,
-        store=GCSRestartableStreamingObjectStore(
+        store=get_backend().restartable_streaming_object_store(
             project=config.pitr_gcs_project,
             bucket=config.pitr_gcs_bucket,
             credentials_file=str(credentials),

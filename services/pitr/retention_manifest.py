@@ -7,24 +7,29 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
+
 PLAN_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True, order=True)
 class RetentionObject:
     object_name: str
-    generation: int
+    pin_token: str
     size: int
     archive_name: str | None
     kind: str
-    crc32c: str
+    checksum_algo: str
+    checksum_value: str
     metadata: tuple[tuple[str, str], ...]
 
     def __post_init__(self) -> None:
-        if not self.object_name or self.generation <= 0 or self.size <= 0 or not self.crc32c:
+        if not self.object_name or not self.pin_token or self.size <= 0 or not self.checksum_value:
             raise ValueError("retention object lacks an exact immutable identity")
         if self.kind not in {"base", "wal", "history"}:
             raise ValueError("retention object kind is unsupported")
+        if self.checksum_algo not in KNOWN_CHECKSUM_ALGOS:
+            raise ValueError("retention object checksum algorithm is unsupported")
         if tuple(sorted(self.metadata)) != self.metadata:
             raise ValueError("retention object metadata must be canonical")
 
@@ -84,6 +89,24 @@ class RetentionPlan:
 def _decision(raw: dict[str, Any]) -> RetentionDecision:
     if set(raw) != {"object", "reason"}:
         raise ValueError("retention decision fields do not match schema")
-    raw_object = raw["object"]
+    raw_object = dict(raw["object"])
+    # Legacy normalization: dry-run plans written before the store
+    # abstraction carry ``generation`` + ``crc32c`` (the GCS vocabulary).
+    if "pin_token" not in raw_object:
+        legacy_generation = raw_object.pop("generation", None)
+        if legacy_generation is None:
+            raise ValueError("retention object lacks a pin token")
+        raw_object["pin_token"] = str(legacy_generation)
+    else:
+        raw_object.pop("generation", None)
+    if "checksum_algo" not in raw_object:
+        raw_object["checksum_algo"] = CRC32C
+    if "checksum_value" not in raw_object:
+        legacy_crc32c = raw_object.pop("crc32c", None)
+        if legacy_crc32c is None:
+            raise ValueError("retention object lacks a checksum")
+        raw_object["checksum_value"] = legacy_crc32c
+    else:
+        raw_object.pop("crc32c", None)
     raw_object["metadata"] = tuple(tuple(item) for item in raw_object["metadata"])
     return RetentionDecision(RetentionObject(**raw_object), str(raw["reason"]))

@@ -24,11 +24,12 @@ import psycopg
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.restore_proof import (
+    ProtectedManifestPublisher,
     RestoreSpaceBudget,
     publish_candidate_proof,
     verify_candidate_proof,
 )
-from services.pitr.restore_publish_store import GCSProtectedManifestPublisher
+from services.pitr.store_factory import get_backend
 from shared.config import settings
 from shared.db import direct_db_url
 from shared.paths import ava_home
@@ -44,6 +45,7 @@ class RestoreWorkerInput:
     root: Path
     ack_dir: Path
     key_path: Path
+    backend: str
     project: str
     bucket: str
     viewer_credentials: Path
@@ -78,6 +80,7 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
         root,
         root / "ack",
         key_path,
+        config.pitr_store_backend,
         config.pitr_gcs_project,
         config.pitr_gcs_bucket,
         read_credentials,
@@ -117,6 +120,7 @@ def _request(inputs: RestoreWorkerInput) -> dict[str, object]:
         "root": str(inputs.root),
         "ack_dir": str(inputs.ack_dir),
         "key_path": str(inputs.key_path),
+        "backend": inputs.backend,
         "project": inputs.project,
         "bucket": inputs.bucket,
         "viewer_credentials": str(inputs.viewer_credentials),
@@ -294,9 +298,9 @@ def verify_then_construct_publisher(
     project: str,
     bucket: str,
     credentials: Path,
-) -> tuple[ProtectedManifest, GCSProtectedManifestPublisher]:
+) -> tuple[ProtectedManifest, ProtectedManifestPublisher]:
     verified = verify_candidate_proof(candidate=candidate, root=root, ack_dir=ack_dir)
-    publisher = GCSProtectedManifestPublisher(
+    publisher = get_backend().protected_manifest_publisher(
         project=project, bucket=bucket, credentials_file=credentials
     )
     return verified, publisher
