@@ -54,9 +54,10 @@ MAX_SHARDS = 1024
 """Platform ceiling on shard count (docs); the 20 GB file bound hits first."""
 
 _RTYPE_CONTENT_ADDRESSED = 3
-"""Precreate naming policy: same content -> rapid transfer, different
-content -> error. The rtype table differs across doc revisions; the P0
-smoke pins this value against the live API."""
+"""Precreate naming policy. The rtype table differs across doc revisions;
+the P0 smoke pins the live semantics: rtype=3 precreate answers
+return_type 1 for fresh and existing paths alike (no collision reject),
+and create-on-existing replaces the object with a new fs_id."""
 
 _DOWNLOAD_UA = "pan.baidu.com"
 """The only User-Agent the download data plane accepts."""
@@ -238,6 +239,12 @@ class BaiduObjectStore:
             )
         except PcsError as exc:
             raise self._map_error("Baidu precreate", exc) from exc
+        # Live smoke: precreate answers return_type 1 for fresh and
+        # existing paths alike — a same-name object is not detectable
+        # here, and create-on-existing replaces it with a new fs_id.
+        # Immutability therefore rests on the content-addressed object
+        # names and the restore-time byte-level md5 verification;
+        # return_type 2/3 below stay defensive (docs-only).
         if pre.return_type == 2:
             # Rapid transfer: the same content already exists; adopt the
             # existing object after verifying it matches, then reconcile

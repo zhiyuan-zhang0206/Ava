@@ -257,15 +257,25 @@ def test_rapid_transfer_adopts_existing_object(
     assert f"upload {obj_path}" not in fake.calls
 
 
-def test_content_collision_is_permanent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_content_collision_replaces_the_object_with_a_fresh_fs_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live P0 smoke: precreate does NOT reject a same-name file with
+    different content (return_type 1 either way); create replaces it with
+    a new fs_id. Immutability rests on the content-addressed object names
+    and restore-time byte verification, not on a platform guard."""
     fake = FakePcs()
     store = make_store(fake, monkeypatch)
-    fake.collision_paths.add(f"{APP_ROOT}/{OBJECT}")
+    obj_path = f"{APP_ROOT}/{OBJECT}"
+    old = fake.seed_file(obj_path, size=99, md5=_opaque(b"old-content"))
     source = tmp_path / "wal.enc"
     source.write_bytes(b"payload")
 
-    with pytest.raises(PermanentObjectStoreError, match="precreate"):
-        store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+    ack = store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+
+    assert ack.created is True
+    assert ack.pin_token == f"{fake.files[obj_path]['fs_id']}:{_opaque(b'payload')}"
+    assert fake.files[obj_path]["fs_id"] != old["fs_id"]
 
 
 def test_precreate_transient_errno_maps_to_transient(

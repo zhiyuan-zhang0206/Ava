@@ -64,7 +64,6 @@ class FakePcs:
         self.parts: dict[str, dict[int, bytes]] = {}
         self.calls: list[str] = []
         self.rapid_paths: set[str] = set()
-        self.collision_paths: set[str] = set()
         self.transient_paths: set[str] = set()
         self.missing_override: dict[str, list[str]] = {}
         self.create_override: dict[str, dict[str, Any]] = {}
@@ -113,8 +112,6 @@ class FakePcs:
     def _precreate(self, params: dict[str, str], path: str) -> httpx.Response:
         if path in self.transient_paths:
             return httpx.Response(200, json={"errno": 31198, "errmsg": "too fast"})
-        if path in self.collision_paths:
-            return httpx.Response(200, json={"errno": 2, "errmsg": "exists"})
         if path in self.rapid_paths:
             return httpx.Response(
                 200, json={"uploadid": "u-rapid", "return_type": 2, "block_list": []}
@@ -138,8 +135,6 @@ class FakePcs:
         return httpx.Response(200, json={"errno": 0})
 
     def _create(self, params: dict[str, str], path: str) -> httpx.Response:
-        if path in self.collision_paths:
-            return httpx.Response(200, json={"errno": 2, "errmsg": "exists"})
         if path in self.create_override:
             return httpx.Response(200, json=dict(self.create_override[path]))
         block_count = len(json.loads(params["block_list"]))

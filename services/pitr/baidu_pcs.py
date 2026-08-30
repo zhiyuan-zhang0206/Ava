@@ -9,7 +9,12 @@ and HTTP failures.
 Upload flow (three phases, official docs):
   precreate  -> upload (per missing shard) -> create
 ``rtype`` names the collision policy (docs disagree across revisions —
-the live P0 smoke pins the semantics; see ``_PrecreatePolicy``).
+the live P0 smoke pins the semantics). Live truth: precreate answers
+return_type 1 for fresh AND existing paths alike (a same-name file
+with different content is NOT rejected), and create replaces any
+same-name object with a new fs_id. Immutability therefore rests on
+the uploader's content-addressed object names and the restore-time
+byte-level md5 verification, not on a platform-side collision guard.
 """
 
 from __future__ import annotations
@@ -83,7 +88,8 @@ _PERMANENT_ERRNOS = {
     31023,  # invalid path
     422,  # file size over limit
     -8,  # file already exists
-    2,  # exists with different md5 (rtype=3 precreate)
+    2,  # docs: exists with different md5 (rtype=3 precreate) — live
+    # smoke: collisions never emit it (they answer return_type 1)
     3,  # exists (rtype=1 precreate)
     12,  # wrong partseq — a caller bug, never a retry
 }
@@ -215,8 +221,9 @@ class PcsClient:
         Business params travel in the POST body, not the query string: the
         live P0 smoke showed query-string params rejected with errno 2 here
         (precreate tolerates both positions). ``rtype`` is a precreate-only
-        collision policy, so create carries none — the precreate phase
-        already decided the iff-absent content-addressed path.
+        collision policy, so create carries none. Live: create replaces
+        any same-name object with a new fs_id — the content-addressed
+        object names of the caller are what keep that safe.
         """
         payload = self._post(
             f"{PCS_HOST}/rest/2.0/xpan/file",
