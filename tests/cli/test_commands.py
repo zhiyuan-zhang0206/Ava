@@ -3081,10 +3081,12 @@ def test_a_restart_resets_the_converging_clock(monkeypatch: pytest.MonkeyPatch) 
 
     out = _cli._poll_until_unpaused([("wsl", "http://unused")])
     assert {n: v.status for n, v in out.items()} == {"wsl": _cli.POLL_CONVERGING}
-    # Without the reset, ~6 probes (two 0.05 s streaks back to back) would end
-    # the poll; the reset at probe 3 forces the second streak to restart, so the
-    # poll needs meaningfully more probes before the bound accumulates.
-    assert probes["n"] >= 8
+    # Without the reset, ~5-6 probes (one 0.05 s streak) would end the poll; the
+    # reset at probe 3 forces the second streak to restart, so the poll needs
+    # meaningfully more probes before the bound accumulates. The bound is set at
+    # 7 with headroom: a slow CI box stretches the sleep intervals and shrinks
+    # the probe count (QA nit, PR #1200) — 6 would make the assertion flaky.
+    assert probes["n"] >= 7
 
 
 def test_probe_verdict_names_the_progress_fact(monkeypatch: pytest.MonkeyPatch) -> None:
