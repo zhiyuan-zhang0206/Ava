@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from services.memory_indexer import embedder
 from services.memory_search.store import MemoryStore
@@ -82,6 +83,43 @@ def test_upsert_rejects_wrong_dim(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "vectors.npz")
     with pytest.raises(ValueError, match="shape"):
         store.upsert("/a.md", 1.0, "h", np.zeros(7, dtype=np.float32), kind="body", chunk_idx=0)
+
+
+def test_last_save_seconds_none_until_first_save(tmp_path: Path) -> None:
+    """The stats surface reports no save duration until a save actually
+    happened since boot — None, never a fabricated zero."""
+    store = MemoryStore(tmp_path / "vectors.npz")
+    assert store.last_save_seconds is None
+    store.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
+    assert store.last_save_seconds is None  # upsert alone does not persist
+    store.save()
+    assert store.last_save_seconds is not None
+    assert store.last_save_seconds >= 0.0
+
+
+def test_last_save_seconds_is_the_latest_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every successful save refreshes the recorded duration — the stats
+    surface always reads the most recent persistence cost, never the first
+    one (write-once would silently hide a growing npz cost)."""
+    import services.memory_search.store as store_module
+
+    ticks = iter([0.0, 1.0, 2.0, 5.0])
+
+    class _FakeTime:
+        @staticmethod
+        def perf_counter() -> float:
+            return next(ticks)
+
+    monkeypatch.setattr(store_module, "time", _FakeTime)
+    store = MemoryStore(tmp_path / "vectors.npz")
+    store.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
+    store.save()
+    assert store.last_save_seconds == 1.0
+    store.upsert("/b.md", 2.0, "hb", _vec(1), kind="body", chunk_idx=0)
+    store.save()
+    assert store.last_save_seconds == 3.0
 
 
 def test_save_load_roundtrip(tmp_path: Path) -> None:
