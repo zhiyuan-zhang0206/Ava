@@ -25,7 +25,7 @@ Both are batch-only. By default every item runs concurrently with no ceiling; pa
 - `SearchResult`: title, url, snippet, kind (`kind` is the source partition: web / news / videos / discussions)
 
 ## Key Dependencies
-- **Does not depend on browser service**: `search` uses Brave Search API (`ava/web.py:BRAVE_ENDPOINT`), `fetch` uses Jina Reader (`r.jina.ai`, server-side headless fetching); hitting a hard login wall raises `FetchError` (`_GATED_SITE_SKILLS` currently empty, login site adapters moved to private install)
+- **Does not depend on browser service**: `search` uses Brave Search API (`AVA_WEB_BRAVE_SEARCH_ENDPOINT`, default `https://api.search.brave.com/res/v1/web/search`), `fetch` uses Jina Reader (`AVA_WEB_JINA_BASE_URL`, default `https://r.jina.ai/`, server-side headless fetching); hitting a hard login wall raises `FetchError` (`_GATED_SITE_SKILLS` currently empty, login site adapters moved to private install)
 
 ## Notes
 `fetch()` returns LLM-refined answers. For events/versions/releases after training cutoff, verify with `search` + `fetch`—do not rely on time-sensitive information in training data.
