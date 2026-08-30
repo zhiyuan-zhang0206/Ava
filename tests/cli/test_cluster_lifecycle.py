@@ -785,3 +785,54 @@ def test_destroy_reports_a_failing_unregister_but_still_succeeds(
     captured = capsys.readouterr()
     assert "launchctl unavailable" in captured.err
     assert "OS-scheduled jobs (health probe" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# _ensure_pgvector_extension — remote-managed planes skip (no local admin socket)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_pgvector_extension_skips_remote_plane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import types
+
+    import cli.commands.cluster_lifecycle as gw
+
+    called: list[tuple[str, str]] = []
+
+    def fake_ensure(identity: str, *, base_admin_url: str) -> None:
+        called.append((identity, base_admin_url))
+
+    # is_remote is a computed pydantic property (no setter), so the wrapper's
+    # module-level settings reference is swapped wholesale.
+    monkeypatch.setattr(
+        gw,
+        "settings",
+        types.SimpleNamespace(data_plane=types.SimpleNamespace(is_remote=True)),
+    )
+    monkeypatch.setattr(cl, "ensure_pgvector_extension", fake_ensure)
+    gw._ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+    assert called == []
+
+
+def test_ensure_pgvector_extension_forwards_on_local_plane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import types
+
+    import cli.commands.cluster_lifecycle as gw
+
+    called: list[tuple[str, str]] = []
+
+    def fake_ensure(identity: str, *, base_admin_url: str) -> None:
+        called.append((identity, base_admin_url))
+
+    monkeypatch.setattr(
+        gw,
+        "settings",
+        types.SimpleNamespace(data_plane=types.SimpleNamespace(is_remote=False)),
+    )
+    monkeypatch.setattr(cl, "ensure_pgvector_extension", fake_ensure)
+    gw._ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+    assert called == [("ava_ident", "postgresql://admin@/postgres")]

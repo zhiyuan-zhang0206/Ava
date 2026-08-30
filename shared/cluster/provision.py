@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from shared.log import logger
 from shared.url_secret import url_with_userinfo
 
 
@@ -211,17 +212,29 @@ def ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
     indexer's startup preflight owns that failure surface with its actionable
     message. Deliberately not a migration: migrations must apply against
     Postgres installations that have no pgvector at all.
+
+    An unreachable admin connection is a no-op too (logged, not raised): the
+    ensure re-runs on every bring-up, so a transient dead socket retries next
+    start, and the migrations step right behind it is the loud failure path
+    when the data plane is genuinely gone.
     """
     import psycopg
 
-    with psycopg.connect(base_admin_url, autocommit=True) as conn:
-        available = conn.execute(
-            "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"
-        ).fetchone()
-    if available is None:
-        return
-    with psycopg.connect(_swap_db(base_admin_url, identity), autocommit=True) as conn:
-        conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    try:
+        with psycopg.connect(base_admin_url, autocommit=True) as conn:
+            available = conn.execute(
+                "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"
+            ).fetchone()
+        if available is None:
+            return
+        with psycopg.connect(_swap_db(base_admin_url, identity), autocommit=True) as conn:
+            conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    except psycopg.OperationalError as exc:
+        logger.warning(
+            "[pgvector] pre-create skipped: cluster Postgres unreachable over the "
+            "admin connection (%s) — re-attempted on the next bring-up",
+            exc,
+        )
 
 
 def drop_database(identity: str, *, base_admin_url: str) -> None:

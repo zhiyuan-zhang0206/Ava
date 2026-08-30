@@ -251,8 +251,14 @@ def test_ensure_pgvector_injects_and_is_idempotent(
     assert (pg_dir / "share/postgresql/extension/vector.control").read_bytes() == b"CTRL"
     assert (pg_dir / "share/postgresql/extension" / rb._PGVECTOR_SQL).read_bytes() == b"SQL"
     assert calls == [fake_url]
-    rb.ensure_pgvector()  # idempotent: the detection file exists -> no second download
+    rb.ensure_pgvector()  # idempotent: detection files exist -> no second download
     assert len(calls) == 1
+    # Detection covers BOTH files: deleting the module alone re-injects
+    # (a partially deleted injection must not silently survive).
+    (pg_dir / "lib/postgresql/vector.so").unlink()
+    rb.ensure_pgvector()
+    assert len(calls) == 2
+    assert (pg_dir / "lib/postgresql/vector.so").read_bytes() == b"SO"
 
 
 def test_ensure_pgvector_fails_on_checksum_mismatch(

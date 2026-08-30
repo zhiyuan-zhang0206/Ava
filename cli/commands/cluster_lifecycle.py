@@ -39,9 +39,13 @@ def _provision(identity: str, *, base_admin_url: str, db_admin_password: str) ->
 def _ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
     """Thin wrapper around cluster.ensure_pgvector_extension for monkeypatching
     in tests (same seam as `_provision` — birth-side provisioning steps are
-    stubbed together)."""
+    stubbed together). A remote-managed plane is skipped here (no local admin
+    socket; its extension provisioning belongs to its owner) — the same guard
+    the `ava start` call site carries."""
     from shared import cluster as cl
 
+    if settings.data_plane.is_remote:
+        return
     cl.ensure_pgvector_extension(identity, base_admin_url=base_admin_url)
 
 
