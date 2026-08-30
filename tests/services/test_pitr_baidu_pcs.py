@@ -411,6 +411,52 @@ def test_existing_sidecar_mismatch_is_permanent(
         store.put_wal_ciphertext_if_absent(source, OBJECT, {})
 
 
+def test_retry_adopts_a_new_pin_when_only_the_pin_drifted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live P0 smoke: create-on-existing replaces the file object with a
+    new fs_id, so a crash retry re-derives a pin that differs only in the
+    pin_token — the retry adopts it while the content identity matches."""
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    obj_path = f"{APP_ROOT}/{OBJECT}"
+    payload = b"payload"
+    digest = _md5(payload)
+    old_row = fake.seed_file(obj_path, size=len(payload), md5=digest)
+    old_sidecar = sidecar_json(
+        OBJECT,
+        RemoteObjectAck(
+            object_name=OBJECT,
+            pin_token=f"{old_row['fs_id']}:{digest}",
+            size=len(payload),
+            checksum=ObjectChecksum(MD5, digest),
+            metadata={},
+            created=False,
+        ),
+    )
+    fake.seed_file(
+        f"{obj_path}.ack.json",
+        size=len(old_sidecar),
+        md5=_md5(old_sidecar),
+        dlink="https://dl.test/side",
+    )
+
+    def fake_get(_url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, content=old_sidecar)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    source = tmp_path / "wal.enc"
+    source.write_bytes(payload)
+
+    ack = store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+
+    # the fake's create assigned a fresh fs_id — the retry adopted it
+    assert ack.pin_token != f"{old_row['fs_id']}:{digest}"
+    assert ack.checksum == ObjectChecksum(MD5, digest)
+    rewritten = sidecar_json(OBJECT, ack)
+    assert fake.files[f"{obj_path}.ack.json"]["md5"] == _md5(rewritten)
+
+
 def test_stat_reads_back_sidecar_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakePcs()
     store = make_store(fake, monkeypatch)
