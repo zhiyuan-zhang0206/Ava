@@ -108,8 +108,10 @@ def _poll_verdict_detail(verdict: PollVerdict) -> str:
     """
     if verdict.status == POLL_CONVERGING:
         return (
-            "still converging — no paused=false before the poll's bound; the cluster "
-            "deploy lease stays held while it finishes"
+            "still converging — no paused=false within the poll's patience; the "
+            "host is handed to the settle hold (which ends early on convergence or "
+            "lapses on its own bound, C3), and the cluster deploy lease stays held "
+            "while it finishes"
         )
     if verdict.status == POLL_NO_PROGRESS:
         from ops.updater_outcome import UpdaterOutcome

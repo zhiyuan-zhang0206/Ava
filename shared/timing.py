@@ -155,6 +155,12 @@ CLOCKS: dict[str, Clock] = {
         "how long one updater stage may be in flight before host reaper and Phase-B "
         "poll call it no-progress",
     ),
+    "CONVERGING_POLL_TIMEOUT_S": Clock(
+        "deploy",
+        lambda: deploy.CONVERGING_POLL_TIMEOUT_S,
+        "how long the Phase-B poll keeps waiting on a host that is alive and making "
+        "progress before handing its convergence to the settle hold",
+    ),
     "HARVEST_GRACE_S": Clock(
         "deploy",
         lambda: deploy.HARVEST_GRACE_S,
@@ -325,6 +331,15 @@ CONSTRAINTS: list[Constraint] = [
         "NO_PROGRESS_TIMEOUT_S",
         "the stage judgment must fire while the whole-run patience still holds, or "
         "a host stuck in one stage outlasts the poll that exists to wait for it",
+    ),
+    Constraint(
+        "<",
+        "CONVERGING_POLL_TIMEOUT_S",
+        "NO_PROGRESS_TIMEOUT_S",
+        "the converging patience spends only PART of the absolute no-progress "
+        "deadline: a host that is alive and making progress is handed to the settle "
+        "hold once this elapses, and a value at or beyond the whole-run bound would "
+        "make that early exit unreachable",
     ),
     Constraint(
         "<",

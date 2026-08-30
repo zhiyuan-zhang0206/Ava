@@ -159,6 +159,42 @@ def test_settle_hold_is_released_once_every_host_reaches_the_pin(
     assert released == ["gateway-host:pid81319"]
 
 
+def test_settle_release_prints_the_hold_duration(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The settle phase's one telemetry record (C3, task #2189) is printed at the
+    early release — the only moment a process is executing at the hold's end. The
+    duration is the server-side elapsed the lease read carried; the host set is
+    read back from the note just released."""
+    import json
+
+    settling = DeployLease(
+        holder="gateway-host:pid81319",
+        held_for_s=600.0,
+        expires_in_s=300.0,
+        note=settle_note(["win"]),
+        settle_started_at=None,  # a real DB read supplies the elapsed directly
+        settle_elapsed_s=600.0,
+    )
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: settling)
+    monkeypatch.setattr("shared.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr(dw, "_probe_machines", _probing({"win": _runner(_PIN, _PIN)}))
+    monkeypatch.setattr(
+        "shared.cluster_lock.release_settle_hold",
+        lambda _h: True,  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    assert dw.deploy_in_flight().active is False
+    lines = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("[rollout-telemetry] ")
+    ]
+    assert len(lines) == 1
+    payload = json.loads(lines[0].removeprefix("[rollout-telemetry] "))
+    assert payload == {"settle": {"dur_s": 600.0, "hosts": ["win"]}}
+
+
 def test_settle_hold_stands_while_a_host_still_runs_the_old_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
