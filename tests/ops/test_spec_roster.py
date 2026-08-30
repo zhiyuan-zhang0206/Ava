@@ -64,6 +64,39 @@ def test_repo_is_a_pure_reexport_of_ops_spec() -> None:
     assert _repo._services_for_roles_annotated is spec.services_for_capabilities_annotated
 
 
+def test_agent_host_spec_launches_under_the_agent_profile() -> None:
+    """The hosted agent-host daemon runs the agent kernel in-process, so its
+    consumption matches the `agent` profile. The capabilities-derived marker
+    (agent-runner-only -> "runner") would crash it at import (settings.agent
+    read — 2026-08-30 soak startup); the spec must carry the explicit override
+    so BOTH launch paths (ava start / ava restart spec path AND the watchdog
+    respawn path) agree."""
+    agent_host = next(s for s in spec.build_services() if s.session == "agent-host")
+    assert agent_host.profile == "agent"
+    assert spec.profile_marker(agent_host) == "agent"
+
+
+def test_profile_override_wins_over_derivation_and_no_marker() -> None:
+    """An explicit spec.profile beats the capabilities derivation and
+    no_profile_marker alike (explicit beats derived, one rule)."""
+    derived = spec.ServiceSpec(
+        session="x",
+        cmd="true",
+        capabilities=cast(frozenset[MachineRole], frozenset({"agent-runner"})),
+        requires_db=False,
+    )
+    assert spec.profile_marker(derived) == "runner"
+    overridden = spec.ServiceSpec(
+        session="x",
+        cmd="true",
+        capabilities=cast(frozenset[MachineRole], frozenset({"agent-runner"})),
+        requires_db=False,
+        profile="agent",
+        no_profile_marker=True,
+    )
+    assert spec.profile_marker(overridden) == "agent"
+
+
 def test_every_service_declares_non_empty_capabilities() -> None:
     for s in spec.build_services():
         assert s.capabilities, f"{s.session} declares no capabilities"
