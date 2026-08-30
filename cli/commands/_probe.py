@@ -605,13 +605,12 @@ def _alert_upsert_and_maybe_im(conn: Any, alert: dict[str, object], *, im_enable
     )
 
     text = notify_text(alert, display_language(conn))
-    key, did_insert, should_notify, row = upsert_alert(conn, alert, source="start-readiness")
-    notified_at = row.get("notified_at") if isinstance(row, dict) else None
-    if (
-        (should_notify or (notified_at is None and not did_insert))
-        and im_enabled
-        and notify_im(text)
-    ):
+    key, _did_insert, should_notify, _row = upsert_alert(conn, alert, source="start-readiness")
+    # `should_notify` already carries the retry gate (a firing instance stays
+    # notifiable until notified_at is stamped — a failed IM is re-sent by the
+    # next start), and a resolved edge for an instance that never fired stays
+    # silent. So the IM push is purely `should_notify and im_enabled`.
+    if should_notify and im_enabled and notify_im(text):
         stamp_notified(conn, [key])
 
 

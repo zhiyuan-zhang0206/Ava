@@ -1349,3 +1349,23 @@ def test_im_is_suppressed_under_no_readiness_gate(
 
     assert len(conn.rows) == 1, "the alerts row must still be written"
     assert ims == [], "the IM push must be suppressed"
+
+
+# ─── the resolved edge's roster (QA #1196 nit-1 / nit-5) ─────────────────────
+
+
+def test_recovered_non_critical_specs_excludes_critical_and_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolved edge's roster is `started` minus the critical manifest minus
+    the failures the wait just returned — so a service that missed its window
+    THIS start (even one that came up the instant after) is not resolved by the
+    same start that alerted it; it stays open for the next start."""
+    from cli.commands import _probe as _probe_mod
+
+    started = (_spec("gateway"), _spec("restarter"), _spec("pitr-uploader"), _spec("browser"))
+    failed = (_spec("pitr-uploader"),)
+
+    recovered = _probe_mod._recovered_non_critical_specs(started, failed)
+
+    assert [s.session for s in recovered] == ["browser"]

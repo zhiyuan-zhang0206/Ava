@@ -904,3 +904,84 @@ def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
     kwargs = seen["kwargs"]
     assert kwargs["channel"] == "ava:alerts"
     assert kwargs["broadcast"] is True
+
+
+# -- CLI-side start-readiness alerts against the real store (QA #1196 nits) ----
+#
+# The readiness tier's alert writes (cli.commands._probe) execute their real
+# SQL here — the same session DB the ingest tests use — closing the fake-only
+# gap: `_unresolved_alert_instance`'s lookup, `upsert_alert`'s ON CONFLICT
+# (which must preserve notified_at across updates), and the resolved flip.
+
+
+def test_start_readiness_alert_lifecycle_on_real_db(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end through `cli.commands._probe` on the real alerts table:
+    firing inserts one unresolved row per service, a re-firing start UPDATES it
+    (no duplicate, no re-notify), the resolved edge flips it with ends_at, and a
+    failure AFTER resolution is a fresh instance with a fresh IM."""
+    import shared.alerts as _alerts
+    from cli.commands import _probe as _probe_mod
+    from cli.commands._repo import ServiceSpec
+    from ops.spec import _GATEWAY
+
+    def _spec(service: str) -> ServiceSpec:
+        return ServiceSpec(
+            session=service,
+            cmd="x",
+            capabilities=_GATEWAY,
+            requires_db=True,
+            curl_url="http://localhost:1/",
+        )
+
+    ims: list[str] = []
+
+    # Production opens a fresh connection per alert write (`with conn:` closes
+    # it on exit — psycopg3), so the seam must mint fresh connections too
+    # instead of reusing the fixture's `db_conn`.
+    def _fresh_conn() -> psycopg.Connection:
+        return psycopg.connect(settings.data_plane.db_url)
+
+    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _fresh_conn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM alerts WHERE labels->>'alertname' = %s",
+            (_probe_mod._NON_CRITICAL_ALERTNAME,),
+        )
+    db_conn.commit()
+
+    specs = (_spec("pitr-uploader"),)
+    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
+    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*), count(notified_at) FROM alerts WHERE labels->>'alertname' = %s",
+            (_probe_mod._NON_CRITICAL_ALERTNAME,),
+        )
+        row = cur.fetchone()
+    assert row == (1, 1), "re-firing must update the open instance, not duplicate it"
+
+    _probe_mod._resolve_recovered_non_critical_alerts(specs, im_enabled=True)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, ends_at IS NOT NULL FROM alerts WHERE labels->>'alertname' = %s",
+            (_probe_mod._NON_CRITICAL_ALERTNAME,),
+        )
+        row = cur.fetchone()
+    assert row == ("resolved", True), "the resolved edge must flip the row with ends_at"
+    assert len(ims) == 2, "one firing IM + one resolved IM"
+
+    # A failure after resolution is a NEW instance (the open one is resolved),
+    # with its own IM — the recovery-notification loop stays alive.
+    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM alerts WHERE labels->>'alertname' = %s AND status = 'unresolved'",
+            (_probe_mod._NON_CRITICAL_ALERTNAME,),
+        )
+        row = cur.fetchone()
+    assert row == (1,), "a failure after resolution is a fresh unresolved instance"
+    assert len(ims) == 3, "the re-fired failure gets a new IM"
