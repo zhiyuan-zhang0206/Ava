@@ -603,7 +603,8 @@ def ensure_cluster_redis_acl(
     every bring-up. `user` is names-as-data: read from the cluster's own
     redis_url (`identity_from_url`) for an existing cluster, `DATA_PLANE_IDENTITY`
     at birth. The user authenticates with its independent runtime password and is scoped
-    to keys (`~*`) + pub/sub channels (`&<channel_prefix>:*`); `-@dangerous` denies
+    to keys (`~*`) + pub/sub channels (`&<channel_prefix>:*` plus the hosted
+    dispatcher's `&<channel_prefix>:inbound:*` subscription pattern); `-@dangerous` denies
     FLUSHALL / CONFIG / SHUTDOWN. The secret travels over the redis connection, never
     a process argv.
 
@@ -642,6 +643,12 @@ def ensure_cluster_redis_acl(
             "~*",
             "resetchannels",
             f"&{channel_prefix}:*",
+            # The hosted dispatcher PSUBSCRIBEs `<prefix>:inbound:*`. Redis
+            # checks the subscription PATTERN, not the channels it would match,
+            # and `&<prefix>:*` does not cover it (empirically, Redis 8) — the
+            # agent-host reconnect-looped on NoPermissionError without this
+            # grant (2026-08-30 soak startup).
+            f"&{channel_prefix}:inbound:*",
             "+@all",
             "-@dangerous",
         )

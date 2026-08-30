@@ -630,6 +630,11 @@ def agent_host_proc(gateway_proc: None) -> Iterator[None]:
         "services.agent_host.daemon",
     ]
     env = os.environ.copy()
+    # Prod-shaped profile construction: the healthcheck launches the daemon with
+    # the `agent` profile (it runs the agent kernel in-process). Marker-less
+    # full construction here masked the consumption-matrix gap that crashed a
+    # `runner`-profile launch at soak startup (2026-08-30).
+    env["AVA_PROCESS_PROFILE"] = "agent"
     # pidfile placed in e2e tmp dir, avoids conflict with dev daemon / cross-test residue
     env["AVA_AGENT_HOST_PIDFILE"] = str(_AVA_HOME / "agent_host.pid")
     # Dynamic health port (same pattern as restarter_proc — kernel-assigned per

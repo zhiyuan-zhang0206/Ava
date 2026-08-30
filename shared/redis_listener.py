@@ -107,6 +107,10 @@ class RedisInboundListener:
             self._redis_url,
             decode_responses=True,
             socket_connect_timeout=_SOCKET_CONNECT_TIMEOUT_S,
+            # Explicit None: redis-py >= 5 defaults socket_timeout to 5s, which
+            # would cut the listener's long blocking pubsub read every idle
+            # interval (same pin as shared/redis_client._RESILIENCE_KWARGS).
+            socket_timeout=None,
             health_check_interval=_HEALTH_CHECK_INTERVAL_S,
             socket_keepalive=True,
             socket_keepalive_options=_KEEPALIVE_OPTIONS,

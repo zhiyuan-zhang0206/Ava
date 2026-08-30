@@ -50,6 +50,36 @@ def test_ensure_creates_enabled_channel_scoped_user() -> None:
                 r.publish("ava:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern() -> None:
+    """The hosted agent-host dispatcher PSUBSCRIBEs `<prefix>:inbound:*`. Redis
+    ACL checks the subscription PATTERN, not the channels it would match, and
+    `&<prefix>:*` alone rejects it — the dispatcher reconnect-looped on
+    NoPermissionError at soak startup (2026-08-30). The grant must exist and the
+    pattern subscription must be allowed (DRYRUN, version-independent)."""
+    with redis_server() as admin_url:
+        ensure_cluster_redis_acl(
+            "ava_feat_x",
+            redis_admin_url=admin_url,
+            runtime_password=_SECRET,
+            channel_prefix="ava:feat-x",
+        )
+        with redis.Redis.from_url(admin_url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType]
+            assert (
+                admin.execute_command(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                    "ACL", "DRYRUN", "ava_feat_x", "PSUBSCRIBE", "ava:feat-x:inbound:*"
+                )
+                == "OK"
+            )
+            # The per-agent literal channel the process-mode listener uses keeps
+            # working under the same grant.
+            assert (
+                admin.execute_command(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                    "ACL", "DRYRUN", "ava_feat_x", "SUBSCRIBE", "ava:feat-x:inbound:42"
+                )
+                == "OK"
+            )
+
+
 def test_ensure_is_idempotent() -> None:
     with redis_server() as admin_url:
         for _ in range(2):

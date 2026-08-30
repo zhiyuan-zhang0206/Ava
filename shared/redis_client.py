@@ -51,10 +51,13 @@ from shared.redis_resilience import (
 # Values live in shared/redis_resilience.py — the single source both this
 # module and redis_listener import (audit 2026-08-08 P2).
 
-# socket_timeout is deliberately NOT set: a blanket read timeout would
-# periodically cut pubsub.listen()'s long blocking read (e.g. the SSE event
-# stream). Keepalive + health_check detect dead links without that side effect.
+# socket_timeout must be None EXPLICITLY: since redis-py 5 the constructor
+# default is 5s (DEFAULT_SOCKET_TIMEOUT), and a blanket 5s read timeout
+# periodically cuts pubsub.listen()'s long blocking read (the hosted
+# agent-host dispatcher reconnect-looped every 5s of idle — 2026-08-30 soak
+# startup). Keepalive + health_check detect dead links without that side effect.
 _RESILIENCE_KWARGS: dict[str, Any] = {
+    "socket_timeout": None,
     "socket_keepalive": True,
     "socket_keepalive_options": keepalive_options(),
     "socket_connect_timeout": _SOCKET_CONNECT_TIMEOUT_S,

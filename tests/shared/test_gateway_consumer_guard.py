@@ -361,7 +361,17 @@ _KIND_ROOTS: dict[str, list[str]] = {
         "services/delivery_watchdog/",
         "services/pitr/",
     ],
-    "agent": ["agent/", "ava/", "ava_builtins/"],
+    "agent": [
+        "agent/",
+        "ava/",
+        "ava_builtins/",
+        # The hosted agent-host daemon runs the agent kernel + plugins
+        # in-process, so its config consumption is the agent kind's. Missing
+        # from the roots it was invisible to the matrix: the healthcheck's
+        # `runner` launch profile crashed at import (settings.agent read) and
+        # CI could not see it (2026-08-30 soak startup).
+        "services/agent_host/",
+    ],
     "runner": [
         "ops/",
         "services/agent_ops/",
@@ -462,6 +472,22 @@ def _closure_domains(closure: set[Path]) -> set[str]:
         for domain, _field in _extract_settings_reads(src_text):
             domains.add(domain)
     return domains
+
+
+def test_agent_host_launches_under_the_agent_profile() -> None:
+    """The hosted agent-host daemon consumes the agent domain set (it runs the
+    agent kernel in-process, and services/agent_host/ is in the agent kind's
+    roots above). Its healthcheck must therefore launch it with the `agent`
+    profile — a `runner` profile crashed it at import (2026-08-30 soak startup),
+    and a marker-less launch (full construction) would silently mask any future
+    cross-profile read instead of failing fast."""
+    from services.healthchecks.agent_host import _HOST_PROCESS_PROFILE
+    from shared.config import PROCESS_PROFILES
+
+    assert _HOST_PROCESS_PROFILE in PROCESS_PROFILES, (
+        f"{_HOST_PROCESS_PROFILE} is not a process profile"
+    )
+    assert _HOST_PROCESS_PROFILE == "agent"
 
 
 def test_profile_domains_match_consumption_matrix() -> None:
