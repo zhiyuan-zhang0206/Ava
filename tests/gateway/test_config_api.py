@@ -579,21 +579,22 @@ def test_put_nonsensitive_field_can_hold_literal_sentinel(_clean_overrides: Path
     assert runtime_config.read_env_aliases()["AVA_MODEL"] == CONFIG_UNCHANGED_SENTINEL
 
 
-def test_put_self_edits_writable_host_capability_bool(
+def test_put_self_edits_writable_host_capability_field(
     _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A writable host capability bool (require_google_drive, not remote_writable) is
-    editable on the self/Cluster view — the local write honors `writable`."""
+    """A writable host capability field (cross_machine_transfer_backend, not
+    remote_writable) is editable on the self/Cluster view — the local write honors
+    `writable`."""
     monkeypatch.setattr(
         host_config_validators,
         "validate",
         lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     with TestClient(app) as client:
-        resp = client.put("/api/config", json={"require_google_drive": False})
+        resp = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
-    assert runtime_config.read_env_aliases()["AVA_REQUIRE_GOOGLE_DRIVE"] == "false"
+    assert runtime_config.read_env_aliases()["AVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
 
 
 def test_put_self_rejects_readonly_identity_field(_clean_overrides: Path) -> None:
@@ -606,18 +607,20 @@ def test_put_self_rejects_readonly_identity_field(_clean_overrides: Path) -> Non
     assert "AVA_MACHINE_NAME" not in runtime_config.read_env_aliases()
 
 
-def test_get_self_raw_overrides_exposes_writable_host_bool_not_readonly(
+def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
     _clean_overrides: Path,
 ) -> None:
-    """Self GET raw_overrides includes a writable host capability bool (editable on
+    """Self GET raw_overrides includes a writable host capability field (editable on
     the host's own panel) but excludes a now-read-only identity field, even when both
     are set in .env."""
-    runtime_config.write_fields({"require_google_drive": False, "machine_name": "m"}, set())
+    runtime_config.write_fields(
+        {"cross_machine_transfer_backend": "none", "machine_name": "m"}, set()
+    )
     with TestClient(app) as client:
         resp = client.get("/api/config")
     assert resp.status_code == 200, resp.text
     raw = resp.json()["raw_overrides"]
-    assert raw.get("require_google_drive") is False  # writable -> self-editable
+    assert raw.get("cross_machine_transfer_backend") == "none"  # writable -> self-editable
     assert "machine_name" not in raw  # writable=False -> read-only, not in the edit set
 
 
@@ -651,15 +654,19 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
 
 def test_get_explicit_self_is_host_view_not_cluster(_clean_overrides: Path) -> None:
     """GET `?machine=<self>` is a host view: raw_overrides is the remote_writable
-    host set, so a writable-but-not-remote_writable field (require_google_drive)
-    that the Cluster view exposes is ABSENT here — the explicit self selection no
-    longer collapses into the Cluster view."""
-    runtime_config.write_fields({"require_google_drive": False}, set())
+    host set, so a writable-but-not-remote_writable field
+    (cross_machine_transfer_backend) that the Cluster view exposes is ABSENT here —
+    the explicit self selection no longer collapses into the Cluster view."""
+    runtime_config.write_fields({"cross_machine_transfer_backend": "none"}, set())
     with TestClient(app) as client:
         cluster = client.get("/api/config").json()["raw_overrides"]
         host = client.get(f"/api/config?machine={machine_name()}").json()["raw_overrides"]
-    assert cluster.get("require_google_drive") is False  # writable -> Cluster view exposes it
-    assert "require_google_drive" not in host  # not remote_writable -> host view excludes it
+    assert (
+        cluster.get("cross_machine_transfer_backend") == "none"
+    )  # writable -> Cluster view exposes it
+    assert (
+        "cross_machine_transfer_backend" not in host
+    )  # not remote_writable -> host view excludes it
 
 
 # ── PUT remote ──
@@ -711,7 +718,7 @@ def test_put_remote_host_field_dispatches_config_write(
 def test_put_remote_rejects_writable_non_remote_host_field(
     monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path
 ) -> None:
-    """A writable-but-not-remote_writable host field (require_google_drive) is
+    """A writable-but-not-remote_writable host field (cross_machine_transfer_backend) is
     rejected at the gate on a machine-addressed PUT — 400 before any dispatch,
     rather than a 200 applied=False from the host-side op. Locks the shared
     field_editable gate: remote host edits require remote_writable."""
@@ -720,7 +727,9 @@ def test_put_remote_rejects_writable_non_remote_host_field(
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatched)
     monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", dispatched)
     with TestClient(app) as client:
-        resp = client.put(f"/api/config?machine={REMOTE}", json={"require_google_drive": False})
+        resp = client.put(
+            f"/api/config?machine={REMOTE}", json={"cross_machine_transfer_backend": "none"}
+        )
     assert resp.status_code == 400, resp.text
     assert "unknown or read-only" in resp.json()["detail"]
     dispatched.assert_not_awaited()
