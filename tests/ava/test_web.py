@@ -276,6 +276,17 @@ def test_search_result_str_format() -> None:
     assert str(r) == "[web] Foo\n  https://example.com\n  A foo page."
 
 
+def test_endpoint_defaults_pin_before_literals() -> None:
+    """The settings defaults must stay byte-identical to the URLs the module
+    used to hard-code — a future default drift breaks the 'behavior unchanged'
+    contract that the other endpoint tests assume (they reference the settings
+    values, so they cannot catch it themselves)."""
+    assert (
+        settings.web.web_brave_search_endpoint == "https://api.search.brave.com/res/v1/web/search"
+    )
+    assert settings.web.web_jina_reader_base == "https://r.jina.ai/"
+
+
 def test_search_hits_configured_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Brave endpoint is configurable (`AVA_WEB_BRAVE_SEARCH_ENDPOINT`) —
     the request must dial the configured URL, not a baked-in literal."""

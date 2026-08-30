@@ -51,7 +51,7 @@ class WebSettings(EnvSettings):
     web_brave_search_endpoint: str = Field(
         default="https://api.search.brave.com/res/v1/web/search",
         alias="AVA_WEB_BRAVE_SEARCH_ENDPOINT",
-        description="Brave Search API endpoint used by `ava.web.search`. Override to point at a different search endpoint (e.g. a self-hosted relay or a provider mirror) without code changes.",
+        description="Brave Search API endpoint used by `ava.web.search`. Override to point at a different search endpoint (e.g. a self-hosted relay or a provider mirror) without code changes. A custom endpoint receives the same auth as Brave: `X-Subscription-Token` with BRAVE_API_KEY.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -63,7 +63,7 @@ class WebSettings(EnvSettings):
     web_jina_reader_base: str = Field(
         default="https://r.jina.ai/",
         alias="AVA_WEB_JINA_BASE_URL",
-        description="Jina Reader base URL used by `ava.web.fetch` (the target URL is appended after it). Override to point at a different reader endpoint (e.g. a self-hosted mirror) without code changes.",
+        description="Jina Reader base URL used by `ava.web.fetch` (the target URL is appended after it). Must end with `/` — it is concatenated with the encoded target URL. Override to point at a different reader endpoint (e.g. a self-hosted mirror) without code changes. A custom endpoint receives the same auth as Jina: `Authorization: Bearer` with JINA_API_KEY.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
