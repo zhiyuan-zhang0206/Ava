@@ -104,16 +104,19 @@ class BaiduObjectStore:
             raise self._map_error("Baidu stat", exc) from exc
         if row is None:
             return None
-        checksum = ObjectChecksum(MD5, str(row.md5))
-        if row.size != int(sidecar["size"]) or checksum != ObjectChecksum(
-            sidecar["checksum_algo"], sidecar["checksum_value"]
+        # The PCS row md5 is Baidu's encrypted server digest (live P0
+        # smoke: it never equals the content md5), so the row is pinned
+        # by fs_id + that digest and the size; the sidecar carries the
+        # real content checksum for downstream verification.
+        if row.size != int(sidecar["size"]) or f"{row.fs_id}:{row.md5}" != str(
+            sidecar["pin_token"]
         ):
             raise PermanentObjectStoreError("immutable Baidu object differs from its sidecar")
         return RemoteObjectAck(
             object_name=object_name,
             pin_token=str(sidecar["pin_token"]),
             size=row.size,
-            checksum=checksum,
+            checksum=ObjectChecksum(str(sidecar["checksum_algo"]), str(sidecar["checksum_value"])),
             metadata=dict(cast(dict[str, str], sidecar["metadata"])),
             created=False,
         )
@@ -297,7 +300,10 @@ class BaiduObjectStore:
             row = self._file_row(object_name)
         except PcsError as exc:
             raise self._map_error("Baidu existing-object read-back", exc) from exc
-        if row is None or row.size != size or str(row.md5) != whole_md5:
+        # return_type=2 is Baidu's own content-address match on the block
+        # md5s; the row md5 is an encrypted server digest (never the
+        # content md5), so size is the comparable property here.
+        if row is None or row.size != size:
             raise PermanentObjectStoreError("immutable Baidu object differs from the local archive")
         return self._ack_from_row(object_name, row, size, whole_md5, metadata, created=False)
 
@@ -324,7 +330,11 @@ class BaiduObjectStore:
         *,
         created: bool,
     ) -> RemoteObjectAck:
-        if row.size != size or str(row.md5) != whole_md5:
+        # The row md5 is an encrypted server digest, not the content md5:
+        # it identifies the row (pin_token) while the content is carried
+        # by the local whole_md5 checksum and verified end to end at
+        # restore time from the downloaded bytes.
+        if row.size != size:
             raise PermanentObjectStoreError("immutable Baidu object differs from the local archive")
         return RemoteObjectAck(
             object_name=object_name,
@@ -411,9 +421,10 @@ class BaiduObjectStore:
             raise self._map_error("Baidu sidecar lookup", exc) from exc
         if row is None:
             return None
+        # The sidecar row md5 is the encrypted server digest and cannot
+        # verify the downloaded bytes; the JSON schema + the identity
+        # cross-checks below are the validation surface.
         data = self._download_bytes(row)
-        if _md5_hex(data) != str(row.md5):
-            raise PermanentObjectStoreError("Baidu object sidecar differs from its PCS row")
         try:
             payload = json.loads(data.decode())
         except (ValueError, UnicodeDecodeError) as exc:

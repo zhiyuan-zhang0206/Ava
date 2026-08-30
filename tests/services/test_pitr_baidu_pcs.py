@@ -447,23 +447,49 @@ def test_stat_reads_back_sidecar_identity(tmp_path: Path, monkeypatch: pytest.Mo
     assert ack.created is False
 
 
-def test_upload_rejects_tampered_read_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """QA #1147 C3: the create read-back is the only cross-check the engine
-    gets — a tampered read-back must fail the upload, not ACK it."""
+def test_upload_rejects_a_tampered_read_back_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QA #1147 C3: the create read-back size is the engine's cross-check
+    — a tampered size must fail the upload, not ACK it."""
     fake = FakePcs()
     store = make_store(fake, monkeypatch)
+    source = tmp_path / "wal.enc"
+    source.write_bytes(b"payload")
     fake.create_override[f"{APP_ROOT}/{OBJECT}"] = {
         "fs_id": 500,
         "path": f"{APP_ROOT}/{OBJECT}",
         "size": 999,
-        "md5": "deadbeef",
+        "md5": _md5(b"payload"),
         "isdir": 0,
     }
-    source = tmp_path / "wal.enc"
-    source.write_bytes(b"payload")
 
     with pytest.raises(PermanentObjectStoreError, match="differs from the local archive"):
         store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+
+
+def test_upload_accepts_an_opaque_server_row_md5(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live P0 smoke: the PCS row md5 is Baidu's encrypted server digest
+    (non-hex, never the content md5) — it identifies the row, and the
+    upload must not compare it against the content md5."""
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    source = tmp_path / "wal.enc"
+    source.write_bytes(b"payload")
+    fake.create_override[f"{APP_ROOT}/{OBJECT}"] = {
+        "fs_id": 500,
+        "path": f"{APP_ROOT}/{OBJECT}",
+        "size": len(b"payload"),
+        "md5": "1bfd89f2frf619ce44912f39c96003d9",
+        "isdir": 0,
+    }
+
+    ack = store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+
+    assert ack.pin_token == "500:1bfd89f2frf619ce44912f39c96003d9"  # noqa: S105
+    assert ack.checksum == ObjectChecksum(MD5, _md5(b"payload"))
 
 
 def test_stat_rejects_row_that_differs_from_its_sidecar(
@@ -498,28 +524,6 @@ def test_stat_rejects_row_that_differs_from_its_sidecar(
     monkeypatch.setattr(httpx, "get", fake_get)
 
     with pytest.raises(PermanentObjectStoreError, match="differs from its sidecar"):
-        store.stat(OBJECT)
-
-
-def test_sidecar_download_md5_mismatch_is_permanent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The sidecar is downloaded over an unauthenticated data plane; its
-    bytes must match the PCS row md5 before any identity is trusted."""
-    fake = FakePcs()
-    store = make_store(fake, monkeypatch)
-    obj_path = f"{APP_ROOT}/{OBJECT}"
-    fake.seed_file(obj_path, size=100, md5=_md5(b"x"))
-    sidecar_path = f"{obj_path}.ack.json"
-    payload = b'{"object_name": "other"}'
-    fake.seed_file(sidecar_path, size=len(payload), md5="deadbeef", dlink="https://dl.test/side")
-
-    def fake_get(_url: str, **_kwargs: object) -> httpx.Response:
-        return httpx.Response(200, content=payload)
-
-    monkeypatch.setattr(httpx, "get", fake_get)
-
-    with pytest.raises(PermanentObjectStoreError, match="differs from its PCS row"):
         store.stat(OBJECT)
 
 

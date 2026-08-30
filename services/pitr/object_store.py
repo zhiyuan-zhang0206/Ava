@@ -2,9 +2,11 @@
 
 The ACK is backend-agnostic: ``pin_token`` is the backend's own
 pinned-read credential (GCS fills the object generation; Baidu Netdisk
-fills ``fs_id`` + content MD5), and ``checksum`` is an ``(algo, value)``
-pair dispatched through :mod:`services.pitr.checksums` (GCS verifies
-CRC32C, Baidu only exposes MD5).
+fills ``fs_id`` + its encrypted server row digest — not the content
+MD5, which is carried by ``checksum`` and verified from the downloaded
+bytes), and ``checksum`` is an ``(algo, value)`` pair dispatched through
+:mod:`services.pitr.checksums` (GCS verifies CRC32C, Baidu only exposes
+MD5).
 """
 
 from __future__ import annotations

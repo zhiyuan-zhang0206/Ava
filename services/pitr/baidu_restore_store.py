@@ -23,8 +23,10 @@ _DOWNLOAD_UA = "pan.baidu.com"
 class BaiduGenerationPinnedObjectReader:
     """Read one pinned immutable object; no write/delete verb on this role.
 
-    ``pin_token`` is ``<fs_id>:<content-md5>`` — the fs_id pins the file
-    row, the md5 pins the content; both must match the restore object
+    ``pin_token`` is ``<fs_id>:<server-md5>`` — the fs_id pins the file
+    row and the md5 part is Baidu's encrypted server digest (live P0
+    smoke: it never equals the content md5); the content itself is
+    verified from the downloaded bytes in ``download_exact``.
     before a single byte is written.
     """
 
@@ -103,11 +105,10 @@ class BaiduGenerationPinnedObjectReader:
 
     @staticmethod
     def _verify_properties(meta: RemoteFile, expected: RestoreObject, pin_md5: str) -> None:
-        if (
-            meta.size != expected.size
-            or str(meta.md5) != pin_md5
-            or str(meta.md5) != expected.checksum_value
-        ):
+        # The filemetas md5 is the encrypted server digest: it pins the
+        # row identity together with the fs_id, never the content — the
+        # content md5 is verified from the downloaded bytes below.
+        if meta.size != expected.size or str(meta.md5) != pin_md5:
             raise PermanentObjectStoreError("pinned restore object properties differ")
 
     def _verify_sidecar(self, expected: RestoreObject) -> None:
