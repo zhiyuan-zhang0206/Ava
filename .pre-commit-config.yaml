@@ -296,6 +296,20 @@ repos:
         files: \.py$
         pass_filenames: false
 
+      # A test that exactly asserts a value derived from a repo fixed-instant
+      # constant while the derivation can reach the real clock is correct only
+      # until the wall clock passes the constant's boundary — the 2026-08-30
+      # pair of deterministic-red tests that each ejected the Mergify batch
+      # queue. Also guards the source side: a function that accepts a clock
+      # parameter must thread it into fixed-instant window boundaries. See
+      # scripts/lint_time_bomb.py.
+      - id: lint-time-bomb
+        name: lint time bombs (fixed instant x real clock)
+        entry: .venv/bin/python scripts/lint_time_bomb.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
       # (Config-scope ownership is now enforced at import by the config package's
       # registry builder — shared/config/__init__.py:_build_registry fails fast on
       # a field with a missing/invalid scope, so the former standalone

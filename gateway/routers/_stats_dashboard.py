@@ -80,7 +80,7 @@ def token_window_plan(
     if day_from > day_to:
         return None, None, [(window_start, now)]
 
-    gap = ledger_gap_plan(newest_day, retention_floor())
+    gap = ledger_gap_plan(newest_day, retention_floor(now))
     if gap.gap_live:
         if gap.day_lt is None:
             raise RuntimeError("live ledger gap requires an exclusive ledger day")

@@ -94,7 +94,10 @@ class _FakeLokiDays:
         self.days = days
         self.queried: list[date] = []
 
-    def __call__(self, day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
+    def __call__(
+        self, day: date, *, now: datetime | None = None
+    ) -> tuple[list[TokensRow], list[MetricsRow]]:
+        del now
         self.queried.append(day)
         return self.days.get(day, ([], []))
 
@@ -104,7 +107,8 @@ class _FakeSourceCounts:
         self.counts = counts
         self.queried: list[date] = []
 
-    def __call__(self, day: date) -> int | None:
+    def __call__(self, day: date, *, now: datetime | None = None) -> int | None:
+        del now
         self.queried.append(day)
         return self.counts.get(day, 0)
 
@@ -445,10 +449,11 @@ def test_nonzero_indexed_slice_rewrites_day(
     )
 
     assert result == RollupResult(day, day, 1, 1)
-    # LEGACY_READ_EXPIRES_AT (a fixed instant, already passed) makes the
-    # cutover day a single INDEXED slice, so only indexed_value=2.0 lands.
-    assert _fetch_tokens(db)[(aid, str(day), "m1")] == (2, 2, 2, 2, 2, 2.0, 2, 0)
-    assert _fetch_metrics(db)[(aid, str(day))] == (2, 2, 2.0, 2.0, 2.0, {"1": 2}, 2, 2)
+    # `now_utc` pins the split clock (index labels threading): 2026-08-24T12:00Z
+    # is inside the legacy-read grace, so the cutover day is the legacy 1.0
+    # + indexed 2.0 merge — deterministic regardless of the wall clock.
+    assert _fetch_tokens(db)[(aid, str(day), "m1")] == (3, 3, 3, 3, 3, 3.0, 3, 0)
+    assert _fetch_metrics(db)[(aid, str(day))] == (3, 3, 3.0, 1.0, 2.0, {"1": 3}, 3, 3)
 
 
 def test_retention_clamp_never_rewrites_archive_days(
@@ -519,7 +524,10 @@ def test_pass_deadline_stops_before_remaining_dirty_days(
     clock = [0.0]
     queried: list[date] = []
 
-    def slow_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
+    def slow_aggregates(
+        day: date, *, now: datetime | None = None
+    ) -> tuple[list[TokensRow], list[MetricsRow]]:
+        del now
         queried.append(day)
         clock[0] = 2.0
         return [], []
@@ -659,7 +667,7 @@ def test_source_count_query_uses_the_union_body_truth_pipeline(
         return [({}, 5.0)]
 
     monkeypatch.setattr(rollup, "_query_instant", query)
-    assert rollup._day_source_count(date(2026, 6, 9)) == 5
+    assert rollup._day_source_count(date(2026, 6, 9), now=_NOW) == 5
     assert len(calls) == 1
     logql, _at = calls[0]
     assert logql.startswith("sum(count_over_time((") and logql.endswith(")[86400s]))")
@@ -688,13 +696,16 @@ def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.Monke
             return [(labels, value), ({**labels, "bucket": "not-an-integer"}, value)]
         return [(labels, value)]
 
-    def _slices(_start: datetime, _end: datetime) -> tuple[LokiReadSlice, ...]:
+    def _slices(
+        _start: datetime, _end: datetime, *, now: datetime | None = None
+    ) -> tuple[LokiReadSlice, ...]:
+        del now
         return slices
 
     monkeypatch.setattr(rollup, "split_index_label_window", _slices)
     monkeypatch.setattr(rollup, "_query_instant", _query)
 
-    aggregates = rollup._day_aggregates(day)
+    aggregates = rollup._day_aggregates(day, now=_NOW)
     assert aggregates is not None
     tokens, metrics = aggregates
 
