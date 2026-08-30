@@ -528,6 +528,22 @@ class AgentRegistry(TypedDict):
     max_id: int
 
 
+class MemorySearchStats(TypedDict):
+    """`memory_search_stats` payload — services/memory_search/app.py 60s flusher.
+
+    One event per 60s window carrying the memory-search store's absolute
+    state: total chunk rows plus the duration of the most recent successful
+    npz save. Both are state, never sums: the OTLP disposition override
+    records them as ObservableGauges (``ava_memory_search_stats_rows_ratio``
+    / ``ava_memory_search_stats_last_save_seconds``), so a flat store does
+    not accrue value the way Counters would. ``last_save_seconds`` is absent
+    until the first save since boot (an absent optional metric is not zero).
+    """
+
+    rows: int
+    last_save_seconds: float
+
+
 class TelemetryReadStale(TypedDict):
     """`telemetry_read_stale` payload — gateway/telemetry_staleness.py."""
 
@@ -1159,6 +1175,15 @@ EVENTS: dict[str, EventSpec] = {
         "agent_registry",
         "agent registry max id — the agents-table high-water mark (absolute state, 60s sample)",
         payload=AgentRegistry,
+        tier="noise",
+    ),
+    # memory search store stats (row-growth monitoring, task #2088) — one
+    # absolute gauge sample per 60s window: row count + last npz save
+    # duration, never counters.
+    "memory_search_stats": _telemetry(
+        "memory_search_stats",
+        "memory search store rows + last save duration (absolute state, 60s sample)",
+        payload=MemorySearchStats,
         tier="noise",
     ),
     "telemetry_read_stale": _telemetry(

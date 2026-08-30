@@ -117,8 +117,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # raises it to 127; the agent-registry max-id gauge (Task #2010) adds
     # agent_registry, raising it to 128; archive_fetch_degraded (Task #2004)
     # raises it to 129; deleting the hibernation chain's agent_hibernating +
-    # agent_swapped_in (Task #1976 phase 2) drops it back to 127.
-    assert len(_TELEMETRY_KINDS) == 127
+    # agent_swapped_in (Task #1976 phase 2) drops it back to 127;
+    # memory_search_stats (Task #2088's row-growth monitoring) raises it
+    # back to 128.
+    assert len(_TELEMETRY_KINDS) == 128
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
@@ -166,6 +168,19 @@ def test_agent_registry_payload_and_metric_disposition() -> None:
 
     assert payload_keys("agent_registry") == ("max_id",)
     assert _METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
+
+
+def test_memory_search_stats_payload_and_metric_disposition() -> None:
+    """The 60s memory-search store sample is absolute state, not a sum:
+    rows is an int that would otherwise default to a Counter and accrue on
+    every sample; last_save_seconds a float that would default to a
+    Histogram. Both must be declared gauges (task #2088)."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("memory_search_stats") == ("rows", "last_save_seconds")
+    assert _METRIC_DISPOSITION[("memory_search_stats", "rows")] == "gauge"
+    assert _METRIC_DISPOSITION[("memory_search_stats", "last_save_seconds")] == "gauge"
 
 
 def test_category_for_kind() -> None:

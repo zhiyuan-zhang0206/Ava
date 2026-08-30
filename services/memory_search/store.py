@@ -11,6 +11,7 @@ so the lock is never contended meaningfully).
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from zipfile import BadZipFile
 
@@ -48,6 +49,10 @@ class MemoryStore:
         self._mtimes: list[float] = []
         self._hashes: list[str] = []
         self._matrix = np.empty((0, DIM), dtype=np.float32)
+        # Duration of the most recent successful save(), None until the first
+        # one — the /stats endpoint and the 60s stats flusher expose it so a
+        # growing npz cost is visible before it becomes a write stall.
+        self._last_save_seconds: float | None = None
 
     # ── persistence ──────────────────────────────────────────────────────
 
@@ -119,7 +124,14 @@ class MemoryStore:
 
     def save(self) -> None:
         """Atomically rewrite the npz — tmp file in the same directory +
-        `os.replace` (same-filesystem rename is atomic)."""
+        `os.replace` (same-filesystem rename is atomic).
+
+        Times the whole write+replace and records it as
+        `last_save_seconds` on success only — a failed save (np.savez
+        raising) leaves the previous duration untouched, because the
+        number operators read is "what did the last completed persistence
+        cost", not "what did the last attempt cost"."""
+        start = time.perf_counter()
         self._data_file.parent.mkdir(parents=True, exist_ok=True)
         # np.savez appends ".npz" to any name not already ending in it, so the
         # tmp name must end in ".npz" for the replace below to find the file.
@@ -135,6 +147,7 @@ class MemoryStore:
             vectors=self._matrix,
         )
         tmp.replace(self._data_file)
+        self._last_save_seconds = time.perf_counter() - start
 
     # ── mutations ────────────────────────────────────────────────────────
 
@@ -224,6 +237,12 @@ class MemoryStore:
             if path not in best or float(sim) > best[path]:
                 best[path] = float(sim)
         return sorted(best, key=best.__getitem__, reverse=True)[:k]
+
+    @property
+    def last_save_seconds(self) -> float | None:
+        """Duration (seconds) of the most recent successful save — None until
+        the first save since process start."""
+        return self._last_save_seconds
 
     def __len__(self) -> int:
         return len(self._pks)

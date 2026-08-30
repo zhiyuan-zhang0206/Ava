@@ -165,6 +165,12 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     # as an int it would default to a Counter and accrue value on every
     # sample. A gauge holds the latest sample (task #2010).
     ("agent_registry", "max_id"): "gauge",
+    # The memory-search store's absolute state (task #2088): rows is an int
+    # that would otherwise default to a Counter and accrue on every 60s
+    # sample; last_save_seconds is a float duration that would default to a
+    # Histogram — both are latest-value gauges.
+    ("memory_search_stats", "rows"): "gauge",
+    ("memory_search_stats", "last_save_seconds"): "gauge",
     # The hourly maintenance pass refreshes these table high-water marks; a
     # gauge preserves the latest measurement between samples. The *_live
     # fields are the live tuple counts, emitted alongside so physical size can
