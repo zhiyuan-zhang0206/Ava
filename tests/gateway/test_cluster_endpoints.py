@@ -365,6 +365,45 @@ class TestPauseLocalCluster:
 # suite-wide (tests/conftest.py:_guard_cluster_spawn).
 @pytest.mark.real_cluster_spawn
 class TestUnpauseLocalCluster:
+    @pytest.fixture(autouse=True)
+    def _hermetic_disabled_marker(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """The unpause tests call the real `unpause_local_cluster`, and it reads
+        the durable `--disable-service` marker from `$AVA_HOME/disabled_services`
+        before respawning (`is_skipped("restarter", read_skipped())` -> early
+        return: no spawn, no raise). The suite's session home is worker-scoped and
+        shared (tests/conftest.py), so a marker written there by ANY earlier test
+        silently displaces this class' assertions — the respawn test sees
+        `spawned == []`, the genuine-failure test never raises (CI #1172/#1173
+        shard-5 flakes, task #2181; the writer-side isolation landed in #1185).
+
+        Defense-in-depth, two arms:
+        - validate: a marker already present in the REAL shared home means a
+          writer leaked durable operator intent there (the writer-side isolation
+          fixture in tests/cli/conftest.py should have kept it per-test). Fail
+          with a diagnosis instead of letting every test below silently exercise
+          the leak.
+        - self-isolate: redirect the marker read to a per-test tmp file — the
+          same redirection tests/shared/test_disabled_services.py and
+          tests/cli/conftest.py use — so these tests keep exercising the unpause
+          respawn contract no matter what any future test writes into the shared
+          home.
+        """
+        from shared import disabled_services as ds
+
+        leaked = sorted(ds.read_skipped())
+        if "restarter" in leaked:
+            pytest.fail(
+                "worker-shared $AVA_HOME/disabled_services already lists 'restarter' "
+                f"(marker: {leaked}): a test wrote the durable --disable-service "
+                "marker into the shared session home instead of a per-test file, so "
+                "the unpause tests below would exercise that leak (no respawn, no "
+                "raise) rather than the respawn contract. Fix the leaking writer — "
+                "redirect its marker to a per-test tmp like "
+                "tests/cli/conftest.py::_isolate_disabled_services_marker — instead "
+                "of the victim."
+            )
+        monkeypatch.setattr(ds, "disabled_services_file", lambda: tmp_path / "disabled_services")
+
     def test_writes_idle_posture_and_respawns_restarter(
         self,
         monkeypatch: pytest.MonkeyPatch,
