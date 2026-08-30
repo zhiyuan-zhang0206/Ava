@@ -100,7 +100,11 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     _write_checkpoint(agent_id)
 
     monkeypatch.setattr(restore_drill.backup, "backup_dir", lambda: tmp_path)
-    monkeypatch.setattr(restore_drill.backup, "find_writable_google_drive", lambda: None)
+
+    def _no_publish(_artifact: object) -> None:
+        return None
+
+    monkeypatch.setattr(restore_drill.backup, "_publish_offsite", _no_publish)
     artifact = restore_drill.backup.run_backup()
     report, elapsed = restore_drill.run_drill(artifact)
 
