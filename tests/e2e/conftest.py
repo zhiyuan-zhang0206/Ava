@@ -147,7 +147,7 @@ def _apply_e2e_seq_offset() -> None:
 
 
 @pytest.fixture(scope="package", autouse=True)
-def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
+def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:  # noqa: PLR0915 — one statement over: the auth alias declaration joined the cluster-scope .env seeding
     """Layer e2e-specific process config on the root conftest's session Postgres +
     Redis (provisioned by its autouse fixtures). The DB/Redis
     URLs are already in settings + os.environ (AVA_DB_URL / AVA_REDIS_URL), so the
@@ -189,6 +189,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # from this body by AST and fails if the tuple falls behind it, so a key added to
     # the setup without a line here cannot merge.
     _env_keys = (
+        "AVA_AUTH_MIDDLEWARE_ENABLED",
         "AVA_CONFIG_FETCH",
         "AVA_EVENTS_CHANNEL",
         "AVA_HOME",
@@ -301,6 +302,10 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     os.environ["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (
         f"http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}"
     )
+    # auth_middleware_enabled is cluster-pinned: the env-authority pass drops
+    # an inherited value the unit .env does not declare (default True = 401 on
+    # every unauthenticated e2e call). Declare it so e2e runs auth-off.
+    os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] = "false"
 
     env_lines = [
         f"{key}={os.environ[key]}"

@@ -72,7 +72,9 @@ def test_warns_when_only_skip_auth_alias_set(monkeypatch: pytest.MonkeyPatch):
     semantics — the warning must fire when the legacy key is the active source."""
     rec = _patch_logger(monkeypatch)
     monkeypatch.setenv("AVA_SKIP_AUTH", "true")
-    monkeypatch.delenv("AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
+    # delitem, not delenv: the lint bans delenv on Settings aliases (the
+    # singleton never re-reads env), but this function inspects the RAW env.
+    monkeypatch.delitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
 
     config.warn_deprecated_env_aliases()
 
@@ -84,7 +86,8 @@ def test_warns_when_only_skip_auth_alias_set(monkeypatch: pytest.MonkeyPatch):
 def test_silent_when_skip_canonical_alias_set(monkeypatch: pytest.MonkeyPatch):
     rec = _patch_logger(monkeypatch)
     monkeypatch.setenv("AVA_SKIP_AUTH", "true")
-    monkeypatch.setenv("AVA_AUTH_MIDDLEWARE_ENABLED", "true")
+    # setitem, not setenv: see test_warns_when_only_skip_auth_alias_set.
+    monkeypatch.setitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", "true")
 
     config.warn_deprecated_env_aliases()
 
@@ -217,6 +220,87 @@ def test_current_field_values_decodes_nodecode_comma_list(
 
     v = config.current_field_values()["skills_to_inject_into_system_prompt"]
     assert v == ["alpha", "beta"]
+
+
+def test_current_field_values_decodes_nodecode_comma_list_without_warning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """P1 regression: a NoDecode comma-list value is a SUPPORTED .env spelling,
+    not a decode failure. Decoding through the owning model must not emit the
+    "cannot be decoded" warning — it fired on every panel read / agent spawn
+    for AVA_IM_DISABLED_ADAPTERS='weixin,feishu' — and a list[float] field must
+    come back floats, not a wrong-typed string split."""
+    from shared import runtime_config as rt
+
+    rec = _patch_logger(monkeypatch)
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    rt.write_fields(
+        {
+            "im_disabled_adapters": ["weixin", "feishu"],
+            "im_send_retry_delays": [0.5, 1.0],
+        },
+        set(),
+    )
+
+    values = config.current_field_values()
+
+    assert values["im_disabled_adapters"] == ["weixin", "feishu"]
+    assert values["im_send_retry_delays"] == [0.5, 1.0]
+    assert all(isinstance(delay, float) for delay in values["im_send_retry_delays"])
+    assert rec.warnings == []
+
+
+def test_current_field_values_decodes_json_array_spelling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """The JSON-array spelling the model validators also accept must decode
+    through the panel path too — both spellings, not just the comma list."""
+    from shared import runtime_config as rt
+
+    rec = _patch_logger(monkeypatch)
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    rt.write_fields({"im_disabled_adapters": '["weixin", "feishu"]'}, set())
+
+    values = config.current_field_values()
+
+    assert values["im_disabled_adapters"] == ["weixin", "feishu"]
+    assert rec.warnings == []
+
+
+def test_current_field_values_decodes_empty_nodecode_list(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """An empty NoDecode list value decodes to [] (nothing disabled), matching
+    Settings construction."""
+    from shared import runtime_config as rt
+
+    rec = _patch_logger(monkeypatch)
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    rt.write_fields({"im_disabled_adapters": []}, set())
+
+    values = config.current_field_values()
+
+    assert values["im_disabled_adapters"] == []
+    assert rec.warnings == []
+
+
+def test_auth_middleware_set_roundtrips_through_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """`ava config set auth_middleware_enabled` writes the key the model
+    actually reads. The field's alias used to fall back to its upper-cased
+    NAME (AUTH_MIDDLEWARE_ENABLED), which a validation_alias-only field never
+    listens on — a written value was silently lost and the panel never served
+    the file value."""
+    from shared import runtime_config as rt
+
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    rt.write_fields({"auth_middleware_enabled": False}, set())
+
+    text = (tmp_path / ".env").read_text()
+    keys = {line.split("=", 1)[0] for line in text.splitlines() if "=" in line}
+    assert keys == {"AVA_AUTH_MIDDLEWARE_ENABLED"}
+    assert config.current_field_values()["auth_middleware_enabled"] is False
 
 
 def test_every_field_declares_valid_scope() -> None:
@@ -1229,6 +1313,50 @@ def test_current_field_values_warns_on_undecodable_env_value(
     assert len(rec.warnings) == 1
     assert "AVA_TRACE_ENABLED" in rec.warnings[0]
     assert "banana" in rec.warnings[0]
+
+
+def test_current_field_values_warns_on_bad_nodecode_list_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A genuinely undecodable NoDecode list value (non-numeric delays) warns
+    and falls back to the boot-time value — never a wrong-typed string split
+    (the old fallback served ["banana", "apple"] for a list[float] field)."""
+    from shared import runtime_config as rt
+
+    rec = _patch_logger(monkeypatch)
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    rt.write_fields({"im_send_retry_delays": "banana,apple"}, set())
+
+    values = config.current_field_values()
+
+    assert values["im_send_retry_delays"] == [2.0, 4.0, 8.0, 16.0, 32.0]
+    assert len(rec.warnings) == 1
+    assert "AVA_IM_SEND_RETRY_DELAYS" in rec.warnings[0]
+    assert "banana,apple" in rec.warnings[0]
+
+
+def test_current_field_values_isolates_bad_env_from_good_file_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """QA #1090 repro: a good comma-list FILE value must decode even when
+    ANOTHER field of the same domain carries a bad ENV value (absent from the
+    file). The decode payload covers every field, so model_validate never reads
+    os.environ — the old retry did, dropped the good file value, and served
+    the boot value instead."""
+    from shared import runtime_config as rt
+
+    rec = _patch_logger(monkeypatch)
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    rt.write_fields({"im_disabled_adapters": ["weixin", "feishu"]}, set())
+    # setitem, not setenv: the lint bans setenv on Settings aliases (the
+    # singleton never re-reads env); this plants the bad value for the decode
+    # path only.
+    monkeypatch.setitem(os.environ, "AVA_IM_SEND_RETRY_DELAYS", "banana")
+
+    values = config.current_field_values()
+
+    assert values["im_disabled_adapters"] == ["weixin", "feishu"]
+    assert rec.warnings == []
 
 
 # ─── AVA_TIMEZONE fails fast at Settings construction ───

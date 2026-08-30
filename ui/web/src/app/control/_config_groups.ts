@@ -127,7 +127,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_SSE_DISCONNECT_POLL_SECONDS",
     "AVA_SSE_THROTTLE_RATE",
     "AVA_GATEWAY_RELOAD",
-    "AUTH_MIDDLEWARE_ENABLED",
+    "AVA_AUTH_MIDDLEWARE_ENABLED",
   ],
   "config-connection": [
     "AVA_GATEWAY_PORT",

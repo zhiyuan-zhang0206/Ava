@@ -39,7 +39,11 @@ def _restore_authority_env() -> Iterator[None]:
     )
 
     touched = cluster_scope_aliases() | env_identity_keys() | agent_runner_cluster_aliases()
-    snapshot = {k: os.environ.get(k) for k in touched if k in os.environ}
+    # Snapshot EVERY touched key (absent = None, restored as a pop): the
+    # authority pass and the legacy-alias translation can ADD a touched key
+    # (e.g. _translate_legacy_skip_aliases writes the canonical key), and a
+    # key added by a test must not leak into the next one.
+    snapshot = {k: os.environ.get(k) for k in touched}
     yield
     for key, val in snapshot.items():
         if val is None:
@@ -810,8 +814,11 @@ def test_translate_legacy_skip_aliases_inverts(monkeypatch: pytest.MonkeyPatch) 
     assert os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] == "false"
     assert os.environ["AVA_SECURITY_SCAN_ENABLED"] == "true"
 
-    # Canonical present -> no translation, canonical survives verbatim.
-    monkeypatch.setitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", "true")
+    # Canonical present -> no translation, canonical survives verbatim. Raw
+    # assignment, not monkeypatch.setitem: setitem would record the
+    # translation-written "false" as the "original" and re-add it at teardown
+    # AFTER the module's restore fixture popped it (leak into later tests).
+    os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] = "true"
     dotenv_boot._translate_legacy_skip_aliases()
     assert os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] == "true"
 
