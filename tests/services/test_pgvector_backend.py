@@ -20,13 +20,15 @@ import psycopg
 import pytest
 from psycopg import sql as pgsql
 
-from services.memory_indexer import embedder
 from services.memory_indexer.backends.pgvector import _TABLE, PGVectorBackend
+
+_DIM = 8
+_FP = "test:gemini:dim=8"
 
 
 def _vec(seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    return rng.standard_normal(embedder.DIM).astype(np.float32)
+    return rng.standard_normal(_DIM).astype(np.float32)
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +44,7 @@ def _fresh_table(db_conn: psycopg.Connection) -> None:
 
 @pytest.fixture
 def backend() -> Iterator[PGVectorBackend]:
-    b = PGVectorBackend()
+    b = PGVectorBackend(dim=_DIM, fingerprint=_FP)
     b.connect()
     try:
         yield b
@@ -65,7 +67,7 @@ def _rows(db_conn: psycopg.Connection) -> list[tuple[Any, ...]]:
 def test_connect_creates_extension_and_table(
     db_conn: psycopg.Connection, backend: PGVectorBackend
 ) -> None:
-    """connect() provisions the extension + table with the embedder's dim."""
+    """connect() provisions the extension + table at the provider's dim."""
     with db_conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s)", (_TABLE,))
         row = cur.fetchone()
@@ -76,15 +78,15 @@ def test_connect_creates_extension_and_table(
             (_TABLE,),
         )
         row = cur.fetchone()
-        assert row is not None and row[0] == embedder.DIM  # pyright: ignore[reportUnknownMemberType]
+        assert row is not None and row[0] == _DIM  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_connect_drops_and_recreates_on_dim_mismatch(
     db_conn: psycopg.Connection, backend: PGVectorBackend
 ) -> None:
-    """A table from an older embedder dim is a stale cache — dropped and
+    """A table at another provider's dim (or missing a column) is a stale cache — dropped and
     recreated at the current dim (cold-start rebuilds the rows)."""
-    wrong_dim = embedder.DIM // 4
+    wrong_dim = _DIM // 4
     with db_conn.cursor() as cur:
         cur.execute("DROP TABLE memory_embeddings")
         cur.execute(
@@ -98,7 +100,7 @@ def test_connect_drops_and_recreates_on_dim_mismatch(
         )
     db_conn.commit()
 
-    fresh = PGVectorBackend()
+    fresh = PGVectorBackend(dim=_DIM, fingerprint=_FP)
     fresh.connect()
     try:
         with db_conn.cursor() as cur:
@@ -108,7 +110,7 @@ def test_connect_drops_and_recreates_on_dim_mismatch(
                 (_TABLE,),
             )
             row = cur.fetchone()
-            assert row is not None and row[0] == embedder.DIM  # pyright: ignore[reportUnknownMemberType]
+            assert row is not None and row[0] == _DIM  # pyright: ignore[reportUnknownMemberType]
     finally:
         fresh.close()
 
@@ -123,7 +125,7 @@ def test_upsert_all_meta_roundtrip(db_conn: psycopg.Connection, backend: PGVecto
     backend.upsert("/a.md", 1.0, "ha", _vec(2), kind="desc", chunk_idx=0)
     backend.upsert("/b.md", 2.0, "hb", _vec(3), kind="body", chunk_idx=0)
 
-    assert backend.all_meta() == {"/a.md": (1.0, "ha"), "/b.md": (2.0, "hb")}
+    assert backend.all_meta() == {"/a.md": (1.0, "ha", _FP), "/b.md": (2.0, "hb", _FP)}
     assert len(_rows(db_conn)) == 4
 
 
@@ -131,7 +133,7 @@ def test_upsert_overwrite_same_pk(db_conn: psycopg.Connection, backend: PGVector
     """Re-upserting the same (path, kind, chunk_idx) overwrites in place."""
     backend.upsert("/a.md", 1.0, "h1", _vec(0), kind="body", chunk_idx=0)
     backend.upsert("/a.md", 2.0, "h2", _vec(1), kind="body", chunk_idx=0)
-    assert backend.all_meta() == {"/a.md": (2.0, "h2")}
+    assert backend.all_meta() == {"/a.md": (2.0, "h2", _FP)}
     assert len(_rows(db_conn)) == 1
 
 
@@ -142,7 +144,7 @@ def test_delete_removes_all_chunks_of_path(
         backend.upsert("/a.md", 1.0, "ha", _vec(idx), kind="body", chunk_idx=idx)
     backend.upsert("/b.md", 2.0, "hb", _vec(9), kind="body", chunk_idx=0)
     backend.delete("/a.md")
-    assert backend.all_meta() == {"/b.md": (2.0, "hb")}
+    assert backend.all_meta() == {"/b.md": (2.0, "hb", _FP)}
     assert [r[1] for r in _rows(db_conn)] == ["/b.md"]
 
 
@@ -156,7 +158,7 @@ def test_delete_missing_noop(backend: PGVectorBackend) -> None:
 def test_search_topk_orders_by_cosine_and_aggregates(backend: PGVectorBackend) -> None:
     """Same-path chunks collapse to one hit (best cosine wins); ordering is
     cosine-ascending — identical contract to the milvus backend."""
-    ones = np.ones(embedder.DIM, dtype=np.float32)
+    ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     backend.upsert("/a.md", 1.0, "ha", 0.9 * ones, kind="body", chunk_idx=1)
     backend.upsert("/a.md", 1.0, "ha", 0.5 * ones, kind="body", chunk_idx=2)
@@ -171,7 +173,7 @@ def test_search_topk_empty_table(backend: PGVectorBackend) -> None:
 
 def test_search_topk_async_matches_sync(backend: PGVectorBackend) -> None:
     """The thread-pooled async variant returns the same order as the sync one."""
-    ones = np.ones(embedder.DIM, dtype=np.float32)
+    ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
     sync = backend.search_topk(ones, k=5)
@@ -191,15 +193,16 @@ def test_backend_without_connect_uses_short_lived_connections(db_conn: psycopg.C
                 "pk VARCHAR(2048) PRIMARY KEY, path VARCHAR(1024) NOT NULL, "
                 "kind VARCHAR(16) NOT NULL, chunk_idx BIGINT NOT NULL, "
                 "mtime DOUBLE PRECISION NOT NULL, content_hash VARCHAR(128) NOT NULL, "
+                "embedder VARCHAR(64) NOT NULL, "
                 "vector vector({dim}) NOT NULL)"
-            ).format(dim=pgsql.Literal(embedder.DIM))
+            ).format(dim=pgsql.Literal(_DIM))
         )
     db_conn.commit()
-    backend = PGVectorBackend()
-    ones = np.ones(embedder.DIM, dtype=np.float32)
+    backend = PGVectorBackend(dim=_DIM, fingerprint=_FP)
+    ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     assert backend.search_topk(ones, k=5) == ["/a.md"]
-    assert backend.all_meta() == {"/a.md": (1.0, "ha")}
+    assert backend.all_meta() == {"/a.md": (1.0, "ha", _FP)}
     backend.close()  # no pool — must not raise
 
 
@@ -208,7 +211,7 @@ def test_zero_vector_query_returns_defined_ranking(backend: PGVectorBackend) -> 
     distance 1.0 for every row) — a defined ranking, never a crash."""
     backend.upsert("/a.md", 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert("/b.md", 2.0, "hb", _vec(1), kind="body", chunk_idx=0)
-    result = backend.search_topk(np.zeros(embedder.DIM, dtype=np.float32), 5)
+    result = backend.search_topk(np.zeros(_DIM, dtype=np.float32), 5)
     assert set(result) == {"/a.md", "/b.md"}
 
 
@@ -218,7 +221,7 @@ def test_nan_query_fails_loudly(backend: PGVectorBackend) -> None:
     behavior the NULL-skip defensive branch never sees)."""
     backend.upsert("/a.md", 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     with pytest.raises(psycopg.errors.DataException):
-        backend.search_topk(np.full(embedder.DIM, np.nan, dtype=np.float32), 5)
+        backend.search_topk(np.full(_DIM, np.nan, dtype=np.float32), 5)
 
 
 def test_path_with_quotes_and_backslashes_roundtrips(backend: PGVectorBackend) -> None:
@@ -226,7 +229,7 @@ def test_path_with_quotes_and_backslashes_roundtrips(backend: PGVectorBackend) -
     regression pin for the injection surface."""
     path = '/notes/"quoted"\\back\\slash.md'
     backend.upsert(path, 1.0, "h", _vec(0), kind="body", chunk_idx=0)
-    assert backend.all_meta() == {path: (1.0, "h")}
+    assert backend.all_meta() == {path: (1.0, "h", _FP)}
     assert backend.search_topk(_vec(0), 5) == [path]
     backend.delete(path)
     assert backend.all_meta() == {}

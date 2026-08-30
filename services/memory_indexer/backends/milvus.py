@@ -26,7 +26,10 @@ Schema: single collection `memory_embeddings`, one row per **chunk**:
 - mtime DOUBLE — used by cold-start reconcile
 - content_hash VARCHAR(128) — secondary gate when mtime is touched but
   content unchanged; skips re-embed
-- vector FLOAT_VECTOR(DIM) COSINE AUTOINDEX
+- `embedder` VARCHAR(64) — the embedding provider `fingerprint` the row
+  was produced with (semantic-space id; a change re-embeds the row)
+- `vector` FLOAT_VECTOR({dim}) COSINE AUTOINDEX — width = the provider's dim
+  (injected by the factory; mismatched collections are dropped + recreated)
 
 One file maps to 0-or-1 desc row + N body-chunk rows; embedding the
 frontmatter description on its own keeps short entity-bearing lines
@@ -53,7 +56,6 @@ import numpy as np
 from pymilvus import AsyncMilvusClient, DataType, MilvusClient
 
 from services.memory_indexer.backends.base import _PK_MAX_LENGTH, KIND_BODY, pk_of
-from services.memory_indexer.embedder import DIM
 from shared.config import settings
 
 _log = logging.getLogger("services.memory_indexer.index")
@@ -61,7 +63,9 @@ _log = logging.getLogger("services.memory_indexer.index")
 _COLLECTION = "memory_embeddings"
 
 
-_EXPECTED_FIELDS = frozenset({"pk", "path", "kind", "chunk_idx", "mtime", "content_hash", "vector"})
+_EXPECTED_FIELDS = frozenset(
+    {"pk", "path", "kind", "chunk_idx", "mtime", "content_hash", "embedder", "vector"}
+)
 
 _RAW_SEARCH_LIMIT = 200
 """Raw chunk hits pulled per query; aggregation then reduces to top-k paths."""
@@ -77,8 +81,12 @@ def server_uri() -> str:
     return settings.services.milvus_uri
 
 
-def _create_collection(client: MilvusClient) -> None:
-    """Create the chunked collection (schema + AUTOINDEX) on `client`."""
+def _create_collection(client: MilvusClient, dim: int) -> None:
+    """Create the chunked collection (schema + AUTOINDEX) on `client`.
+
+    `dim` is the provider's embedding width — the vector field's declared
+    width; a collection built for another width is a mismatched cache and is
+    dropped + recreated by `_schema_current`."""
     schema = client.create_schema(auto_id=False, enable_dynamic_field=False)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("pk", DataType.VARCHAR, is_primary=True, max_length=_PK_MAX_LENGTH)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("path", DataType.VARCHAR, max_length=1024)  # pyright: ignore[reportUnknownMemberType]
@@ -86,20 +94,24 @@ def _create_collection(client: MilvusClient) -> None:
     schema.add_field("chunk_idx", DataType.INT64)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("mtime", DataType.DOUBLE)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("content_hash", DataType.VARCHAR, max_length=128)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=DIM)  # pyright: ignore[reportUnknownMemberType]
+    schema.add_field("embedder", DataType.VARCHAR, max_length=64)  # pyright: ignore[reportUnknownMemberType]
+    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)  # pyright: ignore[reportUnknownMemberType]
     idx = client.prepare_index_params()  # pyright: ignore[reportUnknownMemberType]
     idx.add_index(field_name="vector", metric_type="COSINE", index_type="AUTOINDEX")  # pyright: ignore[reportUnknownMemberType]
     client.create_collection(collection_name=_COLLECTION, schema=schema, index_params=idx)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _schema_current(client: MilvusClient) -> bool:
-    """True when the existing collection already has the chunked schema.
+def _schema_current(client: MilvusClient, dim: int) -> bool:
+    """True when the existing collection already has the chunked schema at
+    `dim`.
 
     The legacy collection had `path` as its primary key and no `kind` /
     `chunk_idx` fields; the chunked schema adds those and folds the triple
-    into a `pk` key. Any mismatch — legacy layout or future drift — makes
-    `connect` drop + recreate, because the index is a derived cache and a
-    cold-start rebuild is the cheapest correct fix.
+    into a `pk` key. Any mismatch — legacy layout, missing `embedder`
+    column (a pre-provider-era collection), or a vector width other than the
+    configured provider's dim — makes `connect` drop + recreate, because the
+    index is a derived cache and a cold-start rebuild is the cheapest
+    correct fix.
     """
     try:
         # pymilvus's stubs type every client method as an async Unknown; the
@@ -120,12 +132,18 @@ def _schema_current(client: MilvusClient) -> bool:
     primaries: set[str] = {
         f.get("name") for f in raw_list if isinstance(f.get("name"), str) and f.get("is_primary")
     }
-    return set(_EXPECTED_FIELDS) == names and primaries == {"pk"}
+    vec_dim: int | None = None
+    for f in raw_list:
+        if isinstance(f.get("name"), str) and f.get("name") == "vector":
+            params: dict[str, Any] = cast(dict[str, Any], f.get("params") or {})  # pyright: ignore[reportUnknownVariableType]
+            if isinstance(params.get("dim"), int):
+                vec_dim = params.get("dim")
+    return set(_EXPECTED_FIELDS) == names and primaries == {"pk"} and vec_dim == dim
 
 
-def _connect() -> MilvusClient:
+def _connect(dim: int) -> MilvusClient:
     """Connect to milvus server + ensure collection exists + load into
-    memory. Caller is responsible for `client.close()`.
+    memory (at the provider's `dim`). Caller is responsible for `client.close()`.
 
     Collection schema is idempotent: first connect creates it (or, when the
     existing collection carries the legacy / a mismatched schema, drops and
@@ -144,15 +162,15 @@ def _connect() -> MilvusClient:
     # is real, not always-true. Every pymilvus client/schema method below also types
     # its **kwargs as Unknown (reportUnknownMemberType); the call args are fully typed.
     if not client.has_collection(collection_name=_COLLECTION):  # pyright: ignore[reportUnnecessaryComparison, reportUnknownMemberType]
-        _create_collection(client)
-    elif not _schema_current(client):
+        _create_collection(client, dim)
+    elif not _schema_current(client, dim):
         _log.warning(
             "[index] collection %s schema mismatch — dropping + recreating; "
             "cold-start will rebuild the index chunked",
             _COLLECTION,
         )
         client.drop_collection(collection_name=_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
-        _create_collection(client)
+        _create_collection(client, dim)
     client.load_collection(collection_name=_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
     return client
 
@@ -178,12 +196,14 @@ def _upsert(
     *,
     kind: str = KIND_BODY,
     chunk_idx: int = 0,
+    fingerprint: str = "",
 ) -> None:
     """Write / update one chunk row, keyed by (path, kind, chunk_idx).
 
     `kind` is KIND_DESC (the frontmatter description, chunk_idx=0) or
     KIND_BODY (a body chunk). Re-upserting the same triple overwrites in
-    place via the folded pk.
+    place via the folded pk. `fingerprint` is the embedding provider's
+    semantic-space id, stamped on the row for the reconcile diff.
     """
     # pymilvus client.upsert types its **kwargs as Unknown; the call args are fully typed.
     client.upsert(  # pyright: ignore[reportUnknownMemberType]
@@ -196,6 +216,7 @@ def _upsert(
                 "chunk_idx": int(chunk_idx),
                 "mtime": float(mtime),
                 "content_hash": hash_,
+                "embedder": fingerprint,
                 "vector": embedding.astype(np.float32).tolist(),
             }
         ],
@@ -219,13 +240,15 @@ def _delete(client: MilvusClient, path: str) -> None:
     client.delete(collection_name=_COLLECTION, filter=expr)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _all_meta(client: MilvusClient) -> dict[str, tuple[float, str]]:
-    """Per-path (mtime, content_hash) — one entry per **file**, not per chunk.
+def _all_meta(client: MilvusClient) -> dict[str, tuple[float, str, str]]:
+    """Per-path (mtime, content_hash, provider_fingerprint) — one entry per
+    **file**, not per chunk.
 
-    Chunk rows of one path share the file's mtime and content_hash; the
-    aggregation keeps the max mtime. Same contract as before chunking: the
-    cold-start reconcile diffs disk against this dict to decide which paths
-    need re-embedding.
+    Chunk rows of one path share the file's mtime, content_hash and
+    provider fingerprint; the aggregation keeps the max mtime. The
+    fingerprint is the reconcile key's third element: the cold-start
+    reconcile diffs disk against this dict to decide which paths need
+    re-embedding (a changed provider fingerprint re-embeds everything).
 
     Does not load vector BLOBs — the meta query only decides which paths need
     re-embedding; a few thousand files takes a few ms.
@@ -236,14 +259,14 @@ def _all_meta(client: MilvusClient) -> dict[str, tuple[float, str]]:
     rows: list[dict[str, Any]] = client.query(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         collection_name=_COLLECTION,
         filter="",
-        output_fields=["path", "mtime", "content_hash"],
+        output_fields=["path", "mtime", "content_hash", "embedder"],
         limit=16384,
     )
-    meta: dict[str, tuple[float, str]] = {}
+    meta: dict[str, tuple[float, str, str]] = {}
     for r in rows:
         prev = meta.get(r["path"])
         if prev is None or r["mtime"] > prev[0]:
-            meta[r["path"]] = (r["mtime"], r["content_hash"])
+            meta[r["path"]] = (r["mtime"], r["content_hash"], r["embedder"])
     return meta
 
 
@@ -330,13 +353,18 @@ class MilvusBackend:
     still re-exported there for the legacy regression suite. New code goes
     through this class via `backends.factory.get_backend()`.
 
-    `client` is injectable for tests that already hold a connected client
-    (the `milvus_client` fixture); production paths call `connect()`.
+    The vector space is injected (factory wiring): `dim` is the collection's
+    vector width and `fingerprint` is stamped on every row — no import of
+    provider constants. `client` is injectable for tests that already hold a
+    connected client (the `milvus_client` fixture); production paths call
+    `connect()`.
     """
 
     name = "milvus"
 
-    def __init__(self, client: MilvusClient | None = None) -> None:
+    def __init__(self, dim: int, fingerprint: str, client: MilvusClient | None = None) -> None:
+        self._dim = dim
+        self._fingerprint = fingerprint
         self._client = client
 
     def _require_client(self) -> MilvusClient:
@@ -348,7 +376,7 @@ class MilvusBackend:
 
     def connect(self) -> None:
         """Connect + ensure collection + load (see `_connect`)."""
-        self._client = _connect()
+        self._client = _connect(self._dim)
 
     def close(self) -> None:
         """Close the held client; idempotent, safe to call twice."""
@@ -375,14 +403,16 @@ class MilvusBackend:
             embedding,
             kind=kind,
             chunk_idx=chunk_idx,
+            fingerprint=self._fingerprint,
         )
 
     def delete(self, path: str) -> None:
         """Delete every chunk row of `path` — see `_delete`."""
         _delete(self._require_client(), path)
 
-    def all_meta(self) -> dict[str, tuple[float, str]]:
-        """Per-path (mtime, content_hash) — see `_all_meta`."""
+    def all_meta(self) -> dict[str, tuple[float, str, str]]:
+        """Per-path (mtime, content_hash, provider_fingerprint) — see
+        `_all_meta`."""
         return _all_meta(self._require_client())
 
     def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:

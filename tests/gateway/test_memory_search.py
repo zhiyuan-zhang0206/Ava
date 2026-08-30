@@ -14,6 +14,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from services.memory_indexer.embeddings.base import EmbeddingAPIError
+
+
+class _StubProvider:
+    """Embedding provider stand-in — the handler reads dim/fingerprint and
+    calls embed_query_async; a class (not an instance) works because the
+    factory's `get_provider()` return value is only attribute-accessed."""
+
+    dim = 768
+    fingerprint = "fake:provider:dim=768"
+
+    @staticmethod
+    async def embed_query_async(_text: str) -> list[float]:
+        return [0.0] * _StubProvider.dim
+
+    @staticmethod
+    def embed_query(_text: str) -> list[float]:
+        return [0.0] * _StubProvider.dim
+
+    @staticmethod
+    def embed_batch(texts: list[str]) -> list[list[float]]:
+        return [[0.0] * _StubProvider.dim for _ in texts]
 
 
 class TestPrimaryPath:
@@ -35,14 +57,14 @@ class TestPrimaryPath:
 
         # stub embedder/backend to avoid real Gemini / milvus calls
         import services.memory_indexer.backends.factory as _factory
-        import services.memory_indexer.embedder as _embedder
+        import services.memory_indexer.embeddings.factory as _embedding_factory
 
-        async def _fake_embed(_q: str) -> list[float]:
-            return [0.0] * 768
-
-        monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
+        monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
 
         class _FakeBackend:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
             async def search_topk_async(
                 self, _vec: object, _k: int, *, timeout: float
             ) -> list[str]:
@@ -100,14 +122,14 @@ title: No Description
         (tmp_path / "no_frontmatter.md").write_text("# Just a heading\n\nNo YAML.")
 
         import services.memory_indexer.backends.factory as _factory
-        import services.memory_indexer.embedder as _embedder
+        import services.memory_indexer.embeddings.factory as _embedding_factory
 
-        async def _fake_embed(_q: str) -> list[float]:
-            return [0.0] * 768
-
-        monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
+        monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
 
         class _FakeBackend:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
             async def search_topk_async(
                 self, _vec: object, _k: int, *, timeout: float
             ) -> list[str]:
@@ -139,12 +161,17 @@ title: No Description
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """embedder API failure → IndexerUnavailable (wire 503)."""
-        import services.memory_indexer.embedder as _embedder
+        import services.memory_indexer.embeddings.factory as _embedding_factory
 
-        async def _fail(_q: str) -> Any:
-            raise _embedder.EmbeddingAPIError("gemini quota exhausted")
+        class _BoomProvider:
+            dim = 768
+            fingerprint = "fake:provider:dim=768"
 
-        monkeypatch.setattr(_embedder, "embed_query_async", _fail)
+            @staticmethod
+            async def embed_query_async(_q: str) -> Any:
+                raise EmbeddingAPIError("gemini quota exhausted")
+
+        monkeypatch.setattr(_embedding_factory, "get_provider", _BoomProvider)
 
         with TestClient(app) as client:
             resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
@@ -168,12 +195,17 @@ title: No Description
         cacert. The milvus phase below already caught broadly; this makes the
         two symmetric.
         """
-        import services.memory_indexer.embedder as _embedder
+        import services.memory_indexer.embeddings.factory as _embedding_factory
 
-        async def _fail(_q: str) -> Any:
-            raise FileNotFoundError(2, "No such file or directory")
+        class _BoomProvider:
+            dim = 768
+            fingerprint = "fake:provider:dim=768"
 
-        monkeypatch.setattr(_embedder, "embed_query_async", _fail)
+            @staticmethod
+            async def embed_query_async(_q: str) -> Any:
+                raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(_embedding_factory, "get_provider", _BoomProvider)
 
         with TestClient(app) as client:
             resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
@@ -185,14 +217,14 @@ title: No Description
     ) -> None:
         """backend raises (e.g. milvus connect refused) → IndexerUnavailable (wire 503)."""
         import services.memory_indexer.backends.factory as _factory
-        import services.memory_indexer.embedder as _embedder
+        import services.memory_indexer.embeddings.factory as _embedding_factory
 
-        async def _fake_embed(_q: str) -> list[float]:
-            return [0.0] * 768
-
-        monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
+        monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
 
         class _BoomBackend:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
             async def search_topk_async(
                 self, _vec: object, _k: int, *, timeout: float
             ) -> list[str]:
@@ -851,21 +883,29 @@ class TestEventLoopIsolation:
 
         import gateway.routers.memory as _gw_memory
         import services.memory_indexer.backends.factory as _factory
-        import services.memory_indexer.embedder as _embedder
+        import services.memory_indexer.embeddings.factory as _embedding_factory
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
         (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n")
 
         in_flight = threading.Event()
 
-        async def _slow_embed(_q: str) -> list[float]:
-            in_flight.set()
-            await asyncio.sleep(1.0)
-            return [0.0] * 768
+        class _SlowProvider:
+            dim = 768
+            fingerprint = "fake:provider:dim=768"
 
-        monkeypatch.setattr(_embedder, "embed_query_async", _slow_embed)
+            @staticmethod
+            async def embed_query_async(_q: str) -> list[float]:
+                in_flight.set()
+                await asyncio.sleep(1.0)
+                return [0.0] * 768
+
+        monkeypatch.setattr(_embedding_factory, "get_provider", _SlowProvider)
 
         class _FakeBackend:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
             async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[str]:
                 assert timeout > 0  # the handler must hand the backend a real deadline
                 return [str(tmp_path / "a.md")]
@@ -927,7 +967,7 @@ def _stub_search_backend(
     """
     import gateway.routers.memory as _gw_memory
     import services.memory_indexer.backends.factory as _factory
-    import services.memory_indexer.embedder as _embedder
+    import services.memory_indexer.embeddings.factory as _embedding_factory
     from shared.config import settings
 
     monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
@@ -943,14 +983,14 @@ def _stub_search_backend(
     monkeypatch.setattr(_gw_memory, "_search_semaphore", lambda: fresh)
     monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", _TEST_DEADLINE_S)
 
-    async def _fake_embed(_q: str) -> list[float]:
-        return [0.0] * 768
-
     class _StubBackend:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
         async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[str]:
             return await search(_v, _k, timeout=timeout)
 
-    monkeypatch.setattr(_embedder, "embed_query_async", _fake_embed)
+    monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
     monkeypatch.setattr(_factory, "get_backend", _StubBackend)
     return fresh
 
@@ -1027,10 +1067,15 @@ class TestWedgedBackendReleasesPermits:
         happened to stall this time would leave the other phase able to pin the
         endpoint exactly the same way.
         """
-        import services.memory_indexer.embedder as _embedder
+        import services.memory_indexer.embeddings.factory as _embedding_factory
+
+        class _StuckProvider:
+            dim = 768
+            fingerprint = "fake:provider:dim=768"
+            embed_query_async = _never_returns
 
         _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
-        monkeypatch.setattr(_embedder, "embed_query_async", _never_returns)
+        monkeypatch.setattr(_embedding_factory, "get_provider", _StuckProvider)
 
         async with _asgi_client() as client:
             responses = await asyncio.wait_for(
@@ -1072,6 +1117,9 @@ class TestWedgedBackendReleasesPermits:
                     await task
 
             class _Healthy:
+                def __init__(self, *args: object, **kwargs: object) -> None:
+                    pass
+
                 async def search_topk_async(
                     self, _v: object, _k: int, *, timeout: float
                 ) -> list[str]:
@@ -1099,6 +1147,9 @@ class TestWedgedBackendReleasesPermits:
             )
 
             class _Healthy:
+                def __init__(self, *args: object, **kwargs: object) -> None:
+                    pass
+
                 async def search_topk_async(
                     self, _v: object, _k: int, *, timeout: float
                 ) -> list[str]:

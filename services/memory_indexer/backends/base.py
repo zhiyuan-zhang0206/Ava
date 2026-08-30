@@ -7,7 +7,15 @@ reconcile rebuilds the index on the new backend without hand-copying data.
 
 The chunk/pk helpers live here because every backend shares them: they
 are the indexer layer's row vocabulary (chunking itself stays in the
-daemon, embedding in `embedder`), not any one backend's storage detail.
+daemon, embedding in `services.memory_indexer.embeddings`), not any one
+backend's storage detail.
+
+The embedding vector space is backend-constructor-injected, never
+imported: `backends.factory.get_backend(dim=..., fingerprint=...)` hands
+each backend the provider's `dim` (schema width) and `fingerprint`
+(identifies the semantic space; stored per row so a provider switch
+triggers a full re-embed). Backends therefore contain no provider
+constant and no import of the embeddings package.
 """
 
 from __future__ import annotations
@@ -66,6 +74,11 @@ class MemorySearchBackend(Protocol):
     def connect(self) -> None: ...
     def close(self) -> None: ...
 
+    # The vector space is fixed at construction (factory injection): every
+    # backend knows the row width (`dim`) and stamps each row with the
+    # provider `fingerprint` it was built for, so `all_meta` can return it
+    # and the daemon can detect a provider switch.
+
     # Write path (indexer daemon).
     def upsert(
         self,
@@ -80,7 +93,14 @@ class MemorySearchBackend(Protocol):
 
     def delete(self, path: str) -> None: ...
 
-    def all_meta(self) -> dict[str, tuple[float, str]]: ...
+    def all_meta(
+        self,
+    ) -> dict[str, tuple[float, str, str]]:
+        """Per-path (mtime, content_hash, provider_fingerprint) — the
+        reconcile key. A fingerprint that differs from the configured
+        provider's means the row belongs to another semantic space and must
+        be re-embedded."""
+        ...
 
     # Read path (gateway).
     def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]: ...

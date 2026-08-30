@@ -1213,15 +1213,22 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     import gateway.routers.agent_events as agent_events_router
     import gateway.routers.memory as memory_router
     from gateway import loki_events
-    from services.memory_indexer import embedder
+    from services.memory_indexer.embeddings import factory as _embedding_factory
 
     def _query(**_kwargs: object) -> tuple[list[dict[str, object]], bool]:
         return [], False
 
-    async def _embed(_query: str) -> list[float]:
-        return [0.0]
+    class _StubProvider:
+        dim = 8
+        fingerprint = "fake:provider:dim=8"
 
-    async def _topk(_vector: object, _k: int, _deadline: float) -> list[str]:
+        @staticmethod
+        async def embed_query_async(_query: str) -> list[float]:
+            return [0.0] * 8
+
+    async def _topk(
+        _vector: object, _k: int, _deadline: float, *args: object, **kwargs: object
+    ) -> list[str]:
         return []
 
     async def _stream(*_args: object, **_kwargs: object):
@@ -1229,7 +1236,7 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
             yield ""
 
     monkeypatch.setattr(loki_events, "query_events", _query)
-    monkeypatch.setattr(embedder, "embed_query_async", _embed)
+    monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
     monkeypatch.setattr(memory_router, "_backend_topk", _topk)
     monkeypatch.setattr(agent_events_router, "event_stream", _stream)
 

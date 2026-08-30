@@ -18,7 +18,6 @@ from zipfile import BadZipFile
 import numpy as np
 
 from services.memory_indexer.backends.base import KIND_BODY, pk_of
-from services.memory_indexer.embedder import DIM
 
 _log = logging.getLogger("services.memory_search.store")
 
@@ -29,18 +28,38 @@ _NPZ_KINDS = "kinds"
 _NPZ_CHUNK_IDX = "chunk_idx"
 _NPZ_MTIMES = "mtimes"
 _NPZ_HASHES = "content_hashes"
+_NPZ_EMBEDDERS = "embedders"
 
 _NPZ_KEYS = frozenset(
-    {_NPZ_VECTORS, _NPZ_PKS, _NPZ_PATHS, _NPZ_KINDS, _NPZ_CHUNK_IDX, _NPZ_MTIMES, _NPZ_HASHES}
+    {
+        _NPZ_VECTORS,
+        _NPZ_PKS,
+        _NPZ_PATHS,
+        _NPZ_KINDS,
+        _NPZ_CHUNK_IDX,
+        _NPZ_MTIMES,
+        _NPZ_HASHES,
+        _NPZ_EMBEDDERS,
+    }
 )
 
 
 class MemoryStore:
     """Chunk rows keyed by the shared folded pk — the same row vocabulary
-    every backend uses, so reconciliation can compare rows 1:1."""
+    every backend uses, so reconciliation can compare rows 1:1.
 
-    def __init__(self, data_file: Path) -> None:
+    The embedding vector space is injected (the provider's `dim` and
+    `fingerprint`, wired by `services.memory_search.daemon` from
+    `embeddings.factory.get_provider()`): the store is the numpy backend's
+    storage, and its matrix width IS the provider's dim. A loaded npz whose
+    width differs is a stale cache from another provider — the store starts
+    empty and the cold-start reconcile rebuilds it.
+    """
+
+    def __init__(self, data_file: Path, dim: int, fingerprint: str) -> None:
         self._data_file = data_file
+        self._dim = dim
+        self._fingerprint = fingerprint
         self._pk_index: dict[str, int] = {}
         self._pks: list[str] = []
         self._paths: list[str] = []
@@ -48,7 +67,8 @@ class MemoryStore:
         self._chunk_idx: list[int] = []
         self._mtimes: list[float] = []
         self._hashes: list[str] = []
-        self._matrix = np.empty((0, DIM), dtype=np.float32)
+        self._embedders: list[str] = []
+        self._matrix = np.empty((0, dim), dtype=np.float32)
         # Duration of the most recent successful save(), None until the first
         # one — the /stats endpoint and the 60s stats flusher expose it so a
         # growing npz cost is visible before it becomes a write stall.
@@ -60,15 +80,18 @@ class MemoryStore:
         """Load rows from the npz when it exists; a fresh service starts
         empty and the indexer's cold-start reconcile fills it.
 
-        Three broken-file paths degrade to "start empty" instead of raising —
+        Four broken-file paths degrade to "start empty" instead of raising —
         a file missing keys, a file that does not parse at all
-        (truncated / foreign bytes), and a file that half-converts (one
-        column fails mid-load). All three are a broken cache: the memory
-        pool is the source of truth and the cold-start reconcile rebuilds
-        the index, so there is nothing worth crashing the daemon for — a
-        raise here would mean the watchdog respawns into the same broken
-        file every 60s (the restart-loop shape the keepalive policy exists
-        to stop, but only a degradable load makes it a non-issue)."""
+        (truncated / foreign bytes), a file that half-converts (one
+        column fails mid-load), and a vector width that differs from the
+        configured provider's dim (another provider's index, or a provider
+        switch without a restart of this service). All four are a broken
+        cache: the memory pool is the source of truth and the cold-start
+        reconcile rebuilds the index, so there is nothing worth crashing the
+        daemon for — a raise here would mean the watchdog respawns into the
+        same broken file every 60s (the restart-loop shape the keepalive
+        policy exists to stop, but only a degradable load makes it a
+        non-issue)."""
         if not self._data_file.exists():
             return
         try:
@@ -93,6 +116,19 @@ class MemoryStore:
                 matrix = data[_NPZ_VECTORS].astype(np.float32)
                 if matrix.ndim == 1:
                     matrix = matrix.reshape(1, -1)
+                if matrix.shape[1] != self._dim:
+                    # Another provider's vector space (same dim ≠ same
+                    # semantic space, but a different dim cannot even be
+                    # searched consistently) — the npz is a stale cache.
+                    _log.warning(
+                        "[memory_search] %s vector dim %d != configured provider dim %d — "
+                        "starting empty; cold-start will rebuild the index",
+                        self._data_file,
+                        matrix.shape[1],
+                        self._dim,
+                    )
+                    return
+                embedders = [str(e) for e in data[_NPZ_EMBEDDERS].tolist()]
                 pk_index = {pk: idx for idx, pk in enumerate(pks)}
         except (OSError, ValueError, EOFError, KeyError, BadZipFile) as exc:
             # np.load raises ValueError / EOFError on foreign bytes, BadZipFile
@@ -118,6 +154,7 @@ class MemoryStore:
         self._chunk_idx = chunk_idx
         self._mtimes = mtimes
         self._hashes = hashes
+        self._embedders = embedders
         self._matrix = matrix
         self._pk_index = pk_index
         _log.info("[memory_search] loaded %d rows from %s", len(self._pks), self._data_file)
@@ -144,6 +181,7 @@ class MemoryStore:
             chunk_idx=np.array(self._chunk_idx, dtype=np.int64),
             mtimes=np.array(self._mtimes, dtype=np.float64),
             content_hashes=np.array(self._hashes, dtype=str),
+            embedders=np.array(self._embedders, dtype=str),
             vectors=self._matrix,
         )
         tmp.replace(self._data_file)
@@ -164,8 +202,8 @@ class MemoryStore:
         """Write / update one chunk row; re-upserting the same triple
         overwrites in place — identical semantics to the milvus backend."""
         vector = embedding.astype(np.float32).reshape(-1)
-        if vector.shape != (DIM,):
-            raise ValueError(f"embedding shape {vector.shape} != ({DIM},)")
+        if vector.shape != (self._dim,):
+            raise ValueError(f"embedding shape {vector.shape} != ({self._dim},)")
         pk = pk_of(path, kind, chunk_idx)
         idx = self._pk_index.get(pk)
         if idx is None:
@@ -176,6 +214,7 @@ class MemoryStore:
             self._chunk_idx.append(int(chunk_idx))
             self._mtimes.append(float(mtime))
             self._hashes.append(content_hash)
+            self._embedders.append(self._fingerprint)
             self._pk_index[pk] = idx
             if self._matrix.shape[0] == 0:
                 self._matrix = vector[np.newaxis, :]
@@ -187,6 +226,7 @@ class MemoryStore:
             self._chunk_idx[idx] = int(chunk_idx)
             self._mtimes[idx] = float(mtime)
             self._hashes[idx] = content_hash
+            self._embedders[idx] = self._fingerprint
             self._matrix[idx] = vector
 
     def delete(self, path: str) -> None:
@@ -200,17 +240,22 @@ class MemoryStore:
         self._chunk_idx = [self._chunk_idx[i] for i in keep_idx]
         self._mtimes = [self._mtimes[i] for i in keep_idx]
         self._hashes = [self._hashes[i] for i in keep_idx]
+        self._embedders = [self._embedders[i] for i in keep_idx]
         self._matrix = self._matrix[keep_idx]
         self._pk_index = {pk: idx for idx, pk in enumerate(self._pks)}
 
-    def all_meta(self) -> dict[str, tuple[float, str]]:
-        """Per-path (mtime, content_hash) — one entry per **file**, not per
-        chunk (aggregation keeps the max mtime; same contract as milvus)."""
-        meta: dict[str, tuple[float, str]] = {}
-        for path, mtime, hash_ in zip(self._paths, self._mtimes, self._hashes, strict=True):
+    def all_meta(self) -> dict[str, tuple[float, str, str]]:
+        """Per-path (mtime, content_hash, provider_fingerprint) — one entry
+        per **file**, not per chunk (aggregation keeps the max mtime; same
+        contract as milvus). The fingerprint is the reconcile key's third
+        element."""
+        meta: dict[str, tuple[float, str, str]] = {}
+        for path, mtime, hash_, fingerprint in zip(
+            self._paths, self._mtimes, self._hashes, self._embedders, strict=True
+        ):
             prev = meta.get(path)
             if prev is None or mtime > prev[0]:
-                meta[path] = (mtime, hash_)
+                meta[path] = (mtime, hash_, fingerprint)
         return meta
 
     def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
@@ -223,8 +268,8 @@ class MemoryStore:
         paths; empty when the store is empty.
         """
         query = query_vector.astype(np.float32).reshape(-1)
-        if query.shape != (DIM,):
-            raise ValueError(f"query shape {query.shape} != ({DIM},)")
+        if query.shape != (self._dim,):
+            raise ValueError(f"query shape {query.shape} != ({self._dim},)")
         if self._matrix.shape[0] == 0:
             return []
         q_norm = float(np.linalg.norm(query))

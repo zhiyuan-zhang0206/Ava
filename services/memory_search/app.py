@@ -17,8 +17,6 @@ Binds loopback only (the daemon passes host="127.0.0.1") — like milvus,
 this is a strictly local service; no LAN port is opened.
 """
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import logging
@@ -29,7 +27,7 @@ import numpy as np
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from services.memory_indexer.embedder import DIM
+from services.memory_indexer.embeddings.factory import get_provider
 from services.memory_search.store import MemoryStore
 from shared import telemetry
 
@@ -37,8 +35,12 @@ _log = logging.getLogger("services.memory_search.app")
 
 # Loopback-only is the trust model, not a security boundary: any local
 # process could still POST a huge body and drive an allocation, so the
-# wire models carry hard size bounds. An embedding is exactly DIM floats;
-# anything longer is malformed and rejected before numpy ever allocates.
+# wire models carry hard size bounds. An embedding is exactly
+# `_EMBED_DIM` floats — the configured provider's width, resolved at
+# import (an unknown AVA_EMBEDDING_BACKEND fails the service boot loudly)
+# — and anything longer is malformed and rejected before numpy ever
+# allocates. The store keeps its own exact-dim check as the last gate.
+_EMBED_DIM = get_provider().dim
 _MAX_K = 1000
 
 # One stats sample per minute — bounded row rate, same cadence as the
@@ -53,7 +55,7 @@ class UpsertBody(BaseModel):
     content_hash: str
     kind: str
     chunk_idx: int
-    vector: list[float] = Field(max_length=DIM)
+    vector: list[float] = Field(max_length=_EMBED_DIM)
 
 
 class DeleteBody(BaseModel):
@@ -61,7 +63,7 @@ class DeleteBody(BaseModel):
 
 
 class SearchBody(BaseModel):
-    vector: list[float] = Field(max_length=DIM)
+    vector: list[float] = Field(max_length=_EMBED_DIM)
     k: int = Field(ge=1, le=_MAX_K)
 
 
@@ -166,7 +168,9 @@ def build_app(store: MemoryStore) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/meta")
-    async def meta() -> dict[str, tuple[float, str]]:
+    async def meta() -> dict[str, tuple[float, str, str]]:
+        """Per-path (mtime, content_hash, provider_fingerprint) — same shape
+        the backend protocol's `all_meta` returns (the reconcile key)."""
         async with lock:
             return store.all_meta()
 
