@@ -247,10 +247,51 @@ def oss_pitr_store_group(
     )
 
 
+def cos_pitr_store_group(
+    *,
+    bucket: str,
+    region: str,
+    credentials_file: str | Path,
+    prefix: str,
+    timeout_seconds: float = 300.0,
+) -> PitrStoreGroup:
+    """The Tencent Cloud COS backend: one static key pair serves every role
+    (the S3-compatible interface has no uploader/viewer credential split like
+    GCS, so the viewer role is the same credential — the operator may still
+    mint a read-only key pair server-side for the viewer file)."""
+    from services.pitr.cos_client import CosCredentials
+    from services.pitr.cos_inventory import CosRetentionInventoryReader
+    from services.pitr.cos_publish_store import CosProtectedManifestPublisher
+    from services.pitr.cos_restore_store import CosGenerationPinnedObjectReader
+    from services.pitr.cos_store import CosObjectStore
+
+    def credentials() -> CosCredentials:
+        return CosCredentials.from_file(Path(credentials_file), region=region, bucket=bucket)
+
+    def object_store() -> CosObjectStore:
+        return CosObjectStore(credentials=credentials(), timeout_seconds=timeout_seconds)
+
+    return PitrStoreGroup(
+        object_store=object_store,
+        restartable_streaming_object_store=object_store,
+        viewer_object_store=object_store,
+        generation_pinned_object_reader=lambda: CosGenerationPinnedObjectReader(
+            credentials=credentials(), timeout_seconds=timeout_seconds
+        ),
+        retention_inventory_reader=lambda: CosRetentionInventoryReader(
+            credentials=credentials(), prefix=prefix, timeout_seconds=timeout_seconds
+        ),
+        protected_manifest_publisher=lambda: CosProtectedManifestPublisher(
+            credentials=credentials(), timeout_seconds=timeout_seconds
+        ),
+    )
+
+
 _GROUP_CONSTRUCTORS: dict[str, Callable[..., PitrStoreGroup]] = {
     "gcs": gcs_pitr_store_group,
     "baidu": baidu_pitr_store_group,
     "oss": oss_pitr_store_group,
+    "cos": cos_pitr_store_group,
 }
 
 
@@ -295,6 +336,16 @@ def get_store_group() -> PitrStoreGroup:
             prefix=config.pitr_gcs_prefix,
             credentials_file=credentials_file,
             token_file=token_file,
+        )
+    if name == "cos":
+        credentials_file = config.pitr_cos_credentials_file
+        if credentials_file is None or not config.pitr_cos_region or not config.pitr_cos_bucket:
+            raise RuntimeError("validated PITR COS credential/bucket/region is missing")
+        return cos_pitr_store_group(
+            bucket=config.pitr_cos_bucket,
+            region=config.pitr_cos_region,
+            credentials_file=credentials_file,
+            prefix=config.pitr_gcs_prefix,
         )
     credentials_file = config.pitr_oss_credentials_file
     if credentials_file is None:

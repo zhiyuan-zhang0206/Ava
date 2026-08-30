@@ -346,3 +346,57 @@ def test_replication_hba_lines_empty_when_url_has_no_user(
         "postgresql://:pw@127.0.0.1:5433/ava_main",
     )
     assert pitr_replication_hba_lines() == []
+
+
+def test_cos_backend_requires_bucket_region_and_credentials(tmp_path: Path) -> None:
+    key = tmp_path / "backup.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    with pytest.raises(ValidationError, match="AVA_PITR_COS_BUCKET"):
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_STORE_BACKEND="cos",
+            AVA_PITR_BACKUP_KEY_FILE=key,
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
+        )
+
+
+def test_cos_backend_accepts_the_validated_contract(tmp_path: Path) -> None:
+    key = tmp_path / "backup.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    credentials = tmp_path / "cos.json"
+    credentials.write_text('{"secret_id": "AKIDx", "secret_key": "SECRETy"}')
+    credentials.chmod(0o600)
+    settings = PhysicalBackupSettings(
+        AVA_PITR_ENABLED=True,
+        AVA_PITR_STORE_BACKEND="cos",
+        AVA_PITR_COS_BUCKET="ava-pitr-1250000000",
+        AVA_PITR_COS_REGION="ap-guangzhou",
+        AVA_PITR_COS_CREDENTIALS_FILE=credentials,
+        AVA_PITR_BACKUP_KEY_FILE=key,
+        AVA_PITR_BACKUP_KEY_ID="prod-v1",
+        AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
+    )
+    assert settings.pitr_cos_bucket == "ava-pitr-1250000000"
+
+
+def test_cos_backend_rejects_overexposed_credentials(tmp_path: Path) -> None:
+    key = tmp_path / "backup.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    credentials = tmp_path / "cos.json"
+    credentials.write_text('{"secret_id": "AKIDx", "secret_key": "SECRETy"}')
+    credentials.chmod(0o644)
+    with pytest.raises(ValidationError, match=r"COS_CREDENTIALS_FILE.*mode 0600"):
+        PhysicalBackupSettings(
+            AVA_PITR_ENABLED=True,
+            AVA_PITR_STORE_BACKEND="cos",
+            AVA_PITR_COS_BUCKET="ava-pitr-1250000000",
+            AVA_PITR_COS_REGION="ap-guangzhou",
+            AVA_PITR_COS_CREDENTIALS_FILE=credentials,
+            AVA_PITR_BACKUP_KEY_FILE=key,
+            AVA_PITR_BACKUP_KEY_ID="prod-v1",
+            AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
+        )

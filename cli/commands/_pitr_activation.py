@@ -70,6 +70,7 @@ from services.pitr.activation_state import (
     write_record,
     write_record_cas,
 )
+from services.pitr.cos_client import credential_evidence as _cos_credential_evidence
 from shared.config import settings
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
@@ -134,6 +135,18 @@ def _validate_secrets() -> dict[str, str]:
             "store_target": bucket_name,
             **common,
         }
+    if config.pitr_store_backend == "cos":
+        credentials_file = config.pitr_cos_credentials_file
+        if credentials_file is None:
+            raise RuntimeError("COS credentials are required")
+        return {
+            **_cos_credential_evidence(
+                credentials_file, region=config.pitr_cos_region, bucket=config.pitr_cos_bucket
+            ),
+            **common,
+        }
+    if config.pitr_store_backend != "baidu":
+        raise RuntimeError(f"unhandled PITR store backend {config.pitr_store_backend!r}")
     credentials_file = config.pitr_baidu_credentials_file
     if credentials_file is None:
         raise RuntimeError("Baidu credentials are required")
