@@ -17,11 +17,14 @@ import base64
 import hashlib
 import hmac
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 
 import psycopg
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from starlette.middleware import Middleware
 
 import gateway.app as gateway_app
 from gateway._cors import cors_allowed_origins
@@ -55,6 +58,42 @@ def _request_with_origin(origin: str) -> Request:
             "headers": [(b"origin", origin.encode())],
         }
     )
+
+
+@contextmanager
+def _rebuilt_cors_middleware() -> Generator[None, None, None]:
+    """Swap the app's CORS middleware for one built from the CURRENT settings.
+
+    CORSMiddleware captures ``allow_origins`` when the middleware stack is
+    built, and the stack is built once and cached on first request. A preflight
+    test that patches gateway settings must therefore rebuild the CORS entry
+    and reset the stack (restoring both afterwards), or it keeps exercising the
+    import-time allowlist instead of the patched one.
+    """
+    from starlette.middleware.cors import CORSMiddleware
+
+    original_entry = None
+    for i, mw in enumerate(app.user_middleware):
+        if mw.cls is CORSMiddleware:
+            original_entry = app.user_middleware[i]
+            app.user_middleware[i] = Middleware(
+                CORSMiddleware,
+                allow_origins=cors_allowed_origins(),
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+            break
+    assert original_entry is not None, "gateway app must register CORSMiddleware"
+    app.middleware_stack = None
+    try:
+        yield
+    finally:
+        for i, mw in enumerate(app.user_middleware):
+            if mw.cls is CORSMiddleware:
+                app.user_middleware[i] = original_entry
+                break
+        app.middleware_stack = None
 
 
 def _login(client: TestClient, *, user_agent: str = "test-browser") -> str:
@@ -114,10 +153,12 @@ def test_session_cookie_secure_parses_explicit_bool() -> None:
 def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The derived allowlist mirrors the frontend origins and the gateway's OWN
-    origin — its own port, not the frontend entry port. Regression guard for
-    the /grafana proxy 403: the browser's same-origin POST Origin
-    (http://<gateway-host>:<gateway-port>) must be allowlisted exactly.
+    """The derived allowlist mirrors the frontend origins, the gateway's OWN
+    origin — its own port, not the frontend entry port — and the frontend
+    entry on the gateway host. Regression guard for the /grafana proxy 403:
+    the browser's same-origin POST Origin (http://<gateway-host>:<gateway-port>)
+    must be allowlisted exactly, and so must the Gate UI's login origin
+    (http://<gateway-host>:<frontend-port>).
     """
     monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
     monkeypatch.setattr(
@@ -135,6 +176,7 @@ def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://gateway.example:8100",
+        "https://gateway.example:3000",
     ]
 
 
@@ -142,7 +184,8 @@ def test_cors_allowed_origins_gateway_origin_matches_prod_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The prod-shaped gateway URL (explicit non-standard port, so the browser
-    Origin carries it) yields exactly that origin in the allowlist."""
+    Origin carries it) yields exactly that origin in the allowlist — plus the
+    frontend entry on the same host, which the Gate login page sends."""
     monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
     monkeypatch.setattr(
         config.settings.services,
@@ -159,6 +202,7 @@ def test_cors_allowed_origins_gateway_origin_matches_prod_url(
         "http://localhost:3100",
         "http://127.0.0.1:3100",
         "http://100.103.96.72:8000",
+        "http://100.103.96.72:3100",
     ]
 
 
@@ -167,7 +211,8 @@ def test_cors_allowed_origins_gateway_default_port_has_bare_and_explicit_forms(
 ) -> None:
     """A port-less gateway URL must yield the origin WITHOUT a port (what a
     browser serializes for the scheme's default port) and the explicit
-    default-port form, since both can appear in an Origin header."""
+    default-port form, since both can appear in an Origin header — and so
+    must the frontend entry on the gateway host."""
     monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
     monkeypatch.setattr(
         config.settings.services,
@@ -185,6 +230,59 @@ def test_cors_allowed_origins_gateway_default_port_has_bare_and_explicit_forms(
         "http://127.0.0.1:3000",
         "https://gateway.example:443",
         "https://gateway.example",
+        "https://gateway.example:3000",
+    ]
+
+
+def test_cors_allowed_origins_ipv6_gateway_host_bracketed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An IPv6 gateway host is bracketed in derived origins — the form a
+    browser puts in the Origin header."""
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:3000",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "http://[2606:4700:4700::1111]:8000",
+    )
+
+    assert cors_allowed_origins() == [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://[2606:4700:4700::1111]:8000",
+        "http://[2606:4700:4700::1111]:3000",
+    ]
+
+
+def test_cors_allowed_origins_frontend_default_port_has_bare_and_explicit_forms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A port-less frontend healthcheck URL resolves to the scheme's default
+    port; the frontend entries on the gateway host then carry BOTH the bare
+    and explicit :80 forms, symmetric with the gateway's own origin handling."""
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "http://gateway.example:8000",
+    )
+
+    assert cors_allowed_origins() == [
+        "http://localhost:80",
+        "http://127.0.0.1:80",
+        "http://gateway.example:8000",
+        "http://gateway.example:80",
+        "http://gateway.example",
     ]
 
 
@@ -585,6 +683,74 @@ def test_cors_preflight_on_protected_route_not_401() -> None:
         )
     assert resp.status_code != 401
     assert resp.headers["access-control-allow-origin"] == allowed_origin
+
+
+def test_cors_preflight_login_from_gateway_frontend_origin_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Gate UI lives on the gateway host at the frontend port, so its
+    login request carries Origin http://<gateway-host>:<frontend-port>.
+    Regression guard for the reported 400 "Disallowed CORS origin" on
+    OPTIONS /api/auth/login: the derived allowlist used to carry only the
+    gateway's own port, never the frontend entry on the gateway host, so the
+    preflight was rejected before the browser ever sent the login POST."""
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:3000",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "http://100.103.96.72:8000",
+    )
+    with _rebuilt_cors_middleware(), TestClient(app) as client:
+        resp = client.options(
+            "/api/auth/login",
+            headers={
+                "Origin": "http://100.103.96.72:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert resp.status_code != 400
+        assert resp.headers["access-control-allow-origin"] == "http://100.103.96.72:3000"
+
+
+def test_cookie_authenticated_post_allows_gateway_frontend_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cookie-authenticated state-changing POST from the Gate UI's origin —
+    gateway host, frontend port — must pass the exact-origin check, not 403.
+    Mirrors the gateway-own-origin test: the allowlist needs BOTH the frontend
+    entry and the gateway's own port."""
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:3000",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "http://100.103.96.72:8000",
+    )
+    with TestClient(app) as client:
+        token = _login(client)
+        resp = client.post(
+            "/api/frontend-telemetry",
+            content=b"{}",
+            headers={
+                **_session_cookie(token),
+                "Origin": "http://100.103.96.72:3000",
+            },
+        )
+
+    # 422 (malformed batch) not 403 — the frontend-port origin passed the
+    # exact-origin check.
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "invalid_telemetry_batch"
 
 
 def test_cors_preflight_disallowed_origin_has_no_allow_origin_header() -> None:
