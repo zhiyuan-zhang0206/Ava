@@ -7,6 +7,14 @@ from pathlib import Path
 from services.pitr.activation_state import ActivationRecord, load_record, write_record
 from shared.log import logger
 
+# Message persistence is scoped to BaseCandidateError: its raise sites carry the
+# static, secret-free failure vocabulary of the candidate pipeline (exit codes +
+# bounded child stderr — credentials ride env vars, never argv), so the text is
+# safe to durably record. Foreign exception types stay type-only: their messages
+# can carry credential-bearing conninfo and are not worth the redaction risk
+# (2026-08-30: "BaseCandidateError" with no message was the entire record while
+# the real FATAL sat in a DEVNULL'd pipe).
+
 
 def save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None:
     latest = load_record(home)
@@ -33,6 +41,9 @@ def save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None
         record.phase,
         code,
     )
+    from services.pitr.base_candidate import BaseCandidateError
+
+    message = str(exc)[:500] if isinstance(exc, BaseCandidateError) else None
     write_record(
         home,
         latest.advance(
@@ -40,5 +51,6 @@ def save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None
             error=type(exc).__name__,
             error_code=code,
             error_detail=detail,
+            error_message=message,
         ),
     )

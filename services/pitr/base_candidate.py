@@ -137,6 +137,60 @@ def _validate_replication_contract(db_url: str, replication_db_url: str) -> None
         row = cur.fetchone()
     if row != (True, False):
         raise BaseCandidateError("PITR replication role must be REPLICATION and NOSUPERUSER")
+    _validate_replication_hba(replication)
+
+
+def _rule_name_set(value: str | list[str] | None) -> frozenset[str]:
+    """One `pg_hba_file_rules` `database`/`user_name` cell as a frozenset of
+    bare names. psycopg returns the text[] columns as Python lists; the psql
+    `{...}` set-literal form is accepted too (and used by mocks)."""
+    if value is None:
+        return frozenset()
+    if isinstance(value, list):
+        return frozenset(str(name).strip().strip('"') for name in value)
+    return frozenset(name.strip().strip('"') for name in value.strip("{}").split(","))
+
+
+def _validate_replication_hba(replication: Mapping[str, object]) -> None:
+    """pg_basebackup dials as a PHYSICAL replication connection (dbname=
+    `replication`), which matches only pg_hba rules whose database field is the
+    literal `replication` keyword — `all` does not cover it. The 2026-08-30
+    activation died here: every normal-connection probe passed while
+    pg_basebackup exited 1 with "no pg_hba.conf entry for replication
+    connection". Fail closed BEFORE the backup when no loaded rule covers the
+    PITR role, so the operator sees an actionable cause instead of a bare exit
+    code."""
+    from services.pitr.activation_runtime import pitr_admin_url
+
+    role = str(replication.get("user") or "")
+    host = str(replication.get("host") or "")
+    try:
+        with psycopg.connect(pitr_admin_url()) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT database, user_name, error FROM pg_hba_file_rules "
+                "WHERE type <> 'local' AND address IS NOT NULL"
+            )
+            rules = cur.fetchall()
+    except BaseException as exc:
+        raise BaseCandidateError(
+            f"cannot verify the replication pg_hba rule for {role}: {type(exc).__name__}"
+        ) from exc
+    for database_cell, user_cell, error_cell in rules:
+        if error_cell is not None:
+            # A row with a parse error is NOT in effect, though the view still
+            # lists it — it must never count as coverage (QA #1096 P2).
+            continue
+        if "replication" not in _rule_name_set(database_cell):
+            continue
+        users = _rule_name_set(user_cell)
+        if "all" in users or role in users:
+            return
+    raise BaseCandidateError(
+        f"pg_hba.conf has no physical-replication rule for PITR role {role} "
+        f"(pg_basebackup dials host={host or '(socket)'}); the data-plane "
+        "renderer must emit a `host replication <role> ...` row — regenerate "
+        "pg_hba.conf via `ava start` or `ava cluster update`"
+    )
 
 
 def _matching_process(pid: int, created_at: float, expected_token: str) -> psutil.Process | None:
@@ -265,6 +319,17 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
         raise BaseCandidateError("backup process leader was not reaped") from exc
 
 
+def _stderr_suffix(stderr: bytes | None) -> str:
+    """The bounded, decoded tail of a failed child's stderr — the part of the
+    failure a bare exit code hides (2026-08-30: "pg_basebackup exited 1" was
+    the whole record; the actual FATAL "no pg_hba.conf entry for replication
+    connection" sat in a DEVNULL'd pipe)."""
+    if not stderr:
+        return ""
+    tail = stderr.decode("utf-8", errors="replace").strip()[-1600:]
+    return f": {tail}" if tail else ""
+
+
 def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: StopSignal) -> None:
     deadline = time.time() + 6 * 3600
     wrapped = [
@@ -281,20 +346,24 @@ def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: 
     process = subprocess.Popen(  # noqa: S603
         wrapped,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         env=env,
         start_new_session=False,
     )
     while process.poll() is None:
         if stop.wait(0.25):
             _stop_process(process)
+            process.communicate()
             raise BaseCandidateError("base candidate capture was stopped")
         if time.time() >= deadline:
             _stop_process(process)
+            process.communicate()
             raise BaseCandidateError("pg_basebackup exceeded its six-hour bound")
-    process.communicate()
+    stderr = process.communicate()[1]
     if process.returncode != 0:
-        raise BaseCandidateError(f"pg_basebackup exited {process.returncode}")
+        raise BaseCandidateError(
+            f"pg_basebackup exited {process.returncode}{_stderr_suffix(stderr)}"
+        )
 
 
 def _birth_candidate(
@@ -384,20 +453,24 @@ def _verify_candidate(path: Path, stop: StopSignal) -> None:
     verify = subprocess.Popen(  # noqa: S603
         [str(pg_tool("pg_verifybackup")), "--no-parse-wal", str(path)],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         start_new_session=False,
     )
     deadline = time.monotonic() + 6 * 3600
     while verify.poll() is None:
         if stop.wait(0.25):
             _stop_process(verify)
+            verify.communicate()
             raise BaseCandidateError("base candidate verification was stopped")
         if time.monotonic() >= deadline:
             _stop_process(verify)
+            verify.communicate()
             raise BaseCandidateError("pg_verifybackup exceeded its six-hour bound")
-    verify.communicate()
+    stderr = verify.communicate()[1]
     if verify.returncode != 0:
-        raise BaseCandidateError(f"pg_verifybackup exited {verify.returncode}")
+        raise BaseCandidateError(
+            f"pg_verifybackup exited {verify.returncode}{_stderr_suffix(stderr)}"
+        )
 
 
 def _load_facts(root: Path, chain_id: str) -> CandidateFacts:

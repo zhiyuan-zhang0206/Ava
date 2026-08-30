@@ -115,9 +115,11 @@ def test_pg_hba_body_no_scram_lines_without_secret(monkeypatch: pytest.MonkeyPat
 
 def test_pg_hba_body_scram_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """With a secret the posture is unchanged: scram everywhere TCP, including
-    the reachable host and trusted CIDRs."""
+    the reachable host and trusted CIDRs. No replication rows without a PITR
+    replication URL (pinned explicitly — ambient prod env must not leak in)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "100.64.0.5")
+    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("s3cret")
     assert body.splitlines() == [
         "local all all trust",
@@ -126,6 +128,51 @@ def test_pg_hba_body_scram_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
         "host all all 100.64.0.5/32 scram-sha-256",
         "host all all 10.0.0.0/8 scram-sha-256",
     ]
+
+
+def test_pg_hba_body_emits_replication_rows_for_pitr_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PITR configured + secret cluster -> loopback `replication` rows for the
+    parsed role: pg_basebackup's physical replication connection matches only
+    the literal `replication` keyword, never `all` (2026-08-30 activation)."""
+    monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
+    monkeypatch.setattr(_ci, "reachable_host", lambda: "127.0.0.1")
+    monkeypatch.setattr(
+        settings.physical_backup,
+        "pitr_replication_db_url",
+        "postgresql://ava_pitr_repl:s3cret@127.0.0.1:5433/ava_main",
+    )
+    body = _ci._pg_hba_body("s3cret")
+    assert "host replication ava_pitr_repl 127.0.0.1/32 scram-sha-256" in body.splitlines()
+    assert "host replication ava_pitr_repl ::1/128 scram-sha-256" in body.splitlines()
+
+
+def test_pg_hba_body_no_replication_rows_without_pitr_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No PITR replication URL -> no replication rows; the existing posture is
+    unchanged (and pre-PITR clusters stay exactly as tightened)."""
+    monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
+    monkeypatch.setattr(_ci, "reachable_host", lambda: "127.0.0.1")
+    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
+    body = _ci._pg_hba_body("s3cret")
+    assert "replication" not in body
+    assert body.splitlines() == [
+        "local all all trust",
+        "host all all 127.0.0.1/32 scram-sha-256",
+        "host all all ::1/128 scram-sha-256",
+    ]
+
+
+def test_pg_hba_body_no_replication_rows_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A no-secret cluster stays replication-free even with a PITR URL in
+    ambient settings — its unauthenticated posture must not gain scram rows."""
+    monkeypatch.setattr(
+        settings.physical_backup,
+        "pitr_replication_db_url",
+        "postgresql://ava_pitr_repl:s3cret@127.0.0.1:5433/ava_main",
+    )
+    body = _ci._pg_hba_body("")
+    assert "replication" not in body
 
 
 # ─── Task #1113: the passed secret wins over ambient settings ────────────────

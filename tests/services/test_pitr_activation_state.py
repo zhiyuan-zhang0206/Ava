@@ -292,7 +292,7 @@ def test_v2_wal_config_pending_upgrades_strictly_and_can_roll_back(tmp_path: Pat
     record_path(tmp_path).parent.mkdir(parents=True)
     record_path(tmp_path).write_text(json.dumps(v2))
     upgraded = load_record(tmp_path)
-    assert upgraded is not None and upgraded.schema_version == 3
+    assert upgraded is not None and upgraded.schema_version == 4
     rolled_back = mark_pre_mutation_rolled_back(tmp_path, upgraded)
     assert rolled_back.phase == "rolled_back"
 
@@ -321,3 +321,34 @@ def test_v2_post_mutation_phase_refuses_unsafe_upgrade() -> None:
     raw.update(schema_version=2, phase="wal_restart_pending")
     with pytest.raises(ValueError, match="cannot be safely upgraded"):
         ActivationRecord.from_json(json.dumps(raw))
+
+
+def test_v3_record_upgrades_to_v4_with_null_error_message(tmp_path: Path) -> None:
+    """The 2026-08-30 base_pending operation on disk was written by schema v3;
+    the v4 bump adds only the optional error_message field, so any phase must
+    load in place (the activation stays resumable across the upgrade)."""
+    from dataclasses import asdict
+
+    record = ActivationRecord.start(operation_id="op-1", origin="cli")
+    raw = asdict(record)
+    assert "error_message" in raw
+    raw.pop("error_message")
+    raw["schema_version"] = 3
+    path = record_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(raw))
+    loaded = load_record(tmp_path)
+    assert loaded is not None
+    assert loaded.schema_version == 4
+    assert loaded.operation_id == "op-1"
+    assert loaded.error_message is None
+
+
+def test_same_phase_update_may_set_error_message(tmp_path: Path) -> None:
+    record = ActivationRecord.start(operation_id="op-1", origin="cli")
+    advanced = record.advance(
+        record.phase,
+        error="BaseCandidateError",
+        error_message="pg_basebackup exited 1: FATAL no pg_hba.conf entry",
+    )
+    assert advanced.error_message == "pg_basebackup exited 1: FATAL no pg_hba.conf entry"

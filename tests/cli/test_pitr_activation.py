@@ -21,6 +21,7 @@ from services.pitr.activation_runtime import (
     rollback_effect_state,
 )
 from services.pitr.activation_state import ActivationRecord, load_record, write_record
+from services.pitr.base_candidate import BaseCandidateError
 
 
 def _credentials() -> dict[str, str]:
@@ -594,6 +595,12 @@ def test_concurrent_activation_refuses_without_snapshot(
         (RuntimeError("state CAS changed"), "state_cas"),
         (RuntimeError("restore candidate mismatch"), "restore_mismatch"),
         (RuntimeError("restart session failed"), "restart_failure"),
+        (
+            BaseCandidateError(
+                "pg_basebackup exited 1: FATAL: no pg_hba.conf entry for replication connection"
+            ),
+            "activation_failure",
+        ),
     ],
 )
 def test_activation_error_diagnostics_are_stable_and_redacted(
@@ -611,6 +618,12 @@ def test_activation_error_diagnostics_are_stable_and_redacted(
     assert "secret-token" not in saved.error_detail
     assert "credential.example" not in saved.error_detail
     assert "private-key" not in saved.error_detail
+    # The candidate pipeline's own errors persist their secret-free message;
+    # every other type stays type-only (its text may carry credentials).
+    if isinstance(failure, BaseCandidateError):
+        assert saved.error_message == str(failure)
+    else:
+        assert saved.error_message is None
 
 
 def test_concurrent_rollback_persists_error_and_preserves_phase(

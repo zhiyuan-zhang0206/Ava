@@ -672,6 +672,14 @@ def _restart_session() -> str:
     return shared.cluster.session_name(_CLUSTER_RESTART_SERVICE)
 
 
+def _refusal_message(exc: BaseException) -> str:
+    """`Type: message` with the message bounded — a refusal log must say WHY
+    (2026-08-30: `PITR activation refused: BaseCandidateError` carried nothing;
+    the actual cause lived in the exception message the old print dropped)."""
+    detail = str(exc).strip()
+    return f"{type(exc).__name__}: {detail[:300]}" if detail else type(exc).__name__
+
+
 def cmd_pitr_activate(*, origin: str) -> int:
     """Resume the durable activation through restart, WAL, base, and restore proof."""
     home = ava_home()
@@ -716,7 +724,7 @@ def cmd_pitr_activate(*, origin: str) -> int:
                     _save_error(home, record, exc)
                     raise
     except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
-        print(f"PITR activation refused: {type(exc).__name__}", file=sys.stderr)
+        print(f"PITR activation refused: {_refusal_message(exc)}", file=sys.stderr)
         return 1
     if record.phase == "wal_restart_pending" and not _restart_ready(
         record, _desired_archive_settings(home)
@@ -724,7 +732,7 @@ def cmd_pitr_activate(*, origin: str) -> int:
         try:
             record = _dispatch_restart_handoff(home, record)
         except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
-            print(f"PITR restart dispatch refused: {type(exc).__name__}", file=sys.stderr)
+            print(f"PITR restart dispatch refused: {_refusal_message(exc)}", file=sys.stderr)
             return 1
     _print_record(record)
     return 0
@@ -764,13 +772,13 @@ def cmd_pitr_rollback(*, continuation: str | None = None) -> int:
                 _save_error(home, record, exc)
                 raise
     except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
-        print(f"PITR rollback refused: {type(exc).__name__}", file=sys.stderr)
+        print(f"PITR rollback refused: {_refusal_message(exc)}", file=sys.stderr)
         return 1
     if record.phase == "rollback_restart_pending":
         try:
             record = _dispatch_restart_handoff(home, record)
         except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
-            print(f"PITR rollback restart refused: {type(exc).__name__}", file=sys.stderr)
+            print(f"PITR rollback restart refused: {_refusal_message(exc)}", file=sys.stderr)
             return 1
     _print_record(record)
     print("PITR rollback preserves all logical and remote backup data")
