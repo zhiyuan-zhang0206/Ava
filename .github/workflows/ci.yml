@@ -265,9 +265,7 @@ jobs:
 
       - name: Run pytest shard
         run: >
-          uv run pytest tests/ -q --ignore=tests/e2e
-          --ignore=tests/integration/test_pgvector_runtime_smoke.py
-          -m "not flaky" -n 4
+          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4
           --splits 12 --group ${{ matrix.group }}
           --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
           --cov=ops --cov=services --cov=ava_builtins
@@ -336,9 +334,9 @@ jobs:
   # line): the pinned Linux PG tree + injected pgvector deb must actually run
   # `CREATE EXTENSION` + a distance query. Deliberately does NOT use the
   # install-pg-redis action — the point is that the vendored tree alone
-  # suffices (initdb/pg_ctl/postgres come from the zonky jar). The test file
-  # is excluded from the pytest shards so the artifact downloads happen here
-  # exactly once per run.
+  # suffices (initdb/pg_ctl/postgres come from the zonky jar). A standalone
+  # script, not a pytest test: the test suite's session fixture provisions its
+  # own Postgres via pg_tool, so a vendored-only job cannot run pytest at all.
   backend-pgvector-smoke:
     name: backend vendored pgvector smoke (Linux)
     runs-on: ubuntu-24.04
@@ -360,7 +358,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Vendored PG + injected pgvector smoke (CREATE EXTENSION + query)
-        run: uv run pytest tests/integration/test_pgvector_runtime_smoke.py -q
+        run: uv run python scripts/pgvector_runtime_smoke.py
 
   backend:
     # The aggregator carrying the branch-protection / Mergify check name:
