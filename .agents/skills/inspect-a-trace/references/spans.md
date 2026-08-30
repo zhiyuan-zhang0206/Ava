@@ -14,6 +14,14 @@ can be far longer than the work in it; and runs recorded before 2026-08-20
 used a session-scoped root (`session_span`) that could span many turns — for
 an old run, read the root's start and end times rather than assuming a turn.
 
+The idle wait itself is now separately labeled: when the claim node blocks
+(`agent/graph/_claim_batch.py:_wait_for_batch`), `claim_idle_wait_span()`
+(`shared/trace.py`) ends the node's `execute_task claim` span at the park
+boundary and records the park as an explicit `claim idle-wait` span
+(parented under the ended node span). A giant `execute_task claim` span in a
+trace is therefore a pre-fix run — post-fix, `execute_task claim` covers only
+the real dispatch (ms) and the long wait shows as `claim idle-wait`.
+
 Three sources, in the order you should reach for them:
 
 | Source | Where | Good for |

@@ -34,6 +34,7 @@ from agent.db import (
 from agent.graph._context import AvaContext
 from shared.agents import AgentStatus
 from shared.log import logger
+from shared.trace import claim_idle_wait_span
 
 
 class LifecycleCasLostError(Exception):
@@ -57,6 +58,10 @@ async def _wait_for_batch(
 
     Mark idling → Redis pub/sub wait → mark running → return batch. Extracted
     as a separate function to reduce claim_node's branch count (PLR0912).
+    The wait runs inside `claim_idle_wait_span()`, which ends the node's
+    `execute_task claim` span at the park boundary and records the park as an
+    explicit `claim idle-wait` span — a long idle wait shows as a labeled
+    span, not a giant opaque node span.
 
     Caller (claim_node) has already narrowed ops_pool / inbound_listener not
     None (container path early-returned); this function narrows once more so
@@ -74,9 +79,10 @@ async def _wait_for_batch(
     await enter_idling_state(pool, agent_id)
     batch: list[ClaimedInbound] = []
     try:
-        while not batch:
-            await wait_for_inbound(pool, listener, agent_id=agent_id)
-            batch = await claim_inbound_batch(pool, agent_id)
+        with claim_idle_wait_span():
+            while not batch:
+                await wait_for_inbound(pool, listener, agent_id=agent_id)
+                batch = await claim_inbound_batch(pool, agent_id)
     except BaseException:
         with suppress(Exception):
             await mark_agent_status(

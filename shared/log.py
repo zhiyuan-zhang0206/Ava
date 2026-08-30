@@ -609,6 +609,16 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
     extra = record["extra"]
     if extra.get("_no_emitter") or extra.get("event") == "node_enter":
         return False
+    # Known artifact of claim_idle_wait_span (shared/trace.py): the traceloop
+    # LangChain handler sets `gen_ai.task.status` on the claim node span AFTER
+    # we end it early at the idle-park boundary, so the OTel SDK logs one
+    # WARNING ("Setting attribute on ended span.") per park. The warning is
+    # information-free (the span end is deliberate) but would add one junk
+    # events row per idle park; keep it in the log-file sinks, drop it from
+    # the table. If the handler stops writing to ended spans, the row stops
+    # appearing entirely and this sentinel can be removed.
+    if record.get("message") == "Setting attribute on ended span.":
+        return False
     level = getattr(record.get("level"), "name", "")  # missing level -> "" (unsampled)
     if level == "INFO" and (extra.get("event") or extra.get("label") or "log") == "log":
         return next(_log_info_sample_counter) % _LOG_INFO_SAMPLE_EVERY == 0

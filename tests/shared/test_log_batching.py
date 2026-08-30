@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -307,6 +307,11 @@ def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
     # The node_enter drop is by event name only, not by message — a record
     # that merely *mentions* node_enter in its message still passes.
     assert f(_rec({"msg": "node_enter handling"}))
+    # The OTel SDK's post-end warning (a deliberate consequence of ending the
+    # claim node span early in claim_idle_wait_span) is dropped from the
+    # table; a record merely mentioning the text still passes.
+    assert not f(cast(Any, dict(_rec({}), message="Setting attribute on ended span.")))
+    assert f(cast(Any, dict(_rec({}), message="Setting attribute on ended span. (context)")))
 
 
 def _rec_level(extra: dict[str, Any], level: str = "INFO") -> Any:

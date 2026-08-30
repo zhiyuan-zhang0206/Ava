@@ -41,6 +41,12 @@ that turn nests under it and the trace exports the moment the turn ends. The
 root carries the vendor-neutral `session.id` (Tempo/Grafana group one agent's
 turns into a session by it) plus `ava.turn` (the per-process turn counter).
 
+claim_idle_wait_span() (used by the agent claim node) ends the open LangChain
+node span (`execute_task claim`) before the node parks in
+`agent/graph/_claim_batch._wait_for_batch` and records the idle park as an
+explicit `claim idle-wait` span, so an idle wait shows as a labeled span
+instead of a giant opaque node span in the trace.
+
 Idempotent: the _initialized guard prevents a second init. A collector miss at
 startup logs once, then one daemon loop retries every five minutes until trace
 recording comes up (or the single arm attempt fails permanently); disk-watermark auto-degrade remains a deliberate no-retry.
@@ -58,10 +64,11 @@ import threading
 import time
 from collections.abc import Callable, Generator, Sequence
 from functools import wraps
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from shared.config import settings
@@ -98,6 +105,7 @@ __all__ = [
     "_mirror_size",
     "_mirror_sort_key",
     "_prune_old_mirror",
+    "claim_idle_wait_span",
     "ensure_init_resolved",
     "initialize_tracing",
     "turn_span",
@@ -113,6 +121,18 @@ _ATTR_NEUTRAL_SESSION_ID = "session.id"
 # an agent's turns within one process lifetime (it restarts at 1 on respawn;
 # cross-process ordering comes from timestamps / checkpoint refs).
 _ATTR_TURN = "ava.turn"
+
+# LangChain/LangGraph node-span naming from the traceloop callback handler:
+# every graph node span is `execute_task <node>`. claim_idle_wait_span is only
+# allowed to end a span carrying this prefix — inside the claim node that is
+# the node's own `execute_task claim` span; ending any other span (the
+# enclosing workflow/root span, when the instrumentor is not attached) would
+# truncate the turn trace, so the prefix check is the fail-safe boundary.
+_NODE_SPAN_PREFIX = "execute_task "
+
+# Explicit span name for the claim node's idle park: keeps the wait visible
+# and attributable instead of hiding it inside the node span's duration.
+_IDLE_WAIT_SPAN_NAME = "claim idle-wait"
 
 
 # ── LLM content stripping (trace v2) ─────────────────────────────────────────
@@ -596,9 +616,10 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
 
     The trace boundary is the turn: the runloop invokes the graph once per
     turn, so this span opens when the invocation starts — including claim's
-    long wait for the turn's inbound — and closes (and exports) when the
-    turn's work is done. All child spans (LangGraph nodes, Anthropic calls,
-    etc.) inherit the OTel context and become children of this root, so the
+    long wait for the turn's inbound (recorded separately, see
+    claim_idle_wait_span) — and closes (and exports) when the turn's work
+    is done. All child spans (LangGraph nodes, Anthropic calls, etc.)
+    inherit the OTel context and become children of this root, so the
     recorded mirror shows a proper span tree per turn. The session_id
     attribute groups one agent's turns into a session on the viewer; the turn
     attribute orders them within a process lifetime.
@@ -620,4 +641,59 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
     with tracer.start_as_current_span(name) as span:
         span.set_attribute(_ATTR_NEUTRAL_SESSION_ID, session_id)
         span.set_attribute(_ATTR_TURN, turn)
+        yield
+
+
+@contextlib.contextmanager
+def claim_idle_wait_span() -> Generator[None, None, None]:
+    """Close the claim node span at the park boundary and record the idle wait
+    as an explicit `claim idle-wait` span.
+
+    The claim node blocks in `_wait_for_batch` (Redis pub/sub wait + defensive
+    SELECT recheck — up to ~30 s per round, unbounded rounds) when an idle
+    agent has no inbound. The LangChain instrumentor opened `execute_task
+    claim` around the whole node, so without this helper the idle park is
+    drawn as one giant opaque node span (observed: 451 s and 697 s traces).
+    Ending the node span here makes `execute_task claim` show only the real
+    dispatch (ms), and the wait itself stays visible and attributed as a
+    labeled `claim idle-wait` span (parented under the ended node span, same
+    trace) instead of vanishing.
+
+    The ended span's later counterpart — the instrumentor's `on_chain_end` —
+    sees `end_time` already set and skips its own end (its `_end_span` guard),
+    so no double-end warning; the node span is exported at the moment the
+    wait begins. The handler's post-end `gen_ai.task.status` write is dropped
+    by the SDK (one "Setting attribute on ended span." log line per park —
+    information-free, kept in the log files, filtered out of the events table
+    by `shared/log.py:_event_pipeline_filter`).
+
+    No-op when trace_enabled=False or initialize_tracing hasn't run yet, and —
+    defensively — when the current span is not recording or is not a LangChain
+    node span (`execute_task ...`). The helper may only end the claim node's
+    own span; with the instrumentor absent the wait simply stays inside
+    whatever span is current (the pre-fix behavior).
+    """
+    if not settings.observability.trace_enabled:
+        yield
+        return
+    ensure_init_resolved()
+    if not _state["initialized"]:
+        yield
+        return
+    from opentelemetry import trace as otel_trace
+
+    current = otel_trace.get_current_span()
+    if not current.is_recording():
+        yield
+        return
+    # `name` is SDK-only (not on the otel API Span type, hence the cast); the
+    # runtime object is the SDK span the callback handler started, and the
+    # prefix check is the fail-safe that keeps us from ending the enclosing
+    # workflow/root span when the node instrumentor is not attached.
+    if not cast(SdkSpan, current).name.startswith(_NODE_SPAN_PREFIX):
+        yield
+        return
+    current.end()
+    tracer = otel_trace.get_tracer("ava.claim")
+    with tracer.start_as_current_span(_IDLE_WAIT_SPAN_NAME):
         yield

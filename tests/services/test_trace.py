@@ -12,7 +12,12 @@ import pytest
 
 from shared import telemetry_otlp
 from shared import trace as trace_mod
-from shared.trace import OtlpJsonHttpSpanExporter, initialize_tracing, turn_span
+from shared.trace import (
+    OtlpJsonHttpSpanExporter,
+    claim_idle_wait_span,
+    initialize_tracing,
+    turn_span,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -977,6 +982,122 @@ def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
         "session.id": "42",
         "ava.turn": 3,
     }
+
+
+# --- claim idle-wait span -------------------------------------------------
+
+
+class _NodeFakeSpan:
+    """Fake of a LangChain node span (the SDK surface claim_idle_wait_span
+    touches: name, is_recording, end)."""
+
+    def __init__(self, name: str, recording: bool = True):
+        self.name = name
+        self._recording = recording
+        self.ended = False
+
+    def is_recording(self) -> bool:
+        return self._recording
+
+    def end(self) -> None:
+        self.ended = True
+
+
+def test_claim_idle_wait_span_noop_when_disabled(monkeypatch: pytest.MonkeyPatch):
+    """trace_enabled=False: pass-through — no OTel call at all."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", False)
+
+    def _explode(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        raise AssertionError("OTel must not be touched when tracing is disabled")
+
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", _explode)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
+
+    with claim_idle_wait_span():
+        pass
+
+
+def test_claim_idle_wait_span_noop_when_initialize_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """trace_enabled=True but initialize_tracing never ran: no-op, same as
+    turn_span — a span opened against the unset proxy tracer is silently lost."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    assert trace_mod._state["initialized"] is False
+
+    def _explode(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        raise AssertionError("must not open a span when uninitialized")
+
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", _explode)  # pyright: ignore[reportUnknownArgumentType]
+
+    with claim_idle_wait_span():
+        pass
+
+
+def test_claim_idle_wait_span_ends_node_span_and_opens_idle_wait(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Enabled + initialized + a recording `execute_task claim` span current:
+    the node span is ended at the park boundary (so the claim span shows only
+    the real dispatch) and an explicit `claim idle-wait` span is opened for
+    the wait."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    trace_mod._state["initialized"] = True
+
+    node_span = _NodeFakeSpan("execute_task claim")
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    tracer = _FakeTracer(_FakeSpan())
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    with claim_idle_wait_span():
+        pass
+
+    assert node_span.ended is True
+    assert tracer.opened == ["claim idle-wait"]
+
+
+def test_claim_idle_wait_span_never_ends_non_node_span(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Fail-safe: a current span that is NOT a LangChain node span (the
+    enclosing turn root — the instrumentor not attached) is never ended:
+    ending it would truncate the whole turn trace. The wait then stays inside
+    the current span (pre-fix behavior)."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    trace_mod._state["initialized"] = True
+
+    root_span = _NodeFakeSpan("ava-agent-42")
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: root_span)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    tracer = _FakeTracer(_FakeSpan())
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    with claim_idle_wait_span():
+        pass
+
+    assert root_span.ended is False
+    assert tracer.opened == []
+
+
+def test_claim_idle_wait_span_skips_non_recording_span(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A non-recording current span (sampler dropped it / no real span open)
+    is not ended and no idle-wait span is opened — the helper only acts on a
+    real recording node span."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    trace_mod._state["initialized"] = True
+
+    node_span = _NodeFakeSpan("execute_task claim", recording=False)
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    tracer = _FakeTracer(_FakeSpan())
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    with claim_idle_wait_span():
+        pass
+
+    assert node_span.ended is False
+    assert tracer.opened == []
 
 
 # --- trace v2: content stripping --------------------------------------------
