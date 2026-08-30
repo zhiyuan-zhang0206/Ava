@@ -286,12 +286,19 @@ def _pgvector_extension_files(blob: bytes, key: str) -> dict[str, bytes]:
 
 
 def _tar_member_bytes(tar: tarfile.TarFile, name: str) -> bytes:
-    """Read one regular member by exact name; a missing member raises (see
+    """Read one regular member by exact name. Deb data tars carry `./` member
+    prefixes (dpkg-deb layout), so both the bare and the `./`-prefixed
+    spelling are accepted; a member present under neither raises (see
     `_pgvector_extension_files`)."""
-    try:
-        member = tar.getmember(name)
-    except KeyError as exc:
-        raise RuntimeError(f"pgvector artifact member missing: {name}") from exc
+    member = None
+    for candidate in (name, f"./{name}"):
+        try:
+            member = tar.getmember(candidate)
+            break
+        except KeyError:
+            continue
+    if member is None:
+        raise RuntimeError(f"pgvector artifact member missing: {name}")
     extracted = tar.extractfile(member)
     if extracted is None:
         raise RuntimeError(f"pgvector artifact member is not a regular file: {name}")
