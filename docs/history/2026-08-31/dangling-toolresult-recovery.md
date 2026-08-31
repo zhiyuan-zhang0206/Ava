@@ -39,3 +39,16 @@ matching the exec path. This recovery boundary must not turn a malformed
 provider message into an unhandled agent-process exit: an empty-id ToolMessage
 pairs with that normalized use, while a non-empty result remains orphaned and
 is dropped.
+
+## Update: global exactly-one-result pairing
+
+The earlier narrow conclusion was insufficient: treating tool-use pairing as
+adjacent while accepting results globally can synthesize a second result when a
+pending real result materializes after an intervening message. Recovery now
+keeps exactly one result for each tool-call id anywhere after its tool use. For
+duplicates it retains the last non-synthetic result (or the last synthetic one
+when no real result exists), and only synthesizes when no kept result exists.
+
+Physical adjacency remains the placement rule for newly synthesized results;
+an existing non-adjacent result is valid and is not moved. This avoids both the
+duplicate-result provider rejection and its permanent repair-loop recurrence.

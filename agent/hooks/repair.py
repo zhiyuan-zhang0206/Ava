@@ -47,6 +47,10 @@ value and one checkpoint blob. A bare tail append can be committed separately
 from its tool_use during kill/n-step-save interleavings, recreating the 5333
 orphan shape this repair removes.
 
+Pairing is global by tool_call id: each preceding tool_use has exactly one kept
+ToolMessage anywhere later in the history. Physical adjacency is retained only
+for newly synthesized results; a non-adjacent kept real result remains valid.
+
 Residual gap, accepted: a force-compact whose threshold trips on the same turn
 that materializes a pending-write dangling runs its summarization LLM call
 (`compact.py:_force_compact`) over the pre-repair state and 400s — hooks in one
@@ -57,7 +61,7 @@ turn's claim path is guarded by the boot-pass-repaired checkpoint shape.
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.messages.modifier import RemoveMessage
@@ -77,40 +81,72 @@ _INTERRUPTED_TOOL_RESULT = (
 
 
 def _unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list[str]]]:
-    """(index, unpaired tool_call ids) for every AIMessage whose tool_calls
-    lack a ToolMessage in the immediately following run of ToolMessages."""
+    """(index, ids) whose AI tool_calls lack a kept result anywhere later.
+
+    Called after `_redundant_tool_results` has established the global exactly-one-
+    result rule, so any later ToolMessage with the same normalized id pairs it.
+    """
+    result_ids_after: set[str] = set()
     out: list[tuple[int, list[str]]] = []
-    for i, m in enumerate(messages):
-        if not isinstance(m, AIMessage):
+    for i in range(len(messages) - 1, -1, -1):
+        message = messages[i]
+        if isinstance(message, ToolMessage):
+            result_ids_after.add(message.tool_call_id or "")
             continue
-        tool_calls = getattr(m, "tool_calls", None) or []
+        if not isinstance(message, AIMessage):
+            continue
+        tool_calls = message.tool_calls
         if not tool_calls:
             continue
-        unpaired = {tc["id"] or "" for tc in tool_calls}
-        for nxt in messages[i + 1 :]:
-            if not isinstance(nxt, ToolMessage):
-                break
-            unpaired.discard(nxt.tool_call_id)
+        unpaired: list[str] = []
+        for tool_call in tool_calls:
+            tool_call_id = tool_call["id"] or ""
+            if tool_call_id not in result_ids_after and tool_call_id not in unpaired:
+                unpaired.append(tool_call_id)
         if unpaired:
-            # Preserve tool_calls order, not set-iteration order.
-            out.append((i, [tc["id"] or "" for tc in tool_calls if (tc["id"] or "") in unpaired]))
-    return out
+            out.append((i, unpaired))
+    return list(reversed(out))
 
 
-def _orphan_tool_results(messages: Sequence[AnyMessage]) -> list[int]:
-    """Indices of ToolMessages lacking a tool_use in any preceding AIMessage."""
+def _is_synthetic_tool_result(message: ToolMessage) -> bool:
+    """Whether this ToolMessage is the recovery marker, not a real result."""
+    return cast(Any, message).content == _INTERRUPTED_TOOL_RESULT
+
+
+def _redundant_tool_results(messages: Sequence[AnyMessage]) -> list[int]:
+    """Indices violating the global exactly-one-result-per-tool-call-id rule.
+
+    A ToolMessage is removed when no preceding AIMessage declares its normalized
+    id, or when it is not the one kept duplicate. Prefer the last non-synthetic
+    result; when all duplicates are synthetic, retain the last record.
+    """
     preceding_tool_call_ids: set[str] = set()
-    out: list[int] = []
+    results_by_tool_call_id: dict[str, list[tuple[int, ToolMessage]]] = {}
+    redundant_indices: set[int] = set()
     for i, message in enumerate(messages):
         if isinstance(message, AIMessage):
             for tool_call in message.tool_calls:
                 tool_call_id = tool_call["id"] or ""
                 preceding_tool_call_ids.add(tool_call_id)
-        elif (
-            isinstance(message, ToolMessage) and message.tool_call_id not in preceding_tool_call_ids
-        ):
-            out.append(i)
-    return out
+        elif isinstance(message, ToolMessage):
+            tool_call_id = message.tool_call_id or ""
+            if tool_call_id not in preceding_tool_call_ids:
+                redundant_indices.add(i)
+            else:
+                results_by_tool_call_id.setdefault(tool_call_id, []).append((i, message))
+    for result_indices in results_by_tool_call_id.values():
+        if len(result_indices) < 2:
+            continue
+        keep_index = next(
+            (
+                result_index
+                for result_index, result in reversed(result_indices)
+                if not _is_synthetic_tool_result(result)
+            ),
+            result_indices[-1][0],
+        )
+        redundant_indices.update(index for index, _ in result_indices if index != keep_index)
+    return sorted(redundant_indices)
 
 
 def _synthetic_tool_result(tool_call_id: str) -> ToolMessage:
@@ -124,16 +160,17 @@ def _synthetic_tool_result(tool_call_id: str) -> ToolMessage:
 
 
 def dangling_tool_pairing_repairs(messages: Sequence[AnyMessage]) -> list[Any]:
-    """Return one full rebuild repairing both dangling pairing directions.
+    """Return one full rebuild enforcing exactly one result per tool_call id.
 
-    Orphan tool_results are dropped first. Every remaining dangling tool_use
-    receives a synthetic [interrupted] result immediately after its trailing
-    ToolMessage run. `[]` means the complete history is API-valid.
+    Redundant tool_results are dropped first. Every remaining tool_use without
+    a kept result anywhere later receives a synthetic [interrupted] result
+    immediately after its trailing ToolMessage run. `[]` means the complete
+    history satisfies the global pairing rule.
     """
-    orphan_indices = set(_orphan_tool_results(messages))
-    survivors = [message for i, message in enumerate(messages) if i not in orphan_indices]
+    redundant_indices = set(_redundant_tool_results(messages))
+    survivors = [message for i, message in enumerate(messages) if i not in redundant_indices]
     dangling = _unpaired_tool_calls(survivors)
-    if not orphan_indices and not dangling:
+    if not redundant_indices and not dangling:
         return []
     # Insertion point per dangling AIMessage: after the trailing run of
     # ToolMessages already pairing some of its tool_calls.

@@ -20,7 +20,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from agent.hooks import HOOKS
 from agent.hooks import repair as repair_module
 from agent.hooks.repair import (
-    _orphan_tool_results,
+    _redundant_tool_results,
     _repair_dangling_tool_pairing,
     _unpaired_tool_calls,
     dangling_tool_pairing_repairs,
@@ -46,6 +46,14 @@ def _full_rebuild(repairs: list[Any]) -> list[Any]:
     return repairs[1:]
 
 
+def _interrupted_tool_result(tool_call_id: str, message_id: str) -> ToolMessage:
+    return ToolMessage(
+        content="[interrupted: the agent process was cancelled before this tool produced a result]",
+        tool_call_id=tool_call_id,
+        id=message_id,
+    )
+
+
 # --- pure detection / rebuild function ----------------------------------------
 
 
@@ -66,14 +74,15 @@ def test_no_repair_when_ai_has_no_tool_calls() -> None:
     assert dangling_tool_pairing_repairs([AIMessage(content="just text")]) == []
 
 
-def test_orphan_detector_scans_all_preceding_ai_messages() -> None:
-    """Only pairing adjacency is invalid here; the result itself is not orphaned."""
+def test_interleaved_result_is_valid_no_repair() -> None:
+    """A result after a non-tool message still satisfies its earlier tool call."""
     messages = [
         _ai_tool_use("c1"),
         HumanMessage(content="intervening message"),
         ToolMessage(content="out", tool_call_id="c1"),
     ]
-    assert _orphan_tool_results(messages) == []
+    assert _redundant_tool_results(messages) == []
+    assert dangling_tool_pairing_repairs(messages) == []
 
 
 def test_repair_tolerates_empty_tool_call_id_and_drops_other_orphan() -> None:
@@ -85,16 +94,81 @@ def test_repair_tolerates_empty_tool_call_id_and_drops_other_orphan() -> None:
         ],
     )
     empty_id_result = ToolMessage(content="out", tool_call_id="", id="t-empty")
+    object.__setattr__(empty_id_result, "tool_call_id", None)
     orphan = ToolMessage(content="stale", tool_call_id="other", id="t-orphan")
     messages: list[AnyMessage] = [empty_id_use, empty_id_result, orphan]
 
     repairs = dangling_tool_pairing_repairs(messages)
 
-    assert _orphan_tool_results(messages) == [2]
+    assert _redundant_tool_results(messages) == [2]
     rebuilt = _full_rebuild(repairs)
     assert rebuilt == [empty_id_use, empty_id_result]
     assert rebuilt[0] is empty_id_use
     assert rebuilt[1] is empty_id_result
+
+
+def test_duplicate_results_drop_all_but_tail_real() -> None:
+    """A pending synthetic result yields to the later materialized real result."""
+    use = _ai_tool_use("c1")
+    use.id = "a1"
+    synthetic = _interrupted_tool_result("c1", "t-synthetic")
+    later = HumanMessage(content="intervening message", id="h1")
+    real = ToolMessage(content="real output", tool_call_id="c1", id="t-real")
+    messages: list[AnyMessage] = [use, synthetic, later, real]
+
+    repairs = dangling_tool_pairing_repairs(messages)
+
+    assert repairs
+    rebuilt = _full_rebuild(repairs)
+    assert rebuilt == [use, later, real]
+    merged = cast("list[AnyMessage]", add_messages(messages, repairs))  # type: ignore[arg-type]
+    assert merged == [use, later, real]
+    assert _unpaired_tool_calls(merged) == []
+    assert _redundant_tool_results(merged) == []
+
+
+def test_duplicate_results_drop_a_synthetic_after_a_real() -> None:
+    """Synthetic content loses to a real result even when it is positioned later."""
+    use = _ai_tool_use("c1")
+    real = ToolMessage(content="real output", tool_call_id="c1", id="t-real")
+    synthetic = _interrupted_tool_result("c1", "t-synthetic")
+
+    repairs = dangling_tool_pairing_repairs([use, real, synthetic])
+
+    assert repairs
+    assert _full_rebuild(repairs) == [use, real]
+
+
+def test_double_real_results_keep_last() -> None:
+    """Two real results retain the latest record for their shared call id."""
+    use = _ai_tool_use("c1")
+    first = ToolMessage(content="first output", tool_call_id="c1", id="t-first")
+    last = ToolMessage(content="last output", tool_call_id="c1", id="t-last")
+
+    repairs = dangling_tool_pairing_repairs([use, first, last])
+
+    assert repairs
+    assert _full_rebuild(repairs) == [use, last]
+
+
+def test_synthetic_only_result_is_kept() -> None:
+    """One interrupted record remains the sole result for its tool call."""
+    use = _ai_tool_use("c1")
+    synthetic = _interrupted_tool_result("c1", "t-synthetic")
+
+    assert dangling_tool_pairing_repairs([use, synthetic]) == []
+
+
+def test_duplicate_synthetic_results_keep_last() -> None:
+    """When no real result exists, the latest interrupted record is retained."""
+    use = _ai_tool_use("c1")
+    first = _interrupted_tool_result("c1", "t-first")
+    last = _interrupted_tool_result("c1", "t-last")
+
+    repairs = dangling_tool_pairing_repairs([use, first, last])
+
+    assert repairs
+    assert _full_rebuild(repairs) == [use, last]
 
 
 def test_repairs_single_dangling_tool_use_at_tail() -> None:
@@ -248,7 +322,7 @@ def test_orphan_and_dangling_tool_use_are_repaired_in_one_atomic_rebuild() -> No
         add_messages(messages, repairs),  # type: ignore[arg-type]
     )
     assert _unpaired_tool_calls(merged) == []
-    assert repair_module._orphan_tool_results(merged) == []
+    assert repair_module._redundant_tool_results(merged) == []
 
 
 def test_5333_kill_mid_exec_repair_converges_after_one_rebuild() -> None:
@@ -267,7 +341,7 @@ def test_5333_kill_mid_exec_repair_converges_after_one_rebuild() -> None:
 
     merged = cast("list[AnyMessage]", add_messages(messages, repairs))  # type: ignore[arg-type]
     assert _unpaired_tool_calls(merged) == []
-    assert repair_module._orphan_tool_results(merged) == []
+    assert repair_module._redundant_tool_results(merged) == []
     assert dangling_tool_pairing_repairs(merged) == []
 
 
