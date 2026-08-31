@@ -7,6 +7,7 @@ that async fan-out path and only validate the SystemStatus.cluster data pipeline
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -318,9 +319,46 @@ class TestClusterPanel:
         assert second.status_code == 200
         assert stub_remote_probe.calls == ["wsl-test", "wsl-test"]
 
+    def test_response_cache_keeps_retry_recovered_result(
+        self,
+        db_conn: psycopg.Connection,
+        fake_flag: Path,
+        stub_machine_identity: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A transport reset recovered by the roster's retry is cached as the
+        successful final verdict, not as a transient offline row."""
+        _ = fake_flag, stub_machine_identity
+        _insert_machine(db_conn, "wsl-test", None, "agent-runner")
+        calls: list[dict[str, object]] = []
+
+        async def retry_aware_dispatch(**kw: object) -> dict[str, object]:
+            calls.append(kw)
+            if kw["retries"] != 1:
+                from ops import cluster_rpc as cw
+
+                raise cw.ClusterOpUnreachable("connection reset was not retried")
+            return {
+                "machine_name": "wsl-test",
+                "serve_gateway": False,
+                "serve_agent_runner": True,
+                "paused": False,
+            }
+
+        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", retry_aware_dispatch)
+        with TestClient(app) as client:
+            first = client.get("/api/status")
+            second = client.get("/api/status")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["cluster"]["machines"][0]["online"] is True
+        assert second.json()["cluster"]["machines"][0]["online"] is True
+        assert len(calls) == 1
+
 
 class TestProbeAgentRunner:
-    """_probe_agent_runner — unreachable ops server / failure paths return online=False."""
+    """_probe_agent_runner maps transport and reached-host outcomes distinctly."""
 
     @pytest.mark.asyncio
     async def test_timeout_budget_comes_from_settings(
@@ -340,6 +378,7 @@ class TestProbeAgentRunner:
 
         async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
             seen["timeout_s"] = _kw.get("timeout_s")
+            seen["retries"] = _kw.get("retries")
             return {
                 "machine_name": "wsl",
                 "serve_gateway": False,
@@ -352,7 +391,42 @@ class TestProbeAgentRunner:
             "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
         assert seen["timeout_s"] == 11.0
+        assert seen["retries"] == 1
         assert r.online is True
+
+    @pytest.mark.asyncio
+    async def test_blackhole_stays_inside_single_total_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Retry is inside one roster deadline: a blackholed first attempt is
+        cancelled at the configured budget rather than getting a second full
+        timeout window."""
+        from datetime import UTC, datetime
+
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.01)
+        cancelled = asyncio.Event()
+
+        async def blackhole(**_kw: object) -> dict[str, object]:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            raise AssertionError("unreachable")
+
+        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", blackhole)
+        row = await asyncio.wait_for(
+            status_router._probe_agent_runner(
+                "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            ),
+            timeout=0.2,
+        )
+
+        assert row.online is False
+        assert cancelled.is_set()
+        assert status_router._probe_failures["wsl"][0] == 1
 
     @pytest.mark.asyncio
     async def test_timeout_returns_offline(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -392,6 +466,7 @@ class TestProbeAgentRunner:
                 "paused": True,
             }
 
+        status_router._probe_failures["wsl"] = (2, 0.0)
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl",
@@ -404,6 +479,7 @@ class TestProbeAgentRunner:
         assert r.online is True
         assert r.paused is True
         assert r.description == "voice IO + browser"
+        assert "wsl" not in status_router._probe_failures
 
     @pytest.mark.asyncio
     async def test_success_threads_head_sha(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -535,9 +611,17 @@ class TestProbeBackoff:
 
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_dispatch)
         last = datetime(2026, 5, 24, tzinfo=UTC)
-        await status_router._probe_agent_runner("wsl", ["agent-runner"], None, last, None, None)
+        first = await status_router._probe_agent_runner(
+            "wsl", ["agent-runner"], None, last, None, None
+        )
+        assert first.online is True
+        assert first.paused is None
         assert "wsl" not in status_router._probe_failures
-        await status_router._probe_agent_runner("wsl", ["agent-runner"], None, last, None, None)
+        second = await status_router._probe_agent_runner(
+            "wsl", ["agent-runner"], None, last, None, None
+        )
+        assert second.online is True
+        assert second.paused is None
         assert len(calls) == 2  # reachable -> dialed again, not skipped
 
 

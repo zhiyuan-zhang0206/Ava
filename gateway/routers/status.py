@@ -24,7 +24,7 @@ from psycopg import Cursor
 from pydantic import ValidationError
 
 from gateway import loki_events, loki_query_budget
-from gateway.routers import _inspect_pg, _roster_rows, _stats_dashboard
+from gateway.routers import _inspect_pg, _roster_probe, _roster_rows, _stats_dashboard
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._health import get_health
 from gateway.schemas import (
@@ -338,16 +338,7 @@ async def _probe_agent_runner(
             name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
         )
     try:
-        result = await _cluster_rpc.dispatch_to_machine(
-            target_machine=name,
-            kind="status_probe",
-            payload={},
-            timeout_s=settings.gateway.status_probe_timeout_seconds,
-            # No transport retry: the roster carries its own per-machine
-            # exponential backoff (_PROBE_BACKOFF_BASE_S), and an offline host
-            # is steady-state — re-dialing it 4x just stalls the roster.
-            retries=0,
-        )
+        result = await _roster_probe.dispatch_status_probe(name)
     except _cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet. Widen
         # this host's backoff so a persistently-down peer stops being dialed every poll.
@@ -362,7 +353,7 @@ async def _probe_agent_runner(
         # is reachable, so clear backoff (this is not the down-host case).
         _log.warning("status_probe op failed on reachable host %s: %s", name, exc.result)
         _note_probe_reachable(name)
-        return _roster_rows.offline_status(
+        return _roster_rows.reachable_unknown_status(
             name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
         )
     _note_probe_reachable(name)
@@ -380,7 +371,7 @@ async def _probe_agent_runner(
             name,
             exc_info=True,
         )
-        return _roster_rows.malformed_probe_status(
+        return _roster_rows.reachable_unknown_status(
             name,
             role,
             gateway_url,
