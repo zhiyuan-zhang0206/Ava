@@ -413,12 +413,13 @@ describe("SpawnButton single-spawnable", () => {
     );
     const onSpawn = vi.fn();
     wrap(<SpawnButton variant="sm" onSpawn={onSpawn} />);
-    const button = screen.getByLabelText("Spawn agent");
     await waitFor(() => {
-      expect(button.hasAttribute("disabled")).toBe(false);
+      expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(
+        false,
+      );
     });
 
-    fireEvent.click(button);
+    fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({ machine: "test-host", model: undefined });
     expect(screen.queryByText("Spawn on")).toBeNull();
   });
