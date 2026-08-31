@@ -743,6 +743,77 @@ def test_env_apply_provisions_only_when_all_four_absent(
     }
 
 
+def test_env_apply_resumes_after_provisioning_crash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA nit 1: the provisioning write crashes after the intent journal;
+    the resume re-run finds the durable intent and completes the write."""
+    calls: list[str] = []
+
+    def crash_after_intent(digest: str) -> bytes:
+        calls.append(digest)
+        raise RuntimeError("crash during env write")
+
+    monkeypatch.setattr(activation_config, "_enable_pitr_services", crash_after_intent)
+    record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
+    with pytest.raises(RuntimeError, match="crash during env write"):
+        activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
+    durable = load_record(tmp_path)
+    assert durable is not None
+    assert durable.config_apply_intent is not None
+    assert durable.config_apply_intent["kind"] == "env"
+
+    monkeypatch.setattr(activation_config, "_enable_pitr_services", lambda _digest: b"a")
+    replacement = activation_config.apply_wal_config(tmp_path, durable, {"archive_mode": "on"})
+    assert calls == [hashlib.sha256(b"OTHER=kept\n").hexdigest()]
+    assert replacement.phase == "wal_restart_pending"
+
+
+def test_env_apply_noop_when_already_desired(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA nit 2: a desired env is adopted untouched — no provisioning write,
+    no intent journal, env bytes byte-identical after the apply."""
+
+    def unexpected_write(_digest: str) -> bytes:
+        raise AssertionError("provisioning write ran although the env was desired")
+
+    monkeypatch.setattr(activation_config, "_enable_pitr_services", unexpected_write)
+    desired = (
+        "AVA_PITR_ENABLED=true\n"
+        "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
+        "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
+        "AVA_PITR_RETENTION_PLANNER_ENABLED=false\n"
+    )
+    record = _env_apply_fixture(monkeypatch, tmp_path, desired)
+    replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
+    assert replacement.phase == "wal_restart_pending"
+    assert replacement.config_apply_applied == {
+        "kind": "env",
+        "digest": hashlib.sha256(desired.encode()).hexdigest(),
+    }
+    assert (tmp_path / ".env").read_bytes() == desired.encode()
+
+
+def test_env_apply_provisioning_round_trips_real_env_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA nit 3: the real write_fields path lands the four aliases in the
+    env file and keeps the unrelated lines."""
+    record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
+    monkeypatch.setattr("shared.runtime_config.env_file_path", lambda: tmp_path / ".env")
+    replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
+    assert replacement.phase == "wal_restart_pending"
+    payload = (tmp_path / ".env").read_text()
+    # write_fields quotes env values — dotenv reads them back unquoted,
+    # which is what pitr_env_is_desired validates on the next apply.
+    assert "AVA_PITR_ENABLED='true'" in payload
+    assert "AVA_PITR_BASE_BACKUP_ENABLED='true'" in payload
+    assert "AVA_PITR_RESTORE_PROOF_ENABLED='true'" in payload
+    assert "AVA_PITR_RETENTION_PLANNER_ENABLED='false'" in payload
+    assert "OTHER=kept" in payload
+
+
 def test_rollback_effect_accepts_only_exact_pre_or_owned_postimage() -> None:
     assert rollback_effect_state(current="before", before="before", owned="after") is False
     assert rollback_effect_state(current="after", before="before", owned="after") is True

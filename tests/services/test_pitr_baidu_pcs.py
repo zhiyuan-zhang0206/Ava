@@ -469,6 +469,41 @@ def test_retry_adopts_a_new_pin_when_only_the_pin_drifted(
     assert fake.files[f"{obj_path}.ack.json"]["md5"] == _opaque(rewritten)
 
 
+def test_listing_resolves_the_newest_row_after_create_on_existing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-08-31 speed test: create-on-existing minted a new fs_id and the
+    sidecar adopted it, yet the directory listing still resolved the OLD
+    row. Resolution must pick the newest (highest fs_id), so stat reports
+    the adopted pin."""
+    fake = FakePcs()
+    store = make_store(fake, monkeypatch)
+    obj_path = f"{APP_ROOT}/{OBJECT}"
+    payload = b"payload"
+    source = tmp_path / "wal.enc"
+    source.write_bytes(payload)
+    served: dict[int, bytes] = {}
+
+    def fake_get(url: str, **_kwargs: object) -> httpx.Response:
+        for fs_id, content in served.items():
+            if f"/{fs_id}" in url:
+                return httpx.Response(200, content=content)
+        raise AssertionError(f"unexpected GET {url}")
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    first = store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+    served[fake.files[f"{obj_path}.ack.json"]["fs_id"]] = sidecar_json(OBJECT, first)
+    second = store.put_wal_ciphertext_if_absent(source, OBJECT, {})
+    served[fake.files[f"{obj_path}.ack.json"]["fs_id"]] = sidecar_json(OBJECT, second)
+    assert first.pin_token != second.pin_token
+    assert any(row["fs_id"] == int(first.pin_token.split(":", 1)[0]) for row in fake.replaced)
+
+    observed = store.stat(OBJECT)
+    assert observed is not None
+    assert observed.pin_token == second.pin_token
+
+
 def test_stat_reads_back_sidecar_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakePcs()
     store = make_store(fake, monkeypatch)

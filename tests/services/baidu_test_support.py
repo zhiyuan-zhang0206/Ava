@@ -67,6 +67,10 @@ class FakePcs:
         self.transient_paths: set[str] = set()
         self.missing_override: dict[str, list[str]] = {}
         self.create_override: dict[str, dict[str, Any]] = {}
+        # Rows replaced by create-on-existing stay listed next to the new
+        # row (2026-08-31 live observation), so readers that list a
+        # directory see both — this models exactly that.
+        self.replaced: list[dict[str, Any]] = []
         self._next_fs_id = 100
         self._next_uploadid = 0
 
@@ -137,6 +141,8 @@ class FakePcs:
     def _create(self, params: dict[str, str], path: str) -> httpx.Response:
         if path in self.create_override:
             return httpx.Response(200, json=dict(self.create_override[path]))
+        if path in self.files:
+            self.replaced.append(dict(self.files[path]))
         block_count = len(json.loads(params["block_list"]))
         content = b"".join(self.parts.get(path, {}).get(i, b"") for i in range(block_count))
         row = self.seed_file(path, size=len(content), md5=_opaque(content))
@@ -146,21 +152,29 @@ class FakePcs:
         fsids = json.loads(params["fsids"])
         want_dlink = params.get("dlink") == "1"
         rows: list[dict[str, Any]] = []
-        for row in self.files.values():
+        for row in [*self.files.values(), *self.replaced]:
             if row["fs_id"] in fsids:
                 copy = dict(row)
-                if not want_dlink:
+                if want_dlink:
+                    copy["dlink"] = copy.get("dlink") or f"https://dl.test/{row['fs_id']}"
+                else:
                     copy.pop("dlink", None)
                 rows.append(copy)
         return httpx.Response(200, json={"list": rows})
 
     def _list(self, params: dict[str, str]) -> httpx.Response:
         directory = str(params["dir"]).rstrip("/")
-        rows = [
+        current = [
             row
             for row in self.files.values()
             if row["path"] == directory or row["path"].startswith(f"{directory}/")
         ]
+        stale = [
+            row
+            for row in self.replaced
+            if row["path"] == directory or row["path"].startswith(f"{directory}/")
+        ]
+        rows = [*stale, *current]
         start = int(params.get("start") or 0)
         limit = int(params.get("limit") or 1000)
         return httpx.Response(200, json={"list": rows[start : start + limit]})
