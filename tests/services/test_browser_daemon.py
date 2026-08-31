@@ -47,50 +47,19 @@ def test_chrome_args_has_debug_port_and_profile(tmp_path: Path) -> None:
     assert not any(a.startswith("--headless") for a in args)
 
 
-def test_chrome_args_opens_frontend_as_first_tab_when_configured(tmp_path: Path) -> None:
-    """A configured frontend URL is appended as Chrome's only positional
-    argument — the tab the user lands on. It must not disturb any flag the
-    CDP probe / identity check keys on (--remote-debugging-port,
-    --user-data-dir)."""
-    args = bd._chrome_args("/chrome", 9222, tmp_path / "prof", "http://10.0.0.72:3001")
-    assert args[-1] == "http://10.0.0.72:3001"
-    assert "--remote-debugging-port=9222" in args
-    assert f"--user-data-dir={tmp_path / 'prof'}" in args
-    assert len([a for a in args if not a.startswith("--")]) == 2  # binary + the one tab
-
-
-def test_chrome_args_has_no_first_tab_without_url(tmp_path: Path) -> None:
-    """No URL configured -> no positional tab argument at all: the browser
-    opens its default page instead of a dead localhost."""
-    args = bd._chrome_args("/chrome", 9222, tmp_path / "prof", None)
-    assert len([a for a in args if not a.startswith("--")]) == 1  # binary only
-
-
-def test_frontend_url_reads_app_port_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first-tab URL is the configured app port on the gateway's host
-    (its private-network address, never localhost); an agent-runner-only
-    host (app_port unset) or a host with no gateway URL gets no first tab."""
-    monkeypatch.setattr(settings.services, "app_port", 3001)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://10.0.0.72:8000")
-    assert bd._frontend_url() == "http://10.0.0.72:3001"
-    # No gateway URL -> no first tab, not a dead loopback URL.
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    assert bd._frontend_url() is None
-    monkeypatch.setattr(settings.services, "app_port", None)
-    assert bd._frontend_url() is None
-
-
 def test_main_asserts_capable_then_execvps_chrome(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """main() must fail-loud-check capability before launching, then exec the
-    resolved Chrome with the configured port (guards healthcheck respawns)."""
+    resolved Chrome with the configured port but no automatic page."""
     order: list[str] = []
     monkeypatch.setattr(bd, "assert_browser_capable", lambda: order.append("capable"))
     monkeypatch.setattr(bd, "_cdp_reachable", lambda _p: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(bd, "resolve_chrome_binary", lambda: "/chrome")
     monkeypatch.setattr(bd, "_profile_dir", lambda: tmp_path / "prof")
     monkeypatch.setattr(bd, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(settings.services, "app_port", 3001)
+    monkeypatch.setattr(settings.gateway, "gateway_url", "http://10.0.0.72:8000")
     monkeypatch.setattr(bd.os, "open", lambda *_a, **_k: 99)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(bd.os, "dup2", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(bd.os, "close", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -110,6 +79,8 @@ def test_main_asserts_capable_then_execvps_chrome(
     # main() takes the port from settings, and a cluster gets one out of its own
     # port block — a literal here only holds on a default-home install.
     assert f"--remote-debugging-port={settings.services.browser_cdp_port}" in captured_args
+    # Even a gateway host with an app port must leave Chrome's first page alone.
+    assert len([arg for arg in captured_args if not arg.startswith("--")]) == 1
 
 
 def test_main_propagates_capability_failure(monkeypatch: pytest.MonkeyPatch) -> None:
