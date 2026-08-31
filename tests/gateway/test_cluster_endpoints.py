@@ -307,7 +307,13 @@ class _FakeSessionBackend:
 @pytest.fixture
 def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
     backend = _FakeSessionBackend()
+
+    def _never_skipped(_name: str, _skipped: set[str]) -> bool:
+        return False
+
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+    # These tests exercise respawn behavior, independent of the operator's durable marker.
+    monkeypatch.setattr("shared.disabled_services.is_skipped", _never_skipped)
     return backend
 
 
