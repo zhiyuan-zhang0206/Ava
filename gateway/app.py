@@ -76,7 +76,6 @@ from gateway import (
     alert_reconciliation,
     loki_events,
     loki_query_budget,
-    pages_recovery,
     prom_metrics,
     ttl_reaper,
 )
@@ -308,11 +307,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # retries on the next interval.
     app.state.ttl_reaper = ttl_reaper.start_ttl_reaper(app.state.db_pool)
 
-    # One-shot show() page recovery scan (task #2212): after a host restart
-    # the agent-owned show() page servers are dead with no daemon to bring
-    # them back; notify each owner to re-serve once. Fails open.
-    pages_recovery.start_show_page_recovery(app)
-
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
     # refreshes the plist, so an `ava cluster update` that changes the probe command
@@ -392,7 +386,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             flusher.cancel()
             with suppress(asyncio.CancelledError):
                 await flusher
-        await pages_recovery.stop_show_page_recovery(app)
         await app.state.schedule_manager.stop()
         app.state.db_pool.close()
         app.state.control_db_pool.close()

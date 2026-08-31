@@ -1051,6 +1051,9 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "page_restore_failed": _telemetry("page_restore_failed", "page restore failed", tier="anomaly"),
     "page_restore_closed": _telemetry("page_restore_closed", "page restore closed", tier="noise"),
+    "page_restore_notified": _telemetry(
+        "page_restore_notified", "page restore notified", tier="noise"
+    ),
     # db resilience
     "db_outage_wait": _telemetry("db_outage_wait", "db outage wait", tier="anomaly"),
     "db_outage_pause": _telemetry("db_outage_pause", "db outage pause", tier="anomaly"),
@@ -1302,11 +1305,11 @@ EVENTS: dict[str, EventSpec] = {
         tier="observation",
         doc="the gateway TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id",
     ),
-    "page_recovery_notified": EventSpec(
-        name="page_recovery_notified",
+    "page_language_lookup_failed": EventSpec(
+        name="page_language_lookup_failed",
         category="log",
-        tier="observation",
-        doc="the gateway startup scan notified an owner that a show() page server died with the host; attributes carry host",
+        tier="anomaly",
+        doc="the gateway could not read the page copy language from user_settings (DB failure) and fell back to the default; attributes carry exc_type, exc_message",
     ),
     "page_proxy_502": EventSpec(
         name="page_proxy_502",

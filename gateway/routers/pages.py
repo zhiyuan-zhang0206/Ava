@@ -51,6 +51,7 @@ from shared.pages_copy import (
     PAGE_EXPIRED_TITLE,
     PAGE_LANGUAGE_DEFAULT,
     PAGE_SERVER_DOWN_BODY,
+    PAGE_SERVER_TIMEOUT_BODY,
 )
 from shared.redis_client import publish_best_effort
 
@@ -71,10 +72,18 @@ def _page_language(pool: ConnectionPool) -> str:
 
     Same single-language-source mechanism as the IM alert copy
     (``shared.alerts.display_language``); a missing row or unknown value
-    falls back to ``PAGE_LANGUAGE_DEFAULT``.
+    falls back to ``PAGE_LANGUAGE_DEFAULT``. A DB failure also falls back —
+    an error page must not turn a proxy 502/504 into a 500 (QA nit A).
     """
-    with pool.connection() as conn:
-        return display_language(conn)
+    try:
+        with pool.connection() as conn:
+            return display_language(conn)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "page copy language lookup failed — falling back to the default",
+            event="page_language_lookup_failed",
+        )
+        return PAGE_LANGUAGE_DEFAULT
 
 
 def _EXPIRED_PAGE_HTML(agent_id: int, name: str, lang: str) -> str:  # noqa: N802 — fixed contract name
@@ -286,9 +295,11 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     except httpx.TimeoutException as exc:
         await client.aclose()
         _log_proxy_failure(request, agent_id, name, host, port, "504", exc)
-        raise HTTPException(
-            status_code=504, detail=f"page server {host}:{port} timed out"
-        ) from None
+        # Friendly, language-aware copy in place of the raw host:port detail —
+        # the dial target stays in the log line above (task #2212, QA nit B).
+        lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
+        detail = PAGE_SERVER_TIMEOUT_BODY.get(lang, PAGE_SERVER_TIMEOUT_BODY[PAGE_LANGUAGE_DEFAULT])
+        raise HTTPException(status_code=504, detail=detail) from None
     except httpx.HTTPError as exc:
         await client.aclose()
         _log_proxy_failure(request, agent_id, name, host, port, "502", exc)
