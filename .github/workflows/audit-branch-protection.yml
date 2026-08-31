@@ -38,7 +38,7 @@ jobs:
         id: audit
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AVA_AUDIT_PAT }}
         shell: bash
         run: |
           set -o pipefail
