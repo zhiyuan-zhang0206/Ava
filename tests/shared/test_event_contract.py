@@ -119,8 +119,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # raises it to 129; deleting the hibernation chain's agent_hibernating +
     # agent_swapped_in (Task #1976 phase 2) drops it back to 127;
     # memory_search_stats (Task #2088's row-growth monitoring) raises it
-    # back to 128.
-    assert len(_TELEMETRY_KINDS) == 128
+    # back to 128; page_restore_notified (Task #2212 direction B — the
+    # reconcile close path's re-serve notice) raises it to 129.
+    assert len(_TELEMETRY_KINDS) == 129
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
