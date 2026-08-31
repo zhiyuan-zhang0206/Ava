@@ -25,6 +25,10 @@ garbled to the user.
 > ⚠️ **Never serve a `.md` file directly.** The user will see raw markup, not a
 > rendered page. Always render Markdown to HTML before serving.
 
+A served directory without `index.html` shows a placeholder page instead of a
+directory listing. When using `serve()`, include an `index.html`; for Markdown,
+use `serve_markdown()`.
+
 **To serve Markdown as a rendered page**, use `ava.ui.serve_markdown()` —
 the one-call path that handles the whole widget dance for you:
 

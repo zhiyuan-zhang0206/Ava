@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import argparse
 import http.server
+import io
 import os
 import socketserver
 from contextlib import suppress
+from http import HTTPStatus
 
 
 class _PageHandler(http.server.SimpleHTTPRequestHandler):
@@ -41,6 +43,32 @@ class _PageHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(("ok:" + self.token).encode())
             return None
         return super().do_GET()
+
+    def list_directory(self, path: str | os.PathLike[str]) -> io.BytesIO:
+        """Return a placeholder instead of exposing directory contents."""
+        del path
+        body = b"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Directory unavailable</title>
+</head>
+<body>
+  <main>
+    <h1>This directory is not browsable</h1>
+    <p>Directory listings are disabled for ava.ui.serve pages.</p>
+    <p>Use <code>ava.ui.serve_markdown()</code> to render Markdown, or add an
+      <code>index.html</code> to the served directory.</p>
+  </main>
+</body>
+</html>
+"""
+        self.send_response(HTTPStatus.FORBIDDEN)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        return io.BytesIO(body)
 
     def handle_one_request(self) -> None:
         try:
