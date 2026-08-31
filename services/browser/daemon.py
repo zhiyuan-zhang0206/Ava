@@ -14,8 +14,6 @@ localhost CDP through the chrome-devtools-mcp plugin (`--browserUrl`).
 env overrides (via shared.config.settings):
 - `AVA_BROWSER_ENABLED` — gate (the ava-browser session only starts when true)
 - `AVA_CHROME_BINARY` — explicit Chrome path; else the platform default
-- `AVA_APP_PORT` — the Next.js app port; when this host serves the frontend
-  (the value is set), Chrome opens it as its first tab
 
 The CDP port is fixed at 9222 (`_CDP_PORT`).
 
@@ -36,7 +34,6 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from loguru import logger
 
@@ -136,44 +133,14 @@ def _watch_cdp(port: int) -> None:
             return
 
 
-def _frontend_url() -> str | None:
-    """The Ava frontend URL to open as the browser's first tab, or None when
-    this host serves none locally.
-
-    The tab is the Next.js app port (AVA_APP_PORT), not the gate's entry port:
-    the entry is the always-up static gate, while the app port is the frontend
-    itself. The port is only set by converge on gateway-capable hosts, so an
-    agent-runner-only unit (no local frontend) gets no first tab.
-
-    The host comes from AVA_GATEWAY_URL (the cluster's private-network
-    address, never localhost) — same derivation as
-    shared.alerts.frontend_base_url; a missing gateway URL means no first tab
-    rather than a dead loopback URL.
-    """
-    port = settings.services.app_port
-    if port is None:
-        return None
-    host = urlsplit(settings.gateway.gateway_url or "").hostname
-    if not host:
-        return None
-    return f"http://{host}:{port}"
-
-
-def _chrome_args(
-    binary: str, port: int, profile: Path, first_tab_url: str | None = None
-) -> list[str]:
-    args = [
+def _chrome_args(binary: str, port: int, profile: Path) -> list[str]:
+    return [
         binary,
         f"--remote-debugging-port={port}",
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
     ]
-    if first_tab_url is not None:
-        # A positional non-flag argument is a URL Chrome opens as a tab —
-        # the user's entry point to the fleet UI on a fresh browser.
-        args.append(first_tab_url)
-    return args
 
 
 def _supervise_chrome(args: list[str], port: int) -> int:
@@ -318,7 +285,7 @@ def main() -> None:
     os.dup2(log_fd, 1)
     os.dup2(log_fd, 2)
     os.close(log_fd)
-    _launch(binary, _chrome_args(binary, _CDP_PORT, profile, _frontend_url()), _CDP_PORT)
+    _launch(binary, _chrome_args(binary, _CDP_PORT, profile), _CDP_PORT)
 
 
 if __name__ == "__main__":
