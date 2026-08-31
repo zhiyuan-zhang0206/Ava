@@ -123,7 +123,7 @@ class DaemonSettings(EnvSettings):
         alias="AVA_HEALTH_PROBE_AGENT_MIN",
         description="Minimum running/idling agents the health-probe requires for a healthy verdict. A test/QA cluster with no resident agents must set this to 0, or the probe's agent-population check fails forever and --auto-rollback rolls the cluster back to the last-known-good commit on a cycle (2026-08-10 preview incident).",
         json_schema_extra={
-            "restart_required": "none",
+            "restart_required": "",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",

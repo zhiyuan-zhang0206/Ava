@@ -132,6 +132,24 @@ _ALLOWED_LIFECYCLES = frozenset({"frozen", "live"})
 # spawn, replayed for life) or "live" (re-read from cluster config every start).
 Lifecycle = Literal["frozen", "live"]
 
+# Which process must restart after a change to the field — the operator's ONLY
+# behavioral guide (the panel/CLI prompt from it; nothing restarts on its own).
+# The empty string means no restart is needed. Every other value names a process
+# kind that must CONSUME the field (see the profile cross-check in
+# _build_registry); "schedule" is the gateway-hosted schedule runner, which has
+# no config profile and reads every domain.
+_ALLOWED_RESTART_REQUIRED = frozenset({"", "agent", "all", "gateway", "ops", "schedule"})
+# restart_required -> the PROCESS_PROFILES set that must contain the field's
+# domain for the value to make sense (the profile sets ARE the consumption
+# matrix, verified bidirectionally by tests/shared/test_gateway_consumer_guard.py).
+# "schedule" / "all" / "" have no named-kind constraint ("schedule" runs without
+# a profile and constructs every domain; "all" is satisfied by any consumer).
+_RESTART_REQUIRED_PROFILE = {
+    "agent": "agent",
+    "gateway": "gateway",
+    "ops": "runner",
+}
+
 
 @lru_cache(maxsize=1)
 def _build_registry() -> dict[str, _FieldRef]:
@@ -216,6 +234,37 @@ def _build_registry() -> dict[str, _FieldRef]:
                     f"per-agent instance to freeze; cluster-scope config is read live by "
                     f"whatever process next starts"
                 )
+            restart_required = extra.get("restart_required", "")
+            if restart_required not in _ALLOWED_RESTART_REQUIRED:
+                raise RuntimeError(
+                    f"config field {name!r} ({attr}) has restart_required={restart_required!r}; "
+                    f"must be one of {sorted(_ALLOWED_RESTART_REQUIRED)} — it names the process "
+                    f"the operator must restart after a change, and the panel/CLI prompt from it"
+                )
+            # Cross-check against the consumption matrix: restart_required names a
+            # process kind, so that kind's config profile must contain the field's
+            # domain (the profile sets ARE the consumption matrix — verified
+            # bidirectionally by tests/shared/test_gateway_consumer_guard.py). A
+            # field only a gateway daemon reads marked "agent" would have the
+            # operator restart the wrong process and the change silently not take
+            # effect (the telegram/feishu/im_* 11-field bug this check seals, lost
+            # in the main rebuild and re-landed by #1226). "schedule" / "all" / ""
+            # carry no constraint.
+            profile_kind = _RESTART_REQUIRED_PROFILE.get(restart_required)
+            if profile_kind is not None:
+                from shared.config.profiles import PROCESS_PROFILES
+
+                profile = PROCESS_PROFILES[profile_kind]  # type: ignore[index]
+                if attr not in profile:
+                    raise RuntimeError(
+                        f"field {name!r} ({attr}) declares restart_required={restart_required!r} "
+                        f"but its domain is not in the {profile_kind!r} process profile "
+                        f"({sorted(profile)}) — the named process kind "
+                        f"does not consume this field, so the operator would restart the wrong "
+                        f"process and the change would silently not take effect. Point it at "
+                        f"the kind that actually reads it (the im_bridge-consumed telegram/feishu/"
+                        f"im_* fields are 'gateway'), or use 'all' or 'schedule'."
+                    )
             reg[name] = _FieldRef(
                 name=name,
                 domain=attr,

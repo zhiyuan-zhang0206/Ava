@@ -70,7 +70,7 @@ class ObservabilitySettings(EnvSettings):
             "older than this many days when `ava logs retention` runs."
         ),
         json_schema_extra={
-            "restart_required": "none",
+            "restart_required": "",
             "writable": True,
             "sensitive": False,
             "scope": "host",

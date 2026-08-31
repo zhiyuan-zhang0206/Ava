@@ -34,7 +34,7 @@ level is the owning sub-model's `group` label. `capability` below is conceptual
 ownership + the remote-view field filter, not panel grouping (default capability
 per domain in `_DOMAIN_MODELS`). Each Field's json_schema_extra carries the
 remaining metadata the frontend and distribution logic need:
-- restart_required: "agent" | "ops" | "gateway" | "all" | "" — which process must restart after a change; "gateway" names the gateway process AND every gateway-profile daemon that consumes the field (im_bridge / memory_indexer / memory_search / milvus / ... — an `ava restart` bounces all of them)
+- restart_required: "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process must restart after a change; "gateway" names the gateway process AND every gateway-profile daemon that consumes the field (im_bridge / memory_indexer / memory_search / milvus / ... — an `ava restart` bounces all of them); "schedule" = the gateway-hosted schedule runner
 - writable: whether the frontend allows editing
 - sensitive: whether the frontend masks the display
 - scope: cluster-pinned | cluster-default | host | agent — drives BOOTSTRAP_FIELDS + write routing

@@ -1530,3 +1530,104 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
             extra = model.model_fields[name].json_schema_extra
             assert isinstance(extra, dict)
             assert extra["restart_required"] == "gateway", name
+
+
+# ─── restart_required: value domain + consumption-matrix cross-check ───
+
+
+def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A typo'd restart_required can never reach prod boot — it is the operator's
+    only guide for which process to restart, so a bad value must fail fast at
+    registry build, the same seal scope/capability/lifecycle have (the bcf966476
+    fail-fast, lost in the main rebuild and restored by #2227)."""
+    from pydantic import Field
+
+    from shared import config_registry
+    from shared.config._base import EnvSettings
+
+    class Bad(EnvSettings):
+        synthetic_knob: int = Field(
+            default=1,
+            alias="AVA_SYNTHETIC_KNOB",
+            json_schema_extra={"scope": "cluster-pinned", "restart_required": "gatewat"},
+        )
+
+    monkeypatch.setattr(
+        config_registry,
+        "_DOMAIN_MODELS",
+        (("synthetic", "Synthetic", Bad, "agent-runner"),),
+    )
+    config_registry._build_registry.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="restart_required='gatewat'"):
+            config_registry._build_registry()
+    finally:
+        config_registry._build_registry.cache_clear()
+
+
+def test_build_registry_rejects_restart_required_for_unconsuming_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """restart_required names a process kind — that kind's config profile must
+    contain the field's domain. The telegram/feishu/im_* fields once said "agent"
+    while only the gateway's im_bridge daemon reads them: the operator restarted
+    the wrong process and the change silently never took effect (#1226 re-landed
+    the value fixes; this check makes the drift class impossible)."""
+    from pydantic import Field
+
+    from shared import config_registry
+    from shared.config._base import EnvSettings
+
+    class WrongKind(EnvSettings):
+        synthetic_knob: int = Field(
+            default=1,
+            alias="AVA_SYNTHETIC_KNOB",
+            json_schema_extra={"scope": "cluster-pinned", "restart_required": "agent"},
+        )
+
+    monkeypatch.setattr(
+        config_registry,
+        "_DOMAIN_MODELS",
+        (("telegram", "Telegram", WrongKind, "gateway"),),
+    )
+    config_registry._build_registry.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match=r"restart_required='agent'.*process profile"):
+            config_registry._build_registry()
+    finally:
+        config_registry._build_registry.cache_clear()
+
+
+def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
+    """Metadata-surface belt-and-braces over the registry enforcement: every
+    field's restart_required is in the value domain, and when it names a process
+    kind, the field's domain is in that kind's profile (the profile sets ARE the
+    consumption matrix — test_gateway_consumer_guard keeps them honest)."""
+    from typing import Any
+
+    from shared.config import _FIELDS
+    from shared.config.profiles import PROCESS_PROFILES
+    from shared.config_registry import _ALLOWED_RESTART_REQUIRED, _RESTART_REQUIRED_PROFILE
+
+    def _extra(ref: object) -> dict[str, Any]:
+        info = getattr(ref, "info", ref)
+        extra = getattr(info, "json_schema_extra", None)
+        return extra if isinstance(extra, dict) else {}
+
+    bad_value: list[tuple[str, str]] = [
+        (name, str(_extra(ref).get("restart_required", ""))) for name, ref in _FIELDS.items()
+    ]
+    bad_value = [(n, v) for n, v in bad_value if v not in _ALLOWED_RESTART_REQUIRED]
+    assert not bad_value, f"fields with invalid restart_required: {bad_value}"
+
+    wrong_kind: list[tuple[str, str, str]] = []
+    for name, ref in _FIELDS.items():
+        restart = str(_extra(ref).get("restart_required", ""))
+        kind = _RESTART_REQUIRED_PROFILE.get(restart)
+        if kind is not None and ref.domain not in PROCESS_PROFILES[kind]:  # type: ignore[index]
+            wrong_kind.append((name, ref.domain, restart))
+    assert not wrong_kind, (
+        f"fields whose restart_required names a process kind that does not consume "
+        f"them: {wrong_kind}"
+    )
+    assert "schedule" in _ALLOWED_RESTART_REQUIRED
