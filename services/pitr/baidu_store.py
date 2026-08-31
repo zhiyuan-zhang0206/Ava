@@ -315,16 +315,24 @@ class BaiduObjectStore:
         return self._ack_from_row(object_name, row, size, whole_md5, metadata, created=False)
 
     def _file_row(self, object_name: str) -> RemoteFile | None:
-        """Resolve one object path to its PCS row via the parent listing."""
+        """Resolve one object path to its PCS row via the parent listing.
+
+        create-on-existing can leave the replaced row listed next to the
+        new one (2026-08-31 speed test: the listing still resolved the
+        pre-replacement fs_id right after the replacement), so the
+        resolution picks the newest match — the highest fs_id, which the
+        live API hands out monotonically — instead of the first listed."""
         directory, _name = object_name.rsplit("/", 1)
+        wanted = self._path(object_name)
+        newest: RemoteFile | None = None
         start = 0
         while True:
             rows = self._client().list_dir(f"{self._app_root}/{directory}", start=start)
             for row in rows:
-                if row.path == self._path(object_name):
-                    return row
+                if row.path == wanted and (newest is None or row.fs_id > newest.fs_id):
+                    newest = row
             if len(rows) < 1000:
-                return None
+                return newest
             start += len(rows)
 
     @staticmethod
