@@ -39,7 +39,7 @@ Overview of the Agent subsystem.
     correcting "who I am".
   - **terminate / force-kill** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)
     or a four-step kill ladder when stuck (`force=true`, not available on `ava.self.terminate()`).
-  - **heartbeat** — check-in for an idle agent, claim appends a system note for the agent to see.
+  - **heartbeat** — check-in for an idle agent; claim appends a system note unless a permanent-provider circuit breaker is open, in which case the heartbeat is consumed without growing the LLM context.
 
 ## Sub-concepts
 

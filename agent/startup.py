@@ -32,7 +32,7 @@ from langgraph.constants import PUSH
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hooks.repair import dangling_tool_use_repairs
+from agent.hooks.repair import dangling_tool_pairing_repairs
 from shared.log import logger
 
 
@@ -222,8 +222,8 @@ async def _repair_dangling_tool_use_at_startup(
     graph: CompiledStateGraph[Any, Any, Any, Any],
     agent_id: int,
 ) -> None:
-    """Repair dangling tool_use left by a hard-cancelled previous process,
-    as crash recovery, before the graph loop begins.
+    """Repair dangling tool_use/tool_result pairing left by a hard-cancelled
+    previous process, before the graph loop begins.
 
     Runs before graph.ainvoke — i.e. before the claim node can feed the
     history to an LLM (a pending compact_request's summarization call) or
@@ -231,13 +231,15 @@ async def _repair_dangling_tool_use_at_startup(
     history, not just the tail: an earlier boot can have buried a dangling
     tool_use mid-history when the consolidating checkpoint `aput` failed at
     shutdown and the dangling AIMessage rode in as a pending write after this
-    repair already ran (agents 236/238, 2026-07-13). That pending-write shape
-    itself is invisible to `aget_state` here; the before_llm hook twin
-    (`agent/hooks/repair.py`) covers it once the graph materializes the write.
+    repair already ran (agents 236/238, 2026-07-13). It also drops a
+    tool_result whose carrying tool_use was lost (agent 5333, 2026-08-31).
+    Pending-write shapes are invisible to `aget_state` here; the before_llm
+    hook twin (`agent/hooks/repair.py`) covers them once the graph materializes
+    the write.
     """
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     snapshot = await graph.aget_state(config)
-    repairs = dangling_tool_use_repairs(snapshot.values.get("messages", []))
+    repairs = dangling_tool_pairing_repairs(snapshot.values.get("messages", []))
     if not repairs:
         return
     await graph.aupdate_state(config, {"messages": repairs})
@@ -246,8 +248,8 @@ async def _repair_dangling_tool_use_at_startup(
     if flush is not None:
         await cast(Callable[[], Awaitable[None]], flush)()
     logger.warning(
-        "repaired dangling tool_use(s) from a hard-cancelled previous process",
-        event="dangling_tool_use_repaired",
+        "repaired dangling tool_use/tool_result pairing from a hard-cancelled previous process",
+        event="dangling_tool_pairing_repaired",
         agent_id=agent_id,
     )
 
