@@ -898,8 +898,18 @@ def test_cluster_status_op_returns_snapshot(monkeypatch: pytest.MonkeyPatch) -> 
     snap = ClusterStatus(
         machine_name="wsl", serve_gateway=False, serve_agent_runner=True, paused=False
     )
-    monkeypatch.setattr(ops_cluster, "status_snapshot", lambda: snap)
-    assert ops_cluster.cluster_status_op() is snap
+    expected_pool = object()
+    seen: list[object] = []
+
+    def _snapshot(pool: object | None = None) -> ClusterStatus:
+        assert pool is expected_pool
+        seen.append(pool)
+        return snap
+
+    monkeypatch.setattr(ops_cluster, "status_snapshot", _snapshot)
+
+    assert ops_cluster.cluster_status_op(expected_pool) is snap
+    assert seen == [expected_pool]
 
 
 @pytest.mark.asyncio

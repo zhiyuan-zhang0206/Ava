@@ -63,6 +63,24 @@ def test_second_live_holder_is_blocked() -> None:
     assert update_lock_holder() == "A"
 
 
+def test_read_lease_uses_the_callers_connection(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bundled snapshot can read the lease without opening or owning another connection."""
+    assert acquire_update_lock("A", kind="rollout") is True
+
+    def _fresh_connect(**_kwargs: object) -> object:
+        raise AssertionError("read_update_lease opened a fresh connection")
+
+    monkeypatch.setattr("shared.db.connect", _fresh_connect)
+
+    lease = read_update_lease(conn=db_conn)
+
+    assert lease is not None
+    assert lease.holder == "A"
+    assert lease.kind == "rollout"
+
+
 def test_release_frees_for_next_holder() -> None:
     assert acquire_update_lock("A") is True
     release_update_lock("A")

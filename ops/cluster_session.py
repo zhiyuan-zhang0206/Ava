@@ -24,7 +24,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
+
+from shared.cluster_lock import DeployLease
+from shared.host_deploy_state import HostDeployState
 
 
 class OrchestrationSpawnFailed(RuntimeError):  # noqa: N818 — state description, same style as ClusterUpdateInProgress
@@ -45,6 +48,7 @@ class OrchestrationSpawnFailed(RuntimeError):  # noqa: N818 — state descriptio
 
 
 _log = logging.getLogger(__name__)
+_UNSET = object()
 
 # Repo root: gateway/cluster.py -> gateway -> repo root
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -172,7 +176,10 @@ def live_orchestration_session() -> str | None:
     return None
 
 
-def current_orchestration() -> OrchestrationKind | None:
+def current_orchestration(
+    state: HostDeployState | None | object = _UNSET,
+    lease: DeployLease | None | object = _UNSET,
+) -> OrchestrationKind | None:
     """The whole-cluster orchestration running on this host, or None if idle.
 
     Returns 'rollout' / 'restart' / 'update' — the value the status panel reads
@@ -193,15 +200,25 @@ def current_orchestration() -> OrchestrationKind | None:
     cannot be inspected is a real hard failure.
     """
     try:
-        from shared.cluster_lock import read_update_lease
+        if lease is _UNSET:
+            from shared.cluster_lock import read_update_lease
 
-        lease = read_update_lease()
-        if lease is not None and lease.kind is not None and lease.note is None:
-            return lease.kind
-        from shared.host_deploy_state import read as read_host_deploy_state
+            resolved_lease = read_update_lease()
+        else:
+            resolved_lease = cast(DeployLease | None, lease)
+        if (
+            resolved_lease is not None
+            and resolved_lease.kind is not None
+            and resolved_lease.note is None
+        ):
+            return resolved_lease.kind
+        if state is _UNSET:
+            from shared.host_deploy_state import read as read_host_deploy_state
 
-        state = read_host_deploy_state()
-        if state is not None and state.updater_live:
+            resolved_state = read_host_deploy_state()
+        else:
+            resolved_state = cast(HostDeployState | None, state)
+        if resolved_state is not None and resolved_state.updater_live:
             return "update"
         return None
     except Exception:

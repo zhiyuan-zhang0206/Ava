@@ -126,6 +126,29 @@ def test_a_declined_preflight_is_reported_as_a_refusal_with_its_reason(home: Pat
     assert "still serving" in uo.describe_updater_outcome(outcome)
 
 
+def test_pre_read_state_preserves_outcome_without_another_db_read(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The status snapshot supplies its row while log anchoring stays unchanged."""
+    from shared.host_deploy_state import HostDeployState
+
+    _paused(home)
+    _write_log(home / "logs" / "updater-1785470000.log", _DECLINED_LOG)
+    state = _PAUSE_STATE["state"]
+    assert isinstance(state, HostDeployState)
+
+    def _unexpected_read() -> HostDeployState | None:
+        raise AssertionError("last_updater_outcome re-read host deploy state")
+
+    monkeypatch.setattr("shared.host_deploy_state.read", _unexpected_read)
+
+    outcome = uo.last_updater_outcome(state)
+
+    assert outcome is not None
+    assert outcome.kind == "declined"
+    assert outcome.rc == 3
+
+
 def test_a_failed_restart_is_reported_as_an_exit_code(home: Path) -> None:
     """The other half: the stop already happened, so this host may be half
     transitioned — a different next action from the refusal above."""

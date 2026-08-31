@@ -50,10 +50,13 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     async def _paused(_request: object) -> bool:
         return flag.exists()
 
+    def _snapshot_paused(_state: object = None) -> bool:
+        return flag.exists()
+
     monkeypatch.setattr("gateway.app._cluster_is_paused", _paused)
     monkeypatch.setattr("gateway.routers.cluster.cluster_is_paused", flag.exists)
     monkeypatch.setattr("gateway.routers.status.cluster_is_paused", flag.exists)
-    monkeypatch.setattr("ops.cluster_pause.is_paused", flag.exists)
+    monkeypatch.setattr("ops.cluster_pause.is_paused", _snapshot_paused)
     return flag
 
 

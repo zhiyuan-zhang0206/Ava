@@ -15,15 +15,18 @@ old-signal sweep (PR5): this module writes only the host posture row.
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 import shared.cluster
 import shared.db
+import shared.host_deploy_state
 from ops.cluster_session import (
     _REPO_ROOT,
     _RESTARTER_SERVICE,
 )
 
 _log = logging.getLogger(__name__)
+_UNSET = object()
 
 # Restarter launch command — duplicated from cli/commands/_repo.py because gateway
 # must not import cli (layering shared < gateway < cli); one constant is
@@ -31,7 +34,9 @@ _log = logging.getLogger(__name__)
 _RESTARTER_CMD = ".venv/bin/python -m services.restarter.daemon"
 
 
-def is_paused() -> bool:
+def is_paused(
+    state: shared.host_deploy_state.HostDeployState | None | object = _UNSET,
+) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).
 
@@ -41,17 +46,18 @@ def is_paused() -> bool:
     unreadable flag was an absent flag). The offline maintenance page is owned
     separately by the cluster orchestrator's Gate marker.
     """
-    from shared.host_deploy_state import read
-
-    try:
-        state = read()
-    except Exception:
-        _log.warning(
-            "[cluster] is_paused: host_deploy_state read failed; reading as not paused",
-            exc_info=True,
-        )
-        return False
-    return state is not None and state.posture == "paused"
+    if state is _UNSET:
+        try:
+            resolved_state = shared.host_deploy_state.read()
+        except Exception:
+            _log.warning(
+                "[cluster] is_paused: host_deploy_state read failed; reading as not paused",
+                exc_info=True,
+            )
+            return False
+    else:
+        resolved_state = cast(shared.host_deploy_state.HostDeployState | None, state)
+    return resolved_state is not None and resolved_state.posture == "paused"
 
 
 def pause_local_cluster() -> None:

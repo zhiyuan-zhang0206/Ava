@@ -517,9 +517,9 @@ def cluster_update_check_op() -> UpdateCheck:
     return update_check()
 
 
-def cluster_status_op() -> ClusterStatus:
+def cluster_status_op(pool: Any | None = None) -> ClusterStatus:
     """Local snapshot — assembled by `status_snapshot()`."""
-    return status_snapshot()
+    return status_snapshot(pool=pool)
 
 
 def shell_probe_op(agent_id: int) -> ShellProbeResult:
