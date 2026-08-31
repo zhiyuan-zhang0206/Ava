@@ -161,15 +161,20 @@ def _bot_rejection_reason(data: dict, since_ts: float) -> str | None:
 
     A "the merge queue status continues" confirmation wins: the PR is in the
     queue, so a later rejection can be a force-push dequeue or another agent's
-    command hitting the lock. Retrying feeds the storm; state watch lands or times out."""
+    command hitting the lock. A standalone dequeue notification ("has been
+    dequeued", e.g. "merge conditions no longer match") counts as a rejection
+    too — it carries no quoted queue command. Retrying feeds the storm; state
+    watch lands or times out."""
     comments = data.get("comments", []) if isinstance(data, dict) else []
     if not isinstance(comments, list):
         return None
     markers = (
         "removed from the queue",
+        "left the queue",
         "manually updated",
         "already running from a previous command",
         "cannot be queued",
+        "merge conditions no longer match",
     )
     rejection = None
     for comment in reversed(comments):
@@ -193,6 +198,12 @@ def _bot_rejection_reason(data: dict, since_ts: float) -> str | None:
             rejection = "checkbox (command not executed)"
         elif rejection is None and ("> queue" in body or "> requeue" in body):
             rejection = next((m for m in markers if m in body), None)
+        elif rejection is None and "has been dequeued" in body:
+            # Mergify's standalone dequeue notification (no quoted command):
+            # "Pull request #<n> has been dequeued — merge conditions no longer
+            # match. Blocked by: ...". The payload status comment is skipped
+            # above, so this branch only sees the notification form.
+            rejection = "dequeued (merge conditions no longer match)"
     return rejection
 
 
