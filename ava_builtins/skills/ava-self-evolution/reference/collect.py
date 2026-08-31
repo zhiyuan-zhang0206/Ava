@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from collections import Counter, defaultdict
@@ -53,6 +54,9 @@ from shared.paths import ava_home
 # the user ("user") or a spawner / peer agent ("agent:<id>"). System and
 # watcher messages are deliberately excluded (nudges, heartbeats, wake-ups).
 TASK_SOURCES = ["user"]  # plus "agent:%" matched via LIKE in the query
+
+_BUILTIN_HELP_CALL_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(")
+_BUILTIN_HELP_ON_AVA_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(\s*ava\.")
 
 
 # ─────── Loki-backed event fetches (paged via the gateway /api/events) ───────
@@ -183,6 +187,19 @@ def _group_by_agent(
             continue
         out[agent_id].append((r["event_name"], r.get("attributes") or {}))
     return out
+
+
+def _builtin_help_counts(events: list[tuple]) -> tuple[int, int]:
+    """Count builtin help() calls and the subset targeting ava.* objects."""
+    calls = 0
+    on_ava = 0
+    for event, payload in events:
+        if event != "code":
+            continue
+        body = str(payload.get("body", ""))
+        calls += len(_BUILTIN_HELP_CALL_RE.findall(body))
+        on_ava += len(_BUILTIN_HELP_ON_AVA_RE.findall(body))
+    return calls, on_ava
 
 
 # ─────── Loki paging constants ─────────────────────────────────────────────
@@ -346,16 +363,19 @@ def collect_with_counts(
         if agent_id in test_ids:
             excluded_test += 1
             continue  # benchmark/probe spawn — never into the health dataset
-        records.append(
-            build_record(
-                agent_id,
-                week,
-                events.get(agent_id, []),
-                logs.get(agent_id, []),
-                inbounds.get(agent_id, []),
-                meta[agent_id],
-            )
+        agent_events = events.get(agent_id, [])
+        record = build_record(
+            agent_id,
+            week,
+            agent_events,
+            logs.get(agent_id, []),
+            inbounds.get(agent_id, []),
+            meta[agent_id],
         )
+        record["builtin_help_calls"], record["builtin_help_on_ava"] = _builtin_help_counts(
+            agent_events
+        )
+        records.append(record)
     counts = {"seen": len(ids), "excluded_test": excluded_test, "skipped_meta": skipped_meta}
     return records, counts
 
@@ -430,7 +450,9 @@ def collect_one(
         meta = cur.fetchone()
     if meta is None:
         raise ValueError(f"no agents_meta row for agent {agent_id}")
-    return build_record(agent_id, week, events, log_events, inbounds, meta, leak_paths=leak_paths)
+    record = build_record(agent_id, week, events, log_events, inbounds, meta, leak_paths=leak_paths)
+    record["builtin_help_calls"], record["builtin_help_on_ava"] = _builtin_help_counts(events)
+    return record
 
 
 def dataset_path(week: str) -> Path:
