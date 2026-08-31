@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -38,10 +39,17 @@ from shared.proc import process_cmdline
 
 @pytest.fixture
 def stranger_pid() -> Iterator[int]:
-    """A real, live process that is emphatically not an agent — a stand-in for
+    """A real, live non-agent process whose argv is readable — a stand-in for
     whatever the OS handed a recycled pid to."""
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
+        deadline = time.monotonic() + 5.0
+        while process_cmdline(proc.pid) is None:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"stranger process {proc.pid} cmdline was not readable within 5 seconds"
+                )
+            time.sleep(0.02)
         yield proc.pid
     finally:
         proc.kill()
