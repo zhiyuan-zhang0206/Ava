@@ -8,18 +8,16 @@
 # under mergify/merge-queue/ — ci.yml's draft-skip explicitly exempts that
 # prefix, so batches always verify fully.
 #
-# Queue tuning (2026-08-30, CTO #3230 P0-2 ruling — decisions note in the
-# P0-2 sprint ledger): `max_parallel_checks: 5` + dynamic
-# `batch_size {min: 1, max: 8}` + `batch_max_wait_time: 90s` +
-# `max_checks_retries: 1`. Hosted CI minutes are free (public repo), so the
-# lever is parallelism, not fewer runs: five overlapping batches break the
-# queue's serialization bottleneck, dynamic batch sizing gives a lone PR a
-# batch immediately (zero wait) while a burst still coalesces up to 8 into
-# one speculative cycle, and one automatic retry absorbs batch flakes
-# (measured 2026-08-30: 22% of PRs took a second queue cycle, partly flake).
-# In-place checks were evaluated and rejected — rebase re-heads still force
-# a second full CI run, and the serialization they require would trade
-# throughput for a latency the rerun cannot remove.
+# Queue tuning (2026-08-31, EMERGENCY ROLLBACK of the 2026-08-30 P0-2
+# tuning, cluster-ops #1818 / Ava P0 lead #405): `max_parallel_checks: 2` +
+# static `batch_size: 8` + `batch_max_wait_time: 300s` + no batch retry —
+# the 08-29 known-stable values. On 2026-08-31 ~21:58Z (UTC), right after
+# the first `max_checks_retries: 1` cycle completed (#1202 -> #1203), the
+# queue engine stopped creating speculative draft PRs ("The draft pull
+# request cannot be created") and later stopped dequeuing entirely; the
+# P0-2 four values are reverted to the last configuration the engine ran
+# without incident. Restore the P0-2 tuning after the root cause is
+# confirmed.
 #
 # QA GATE: `qa-approved` is a hard merge precondition (merge_conditions). The
 # label is applied by QA / maintainers only, and only on a PASS or
@@ -46,7 +44,7 @@
 # duplicate it.
 
 merge_queue:
-  max_parallel_checks: 5
+  max_parallel_checks: 2
 
 queue_rules:
   - name: default
@@ -57,14 +55,11 @@ queue_rules:
     merge_bot_account: zhiyuan-zhang0206
     # Batch queued PRs into one speculative verification (draft PR); a red
     # batch bisects automatically.
-    batch_size:
-      min: 1
-      max: 8
-    # Wait up to 90s for a burst to fill the batch before processing: burst
+    batch_size: 8
+    # Wait up to 300s for a burst to fill the batch before processing: burst
     # PRs merge into one speculative batch (one CI cycle instead of several).
-    # A lone PR still pays up to 90s queue latency, but the dynamic batch
-    # floor of 1 means it never waits for company.
-    batch_max_wait_time: 90s
+    # A lone PR pays up to 5 min queue latency — accepted for the burst case.
+    batch_max_wait_time: 300s
     # Without checks_timeout Mergify waits only the auto-derived 18m; on a
     # busy queue every batch re-runs CI and PRs get dequeued mid-run.
     # 3600s = comfortable headroom over the full suite.
@@ -92,10 +87,6 @@ queue_rules:
       - or:
           - check-success=e2e (Playwright happy path)
           - check-skipped=e2e (Playwright happy path)
-    # One automatic batch-level retry after a red speculative run (flake
-    # absorption). The batch is rebuilt and re-verified; a second red still
-    # bisects to evict the culprit, so correctness is not weakened.
-    max_checks_retries: 1
     merge_method: rebase
     update_method: rebase
     branch_protection_injection_mode: none
