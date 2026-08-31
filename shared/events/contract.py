@@ -985,8 +985,8 @@ EVENTS: dict[str, EventSpec] = {
         "idle_cas_lost", "idle-flip CAS race lost — degraded, not fatal", tier="anomaly"
     ),
     "boot_timing": _telemetry("boot_timing", "boot duration", tier="noise"),
-    "dangling_tool_use_repaired": _telemetry(
-        "dangling_tool_use_repaired", "dangling tool_use repaired", tier="anomaly"
+    "dangling_tool_pairing_repaired": _telemetry(
+        "dangling_tool_pairing_repaired", "dangling tool pairing repaired", tier="anomaly"
     ),
     "agent_spawned": _telemetry("agent_spawned", "agent process started", payload=AgentSpawned),
     "agent_resurrected": _telemetry("agent_resurrected", "agent resurrected"),

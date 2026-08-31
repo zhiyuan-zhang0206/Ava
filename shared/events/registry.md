@@ -145,7 +145,7 @@ consumers: see the comments at each emit point.
 | `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | anomaly | — | — | events |
 | `idle_cas_lost` | idle-flip CAS race lost — degraded, not fatal | anomaly | — | — | events |
 | `boot_timing` | boot duration | noise | — | — | events |
-| `dangling_tool_use_repaired` | dangling tool_use repaired | anomaly | — | — | events |
+| `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events |
 | `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
 | `agent_resurrected` | agent resurrected | observation | — | — | events |
 | `agent_terminated` | agent terminated | observation | — | — | events |
