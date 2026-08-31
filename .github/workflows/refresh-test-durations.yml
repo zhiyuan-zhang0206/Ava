@@ -3,12 +3,11 @@ name: Refresh test durations
 # Nightly re-measure of pytest-split's duration data. The backend and e2e
 # shards split by per-test durations in .test_durations; that file goes stale
 # as the suite grows (new tests are costed at the average, which skewed the
-# shards ~20% as of 2026-08-30). This workflow runs both suites exactly as CI
-# runs them and opens ONE reviewable PR with the refreshed durations — the
-# same bot-PR pattern as update-model-pricing.yml, and the PR is never
-# auto-merged. Hosted minutes are unmetered for public repos, so the ~50
-# minute re-measure is free; it is why sharding was adopted in the first
-# place.
+# shards ~20% as of 2026-08-30). Each measurement runs in the same isolated
+# shard shape as CI, retries only its own timing-sensitive shard, and uploads
+# a clean duration artifact. The merge job opens ONE reviewable PR with the
+# refreshed durations — the same bot-PR pattern as update-model-pricing.yml,
+# and the PR is never auto-merged.
 
 on:
   schedule:
@@ -25,15 +24,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  refresh:
+  measure-backend:
     if: github.ref == 'refs/heads/main'
-    name: Refresh .test_durations
+    name: Measure backend durations (${{ matrix.group }}/12)
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    env:
+      # Sentinel data planes: the suite must provision its own throwaway
+      # cluster; a sentinel turns a leaked real-data-plane access into a
+      # connection error rather than a silent write. Same as ci.yml.
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           ref: main
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -47,12 +55,53 @@ jobs:
       - name: Install locked Python environment
         run: uv sync --frozen
 
+      - name: Measure backend shard
+        run: >
+          uv run python scripts/refresh_test_durations.py measure backend
+          --group ${{ matrix.group }}
+          --output "$RUNNER_TEMP/durations/backend-${{ matrix.group }}.json"
+
+      - name: Upload backend duration measurement
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-durations-backend-${{ matrix.group }}
+          path: ${{ runner.temp }}/durations/backend-${{ matrix.group }}.json
+          if-no-files-found: error
+
+  measure-e2e:
+    if: github.ref == 'refs/heads/main'
+    name: Measure e2e durations (${{ matrix.group }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.10.2'
+          enable-cache: true
+
       - name: Install Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
 
       - name: Install frontend deps
         working-directory: ui/web
@@ -70,14 +119,50 @@ jobs:
         timeout-minutes: 10
         run: uv run playwright install --with-deps chromium
 
-      - name: Refresh .test_durations
-        env:
-          # Sentinel data planes: the suite must provision its own throwaway
-          # cluster; a sentinel turns a leaked real-data-plane access into a
-          # connection error rather than a silent write. Same as ci.yml.
-          AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
-          AVA_REDIS_URL: redis://127.0.0.1:1/0
-        run: uv run python scripts/refresh_test_durations.py
+      - name: Measure e2e shard
+        run: >
+          uv run python scripts/refresh_test_durations.py measure e2e
+          --group ${{ matrix.group }}
+          --output "$RUNNER_TEMP/durations/e2e-${{ matrix.group }}.json"
+
+      - name: Upload e2e duration measurement
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-durations-e2e-${{ matrix.group }}
+          path: ${{ runner.temp }}/durations/e2e-${{ matrix.group }}.json
+          if-no-files-found: error
+
+  refresh:
+    if: github.ref == 'refs/heads/main'
+    needs: [measure-backend, measure-e2e]
+    name: Refresh .test_durations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.10.2'
+          enable-cache: true
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Download shard measurements
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-durations-*
+          path: ${{ runner.temp }}/durations
+          merge-multiple: true
+
+      - name: Merge complete shard measurements
+        run: >
+          uv run python scripts/refresh_test_durations.py merge
+          --durations-dir "$RUNNER_TEMP/durations"
 
       - name: Detect a change
         id: diff
@@ -150,10 +235,9 @@ jobs:
               --body '## Summary
 
           A nightly re-measure of the pytest-split duration data. The backend
-          and e2e shards split by per-test durations; the previous file was
-          stale (11 days / ~2k new tests, 83% of test files without an entry),
-          which skewed the shards ~20%. Both suites were re-run the same way
-          CI runs them and the durations were rewritten.
+          and e2e suites ran in their CI-shaped isolated shards, each artifact
+          was recorded with --store-durations --clean-durations, and the 16
+          successful measurements were merged into the refreshed timings.
 
           ## File tree
 
@@ -163,8 +247,9 @@ jobs:
 
           ## Data flow
 
-          Full suite re-measure (backend -n 4, e2e -n 2) → --store-durations
-          --clean-durations → merge + drop <0.2s entries → commit.
+          CI-shaped shard measurements (backend 12 × -n 4, e2e 4 × -n 2)
+          → per-shard clean duration artifacts → complete merge + drop <0.2s
+          entries → commit.
 
           This PR is never auto-merged.'
           fi

@@ -14,26 +14,27 @@ same way CI runs them and rewrites the file:
   faster and the split under-estimates);
 * e2e: `pytest tests/e2e/ -n 2` (CI's e2e job carries no --cov).
 
-Each suite runs with `--store-durations --clean-durations` into a temp file,
-so only tests that actually ran this refresh are kept (no stale entries for
-deleted or renamed tests). The two temp files are merged, entries under
-0.2s are dropped (they carry ~13% of runtime and only add noise), values are
-rounded to 3 decimals, and `.test_durations` is rewritten in the committed
-compact format (sorted keys, no indent, trailing newline) — atomically, via
-tmp + rename, so an interrupted run can never leave a truncated file behind.
+The nightly workflow invokes `measure` once per CI-shaped shard (12 backend,
+four e2e), each on its own runner. A measurement retries its isolated shard
+three times, reseeding its temporary duration input before every attempt, so a
+failed attempt cannot affect selection or leak partial measurements into its
+retry. Every successful measurement uses `--store-durations --clean-durations`;
+therefore its artifact contains only the tests that ran in that shard.
+`merge` requires all 16 artifacts, combines them, drops entries below 0.2s,
+rounds values to three decimals, and atomically rewrites `.test_durations` in
+the committed compact format (sorted keys, no indent, trailing newline). An
+interrupted run can never leave a truncated file behind.
 
 Run it manually after a significant test-suite change, or let the scheduled
 `.github/workflows/refresh-test-durations.yml` do it nightly:
 
     uv run python scripts/refresh_test_durations.py
 
-The script never writes the committed file in place: the suites write temp
-files, and the final atomic write happens only after the backend run
-succeeded. A failed e2e run still contributes whatever durations it recorded
-(the pytest-split cache plugin writes on session finish even for a failed
-run); if it recorded nothing, the previous e2e entries are kept. A missing
-or corrupt `.test_durations` reads as empty (and is healed by the write);
-an unexpected JSON shape is an error, not silently rebuilt.
+`refresh` (the default when no command is given) preserves the prior local,
+single-runner workflow for manual use. The nightly workflow instead uses the
+isolated `measure` + `merge` path. A missing or corrupt `.test_durations`
+reads as empty (and is healed by a successful merge); an unexpected JSON shape
+is an error, not silently rebuilt.
 
 Note: the first refresh after this feature lands rewrites the whole file
 (the committed one was last written by a one-off script), after which each
@@ -42,6 +43,7 @@ refresh only touches the values that changed.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -52,6 +54,9 @@ from pathlib import Path
 _MIN_DURATION_SECONDS = 0.2
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)
 _E2E_WORKERS = 2  # mirrors the e2e-shard job (-n 2)
+_BACKEND_SHARDS = 12
+_E2E_SHARDS = 4
+_MEASUREMENT_ATTEMPTS = 3
 # The exact --cov module list of the backend-shard job (ci.yml): the refresh
 # carries it so the measured durations include the same tracing overhead the
 # shards will pay.
@@ -122,6 +127,102 @@ def _run_suite(
     return subprocess.run(cmd, cwd=_REPO_ROOT, check=False).returncode  # noqa: S603 - fixed argv built from constants, no untrusted input
 
 
+def _seed_shard_durations(path: Path) -> None:
+    """Give each shard CI's current timing model without sharing a writable file."""
+    source = _load_durations(_DURATIONS_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(source, sort_keys=True, separators=(",", ":")) + "\n")
+
+
+def _measure_shard(suite: str, group: int, output_path: Path) -> int:
+    """Record one CI-equivalent shard, retrying only that isolated measurement."""
+    if suite == "backend":
+        groups = _BACKEND_SHARDS
+        targets = [
+            "tests/",
+            "--ignore=tests/e2e",
+            "-m",
+            "not flaky",
+            "--splits",
+            str(groups),
+            "--group",
+            str(group),
+        ]
+        workers = _BACKEND_WORKERS
+        coverage = True
+    else:
+        groups = _E2E_SHARDS
+        targets = [
+            "tests/e2e/",
+            "--splits",
+            str(groups),
+            "--group",
+            str(group),
+            "--splitting-algorithm",
+            "least_duration",
+        ]
+        workers = _E2E_WORKERS
+        coverage = False
+
+    if not 1 <= group <= groups:
+        print(f"{suite} group must be between 1 and {groups}, got {group}", file=sys.stderr)
+        return 1
+    if output_path.resolve() == _DURATIONS_PATH.resolve():
+        print("shard output must not overwrite .test_durations", file=sys.stderr)
+        return 1
+
+    for attempt in range(1, _MEASUREMENT_ATTEMPTS + 1):
+        _seed_shard_durations(output_path)
+        result = _run_suite(targets, workers, output_path, coverage=coverage)
+        if result == 0:
+            return 0
+        print(
+            f"{suite} shard {group}/{groups} failed (exit {result}; "
+            f"attempt {attempt}/{_MEASUREMENT_ATTEMPTS})",
+            file=sys.stderr,
+        )
+    return 1
+
+
+def _expected_measurement_paths(durations_dir: Path) -> list[Path] | None:
+    """Return all required artifacts, or fail before an incomplete timing model publishes."""
+    paths = [
+        *(durations_dir / f"backend-{group}.json" for group in range(1, _BACKEND_SHARDS + 1)),
+        *(durations_dir / f"e2e-{group}.json" for group in range(1, _E2E_SHARDS + 1)),
+    ]
+    missing = [str(path) for path in paths if not path.is_file()]
+    if missing:
+        print(f"missing shard measurements: {', '.join(missing)}", file=sys.stderr)
+        return None
+    return paths
+
+
+def _merge_shard_measurements(durations_dir: Path) -> int:
+    """Merge complete shard artifacts into the committed timings file atomically."""
+    paths = _expected_measurement_paths(durations_dir)
+    if paths is None:
+        return 1
+
+    merged: dict[str, float] = {}
+    for path in paths:
+        measured = _load_durations(path)
+        if not measured:
+            print(f"empty shard measurement: {path}", file=sys.stderr)
+            return 1
+        duplicate_nodeids = merged.keys() & measured.keys()
+        if duplicate_nodeids:
+            print(
+                f"duplicate test durations in shard measurements: {sorted(duplicate_nodeids)}",
+                file=sys.stderr,
+            )
+            return 1
+        merged.update(measured)
+
+    refreshed = _write_durations(merged)
+    print(f"merged {len(paths)} shard measurements into {len(refreshed)} duration entries")
+    return 0
+
+
 def _write_durations(durations: dict[str, float]) -> dict[str, float]:
     """Atomically write the canonical compact JSON format + trailing newline."""
     trimmed = {
@@ -152,7 +253,7 @@ def _write_durations(durations: dict[str, float]) -> dict[str, float]:
     return trimmed
 
 
-def main() -> int:
+def _refresh_all() -> int:
     previous = _load_durations(_DURATIONS_PATH)
     print(f"refreshing .test_durations (previous: {len(previous)} entries)")
 
@@ -207,5 +308,32 @@ def main() -> int:
     return 0
 
 
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("refresh", help="run both suites in one local process (default)")
+
+    measure = commands.add_parser("measure", help="record one isolated CI-shaped shard")
+    measure.add_argument("suite", choices=("backend", "e2e"))
+    measure.add_argument("--group", type=int, required=True)
+    measure.add_argument("--output", type=Path, required=True)
+
+    merge = commands.add_parser("merge", help="merge all isolated shard measurements")
+    merge.add_argument("--durations-dir", type=Path, required=True)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Dispatch the legacy local refresh or the nightly isolation commands."""
+    args = _parse_args([] if argv is None else argv)
+    if args.command in (None, "refresh"):
+        return _refresh_all()
+    if args.command == "measure":
+        return _measure_shard(args.suite, args.group, args.output)
+    if args.command == "merge":
+        return _merge_shard_measurements(args.durations_dir)
+    raise AssertionError(f"unhandled command: {args.command}")
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
