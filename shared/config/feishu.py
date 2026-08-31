@@ -18,7 +18,7 @@ class FeishuSettings(EnvSettings):
         alias="AVA_FEISHU_APP_ID",
         description="Feishu app id (cli_...) of the IM Bridge self-built app. Empty = feishu channel unavailable.",
         json_schema_extra={
-            "restart_required": "agent",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
@@ -30,7 +30,7 @@ class FeishuSettings(EnvSettings):
         alias="AVA_FEISHU_APP_SECRET",
         description="Feishu app secret of the IM Bridge app. Empty = feishu channel unavailable.",
         json_schema_extra={
-            "restart_required": "agent",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
@@ -42,7 +42,7 @@ class FeishuSettings(EnvSettings):
         alias="AVA_FEISHU_REST_TIMEOUT_SECONDS",
         description="Feishu REST API timeout (seconds) for outbound sends. The lark-oapi SDK's own default is 30s; pinning it explicitly keeps a hung Feishu line from parking an IM outbound at whatever the SDK version happens to default to (task #698 G6).",
         json_schema_extra={
-            "restart_required": "agent",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",

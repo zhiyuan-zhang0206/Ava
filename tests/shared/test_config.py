@@ -1474,3 +1474,59 @@ def test_memory_backend_switch_fields_require_gateway_restart() -> None:
         extra = field.json_schema_extra
         assert isinstance(extra, dict)
         assert extra["restart_required"] == "gateway", name
+
+
+# ─── gateway-consumed fields must declare "gateway" restart (batch audit) ───
+
+
+def test_gateway_consumed_fields_declare_gateway_restart() -> None:
+    """Fields read at boot by gateway-profile processes must say "gateway".
+
+    Every field here is consumed by a gateway-profile process (the gateway
+    process itself or a gateway-side daemon: im_bridge / memory_indexer /
+    memory_search). A wrong or empty value tells the panel/CLI the wrong
+    process to restart (Task #2224 follow-up audit):
+
+    - im_* / telegram / feishu: the im_bridge daemon reads them at boot —
+      they said "agent", so an operator restarted the agent process and the
+      change never applied (the bcf966476 fix was lost in the main rebuild).
+    - embedding_backend / memory_embed_timeout_seconds: the memory_indexer /
+      memory_search daemons read them at boot — they said "" (no restart hint
+      at all), the same class #2224 fixed for memory_search_backend.
+    """
+    from shared.config.feishu import FeishuSettings
+    from shared.config.profiles import PROCESS_PROFILES
+    from shared.config.services import ServiceSettings
+    from shared.config.telegram import TelegramSettings
+
+    # The owning domains must be in the gateway profile for "gateway" to be
+    # the honest value — the consumption matrix, kept in sync with the set.
+    for domain in ("services", "telegram", "feishu"):
+        assert domain in PROCESS_PROFILES["gateway"]
+
+    by_model = {
+        ServiceSettings: (
+            "embedding_backend",
+            "memory_embed_timeout_seconds",
+            "im_disabled_adapters",
+            "im_send_retry_delays",
+            "im_sse_read_timeout_seconds",
+        ),
+        TelegramSettings: (
+            "telegram_bot_token",
+            "telegram_owner_id",
+            "telegram_poll_timeout_seconds",
+            "telegram_reconnect_base_delay_seconds",
+            "telegram_reconnect_max_delay_seconds",
+        ),
+        FeishuSettings: (
+            "feishu_app_id",
+            "feishu_app_secret",
+            "feishu_rest_timeout_seconds",
+        ),
+    }
+    for model, names in by_model.items():
+        for name in names:
+            extra = model.model_fields[name].json_schema_extra
+            assert isinstance(extra, dict)
+            assert extra["restart_required"] == "gateway", name
