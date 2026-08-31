@@ -135,6 +135,9 @@ def render(
     peer = sum(len(r["peer_feedback"]) for r in records)
     breached = sum(1 for r in records if r["breached"])
     execfail = sum(1 for r in records if r["exec_failed"])
+    builtin_help_calls = sum(r.get("builtin_help_calls", 0) for r in records)
+    builtin_help_agents = sum(bool(r.get("builtin_help_calls", 0)) for r in records)
+    builtin_help_on_ava = sum(r.get("builtin_help_on_ava", 0) for r in records)
     top_skills = (
         ", ".join(f"{skill} {count}" for skill, count in skill_counts.most_common(5)) or "none"
     )
@@ -145,6 +148,8 @@ def render(
         f"self-evolution daily scan — {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"window: {days} day(s) | runs: {len(records)} (ok {counts_by_label['ok']} / fumbled {counts_by_label['fumbled']} / failed {counts_by_label['failed']})"
         f" | corrections {corrections} | peer feedback {peer} | breached {breached} | exec-fail runs {execfail}",
+        f"builtin help(): {builtin_help_calls} calls across {builtin_help_agents} agents "
+        f"({builtin_help_on_ava} on ava.* targets)",
         f"dataset: {path}",
         "skills loaded:",
         f"  top 5: {top_skills}",
