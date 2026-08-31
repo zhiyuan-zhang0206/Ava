@@ -38,6 +38,13 @@ _log = logging.getLogger(__name__)
 # `connection(timeout=...)` overrides the pool's long-lived default for this
 # probe. Status must degrade before the gateway's probe deadline when the
 # central DB is down instead of queueing behind the pool for its full timeout.
+#
+# The bound covers the pool QUEUE only: once a connection is handed out, a
+# query hung on a blackholed flow waits out the connection's own keepalive +
+# statement ceiling (~60s, PG_KEEPALIVE_KWARGS / statement_timeout) before
+# failing — same failure class as the pre-change fresh connects (connect
+# timeout 5s, then the same ~60s query ceiling), so a blackhole slows the
+# probe but never hangs it.
 _POOL_BORROW_TIMEOUT_S = 2.0
 
 
@@ -390,6 +397,12 @@ def _read_deploy_snapshot(
             lease = shared.cluster_lock.read_update_lease(conn=conn)
         return state, lease
     except Exception:  # fail-fast-ok: status degrades when the central DB is unavailable
+        # Deliberate coupling: paused / current_orchestration / last_updater_outcome
+        # now degrade TOGETHER from this one snapshot-scoped read, where each used
+        # to read its own row independently. Each degraded answer is exactly what
+        # its own failed read produced before (not paused / no orchestration / no
+        # outcome), so the only difference is that one failed read degrades all
+        # three instead of one.
         _log.warning("deploy-state snapshot read failed; using degraded status", exc_info=True)
         return None, None
 
