@@ -17,12 +17,14 @@ text model (`settings.lm.understand_text_model`, default DeepSeek V4 Flash); bin
 media (image / video / audio / PDF) runs on the media model
 (`settings.lm.understand_media_model`, default Gemini 3.5 Flash, which natively
 decodes those bytes). The media model's provider is picked by the model prefix
-through the same model factory every LLM path uses — a Gemini model uses the
-Gemini client (with the configured resolution / thinking-level knobs), any other
-registered multimodal model (e.g. a gpt / claude image model) is built by its own
-provider branch, and `AVA_UNDERSTAND_MEDIA_BASE_URL` can point the Gemini branch
-at a self-hosted relay or mirror. `effort` (default `max`) controls the answering
-model's reasoning depth; the per-modality mapping is on the entry point below."""
+through the same model factory every LLM path uses, and
+`AVA_UNDERSTAND_MEDIA_BASE_URL` can point the Gemini branch at a self-hosted
+relay or mirror. The media wire format is Gemini-specific, so the path currently
+supports Gemini models only — a non-Gemini media model fails fast with a clear
+error; the abstraction (factory routing, endpoint override, quality knobs) is in
+place so a second media provider can plug in with its own part conversion.
+`effort` (default `max`) controls the answering model's reasoning depth; the
+per-modality mapping is on the entry point below."""
 
 from __future__ import annotations
 
@@ -386,21 +388,32 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     Gemini gets its quality knobs (`media_resolution` /
     `media_thinking_level`) via the factory's media-path parameters, and
     `AVA_UNDERSTAND_MEDIA_BASE_URL` can point the Gemini endpoint at a
-    self-hosted relay; any other registered multimodal model (gpt / claude /
-    kimi image models, ...) is built by its own provider branch and ignores
-    the Gemini-only knobs.
+    self-hosted relay. The media wire format is Gemini-specific, so a
+    non-Gemini model fails fast here with a clear error instead of crashing
+    later at invoke time; the abstraction is in place for a second media
+    provider to plug in with its own part conversion.
 
     `effort` maps onto Gemini's `thinking_level` via the cross-provider clamp:
     any level is clamped onto `minimal`/`low`/`medium`/`high` (`none` →
     `minimal`, `xhigh` → `high`). `max` has no gemini equivalent and keeps the
     configured `settings.lm.understand_media_thinking_level` knob instead, so
-    default calls behave exactly as before. (On a non-gemini media model the
-    Gemini knob is ignored; the model's own reasoning-effort resolution
-    applies instead.)
+    default calls behave exactly as before. (The path is Gemini-only for now —
+    see the module docstring — so the knob always applies.)
     """
-    from shared.lm.factory import build_chat_model
+    from shared.lm.factory import build_chat_model, provider_key_of_model
 
     model = settings.lm.understand_media_model
+    # The media part shape is Gemini-specific (see the module docstring); only
+    # the Gemini provider client understands it. Fail fast at build time with a
+    # clear error instead of letting a non-Gemini client crash at invoke time.
+    if provider_key_of_model(model) != "gemini":
+        raise UnderstandError(
+            f"media model {model!r} is not supported by ava.understand — the "
+            "media path (image/video/audio/PDF) currently supports Gemini "
+            "models only (their media wire format is the only one the factory "
+            "clients accept). Set AVA_UNDERSTAND_MEDIA_MODEL to a gemini-* model "
+            "or wait for a second media provider."
+        )
     res = settings.lm.understand_media_resolution
     if res not in _MEDIA_RESOLUTION_LEVELS:
         raise UnderstandError(

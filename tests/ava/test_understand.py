@@ -334,15 +334,16 @@ def test_media_base_url_default_keeps_none(mock_gemini: dict[str, Any], fake_ima
     assert mock_gemini["kwargs"]["base_url"] is None
 
 
-def test_media_model_can_be_non_gemini(
-    monkeypatch: pytest.MonkeyPatch, mock_gemini: dict[str, Any], fake_image: Path
+def test_media_model_non_gemini_fails_fast(
+    monkeypatch: pytest.MonkeyPatch, fake_image: Path
 ) -> None:
-    """The media model is a plain model id — the factory picks the provider by
-    prefix. A non-Gemini multimodal model (gpt image) routes to its own branch,
-    so no Gemini SDK binding lives in the media path."""
+    """Non-Gemini media models fail fast with a clear error: the media wire
+    format is Gemini-specific, so a gpt image model would otherwise crash at
+    invoke time. Real provider routing — no build_chat_model mock — and the
+    check runs before any client is built, so no API key is needed here."""
     monkeypatch.setattr(settings.lm, "understand_media_model", "gpt-5.5")
-    understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
-    assert mock_gemini["model"] == "gpt-5.5"
+    with pytest.raises(understand_mod.UnderstandError, match="Gemini"):
+        understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
 
 
 # ── error paths ─────────────────────────────────────────────────────────────

@@ -392,9 +392,10 @@ class LmSettings(EnvSettings):
         alias="AVA_UNDERSTAND_MEDIA_MODEL",
         description=(
             "Model for `ava.understand`'s media path (image/video/audio/PDF). "
-            "The provider is picked by the model prefix through `build_chat_model` — "
-            "any registered model accepting the media types works (default Gemini "
-            "3.5 Flash, which natively decodes image/video/audio/PDF)."
+            "Must be a Gemini model — the media wire format is Gemini-specific, "
+            "so a non-Gemini id fails fast with a clear error. The provider "
+            "abstraction (factory routing / endpoint override / quality knobs) "
+            "is in place for a second media provider to plug in later."
         ),
         json_schema_extra={
             "restart_required": "agent",
