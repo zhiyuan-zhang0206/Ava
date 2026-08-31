@@ -8,18 +8,29 @@ import threading
 from pathlib import Path
 from types import TracebackType
 
+import pytest
+
 from services.page_server import server as page_server
 
 _HOST = "127.0.0.1"
 _TOKEN = "page-server-test-token"  # noqa: S105 - test-only liveness value
 
 
+@pytest.fixture(autouse=True)
+def _configure_page_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        page_server._PageHandler,
+        "extensions_map",
+        page_server._PageHandler.extensions_map.copy(),
+    )
+    monkeypatch.setattr(page_server._PageHandler, "token", _TOKEN)
+    page_server._configure_handler(_TOKEN)
+
+
 class _RunningPageServer:
     """Run the production page handler against one temporary directory."""
 
     def __init__(self, directory: Path) -> None:
-        self._previous_token = page_server._PageHandler.token
-        page_server._PageHandler.token = _TOKEN
         handler = functools.partial(page_server._PageHandler, directory=str(directory))
         self._server = page_server._ReuseTCPServer((_HOST, 0), handler)
         self.port = int(self._server.server_address[1])
@@ -38,7 +49,6 @@ class _RunningPageServer:
         self._server.shutdown()
         self._server.server_close()
         self._thread.join()
-        page_server._PageHandler.token = self._previous_token
 
 
 def _get(port: int, path: str) -> tuple[int, str | None, bytes]:
@@ -75,7 +85,7 @@ def test_directory_with_index_serves_index(tmp_path: Path) -> None:
         status, content_type, body = _get(server.port, "/")
 
     assert status == 200
-    assert content_type == "text/html"
+    assert content_type == "text/html; charset=utf-8"
     assert body == index
 
 

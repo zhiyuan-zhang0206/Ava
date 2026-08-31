@@ -95,6 +95,11 @@ class _ReuseTCPServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
+def _configure_handler(token: str) -> None:
+    _PageHandler.token = token
+    _PageHandler.extensions_map.update(_EXTENSIONS)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ava page server (R3 doorplate 3)")
     parser.add_argument("--port", type=int, required=True)
@@ -106,8 +111,7 @@ def main() -> None:
     token = os.environ.get("PAGE_SERVER_TOKEN", "")
     if not token:
         parser.error("PAGE_SERVER_TOKEN not set in environment")
-    _PageHandler.token = token
-    _PageHandler.extensions_map.update(_EXTENSIONS)
+    _configure_handler(token)
     # SimpleHTTPRequestHandler serves the process cwd unless `directory` is
     # given; the daemon passes --dir, so chdir to it before serving (otherwise
     # every page serves the daemon's cwd as a directory listing).
