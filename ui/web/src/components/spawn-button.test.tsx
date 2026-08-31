@@ -380,6 +380,20 @@ describe("SpawnButton zero-spawnable", () => {
     });
     expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(true);
   });
+
+  it("reachable agent-runner with unknown status → disabled", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(
+      statusWith([
+        { name: "cloud", online: true },
+        { name: "test-host", online: true, paused: null },
+      ]),
+    );
+    wrap(<SpawnButton variant="sm" onSpawn={vi.fn()} />);
+    await waitFor(() => {
+      expect(api.getSystemStatus).toHaveBeenCalled();
+    });
+    expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(true);
+  });
 });
 
 describe("SpawnButton single-spawnable", () => {

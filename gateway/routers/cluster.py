@@ -551,7 +551,9 @@ async def get_cluster_machines(request: Request) -> list[AgentMachineRow]:
         AgentMachineRow(
             name=m.name,
             description=m.description,
-            live=m.online,
+            # Reached-but-unknown is diagnostic visibility, not a determinate
+            # liveness verdict for the SDK/config projection.
+            live=m.online and m.paused is not None,
             is_staging=m.is_staging,
         )
         for m in statuses

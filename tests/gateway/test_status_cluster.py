@@ -18,6 +18,8 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from gateway.routers import status as status_router
 
+_OPS_URL = "http://wsl:18121"
+
 
 class _RemoteProbeResults(dict[str, tuple[bool, bool | None]]):
     def __init__(self) -> None:
@@ -329,11 +331,12 @@ class TestClusterPanel:
         """A transport reset recovered by the roster's retry is cached as the
         successful final verdict, not as a transient offline row."""
         _ = fake_flag, stub_machine_identity
-        _insert_machine(db_conn, "wsl-test", None, "agent-runner")
+        _insert_machine(db_conn, "wsl-test", _OPS_URL, "agent-runner")
         calls: list[dict[str, object]] = []
 
         async def retry_aware_dispatch(**kw: object) -> dict[str, object]:
             calls.append(kw)
+            assert kw["ops_url"] == _OPS_URL
             if kw["retries"] != 1:
                 from ops import cluster_rpc as cw
 
@@ -378,6 +381,7 @@ class TestProbeAgentRunner:
 
         async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
             seen["timeout_s"] = _kw.get("timeout_s")
+            seen["ops_url"] = _kw.get("ops_url")
             seen["retries"] = _kw.get("retries")
             return {
                 "machine_name": "wsl",
@@ -388,11 +392,34 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
         assert seen["timeout_s"] == 11.0
+        assert seen["ops_url"] == _OPS_URL
         assert seen["retries"] == 1
         assert r.online is True
+
+    @pytest.mark.asyncio
+    async def test_missing_registered_url_is_offline_without_dispatch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from datetime import UTC, datetime
+
+        called = False
+
+        async def must_not_dispatch(**_kw: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            raise AssertionError("missing roster URL must not trigger a DB re-lookup")
+
+        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", must_not_dispatch)
+        row = await status_router._probe_agent_runner(
+            "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
+        )
+
+        assert row.online is False
+        assert called is False
+        assert status_router._probe_failures["wsl"][0] == 1
 
     @pytest.mark.asyncio
     async def test_blackhole_stays_inside_single_total_budget(
@@ -419,7 +446,12 @@ class TestProbeAgentRunner:
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", blackhole)
         row = await asyncio.wait_for(
             status_router._probe_agent_runner(
-                "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
+                "wsl",
+                ["agent-runner"],
+                _OPS_URL,
+                datetime(2026, 5, 24, tzinfo=UTC),
+                None,
+                None,
             ),
             timeout=0.2,
         )
@@ -442,7 +474,7 @@ class TestProbeAgentRunner:
         r = await status_router._probe_agent_runner(
             "wsl",
             ["agent-runner"],
-            None,
+            _OPS_URL,
             datetime(2026, 5, 24, tzinfo=UTC),
             "voice IO + browser",
             stopped,
@@ -471,7 +503,7 @@ class TestProbeAgentRunner:
         r = await status_router._probe_agent_runner(
             "wsl",
             ["agent-runner"],
-            None,
+            _OPS_URL,
             datetime(2026, 5, 24, tzinfo=UTC),
             "voice IO + browser",
             None,
@@ -498,7 +530,7 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
         assert r.head_sha == "def5678"
 
@@ -518,7 +550,7 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
         assert r.online is True
         assert r.paused is None
@@ -585,12 +617,12 @@ class TestProbeBackoff:
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_dispatch)
         last = datetime(2026, 5, 24, tzinfo=UTC)
         r1 = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], None, last, None, None
+            "wsl", ["agent-runner"], _OPS_URL, last, None, None
         )
         assert r1.online is False
         assert len(calls) == 1
         r2 = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], None, last, None, None
+            "wsl", ["agent-runner"], _OPS_URL, last, None, None
         )
         assert r2.online is False
         assert len(calls) == 1  # inside backoff window -> ops server NOT dialed again
@@ -612,13 +644,13 @@ class TestProbeBackoff:
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_dispatch)
         last = datetime(2026, 5, 24, tzinfo=UTC)
         first = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], None, last, None, None
+            "wsl", ["agent-runner"], _OPS_URL, last, None, None
         )
         assert first.online is True
         assert first.paused is None
         assert "wsl" not in status_router._probe_failures
         second = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], None, last, None, None
+            "wsl", ["agent-runner"], _OPS_URL, last, None, None
         )
         assert second.online is True
         assert second.paused is None

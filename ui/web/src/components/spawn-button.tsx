@@ -85,13 +85,12 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   const setSelectedReasoningEffort = (v: string | undefined) =>
     setSetting("behavior.spawn_reasoning_effort", v ?? null);
 
-  // Agent processes only run on agent-runner machines + must be online +
-  // not paused (paused machines reject new spawns). paused=null
-  // (probe unparseable) is treated as not-paused — better than silently
-  // hiding a reachable machine.
+  // Agent processes only run on agent-runner machines whose probe returned a
+  // determinate unpaused verdict. `online=true, paused=null` means the ops
+  // server was reached but status is unknown, so spawning must fail closed.
   const allMachines = statusData?.cluster.machines ?? [];
   const spawnable = allMachines.filter(
-    (m) => m.serve_agent_runner && m.online && !m.paused,
+    (m) => m.serve_agent_runner && m.online && m.paused === false,
   );
 
   // Provider-grouped model list for the picker — providers in response

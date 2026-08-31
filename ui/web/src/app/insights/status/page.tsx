@@ -125,8 +125,9 @@ function machineVerdict(m: MachineStatus, runningLabel: string): { label: string
   // answered under the WRONG machine_name, so this row's gateway_url points at
   // the wrong host. It outranks online/offline — never green.
   if (m.identity_mismatch) return { label: "identity mismatch", tone: "error" };
-  if (m.online && m.paused) return { label: "paused", tone: "warn" };
-  if (m.online) return { label: runningLabel, tone: "ok" };
+  if (m.online && m.paused === null) return { label: "status unknown", tone: "warn" };
+  if (m.online && m.paused === true) return { label: "paused", tone: "warn" };
+  if (m.online && m.paused === false) return { label: runningLabel, tone: "ok" };
   // stopped_at, set by `ava stop` and cleared by `ava start`, separates a
   // deliberate stop from a crash — the live probe alone can't.
   if (m.stopped_at != null) return { label: "stopped", tone: "muted" };

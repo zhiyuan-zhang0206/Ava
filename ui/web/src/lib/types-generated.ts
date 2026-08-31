@@ -3811,8 +3811,11 @@ export interface components {
          * AgentMachineRow
          * @description One machine as exposed to agents via ava.agents.list_machines().
          *
-         *     Intentionally minimal: name + free-text description + live status. role /
-         *     gateway_url stay internal to ops and are not surfaced to agents.
+         *     Intentionally minimal: name + free-text description + determinate liveness.
+         *     A paused host is still live, but a reached host whose status operation
+         *     failed has no liveness verdict, so `live=False` until a probe returns a
+         *     concrete paused value. role / gateway_url stay internal to ops and are not
+         *     surfaced to agents.
          */
         AgentMachineRow: {
             /** Name */
@@ -5359,13 +5362,13 @@ export interface components {
          * MachineStatus
          * @description A machines-table row state — augmented with live probe results.
          *
-         *     `online` / `paused` come from probing the gateway's
-         *     /api/cluster/status (2s timeout):
+         *     `online` / `paused` come from each machine's ops `status_probe` within
+         *     the configured roster deadline:
          *     - online=True + paused has a value: probe succeeded
          *     - online=False + paused=None: probe failed (network unreachable /
          *       gateway down)
-         *     - online=True + paused=None: probe got through but response did not
-         *       match ClusterStatus (abnormal)
+         *     - online=True + paused=None: ops server responded, but the operation failed
+         *       or its response did not match ClusterStatus (abnormal)
          */
         MachineStatus: {
             /** Name */

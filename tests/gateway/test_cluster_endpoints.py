@@ -2229,10 +2229,12 @@ class TestAgentMachineList:
             kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
             payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
             timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            ops_url=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
             retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
             idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         ):  # type: ignore[no-untyped-def]
             assert kind == "status_probe"
+            assert ops_url == "http://wsl-test:18121"
             # The ops server echoes its own machine_name; the gateway verifies it
             # matches the probed row, so the stub must self-report the same name.
             return {"machine_name": "wsl-test", "paused": False}
@@ -2242,7 +2244,8 @@ class TestAgentMachineList:
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url, description) "
-                "VALUES ('wsl-test', ARRAY['agent-runner'], NULL, 'voice IO + browser')"
+                "VALUES ('wsl-test', ARRAY['agent-runner'], "
+                "'http://wsl-test:18121', 'voice IO + browser')"
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         with TestClient(app) as client:
@@ -2254,6 +2257,56 @@ class TestAgentMachineList:
                 "name": "wsl-test",
                 "description": "voice IO + browser",
                 "live": True,
+                "is_staging": False,
+            }
+        ]
+
+    def test_get_cluster_machines_reachable_unknown_is_not_live(
+        self,
+        db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:  # type: ignore[no-untyped-def]
+        """The agent/config projection must not target a runner whose ops
+        server answered but could not provide a determinate status."""
+        from datetime import UTC, datetime
+
+        from gateway.routers import cluster as cluster_router
+        from gateway.schemas import MachineStatus
+
+        set_machine_identity(role="gateway", name="cloud-test")
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
+            cur.execute(  # pyright: ignore[reportUnknownMemberType]
+                "INSERT INTO machines (name, role, gateway_url) "
+                "VALUES ('wsl-test', ARRAY['agent-runner'], 'http://wsl-test:18121')"
+            )
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        now = datetime.now(UTC)
+
+        async def _fake_gather(rows, local_name, **_kw):  # type: ignore[no-untyped-def]
+            return [
+                MachineStatus(
+                    name="wsl-test",
+                    serve_gateway=False,
+                    serve_agent_runner=True,
+                    gateway_url="http://wsl-test:18121",
+                    up_since_at=now,
+                    online=True,
+                    paused=None,
+                )
+            ]
+
+        monkeypatch.setattr(cluster_router, "gather_cluster_status", _fake_gather)  # pyright: ignore[reportUnknownArgumentType]
+        with TestClient(app) as client:
+            response = client.get("/api/cluster/machines")
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "name": "wsl-test",
+                "description": None,
+                "live": False,
                 "is_staging": False,
             }
         ]

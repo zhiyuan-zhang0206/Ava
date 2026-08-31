@@ -94,8 +94,11 @@ class SystemStatus(BaseModel):
 class AgentMachineRow(BaseModel):
     """One machine as exposed to agents via ava.agents.list_machines().
 
-    Intentionally minimal: name + free-text description + live status. role /
-    gateway_url stay internal to ops and are not surfaced to agents.
+    Intentionally minimal: name + free-text description + determinate liveness.
+    A paused host is still live, but a reached host whose status operation
+    failed has no liveness verdict, so `live=False` until a probe returns a
+    concrete paused value. role / gateway_url stay internal to ops and are not
+    surfaced to agents.
     """
 
     model_config = ConfigDict(frozen=True)
