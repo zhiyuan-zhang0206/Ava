@@ -19,8 +19,9 @@ from agent.state import AgentState
 
 
 class _FakeCursor:
-    def __init__(self, rows: list[tuple]) -> None:
+    def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
         self._rows = rows  # pyright: ignore[reportUnknownMemberType]
+        self._fetchone_row = fetchone_row
         self.executed: list[tuple[str, tuple | None]] = []
 
     async def execute(self, sql: str, params: tuple | None = None) -> None:
@@ -28,6 +29,10 @@ class _FakeCursor:
 
     async def fetchall(self) -> list[tuple]:
         return self._rows  # pyright: ignore[reportUnknownMemberType]
+
+    async def fetchone(self) -> tuple[object, ...] | None:
+        # The page-recovery notice dedupe check ("already told within 6h?").
+        return self._fetchone_row
 
     async def __aenter__(self) -> _FakeCursor:
         return self
@@ -37,8 +42,8 @@ class _FakeCursor:
 
 
 class _FakeConn:
-    def __init__(self, rows: list[tuple]) -> None:
-        self._cursor = _FakeCursor(rows)
+    def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
+        self._cursor = _FakeCursor(rows, fetchone_row)
 
     def cursor(self) -> _FakeCursor:
         return self._cursor
@@ -51,8 +56,8 @@ class _FakeConn:
 
 
 class _FakePool:
-    def __init__(self, rows: list[tuple]) -> None:
-        self._conn = _FakeConn(rows)
+    def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
+        self._conn = _FakeConn(rows, fetchone_row)
 
     def connection(self) -> _FakeConn:
         # Mirrors AsyncConnectionPool.connection(): returns a (sync) context
@@ -62,6 +67,15 @@ class _FakePool:
     @property
     def executed(self) -> list[tuple[str, tuple | None]]:
         return self._conn._cursor.executed  # pyright: ignore[reportUnknownMemberType]
+
+
+def _notice_inserts(pool: _FakePool) -> list[tuple[object, ...]]:
+    """(agent_id, content) params of the re-serve-notice INSERTs recorded by
+    the fake pool — typed so the assertions below stay pyright-clean."""
+    from typing import cast
+
+    rows = [p for sql, p in pool.executed if "INSERT INTO inbound_messages" in sql]  # pyright: ignore[reportUnknownMemberType]
+    return [cast(tuple[object, ...], r) for r in rows if r is not None]
 
 
 def _row(
@@ -130,10 +144,18 @@ async def test_closes_dead_page_without_serve_dir(monkeypatch: pytest.MonkeyPatc
     )
     await reconcile_open_pages(pool, 7, event_publisher=_Pub())  # type: ignore[arg-type]
 
-    # report re-served; plain closed + PageClosed
+    # report re-served; plain closed + PageClosed + one re-serve notice
     assert served == [((("/data/report", "report", 18001, None), {}))]
     updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
     assert updates == [(7, "plain")]
+    inserts = _notice_inserts(pool)
+    assert len(inserts) == 1
+    agent_id_param, content = inserts[0]
+    assert agent_id_param == 7
+    assert isinstance(content, str)
+    assert content.startswith("Page recovery:")
+    assert "'plain'" in content
+    assert "show()" in content
     assert len(events) == 1
     assert "page_closed" in events[0]
     assert '"name":"plain"' in events[0]
@@ -155,6 +177,50 @@ async def test_keeps_alive_page_without_serve_dir(monkeypatch: pytest.MonkeyPatc
 
     assert not any("UPDATE agent_pages" in sql for sql, _ in pool.executed)  # pyright: ignore[reportUnknownMemberType]
     assert events == []
+
+
+async def test_closes_multiple_dead_show_pages_with_one_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Several dead show() rows of one agent merge into ONE notice listing
+    them all — the heartbeat must not nag once per page."""
+    served: list[tuple] = []
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool(
+        [
+            _row("a", 18001, serve_dir=None),
+            _row("b", 18002, serve_dir=None),
+        ]
+    )
+    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+
+    updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
+    assert updates == [(7, "a"), (7, "b")]
+    inserts = _notice_inserts(pool)
+    assert len(inserts) == 1
+    _agent_id_param, content = inserts[0]
+    assert isinstance(content, str)
+    assert "'a'" in content and "'b'" in content
+
+
+async def test_dead_show_page_recent_notice_skips_notify(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An agent already told within the 6h window is not told again (the
+    heartbeat runs every 5 min — without the window a persistent failure
+    would nag on every pass). The row still closes."""
+    served: list[tuple] = []
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool([_row("plain", 18002, serve_dir=None)], fetchone_row=((1,),))
+    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+
+    updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
+    assert updates == [(7, "plain")]
+    assert not any("INSERT INTO inbound_messages" in sql for sql, _p in pool.executed)  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_swallows_query_failure(monkeypatch: pytest.MonkeyPatch) -> None:

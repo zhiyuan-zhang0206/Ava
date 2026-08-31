@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 21 | events table |
-| telemetry (category=telemetry) | `events` | 128 | events table |
+| telemetry (category=telemetry) | `events` | 129 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -88,7 +88,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 128)
+## 3. Telemetry events (category=telemetry, 129)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -174,6 +174,7 @@ consumers: see the comments at each emit point.
 | `page_restore_query_failed` | page restore query failed | anomaly | — | — | events |
 | `page_restore_failed` | page restore failed | anomaly | — | — | events |
 | `page_restore_closed` | page restore closed | noise | — | — | events |
+| `page_restore_notified` | page restore notified | noise | — | — | events |
 | `db_outage_wait` | db outage wait | anomaly | — | — | events |
 | `db_outage_pause` | db outage pause | anomaly | — | — | events |
 | `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | events |
@@ -237,7 +238,7 @@ consumers: see the comments at each emit point.
 | `prom_query_failed` | a Prometheus HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, query | events |
 | `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | anomaly | agent_id, key, name, serve_dir, port | events |
 | `page_ttl_expired` | the gateway TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id | observation | — | events |
-| `page_recovery_notified` | the gateway startup scan notified an owner that a show() page server died with the host; attributes carry host | observation | — | events |
+| `page_language_lookup_failed` | the gateway could not read the page copy language from user_settings (DB failure) and fell back to the default; attributes carry exc_type, exc_message | anomaly | — | events |
 | `page_proxy_502` | the gateway reverse proxy could not reach a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `page_proxy_504` | the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `shell_ttl_expired` | the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |

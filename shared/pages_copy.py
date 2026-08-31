@@ -32,3 +32,11 @@ PAGE_SERVER_DOWN_BODY = {
     "zh": "页面服务器刚重启或已失效——让生成它的 agent 重新发布即可恢复",
     "en": "The page server just restarted or is no longer available - ask the agent that created it to republish",
 }
+
+# 504 (page server timed out): the proxy dialed or waited but the server did
+# not answer in time. The server is up but stuck (or the dial hung); the fix
+# is the same as 502 — the agent republishes.
+PAGE_SERVER_TIMEOUT_BODY = {
+    "zh": "页面服务器无响应（超时）——让生成它的 agent 重新发布即可恢复",  # noqa: RUF001 - zh copy carries fullwidth punctuation
+    "en": "The page server did not respond in time - ask the agent that created it to republish",
+}

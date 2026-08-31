@@ -30,7 +30,7 @@ from gateway.app import app
 from gateway.routers import pages as pages_router
 from shared import config
 from shared.db import create_agent
-from shared.pages_copy import PAGE_LANGUAGE_DEFAULT, PAGE_SERVER_DOWN_BODY
+from shared.pages_copy import PAGE_LANGUAGE_DEFAULT, PAGE_SERVER_DOWN_BODY, PAGE_SERVER_TIMEOUT_BODY
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -333,6 +333,86 @@ def test_proxy_502_emits_structured_log_line(db_conn) -> None:  # pyright: ignor
     assert extra["trace_id"]
     assert extra["exc_type"]  # e.g. ConnectError
     assert extra["exc_message"]
+
+
+def test_proxy_504_timeout_friendly_copy_and_log(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dial timeout surfaces as 504 with friendly copy (never the raw
+    host:port) and one structured log line carrying the timeout exception —
+    the 504 branch's traceability mirrors the 502 branch (task #2212)."""
+    from typing import Any as _Any
+
+    import httpx
+    from loguru import logger as _loguru
+
+    async def _send_times_out(
+        self: object, request: object, *args: object, **kwargs: object
+    ) -> None:  # pyright: ignore[reportUnknownParameterType, reportUnknownArgumentType]
+        raise httpx.TimeoutException("connect timed out")
+
+    records: list[_Any] = []
+
+    def _capture(message: _Any) -> None:
+        records.append(message.record)
+
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    free_port = probe.getsockname()[1]
+    probe.close()
+    sink_id = _loguru.add(_capture, level="WARNING")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(httpx.AsyncClient, "send", _send_times_out)
+    try:
+        with TestClient(app) as client:
+            client.post(
+                f"/api/agents/{aid}/pages",
+                json={"name": "p", "port": free_port, "host": "127.0.0.1"},
+            )
+            resp = client.get(f"/pages/{aid}-p/")
+    finally:
+        _loguru.remove(sink_id)
+
+    assert resp.status_code == 504
+    # Friendly copy (zh default) replaces the raw host:port detail.
+    assert resp.json()["detail"] == PAGE_SERVER_TIMEOUT_BODY[PAGE_LANGUAGE_DEFAULT]
+    assert "127.0.0.1" not in resp.json()["detail"]
+
+    hits = [r for r in records if r["extra"].get("event") == "page_proxy_504"]
+    assert len(hits) == 1
+    extra: dict[str, object] = hits[0]["extra"]
+    assert extra["agent_id"] == aid
+    assert extra["page"] == "p"
+    assert extra["host"] == "127.0.0.1"
+    assert extra["port"] == free_port
+    assert extra["trace_id"]
+    assert extra["exc_type"] == "TimeoutException"
+    assert extra["exc_message"]
+
+
+def test_proxy_502_language_lookup_failure_falls_back_to_default(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A DB failure while reading the copy language must not turn the 502
+    into a 500 — the default-language copy is served instead (QA nit A)."""
+
+    def _boom(_conn: object) -> str:
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr("gateway.routers.pages.display_language", _boom)
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    free_port = probe.getsockname()[1]
+    probe.close()
+    with TestClient(app) as client:
+        client.post(
+            f"/api/agents/{aid}/pages",
+            json={"name": "p", "port": free_port, "host": "127.0.0.1"},
+        )
+        resp = client.get(f"/pages/{aid}-p/")
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == PAGE_SERVER_DOWN_BODY[PAGE_LANGUAGE_DEFAULT]
 
 
 def test_proxy_revalidates_nonloopback_registry_target_before_dialing(
