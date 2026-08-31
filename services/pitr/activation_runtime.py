@@ -14,7 +14,6 @@ import time
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
-from typing import cast
 
 import psycopg
 from dotenv import dotenv_values
@@ -217,6 +216,17 @@ def pitr_env_is_desired(payload: bytes) -> bool:
     )
 
 
+def pitr_env_absent(payload: bytes) -> bool:
+    """True when none of the four PITR gate aliases appears in the env.
+
+    The keys are config-owned (settable through the settings path), so the
+    activation may only provision them when they are entirely absent —
+    anything in between is an operator's explicit configuration and is
+    refused rather than clobbered."""
+    values = dotenv_values(stream=StringIO(payload.decode()))
+    return not any(alias in values for alias in _PITR_ENV_FIELDS.values())
+
+
 def rollback_effect_state(*, current: str, before: str, owned: str) -> bool:
     """Return whether rollback owns a mutation; reject every third-party byte state."""
 
@@ -225,31 +235,6 @@ def rollback_effect_state(*, current: str, before: str, owned: str) -> bool:
     if current == owned:
         return True
     raise RuntimeError("config is neither pre-effect nor exact owned post-effect")
-
-
-def _restore_pitr_env(baseline: dict[str, str]) -> None:
-    from shared.envfile import env_lock_path, snapshot_env
-    from shared.platform import file_lock
-    from shared.private_storage import write_private_bytes
-
-    path = ava_home() / ".env"
-    aliases = set(_PITR_ENV_FIELDS.values())
-    with file_lock(env_lock_path(path), timeout_s=30):
-        current = path.read_bytes() if path.exists() else b""
-        if not pitr_env_is_desired(current):
-            raise RuntimeError("PITR-owned environment keys changed before rollback")
-        snapshot_env(path)
-        lines = current.decode().splitlines()
-        kept = [line for line in lines if line.split("=", 1)[0].strip() not in aliases]
-        for encoded in baseline.values():
-            restored = json.loads(encoded)
-            if not isinstance(restored, list):
-                raise TypeError("PITR environment baseline is invalid")
-            restored_items = cast(list[object], restored)
-            if not all(isinstance(item, str) for item in restored_items):
-                raise RuntimeError("PITR environment baseline is invalid")
-            kept.extend(cast(list[str], restored_items))
-        write_private_bytes(path, ("\n".join(kept) + "\n").encode())
 
 
 def archiver_reached_target(*, last_archived: str, timeline: str, target: str) -> bool:

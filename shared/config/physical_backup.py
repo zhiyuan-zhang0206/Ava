@@ -83,7 +83,7 @@ class PhysicalBackupSettings(EnvSettings):
         description="Enable physical backup wiring. This foundation release never enables Postgres archiving. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
             "bootstrap": False,
@@ -95,7 +95,7 @@ class PhysicalBackupSettings(EnvSettings):
         description="Enable weekly unprotected physical base-backup candidates. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
             "bootstrap": False,
@@ -107,7 +107,7 @@ class PhysicalBackupSettings(EnvSettings):
         description="Enable generation-pinned isolated restore drills for base candidates. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
             "bootstrap": False,
@@ -119,7 +119,7 @@ class PhysicalBackupSettings(EnvSettings):
         description="Enable local dry-run PITR retention planning; this never deletes objects. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
             "bootstrap": False,
@@ -137,7 +137,7 @@ class PhysicalBackupSettings(EnvSettings):
         ),
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
             "bootstrap": False,
