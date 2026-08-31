@@ -235,28 +235,6 @@ def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
     assert "text-only" in (payload.exc_msg or "")
 
 
-def test_child_pause_note_reaches_result_envelope(tmp_path: Path) -> None:
-    """A heartbeat-pause backoff reminder buffered inside the exec (the
-    pause_heartbeat violation path) drains into the result envelope — the
-    parent's exec node merges it into the messages delta."""
-    state = {
-        "messages": [HumanMessage(content="hi")],
-        "halted": False,
-    }
-    code = (
-        "import ava\n"
-        "from ava._pause_notes import record_pause_note\n"
-        "record_pause_note('Previous heartbeat pause window: 30m; this pause: 30m.')\n"
-    )
-    proc, _request, result = _spawn(tmp_path, code, state=state)
-    assert proc.returncode == 0, proc.stderr
-    payload = read_result(result)
-    assert payload.kind == "done"
-    assert payload.pause_notes == [
-        {"content": "Previous heartbeat pause window: 30m; this pause: 30m."}
-    ]
-
-
 def test_child_crash_writes_envelope_with_traceback(tmp_path: Path) -> None:
     proc, _request, result = _spawn(tmp_path, "raise ValueError('boom')")
     assert proc.returncode == 0

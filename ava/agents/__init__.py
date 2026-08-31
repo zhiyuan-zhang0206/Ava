@@ -24,6 +24,7 @@ from shared.agents import MachineNotRegistered as MachineNotRegistered
 from shared.agents import ResurrectError as ResurrectError
 from shared.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 from shared.config import cluster_tz
+from shared.message_kwargs import NoteTag
 
 from . import presets as presets
 
@@ -360,6 +361,11 @@ def send_system_note(
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content")
     tag = coerce_str(tag, "tag")
+    try:
+        NoteTag(tag)
+    except ValueError as exc:
+        valid_tags = ", ".join(member.value for member in NoteTag)
+        raise ValueError(f"tag must be one of: {valid_tags}; got {tag!r}") from exc
     resurrect = coerce_typed(resurrect, "resurrect", bool)
     source = ava._boot.require_actor()
     return _client.send_system_note(
