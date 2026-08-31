@@ -21,3 +21,11 @@ isolation on which normal CI relies.
   publishing a partial timing model.
 - The existing review-only branch, PR title, and no-auto-merge policy remain
   unchanged.
+- The first isolated refresh removes pre-existing flaky-test entries: backend
+  measurements exclude them with `-m "not flaky"`, and `--clean-durations`
+  retains only tests that ran in a measurement shard. Later nightly refreshes
+  retain that behavior, so flaky durations do not accumulate.
+- The first isolated refresh also rewrites the whole existing
+  `.test_durations` file into its compact canonical JSON format. That is an
+  intentional one-time format normalization; subsequent refreshes keep the
+  same format.

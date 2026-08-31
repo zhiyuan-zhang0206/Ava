@@ -28,16 +28,21 @@ def test_load_durations_corrupt_json_is_empty(tmp_path: Path) -> None:
     assert refresh._load_durations(bad) == {}
 
 
-def test_load_durations_rejects_non_mapping(tmp_path: Path) -> None:
+@pytest.mark.parametrize("contents", ["[]", "true"])
+def test_load_durations_rejects_non_mapping(tmp_path: Path, contents: str) -> None:
     bad = tmp_path / "bad.json"
-    bad.write_text("[]")
+    bad.write_text(contents)
     with pytest.raises(SystemExit, match="shape"):
         refresh._load_durations(bad)
 
 
-def test_load_durations_rejects_non_numeric_values(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "contents",
+    ['{"some::test": "fast"}', '{"some::test": true}'],
+)
+def test_load_durations_rejects_non_numeric_values(tmp_path: Path, contents: str) -> None:
     bad = tmp_path / "bad.json"
-    bad.write_text('{"some::test": "fast"}')
+    bad.write_text(contents)
     with pytest.raises(SystemExit, match="non-numeric"):
         refresh._load_durations(bad)
 
@@ -95,13 +100,12 @@ def _fake_runner_factory(backend_data: dict[str, float], e2e_data: dict[str, flo
     """Build a _run_suite fake that records durations into the given paths."""
 
     def _fake_run_suite(
-        targets: list[str],
-        workers: int,
+        pytest_args: list[str],
         durations_path: Path,
         *,
         coverage: bool,
     ) -> int:
-        data = e2e_data if any(t.startswith("tests/e2e") for t in targets) else backend_data
+        data = e2e_data if any(arg.startswith("tests/e2e") for arg in pytest_args) else backend_data
         durations_path.write_text(json.dumps(data))
         return 0
 
@@ -172,25 +176,26 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
     attempts = 0
 
     def _fail_once_then_record(
-        targets: list[str],
-        workers: int,
+        pytest_args: list[str],
         durations_path: Path,
         *,
         coverage: bool,
     ) -> int:
         nonlocal attempts
         attempts += 1
-        assert targets == [
+        assert pytest_args == [
             "tests/",
+            "-q",
             "--ignore=tests/e2e",
             "-m",
             "not flaky",
+            "-n",
+            "4",
             "--splits",
             "12",
             "--group",
             "3",
         ]
-        assert workers == 4
         assert coverage is True
         assert json.loads(durations_path.read_text()) == json.loads(source.read_text())
         if attempts == 1:
@@ -206,6 +211,54 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
     assert json.loads(output.read_text()) == {"tests/agent/test_recorded.py::test_one": 1.0}
 
 
+def test_measure_e2e_uses_the_ci_pytest_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An e2e measurement must include CI's verbosity, worker, and split flags."""
+    source = tmp_path / ".test_durations"
+    source.write_text('{"tests/e2e/test_existing.py::test_one": 1.5}\n')
+    output = tmp_path / "e2e-2.json"
+    monkeypatch.setattr(refresh, "_DURATIONS_PATH", source)
+
+    def _record_e2e_arguments(
+        pytest_args: list[str],
+        durations_path: Path,
+        *,
+        coverage: bool,
+    ) -> int:
+        assert pytest_args == [
+            "tests/e2e/",
+            "-v",
+            "-n",
+            "2",
+            "--splits",
+            "4",
+            "--group",
+            "2",
+            "--splitting-algorithm",
+            "least_duration",
+        ]
+        assert coverage is False
+        durations_path.write_text('{"tests/e2e/test_recorded.py::test_one": 1.0}\n')
+        return 0
+
+    monkeypatch.setattr(refresh, "_run_suite", _record_e2e_arguments)
+
+    assert refresh.main(["measure", "e2e", "--group", "2", "--output", str(output)]) == 0
+
+
+def _write_complete_measurements(durations_dir: Path) -> None:
+    """Write one unique timing record for every CI-shaped measurement shard."""
+    for group in range(1, 13):
+        (durations_dir / f"backend-{group}.json").write_text(
+            json.dumps({f"tests/agent/test_{group}.py::test_one": 1.0})
+        )
+    for group in range(1, 5):
+        (durations_dir / f"e2e-{group}.json").write_text(
+            json.dumps({f"tests/e2e/test_{group}.py::test_one": 1.0})
+        )
+
+
 def test_merge_refuses_incomplete_shard_measurements_without_overwriting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -216,14 +269,40 @@ def test_merge_refuses_incomplete_shard_measurements_without_overwriting(
     durations_dir.mkdir()
     monkeypatch.setattr(refresh, "_DURATIONS_PATH", target)
 
-    for group in range(1, 13):
-        (durations_dir / f"backend-{group}.json").write_text(
-            json.dumps({f"tests/agent/test_{group}.py::test_one": 1.0})
-        )
-    for group in range(1, 4):
-        (durations_dir / f"e2e-{group}.json").write_text(
-            json.dumps({f"tests/e2e/test_{group}.py::test_one": 1.0})
-        )
+    _write_complete_measurements(durations_dir)
+    (durations_dir / "e2e-4.json").unlink()
+
+    assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 1
+    assert target.read_text() == '{"tests/agent/test_old.py::test_one": 1.5}\n'
+
+
+def test_merge_refuses_empty_shard_measurement_without_overwriting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty artifact cannot erase the already-committed timing model."""
+    target = tmp_path / ".test_durations"
+    target.write_text('{"tests/agent/test_old.py::test_one": 1.5}\n')
+    durations_dir = tmp_path / "durations"
+    durations_dir.mkdir()
+    monkeypatch.setattr(refresh, "_DURATIONS_PATH", target)
+    _write_complete_measurements(durations_dir)
+    (durations_dir / "backend-1.json").write_text("{}")
+
+    assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 1
+    assert target.read_text() == '{"tests/agent/test_old.py::test_one": 1.5}\n'
+
+
+def test_merge_refuses_duplicate_shard_measurement_without_overwriting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Duplicated node ids cannot publish a nondeterministic timing model."""
+    target = tmp_path / ".test_durations"
+    target.write_text('{"tests/agent/test_old.py::test_one": 1.5}\n')
+    durations_dir = tmp_path / "durations"
+    durations_dir.mkdir()
+    monkeypatch.setattr(refresh, "_DURATIONS_PATH", target)
+    _write_complete_measurements(durations_dir)
+    (durations_dir / "backend-2.json").write_text('{"tests/agent/test_1.py::test_one": 1.0}')
 
     assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 1
     assert target.read_text() == '{"tests/agent/test_old.py::test_one": 1.5}\n'
@@ -238,14 +317,7 @@ def test_merge_all_ci_shards_writes_the_compact_combined_durations(
     durations_dir.mkdir()
     monkeypatch.setattr(refresh, "_DURATIONS_PATH", target)
 
-    for group in range(1, 13):
-        (durations_dir / f"backend-{group}.json").write_text(
-            json.dumps({f"tests/agent/test_{group}.py::test_one": 1.0})
-        )
-    for group in range(1, 5):
-        (durations_dir / f"e2e-{group}.json").write_text(
-            json.dumps({f"tests/e2e/test_{group}.py::test_one": 1.0})
-        )
+    _write_complete_measurements(durations_dir)
 
     assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 0
     combined = json.loads(target.read_text())

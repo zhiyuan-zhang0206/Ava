@@ -139,6 +139,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: 0.10.2
+          enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
         uses: ./.github/actions/install-pg-redis
@@ -216,6 +217,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: 0.10.2
+          enable-cache: true
 
       - name: Install Python deps
         run: uv sync --frozen
@@ -259,6 +261,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: 0.10.2
+          enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
         uses: ./.github/actions/install-pg-redis
@@ -306,6 +309,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: 0.10.2
+          enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
         uses: ./.github/actions/install-pg-redis
@@ -356,6 +360,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: 0.10.2
+          enable-cache: true
 
       - name: Install Python deps
         run: uv sync --frozen
@@ -386,6 +391,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: 0.10.2
+          enable-cache: true
 
       - name: Install Python deps
         run: uv sync --frozen
@@ -509,6 +515,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: 0.10.2
+          enable-cache: true
 
       - name: Install Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -583,6 +590,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: 0.10.2
+          enable-cache: true
 
       - name: Install Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

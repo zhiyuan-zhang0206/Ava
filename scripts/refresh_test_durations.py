@@ -12,7 +12,7 @@ same way CI runs them and rewrites the file:
   `--cov=agent --cov=ava ...` module list (coverage tracing is part of the
   CI shard environment, so durations measured without it run systematically
   faster and the split under-estimates);
-* e2e: `pytest tests/e2e/ -n 2` (CI's e2e job carries no --cov).
+* e2e: `pytest tests/e2e/ -v -n 2` (CI's e2e job carries no --cov).
 
 The nightly workflow invokes `measure` once per CI-shaped shard (12 backend,
 four e2e), each on its own runner. A measurement retries its isolated shard
@@ -89,14 +89,15 @@ def _load_durations(path: Path) -> dict[str, float]:
         return {}
     if not isinstance(data, dict):
         raise SystemExit(f"unexpected durations shape in {path}: {type(data).__name__}")
-    if not all(isinstance(value, (int, float)) for value in data.values()):
+    if not all(
+        isinstance(value, (int, float)) and not isinstance(value, bool) for value in data.values()
+    ):
         raise SystemExit(f"non-numeric duration in {path}")
     return {str(nodeid): float(value) for nodeid, value in data.items()}
 
 
 def _run_suite(
-    targets: list[str],
-    workers: int,
+    pytest_args: list[str],
     durations_path: Path,
     *,
     coverage: bool,
@@ -113,16 +114,17 @@ def _run_suite(
         sys.executable,
         "-m",
         "pytest",
-        *targets,
-        "-n",
-        str(workers),
-        "--store-durations",
-        "--clean-durations",
-        f"--durations-path={durations_path}",
-        "-q",
+        *pytest_args,
     ]
     if coverage:
         cmd.extend(_BACKEND_COVERAGE_ARGS)
+    cmd.extend(
+        [
+            "--store-durations",
+            "--clean-durations",
+            f"--durations-path={durations_path}",
+        ]
+    )
     print(f"  running: {' '.join(cmd)}")
     return subprocess.run(cmd, cwd=_REPO_ROOT, check=False).returncode  # noqa: S603 - fixed argv built from constants, no untrusted input
 
@@ -138,22 +140,27 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
     """Record one CI-equivalent shard, retrying only that isolated measurement."""
     if suite == "backend":
         groups = _BACKEND_SHARDS
-        targets = [
+        pytest_args = [
             "tests/",
+            "-q",
             "--ignore=tests/e2e",
             "-m",
             "not flaky",
+            "-n",
+            str(_BACKEND_WORKERS),
             "--splits",
             str(groups),
             "--group",
             str(group),
         ]
-        workers = _BACKEND_WORKERS
         coverage = True
     else:
         groups = _E2E_SHARDS
-        targets = [
+        pytest_args = [
             "tests/e2e/",
+            "-v",
+            "-n",
+            str(_E2E_WORKERS),
             "--splits",
             str(groups),
             "--group",
@@ -161,7 +168,6 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
             "--splitting-algorithm",
             "least_duration",
         ]
-        workers = _E2E_WORKERS
         coverage = False
 
     if not 1 <= group <= groups:
@@ -173,7 +179,7 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
 
     for attempt in range(1, _MEASUREMENT_ATTEMPTS + 1):
         _seed_shard_durations(output_path)
-        result = _run_suite(targets, workers, output_path, coverage=coverage)
+        result = _run_suite(pytest_args, output_path, coverage=coverage)
         if result == 0:
             return 0
         print(
@@ -263,8 +269,15 @@ def _refresh_all() -> int:
         e2e_path = tmp_dir / "e2e.json"
 
         backend_rc = _run_suite(
-            ["tests/", "--ignore=tests/e2e", "-m", "not flaky"],
-            _BACKEND_WORKERS,
+            [
+                "tests/",
+                "-q",
+                "--ignore=tests/e2e",
+                "-m",
+                "not flaky",
+                "-n",
+                str(_BACKEND_WORKERS),
+            ],
             backend_path,
             coverage=True,
         )
@@ -276,7 +289,11 @@ def _refresh_all() -> int:
             )
             return 1
 
-        e2e_rc = _run_suite(["tests/e2e/"], _E2E_WORKERS, e2e_path, coverage=False)
+        e2e_rc = _run_suite(
+            ["tests/e2e/", "-v", "-n", str(_E2E_WORKERS)],
+            e2e_path,
+            coverage=False,
+        )
         if e2e_rc != 0:
             print(
                 f"warning: e2e suite failed (exit {e2e_rc}); using whatever durations it recorded",
