@@ -58,9 +58,11 @@ from shared.config import settings
 from shared.config.physical_backup import pitr_replication_hba_lines
 from shared.machine import reachable_host
 from shared.paths import ava_home
+from shared.pg_admin import live_pg_socket_dir, pg_socket_dir
+from shared.pg_admin import pg_admin_url as _shared_pg_admin_url
 from shared.pg_tools import PG_BIN_LINUX, brew_prefix, is_macos, pg_shm_args, pg_tool, pg_tz_args
 from shared.platform_backend import get_backend
-from shared.private_storage import ensure_private_dir, write_private_bytes
+from shared.private_storage import write_private_bytes
 from shared.process_env import inherited_process_env
 from shared.url_secret import url_host
 
@@ -252,38 +254,26 @@ def _ensure_pg_data() -> Path:
     return data
 
 
+# Thin shells over the shared admin-plane dial (moved to shared.pg_admin,
+# 2026-08-31 — services layer reaches it without importing up into cli). The
+# underscore names stay for existing cli callers and their monkeypatches.
 def _pg_socket_dir(socket_root: Path | None = None) -> Path:
-    """A SHORT, cluster-unique socket directory. The Postgres socket path
-    (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so it cannot live under a
-    deep `$AVA_HOME` / pytest-tmp data dir — a short `/tmp/ava-pg-<home-slug>`
-    (keyed on the cluster home path, never a name) stays well under the cap. The
-    socket only serves local provisioning (the runtime connects over TCP); 0700
-    keeps it owner-only."""
-    from shared.cluster import home_slug
-
-    root = Path("/tmp") if socket_root is None else socket_root  # noqa: S108 — OS-fixed production socket root
-    d = root / f"ava-pg-{home_slug(ava_home())}"
-    return ensure_private_dir(d)
+    """Thin shell over shared.pg_admin.pg_socket_dir — the home resolution stays
+    in the cli namespace so tests steering `ava_home` keep steering this probe."""
+    return pg_socket_dir(socket_root, home=ava_home())
 
 
 def _live_pg_socket_dir(pg_port: int, probe_root: Path = Path("/tmp")) -> Path:  # noqa: S108 — the OS-fixed short socket root
-    """The socket dir the RUNNING pg instance on `pg_port` actually listens on.
+    """Thin shell over shared.pg_admin.live_pg_socket_dir; the canonical-dir
+    source binds through `_pg_socket_dir` so tests steering that attribute
+    keep steering this probe (pre-cutover rolling-dial contract)."""
+    return live_pg_socket_dir(pg_port, probe_root, canonical=_pg_socket_dir())
 
-    Normally the canonical `_pg_socket_dir()`. A pg started by pre-path-only code
-    still listens under the old name-keyed `/tmp/ava-pg-<cluster>` until its next
-    restart, so the admin dial probes every `<probe_root>/ava-pg-*` dir for a live
-    `.s.PGSQL.<pg_port>` socket — the port is this cluster's own allocated one,
-    so a match is unambiguous (data, not a name). Falls back to the canonical dir
-    when nothing is listening yet (fresh birth: the socket appears when
-    `_start_pg` starts pg there). `probe_root` is /tmp in production (where the
-    short socket dirs live); tests inject a scratch root."""
-    canonical = _pg_socket_dir()
-    if (canonical / f".s.PGSQL.{pg_port}").exists():
-        return canonical
-    for d in probe_root.glob("ava-pg-*"):
-        if (d / f".s.PGSQL.{pg_port}").exists():
-            return d
-    return canonical
+
+def pg_admin_url(pg_port: int) -> str:
+    """Thin shell — the admin URL lives in shared.pg_admin (services import it
+    from there); this keeps the cli-side monkeypatch surface stable."""
+    return _shared_pg_admin_url(pg_port)
 
 
 def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
@@ -371,19 +361,6 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
         return 1
     print(f"  ✓ postgres started ({dial_host}:{pg_port})")
     return 0
-
-
-def pg_admin_url(pg_port: int) -> str:
-    """The provisioning admin connection for this cluster's instance: the initdb
-    superuser over the local unix socket (trust), so provisioning is passwordless.
-    psycopg reads `host=<socket-dir>` + `port` from the query string. Dials the
-    socket dir the running instance actually listens on (`_live_pg_socket_dir`),
-    so an admin call keeps working while a pre-cutover pg is still up on the old
-    name-keyed dir."""
-    return (
-        f"postgresql://{getpass.getuser()}@/postgres"
-        f"?host={_live_pg_socket_dir(pg_port)}&port={pg_port}"
-    )
 
 
 def _redis_cli_env(redis_admin_password: str) -> dict[str, str]:
