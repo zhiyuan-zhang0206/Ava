@@ -23,8 +23,8 @@ from shared.resource_sample import ResourceSample
 class MachineStatus(BaseModel):
     """A machines-table row state — augmented with live probe results.
 
-    `online` / `paused` come from probing the gateway's
-    /api/cluster/status (2s timeout):
+    `online` / `paused` come from each machine's ops `status_probe` within
+    the configured roster deadline:
     - online=True + paused has a value: probe succeeded
     - online=False + paused=None: probe failed (network unreachable /
       gateway down)

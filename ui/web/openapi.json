@@ -6711,7 +6711,7 @@
           "live"
         ],
         "title": "AgentMachineRow",
-        "description": "One machine as exposed to agents via ava.agents.list_machines().\n\nIntentionally minimal: name + free-text description + live status. role /\ngateway_url stay internal to ops and are not surfaced to agents."
+        "description": "One machine as exposed to agents via ava.agents.list_machines().\n\nIntentionally minimal: name + free-text description + determinate liveness.\nA paused host is still live, but a reached host whose status operation\nfailed has no liveness verdict, so `live=False` until a probe returns a\nconcrete paused value. role / gateway_url stay internal to ops and are not\nsurfaced to agents."
       },
       "AgentMessageEnqueued": {
         "properties": {
@@ -9953,7 +9953,7 @@
           "paused"
         ],
         "title": "MachineStatus",
-        "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from probing the gateway's\n/api/cluster/status (2s timeout):\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: probe got through but response did not\n  match ClusterStatus (abnormal)"
+        "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from each machine's ops `status_probe` within\nthe configured roster deadline:\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: ops server responded, but the operation failed\n  or its response did not match ClusterStatus (abnormal)"
       },
       "McpClientCreate": {
         "properties": {

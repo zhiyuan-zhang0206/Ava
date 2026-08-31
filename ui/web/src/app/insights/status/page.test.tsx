@@ -242,6 +242,23 @@ describe("StatusPage Services and Gateway sections", () => {
     expect(screen.queryByText("stopped")).toBeNull();
   });
 
+  it("reachable runner with unknown status is amber, never green", async () => {
+    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+      ...STATUS_OK,
+      cluster: {
+        ...STATUS_OK.cluster,
+        machines: STATUS_OK.cluster.machines.map((machine) =>
+          machine.name === "wsl" ? { ...machine, online: true, paused: null } : machine,
+        ),
+      },
+    });
+    wrap(<StatusPage />);
+
+    const unknown = await screen.findByText("status unknown");
+    expect(unknown.className).toContain("text-amber");
+    expect(unknown.className).not.toContain("text-green");
+  });
+
   it("stopped_at set → deliberate 'stopped', not 'offline'", async () => {
     vi.spyOn(api, "getSystemStatus").mockResolvedValue({
       ...STATUS_OK,

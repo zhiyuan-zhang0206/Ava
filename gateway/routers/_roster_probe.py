@@ -9,7 +9,7 @@ from ops import cluster_rpc
 from shared.config import settings
 
 
-async def dispatch_status_probe(name: str) -> dict[str, Any]:
+async def dispatch_status_probe(name: str, ops_url: str) -> dict[str, Any]:
     """Retry one fast transport failure inside the existing total deadline.
 
     The outer deadline is load-bearing: ``cluster_rpc`` applies ``timeout_s``
@@ -24,6 +24,7 @@ async def dispatch_status_probe(name: str) -> dict[str, Any]:
                 kind="status_probe",
                 payload={},
                 timeout_s=timeout_s,
+                ops_url=ops_url,
                 retries=1,
             )
     except TimeoutError as exc:

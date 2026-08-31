@@ -170,7 +170,7 @@ class GatewaySettings(EnvSettings):
     cluster_rpc_max_retries: int = Field(
         default=3,
         alias="AVA_CLUSTER_RPC_MAX_RETRIES",
-        description="Extra attempts (after the first) for a gateway -> agent-runner cluster op on transient infrastructure failure (transport error / 5xx), with bounded exponential backoff + jitter (task #961). Non-idempotent ops (spawn / cluster_update / lifecycle) retry under an auto-generated idempotency key, so a lost response replays the first run instead of duplicating it. 0 = fail fast, the pre-#961 single-shot behaviour. status_probe passes retries=0 explicitly (the roster carries its own per-machine backoff).",
+        description="Extra attempts (after the first) for a gateway -> agent-runner cluster op on transient infrastructure failure (transport error / 5xx), with bounded exponential backoff + jitter (task #961). Non-idempotent ops (spawn / cluster_update / lifecycle) retry under an auto-generated idempotency key, so a lost response replays the first run instead of duplicating it. 0 = fail fast, the pre-#961 single-shot behaviour. The roster's status_probe passes retries=1 inside its separate total deadline; persistent failures then use per-machine backoff.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,

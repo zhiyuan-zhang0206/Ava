@@ -337,8 +337,15 @@ async def _probe_agent_runner(
         return _roster_rows.offline_status(
             name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
         )
+    if gateway_url is None:
+        # The roster row is the address authority for this fan-out. Do not let
+        # cluster_rpc synchronously re-read Postgres outside the async timeout.
+        _note_probe_unreachable(name)
+        return _roster_rows.offline_status(
+            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
+        )
     try:
-        result = await _roster_probe.dispatch_status_probe(name)
+        result = await _roster_probe.dispatch_status_probe(name, gateway_url)
     except _cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet. Widen
         # this host's backoff so a persistently-down peer stops being dialed every poll.
