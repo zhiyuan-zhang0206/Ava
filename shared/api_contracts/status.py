@@ -28,8 +28,8 @@ class MachineStatus(BaseModel):
     - online=True + paused has a value: probe succeeded
     - online=False + paused=None: probe failed (network unreachable /
       gateway down)
-    - online=True + paused=None: probe got through but response did not
-      match ClusterStatus (abnormal)
+    - online=True + paused=None: ops server responded, but the operation failed
+      or its response did not match ClusterStatus (abnormal)
     """
 
     model_config = ConfigDict(frozen=True)

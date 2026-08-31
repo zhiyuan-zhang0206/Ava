@@ -282,25 +282,45 @@ def _pin_retry(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 @pytest.mark.asyncio
 async def test_transient_failure_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A transport error on the first attempt is retried with the bounded
-    backoff schedule; the op succeeds on the second attempt."""
+    """A connection reset on the first attempt is retried once; the op succeeds
+    on the fresh second connection."""
     calls = {"n": 0}
 
     def _flaky(_r: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
-            raise httpx.ConnectError("transient blip")
+            raise httpx.ReadError("connection reset by peer")
         return httpx.Response(200, json={"status": "completed", "result": {"ok": 1}})
 
     captured = _patch(monkeypatch, handler=_flaky)
     sleeps = _pin_retry(monkeypatch)
 
-    result = await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {}, retries=2)
+    result = await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {}, retries=1)
 
     assert result == {"ok": 1}
     assert calls["n"] == 2
     assert len(captured["requests"]) == 2
     assert sleeps == [0.5]  # base delay, attempt 0 → 0.5s (jitter pinned to 1.0)
+
+
+@pytest.mark.asyncio
+async def test_two_connection_resets_exhaust_single_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two fast transport failures consume the initial attempt plus one retry,
+    then surface ClusterOpUnreachable to the roster's offline/backoff path."""
+
+    def _reset(_r: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("connection reset by peer")
+
+    captured = _patch(monkeypatch, handler=_reset)
+    sleeps = _pin_retry(monkeypatch)
+
+    with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="after 2 attempt"):
+        await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {}, retries=1)
+
+    assert len(captured["requests"]) == 2
+    assert sleeps == [0.5]
 
 
 @pytest.mark.asyncio

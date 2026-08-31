@@ -1,6 +1,6 @@
 """MachineStatus row shapers for the roster fan-out (gateway/routers/status.py).
 
-The three abnormal-state rows — malformed probe, offline, identity mismatch —
+The three abnormal-state rows — reachable-unknown, offline, identity mismatch —
 are pure functions of a machines-table row: no probe state, no backoff, no
 cluster-global markers. Split out of status.py so the roster module stays under
 the 800-line budget while the row contract lives in one place."""
@@ -12,7 +12,7 @@ from datetime import datetime
 from shared.api_contracts.status import MachineStatus
 
 
-def malformed_probe_status(
+def reachable_unknown_status(
     name: str,
     role: list[str],
     gateway_url: str | None,
@@ -22,14 +22,13 @@ def malformed_probe_status(
     *,
     is_staging: bool = False,
 ) -> MachineStatus:
-    """The MachineStatus row for a host whose ops server answered 200 but whose
-    body did NOT validate as ClusterStatus.
+    """The MachineStatus row for a reachable host whose status is unknown.
 
     The documented online=True + paused=None abnormal state (see MachineStatus):
-    the probe got through, but the response did not match the status_probe
-    contract (a version-skewed / wrong server). A loud unknown state — never
-    disguised as a determinate paused verdict, and distinct from offline (the
-    probe never reached the host at all).
+    the probe got through, but either the operation failed or its response did
+    not match the status_probe contract. A loud unknown state — never disguised
+    as a determinate paused verdict, and distinct from offline (the probe never
+    reached the host at all).
     """
     return MachineStatus(
         name=name,
