@@ -474,6 +474,20 @@ def _comment(body: str, author: str = "mergify", created: str = "2026-08-24T22:3
             "manually updated",
         ),
         (
+            {"comments": [_comment("> queue\nThe pull request left the queue.")]},
+            "left the queue",
+        ),
+        (
+            {
+                "comments": [
+                    _comment(
+                        "Pull request #1189 has been dequeued\n\nmerge conditions no longer match. Blocked by:\n\n> - `label=qa-approved`"
+                    )
+                ]
+            },
+            "dequeued (merge conditions no longer match)",
+        ),
+        (
             {"comments": [_comment("> queue\nAlready running from a previous command.")]},
             "already running from a previous command",
         ),
