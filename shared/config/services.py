@@ -188,7 +188,7 @@ class ServiceSettings(EnvSettings):
         alias="AVA_MILVUS_URI",
         description="Milvus standalone server URI — memory_indexer / ava.memory.search both connect via this.",
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
@@ -210,7 +210,7 @@ class ServiceSettings(EnvSettings):
             "is one env var + a restart, the cold-start scan rebuilds the index."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
