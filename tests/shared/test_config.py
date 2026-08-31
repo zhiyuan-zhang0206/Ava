@@ -1443,3 +1443,34 @@ def test_frontend_config_group_keys_match_backend_aliases() -> None:
         f"remove them or fix the spelling (a dead key renders nothing and the "
         f"real field falls into a default bucket)"
     )
+
+
+# ─── memory backend switch fields: restart_required must name "gateway" ───
+
+
+def test_memory_backend_switch_fields_require_gateway_restart() -> None:
+    """The backend-switch fields must declare restart_required="gateway".
+
+    AVA_MEMORY_SEARCH_BACKEND is consumed at process boot by the gateway
+    search endpoint (factory.get_backend) and the memory_indexer daemon;
+    switching to 'numpy' also makes the gateway's search path ride the
+    memory_search daemon. All three processes run under the gateway process
+    profile, so the metadata must name "gateway" — an `ava restart` bounces
+    the gateway process AND every gateway-profile daemon. A "" here told the
+    panel/CLI "no restart required" and a backend switch silently stayed
+    unapplied until a manual kickstart (Task #2224). milvus_uri is the same
+    bug class: memory_indexer's milvus backend, the milvus healthcheck and
+    the gateway search path all read it.
+    """
+    from shared.config.profiles import PROCESS_PROFILES
+    from shared.config.services import ServiceSettings
+
+    # The owning domain must be in the gateway profile for "gateway" to be the
+    # honest value — the consumption matrix, kept in sync with the profile set.
+    assert "services" in PROCESS_PROFILES["gateway"]
+
+    for name in ("milvus_uri", "memory_search_backend"):
+        field = ServiceSettings.model_fields[name]
+        extra = field.json_schema_extra
+        assert isinstance(extra, dict)
+        assert extra["restart_required"] == "gateway", name

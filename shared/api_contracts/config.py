@@ -47,7 +47,12 @@ class ConfigFieldView(BaseModel):
     # "common" = not owned by a single capability (cluster-wide policy or shared
     # host identity).
     capability: Capability
-    restart_required: str  # "agent" | "ops" | "gateway" | "all" | ""
+    # "agent" | "ops" | "gateway" | "all" | "" — which process must restart
+    # after a change. "gateway" covers the gateway process plus the
+    # gateway-profile daemons that consume the field (im_bridge /
+    # memory_indexer / memory_search / milvus / ...) — an `ava restart`
+    # bounces all of them.
+    restart_required: str
     writable: bool
     sensitive: bool
     env_var: str
