@@ -3,8 +3,8 @@
 Runs against the REAL PCS API with a real OAuth pair, so it needs the
 operator's credential file and an already-refreshed token state file
 (see services/pitr/baidu_token.py). It exercises the three-phase upload
-of a synthetic file, rapid transfer on re-upload, and a verified
-download — reporting wall-clock throughput for each phase.
+of a synthetic file, the create-on-existing re-upload path, and a
+verified download — reporting wall-clock throughput for each phase.
 
 Usage:
   python scripts/pitr_baidu_speedtest.py \
@@ -97,15 +97,16 @@ def main() -> None:
             ack.created,
         )
 
-        print("re-uploading the same content (rapid transfer expected) ...")
+        # Live smoke (2026-08-31): precreate return_type 2 never fires — an
+        # identical re-upload always re-uploads the shards and
+        # create-on-existing mints a new fs_id (the sidecar writer adopts
+        # the drifted pin). Byte integrity is proven by the download
+        # verification below, so created=True is the expected outcome here.
+        print("re-uploading the same content (create-on-existing expected) ...")
         started = time.monotonic()
         again = store.put_wal_ciphertext_if_absent(path, object_name, {"ava-speedtest": "1"})
         _measure("re-upload", size, started)
-        print(
-            "re-upload ack created:", again.created, "(False = rapid transfer adopted the object)"
-        )
-        if again.created:
-            raise SystemExit("rapid transfer did not adopt the identical content — investigate")
+        print("re-upload ack created:", again.created, "pin:", again.pin_token)
 
         print("verifying stat ...")
         observed = store.stat(object_name)
