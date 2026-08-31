@@ -150,15 +150,15 @@ Refresh the file manually after a significant test-suite change:
 uv run python scripts/refresh_test_durations.py
 ```
 
-The script re-runs both suites exactly as CI runs them — backend `-n 4` +
-`-m "not flaky"` + CI's `--cov` module list (coverage tracing is part of the
-shard environment), e2e `-n 2` — with `--store-durations --clean-durations`,
-merges the two runs, keeps entries `>= 0.2s`, and atomically rewrites
+The nightly workflow runs the CI-shaped backend 12-way and e2e four-way shard
+matrices: backend carries `-n 4`, `-m "not flaky"`, and CI's `--cov` module
+list (coverage tracing is part of the shard environment); e2e carries `-n 2`.
+Each shard records a clean duration artifact with `--store-durations
+--clean-durations` and retries independently. The merge accepts only all 16
+successful artifacts, keeps entries `>= 0.2s`, and atomically rewrites
 `.test_durations` in the committed compact-JSON format (sorted keys,
-3-decimal values, one trailing newline). It never edits the file in place: a
-failed backend run aborts without touching it; a failed e2e run still keeps
-whatever durations it recorded, and if it recorded nothing the previous e2e
-entries are retained.
+3-decimal values, one trailing newline). A failed or missing shard therefore
+leaves the committed file untouched instead of publishing partial timings.
 
 `.github/workflows/refresh-test-durations.yml` runs this nightly on `main` and
 opens one reviewable PR (never auto-merged) when the file changed — follow its

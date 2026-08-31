@@ -36,6 +36,9 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `audit_branch_protection.py` — read-only comparison of live GitHub branch protection / workflow activation against the required checks declared in `.mergify.yml`; exit status distinguishes verified drift from an API/tool failure
 - `build_app_update_manifest.py` — turns signed Tauri desktop archives into the app's static `latest.json`; unsigned release runs get an empty platform map
 - `update_model_pricing.py` — fail-closed official price checks that propose reviewed catalog PRs
+- `refresh_test_durations.py` — records isolated CI-shaped pytest timing shards, retries
+  only a failed measurement, and atomically merges a complete artifact set into
+  `.test_durations`
 - `release_cut.py`, `pre-push-check.sh`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`
 
 ### Code Generation
