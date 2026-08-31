@@ -1302,6 +1302,24 @@ EVENTS: dict[str, EventSpec] = {
         tier="observation",
         doc="the gateway TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id",
     ),
+    "page_recovery_notified": EventSpec(
+        name="page_recovery_notified",
+        category="log",
+        tier="observation",
+        doc="the gateway startup scan notified an owner that a show() page server died with the host; attributes carry host",
+    ),
+    "page_proxy_502": EventSpec(
+        name="page_proxy_502",
+        category="log",
+        tier="anomaly",
+        doc="the gateway reverse proxy could not reach a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message",
+    ),
+    "page_proxy_504": EventSpec(
+        name="page_proxy_504",
+        category="log",
+        tier="anomaly",
+        doc="the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message",
+    ),
     "shell_ttl_expired": EventSpec(
         name="shell_ttl_expired",
         category="log",
