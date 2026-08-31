@@ -299,6 +299,49 @@ class TestBuildChatModel:
         assert isinstance(m, ChatGoogleGenerativeAI)
         assert m.include_thoughts is False
 
+    def test_gemini_media_args_build(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Media-path extras (ava.understand): media_resolution maps onto the
+        Google enum, media_thinking_level wins over the resolved effort, and
+        base_url overrides the endpoint. include_thoughts stays at the SDK
+        default (None) — the media path never surfaced thought blocks."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        from google.genai.types import MediaResolution
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        m = build_chat_model(
+            "gemini-3.5-flash",
+            media_resolution="high",
+            media_thinking_level="low",
+            base_url="http://localhost:8080/v1beta",
+        )
+        assert isinstance(m, ChatGoogleGenerativeAI)
+        assert m.media_resolution == MediaResolution.MEDIA_RESOLUTION_HIGH
+        assert m.thinking_level == "low"
+        assert m.base_url == "http://localhost:8080/v1beta"  # type: ignore[reportUnknownMemberType]
+        assert m.include_thoughts is None
+
+    def test_gemini_media_resolution_maps_each_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        from google.genai.types import MediaResolution
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        for setting, enum in [
+            ("low", MediaResolution.MEDIA_RESOLUTION_LOW),
+            ("medium", MediaResolution.MEDIA_RESOLUTION_MEDIUM),
+            ("high", MediaResolution.MEDIA_RESOLUTION_HIGH),
+        ]:
+            m = build_chat_model("gemini-3.5-flash", media_resolution=setting)
+            assert isinstance(m, ChatGoogleGenerativeAI)
+            assert m.media_resolution == enum
+
+    def test_gemini_invalid_media_resolution_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        with pytest.raises(ValueError, match="media_resolution"):
+            build_chat_model("gemini-3.5-flash", media_resolution="ultra")
+
     def test_gpt_branch_builds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("k"))

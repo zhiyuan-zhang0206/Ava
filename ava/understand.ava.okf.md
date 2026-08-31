@@ -17,7 +17,7 @@ tags:
 ## Core API
 
 - `understand(targets: list[dict], max_concurrent=None) → list[str]` — Batch-only. Each target is a dict with `prompt` plus exactly one of `text` / `paths`. Answers come back in input order.
-  - `paths`: non-empty list of file paths (relative path resolution same as other file operations) — a single file is a one-element list. Text files are read as UTF-8; images/video/audio/PDF are processed via media path based on detected MIME (Gemini inline, with size limits). Every file is sent in ONE model call as separate parts, so the model can compare them (e.g. a design frame plus a page screenshot); any media file routes the whole call to the media model.
+  - `paths`: non-empty list of file paths (relative path resolution same as other file operations) — a single file is a one-element list. Text files are read as UTF-8; images/video/audio/PDF are processed via media path based on detected MIME (inline media parts on the media model; size limits apply). Every file is sent in ONE model call as separate parts, so the model can compare them (e.g. a design frame plus a page screenshot); any media file routes the whole call to the media model.
   - `text`: material itself (literal string).
 
 There is no single-call form — one question is a one-element list:
@@ -42,4 +42,4 @@ Validation runs over every target before any model call, so a malformed batch fa
 - [[shared/lm/lm.ava.okf.md]] — underlying chat model factory (text/media models come from settings)
 
 ## Notes
-Text and media models come from `settings.lm.understand_text_model` (default DeepSeek V4 Flash) / `settings.lm.understand_media_model` (default Gemini 3.5 Flash) respectively. Media goes inline; exceeding inline limits will raise `UnderstandError`.
+Text and media models come from `settings.lm.understand_text_model` (default DeepSeek V4 Flash) / `settings.lm.understand_media_model` (default Gemini 3.5 Flash) respectively. The media model's provider is picked by its prefix through the same model factory every LLM path uses (`shared/lm/factory.py`), so a non-Gemini multimodal model id works too and `AVA_UNDERSTAND_MEDIA_BASE_URL` can point the Gemini endpoint at a self-hosted relay. The Gemini-only knobs (`AVA_UNDERSTAND_MEDIA_RESOLUTION` / `AVA_UNDERSTAND_MEDIA_THINKING_LEVEL`) apply to Gemini models; other providers ignore them. Media goes inline; exceeding inline limits will raise `UnderstandError`.
