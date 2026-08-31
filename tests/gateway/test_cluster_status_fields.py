@@ -356,11 +356,13 @@ def test_gather_cluster_status_local_agent_runner_probed(monkeypatch: pytest.Mon
         kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        ops_url=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     ):
         assert kind == "status_probe"
         assert target_machine == "m1"
+        assert ops_url == "http://localhost:9"
         # The real ops server always echoes its own machine_name in the ClusterStatus
         # probe result; the gateway verifies it matches the targeted row.
         return {
@@ -413,10 +415,12 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(monkeypatch: 
         kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        ops_url=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     ):
         assert target_machine == "air"
+        assert ops_url == "http://localhost:8106"
         # The gateway (co-located ops server) answers under ITS name, not "air" — a
         # complete ClusterStatus (so it validates), just from the wrong host.
         return {

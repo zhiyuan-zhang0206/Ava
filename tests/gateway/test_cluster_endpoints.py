@@ -2237,7 +2237,12 @@ class TestAgentMachineList:
             assert ops_url == "http://wsl-test:18121"
             # The ops server echoes its own machine_name; the gateway verifies it
             # matches the probed row, so the stub must self-report the same name.
-            return {"machine_name": "wsl-test", "paused": False}
+            return {
+                "machine_name": "wsl-test",
+                "serve_gateway": False,
+                "serve_agent_runner": True,
+                "paused": False,
+            }
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
