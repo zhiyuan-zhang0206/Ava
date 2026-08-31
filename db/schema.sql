@@ -161,11 +161,8 @@ CREATE INDEX agent_activity_agent_id_created_at_id_idx
 
 -- ─────────────── heartbeat_pause_log ───────────────
 -- Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat
--- call. The backoff reminder (user ruling 2026-08-29) reads the previous
--- window from the latest row per agent and, when the new call repeats or
--- shortens the window, buffers a reminder system note the exec node injects
--- into the agent's conversation. The telemetry `heartbeat_paused` event stays
--- the display surface; this table is the agent-side history source.
+-- call. The telemetry `heartbeat_paused` event stays the display surface; this
+-- table is the agent-side history source.
 CREATE TABLE heartbeat_pause_log (
     id          BIGSERIAL PRIMARY KEY,
     agent_id    BIGINT NOT NULL REFERENCES agents(id),
@@ -174,15 +171,14 @@ CREATE TABLE heartbeat_pause_log (
 );
 
 COMMENT ON TABLE heartbeat_pause_log IS
-    'Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat call. The previous-window lookup for the backoff reminder reads the latest row per agent; the telemetry `heartbeat_paused` event stays the display surface.';
+    'Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat call. The telemetry `heartbeat_paused` event stays the display surface.';
 
--- (agent_id, created_at DESC, id DESC) matches the previous-window lookup's
--- ORDER BY exactly (same shape as agent_activity's lateral index).
+-- Latest-first ordering supports pause-trail inspection.
 CREATE INDEX heartbeat_pause_log_agent_created_idx
     ON heartbeat_pause_log (agent_id, created_at DESC, id DESC);
 
 -- ava_runner surface for the pause trail (task #1932): the runner process
--- (ava.self.pause_heartbeat) SELECTs the previous window and INSERTs the new
+-- (ava.self.pause_heartbeat) INSERTs the new
 -- row; the BIGSERIAL id draws from the owning sequence. UPDATE/DELETE stay
 -- out — the trail is append-only and no runner path rewrites rows.
 -- Gated on the role's existence: fresh bootstrap applies this baseline before

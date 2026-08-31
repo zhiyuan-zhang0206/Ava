@@ -214,13 +214,11 @@ class TestRestart:
 
 
 class TestPauseHeartbeat:
-    def test_pause_heartbeat_sets_window_and_emits_event(
+    def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
         self, db_conn: psycopg.Connection, monkeypatch
     ) -> None:
-        """pause_heartbeat does two things (same cursor, atomic): ① UPDATE
-        agents_meta.heartbeat_paused_until = now()+duration; ② INSERT a
-        heartbeat_paused events row (payload.duration_s) — the inspector's Last
-        Pause relies on this. Both read back via db_conn."""
+        """pause_heartbeat updates the window, records the pause trail, and
+        emits the heartbeat_paused event used by the inspector's Last Pause."""
         ava._boot._agent_id = spawn_agent()  # self identity
         ava.self.pause_heartbeat(1800)
         from shared import telemetry
@@ -234,8 +232,14 @@ class TestPauseHeartbeat:
                 (ava.self.AGENT_ID,),
             )
             window_row = cur.fetchone()
+            cur.execute(
+                "SELECT duration_s FROM heartbeat_pause_log WHERE agent_id = %s",
+                (ava.self.AGENT_ID,),
+            )
+            trail_rows = cur.fetchall()
         assert window_row is not None
         assert window_row[0] == pytest.approx(1800, abs=5)  # pyright: ignore[reportUnknownMemberType]
+        assert [float(row[0]) for row in trail_rows] == [1800.0]
         # The event row lives in the JSONL mirror (the PG events copy is a
         # read-only archive since the LGTM cutover, task #1197 close-C).
         import json as _json
@@ -319,62 +323,6 @@ class TestPauseHeartbeat:
             set_field("heartbeat_pause_max_seconds", original_limit)
         with pytest.raises(ValueError, match=r"at most"):
             ava.self.pause_heartbeat(172800)
-
-    def test_pause_heartbeat_repeat_window_buffers_reminder(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The backoff reminder (user ruling 2026-08-29): every pause writes a
-        heartbeat_pause_log row; a repeat or shorter window (Y <= X) buffers a
-        reminder note (delivered by the exec node via the result envelope), a
-        longer window and a first pause do not."""
-        ava._boot._agent_id = spawn_agent()
-        ava.state = object()  # record_pause_note requires an exec turn
-        try:
-            ava.self.pause_heartbeat(1800)  # first pause: history only
-            ava.self.pause_heartbeat(1800)  # repeat window: reminder
-            ava.self.pause_heartbeat(7200)  # longer window: no reminder
-            ava.self.pause_heartbeat(3600)  # shorter than 7200: reminder
-        finally:
-            ava.state = None
-        from ava._pause_notes import take_pause_notes
-
-        notes = take_pause_notes()
-        assert len(notes) == 2
-        assert "Previous heartbeat pause window: 30m; this pause: 30m." in notes[0].content
-        assert "Previous heartbeat pause window: 2h; this pause: 1h." in notes[1].content
-        assert "backoff rule" in notes[0].content
-        db_conn.rollback()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT duration_s FROM heartbeat_pause_log WHERE agent_id = %s ORDER BY id ASC",
-                (ava.self.AGENT_ID,),
-            )
-            rows = cur.fetchall()
-        assert [float(r[0]) for r in rows] == [1800.0, 1800.0, 7200.0, 3600.0]
-
-    def test_pause_heartbeat_first_pause_no_reminder(self) -> None:
-        """A first-ever pause has no previous window to compare — no reminder."""
-        ava._boot._agent_id = spawn_agent()
-        ava.state = object()
-        try:
-            ava.self.pause_heartbeat(1800)
-        finally:
-            ava.state = None
-        from ava._pause_notes import take_pause_notes
-
-        assert take_pause_notes() == []
-
-    def test_pause_heartbeat_docstring_locks_backoff_rule(self) -> None:
-        """The SDK docstring states the backoff sequence as a rule, not a
-        suggestion — a regression to advisory wording fails here (user ruling
-        2026-08-29)."""
-        import inspect
-
-        doc = inspect.getdoc(ava.self.pause_heartbeat)
-        assert doc is not None
-        assert "must strictly" in doc
-        assert "30m, then 2h, then 4h, then 8h, then 16h, then 24h" in doc
-        assert "backoff violation" in doc
 
 
 class TestRestartCompletedMarker:
