@@ -253,6 +253,46 @@ async def test_heartbeat_while_breaker_open_non_overflow_parks(
     assert cmd.goto == "claim"
 
 
+@pytest.mark.parametrize(
+    ("first_kind", "second_kind"),
+    [("chat", "heartbeat"), ("heartbeat", "chat")],
+)
+async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
+    first_kind: str,
+    second_kind: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+) -> None:
+    """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
+    tid = create_agent(db_conn)
+    inbound_ids: dict[str, int] = {}
+    for kind in (first_kind, second_kind):
+        content = "real user work" if kind == "chat" else "Heartbeat."
+        inbound_ids[kind] = _insert_inbound_kind(db_conn, tid, content, kind, source="user")
+
+    fake_llm = _fake_llm(_LONG_SUMMARY)
+    cmd = await claim_node(
+        _overflow_state(breaker_reason="billing"),
+        _make_runtime(
+            ops_pool=aops_pool,
+            inbound_listener=aredis_inbound_listener,
+            llm=fake_llm,
+        ),
+        _config(tid),
+    )
+
+    assert cmd.goto == "before_llm"
+    assert cmd.update["halted"] is False  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType]
+    messages = cmd.update["messages"]  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType]
+    assert len(messages) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert isinstance(messages[0], HumanMessage)
+    assert "real user work" in messages[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert messages[0].additional_kwargs["ava_inbound_id"] == inbound_ids["chat"]  # pyright: ignore[reportUnknownMemberType]
+    assert "Heartbeat." not in messages[0].content  # pyright: ignore[reportUnknownMemberType]
+    fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
+
+
 async def test_claim_parks_idle_while_non_overflow_breaker_open(
     aops_pool: AsyncConnectionPool,
 ) -> None:

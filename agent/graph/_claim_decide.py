@@ -210,6 +210,10 @@ async def decide(
     # END snapshot needed when claim routes to END with new markers appended.
     publish_snapshot = st.next_goto == END and bool(st.new_msgs)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
+    # A non-overflow open-breaker heartbeat parks at CLAIM. Its co-batched chat
+    # is real work already committed to this update, so it must reach the LLM;
+    # only CLAIM has this heartbeat-park meaning in normal fallthrough.
+    goto = BEFORE_LLM if st.committed_chat_ids and st.next_goto == CLAIM else st.next_goto
     return _Outcome(
         command=Command[ClaimGoto](
             update={
@@ -217,7 +221,7 @@ async def decide(
                 "halted": halted,
                 "update_initiated": st.update_initiated,
             },
-            goto=st.next_goto,
+            goto=goto,
         ),
         publish_end_snapshot=publish_snapshot,
     )

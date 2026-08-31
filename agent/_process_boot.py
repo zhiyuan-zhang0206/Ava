@@ -14,7 +14,7 @@ Everything between `python -m agent` and the graph going live, split out of
 - `_build_checkpointer`: the AsyncPostgresSaver (wrapped with loud-failure
   logging and optional N-step checkpoint throttling) + the startup
   claimed-inbound reconcile;
-- `_build_graph`: the compiled graph + dangling tool_use repair + the
+- `_build_graph`: the compiled graph + dangling tool pairing repair + the
   plugin-scope config overlay + the effective-config snapshot.
 
 The MCP daemon is a per-machine SHARED cluster service (ops roster session
@@ -424,12 +424,13 @@ async def _build_graph(
     config_overlay: dict[str, object] | None,
     agent_id: int,
 ) -> CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]:
-    """Build the graph, apply eval isolation, repair a dangling tool_use,
+    """Build the graph, apply eval isolation, repair dangling tool pairing,
     apply the plugin-scope config overlay, and write the effective-config snapshot.
 
     A hard cancel (SIGTERM / restart / stop kill -> asyncio.CancelledError)
-    can leave a tool_use committed without its paired tool_result; repair it
-    before ainvoke so resurrect doesn't loop on provider 400s (agent 167).
+    can leave a tool_use committed without its paired tool_result, or a
+    tool_result committed without its carrying tool_use; repair it before
+    ainvoke so resurrect does not loop on provider 400s (agents 167, 5333).
 
     Plugin-scope overlay runs after build_graph's bind_from_disk has populated
     _PLUGIN_CONFIGS; framework-scope already ran in `_boot_agent_process`

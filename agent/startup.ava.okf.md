@@ -48,7 +48,7 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
 - `startup.py`:
   - `_wrap_saver_writes_with_loud_failure()` — monkey-patch checkpointer to make write failures observable
   - `_reconcile_claimed_inbounds_at_startup()` — clean up 'claimed' inbounds left by previous process
-  - `_repair_dangling_tool_use_at_startup()` — fill in dangling tool_use (no tool_result) left over from last crash
+  - `_repair_dangling_tool_use_at_startup()` — repair crash-left tool pairing: synthesize an interrupted result for an unpaired use or drop an orphan result
   - `_apply_per_agent_framework_config()` — apply this agent's two stored config maps onto the settings singleton, birth stamp first and explicit overlay on top, so the effective order is `config_overlay > birth_config > current config`. Runs before `build_chat_model` so a per-agent model reaches the LLM client this process actually builds. Both maps arrive via child-process env (`$AVA_AGENT_CONFIG_OVERLAY` / `$AVA_AGENT_BIRTH_CONFIG`), **never argv** — argv is world-readable via `ps` and can carry a provider api_key (issue #974); launcher reads them off `agents_meta`; `birth_config` is the frozen-lifecycle set stamped at spawn (see the `shared/config` module docstring for the axis and `shared/birth_config.py` for the mechanics)
   - `_write_effective_config_to_restart_completed()` — record the post-apply config snapshot
   - `_notify_screen_capture_at_startup()` — renders whichever OS-level screen-capture fault the converge preflight recorded (permissions helper holds no Screen Recording grant / never answered, so the grant is unknown); each state carries its own headline and fix

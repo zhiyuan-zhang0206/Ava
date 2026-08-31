@@ -27,7 +27,7 @@ Submodules:
 - `agent.hooks.compact` — compact's `generate_summary()` utility function,
   used by the claim node. Actual hook registration lives in
   `ava_builtins/plugins/ava_compact/plugin.py`.
-- `agent.hooks.repair` — dangling tool_use crash recovery: shared
+- `agent.hooks.repair` — dangling tool_use/tool_result pairing crash recovery: shared
   detection/rebuild helper + the built-in before_llm repair hook
   (`register_repair_hooks()`, called from `build_graph`).
 """

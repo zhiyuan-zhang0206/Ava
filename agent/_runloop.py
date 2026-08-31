@@ -277,7 +277,7 @@ async def _recover_from_db_outage(
 ) -> None:
     """Wait for the DB, then re-run the same startup reconciliation a fresh
     process runs: resolve 'claimed' inbound rows the interrupted turn left
-    behind (committed → done, else → pending) and repair a dangling tool_use.
+    behind (committed → done, else → pending) and repair dangling tool pairing.
     ainvoke has returned, so this process is the sole writer — the
     no-concurrent-claim invariant holds. `graph.checkpointer` is the
     AsyncPostgresSaver the graph runs with; ops_pool is always set on the
