@@ -45,10 +45,12 @@ from shared.alerts import display_language
 from shared.config import settings
 from shared.db import agent_exists
 from shared.live_events import PageClosed, PageOpened
+from shared.log import logger
 from shared.pages_copy import (
     PAGE_EXPIRED_BODY,
     PAGE_EXPIRED_TITLE,
     PAGE_LANGUAGE_DEFAULT,
+    PAGE_SERVER_DOWN_BODY,
 )
 from shared.redis_client import publish_best_effort
 
@@ -281,22 +283,62 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     try:
         req = client.build_request("GET", target)
         resp = await client.send(req, stream=True)
-    except httpx.TimeoutException:
+    except httpx.TimeoutException as exc:
         await client.aclose()
+        _log_proxy_failure(request, agent_id, name, host, port, "504", exc)
         raise HTTPException(
             status_code=504, detail=f"page server {host}:{port} timed out"
         ) from None
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
         await client.aclose()
-        raise HTTPException(
-            status_code=502, detail=f"page server {host}:{port} unreachable"
-        ) from None
+        _log_proxy_failure(request, agent_id, name, host, port, "502", exc)
+        # Friendly, language-aware copy in place of the raw host:port detail —
+        # the dial target stays in the log line above (task #2212).
+        lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
+        detail = PAGE_SERVER_DOWN_BODY.get(lang, PAGE_SERVER_DOWN_BODY[PAGE_LANGUAGE_DEFAULT])
+        raise HTTPException(status_code=502, detail=detail) from None
     headers = {k: v for k, v in resp.headers.items() if k.lower() in _FORWARDED_RESPONSE_HEADERS}
     return StreamingResponse(
         _iter_upstream(resp),
         status_code=resp.status_code,
         headers=headers,
         background=BackgroundTask(_close_upstream, resp, client),
+    )
+
+
+def _log_proxy_failure(
+    request: Request,
+    agent_id: int,
+    name: str,
+    host: str,
+    port: int,
+    status: str,
+    exc: Exception,
+) -> None:
+    """One structured log line per failed page-proxy dial (502/504).
+
+    Every user-pasted 502 must be traceable end-to-end: the request's
+    trace_id (the same value the error envelope returns), the page's
+    agent/name, the dial target, and the exception type + message. The
+    user-facing response deliberately no longer carries host:port — this
+    line is where that detail lives.
+    """
+    logger.bind(
+        event=f"page_proxy_{status}",
+        agent_id=agent_id,
+        trace_id=getattr(request.state, "trace_id", None),
+        page=name,
+        host=host,
+        port=port,
+        exc_type=type(exc).__name__,
+        exc_message=str(exc),
+    ).warning(
+        "page proxy {status}: page server {host}:{port} failed for agent {agent_id} page {name!r}",
+        status=status,
+        host=host,
+        port=port,
+        agent_id=agent_id,
+        name=name,
     )
 
 
