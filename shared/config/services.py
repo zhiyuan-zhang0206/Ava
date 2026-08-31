@@ -292,7 +292,7 @@ class ServiceSettings(EnvSettings):
             "provider-fingerprint change and rebuilds the index from scratch."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
@@ -304,7 +304,7 @@ class ServiceSettings(EnvSettings):
         alias="AVA_EMBED_TIMEOUT_SECONDS",
         description="Per-request timeout (seconds) for one Gemini batchEmbedContents call. A 32-file batch is one round-trip; the memory-indexer daemon's liveness timeout (180s) sits well above it, so a slow-but-legit batch does not trip the healthcheck (task #698 G8).",
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
@@ -651,7 +651,7 @@ class ServiceSettings(EnvSettings):
         alias="AVA_IM_DISABLED_ADAPTERS",
         description="Comma-separated IM adapter names to skip at daemon load (code stays; e.g. 'weixin,feishu' — user ruling 2026-08-06 keeps only Telegram live).",
         json_schema_extra={
-            "restart_required": "agent",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
@@ -663,7 +663,7 @@ class ServiceSettings(EnvSettings):
         alias="AVA_IM_SEND_RETRY_DELAYS",
         description="Comma-separated backoff delays (seconds) between gateway enqueue retries. A gateway mid-rollout is down for roughly a minute; 2+4+8+16+32 covers it, then the message is dropped (task #698 G8).",
         json_schema_extra={
-            "restart_required": "agent",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
@@ -675,7 +675,7 @@ class ServiceSettings(EnvSettings):
         alias="AVA_IM_SSE_READ_TIMEOUT_SECONDS",
         description="Read timeout (seconds) for the IM Bridge SSE subscription stream. The stream is long-lived and mostly idle (the gateway sends a keep-alive comment about once a second), so this only trips on a genuinely dead connection (task #698 G8).",
         json_schema_extra={
-            "restart_required": "agent",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
