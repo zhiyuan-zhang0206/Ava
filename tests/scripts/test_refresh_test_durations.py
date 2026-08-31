@@ -159,3 +159,96 @@ def test_main_merges_both_suite_durations(tmp_path: Path, monkeypatch: pytest.Mo
         "tests/agent/test_a.py::test_one": 1.1,
         "tests/e2e/test_b.py::test_two": 0.5,
     }
+
+
+def test_measure_backend_retries_and_reseeds_the_ci_durations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed shard retry must retain CI's input timing model, not its partial output."""
+    source = tmp_path / ".test_durations"
+    source.write_text('{"tests/agent/test_existing.py::test_one": 1.5}\n')
+    output = tmp_path / "backend-3.json"
+    monkeypatch.setattr(refresh, "_DURATIONS_PATH", source)
+    attempts = 0
+
+    def _fail_once_then_record(
+        targets: list[str],
+        workers: int,
+        durations_path: Path,
+        *,
+        coverage: bool,
+    ) -> int:
+        nonlocal attempts
+        attempts += 1
+        assert targets == [
+            "tests/",
+            "--ignore=tests/e2e",
+            "-m",
+            "not flaky",
+            "--splits",
+            "12",
+            "--group",
+            "3",
+        ]
+        assert workers == 4
+        assert coverage is True
+        assert json.loads(durations_path.read_text()) == json.loads(source.read_text())
+        if attempts == 1:
+            durations_path.write_text('{"tests/agent/test_partial.py::test_one": 9.0}\n')
+            return 1
+        durations_path.write_text('{"tests/agent/test_recorded.py::test_one": 1.0}\n')
+        return 0
+
+    monkeypatch.setattr(refresh, "_run_suite", _fail_once_then_record)
+
+    assert refresh.main(["measure", "backend", "--group", "3", "--output", str(output)]) == 0
+    assert attempts == 2
+    assert json.loads(output.read_text()) == {"tests/agent/test_recorded.py::test_one": 1.0}
+
+
+def test_merge_refuses_incomplete_shard_measurements_without_overwriting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing successful shard must not publish an incomplete timing model."""
+    target = tmp_path / ".test_durations"
+    target.write_text('{"tests/agent/test_old.py::test_one": 1.5}\n')
+    durations_dir = tmp_path / "durations"
+    durations_dir.mkdir()
+    monkeypatch.setattr(refresh, "_DURATIONS_PATH", target)
+
+    for group in range(1, 13):
+        (durations_dir / f"backend-{group}.json").write_text(
+            json.dumps({f"tests/agent/test_{group}.py::test_one": 1.0})
+        )
+    for group in range(1, 4):
+        (durations_dir / f"e2e-{group}.json").write_text(
+            json.dumps({f"tests/e2e/test_{group}.py::test_one": 1.0})
+        )
+
+    assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 1
+    assert target.read_text() == '{"tests/agent/test_old.py::test_one": 1.5}\n'
+
+
+def test_merge_all_ci_shards_writes_the_compact_combined_durations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every successful CI-shaped shard contributes its recorded test duration."""
+    target = tmp_path / ".test_durations"
+    durations_dir = tmp_path / "durations"
+    durations_dir.mkdir()
+    monkeypatch.setattr(refresh, "_DURATIONS_PATH", target)
+
+    for group in range(1, 13):
+        (durations_dir / f"backend-{group}.json").write_text(
+            json.dumps({f"tests/agent/test_{group}.py::test_one": 1.0})
+        )
+    for group in range(1, 5):
+        (durations_dir / f"e2e-{group}.json").write_text(
+            json.dumps({f"tests/e2e/test_{group}.py::test_one": 1.0})
+        )
+
+    assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 0
+    combined = json.loads(target.read_text())
+    assert len(combined) == 16
+    assert combined["tests/agent/test_12.py::test_one"] == 1.0
+    assert combined["tests/e2e/test_4.py::test_one"] == 1.0
