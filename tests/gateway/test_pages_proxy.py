@@ -30,6 +30,7 @@ from gateway.app import app
 from gateway.routers import pages as pages_router
 from shared import config
 from shared.db import create_agent
+from shared.pages_copy import PAGE_LANGUAGE_DEFAULT, PAGE_SERVER_DOWN_BODY
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -244,7 +245,8 @@ def test_proxy_rejects_traversal(db_conn, page_server: int, bad_path: str) -> No
 
 
 def test_proxy_502_when_page_server_unreachable(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    """A registered page whose server is down surfaces as 502."""
+    """A registered page whose server is down surfaces as 502 with the
+    friendly zh copy (the default display language) — never the raw host:port."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     # Grab a free port and release it — nothing will be listening there.
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -259,6 +261,78 @@ def test_proxy_502_when_page_server_unreachable(db_conn) -> None:  # pyright: ig
         assert resp.status_code == 201
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 502
+    # Friendly copy (zh default) replaces the raw host:port detail.
+    assert resp.json()["detail"] == PAGE_SERVER_DOWN_BODY[PAGE_LANGUAGE_DEFAULT]
+    assert "127.0.0.1" not in resp.json()["detail"]
+
+
+def test_proxy_502_friendly_copy_en_when_display_language_en(
+    db_conn: psycopg.Connection,
+) -> None:
+    """display.language=en selects the English 502 copy through the full proxy path."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO user_settings (key, value) VALUES ('display.language', %s)",
+            (Jsonb("en"),),
+        )
+    aid = create_agent(db_conn)
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    free_port = probe.getsockname()[1]
+    probe.close()
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/pages",
+            json={"name": "p", "port": free_port, "host": "127.0.0.1"},
+        )
+        assert resp.status_code == 201
+        resp = client.get(f"/pages/{aid}-p/")
+    assert resp.status_code == 502
+    assert (
+        resp.json()["detail"]
+        == "The page server just restarted or is no longer available - ask the agent that created it to republish"
+    )
+
+
+def test_proxy_502_emits_structured_log_line(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """The 502 branch writes one structured log line carrying trace_id,
+    agent_id, page name, host:port, and the exception type + message — the
+    traceability the report asked for (task #2212)."""
+    from typing import Any as _Any
+
+    from loguru import logger as _loguru
+
+    records: list[_Any] = []
+
+    def _capture(message: _Any) -> None:
+        records.append(message.record)
+
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    free_port = probe.getsockname()[1]
+    probe.close()
+    sink_id = _loguru.add(_capture, level="WARNING")  # pyright: ignore[reportUnknownArgumentType]
+    try:
+        with TestClient(app) as client:
+            client.post(
+                f"/api/agents/{aid}/pages",
+                json={"name": "p", "port": free_port, "host": "127.0.0.1"},
+            )
+            client.get(f"/pages/{aid}-p/")
+    finally:
+        _loguru.remove(sink_id)
+
+    hits = [r for r in records if r["extra"].get("event") == "page_proxy_502"]
+    assert len(hits) == 1
+    extra: dict[str, object] = hits[0]["extra"]
+    assert extra["agent_id"] == aid
+    assert extra["page"] == "p"
+    assert extra["host"] == "127.0.0.1"
+    assert extra["port"] == free_port
+    assert extra["trace_id"]
+    assert extra["exc_type"]  # e.g. ConnectError
+    assert extra["exc_message"]
 
 
 def test_proxy_revalidates_nonloopback_registry_target_before_dialing(
