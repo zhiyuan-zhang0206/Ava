@@ -140,11 +140,6 @@ def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         activation,
-        "_pitr_env_baseline",
-        lambda: dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
-    )
-    monkeypatch.setattr(
-        activation,
         "_pg_auto_conf_baseline",
         lambda _home, _values=None: {
             "archive_mode": "__ABSENT__",
@@ -580,33 +575,76 @@ def test_rollback_setting_crash_matrix_resumes_each_owned_alter(
     assert current == baseline
 
 
-def test_env_baseline_restores_exact_raw_presence_and_duplicate_values(
+def test_rollback_leaves_config_owned_env_untouched(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    env = tmp_path / ".env"
-    env.write_text("KEEP='unchanged'\nAVA_PITR_ENABLED='false'\nAVA_PITR_ENABLED=false # exact\n")
-    monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(activation_runtime, "ava_home", lambda: tmp_path)
-    baseline = activation._pitr_env_baseline()
-    env.write_text(
-        "KEEP='unchanged'\n"
+    """The four PITR gate keys are config-owned since the 2026-08-31
+    rework: rolling an activation back must never strip them (that used to
+    stop every PITR service mid-rollback)."""
+    record = _wal_restart_pending_record().advance(
+        "rollback_pending",
+        restart_handoff="rollback-handoff",
+        restart_orchestration="rollback-orchestration",
+        rollback_postmaster_started_at="2026-08-31 12:00:00+00",
+        rollback_expected_auto_conf_digest="a" * 64,
+        pre_activation_auto_conf_digest="a" * 64,
+    )
+    write_record(tmp_path, record)
+    (tmp_path / "pg").mkdir()
+    (tmp_path / "pg" / "postgresql.auto.conf").write_text("")
+    (tmp_path / ".env").write_text(
         "AVA_PITR_ENABLED=true\n"
         "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
         "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
         "AVA_PITR_RETENTION_PLANNER_ENABLED=false\n"
     )
+    monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
+    monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
+    monkeypatch.setattr(
+        activation_config,
+        "_persistent_archive_settings",
+        lambda _home: {
+            "archive_mode": "__ABSENT__",
+            "archive_command": "__ABSENT__",
+            "archive_timeout": "__ABSENT__",
+            "wal_compression": "__ABSENT__",
+        },
+    )
+    monkeypatch.setattr(
+        activation_config,
+        "_file_evidence",
+        lambda _path: ("", "a" * 64),
+    )
+    monkeypatch.setattr(
+        activation,
+        "_read_pg_state",
+        lambda: {
+            "archive_mode": "on",
+            "archive_command": "shim",
+            "archive_timeout": "60min",
+            "wal_compression": "pglz",
+            "postmaster_started_at": "2026-08-31 12:00:00+00",
+        },
+    )
+    monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("", "a" * 64))
 
-    from services.pitr.activation_runtime import _restore_pitr_env
+    def spawn_restart(*_args: object, **kwargs: object) -> dict[str, str]:
+        binder = kwargs["bind_continuation"]
+        assert callable(binder)
+        binder()
+        return {"session": activation._restart_session(), "log": "/tmp/restart.log"}  # noqa: S108
 
-    _restore_pitr_env(baseline)
+    monkeypatch.setattr("ops.cluster_deploy.spawn_restart", spawn_restart)
 
-    lines = env.read_text().splitlines()
+    assert activation.cmd_pitr_rollback() == 0
+    lines = (tmp_path / ".env").read_text().splitlines()
     assert lines == [
-        "KEEP='unchanged'",
-        "AVA_PITR_ENABLED='false'",
-        "AVA_PITR_ENABLED=false # exact",
+        "AVA_PITR_ENABLED=true",
+        "AVA_PITR_BASE_BACKUP_ENABLED=true",
+        "AVA_PITR_RESTORE_PROOF_ENABLED=true",
+        "AVA_PITR_RETENTION_PLANNER_ENABLED=false",
     ]
-    assert json.loads(baseline["pitr_base_backup_enabled"]) == []
 
 
 def test_pitr_env_desired_requires_all_four_owned_aliases() -> None:
@@ -617,6 +655,92 @@ def test_pitr_env_desired_requires_all_four_owned_aliases() -> None:
         b"AVA_PITR_RETENTION_PLANNER_ENABLED=false\n"
     )
     assert not pitr_env_is_desired(b"AVA_PITR_ENABLED=true\n")
+
+
+def test_pitr_env_absent_detects_all_four_missing() -> None:
+    from services.pitr.activation_runtime import pitr_env_absent
+
+    assert pitr_env_absent(b"OTHER=kept\n")
+    assert pitr_env_absent(b"")
+    assert not pitr_env_absent(b"AVA_PITR_ENABLED=true\n")
+
+
+def _env_apply_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env_text: str
+) -> ActivationRecord:
+    (tmp_path / "pg").mkdir()
+    (tmp_path / "pg" / "postgresql.auto.conf").write_text("")
+    (tmp_path / ".env").write_text(env_text)
+    record = _wal_config_pending_record().advance(
+        "wal_config_applying",
+        wal_config_before_digest="before",
+        wal_config_desired_digest="desired",
+        pre_activation_pitr_env=dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+        pre_activation_pg_auto_conf={
+            "archive_mode": "__ABSENT__",
+            "archive_command": "__ABSENT__",
+            "archive_timeout": "__ABSENT__",
+            "wal_compression": "__ABSENT__",
+        },
+        pre_activation_env_b64="YQ==",
+        pre_activation_env_digest="env-digest",
+        pre_activation_auto_conf_b64="Yg==",
+        pre_activation_auto_conf_digest="auto-digest",
+    )
+    write_record(tmp_path, record)
+    monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "on")
+    monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
+    monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", "0" * 64))
+    monkeypatch.setattr(activation_config, "_settings_digest", lambda _values: "0" * 64)
+    return record
+
+
+def test_env_apply_refuses_config_owned_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Present-but-not-desired PITR keys are the operator's explicit config;
+    the activation must refuse instead of clobbering them."""
+    record = _env_apply_fixture(
+        monkeypatch,
+        tmp_path,
+        "AVA_PITR_ENABLED=true\n"
+        "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
+        "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
+        "AVA_PITR_RETENTION_PLANNER_ENABLED=true\n",
+    )
+    with pytest.raises(RuntimeError, match="config-owned"):
+        activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
+    assert "AVA_PITR_RETENTION_PLANNER_ENABLED=true" in (tmp_path / ".env").read_text()
+
+
+def test_env_apply_refuses_partial_pitr_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    record = _env_apply_fixture(monkeypatch, tmp_path, "AVA_PITR_ENABLED=true\n")
+    with pytest.raises(RuntimeError, match="config-owned"):
+        activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
+
+
+def test_env_apply_provisions_only_when_all_four_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The one-shot provisioning path survives: with no PITR keys in the env
+    the activation writes the desired set and advances to wal_restart_pending."""
+    called: list[str] = []
+
+    def enable(digest: str) -> bytes:
+        called.append(digest)
+        return b"a"
+
+    monkeypatch.setattr(activation_config, "_enable_pitr_services", enable)
+    record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
+    replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
+    assert called == [hashlib.sha256(b"OTHER=kept\n").hexdigest()]
+    assert replacement.phase == "wal_restart_pending"
+    assert replacement.config_apply_applied == {
+        "kind": "env",
+        "digest": hashlib.sha256(b"a").hexdigest(),
+    }
 
 
 def test_rollback_effect_accepts_only_exact_pre_or_owned_postimage() -> None:

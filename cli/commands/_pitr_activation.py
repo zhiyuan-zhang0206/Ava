@@ -36,8 +36,6 @@ from services.pitr.activation_runtime import (
     _archive_settings,
     _desired_archive_settings,
     _file_evidence,
-    _pitr_env_baseline,
-    _restore_pitr_env,
     _settings_digest,
     _shadow_pg_gate,
     capture_pitr_env_baseline,
@@ -538,18 +536,6 @@ def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
                 current
             ) != _archive_settings(expected):
                 return record
-            config = settings.physical_backup
-            if any(
-                (
-                    config.pitr_enabled,
-                    config.pitr_base_backup_enabled,
-                    config.pitr_restore_proof_enabled,
-                    config.pitr_retention_planner_enabled,
-                )
-            ):
-                raise RuntimeError("PITR runtime gates remain enabled after rollback restart")
-            if _pitr_env_baseline() != record.pre_activation_pitr_env:
-                raise RuntimeError("PITR environment differs from rollback baseline")
             if _pg_auto_conf_baseline(home, current) != record.pre_activation_pg_auto_conf:
                 raise RuntimeError("PostgreSQL ALTER SYSTEM ownership differs after rollback")
             return _persist_transition(home, record, "rolled_back", error=None)
@@ -579,25 +565,18 @@ def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
                 rollback_postmaster_started_at=current["postmaster_started_at"],
                 error=None,
             )
+        # The PITR gate keys are config-owned (settable through the settings
+        # path since the 2026-08-31 rollback rework), so rollback never
+        # reverts them: undoing the activation leaves the operator's
+        # enablement exactly as configured. The captured env evidence stays
+        # in the record for audit, but only the PostgreSQL auto-conf bytes
+        # are restored here.
         if None in {
-            record.pre_activation_env_b64,
-            record.pre_activation_env_digest,
             record.pre_activation_auto_conf_b64,
             record.pre_activation_auto_conf_digest,
-            record.rollback_expected_env_digest,
             record.rollback_expected_auto_conf_digest,
         }:
             raise RuntimeError("rollback has no exact config byte ownership evidence")
-        current_env_digest = hashlib.sha256((home / ".env").read_bytes()).hexdigest()
-        env_changed = rollback_effect_state(
-            current=current_env_digest,
-            before=str(record.pre_activation_env_digest),
-            owned=str(record.rollback_expected_env_digest),
-        )
-        if env_changed:
-            if record.pre_activation_pitr_env is None:
-                raise RuntimeError("rollback lacks PITR environment key baseline")
-            _restore_pitr_env(record.pre_activation_pitr_env)
         current_auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
         try:
             rollback_effect_state(

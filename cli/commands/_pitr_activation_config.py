@@ -15,6 +15,7 @@ from services.pitr.activation_runtime import (
     _enable_pitr_services,
     _file_evidence,
     _settings_digest,
+    pitr_env_absent,
     pitr_env_is_desired,
 )
 from services.pitr.activation_state import ActivationRecord, write_record_cas
@@ -204,27 +205,32 @@ def apply_wal_config(
     payload = _env_payload(home)
     expected = hashlib.sha256(payload).hexdigest()
     intent = record.config_apply_intent
-    if intent is None:
-        record = _journal(
-            home,
-            record,
-            config_apply_intent={
-                "kind": "env",
-                "expected_digest": expected,
-                "desired_digest": _settings_digest(
-                    {
-                        "pitr_enabled": "true",
-                        "pitr_base_backup_enabled": "true",
-                        "pitr_restore_proof_enabled": "true",
-                        "pitr_retention_planner_enabled": "false",
-                    }
-                ),
-            },
-        )
-        intent = record.config_apply_intent
     if pitr_env_is_desired(payload):
         owned = payload
-    else:
+    elif pitr_env_absent(payload):
+        # Provisioning path: the env carries none of the four PITR gate keys
+        # yet, so the activation writes the desired set (journaled first for
+        # crash-resume). Present-but-different keys never reach this branch —
+        # they are config-owned (settings path) and get refused below instead
+        # of being clobbered.
+        if intent is None:
+            record = _journal(
+                home,
+                record,
+                config_apply_intent={
+                    "kind": "env",
+                    "expected_digest": expected,
+                    "desired_digest": _settings_digest(
+                        {
+                            "pitr_enabled": "true",
+                            "pitr_base_backup_enabled": "true",
+                            "pitr_restore_proof_enabled": "true",
+                            "pitr_retention_planner_enabled": "false",
+                        }
+                    ),
+                },
+            )
+            intent = record.config_apply_intent
         if (
             intent is None
             or intent.get("kind") != "env"
@@ -232,6 +238,13 @@ def apply_wal_config(
         ):
             raise RuntimeError(".env differs from durable PITR apply intent")
         owned = _enable_pitr_services(expected)
+    else:
+        raise RuntimeError(
+            "PITR environment keys are config-owned; align them with "
+            "`ava config set` (the activation requires AVA_PITR_ENABLED=true, "
+            "AVA_PITR_BASE_BACKUP_ENABLED=true, AVA_PITR_RESTORE_PROOF_ENABLED=true, "
+            "AVA_PITR_RETENTION_PLANNER_ENABLED=false) and re-run"
+        )
     env_digest = hashlib.sha256(owned).hexdigest()
     record = _journal(
         home,
