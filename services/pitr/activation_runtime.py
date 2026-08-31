@@ -259,8 +259,8 @@ def pitr_admin_url() -> str:
     the mutation means the probe can never certify a different connection
     than the switch runs on.
     """
-    from cli.commands._cluster_instance import pg_admin_url
     from shared.cluster import get_record, record_postgres_port
+    from shared.pg_admin import pg_admin_url
 
     record = get_record(ava_home())
     if record is None:
