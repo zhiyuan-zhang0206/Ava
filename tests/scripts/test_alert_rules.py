@@ -70,6 +70,9 @@ _EXPECTED_UIDS = {
     "ava-ops-otelcol-queue-pressure",
     "ava-ops-otelcol-enqueue-failures",
     "ava-ops-otelcol-host-silent",
+    # memory-search growth layer (task #2088/#2090) — OTLP gauge mirror
+    "ava-ops-memory-search-rows-warning",
+    "ava-ops-memory-search-rows-critical",
 }
 
 # The infra rules and the metric each one is built on. A rename on the
@@ -93,7 +96,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [17, 7]
+    assert [len(group["rules"]) for group in groups] == [19, 7]
     return groups
 
 
@@ -583,3 +586,34 @@ def test_turn_duration_rule_uses_prometheus_histogram() -> None:
     assert rule["for"] == "10m"
     assert rule["labels"]["notify_im"] == "false"
     assert rule["labels"]["severity"] == "warning"
+
+
+def test_memory_search_rows_rules() -> None:
+    """Row-growth tiers (task #2088/#2090): the store's absolute row-count
+    gauge warns at the 30k soft threshold and fires critical at the 100k
+    hard cap; the 50k mark is the backend-switch evaluation point (on the
+    dashboard, not an alert)."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    expectations: dict[str, tuple[str, int]] = {
+        "ava-ops-memory-search-rows-warning": ("warning", 30000),
+        "ava-ops-memory-search-rows-critical": ("critical", 100000),
+    }
+    for uid, (severity, threshold) in expectations.items():
+        rule = rules[uid]
+        exprs = _exprs(rule, "prometheus")
+        assert exprs == [f"max(ava_memory_search_stats_rows_ratio) > {threshold}"]
+        assert _exprs(rule, "loki") == []
+        assert rule["for"] == "2h"
+        assert rule["noDataState"] == "OK"
+        assert rule["execErrState"] == "OK"
+        assert _threshold_params(rule) == [[threshold]]
+        assert rule["labels"] == {
+            "severity": severity,
+            "ruleUID": uid,
+            "metric": "memory_search_rows",
+            "team": "ava-ops",
+        }
+        description = rule["annotations"]["description"]
+        assert "100k" in description
+        if uid == "ava-ops-memory-search-rows-warning":
+            assert "50k" in description

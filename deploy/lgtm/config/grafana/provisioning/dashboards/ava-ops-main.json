@@ -4714,12 +4714,152 @@
    }
   },
   {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Memory-search store row count (absolute state, 60s sample) into the ava_memory_search_stats_rows_ratio gauge (task #2088); thresholds: 30k soft warning / 50k backend-switch evaluation / 100k hard cap.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "blue"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 30000
+       },
+       {
+        "color": "orange",
+        "value": 50000
+       },
+       {
+        "color": "red",
+        "value": 100000
+       }
+      ]
+     },
+     "unit": "short",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never"
+     }
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 245
+   },
+   "id": 2303,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Memory search rows",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max(ava_memory_search_stats_rows_ratio)",
+     "legendFormat": "rows",
+     "queryType": "range",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Duration of the most recent npz save (ava_memory_search_stats_last_save_seconds, task #2088); absent until the first save after boot \u2014 a climbing value flags a slow save path.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "purple"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "s",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never"
+     }
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 245
+   },
+   "id": 2304,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Memory search npz save duration",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max(ava_memory_search_stats_last_save_seconds)",
+     "legendFormat": "last_save",
+     "queryType": "range",
+     "refId": "A"
+    }
+   ]
+  },
+  {
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 245
+    "y": 252
    },
    "id": 2007,
    "panels": [],
@@ -4755,7 +4895,7 @@
     "h": 4,
     "w": 8,
     "x": 0,
-    "y": 246
+    "y": 253
    },
    "id": 38,
    "options": {
@@ -4817,7 +4957,7 @@
     "h": 4,
     "w": 16,
     "x": 8,
-    "y": 246
+    "y": 253
    },
    "id": 39,
    "options": {
@@ -4872,7 +5012,7 @@
     "h": 7,
     "w": 24,
     "x": 0,
-    "y": 250
+    "y": 257
    },
    "id": 41,
    "options": {
@@ -4928,7 +5068,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 257
+    "y": 264
    },
    "id": 42,
    "options": {
@@ -4977,7 +5117,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 257
+    "y": 264
    },
    "id": 43,
    "options": {
