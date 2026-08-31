@@ -246,6 +246,9 @@ def serve(
     """Start an HTTP server for `dir` and show it to the user, in one call.
 
     Calling again auto-closes any existing page.
+    A directory without `index.html` is not browsable: requests show a
+    placeholder because directory listings are disabled. Use
+    `ava.ui.serve_markdown()` for Markdown or include an `index.html`.
 
     Args:
         dir: the directory to serve. A relative path is resolved against
