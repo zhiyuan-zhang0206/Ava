@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import HumanMessage
 
+import ava
 from agent.graph._exec_protocol import (
     make_request_path,
     make_result_path,
@@ -101,6 +102,103 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert payload.state_update is None
     assert payload.findings == []
     assert payload.attachments == []
+
+
+def test_child_builtin_help_routes_only_ava_targets(tmp_path: Path) -> None:
+    code = """
+import contextlib
+import builtins
+import io
+import json
+import os
+import sys
+
+import ava
+
+
+def capture(call, stdin_text=None):
+    output = io.StringIO()
+    original_stdin = sys.stdin
+    if stdin_text is not None:
+        sys.stdin = io.StringIO(stdin_text)
+    try:
+        with contextlib.redirect_stdout(output):
+            call()
+    except BaseException as exc:
+        return {"error": f"{type(exc).__name__}: {exc}", "output": output.getvalue()}
+    finally:
+        sys.stdin = original_stdin
+    return {"error": None, "output": output.getvalue()}
+
+
+outputs = {
+    "shim_is_global_builtin": help is builtins.help,
+    "global_builtin_type": f"{type(builtins.help).__module__}.{type(builtins.help).__name__}",
+    "ava_files": capture(lambda: help(ava.files)),
+    "agent_status": capture(lambda: help(ava.agents.AgentStatus)),
+    "str": capture(lambda: help("str")),
+    "os_path": capture(lambda: help(os.path)),
+    "no_args": capture(lambda: help(), "quit\\n"),
+    "keyword": capture(lambda: help(request=ava.files)),
+    "mixed": capture(lambda: help(ava.files, os.path)),
+    "two_ava": capture(lambda: help(ava.files, ava.agents.AgentStatus)),
+    "expected_ava_files": capture(lambda: ava.help(ava.files)),
+    "expected_agent_status": capture(lambda: ava.help(ava.agents.AgentStatus)),
+    "expected_str": capture(lambda: builtins.help("str")),
+    "expected_os_path": capture(lambda: builtins.help(os.path)),
+    "expected_no_args": capture(lambda: builtins.help(), "quit\\n"),
+    "expected_keyword": capture(lambda: builtins.help(request=ava.files)),
+    "expected_two_ava": capture(lambda: ava.help(ava.files, ava.agents.AgentStatus)),
+}
+print("__HELP_OUTPUTS__" + json.dumps(outputs, sort_keys=True))
+"""
+    proc, _request, result = _spawn(tmp_path, code)
+
+    assert proc.returncode == 0, proc.stderr
+    payload = read_result(result)
+    assert payload.kind == "done", payload
+    output_line = next(
+        line for line in proc.stdout.splitlines() if line.startswith("__HELP_OUTPUTS__")
+    )
+    outputs = json.loads(output_line.removeprefix("__HELP_OUTPUTS__"))
+
+    assert outputs["shim_is_global_builtin"] is False
+    assert outputs["global_builtin_type"] == "_sitebuiltins._Helper"
+    assert outputs["ava_files"] == outputs["expected_ava_files"]
+    assert outputs["agent_status"] == outputs["expected_agent_status"]
+    assert outputs["str"] == outputs["expected_str"]
+    assert outputs["os_path"] == outputs["expected_os_path"]
+    assert outputs["no_args"] == outputs["expected_no_args"]
+    assert "Welcome to Python" in outputs["no_args"]["output"]
+    assert outputs["keyword"] == outputs["expected_keyword"]
+    assert outputs["mixed"] == {
+        "error": None,
+        "output": f"{outputs['expected_ava_files']['output']}\n"
+        f"{outputs['expected_os_path']['output']}",
+    }
+    assert outputs["two_ava"] == outputs["expected_two_ava"]
+
+
+def test_help_is_ava_target_accepts_only_agent_visible_sdk_objects() -> None:
+    from ava._exports.help import is_ava_target
+    from ava.skills import _NS, _Namespace
+
+    def foreign_function() -> None:
+        return None
+
+    foreign_function.__module__ = "__main__"
+    skill_namespace = _Namespace("example", _NS())
+
+    assert is_ava_target(ava)
+    assert is_ava_target(ava.files)
+    assert is_ava_target(ava.files.read)
+    assert is_ava_target(ava.agents.AgentStatus)
+    assert is_ava_target(skill_namespace)
+    assert not is_ava_target(str)
+    assert not is_ava_target(int)
+    assert not is_ava_target(os.path)
+    assert not is_ava_target(object())
+    assert not is_ava_target(foreign_function)
 
 
 def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> None:

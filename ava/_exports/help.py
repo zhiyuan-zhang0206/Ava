@@ -1,11 +1,12 @@
-"""The `ava.help()` renderer — stub-format docs for SDK targets.
+"""The `ava.help()` renderer and exec-sandbox builtin help routing.
 
 `help()` plus the whole render pipeline (target dispatch, stub formatters,
-signature/docstring cleaning), split out of `ava/__init__.py`. The package
-entry re-exports `help` and the `_format_*` helpers tests reach directly, so
-`import ava; ava.help(...)` is unchanged. Children discovery lives in
-`ava/_exports/discovery.py`; this module imports it (one-way — discovery
-never imports help).
+signature/docstring cleaning), plus the predicate and callable shim that route
+builtin `help(ava.*)` calls through that renderer. The package entry re-exports
+`help` and the `_format_*` helpers tests reach directly, so `import ava;
+ava.help(...)` is unchanged. Children discovery lives in
+`ava/_exports/discovery.py`; this module imports it (one-way — discovery never
+imports help).
 """
 
 import contextvars
@@ -40,6 +41,48 @@ def help(*targets: Any) -> None:
         if i > 0:
             print()
         _print_target(target)
+
+
+def is_ava_target(obj: Any) -> bool:
+    """True for an Ava module or agent-visible Ava routine/class binding.
+
+    The module-name fast path treats an object's `__module__` value as a trusted
+    identity boundary when it is `ava` or begins with `ava.`.
+    """
+    import ava as _ava
+
+    if obj is _ava:
+        return True
+    if inspect.ismodule(obj):
+        return _is_ava_module_name(getattr(obj, "__name__", None))
+    if not (inspect.isroutine(obj) or inspect.isclass(obj)):
+        return False
+    if _is_ava_module_name(getattr(obj, "__module__", None)):
+        return True
+    return _search_ava_for_binding(obj) is not None
+
+
+def _is_ava_module_name(name: Any) -> bool:
+    return isinstance(name, str) and (name == "ava" or name.startswith("ava."))
+
+
+class HelpRouter:
+    """Route Ava targets to curated SDK help without changing builtin help."""
+
+    def __init__(self, original_help: Callable[..., Any]) -> None:
+        self._original_help = original_help
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        if not args or kwds:
+            return self._original_help(*args, **kwds)
+        for index, target in enumerate(args):
+            if index:
+                print()
+            if is_ava_target(target):
+                help(target)
+            else:
+                self._original_help(target)
+        return None
 
 
 # ── Target dispatch ─────────────────────────────────────────────────────────
@@ -133,14 +176,14 @@ def _element_fqn(target: Any) -> str:
     fn_name = getattr(target, "__name__", "?")
     if mod_name == "ava" or mod_name.startswith("ava."):
         return f"{mod_name}.{fn_name}"
-    found = _search_ava_for_function_binding(target)
+    found = _search_ava_for_binding(target)
     if found is not None:
         return found
     return f"{mod_name}.{fn_name}" if mod_name else fn_name
 
 
-def _search_ava_for_function_binding(target: Any) -> str | None:
-    """Search `ava.*` submodules for an attribute that IS `target`.
+def _search_ava_for_binding(target: Any) -> str | None:
+    """Search agent-visible `ava.*` namespaces for a binding that IS `target`.
 
     Returns the `ava.<sub>.<attr>` form; submodule prefix prefers the
     submodule's `_qualname` (plugin namespaces register that) so the heading
@@ -152,21 +195,22 @@ def _search_ava_for_function_binding(target: Any) -> str | None:
         mod = getattr(_ava, mod_name, None)
         if not _is_namespace(mod):
             continue
-        binding = _find_binding_in_namespace(mod, mod_name, target)
+        binding = _find_agent_visible_binding(mod, mod_name, target)
         if binding is not None:
             return binding
     return None
 
 
-def _find_binding_in_namespace(mod: Any, mod_name: str, target: Any) -> str | None:
-    """Search one namespace's members for an attribute that IS `target`.
+def _find_agent_visible_binding(mod: Any, mod_name: str, target: Any) -> str | None:
+    """Search one namespace's agent-visible bindings for `target` identity.
 
     The submodule prefix prefers the namespace's `_qualname` (plugin
     namespaces register that) so the heading reflects the agent-facing name
     rather than the internal module path."""
     members = vars(mod) if isinstance(mod, SimpleNamespace) else mod.__dict__
-    for attr_name, attr_value in members.items():
-        if attr_value is target:
+    for attr_name in agent_visible_names(mod):
+        attr_value = members.get(attr_name)
+        if attr_value is target and (inspect.isroutine(attr_value) or inspect.isclass(attr_value)):
             prefix = getattr(mod, "_qualname", f"ava.{mod_name}")
             return f"{prefix}.{attr_name}"
     return None
@@ -341,7 +385,7 @@ _COMPACT_CLASSES: contextvars.ContextVar[bool] = contextvars.ContextVar(
 )
 
 
-def _format_class_stub(name: str, cls: type) -> str:
+def _format_class_stub(name: str, cls: type[Any]) -> str:
     # Class child: `class name(Bases):` + indented docstring + indented members
     # (fields as `name: type`, methods as `def name(sig): doc`), the same
     # expansion functions get. Bases are shown (minus object) so an exception's

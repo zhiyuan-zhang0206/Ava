@@ -248,14 +248,24 @@ def _run_code(code: str, payload: ResultPayload) -> None:
         format_full_traceback,
         register_agent_source,
     )
+    from ava._exports.help import HelpRouter
     from shared import sdk_telemetry
 
     # Register the source so `<agent_code>` frames resolve their offending
     # line in tracebacks (exec'd code is invisible to linecache).
     register_agent_source(code)
+    builtins_source = (
+        cast(dict[str, Any], __builtins__)
+        if isinstance(__builtins__, dict)
+        else cast(dict[str, Any], vars(__builtins__))
+    )
+    # The module is process-global; only this exec's copied binding may change.
+    builtins_map = dict(builtins_source)
+    original_help = builtins_map["help"]
+    builtins_map["help"] = HelpRouter(original_help)
     fresh_globals: dict[str, Any] = {
         "__name__": "__agent_code__",
-        "__builtins__": __builtins__,
+        "__builtins__": builtins_map,
     }
     try:
         # `recording()` arms SDK-usage metering for exactly this agent-authored
