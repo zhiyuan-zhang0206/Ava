@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -244,6 +245,18 @@ def test_editable_install_violations_healthy_is_empty(tmp_path: Path) -> None:
     assert editable_install.editable_install_violations(source_root) == ()
 
 
+def test_editable_install_violations_accepts_repeated_checkout_pth_entries(
+    tmp_path: Path,
+) -> None:
+    """Repeated equivalent .pth entries are harmless, unlike a foreign entry."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    pth = _write_pth(source_root, source_root)
+    pth.write_text(f"{source_root}\n{source_root}")
+
+    assert editable_install.editable_install_violations(source_root) == ()
+
+
 def test_editable_install_violations_missing_records_are_empty(tmp_path: Path) -> None:
     """A venv with no editable records has nothing to assert (repair: no-op)."""
     source_root = tmp_path / "prod" / "source"
@@ -293,3 +306,126 @@ def test_editable_install_violations_unparsable_record_is_reported(
     violations = editable_install.editable_install_violations(source_root)
 
     assert len(violations) == 1 and str(record) in violations[0]
+
+
+def test_current_interpreter_source_root_reads_a_posix_venv_layout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The exec guard anchors itself to the interpreter's checkout, not cwd."""
+    source_root = tmp_path / "checkout"
+    interpreter = source_root / ".venv" / "bin" / "python"
+    monkeypatch.setattr(editable_install.sys, "executable", str(interpreter))
+
+    assert editable_install.current_interpreter_source_root() == source_root
+
+
+def test_current_interpreter_source_root_keeps_symlinked_venv_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Resolving the base interpreter must not discard its enclosing virtualenv."""
+    source_root = tmp_path / "checkout"
+    base_python = tmp_path / "base" / "python"
+    base_python.parent.mkdir(parents=True)
+    base_python.write_text("")
+    interpreter = source_root / ".venv" / "bin" / "python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.symlink_to(base_python)
+    monkeypatch.setattr(editable_install.sys, "executable", str(interpreter))
+
+    assert editable_install.current_interpreter_source_root() == source_root
+
+
+def test_guard_editable_install_repairs_all_records_and_emits_exec_event(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """One exec-boundary guard reports then repairs the complete poisoned install."""
+    source_root = tmp_path / "prod" / "source"
+    deleted_worktree = tmp_path / "deleted-worktree"
+    pth = _write_pth(source_root, deleted_worktree)
+    direct_url = _write_direct_url(source_root, deleted_worktree.as_uri())
+    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def record_emit(*args: object, **kwargs: object) -> None:
+        emitted.append((args, kwargs))
+
+    monkeypatch.setattr("shared.telemetry.emit", record_emit)
+
+    violations = editable_install.guard_editable_install(source_root)
+
+    assert len(violations) == 2
+    assert pth.read_text() == str(source_root)
+    assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
+    assert emitted[0] == (
+        ("telemetry", "exec_editable_install_poisoned"),
+        {
+            "level": "warning",
+            "source": "exec_guard",
+            "attributes": {
+                "violations": list(violations),
+                "source_root": str(source_root),
+                "python": str(editable_install.sys.executable),
+            },
+        },
+    )
+
+
+def test_guard_editable_install_leaves_healthy_records_byte_identical(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A clean per-exec check has no repair side effect or telemetry noise."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    pth = _write_pth(source_root, source_root)
+    direct_url = _write_direct_url(source_root, source_root.as_uri())
+    before = {pth: pth.read_bytes(), direct_url: direct_url.read_bytes()}
+    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def record_emit(*args: object, **kwargs: object) -> None:
+        emitted.append((args, kwargs))
+
+    monkeypatch.setattr("shared.telemetry.emit", record_emit)
+
+    assert editable_install.guard_editable_install(source_root) == ()
+    assert {path: path.read_bytes() for path in before} == before
+    assert emitted == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
+def test_editable_site_packages_write_window_opens_then_restores_directory(
+    tmp_path: Path,
+) -> None:
+    """Directory protection blocks uv's atomic replacement except in its narrow window."""
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    site_packages = pth.parent
+    site_packages.chmod(0o555)
+    replacement = tmp_path / "replacement.pth"
+    replacement.write_text("replacement")
+
+    with pytest.raises(PermissionError):
+        replacement.replace(pth)
+
+    with editable_install.editable_site_packages_write_window(source_root):
+        assert stat.S_IMODE(site_packages.stat().st_mode) == 0o755
+        replacement.replace(pth)
+
+    assert pth.read_text() == "replacement"
+    assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
+def test_repair_editable_install_opens_protected_site_packages_directory(
+    tmp_path: Path,
+) -> None:
+    """Converge repair remains able to fix records after directory hardening."""
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, tmp_path / "deleted-worktree")
+    direct_url = _write_direct_url(source_root, (tmp_path / "deleted-worktree").as_uri())
+    site_packages = pth.parent
+    site_packages.chmod(0o555)
+
+    editable_install.repair_editable_install(source_root)
+
+    assert pth.read_text() == str(source_root)
+    assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
+    assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555

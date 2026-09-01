@@ -132,6 +132,22 @@ def _ensure_prod_editable_pth(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         )
 
 
+def _ensure_prod_editable_dir_protection(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Block atomic editable-record replacement outside the sanctioned write window."""
+    if os.name == "nt":
+        return
+    import shared.cluster_drift
+    import shared.editable_install
+
+    source_root = shared.cluster_drift.prod_source_dir()
+    if source_root is None:
+        return
+    for directory in shared.editable_install.editable_site_packages_dirs(source_root):
+        if directory.stat().st_mode & 0o777 == 0o555:
+            continue
+        directory.chmod(0o555)
+
+
 def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Fetch the vendored relocatable Postgres + inject the pinned pgvector
     extension files (both idempotent — no-ops once the host-level
@@ -503,6 +519,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # rest of converge runs against the installed commit.
     ConvergeStep("source tree reset + clean", ensure_source_tree_integrity, host_global=True),
     ConvergeStep("prod editable .pth target", _ensure_prod_editable_pth, host_global=True),
+    ConvergeStep(
+        "prod editable site-packages protection",
+        _ensure_prod_editable_dir_protection,
+        host_global=True,
+    ),
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
