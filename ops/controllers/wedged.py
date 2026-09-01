@@ -95,7 +95,10 @@ def _claim_wedged_candidates(
 
     Selects ``running``/``idling`` rows on this host with a recorded pid, holding an
     unconsumed ``pending`` inbound older than its status-specific threshold,
-    and either never checked or past the per-agent backoff. The UPDATE's RETURNING is the atomic claim —
+    and either never checked or past the per-agent backoff. The idling branch
+    additionally requires the row to have remained idling for that short
+    threshold: a healthy long turn can leave an already-old inbound pending in
+    the small running→idling→first-claim window. The UPDATE's RETURNING is the atomic claim —
     the caller processes every returned row through the OWNED/FOREIGN/GONE/
     UNREADABLE identity matrix under the agent row lock. Each wedged recovery
     inserts its own ``kind='resurrect'`` inbound, so the shared unconsumed-attempt
@@ -119,6 +122,9 @@ def _claim_wedged_candidates(
             "    AND im.created_at < now() - make_interval(secs => CASE "
             "        WHEN agents_meta.status = 'idling' THEN %s ELSE %s END)"
             ") "
+            "AND (agents_meta.status = 'running' "
+            "     OR agents_meta.status_changed_at "
+            "        < now() - make_interval(secs => %s)) "
             "RETURNING id, pid, last_wedged_check_at",
             (
                 local_machine,
@@ -126,6 +132,7 @@ def _claim_wedged_candidates(
                 settings.daemon.auto_resurrect_max_attempts,
                 idling_age_s,
                 running_age_s,
+                idling_age_s,
             ),
         )
         return [(r[0], r[1], r[2]) for r in cur.fetchall()]
@@ -215,6 +222,146 @@ def _reap_terminated_lease_zombie(pool: ConnectionPool, agent_id: int, pid: int)
         return False
 
 
+def _recover_wedged_candidate(
+    pool: ConnectionPool,
+    agent_id: int,
+    pid: int,
+    claimed_at: datetime,
+    running_age_s: float,
+    idling_age_s: float,
+) -> bool:
+    """Identity-check, reap, then resurrect one non-terminal wedge candidate.
+
+    A pending terminate changes the last step: it is a durable user lifecycle
+    intent, so the process projection is cleared and the row stays terminated
+    rather than being resurrected to process unrelated backlog.
+    """
+    first_identity = probe_agent_process(pid, agent_id)
+    if first_identity is AgentProcessIdentity.UNREADABLE:
+        # No evidence licenses either a signal or a duplicate launch. Leave the
+        # claimed row for a later scan; the detail count must not call this a
+        # recovered agent.
+        _log.info(
+            "[ops.wedged] agent %s pid %s identity unreadable; deferring",
+            agent_id,
+            pid,
+        )
+        return False
+
+    _log.warning(
+        "[ops.wedged] agent %s (recorded pid %s) has stale pending "
+        "inbound beyond its status-aware threshold (running %.0fs, idling %.0fs) "
+        "— reconciling process identity",
+        agent_id,
+        pid,
+        running_age_s,
+        idling_age_s,
+    )
+
+    try:
+        transition_row = None
+        page_names: list[str] = []
+        pending_terminate = False
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, pid, lease_expires_at > now() "
+                "FROM agents_meta WHERE id = %s FOR UPDATE",
+                (agent_id,),
+            )
+            locked_row = cur.fetchone()
+            locked_identity = probe_agent_process(pid, agent_id)
+            if (
+                locked_row is not None
+                and locked_row[0] in ("running", "idling")
+                and locked_row[1] == pid
+                and locked_row[2] is True
+                and locked_identity is not AgentProcessIdentity.UNREADABLE
+            ):
+                cur.execute(
+                    "SELECT EXISTS("
+                    "  SELECT 1 FROM inbound_messages "
+                    "  WHERE agent_id = %s AND status = 'pending' AND kind = 'terminate'"
+                    ")",
+                    (agent_id,),
+                )
+                pending_terminate_row = cur.fetchone()
+                pending_terminate = (
+                    False if pending_terminate_row is None else bool(pending_terminate_row[0])
+                )
+                # Capture cascade-closable show() pages only after the row lock
+                # proves this is still the claimed live incarnation.
+                page_names = list_open_page_names(conn, agent_id)
+                if pending_terminate:
+                    cur.execute(
+                        "UPDATE agents_meta SET status = 'terminated', "
+                        "termination_source = 'reaper', pid = NULL, "
+                        "lease_expires_at = NULL "
+                        "WHERE id = %s AND status IN ('running', 'idling') "
+                        "AND pid = %s AND lease_expires_at > now() "
+                        "RETURNING status_changed_at",
+                        (agent_id, pid),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE agents_meta SET status = 'terminated', "
+                        "termination_source = 'reaper' "
+                        "WHERE id = %s AND status IN ('running', 'idling') "
+                        "AND pid = %s AND lease_expires_at > now() "
+                        "RETURNING status_changed_at",
+                        (agent_id, pid),
+                    )
+                transition_row = cur.fetchone()
+                if transition_row is not None and locked_identity is AgentProcessIdentity.OWNED:
+                    # Keep the row lock through the identity-verified kill. A
+                    # concurrent user force waits, then writes its newer
+                    # fence/source after this transaction.
+                    force_kill(pid)
+        if transition_row is None:
+            _log.info(
+                "[ops.wedged] agent %s changed before recovery transition; skipping",
+                agent_id,
+            )
+            return False
+        for page_name in page_names:
+            publish_page_closed_sync(agent_id, page_name)
+
+        if pending_terminate:
+            _log.info(
+                "[ops.wedged] agent %s reaped for its pending terminate inbound",
+                agent_id,
+            )
+            return True
+
+        # Resurrect: pass a prompt so the agent knows why it was woken.
+        resurrect_agent(
+            agent_id,
+            resurrected_by="system",
+            prompt=(
+                "You were restarted by the wedged-agent detector after an "
+                "unconsumed pending inbound stopped making progress. "
+                "Continue from where you left off."
+            ),
+            auto_claim=AutoResurrectClaim(
+                agent_id=agent_id,
+                termination_source=TerminationSource.REAPER,
+                termination_epoch=transition_row[0],
+                claim_kind="wedged",
+                claimed_at=claimed_at,
+            ),
+        )
+        _log.info(
+            "[ops.wedged] agent %s recovered from process identity %s; resurrected",
+            agent_id,
+            locked_identity.value,
+        )
+        return True
+    except (ResurrectAlreadyAlive, ResurrectClaimStaleError):
+        _log.info("[ops.wedged] agent %s already alive — race with another recovery", agent_id)
+    except Exception:
+        _log.exception("[ops.wedged] failed to recover agent %s", agent_id)
+    return False
+
+
 class WedgedAgentController:
     """Detect and recover live-but-stuck agents on this host."""
 
@@ -250,112 +397,27 @@ class WedgedAgentController:
                 self._pool, local_machine, running_age_s, idling_age_s, _BACKOFF_S
             )
 
-        acted = False
+        recovered_count = 0
         for agent_id, pid, claimed_at in candidates:
-            first_identity = probe_agent_process(pid, agent_id)
-            if first_identity is AgentProcessIdentity.UNREADABLE:
-                # No evidence licenses either a signal or a duplicate launch.
-                # Leave the row for a later scan.
-                _log.info(
-                    "[ops.wedged] agent %s pid %s identity unreadable; deferring",
-                    agent_id,
-                    pid,
-                )
-                continue
-
-            _log.warning(
-                "[ops.wedged] agent %s (recorded pid %s) has stale pending "
-                "inbound beyond its status-aware threshold (running %.0fs, idling %.0fs) "
-                "— reconciling process identity",
+            if _recover_wedged_candidate(
+                self._pool,
                 agent_id,
                 pid,
+                claimed_at,
                 running_age_s,
                 idling_age_s,
-            )
-
-            try:
-                transition_row = None
-                page_names: list[str] = []
-                with self._pool.connection() as conn, conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT status, pid, lease_expires_at > now() "
-                        "FROM agents_meta WHERE id = %s FOR UPDATE",
-                        (agent_id,),
-                    )
-                    locked_row = cur.fetchone()
-                    locked_identity = probe_agent_process(pid, agent_id)
-                    if (
-                        locked_row is not None
-                        and locked_row[0] in ("running", "idling")
-                        and locked_row[1] == pid
-                        and locked_row[2] is True
-                        and locked_identity is not AgentProcessIdentity.UNREADABLE
-                    ):
-                        # Capture cascade-closable show() pages only after the
-                        # row lock proves this is still the claimed live incarnation.
-                        page_names = list_open_page_names(conn, agent_id)
-                        cur.execute(
-                            "UPDATE agents_meta SET status = 'terminated', "
-                            "termination_source = 'reaper' "
-                            "WHERE id = %s AND status IN ('running', 'idling') "
-                            "AND pid = %s AND lease_expires_at > now() "
-                            "RETURNING status_changed_at",
-                            (agent_id, pid),
-                        )
-                        transition_row = cur.fetchone()
-                        if (
-                            transition_row is not None
-                            and locked_identity is AgentProcessIdentity.OWNED
-                        ):
-                            # Keep the row lock through the identity-verified
-                            # kill. A concurrent user force waits, then writes
-                            # its newer fence/source after this transaction.
-                            force_kill(pid)
-                if transition_row is None:
-                    _log.info(
-                        "[ops.wedged] agent %s changed before recovery transition; skipping",
-                        agent_id,
-                    )
-                    continue
-                for page_name in page_names:
-                    publish_page_closed_sync(agent_id, page_name)
-
-                # Resurrect: pass a prompt so the agent knows why it was woken.
-                resurrect_agent(
-                    agent_id,
-                    resurrected_by="system",
-                    prompt=(
-                        "You were restarted by the wedged-agent detector after an "
-                        "unconsumed pending inbound stopped making progress. "
-                        "Continue from where you left off."
-                    ),
-                    auto_claim=AutoResurrectClaim(
-                        agent_id=agent_id,
-                        termination_source=TerminationSource.REAPER,
-                        termination_epoch=transition_row[0],
-                        claim_kind="wedged",
-                        claimed_at=claimed_at,
-                    ),
-                )
-                acted = True
-                _log.info(
-                    "[ops.wedged] agent %s recovered from process identity %s; resurrected",
-                    agent_id,
-                    locked_identity.value,
-                )
-            except (ResurrectAlreadyAlive, ResurrectClaimStaleError):
-                _log.info(
-                    "[ops.wedged] agent %s already alive — race with another recovery", agent_id
-                )
-            except Exception:
-                _log.exception("[ops.wedged] failed to recover agent %s", agent_id)
+            ):
+                recovered_count += 1
 
         zombie_candidates = _claim_terminated_lease_zombies(self._pool, local_machine, _BACKOFF_S)
         for agent_id, pid in zombie_candidates:
-            acted = _reap_terminated_lease_zombie(self._pool, agent_id, pid) or acted
+            if _reap_terminated_lease_zombie(self._pool, agent_id, pid):
+                recovered_count += 1
 
-        candidate_count = len(candidates) + len(zombie_candidates)
-        detail = f"recovered {candidate_count} agent(s)" if candidate_count else None
+        detail = f"recovered {recovered_count} agent(s)" if recovered_count else None
         return ReconcileResult(
-            dimension=self.name, blocks=BlockScope.NONE, acted=acted, detail=detail
+            dimension=self.name,
+            blocks=BlockScope.NONE,
+            acted=bool(recovered_count),
+            detail=detail,
         )
