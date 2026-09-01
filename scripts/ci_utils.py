@@ -29,10 +29,9 @@ Usage as CLI:
     least five minutes after a head update before queueing, and detects a
     dropped/rejected command with one automatic retry. Mergify then rebases
     onto latest main, re-runs CI, and rebase-merges once its conditions are
-    green. The all-green predicate excludes checks named "Mergify
-    Merge Queue" — that check reports queue state, not a CI result, and sits
-    pending forever after a dequeue, which used to deadlock this wait (issue
-    #98). This is the canonical CI watcher: launch it with
+    green. The all-green predicate excludes checks named "Mergify Merge Queue"
+    (queue state) and "qa-approved-gate" (QA gate; the queue itself enforces
+    the label at merge time). This is the canonical CI watcher: launch it with
     ava.shell.run_background, and the completion notice delivers the exit
     code + verdict to the agent automatically.
 """
@@ -223,6 +222,9 @@ class CIResult:
     # that sits pending forever after a dequeue can never block the all-green
     # wait. Kept here so `--merge` can inspect queue state separately.
     mergify_checks: list[dict] = field(default_factory=list)
+    # The qa-approved label gate is enforced by the queue at merge time, not by
+    # the CI verdict. Kept separately so it cannot enter the verdict buckets.
+    gate_checks: list[dict] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
     head_sha: str = ""
     error_detail: str = ""
@@ -264,6 +266,9 @@ def _repo_has_workflows() -> bool:
 
 
 MERGIFY_CHECK_PREFIX = "Mergify"
+# Must match the job name in .github/workflows/qa-approved-gate.yml — the check is
+# a QA label gate enforced by the queue at merge time, never part of the CI verdict.
+QA_APPROVED_GATE_CHECK_NAME = "qa-approved-gate"
 
 
 def _partition_checks(checks: list[dict], result: CIResult) -> None:
@@ -274,12 +279,9 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     so is a COMPLETED one whose conclusion is unrecognized — guessing there is
     how a false "all green" gets reported.
 
-    A check named "Mergify Merge Queue" reports queue state, not a CI result
-    (issue #98) — it sits pending indefinitely once a PR is dequeued (e.g. a
-    force-push knocks it out of the queue), which would otherwise deadlock
-    `--wait --merge` forever waiting for a check that only queuing itself can
-    turn green. Routed to `result.mergify_checks` instead, so it never enters
-    completed/pending/passed/failed/workflow_checks.
+    Mergify checks report queue state rather than CI results, while
+    `qa-approved-gate` is a QA gate enforced by the queue at merge time. Both
+    are routed to dedicated buckets so they never enter the verdict fields.
     """
     for c in checks:
         name = c.get("name", "?")
@@ -288,6 +290,9 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
 
         if name.startswith(MERGIFY_CHECK_PREFIX):
             result.mergify_checks.append(c)
+            continue
+        if name == QA_APPROVED_GATE_CHECK_NAME:
+            result.gate_checks.append(c)
             continue
 
         # A check produced by a workflow run carries the workflow's name; checks
@@ -464,6 +469,9 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
         result.checks = checks
         for c in checks:
             name = c.get("name", "?")
+            if name == QA_APPROVED_GATE_CHECK_NAME:
+                result.gate_checks.append(c)
+                continue
             status = c.get("status", "")
             if status == "COMPLETED":
                 result.completed.append(name)
@@ -527,6 +535,8 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
                     "passed": result.passed,
                     "failed": result.failed,
                     "workflow_checks": result.workflow_checks,
+                    "mergify_checks": result.mergify_checks,
+                    "gate_checks": result.gate_checks,
                     "error_detail": result.error_detail,
                     "terminal": result.verdict.is_terminal,
                 },
