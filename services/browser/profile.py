@@ -9,8 +9,8 @@ inherits every logged-in session and acts as the user without re-authenticating.
 
 Copying hands the agent the user's full logged-in identity (cookies, sessions,
 saved passwords, signed-in accounts), so it is a SECURITY decision. It is made
-only interactively and only when the dedicated profile does not yet exist — an
-already-populated profile is NEVER touched (constraint: prod carries a multi-GB
+only interactively and only when the dedicated profile does not yet exist — any
+existing profile directory is NEVER touched (constraint: prod carries a multi-GB
 logged-in profile that must survive every `ava start`).
 
 `ensure_browser_profile` is called from the converge `_ensure_browser` step,
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from pathlib import Path
 
 from shared.config import settings
@@ -118,18 +119,38 @@ def _running_chrome_pid(src: Path) -> int | None:
 
 def _copy_default_profile(src: Path, dst: Path) -> None:
     """Copy the daily Chrome user-data dir `src` into the agent profile `dst`,
-    excluding locks + caches. `dst` must be absent or empty (the caller guarantees
-    it is not an existing profile). On any failure the partial `dst` is removed so
-    a half-copied profile is never mistaken for a real one."""
+    excluding locks + caches. `dst` must be absent: any existing directory is an
+    immutable Chrome profile, including a partial first copy, so it is never
+    overwritten or cleared automatically."""
     if dst.exists():
-        shutil.rmtree(dst)
+        raise FileExistsError(f"refusing to overwrite existing Chrome profile: {dst}")
+    # symlinks=True copies links verbatim rather than following them, so a
+    # broken link in the source can't abort the whole copy. If this fails after
+    # creating `dst`, leave it intact rather than deleting potentially valuable
+    # profile material; a human can inspect or remove it explicitly.
+    shutil.copytree(src, dst, ignore=_ignore_junk, symlinks=True)
+
+
+def validate_local_state(profile: Path) -> str | None:
+    """Return a warning for unsafe-looking `Local State`, without reading it.
+
+    Chrome owns this file's encrypted metadata. Startup only validates its
+    existence, ordinary read permission, and mtime; it never parses,
+    copies, rewrites, or deletes it. A warning remains non-fatal because Chrome
+    is the only component that can authoritatively interpret its own state.
+    """
+    local_state = profile / "Local State"
     try:
-        # symlinks=True copies links verbatim rather than following them, so a
-        # broken link in the source can't abort the whole copy.
-        shutil.copytree(src, dst, ignore=_ignore_junk, symlinks=True)
-    except BaseException:
-        shutil.rmtree(dst, ignore_errors=True)
-        raise
+        metadata = local_state.stat()
+    except FileNotFoundError:
+        return f"Local State is missing at {local_state}"
+    except OSError as exc:
+        return f"Local State could not be inspected at {local_state}: {exc}"
+    if not metadata.st_mode & 0o444 or not os.access(local_state, os.R_OK):
+        return f"Local State is not readable at {local_state}"
+    if metadata.st_mtime > time.time() + 300:
+        return f"Local State mtime is unexpectedly in the future at {local_state}"
+    return None
 
 
 def _human_size(n_bytes: int) -> str:
@@ -168,12 +189,12 @@ def ensure_browser_profile(*, interactive: bool) -> None:
     """Offer, once, to seed the agent's dedicated Chrome profile from the daily one.
 
     No-ops (leaving the daemon to create a fresh empty profile) when the profile
-    already exists non-empty, when not interactive, or when this host has no daily
+    path already exists, when not interactive, or when this host has no daily
     Chrome profile to copy from. Otherwise prompts; on 'copy' it refuses while
     Chrome is still running (retry loop), reports the size, takes a final
     confirmation, then copies."""
     dst = profile_dir()
-    if profile_is_populated(dst):
+    if dst.exists():
         return  # never clobber an existing profile
     if not interactive:
         return  # non-interactive default = fresh empty profile

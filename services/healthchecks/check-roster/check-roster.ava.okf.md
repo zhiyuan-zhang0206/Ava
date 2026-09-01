@@ -14,7 +14,7 @@ tags:
 
 | Module | Service | Liveness Probe | Restart Method | What it certifies (how the probe traverses it) |
 |--------|---------|----------------|----------------|------------------------------------------------|
-| `browser.py` | Chrome | CDP `GET /json/version`, profile argv token, listener socket, and session liveness | `respawn_service` (our orphan is rebuilt; another unit's holder is skipped) | the supervised Chrome of this cluster serves CDP |
+| `browser.py` | Chrome | CDP `GET /json/version`, profile argv token, listener socket, session liveness, and macOS readiness wait marker | `respawn_service` (our orphan is rebuilt; another unit's holder is skipped; a live macOS readiness wait is preserved) | the supervised Chrome of this cluster serves CDP, or an explicit degraded wait names why launch is safely delayed |
 | `browser_mcp.py` | MCP upstream | Unix socket protocol `ping` (JSON request, `ok` reply — the daemon's accept/read loop must answer) | `respawn_service` | the browser-MCP daemon's loop answers requests; lock-free by design (a slow browser op must not read as death) |
 | `brew_pin.py` | Homebrew dependency pin policy | read-only `brew list --pinned` + `brew list --formula`; non-macOS and hosts without brew are silent no-ops | none — one ERROR per drift episode tells the operator to run `brew pin <formula>` manually | every installed formula in the operator-approved manifest remains pinned; it never changes package state |
 | `computer_mcp.py` | Computer-use service | Unix socket protocol `ping` (lock-free; does not take the action lock) | `respawn_service` | the computer-MCP daemon's accept/read loop answers |
