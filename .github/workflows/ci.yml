@@ -270,12 +270,43 @@ jobs:
         run: uv sync --frozen
 
       - name: Run pytest shard
-        run: >
-          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4
-          --splits 12 --group ${{ matrix.group }}
-          --splitting-algorithm least_duration
-          --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
-          --cov=ops --cov=services --cov=ava_builtins
+        id: pytest-shard
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          mkdir -p tmp
+          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 \
+            --splits 12 --group ${{ matrix.group }} \
+            --splitting-algorithm least_duration \
+            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
+            --cov=ops --cov=services --cov=ava_builtins \
+            2>&1 | tee tmp/flake-attempt1-shard-${{ matrix.group }}.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::warning title=backend shard ${{ matrix.group }} attempt-1 failure::pytest exit $status, retried once"
+            echo "FLAKE-RETRY group=${{ matrix.group }} attempt=1 exit=$status"
+            echo "retried=true" >> "$GITHUB_OUTPUT"
+            # Attempt 1's partial coverage would append into attempt 2's data
+            # file (coverage.py appends by default) and flatten the combine;
+            # drop it so the retry writes a clean per-shard file.
+            rm -f "$COVERAGE_FILE"
+            uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 \
+              --splits 12 --group ${{ matrix.group }} \
+              --splitting-algorithm least_duration \
+              --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
+              --cov=ops --cov=services --cov=ava_builtins
+            status=$?
+          fi
+          exit "$status"
+
+      - name: Upload flake telemetry (attempt-1 failure)
+        if: ${{ always() && steps.pytest-shard.outputs.retried == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flake-attempt1-shard-${{ matrix.group }}
+          path: tmp/flake-attempt1-shard-${{ matrix.group }}.log
+          if-no-files-found: error
 
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
