@@ -70,6 +70,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from services.browser import macos_readiness
 from services.browser.orphan import reap_cluster_chrome
 from services.browser.probe import probe_browser
 from shared.cluster import session_name
@@ -173,6 +174,7 @@ class _Episode:
     TERMINAL = "terminal"
     ORPHAN_HEAL_FAILED = "orphan-heal-failed"
     RESPAWN_FAILED = "respawn-failed"
+    WAITING_FOR_MACOS_READINESS = "waiting-for-macos-readiness"
 
     def __init__(
         self,
@@ -268,6 +270,21 @@ def main() -> None:
             if episode.mark_healthy():
                 _log.info("[browser healthcheck] browser recovered (%s)", probe.detail)
             _log.debug("[browser healthcheck] alive (%s), no-op", probe.detail)
+            return
+        wait_reason = macos_readiness.degraded_wait_reason()
+        if wait_reason is not None:
+            if episode.should_report(_Episode.WAITING_FOR_MACOS_READINESS):
+                _log.warning(
+                    "[browser healthcheck] browser DEGRADED: waiting for macOS startup "
+                    "readiness (%s); keeping the live ava-browser session for retry",
+                    wait_reason,
+                )
+            else:
+                _log.debug(
+                    "[browser healthcheck] browser still waiting for macOS startup readiness "
+                    "(%s); reported this episode",
+                    wait_reason,
+                )
             return
         # Live session, dead CDP: Chrome crashed or hung inside its own pane.
         # respawn_service kills the stale session first, so the restart applies.

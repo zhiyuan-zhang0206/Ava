@@ -15,6 +15,14 @@ Chrome, and npx). Fresh-host enroll/install uses the settings-free twin
 `AVA_CHROME_BINARY` override because Settings cannot be built on a fresh host.
 The headed browser runs on Windows.
 
+On macOS, these static prongs are necessary but not sufficient at daemon launch.
+`services/browser/macos_readiness.py` additionally waits for the current service
+account to be the console GUI user, to have a `launchctl gui/<uid>` namespace,
+and for its login Keychain to answer a read-only readiness query. The browser
+session stays alive while waiting, and the healthcheck reports **DEGRADED**
+instead of respawning it. This runtime gate never unlocks the Keychain or
+changes Chrome profile data.
+
 ## Browser MCP
 
 `browser-mcp` requires the same browser prongs plus AF_UNIX
