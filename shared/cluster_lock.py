@@ -67,7 +67,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 import shared.db
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
@@ -573,15 +573,9 @@ def release_settle_hold(holder: str) -> bool:
     return released
 
 
-def read_update_lease() -> DeployLease | None:
-    """The *live* lease (None if free, or only an expired holder remains).
-
-    The read every consumer that must explain the hold to a human goes through — a
-    refused `ava cluster update`, the health probe's decision to treat a down gateway as an
-    expected transition rather than an outage. `update_lock_holder()` is the
-    name-only form kept for the branch-on-it callers.
-    """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+def _read_update_lease_with_conn(conn: Any) -> DeployLease | None:
+    """Read the live lease through a connection whose lifecycle the caller owns."""
+    with conn.cursor() as cur:
         cur.execute(
             "SELECT holder, extract(epoch FROM now() - acquired_at), "
             "       extract(epoch FROM expires_at - now()), note, kind, acquired_at, "
@@ -589,18 +583,34 @@ def read_update_lease() -> DeployLease | None:
             "FROM deployment_state WHERE id = 1 AND expires_at > now()"
         )
         row = cur.fetchone()
-        if row is None or row[0] is None:
-            return None
-        return DeployLease(
-            holder=row[0],
-            held_for_s=float(row[1] or 0.0),
-            expires_in_s=float(row[2] or 0.0),
-            note=row[3],
-            kind=row[4],
-            acquired_at=row[5],
-            settle_started_at=row[6],
-            settle_elapsed_s=float(row[7]) if row[7] is not None else None,
-        )
+    if row is None or row[0] is None:
+        return None
+    return DeployLease(
+        holder=row[0],
+        held_for_s=float(row[1] or 0.0),
+        expires_in_s=float(row[2] or 0.0),
+        note=row[3],
+        kind=row[4],
+        acquired_at=row[5],
+        settle_started_at=row[6],
+        settle_elapsed_s=float(row[7]) if row[7] is not None else None,
+    )
+
+
+def read_update_lease(*, conn: Any | None = None) -> DeployLease | None:
+    """The *live* lease (None if free, or only an expired holder remains).
+
+    The read every consumer that must explain the hold to a human goes through — a
+    refused `ava cluster update`, the health probe's decision to treat a down gateway as an
+    expected transition rather than an outage. `update_lock_holder()` is the
+    name-only form kept for the branch-on-it callers. When `conn` is supplied,
+    the caller owns its lifecycle; otherwise this read opens and closes one
+    connection as before.
+    """
+    if conn is not None:
+        return _read_update_lease_with_conn(conn)
+    with shared.db.connect(autocommit=True) as owned_conn:
+        return _read_update_lease_with_conn(owned_conn)
 
 
 def update_lock_holder() -> str | None:

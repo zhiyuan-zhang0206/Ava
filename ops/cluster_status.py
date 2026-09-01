@@ -13,12 +13,17 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 
 import shared.cluster
+import shared.cluster_lock
+import shared.db
+import shared.host_deploy_state
 from ops import cluster_pause, cluster_session
 from ops.cluster_session import OrchestrationKind
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
@@ -29,6 +34,18 @@ from shared.proc import process_alive
 from shared.resource_sample import ResourceSample
 
 _log = logging.getLogger(__name__)
+
+# `connection(timeout=...)` overrides the pool's long-lived default for this
+# probe. Status must degrade before the gateway's probe deadline when the
+# central DB is down instead of queueing behind the pool for its full timeout.
+#
+# The bound covers the pool QUEUE only: once a connection is handed out, a
+# query hung on a blackholed flow waits out the connection's own keepalive +
+# statement ceiling (~60s, PG_KEEPALIVE_KWARGS / statement_timeout) before
+# failing — same failure class as the pre-change fresh connects (connect
+# timeout 5s, then the same ~60s query ceiling), so a blackhole slows the
+# probe but never hangs it.
+_POOL_BORROW_TIMEOUT_S = 2.0
 
 
 class ClusterStatus(BaseModel):
@@ -365,7 +382,43 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
     return sessions, _count_agent_shells(sessions), len(sessions)
 
 
-def status_snapshot() -> ClusterStatus:
+def _read_deploy_snapshot(
+    pool: Any | None,
+) -> tuple[shared.host_deploy_state.HostDeployState | None, shared.cluster_lock.DeployLease | None]:
+    """Read both central deploy rows through one snapshot-local connection."""
+    try:
+        connection = (
+            shared.db.connect(autocommit=True)
+            if pool is None
+            else pool.connection(timeout=_POOL_BORROW_TIMEOUT_S)
+        )
+        with connection as conn:
+            state = shared.host_deploy_state.read(conn=conn)
+            lease = shared.cluster_lock.read_update_lease(conn=conn)
+        return state, lease
+    except Exception:  # fail-fast-ok: status degrades when the central DB is unavailable
+        # Deliberate coupling: paused / current_orchestration / last_updater_outcome
+        # now degrade TOGETHER from this one snapshot-scoped read, where each used
+        # to read its own row independently. Each degraded answer is exactly what
+        # its own failed read produced before (not paused / no orchestration / no
+        # outcome), so the only difference is that one failed read degrades all
+        # three instead of one.
+        _log.warning("deploy-state snapshot read failed; using degraded status", exc_info=True)
+        return None, None
+
+
+def _read_resource_sample() -> ResourceSample | None:
+    """One live resource sample, degraded to None on any psutil failure."""
+    try:
+        from shared.resource_sample import resource_sample
+
+        return resource_sample()
+    except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
+        _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
+        return None
+
+
+def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
     When setup is missing, shared/machine.py's machine_name /
@@ -395,27 +448,21 @@ def status_snapshot() -> ClusterStatus:
     # an open dict list so the frontend-facing status schema (and its generated TS
     # types) is unchanged — serialize the models to JSON dicts at the boundary.
     agent_groups = [g.model_dump(mode="json") for g in _group_agent_sessions(sessions)]
-    # One live CPU/memory/disk reading. Wrapped in try/except so a missing
-    # psutil does not take down the status probe.
-    resource: ResourceSample | None = None
-    try:
-        from shared.resource_sample import resource_sample
-
-        resource = resource_sample()
-    except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "resource_sample failed (psutil missing?)", exc_info=True
-        )
+    # The live one-shot resource sample blocks for its CPU interval. Run it in
+    # parallel with the two central-DB reads so snapshot latency pays the slower
+    # of those independent operations, not their sum.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        resource_future = executor.submit(_read_resource_sample)
+        state, lease = _read_deploy_snapshot(pool)
+        resource = resource_future.result()
     return ClusterStatus(
         machine_name=machine_name(),
         serve_gateway=is_gateway(),
         serve_agent_runner=is_agent_runner(),
         serve_observability_station=is_observability_station(),
-        paused=cluster_pause.is_paused(),
-        current_orchestration=cluster_session.current_orchestration(),
-        last_updater_outcome=last_updater_outcome(),
+        paused=cluster_pause.is_paused(state),
+        current_orchestration=cluster_session.current_orchestration(state, lease),
+        last_updater_outcome=last_updater_outcome(state),
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
         shell_count=shell_count,

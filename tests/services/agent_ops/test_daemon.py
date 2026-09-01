@@ -585,6 +585,35 @@ async def test_dispatch_no_db_pool_fails_cleanly(monkeypatch: pytest.MonkeyPatch
     assert "_db_pool" in str(result["error"])
 
 
+@pytest.mark.asyncio
+async def test_dispatch_status_probe_passes_the_daemon_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The steady-state probe reuses the daemon's already-open central DB pool."""
+    from ops.cluster import ClusterStatus
+
+    pool = _stub_pool()
+    seen: list[object] = []
+    monkeypatch.setattr(daemon, "_db_pool", pool)
+
+    def _status(probe_pool: object) -> ClusterStatus:
+        seen.append(probe_pool)
+        return ClusterStatus(
+            machine_name="win",
+            serve_gateway=False,
+            serve_agent_runner=True,
+            paused=False,
+        )
+
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _status)
+
+    status, result = await daemon._dispatch("status_probe", {})
+
+    assert status == "completed"
+    assert result["machine_name"] == "win"
+    assert seen == [pool]
+
+
 # ─── _ops_route (the POST /ops handler) ─────────────────────────────────────────
 
 
@@ -626,10 +655,10 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     daemon._dispatch_sem = asyncio.Semaphore(1)
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     created = datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)
-    monkeypatch.setattr(
-        daemon.ops_cluster,
-        "cluster_status_op",
-        lambda: ClusterStatus(
+
+    def _status(probe_pool: object) -> ClusterStatus:
+        assert probe_pool is daemon._db_pool
+        return ClusterStatus(
             machine_name="runner-1",
             serve_gateway=False,
             serve_agent_runner=True,
@@ -645,8 +674,9 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
                     ],
                 }
             ],
-        ),
-    )
+        )
+
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _status)
     status, body, ctype = await daemon._ops_route(json.dumps({"kind": "status_probe"}).encode())
     assert status == 200
     assert ctype == "application/json"
@@ -655,6 +685,44 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     shell = parsed["result"]["agent_groups"][0]["shells"][0]
     assert shell["name"] == "ava-agent-7"
     assert shell["created_at"] == "2026-06-11T08:30:00Z"
+    daemon._dispatch_sem = None
+
+
+@pytest.mark.asyncio
+async def test_ops_route_completes_with_a_db_down_degraded_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DB-down, including an unreachable paused row, remains HTTP 200 completed."""
+    from ops.cluster import ClusterStatus
+
+    pool = _stub_pool()
+    daemon._dispatch_sem = asyncio.Semaphore(1)
+    monkeypatch.setattr(daemon, "_db_pool", pool)
+
+    def _degraded_status(probe_pool: object) -> ClusterStatus:
+        assert probe_pool is pool
+        return ClusterStatus(
+            machine_name="win",
+            serve_gateway=False,
+            serve_agent_runner=True,
+            paused=False,
+            current_orchestration=None,
+            last_updater_outcome=None,
+            resource=None,
+        )
+
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _degraded_status)
+
+    status, body, ctype = await daemon._ops_route(json.dumps({"kind": "status_probe"}).encode())
+
+    assert status == 200
+    assert ctype == "application/json"
+    parsed = json.loads(body)
+    assert parsed["status"] == "completed"
+    assert parsed["result"]["paused"] is False
+    assert parsed["result"]["current_orchestration"] is None
+    assert parsed["result"]["last_updater_outcome"] is None
+    assert parsed["result"]["resource"] is None
     daemon._dispatch_sem = None
 
 

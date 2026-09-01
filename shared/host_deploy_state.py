@@ -39,6 +39,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import shared.db
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
@@ -140,15 +141,9 @@ class HostDeployState:
         return armed >= self.paused_at
 
 
-def read(machine: str | None = None) -> HostDeployState | None:
-    """This host's (or `machine`'s) deploy-state row; None when no row exists yet.
-
-    A missing row reads as idle — every consumer's default — so a host that has
-    never been paused (or whose row the migration did not seed) behaves exactly
-    like an unpaused one.
-    """
-    machine = machine or machine_name()
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+def _read_with_conn(conn: Any, machine: str) -> HostDeployState | None:
+    """Read one host row through a connection whose lifecycle the caller owns."""
+    with conn.cursor() as cur:
         cur.execute(
             "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, now() "
             "FROM host_deploy_state WHERE machine = %s",
@@ -165,6 +160,21 @@ def read(machine: str | None = None) -> HostDeployState | None:
         paused_at=row[4],
         db_now=row[5],
     )
+
+
+def read(machine: str | None = None, *, conn: Any | None = None) -> HostDeployState | None:
+    """This host's (or `machine`'s) deploy-state row; None when no row exists yet.
+
+    A missing row reads as idle — every consumer's default — so a host that has
+    never been paused (or whose row the migration did not seed) behaves exactly
+    like an unpaused one. When `conn` is supplied, the caller owns its lifecycle;
+    otherwise this read opens and closes one connection as before.
+    """
+    machine = machine or machine_name()
+    if conn is not None:
+        return _read_with_conn(conn, machine)
+    with shared.db.connect(autocommit=True) as owned_conn:
+        return _read_with_conn(owned_conn, machine)
 
 
 def read_all() -> dict[str, HostDeployState]:

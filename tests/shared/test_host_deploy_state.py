@@ -45,6 +45,23 @@ def test_no_row_reads_as_none() -> None:
     assert hds.read() is None
 
 
+def test_read_uses_the_callers_connection(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bundled snapshot can read the row without opening or owning another connection."""
+    hds.set_posture("paused")
+
+    def _fresh_connect(**_kwargs: object) -> object:
+        raise AssertionError("read opened a fresh connection")
+
+    monkeypatch.setattr("shared.db.connect", _fresh_connect)
+
+    state = hds.read(conn=db_conn)
+
+    assert state is not None
+    assert state.posture == "paused"
+
+
 def test_host_transitions_never_mutate_an_existing_ui_marker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
