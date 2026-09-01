@@ -31,6 +31,10 @@ def _scaffold(tmp_path: Path, checkout_name: str) -> tuple[Path, Path, Path]:
     checkout = tmp_path / checkout_name
     (checkout / "scripts").mkdir(parents=True)
     shutil.copy(_REPO_ROOT / "scripts" / "install.sh", checkout / "scripts" / "install.sh")
+    shutil.copy(
+        _REPO_ROOT / "scripts" / "guard_editable_venv.py",
+        checkout / "scripts" / "guard_editable_venv.py",
+    )
 
     log = tmp_path / "calls.log"
     stub_bin = tmp_path / "stub-bin"
@@ -165,6 +169,28 @@ def test_worktree_requires_uv_on_path(tmp_path: Path) -> None:
     assert proc.returncode != 0
     assert "uv" in proc.stderr
     assert not log.exists(), "nothing may run when the uv prerequisite is missing"
+
+
+def test_worktree_guard_refuses_symlinked_venv_before_uv_sync(tmp_path: Path) -> None:
+    """The installer must fail before its first venv-writing child can run."""
+    checkout, log, fake_home = _scaffold(tmp_path, "myclone")
+    shutil.rmtree(checkout / ".venv")
+    external = tmp_path / "external-venv"
+    external.mkdir()
+    (checkout / ".venv").symlink_to(external, target_is_directory=True)
+    proc = subprocess.run(  # noqa: S603 — fixed repository-owned script
+        ["bash", str(checkout / "scripts" / "install.sh"), "--worktree"],
+        cwd=tmp_path,
+        env={"PATH": f"{tmp_path / 'stub-bin'}:/usr/bin:/bin", "HOME": str(fake_home)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert proc.returncode == 1
+    assert str(external) in proc.stderr
+    assert not log.exists(), "uv and cluster birth must not run after a guard violation"
 
 
 def test_install_sh_syntax_ok() -> None:

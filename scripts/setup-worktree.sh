@@ -14,8 +14,11 @@ cd "$REPO_ROOT"
 git config --local --unset core.hookspath 2>/dev/null || true
 .venv/bin/pre-commit install --install-hooks
 
+echo "→ editable venv guard …"
+python3 "$SCRIPT_DIR/guard_editable_venv.py" "$REPO_ROOT"
+
 echo "→ uv sync …"
-uv sync
+env -u VIRTUAL_ENV uv sync
 
 echo "→ npm install (frontend) …"
 cd "$REPO_ROOT/ui/web"
