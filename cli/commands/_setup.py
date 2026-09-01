@@ -213,8 +213,8 @@ def _collect_setup_values(
 
     Phase 2: filter the rest of `_SETUP_FIELDS` by `roles`, then resolve and
     collect missing. Missing optional fields do not enter the missing list —
-    caller decides fallback (e.g. when memory_remote is missing,
-    `_ensure_memory_repo` takes the local-init path).
+    caller decides fallback (e.g. when memory_remote is missing, explicit
+    `ava memory init` takes the local-init path).
     """
     caps = {
         cap.capability

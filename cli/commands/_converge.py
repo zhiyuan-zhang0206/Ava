@@ -2,8 +2,8 @@
 
 Bring a machine to the host-level state the current code expects: the `ava`
 symlink on PATH, ~/.local/bin on PATH, the $AVA_HOME dir skeleton, fresh plugin
-config images, and the memory pool. Run by `cmd_start` (so `ava cluster update` inherits
-it via its trailing start), and standalone via `ava converge`.
+config images. Run by `cmd_start` (so `ava cluster update` inherits it via its
+trailing start), and standalone via `ava converge`.
 """
 
 # Host setup that used to live only in install.sh never reached already-deployed
@@ -231,13 +231,6 @@ def _converge_skills_step(ctx: ConvergeCtx) -> None:
             print(f"    {kind}: {', '.join(names)}")
     for warning in result.warnings:
         print(f"  ! skills: {warning}", file=sys.stderr)
-
-
-def _plugin_scaffold_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    """Run each enabled plugin's `scaffold()` — see `_converge_plugins.py`."""
-    from cli.commands._converge_plugins import run_plugin_scaffolds
-
-    run_plugin_scaffolds()
 
 
 def _ensure_browser(ctx: ConvergeCtx) -> None:
@@ -603,15 +596,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # inside, not on roles: only the one home the operator marked brings it up;
     # every other cluster on the box (dev worktrees included) no-ops.
     ConvergeStep("lgtm observability stack", ensure_lgtm_stack_step),
-    # Plugin-owned host state. ava_memory's scaffold brings up this cluster's
-    # memory pool checkouts and lays its template down inside them — a step the
-    # framework used to carry for it. A disabled plugin is skipped, so turning it
-    # off leaves nothing of its behind.
-    ConvergeStep(
-        "plugin scaffolds",
-        _plugin_scaffold_step,
-        requires_unit_config=True,
-    ),
     ConvergeStep(
         "browser capability + plugin",
         _ensure_browser,

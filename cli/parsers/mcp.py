@@ -78,6 +78,12 @@ def _h_memory_refresh(_args: argparse.Namespace) -> int:
     return cmd_memory_refresh()
 
 
+def _h_memory_init(_args: argparse.Namespace) -> int:
+    from cli.commands.memory import cmd_memory_init
+
+    return cmd_memory_init()
+
+
 def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     from cli.main import (
         _h_mcp_add,
@@ -177,14 +183,18 @@ def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 
 
 def _add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_memory_refresh
+    from cli.main import _h_memory_init, _h_memory_refresh
 
     """`ava memory` — memory pool operations.
 
+    init          Initialize the memory pool and plugin-owned templates
     refresh       Trigger gateway memory index refresh
     """
     memory_p = sub.add_parser("memory", help="memory pool operations")
     memory_sub = memory_p.add_subparsers(dest="memory_cmd", required=True)
+
+    init_p = memory_sub.add_parser("init", help="initialize memory pool resources")
+    init_p.set_defaults(func=_h_memory_init)
 
     refresh_p = memory_sub.add_parser("refresh", help="trigger gateway memory index refresh")
     refresh_p.set_defaults(func=_h_memory_refresh)
