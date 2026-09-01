@@ -76,6 +76,7 @@ _ALLOWED_FILES = frozenset(
         "shared/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import
         "shared/runtime_config.py",  # path bootstrap; cannot import Settings (circular dep)
         "shared/config/service_read.py",  # warn_deprecated_env_aliases inspects the RAW env for the legacy AVA_PRIMARY_GATEWAY_URL alias — Settings' AliasChoices resolution would mask which name was actually set
+        "cli/commands/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first; same raw-env class as shared/config/service_read.py
         "shared/bootstrap.py",  # fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing shared.config here is the import cycle this module exists to break
         "services/page_server/daemon.py",  # spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as shared/session_env
         "services/page_server/server.py",  # reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it
