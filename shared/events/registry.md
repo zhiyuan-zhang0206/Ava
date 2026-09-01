@@ -222,6 +222,8 @@ consumers: see the comments at each emit point.
 | `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events |
 | `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events |
 | `watchdog_tick` | watchdog completed one full healthcheck and reconcile round | noise | last_tick_timestamp_seconds | — | events |
+| `pitr_remote_inventory` | PITR remote object inventory (backend-scoped absolute object and byte state) | noise | backend, object_count, bytes | — | events |
+| `recovery_drill_failed` | scheduled logical dump or PITR recovery proof failed | anomaly | drill, detail | — | events |
 | `telemetry_read_stale` | read-side telemetry staleness detected — heartbeat older than threshold | anomaly | source, signal, threshold_s, age_s, action, reason | — | events |
 | `telemetry_read_recovered` | read-side telemetry heartbeat recovered | observation | source, signal, stale_duration_s | — | events |
 | `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | events |
