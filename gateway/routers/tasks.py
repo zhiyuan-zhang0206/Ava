@@ -39,10 +39,7 @@ _TASK_COLS = (
 )
 
 _TASK_SUMMARY_COLS = (
-    "t.id, t.parent_id, t.title, "
-    "left(t.description, 300) AS description_preview, "
-    "left(t.results, 300) AS results_preview, "
-    "t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
+    "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
     "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
 )
 
@@ -74,18 +71,16 @@ def _row_to_task(
             id=row[0],
             parent_id=row[1],
             title=row[2],
-            description_preview=row[3],
-            results_preview=row[4],
-            status=row[5],
-            owner=row[6],
+            status=row[3],
+            owner=row[4],
             owner_label=owner_label,
-            created_by=row[7],
-            created_at=row[8].isoformat(),
-            updated_at=row[9].isoformat(),
-            remind_interval_seconds=row[10],
-            last_reminded_at=row[11].isoformat() if row[11] else None,
-            reminder_count=row[12],
-            priority=row[13],
+            created_by=row[5],
+            created_at=row[6].isoformat(),
+            updated_at=row[7].isoformat(),
+            remind_interval_seconds=row[8],
+            last_reminded_at=row[9].isoformat() if row[9] else None,
+            reminder_count=row[10],
+            priority=row[11],
         )
     return TaskRow(
         id=row[0],
@@ -159,8 +154,7 @@ def get_tasks(
     """Return the task registry, newest first.
 
     `fields=full` (the default) returns the compatibility projection. `fields=summary`
-    returns 300-character description/results previews without selecting the full
-    text columns. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
+    returns metadata only, selecting neither task text column. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
     (updated_at) on the backend, so the task graph's default 24-hour view never
     pulls the full registry. A windowed list still carries every kept task's
     out-of-window ancestors flagged ghost=True (see _windowed_tasks); without

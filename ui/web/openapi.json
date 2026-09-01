@@ -6012,7 +6012,7 @@
     "/api/tasks": {
       "get": {
         "summary": "Get Tasks",
-        "description": "Return the task registry, newest first.\n\n`fields=full` (the default) returns the compatibility projection. `fields=summary`\nreturns 300-character description/results previews without selecting the full\ntext columns. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity\n(updated_at) on the backend, so the task graph's default 24-hour view never\npulls the full registry. A windowed list still carries every kept task's\nout-of-window ancestors flagged ghost=True (see _windowed_tasks); without\na window the full table is returned unchanged.\n\nNo pagination — the task registry is bounded (tasks are created by agents;\nclosed tasks are kept). Order by created_at DESC so the newest tasks\nsurface first in the Task Graph view.",
+        "description": "Return the task registry, newest first.\n\n`fields=full` (the default) returns the compatibility projection. `fields=summary`\nreturns metadata only, selecting neither task text column. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity\n(updated_at) on the backend, so the task graph's default 24-hour view never\npulls the full registry. A windowed list still carries every kept task's\nout-of-window ancestors flagged ghost=True (see _windowed_tasks); without\na window the full table is returned unchanged.\n\nNo pagination — the task registry is bounded (tasks are created by agents;\nclosed tasks are kept). Order by created_at DESC so the newest tasks\nsurface first in the Task Graph view.",
         "operationId": "get_tasks_api_tasks_get",
         "parameters": [
           {
@@ -13709,21 +13709,6 @@
             "type": "string",
             "title": "Title"
           },
-          "description_preview": {
-            "type": "string",
-            "title": "Description Preview"
-          },
-          "results_preview": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Results Preview"
-          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -13803,8 +13788,6 @@
           "id",
           "parent_id",
           "title",
-          "description_preview",
-          "results_preview",
           "status",
           "owner",
           "created_by",
@@ -13813,7 +13796,7 @@
           "priority"
         ],
         "title": "TaskSummaryRow",
-        "description": "One compact task-list row with text previews only."
+        "description": "One metadata-only task-list row."
       },
       "TaskUpdateRequest": {
         "properties": {

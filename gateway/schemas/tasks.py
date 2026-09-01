@@ -36,15 +36,13 @@ class TaskRow(BaseModel):
 
 
 class TaskSummaryRow(BaseModel):
-    """One compact task-list row with text previews only."""
+    """One metadata-only task-list row."""
 
     model_config = ConfigDict(frozen=True)
 
     id: int
     parent_id: int | None
     title: str
-    description_preview: str
-    results_preview: str | None
     status: str
     owner: int | None
     owner_label: str | None = None
