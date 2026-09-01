@@ -10,11 +10,11 @@ before it ever reached `_StdlibInterceptHandler`, let alone loguru. 68 days of
 respawn controller's gateway-health gate defers a restart.
 
 Fix: `_install_stdlib_intercept` raises the effective level back to DEBUG for
-`_FIRST_PARTY_LOGGER_NAMES` (our own top-level packages, plus the one bare
-logger name `ci-autoscale`) via stdlib's own ancestor-level lookup, while the
-root stays at INFO — so third-party libraries (httpx, psycopg, ...), which
-never call `setLevel` on themselves, stay gated, and only our own code's
-DEBUG reaches the (already level=DEBUG) file sink.
+`_FIRST_PARTY_LOGGER_NAMES` (our own top-level logger names) via stdlib's own
+ancestor-level lookup, while the root stays at INFO — so third-party libraries
+(httpx, psycopg, ...), which never call
+`setLevel` on themselves, stay gated, and only our own code's DEBUG reaches
+the (already level=DEBUG) file sink.
 """
 
 from __future__ import annotations
@@ -25,13 +25,6 @@ from collections.abc import Iterator
 import pytest
 
 from shared.log import _FIRST_PARTY_LOGGER_NAMES, _install_stdlib_intercept
-
-# The real callsites for the one non-dotted entry (ops/ci_autoscale/*
-# constructs its logger as `logging.getLogger("ci-autoscale")`, not a
-# `__name__`-derived dotted path) — everything else gets a synthetic child
-# logger name to prove the ancestor-level lookup, not just the exact
-# first-party name itself.
-_PROBE_LOGGER_NAME = {"ci-autoscale": "ci-autoscale"}
 
 
 @pytest.fixture(autouse=True)
@@ -68,10 +61,9 @@ def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict])
 def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list[dict]) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     """Every listed first-party namespace gets the same DEBUG passthrough —
     not just ops.controllers.*, but services / shared / gateway / agent /
-    ava_builtins daemons and controllers, plus the ci-autoscale webhook."""
+    ava_builtins daemons and controllers."""
     _install_stdlib_intercept()
-    name = _PROBE_LOGGER_NAME.get(prefix, f"{prefix}.some_module")
-    logging.getLogger(name).debug("marker-%s", prefix)
+    logging.getLogger(f"{prefix}.some_module").debug("marker-%s", prefix)
     assert any(
         r["level"].name == "DEBUG" and f"marker-{prefix}" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         for r in loguru_records  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
