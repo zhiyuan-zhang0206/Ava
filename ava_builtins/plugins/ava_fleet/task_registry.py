@@ -18,6 +18,7 @@ from shared.audit_events import insert_event_log
 from shared.live_announce import publish_task_created_sync, publish_task_updated_sync
 from shared.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority, validate_priority
 from shared.task_notes import task_note_line
+from shared.task_owner_notifications import owner_change_notifications
 from shared.task_reparent import resolve_reparent
 from shared.task_timestamps import render_task_timestamps
 
@@ -814,22 +815,27 @@ def _notify_owner_change(
     renders it as a system marker without an Agent prefix or peer timestamp
     (user ruling 2026-08-27).
     """
-    if new_owner is not None and new_owner != actor:
-        new_msg = f'Task #{task_id} "{title}" is now assigned to you (by agent #{actor}).'
-        if changes:
-            new_msg += "\n\n" + "\n".join(f"- {c}" for c in changes)
-        if description:
-            new_msg += f"\n\n{description}"
-        # A task assignment is a delegator direction: the new owner is always
-        # told, even when terminated — the system-note delivery auto-resurrects
-        # so an assigned task never strands on a dead agent.
-        ava.agents.send_system_note(new_owner, new_msg, resurrect=True)
+    for note in owner_change_notifications(
+        task_id,
+        title,
+        None,
+        new_owner,
+        actor=actor,
+        previous_owner_terminated=False,
+        description=description,
+        changes=changes,
+    ):
+        ava.agents.send_system_note(note.agent_id, note.content, resurrect=note.resurrect)
     if _should_notify_previous_owner(old_owner, actor):
-        ava.agents.send_system_note(
+        for note in owner_change_notifications(
+            task_id,
+            title,
             old_owner,
-            f'Task #{task_id} "{title}" you owned is no longer assigned to you.',
-            resurrect=False,
-        )
+            None,
+            actor=actor,
+            previous_owner_terminated=False,
+        ):
+            ava.agents.send_system_note(note.agent_id, note.content, resurrect=note.resurrect)
 
 
 def _notify_owner_updated(
