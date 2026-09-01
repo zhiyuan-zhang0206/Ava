@@ -940,6 +940,7 @@ def test_kill_graceful_then_force(sessions: Path) -> None:
     assert _wait(lambda: not _has(home, name))
 
 
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded.*:DeprecationWarning")
 def test_orphan_reaper_host_is_live_treats_zombie_as_dead() -> None:
     """A reaped-but-unreaped (zombie) host must not count as a live survivor —
     the force-reap flake: is_running() stays True for zombies, so the reaper
