@@ -48,3 +48,27 @@ class FeishuSettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    feishu_poll_interval_seconds: float = Field(
+        default=1.0,
+        alias="AVA_FEISHU_POLL_INTERVAL_SECONDS",
+        description="Polling interval (seconds) for the p2p chat fallback. The Feishu platform does not deliver im.message.receive_v1 for this app (diagnosed 2026-09-01), so the adapter polls the known p2p chat via ListMessage and feeds new user texts like WS events. 0 disables polling (WS-only).",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    feishu_poll_chat_id: str = Field(
+        default="",
+        alias="AVA_FEISHU_POLL_CHAT_ID",
+        description="Bootstrap p2p chat id (oc_...) to poll. Needed to catch the FIRST user message before any outbound send resolved the chat; chats are also discovered automatically from outbound send responses.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
