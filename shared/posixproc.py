@@ -87,12 +87,26 @@ def _read_record(name: str) -> SessionRecord | None:
     return SessionRecord.read(_record_path(name))
 
 
+def _process_is_live(proc: psutil.Process) -> bool:
+    """True when `proc` is genuinely running — a zombie counts as dead.
+
+    `is_running()` alone is zombie-blind: a zombie's status is not DEAD, so a
+    kill whose victim init has not reaped yet looks like a survivor. Same
+    semantics as the orphan-reaper fix (#1272): a corpse awaiting its reaper
+    cannot run again, so it is not a live session.
+    """
+    try:
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+
+
 def _process_for_record(rec: SessionRecord) -> psutil.Process | None:
     """Return the live psutil.Process named by `rec`, or None if it is gone or a
     different (recycled) process now holds the pid."""
     try:
         proc = psutil.Process(rec.pid)
-        if not proc.is_running():
+        if not _process_is_live(proc):
             return None
         if rec.starttime is not None:
             return proc if rec.identifies(rec.pid) is True else None
@@ -278,7 +292,7 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
     # service nothing starts. The contract (session_backend.py) says `ok`
     # means the session is confirmed gone; on a survivor we keep the record —
     # the no-DB reap's only view of the process — and say so.
-    if proc.is_running():
+    if _process_is_live(proc):
         logger.error(
             "posixproc kill {name}: pid {pid} is still running after the kill — leaving "
             "its session record in place so the survivor stays visible",
@@ -311,7 +325,7 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
         return False, "process is still live"
     try:
         proc = psutil.Process(rec.pid)
-        if not proc.is_running():
+        if not proc.is_running() or not _process_is_live(proc):
             return True, "pid is no longer running"
     except psutil.NoSuchProcess:
         return True, "pid is gone"

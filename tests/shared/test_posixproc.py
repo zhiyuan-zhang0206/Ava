@@ -47,6 +47,83 @@ def _wait(predicate, timeout: float = 5.0, interval: float = 0.05) -> bool:  # p
     return predicate()  # pyright: ignore[reportUnknownVariableType]
 
 
+def _no_new_direct_children(spawner: psutil.Process, before: set[psutil.Process]) -> bool:
+    """True when `spawner` has no direct child beyond the pre-spawn snapshot."""
+    try:
+        return set(spawner.children()) - before == set()
+    except psutil.NoSuchProcess:
+        return True
+
+
+def _no_zombie_children(spawner: psutil.Process) -> bool:
+    """True when none of `spawner`'s recursive children is a zombie.
+
+    Children that exit between the snapshot and the status read are skipped —
+    a reaped child is exactly what the no-zombie assertion wants.
+    """
+    try:
+        children = spawner.children(recursive=True)
+    except psutil.NoSuchProcess:
+        return True
+    for child in children:
+        try:
+            if child.status() == psutil.STATUS_ZOMBIE:
+                return False
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return True
+
+
+def _pid_gone_or_zombie(pid: int) -> bool:
+    """True when `pid` no longer exists, or is a zombie (dead, unreaped).
+
+    psutil.pid_exists() is zombie-blind (it returns True for a zombie), and a
+    SIGKILLed child lingers as a zombie until init asynchronously reaps it — so
+    "process is gone" assertions must count a zombie as gone or they race init's
+    reap schedule (same semantics as the orphan-reaper fix #1272).
+    """
+    try:
+        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return True
+
+
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded.*:DeprecationWarning")
+def test_process_is_live_treats_zombie_as_dead() -> None:
+    """A reaped-but-unreaped (zombie) child must not count as live — the
+    is_running() blind spot that made kill-then-assert tests race init's reap.
+    Deterministic fork+pipe probe (same pattern as the orphan-reaper regression
+    test in #1272): the child writes a byte then exits; the parent reads it and
+    holds the pid unreaped until the status read confirms ZOMBIE."""
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        os.write(write_fd, b"x")
+        os._exit(0)
+    os.close(write_fd)
+    try:
+        os.read(read_fd, 1)  # child has started its exit; parent has not waited
+        proc = psutil.Process(pid)
+        assert _wait(lambda: proc.status() == psutil.STATUS_ZOMBIE)
+        assert posixproc._process_is_live(proc) is False
+        assert (
+            posixproc._process_for_record(
+                SessionRecord(
+                    pid=pid,
+                    create_time=proc.create_time(),
+                    cmd="zombie",
+                    cwd="/",
+                    started_at=time.time(),
+                )
+            )
+            is None
+        )
+    finally:
+        os.close(read_fd)
+        os.waitpid(pid, 0)  # reap so the test never leaks a zombie
+
+
 def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     """The launched child double-forks: it reparents to init (PPID==1) immediately,
     so the spawner (this test process) accretes no zombie, and the record tracks
@@ -77,17 +154,22 @@ def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright:
         assert _wait(lambda: child.ppid() == 1), (
             f"child never reparented to init (ppid={child.ppid()})"
         )
-        assert posixproc.has_session(name) is True
-        assert name in posixproc.list_sessions(prefix="ava-test-agent-")
+        # Each of these is a state the OS lands asynchronously (record write vs
+        # /proc visibility), so read it with a bounded poll instead of sampling
+        # once — a one-shot read races the update on a loaded runner.
+        assert _wait(lambda: posixproc.has_session(name) is True)
+        assert _wait(lambda: name in posixproc.list_sessions(prefix="ava-test-agent-"))
 
         # The spawner gained no lingering direct child (the helper was reaped by
-        # the internal subprocess wait), and no zombie.
-        new_children = set(spawner.children()) - before_children
-        assert new_children == set()
-        zombies = [
-            c for c in spawner.children(recursive=True) if c.status() == psutil.STATUS_ZOMBIE
-        ]
-        assert zombies == []
+        # the internal subprocess wait), and no zombie. Same bounded-poll
+        # treatment — the assertions themselves are unchanged.
+        assert _wait(lambda: _no_new_direct_children(spawner, before_children)), (
+            f"spawner gained a lingering direct child: {set(spawner.children()) - before_children}"
+        )
+        assert _wait(lambda: _no_zombie_children(spawner)), (
+            "spawner accreted a zombie; children: "
+            f"{[c.pid for c in spawner.children(recursive=True)]}"
+        )
     finally:
         posixproc.kill_session(name, graceful=False)
 
@@ -104,22 +186,33 @@ def test_graceful_signal_terminates(unit_home) -> None:  # pyright: ignore[repor
         posixproc.kill_session(name, graceful=False)
 
 
-def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> None:
     """graceful kill_session SIGTERMs, waits, then SIGKILLs a straggler that
     ignored SIGTERM — the force floor under the graceful reap."""
     name = "ava-test-agent-3"
-    # A process that ignores SIGTERM, so only SIGKILL takes it down.
+    # A process that ignores SIGTERM, so only SIGKILL takes it down. The marker
+    # file proves SIG_IGN is installed BEFORE the kill: a SIGTERM that lands in
+    # the pre-exec / handler-install window kills the child "gracefully", which
+    # is not the force-floor scenario this test names (the old `mode ==
+    # "graceful"` expectation passed for that wrong reason).
+    marker = unit_home / "sigign-ready"
     argv = [
         sys.executable,
         "-c",
-        "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)",
+        "import signal,time;"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
+        f"open({str(marker)!r}, 'w').close();"
+        "time.sleep(300)",
     ]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
     assert _wait(lambda: psutil.pid_exists(pid))
+    assert _wait(marker.exists), "child never installed SIG_IGN"
     ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5)
-    assert ok is True and mode == "graceful"
-    assert _wait(lambda: not psutil.pid_exists(pid))
+    # The child ignores SIGTERM, so the graceful signal alone cannot end it —
+    # the force floor must fire, which is exactly what `forced` reports.
+    assert ok is True and mode == "forced"
+    assert _wait(lambda: _pid_gone_or_zombie(pid))
     assert not posixproc._record_path(name).exists()
 
 
@@ -142,8 +235,8 @@ def test_kill_session_reaps_process_tree(unit_home) -> None:  # pyright: ignore[
     child_pid = psutil.Process(parent_pid).children()[0].pid
 
     posixproc.kill_session(name, graceful=False)
-    assert _wait(lambda: not psutil.pid_exists(parent_pid))
-    assert _wait(lambda: not psutil.pid_exists(child_pid)), "child sleep should be reaped with tree"
+    assert _wait(lambda: _pid_gone_or_zombie(parent_pid))
+    assert _wait(lambda: _pid_gone_or_zombie(child_pid)), "child sleep should be reaped with tree"
 
 
 def test_has_session_false_when_process_gone(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
@@ -151,7 +244,9 @@ def test_has_session_false_when_process_gone(unit_home) -> None:  # pyright: ign
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
     posixproc.kill_session(name, graceful=False)
-    assert not psutil.pid_exists(pid)
+    # The SIGKILLed child lingers as a zombie until init reaps it — poll with a
+    # zombie counted as gone instead of asserting on the one-shot pid_exists.
+    assert _wait(lambda: _pid_gone_or_zombie(pid))
     # Record is gone after kill, so has_session is False.
     assert posixproc.has_session(name) is False
 
@@ -164,14 +259,12 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:  # pyright: ignore[
     pid = _pid(name)
     # Kill the process out from under the record WITHOUT going through kill_session,
     # so the record file lingers until list_sessions reaps it.
-    # One Process handle for kill+wait: the child is reparented to init, which
-    # reaps it the instant it dies — a second `psutil.Process(pid)` constructed
-    # after kill() races that reap and can raise NoSuchProcess in __init__.
-    # The handle pins identity at construction; wait() on an already-gone
-    # non-child pid just returns.
+    # The child is reparented to init, which reaps it asynchronously — wait for
+    # the pid to disappear (bounded) rather than proc.wait(), which raises
+    # ChildProcessError on a non-child zombie.
     proc = psutil.Process(pid)
     proc.kill()
-    proc.wait(timeout=5)
+    assert _wait(lambda: not psutil.pid_exists(pid))
     assert posixproc._record_path(name).exists()
     assert posixproc.list_sessions(prefix="ava-test-agent-") == []
     assert not posixproc._record_path(name).exists()
