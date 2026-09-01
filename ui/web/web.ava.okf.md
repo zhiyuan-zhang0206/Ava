@@ -29,10 +29,11 @@ the browser receives that same per-request policy. `next-themes` receives the
 same nonce for its theme bootstrap script. The policy builder at
 `src/lib/content-security-policy.ts` permits the frontend origin, the configured
 gateway HTTP and WebSocket origins, and no broad protocol sources. Grafana is
-served through the same-origin `/grafana` proxy, so `frame-src` permits only
-the frontend origin. Production permits `'unsafe-inline'` only through CSP3's
-`style-src-attr`, because dynamic layout attributes require it; `script-src`
-remains nonce-only with no unsafe directive.
+served through the configured gateway, and plugin iframe mounts use
+`pluginPageSrc` → `${API_BASE}/api/plugin-ui/...`; `frame-src` therefore permits
+the frontend and configured gateway origins only. Production permits
+`'unsafe-inline'` only through CSP3's `style-src-attr`, because dynamic layout
+attributes require it; `script-src` remains nonce-only with no unsafe directive.
 
 `NEXT_PUBLIC_API_BASE` supplies an explicit gateway origin. Without it, converge
 supplies `NEXT_PUBLIC_GATEWAY_PORT` and the proxy combines that port with the
@@ -40,6 +41,8 @@ browser-facing host. The gate preserves the browser's `Host` and any
 `X-Forwarded-Host` / `X-Forwarded-Proto` while proxying to Next.js. A TLS
 terminator must overwrite both forwarding headers with the public origin before
 the gate; direct/private-network access instead uses the preserved `Host`.
+Use lowercase `http` or `https` for `X-Forwarded-Proto`; the frontend normalizes
+other casing before deriving the CSP origin.
 The gate also relays the CSP and the static browser-security headers on the
 response, which is the public browser boundary.
 

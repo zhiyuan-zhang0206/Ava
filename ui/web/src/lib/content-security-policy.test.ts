@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildContentSecurityPolicy, gatewayOriginForRequest } from "./content-security-policy";
+import {
+  browserFacingRequestUrl,
+  buildContentSecurityPolicy,
+  gatewayOriginForRequest,
+} from "./content-security-policy";
 
 function directive(policy: string, name: string): string {
   return policy.split("; ").find((value) => value.startsWith(`${name} `)) ?? "";
@@ -24,6 +28,21 @@ describe("gatewayOriginForRequest", () => {
   });
 });
 
+describe("browserFacingRequestUrl", () => {
+  it("normalizes an uppercase forwarded protocol", () => {
+    expect(
+      browserFacingRequestUrl(
+        new Request("http://localhost:3109/control", {
+          headers: {
+            "x-forwarded-host": "console.example.test:3109",
+            "x-forwarded-proto": "HTTP",
+          },
+        }),
+      ).origin,
+    ).toBe("http://console.example.test:3109");
+  });
+});
+
 describe("buildContentSecurityPolicy", () => {
   it("uses a nonce instead of unsafe script execution in production", () => {
     const policy = buildContentSecurityPolicy({
@@ -37,6 +56,9 @@ describe("buildContentSecurityPolicy", () => {
     );
     expect(directive(policy, "style-src")).toBe("style-src 'self' 'nonce-request-nonce'");
     expect(directive(policy, "style-src-attr")).toBe("style-src-attr 'unsafe-inline'");
+    expect(directive(policy, "object-src")).toBe("object-src 'none'");
+    expect(directive(policy, "base-uri")).toBe("base-uri 'none'");
+    expect(directive(policy, "form-action")).toBe("form-action 'self'");
     expect(policy).not.toContain("'unsafe-eval'");
     expect(directive(policy, "script-src")).not.toContain("'unsafe-inline'");
   });
@@ -51,7 +73,9 @@ describe("buildContentSecurityPolicy", () => {
     expect(directive(policy, "connect-src")).toBe(
       "connect-src 'self' https://gateway.example.test:8443 wss://gateway.example.test:8443",
     );
-    expect(directive(policy, "frame-src")).toBe("frame-src 'self'");
+    expect(directive(policy, "frame-src")).toBe(
+      "frame-src 'self' https://gateway.example.test:8443",
+    );
   });
 
   it("keeps the development allowances Next.js needs", () => {

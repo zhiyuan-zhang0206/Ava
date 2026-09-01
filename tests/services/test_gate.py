@@ -415,6 +415,25 @@ def test_app_proxy_forwards_browser_origin_headers_only_when_provided(servers: _
     }
 
 
+def test_app_proxy_rejects_invalid_browser_origin_headers(servers: _Servers) -> None:
+    _FakeGateway.authenticated = True
+    _FakeGateway.down = False
+
+    status, body, _ = _request(
+        servers["gate"] + "/fleet",
+        headers={
+            "X-Forwarded-Host": "console.example.test/invalid",
+            "X-Forwarded-Proto": "ftp",
+        },
+    )
+
+    assert status == 200
+    assert body == "APP-PAGE /fleet"
+    assert _FakeApp.forwarded_origin_headers == [
+        {"x-forwarded-host": None, "x-forwarded-proto": None}
+    ]
+
+
 def test_app_404_passes_through_not_updating_page(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     """The app answering 404 means the app is UP and the resource is gone — the
     gate must pass the 404 through. A browser probing /favicon.ico relies on

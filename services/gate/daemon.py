@@ -31,6 +31,7 @@ import argparse
 import datetime as dt
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -66,6 +67,16 @@ _FORWARD_RESPONSE_HEADERS = (
     "x-content-type-options",
     "x-frame-options",
 )
+
+_FORWARDED_HOST_RE = re.compile(r"^[A-Za-z0-9.:-]+$")
+
+
+def _valid_forwarded_header(name: str, value: str) -> bool:
+    if name == "x-forwarded-host":
+        return _FORWARDED_HOST_RE.fullmatch(value) is not None
+    if name == "x-forwarded-proto":
+        return value.lower() in ("http", "https")
+    return True
 
 _PROBE_TIMEOUT_S = 3.0
 
@@ -209,7 +220,7 @@ class Gate:
             )
             for name in _FORWARD_HEADERS:
                 value = handler.headers.get(name)
-                if value:
+                if value and _valid_forwarded_header(name, value):
                     req.add_header(name, value)
             if handler.command in ("POST", "PUT", "PATCH"):
                 length = int(handler.headers.get("Content-Length") or 0)

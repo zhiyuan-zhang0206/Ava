@@ -589,8 +589,10 @@ The gate preserves the browser `Host` while proxying to the loopback frontend,
 so the frontend CSP derives the same host that its API client uses. A TLS or
 reverse proxy before the gate must overwrite `X-Forwarded-Host` and
 `X-Forwarded-Proto` with the public browser origin; the gate relays those
-headers only when present. It also relays the frontend CSP and static browser
-security headers to the public response.
+headers only when present. Use lowercase `http` or `https` for
+`X-Forwarded-Proto`; the frontend normalizes other casing before deriving its
+CSP origin. The gate also relays the frontend CSP and static browser-security
+headers to the public response.
 
 The base-candidate gate additionally requires `AVA_PITR_REPLICATION_DB_URL`, a
 local URL for a dedicated `LOGIN REPLICATION NOSUPERUSER` role. The role must be
