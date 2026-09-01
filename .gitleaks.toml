@@ -1,0 +1,49 @@
+title = "Ava secret scanning policy"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Development and test fixture values that are not deployable credentials"
+regexes = [
+    '''\bava_dev_only\b''',
+    '''\bpw123\b''',
+    '''\bs3cr3t\b''',
+    '''\bnew-db\b''',
+    '''\bnew-runner-db\b''',
+]
+
+# These legacy findings are test, example, demo, or planning content. Scope
+# each exception to the historical commit that introduced it: a future copy is
+# still a scan failure.
+commits = [
+    "e0270b05d28524401b6caf5b0a300ab91a4d1c6a",
+    "14e008cd0f9ab4b791330f16d098d8155726d392",
+    "c15f00344d4805b82ed2e0cda824a7527cc0b943",
+]
+
+# The empty bot-token placeholder is immediately followed by the owner-id
+# setting. Limit the exception to the environment template and exact match.
+[[allowlists]]
+description = "Empty Telegram bot-token placeholder in the environment template"
+condition = "AND"
+paths = [
+    '''^\.env\.example$''',
+]
+regexTarget = "match"
+regexes = [
+    '''(?s)AVA_TELEGRAM_BOT_TOKEN=\nAVA_TELEGRAM_OWNER_ID=0''',
+]
+
+# This demo's fixed localStorage key is not an API key. Keep its exception
+# limited to this exact value in the weekly-planner demo.
+[[allowlists]]
+description = "Weekly planner demo localStorage key"
+condition = "AND"
+paths = [
+    '''^demos/goal-mode/weekly-planner/store\.js$''',
+]
+regexTarget = "match"
+regexes = [
+    "STORAGE_KEY = 'weekly-planner\\.v1'",
+]

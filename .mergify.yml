@@ -49,7 +49,7 @@ merge_queue:
 queue_rules:
   - name: default
     # Mergify merges as the repo owner (admin). Branch protection enforces
-    # `enforce_admins`, so the required checks (backend, frontend, e2e) must
+    # `enforce_admins`, so the required checks (backend, frontend, e2e, secret scan) must
     # be genuinely green-or-skipped for ANY merge, admin or not.
     # Must be a GitHub user account logged into Mergify.
     merge_bot_account: zhiyuan-zhang0206
@@ -80,6 +80,9 @@ queue_rules:
       - or:
           - check-success=e2e (Playwright happy path)
           - check-skipped=e2e (Playwright happy path)
+      - or:
+          - check-success=secret scan (Gitleaks)
+          - check-skipped=secret scan (Gitleaks)
     merge_conditions:
       # QA gate: only QA / maintainers apply `qa-approved`, and only on a
       # final PASS / PASS-with-nits conclusion. Without it nothing merges.
@@ -93,6 +96,9 @@ queue_rules:
       - or:
           - check-success=e2e (Playwright happy path)
           - check-skipped=e2e (Playwright happy path)
+      - or:
+          - check-success=secret scan (Gitleaks)
+          - check-skipped=secret scan (Gitleaks)
     merge_method: rebase
     update_method: rebase
     branch_protection_injection_mode: none
