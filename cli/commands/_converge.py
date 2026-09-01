@@ -47,6 +47,7 @@ from shared.config import settings
 from shared.machine import MachineRoles
 from shared.platform_backend import get_backend
 from shared.platform_probes import browser_incapability
+from shared.private_storage import converge_private_tree, ensure_private_file
 from shared.runtime_config import migrate_permissions_helper_env_keys
 from shared.screen_capture import clear_status, write_status
 
@@ -107,9 +108,13 @@ def _ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
-    for sub in ("logs", "configs", "secrets"):
+    for sub in ("configs", "secrets"):
         (ctx.ava_home / sub).mkdir(parents=True, exist_ok=True)
-    (ctx.ava_home / "logs" / ".metadata_never_index").touch(exist_ok=True)
+    for sub in ("logs", "workspaces", "memory"):
+        converge_private_tree(ctx.ava_home / sub)
+    marker = ctx.ava_home / "logs" / ".metadata_never_index"
+    marker.touch(exist_ok=True)
+    ensure_private_file(marker)
 
 
 def _ensure_prod_editable_pth(ctx: ConvergeCtx) -> None:  # noqa: ARG001

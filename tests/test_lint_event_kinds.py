@@ -60,6 +60,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "auth401_rejected",  # gateway/_auth401_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
         "agent_registry",  # gateway/_agent_max_id.py:emit_max_agent_id telemetry.emit("telemetry", ...)
         "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)
+        "pitr_remote_inventory",  # services/pitr/retention_scheduler.py:refresh (positional emit)
+        "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)
         "plugin_load_failed",  # agent/graph/_build.py:_report_plugin_load_failure telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit

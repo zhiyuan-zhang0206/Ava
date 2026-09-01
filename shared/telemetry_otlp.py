@@ -179,6 +179,11 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     # A watchdog timestamp is absolute freshness state. Summing it or
     # histogramming it would hide the age alert's only input.
     ("watchdog_tick", "last_tick_timestamp_seconds"): "gauge",
+    # Retention planning reads the remote object inventory with viewer-only
+    # credentials. Both fields are snapshots, so Prometheus must retain their
+    # latest value rather than summing every dry-run refresh.
+    ("pitr_remote_inventory", "object_count"): "gauge",
+    ("pitr_remote_inventory", "bytes"): "gauge",
     # The hourly maintenance pass refreshes these table high-water marks; a
     # gauge preserves the latest measurement between samples. The *_live
     # fields are the live tuple counts, emitted alongside so physical size can

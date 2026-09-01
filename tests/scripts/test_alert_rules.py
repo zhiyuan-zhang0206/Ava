@@ -75,6 +75,9 @@ _EXPECTED_UIDS = {
     # memory-search growth layer (task #2088/#2090) — OTLP gauge mirror
     "ava-ops-memory-search-rows-warning",
     "ava-ops-memory-search-rows-critical",
+    # recovery posture — scheduled-proof failure and remote retention growth
+    "ava-ops-recovery-drill-failed",
+    "ava-ops-pitr-storage-growth",
 }
 
 # The infra rules and the metric each one is built on. A rename on the
@@ -98,7 +101,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [20, 8]
+    assert [len(group["rules"]) for group in groups] == [21, 9]
     return groups
 
 
@@ -658,3 +661,48 @@ def test_memory_search_rows_rules() -> None:
         assert "100k" in description
         if uid == "ava-ops-memory-search-rows-warning":
             assert "50k" in description
+
+
+def test_recovery_drill_failure_rule_is_immediate_and_names_the_drill() -> None:
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-recovery-drill-failed"]
+
+    assert _exprs(rule, "loki") == [
+        'sum by (attributes_drill) (count_over_time({service_name="unknown_service", '
+        'event_name="recovery_drill_failed"} | json | cluster=".ava" | '
+        'category="telemetry" | level="error" [1h]))'
+    ]
+    assert rule["for"] == "0m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert _threshold_params(rule) == [[0]]
+    assert rule["labels"] == {
+        "severity": "error",
+        "ruleUID": "ava-ops-recovery-drill-failed",
+        "metric": "recovery_drill_failure",
+        "team": "ava-ops",
+    }
+    assert "attributes_drill" in rule["annotations"]["summary"]
+
+
+def test_pitr_storage_growth_rule_compares_remote_bytes_week_over_week() -> None:
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-pitr-storage-growth"]
+
+    assert _exprs(rule, "prometheus") == [
+        "max by (machine, backend) (ava_pitr_remote_inventory_bytes_ratio) / "
+        "clamp_min(max by (machine, backend) "
+        "(ava_pitr_remote_inventory_bytes_ratio offset 7d), 1)"
+    ]
+    assert _exprs(rule, "loki") == []
+    assert rule["for"] == "1h"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert _threshold_params(rule) == [[1.25]]
+    assert rule["labels"] == {
+        "severity": "warning",
+        "ruleUID": "ava-ops-pitr-storage-growth",
+        "metric": "pitr_remote_storage_growth",
+        "team": "ava-ops",
+        "notify_im": "false",
+    }

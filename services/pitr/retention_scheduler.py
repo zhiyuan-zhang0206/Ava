@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from services.pitr.retention_planner import DryRunResult, write_dry_run_plan
 from services.pitr.store_factory import get_store_group
+from shared import telemetry
 from shared.config.physical_backup import PhysicalBackupSettings
 from shared.health_schema import DEGRADED, OK, component
 from shared.paths import ava_home
@@ -72,8 +73,18 @@ def refresh(config: PhysicalBackupSettings) -> DryRunResult:
     credentials = config.pitr_restore_gcs_credentials_file
     if credentials is None:
         raise RuntimeError("validated retention viewer credential is missing")
-    return write_dry_run_plan(
+    result = write_dry_run_plan(
         ava_home() / "physical-backup",
         retain_chains=config.pitr_retained_weekly_chains,
         inventory_reader=get_store_group().retention_inventory_reader(),
     )
+    telemetry.emit(
+        "telemetry",
+        "pitr_remote_inventory",
+        attributes={
+            "backend": config.pitr_store_backend,
+            "object_count": result.remote_object_count,
+            "bytes": result.remote_bytes,
+        },
+    )
+    return result
