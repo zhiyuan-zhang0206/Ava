@@ -92,6 +92,7 @@ class ModelTuning:
     prompt_action_caution_enabled: bool | None = None
     prompt_align_before_action_enabled: bool | None = None
     prompt_delegation_check_enabled: bool | None = None
+    prompt_capabilities_match_first_enabled: bool | None = None
     prompt_cross_machine_delegation_enabled: bool | None = None
     prompt_file_driven_work_enabled: bool | None = None
     prompt_temporal_awareness_enabled: bool | None = None
@@ -140,6 +141,7 @@ DEFAULT_TUNING = ModelTuning(
     prompt_action_caution_enabled=True,
     prompt_align_before_action_enabled=True,
     prompt_delegation_check_enabled=True,
+    prompt_capabilities_match_first_enabled=True,
     prompt_cross_machine_delegation_enabled=True,
     prompt_file_driven_work_enabled=True,
     prompt_temporal_awareness_enabled=True,

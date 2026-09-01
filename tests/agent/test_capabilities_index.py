@@ -9,7 +9,9 @@ Also pinned here: the delegation check names the index (an agent that never
 consults it cannot know it is reinventing one of its own skills), and building
 the prompt records NO skill attribution — exposure is not use, and `loaded`,
 the only depth ava_self_evolution scores, is written only when the agent
-actually opens a skill body.
+actually opens a skill body. The index itself tells an agent to match against
+its capabilities first by default; that instruction is independently toggled,
+ordered after the rebuild nudge, and absent with an empty index.
 
 Skills are faked by pointing `ava.skills._skills_dir` at a tmpdir, same shape as
 tests/agent/test_preloaded_skills.py.
@@ -18,6 +20,7 @@ tests/agent/test_preloaded_skills.py.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -146,6 +149,61 @@ def test_header_only_promises_the_halves_that_rendered(
     assert "subset" in text
 
 
+_MATCH_FIRST_PARAGRAPH = (
+    "Before starting any task, first match it against this index: name the skill(s) "
+    "you plan to use and why, and write that reasoning into your final output."
+)
+_MATCH_EVERY_TASK_PARAGRAPH = "This is your index of what you can already do."
+
+
+def test_default_index_instructs_matching_capabilities_first(
+    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shared tuning floor gives every rendered index the match-first instruction."""
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
+    _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
+
+    assert _MATCH_FIRST_PARAGRAPH in capabilities_section()
+
+
+def test_match_first_instruction_can_be_disabled(
+    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit false override removes only the rollbackable match-first paragraph."""
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
+    monkeypatch.setattr(settings.agent, "prompt_capabilities_match_first_enabled", False)
+    _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
+
+    text = capabilities_section()
+
+    assert _MATCH_FIRST_PARAGRAPH not in text
+    assert _MATCH_EVERY_TASK_PARAGRAPH in text
+    assert "- `ava.skills.alpha` — Alpha desc" in text
+
+
+def test_match_first_instruction_follows_the_rebuild_nudge(
+    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The action-planning instruction follows the standing index framing."""
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
+    _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
+
+    text = capabilities_section()
+
+    assert text.index(_MATCH_EVERY_TASK_PARAGRAPH) < text.index(_MATCH_FIRST_PARAGRAPH)
+
+
+def test_empty_index_omits_the_match_first_instruction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No standalone task instruction remains when neither capabilities half renders."""
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
+    monkeypatch.setattr("ava.mcps.servers", list)
+
+    text = capabilities_section()
+
+    assert text == ""
+    assert _MATCH_FIRST_PARAGRAPH not in text
+
+
 def test_delegation_check_makes_consulting_the_index_mandatory(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -212,10 +270,10 @@ def test_building_the_prompt_records_no_skill_attribution(
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc", body="# A\n")
     _write_skill(fake_skills_dir / "grp", "beta", "beta", "Beta desc", body="# B\n")
 
-    batches: list[list] = []
+    batches: list[list[Any]] = []
 
-    def _fake_write(agent: int, skills: list) -> bool:
-        batches.append(skills)  # pyright: ignore[reportUnknownMemberType]
+    def _fake_write(agent: int, skills: list[Any]) -> bool:
+        batches.append(skills)
         return True
 
     # Stub the ONE write path, so any regression that routes prompt assembly
