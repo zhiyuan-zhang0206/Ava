@@ -420,7 +420,7 @@ async def put_config(body: dict[str, object], machine: str | None = None) -> Con
         # process picks it up on its next restart (restart_required says which).
         host_result = await _dispatch_config_write(target, plan.host_body, local=True)
         cluster_changed: set[str] = set()
-        if host_result.applied:
+        if host_result.applied and (plan.cluster_writes or plan.cluster_removals):
             await asyncio.to_thread(
                 runtime_config.write_fields,
                 plan.cluster_writes,
