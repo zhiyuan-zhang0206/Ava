@@ -160,9 +160,8 @@ class _StdlibInterceptHandler(logging.Handler):
             self.handleError(record)
 
 
-# Top-level logger names for our own code (plus `ci-autoscale`, a bare
-# string name rather than a dotted module path — see ops/ci_autoscale/*).
-# `_install_stdlib_intercept` raises these back to DEBUG so a controller's
+# Top-level logger names for our own code. `_install_stdlib_intercept` raises
+# these back to DEBUG so a controller's
 # `_log.debug(...)` (e.g. `ops.controllers.respawn`'s gateway-health
 # deferral line, #1126) reaches the file sink instead of being dropped at
 # the root INFO floor. Every dotted child (`ops.controllers.respawn` under
@@ -178,7 +177,6 @@ _FIRST_PARTY_LOGGER_NAMES = (
     "gateway",
     "agent",
     "ava_builtins",
-    "ci-autoscale",
 )
 
 
