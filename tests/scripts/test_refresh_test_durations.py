@@ -195,6 +195,8 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
             "12",
             "--group",
             "3",
+            "--splitting-algorithm",
+            "least_duration",
         ]
         assert coverage is True
         assert json.loads(durations_path.read_text()) == json.loads(source.read_text())

@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -42,7 +43,25 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)
-    assert values["AVA_DB_URL"] == expected
+    actual_parts = urlsplit(values["AVA_DB_URL"])
+    expected_parts = urlsplit(expected)
+    # libpq dial hints such as hostaddr are implementation-specific query
+    # parameters. The runner projection's connection identity must still match.
+    assert (
+        actual_parts.scheme,
+        actual_parts.username,
+        actual_parts.password,
+        actual_parts.hostname,
+        actual_parts.port,
+        actual_parts.path.lstrip("/"),
+    ) == (
+        expected_parts.scheme,
+        expected_parts.username,
+        expected_parts.password,
+        expected_parts.hostname,
+        expected_parts.port,
+        expected_parts.path.lstrip("/"),
+    )
 
 
 # NOTE: shared/bootstrap.py reads os.environ directly (it must run BEFORE
