@@ -133,9 +133,6 @@ def write_fields(
     (never silent — a silent full-replace once dropped a cluster's secrets).
     """
     path = env_file_path()
-    if not updates and not removals:
-        return path.read_bytes() if capture_bytes and path.exists() else None
-    amap = _field_alias_map()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Cross-process exclusive, for the whole snapshot-and-rewrite section. Each
     # `set_key` / `unset_key` READS the file and rewrites it, so two writers
@@ -151,6 +148,9 @@ def write_fields(
     # taken mid-rewrite would preserve a state that never existed.
     captured: bytes | None = None
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
+        if not updates and not removals:
+            return path.read_bytes() if capture_bytes and path.exists() else None
+        amap = _field_alias_map()
         if expected_digest is not None:
             import hashlib
 
