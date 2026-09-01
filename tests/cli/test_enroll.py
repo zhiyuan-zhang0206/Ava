@@ -11,6 +11,14 @@ import pytest
 from cli import enroll
 from shared.env_registry import WSL_DEFAULT_HEALTH_PORT_BASE, health_port_env_aliases
 
+_REAL_CHECK_BROWSER_DEPS = enroll._check_browser_deps
+
+
+@pytest.fixture(autouse=True)
+def _stub_browser_deps_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep existing enrollment tests hermetic on hosts without browser deps."""
+    monkeypatch.setattr(enroll, "_check_browser_deps", lambda: None)
+
 
 @pytest.fixture(autouse=True)
 def _restore_cluster_secret_env() -> Iterator[None]:
@@ -268,6 +276,88 @@ def test_run_enroll_reads_cluster_secret_from_environment(
 
     assert rc == 0
     assert "AVA_CLUSTER_SECRET=from-environment" in env_path.read_text()
+
+
+def test_run_enroll_reports_browser_deps_ready_after_writing_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A capable enrolled host gets explicit confirmation that ava-browser will run."""
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
+    monkeypatch.setattr(enroll, "_check_browser_deps", _REAL_CHECK_BROWSER_DEPS)
+    monkeypatch.setattr(enroll, "ensure_browser_deps", lambda: None)
+    monkeypatch.setattr(
+        enroll,
+        "_fetch_enroll_payload",
+        lambda *_args, **_kwargs: {"AVA_DB_URL": "postgresql://ava@db:5432/ava"},  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    rc = enroll.run_enroll(
+        [
+            "--gateway",
+            "https://cp",
+            "--machine-name",
+            "runner",
+            "--machine-host",
+            "10.0.0.9",
+            "--cluster-secret",
+            "sek",
+        ]
+    )
+
+    assert rc == 0
+    assert env_path.exists()
+    assert "browser deps OK (display + Chrome + npx)" in capsys.readouterr().out
+
+
+def test_run_enroll_prints_browser_warning_to_stdout_and_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An incapable host enrolls successfully but cannot silently skip ava-browser."""
+    env_path = tmp_path / ".env"
+    reason = "no npx (install Node.js for chrome-devtools-mcp)"
+    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
+    monkeypatch.setattr(enroll, "_check_browser_deps", _REAL_CHECK_BROWSER_DEPS)
+    monkeypatch.setattr(enroll, "ensure_browser_deps", lambda: reason)
+    monkeypatch.setattr(
+        enroll,
+        "_fetch_enroll_payload",
+        lambda *_args, **_kwargs: {"AVA_DB_URL": "postgresql://ava@db:5432/ava"},  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    rc = enroll.run_enroll(
+        [
+            "--gateway",
+            "https://cp",
+            "--machine-name",
+            "runner",
+            "--machine-host",
+            "10.0.0.9",
+            "--cluster-secret",
+            "sek",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert env_path.exists()
+    assert reason in captured.out
+    assert "ava-browser will not run on this host until this is fixed" in captured.out
+    assert reason in captured.err
+    assert "ava-browser will not run on this host until this is fixed" in captured.err
+
+
+def test_browser_explicitly_disabled_reads_the_unit_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only an explicit false setting suppresses the fresh-host browser check."""
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
+    assert enroll._browser_explicitly_disabled() is False
+    env_path.write_text("AVA_BROWSER_ENABLED=true\n")
+    assert enroll._browser_explicitly_disabled() is False
+    env_path.write_text("AVA_BROWSER_ENABLED = false \n")
+    assert enroll._browser_explicitly_disabled() is True
 
 
 def test_run_enroll_requires_machine_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 from shared import bootstrap
+from shared.browser_deps import browser_deps_warning, ensure_browser_deps
 from shared.dotenv_boot import AVA_ENV_PATH
 from shared.env_registry import (
     WSL_DEFAULT_HEALTH_PORT_BASE,
@@ -221,6 +222,37 @@ def _print_health_port_outcome(
             "kept this unit's existing daemon health-port block: "
             f"{', '.join(f'{k}={v}' for k, v in sorted(existing.items()))}"
         )
+
+
+def _browser_explicitly_disabled() -> bool:
+    """Return whether this unit deliberately disables the shared browser service."""
+    if not AVA_ENV_PATH.exists():
+        return False
+    for line in AVA_ENV_PATH.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "AVA_BROWSER_ENABLED":
+            return value.strip().lower() == "false"
+    return False
+
+
+def _check_browser_deps() -> None:
+    """Detect and repair ava-browser dependencies, then report any remaining gap.
+
+    Enroll must not leave a host that silently skips ava-browser forever
+    (company-mini, 2026-08-27: no npx, skipped since). Never fails enroll —
+    identity and connectivity are enroll's job, and a headless host legitimately
+    cannot run a browser. Both output streams receive a warning because headless
+    enroll callers may capture only one.
+    """
+    if _browser_explicitly_disabled():
+        return
+    reason = ensure_browser_deps()
+    if reason is None:
+        print("browser deps OK (display + Chrome + npx) — ava-browser will run on this host")
+        return
+    warning = browser_deps_warning(reason)
+    print(warning)
+    print(warning, file=sys.stderr)
 
 
 def _payload_serves_loopback_data_plane(payload: dict[str, str]) -> bool:
@@ -462,5 +494,6 @@ def run_enroll(argv: list[str]) -> int:
     _print_health_port_outcome(
         explicit=args.health_port_base, resolved=health_port_base, existing=existing_health_ports
     )
+    _check_browser_deps()
     print("next: run `ava start` on this host.")
     return 0
