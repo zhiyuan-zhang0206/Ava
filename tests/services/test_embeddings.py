@@ -67,10 +67,12 @@ class _FakePost:
         *,
         raises_times: int = 0,
         status_ok: bool = True,
+        prompt_token_count: int | None = None,
     ) -> None:
         self._vectors = vectors or []
         self._raises_remaining = raises_times
         self._status_ok = status_ok
+        self._prompt_token_count = prompt_token_count
         self.call_count = 0
         self.calls: list[dict[str, Any]] = []
 
@@ -83,11 +85,62 @@ class _FakePost:
             self._raises_remaining -= 1
             raise httpx.ConnectError("simulated network failure")
         embeddings = [{"values": v} for v in self._vectors]
-        return _FakeResponse({"embeddings": embeddings}, status_ok=self._status_ok)
+        body: dict[str, Any] = {"embeddings": embeddings}
+        if self._prompt_token_count is not None:
+            body["usageMetadata"] = {"promptTokenCount": self._prompt_token_count}
+        return _FakeResponse(body, status_ok=self._status_ok)
 
 
 def _patch_post(monkeypatch: pytest.MonkeyPatch, fake: _FakePost) -> None:
     monkeypatch.setattr(httpx, "post", fake)
+
+
+class _RecordedSpan:
+    def __init__(self, name: str, start_time: int | None) -> None:
+        self.name = name
+        self.start_time = start_time
+        self.attributes: dict[str, Any] = {}
+        self.ended = False
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        self.attributes[key] = value
+
+    def end(self) -> None:
+        self.ended = True
+
+
+class _RecordingTracer:
+    def __init__(self) -> None:
+        self.spans: list[_RecordedSpan] = []
+
+    def start_span(self, name: str, *, start_time: int | None = None) -> _RecordedSpan:
+        span = _RecordedSpan(name, start_time)
+        self.spans.append(span)
+        return span
+
+
+def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
+    from shared import trace as trace_mod
+
+    tracer = _RecordingTracer()
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    return tracer
+
+
+def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
+    assert len(tracer.spans) == 1
+    span = tracer.spans[0]
+    assert span.name == "ava.billing.call"
+    assert span.ended is True
+    assert span.attributes["ava.billing.vendor"] == "google"
+    assert span.attributes["ava.billing.model"] == _MODEL_ID
+    assert span.attributes["ava.billing.tokens_in"] == tok_in
+    assert span.attributes["ava.billing.tokens_out"] == 0
+    assert span.attributes["ava.billing.usage_kind"] == "embedding"
+    assert span.attributes["ava.billing.cost"] == 0.0
+    assert span.attributes["ava.billing.unpriced"] is True
 
 
 @pytest.fixture(autouse=True)
@@ -156,6 +209,28 @@ def test_embed_query_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["requests"][0]["taskType"] == "RETRIEVAL_QUERY"
 
 
+def test_embed_batch_emits_unpriced_billing_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakePost(vectors=[[1.0] * DIM], prompt_token_count=123)
+    _patch_post(monkeypatch, fake)
+    tracer = _enable_tracing(monkeypatch)
+
+    _provider().embed_batch(["hello"])
+
+    _assert_unpriced_embedding_span(tracer, tok_in=123)
+
+
+def test_embed_batch_emits_zero_token_span_without_usage_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakePost(vectors=[[1.0] * DIM])
+    _patch_post(monkeypatch, fake)
+    tracer = _enable_tracing(monkeypatch)
+
+    _provider().embed_batch(["hello"])
+
+    _assert_unpriced_embedding_span(tracer, tok_in=0)
+
+
 def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     """The async path uses `httpx.AsyncClient` (not the sync `httpx.post`),
     so it needs its own client fake — the wire contract it produces is the
@@ -197,6 +272,38 @@ def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["requests"][0]["outputDimensionality"] == DIM
 
 
+def test_embed_query_async_emits_unpriced_billing_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _AsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> _AsyncClient:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(
+            self, url: str, *, json: dict[str, Any], headers: dict[str, str]
+        ) -> _FakeResponse:
+            return _FakeResponse(
+                {
+                    "embeddings": [{"values": [1.0] * DIM} for _ in json["requests"]],
+                    "usageMetadata": {"promptTokenCount": 123},
+                }
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
+    tracer = _enable_tracing(monkeypatch)
+
+    result = asyncio.run(_provider().embed_query_async("hello"))
+
+    assert result.shape == (DIM,)
+    _assert_unpriced_embedding_span(tracer, tok_in=123)
+
+
 def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Wire contract: endpoint, api-key header, per-text request shape."""
     fake = _FakePost(vectors=[[1.0] * DIM])
@@ -214,9 +321,11 @@ def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None
 def test_embed_batch_empty_short_circuit(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakePost(vectors=[])
     _patch_post(monkeypatch, fake)
+    tracer = _enable_tracing(monkeypatch)
     result = _provider().embed_batch([])
     assert result.shape == (0, DIM)
     assert fake.call_count == 0
+    assert tracer.spans == []
 
 
 def test_embed_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:

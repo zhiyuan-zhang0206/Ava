@@ -18,6 +18,9 @@ dependency. `google-genai` stays installed for `ava._understand` (media)
 and `langchain-google-genai` (LLM factory), but nothing on the
 indexer / gateway path imports it now.
 
+Billing imports are also lazy: they pull LangChain and OpenTelemetry into the
+always-on indexer only after a successful provider call, never at module load.
+
 API key is read from `GEMINI_API_KEY` env — prod injects it via
 `~/.ava/.env`.
 
@@ -124,6 +127,31 @@ def _vectors_from_body(body: dict[str, Any], texts: list[str]) -> np.ndarray:
     return vectors
 
 
+def _emit_billing(body: dict[str, Any]) -> None:
+    """Emit the completed Gemini embedding call without affecting it."""
+    try:
+        from shared.lm.billing import emit_billing_event, vendor_of_model
+        from shared.lm.pricing import quote
+
+        usage: dict[str, Any] = body.get("usageMetadata") or {}
+        tok_in = int(usage.get("promptTokenCount") or 0)
+        vendor = vendor_of_model(_MODEL_ID)
+        if vendor is None:
+            return
+        priced = quote(_MODEL_ID, tok_in, 0)
+        emit_billing_event(
+            vendor=vendor,
+            model=_MODEL_ID,
+            tok_in=tok_in,
+            tok_out=0,
+            cost_usd=priced.cost_usd if priced is not None else 0.0,
+            usage_kind="embedding",
+            unpriced=priced is None,
+        )
+    except Exception:
+        return
+
+
 def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
@@ -159,6 +187,7 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
+    _emit_billing(body)
     return _vectors_from_body(body, texts)
 
 
@@ -199,6 +228,7 @@ async def _embed_async(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
+    _emit_billing(body)
     return _vectors_from_body(body, texts)
 
 
