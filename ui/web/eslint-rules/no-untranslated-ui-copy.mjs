@@ -24,6 +24,14 @@ function isNonCopyTemplate(node, allow) {
   );
 }
 
+function isPureStringConcatenation(node) {
+  return (node.type === "Literal" && typeof node.value === "string")
+    || (node.type === "BinaryExpression"
+      && node.operator === "+"
+      && isPureStringConcatenation(node.left)
+      && isPureStringConcatenation(node.right));
+}
+
 function isAllowedExpression(
   node,
   allow,
@@ -279,6 +287,7 @@ const rule = {
           );
         case "BinaryExpression":
           return node.operator !== "+"
+            || !isPureStringConcatenation(node)
             || (isAllowedChildExpression(node.left) && isAllowedChildExpression(node.right));
         case "CallExpression": {
           if (isKnownTranslationCall(node)) return true;
