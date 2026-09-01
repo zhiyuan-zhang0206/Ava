@@ -2,6 +2,45 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+/**
+ * @typedef {{ route: string, firstLoadUncompressedJsBytes: number }} RouteBundleStat
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {value is RouteBundleStat}
+ */
+function isRouteBundleStat(value) {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "route" in value &&
+    typeof value.route === "string" &&
+    "firstLoadUncompressedJsBytes" in value &&
+    typeof value.firstLoadUncompressedJsBytes === "number"
+  );
+}
+
+/**
+ * Reject malformed Next diagnostics at the JSON boundary.
+ *
+ * @param {unknown} diagnostics
+ * @returns {RouteBundleStat[]}
+ */
+export function parseRouteBundleStats(diagnostics) {
+  if (!Array.isArray(diagnostics) || !diagnostics.every(isRouteBundleStat)) {
+    throw new Error("Next build diagnostics do not contain valid route bundle statistics");
+  }
+
+  return diagnostics;
+}
+
+/**
+ * @param {RouteBundleStat[]} routeStats
+ * @param {string} route
+ * @param {number} budgetBytes
+ * @returns {number}
+ */
 export function checkFirstLoadJs(routeStats, route, budgetBytes) {
   const entry = routeStats.find((candidate) => candidate.route === route);
   if (entry === undefined) {
@@ -28,7 +67,11 @@ if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLTo
   // bytes (3.5%) of intentional growth before a bundle-size review is required.
   const budgetBytes = 1_250_000;
   const diagnosticsPath = path.join(".next", "diagnostics", "route-bundle-stats.json");
-  const routeStats = JSON.parse(readFileSync(diagnosticsPath, "utf8"));
+  /** @type {unknown} */
+  const diagnostics = JSON.parse(readFileSync(diagnosticsPath, "utf8"));
+  const routeStats = parseRouteBundleStats(diagnostics);
   const bytes = checkFirstLoadJs(routeStats, route, budgetBytes);
-  console.log(`First-load JavaScript for ${route}: ${bytes} bytes (budget: ${budgetBytes} bytes)`);
+  process.stdout.write(
+    `First-load JavaScript for ${route}: ${bytes} bytes (budget: ${budgetBytes} bytes)\n`,
+  );
 }
