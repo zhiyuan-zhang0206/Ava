@@ -151,7 +151,6 @@ describe("TimelineView accessibility", () => {
     const log = screen.getByRole("log");
     expect(log.getAttribute("aria-live")).toBe("polite");
     expect(log.getAttribute("aria-relevant")).toBe("additions");
-    expect(log.querySelector('[aria-live="off"]')).not.toBeNull();
     expect(screen.queryByTestId("timeline-turn-announcement")).toBeNull();
 
     rerender(<TimelineView items={[]} turnActive />);
@@ -160,9 +159,10 @@ describe("TimelineView accessibility", () => {
     rerender(
       <TimelineView
         turnActive
-        items={[makeItem({ kind: "agent_chat", payload: "A streaming chunk" })]}
+        items={[makeItem({ item_id: "streaming", kind: "agent_chat", payload: "A streaming chunk" })]}
       />,
     );
+    expect(log.querySelector('[data-item-id="streaming"]')?.getAttribute("aria-live")).toBe("off");
     expect(screen.getByTestId("timeline-turn-announcement").textContent).toBe("Agent is responding.");
 
     rerender(<TimelineView items={[]} />);
@@ -199,6 +199,7 @@ describe("compact history segment dividers", () => {
     const dividers = screen.getAllByTestId("compact-history-divider");
     expect(dividers).toHaveLength(2);
     expect(dividers.map((divider) => divider.dataset.segmentRank)).toEqual(["2", "1"]);
+    expect(dividers.map((divider) => divider.getAttribute("aria-live"))).toEqual(["off", "off"]);
     expect(screen.getAllByText("Original history before compact")).toHaveLength(2);
 
     const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");

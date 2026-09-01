@@ -140,6 +140,7 @@ export function TurnBlock({
     <div
       data-item-id={id}
       data-turn-member-ids={memberIds.join(" ")}
+      aria-live="off"
       className={cn(
         "border-l-2 border-dashed border-border/70 rounded-r-sm",
         !expanded && "bg-muted/30",
