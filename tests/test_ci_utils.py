@@ -166,6 +166,18 @@ def test_merge_conflict_short_circuits(gh: Any, has_workflows: Any) -> None:
     assert ci_utils.check_ci("1").verdict is CIStatus.MERGE_CONFLICT
 
 
+def test_merge_conflict_keeps_qa_approved_gate_out_of_completed(
+    gh: Any, has_workflows: Any
+) -> None:
+    gate = _check("qa-approved-gate", "FAILURE", workflow="QA approved gate")
+    gh([_check("backend", "SUCCESS"), gate], mergeable="CONFLICTING")
+    has_workflows(True)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.MERGE_CONFLICT
+    assert r.completed == ["backend"]
+    assert r.gate_checks == [gate]
+
+
 def test_empty_rollup(gh: Any, has_workflows: Any) -> None:
     gh([])
     has_workflows(True)
@@ -290,6 +302,7 @@ def test_runs_probe_survives_unparseable_output(monkeypatch: pytest.MonkeyPatch)
 
 _MERGIFY_PENDING = _check("Mergify Merge Queue", "", workflow="", status="IN_PROGRESS")
 _MERGIFY_SUCCESS = _check("Mergify Merge Queue", "SUCCESS", workflow="")
+_QA_APPROVED_GATE_FAILURE = _check("qa-approved-gate", "FAILURE", workflow="QA approved gate")
 
 
 def test_pending_mergify_check_does_not_block_all_passed(gh: Any, has_workflows: Any) -> None:
@@ -315,6 +328,17 @@ def test_mergify_check_excluded_from_passed_and_workflow_checks(
     assert "Mergify Merge Queue" not in r.passed
     assert "Mergify Merge Queue" not in r.workflow_checks
     assert len(r.mergify_checks) == 1
+
+
+def test_qa_approved_gate_failure_is_excluded_from_ci_verdict(gh: Any, has_workflows: Any) -> None:
+    """The QA label gate is enforced by the queue, not the CI verdict."""
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), _QA_APPROVED_GATE_FAILURE])
+    has_workflows(True)
+    r = ci_utils.check_ci("57")
+    assert r.verdict is CIStatus.ALL_PASSED
+    assert "qa-approved-gate" not in r.failed
+    assert "qa-approved-gate" not in r.workflow_checks
+    assert r.gate_checks == [_QA_APPROVED_GATE_FAILURE]
 
 
 def test_mergify_only_rollup_falls_back_to_no_workflow_runs(gh: Any, has_workflows: Any) -> None:
@@ -836,6 +860,8 @@ def test_json_probe_carries_terminal_flag(gh: Any, has_workflows: Any, capsys) -
     payload = json.loads(capsys.readouterr().out)
     assert payload["verdict"] == "all_passed"
     assert payload["terminal"] is True
+    assert payload["mergify_checks"] == []
+    assert payload["gate_checks"] == []
 
 
 def test_json_probe_pending_is_not_terminal(gh: Any, has_workflows: Any, capsys) -> None:
