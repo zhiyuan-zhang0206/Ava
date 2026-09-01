@@ -428,9 +428,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     raise_fd_limit(65536)  # every service spawned here inherits the raised ceiling
 
     # 1) converge host state (symlink / PATH / $AVA_HOME dirs / plugin config
-    # images / memory pool). Idempotent; subsumes the former standalone
-    # _ensure_memory_repo() call. `ava cluster update` inherits this via its trailing
-    # cmd_start, so one gateway update converges the whole fleet.
+    # images). Memory initialization is explicit (`ava memory init`) and never
+    # runs during start or rollback. `ava cluster update` inherits this via its
+    # trailing cmd_start, so one gateway update converges the whole fleet.
     try:
         _ns.converge_host(repo, roles)
     except Exception as e:

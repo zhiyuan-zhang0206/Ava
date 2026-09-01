@@ -145,7 +145,7 @@ plus bundled assets:
 | Module | Loaded by | May depend on |
 |---|---|---|
 | `plugin.py` | `agent/graph/_build.py:_load_extensions()` in the agent process | the agent runtime, hooks, the `ava.*` namespace |
-| `setup.py` | `cli/commands/_converge_plugins.py:run_plugin_scaffolds` on every converge | **`shared` only** |
+| `setup.py` | `cli/commands/_converge_plugins.py:run_plugin_scaffolds` from explicit `ava memory init` | **`shared` only** |
 | `default_config.py` | `shared/plugins_config.py:update_all_disk_images`, and the framework extension load via `shared/plugin_config_registry.py:register_plugin_config` | `shared` only |
 | bundled `skills/`, `.mcp.json` | converge / the MCP loader | n/a |
 

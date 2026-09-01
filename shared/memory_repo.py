@@ -77,7 +77,7 @@ class MemoryPoolBootstrapFailed(RuntimeError):  # noqa: N818
 
 
 class MemoryRepoUninitialized(RuntimeError):  # noqa: N818
-    """`~/.ava/memory` is not yet a git repo — `ava start`'s ensure_memory_repo() should auto-init."""
+    """`~/.ava/memory` is not yet a git repo — run `ava memory init` first."""
 
 
 class MemoryBranchMismatch(RuntimeError):  # noqa: N818
@@ -225,7 +225,8 @@ def _init_local_repo(branch: str, cwd: Path) -> None:
 def _strip_remotes(cwd: Path) -> None:
     """Remove every git remote from the checkout at `cwd`. Keep-local mode must
     never sync off-box, so a leftover remote (e.g. a host flipped to keep-local
-    after being set up against a central remote) is dropped on every converge."""
+    after being set up against a central remote) is dropped on every explicit
+    memory initialization."""
     for name in _run_git("remote", cwd=cwd).split():
         _run_git("remote", "remove", name, cwd=cwd)
 

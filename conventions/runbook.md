@@ -363,9 +363,11 @@ with `ava converge`. It covers the `ava` symlink (re-ensuring install.sh's boots
 `~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, a gateway-host guard that fails
 loud on frontend build-time env overrides (`ui/web/.env{,.local,.production,.production.local}`
 bake `NEXT_PUBLIC_*` into the bundle and silently beat the runtime gateway inference —
-the 2026-06-09 outage), plugin config images, the pre-rename disabled-services marker
-carry-over (below), and each enabled plugin's `scaffold()` (`ava_memory`'s brings up the memory pool checkouts and seeds `MEMORY.md` + the commit-cap hook; a disabled plugin is skipped and leaves nothing behind). The unit-state steps (plugin images / plugin scaffolds) need a configured
-unit, so on a brand-new host they first run at `ava start`, not during `install.sh`.
+the 2026-06-09 outage), plugin config images, and the pre-rename disabled-services marker
+carry-over (below). Converge never runs plugin scaffolds or touches the memory pool;
+explicit `ava memory init` brings up the memory checkouts and seeds `MEMORY.md` plus the
+commit-cap hook. The unit-state plugin-image step needs a configured unit, so on a
+brand-new host it first runs at `ava start`, not during `install.sh`.
 On a gateway host it also registers the **fleet UI gate** (`cli/commands/_converge_gate.py`)
 — the launchd KeepAlive job that owns the entry port (:3000) and proxies the Next.js app
 on :3001. That step **replaces the running job only when the desired plist actually
