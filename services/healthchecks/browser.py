@@ -14,7 +14,7 @@ Two questions, both required, because either answer alone lies:
   across a `SingletonLock` handoff (`services/browser/daemon.py`:
   `_supervise_chrome`) — a handed-off Chrome is out of its process tree, so the
   reach claim weakens there (the known gap is recorded in
-  `services/agent_runner_side/browser/browser.ava.okf.md`).
+  `services/agent_runner_side/browser/browser/browser.ava.okf.md`).
 
 A bare CDP probe was the whole check, and it cannot tell a supervised Chrome from
 an orphan — nor ours from anyone's. The daemon deliberately refuses to launch

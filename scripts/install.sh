@@ -271,7 +271,7 @@ warn_browser_deps() {
     command -v npx >/dev/null 2>&1 && return 0
     echo "install.sh: WARNING ava-browser needs Node.js (npx); it is not on PATH — ava-browser will stay skipped on this host." >&2
     case "$OS" in
-        Darwin) echo "  Run \`brew install node@22\` (or \`brew install node\`) then re-run this install." >&2 ;;
+        Darwin) echo "  Run \`brew install node\` (or \`brew install node@22 && brew link --force node@22\`) then re-run this install." >&2 ;;
         Linux)  echo "  Run \`curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs\` then re-run this install." >&2 ;;
     esac
 }

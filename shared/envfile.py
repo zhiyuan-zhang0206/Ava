@@ -13,7 +13,6 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from shared.config import cluster_tz
 from shared.platform import file_lock
 from shared.private_storage import ensure_private_dir, ensure_private_file, write_private_bytes
 
@@ -63,6 +62,8 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
     try:
         if not path.exists():
             return None
+        from shared.config import cluster_tz
+
         content = path.read_text()
         if not content.strip():
             return None

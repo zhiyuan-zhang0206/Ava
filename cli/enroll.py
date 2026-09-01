@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 
 from shared import bootstrap
-from shared.browser_deps import browser_deps_warning, ensure_browser_deps
+from shared.browser_deps import browser_deps_notice, browser_deps_warning, ensure_browser_deps
 from shared.dotenv_boot import AVA_ENV_PATH
 from shared.env_registry import (
     WSL_DEFAULT_HEALTH_PORT_BASE,
@@ -231,7 +231,8 @@ def _browser_explicitly_disabled() -> bool:
     for line in AVA_ENV_PATH.read_text(encoding="utf-8").splitlines():
         key, separator, value = line.partition("=")
         if separator and key.strip() == "AVA_BROWSER_ENABLED":
-            return value.strip().lower() == "false"
+            # Keep this raw bootstrap check aligned with Pydantic's bool coercion.
+            return value.strip().lower() in {"false", "0", "no", "off", "f", "n"}
     return False
 
 
@@ -241,14 +242,18 @@ def _check_browser_deps() -> None:
     Enroll must not leave a host that silently skips ava-browser forever
     (company-mini, 2026-08-27: no npx, skipped since). Never fails enroll —
     identity and connectivity are enroll's job, and a headless host legitimately
-    cannot run a browser. Both output streams receive a warning because headless
-    enroll callers may capture only one.
+    cannot run a browser. Repair warnings reach both output streams because
+    headless enroll callers may capture only one; a display-less host instead
+    receives a stdout-only informational notice because it needs no repair.
     """
     if _browser_explicitly_disabled():
         return
     reason = ensure_browser_deps()
     if reason is None:
-        print("browser deps OK (display + Chrome + npx) — ava-browser will run on this host")
+        print("browser deps OK (Chrome + npx on PATH) — ava-browser should start on this host")
+        return
+    if reason.startswith("no display"):
+        print(browser_deps_notice(reason))
         return
     warning = browser_deps_warning(reason)
     print(warning)

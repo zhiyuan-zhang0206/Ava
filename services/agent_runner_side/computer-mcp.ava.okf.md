@@ -114,7 +114,7 @@ complete facts for replay.
 - [[permissions-helper.ava.okf.md]] — the signed helper every action executes
   through; `screen_size` / `frontmost_app` are helper methods added for the
   snapshot geometry (2026-08-09, task #1101).
-- [[browser.ava.okf.md]] — browser tasks go through chrome MCP (DOM path,
+- [[browser/browser.ava.okf.md]] — browser tasks go through chrome MCP (DOM path,
   preferred); computer-mcp is the pixel-level fallback for surfaces DOM cannot
   reach (canvas, native apps, system settings).
 - [[watchdog.ava.okf.md]] — the healthcheck (`services.healthchecks.computer_mcp`)

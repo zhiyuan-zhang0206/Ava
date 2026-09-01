@@ -83,15 +83,27 @@ def test_incapable_host_does_not_offer_profile_seed(
 def test_enabled_but_incapable_warns_not_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """On a headless machine, _ensure_browser prints a warning and returns
-    without raising — converge proceeds, browser is just skipped."""
+    """On a headless machine, converge prints an informational skip and returns."""
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
     monkeypatch.setattr(cv, "browser_incapability", lambda: "no display")
-    # Must NOT raise — incapable hosts warn and return.
     cv._ensure_browser(_ctx(tmp_path))
-    assert "ava-browser will not run on this host until this is fixed" in capsys.readouterr().err
+    stderr = capsys.readouterr().err
+    assert "not applicable" in stderr
+    assert "Install Node.js" not in stderr
     # Legacy plugin file is still shed.
     assert not _plugin_path(tmp_path).exists()
+
+
+def test_enabled_with_missing_npx_prints_the_repair_box(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A repairable dependency gap keeps converge's existing warn-not-raise path."""
+    monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
+    monkeypatch.setattr(
+        cv, "browser_incapability", lambda: "no npx (install Node.js for chrome-devtools-mcp)"
+    )
+    cv._ensure_browser(_ctx(tmp_path))
+    assert "Install Node.js" in capsys.readouterr().err
 
 
 def test_step_registered_agent_runner_only() -> None:

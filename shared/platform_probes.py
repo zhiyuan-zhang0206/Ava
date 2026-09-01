@@ -34,6 +34,7 @@ _WINDOWS_CHROME_PATHS = (
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
     str(Path(os.environ.get("LOCALAPPDATA", "")) / "Google\\Chrome\\Application\\chrome.exe"),
 )
+NPX_INCAPABILITY_REASON = "no npx (install Node.js for chrome-devtools-mcp)"
 
 
 def _platform_chrome_binary() -> str | None:
@@ -140,7 +141,7 @@ def browser_incapability() -> str | None:
     if resolve_chrome_binary() is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
     if shutil.which("npx") is None:
-        return "no npx (install Node.js for chrome-devtools-mcp)"
+        return NPX_INCAPABILITY_REASON
     return None
 
 
@@ -157,7 +158,7 @@ def browser_deps_incapability() -> str | None:
     if _platform_chrome_binary() is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
     if shutil.which("npx") is None:
-        return "no npx (install Node.js for chrome-devtools-mcp)"
+        return NPX_INCAPABILITY_REASON
     return None
 
 

@@ -3,6 +3,8 @@
 import ast
 import inspect
 import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from cli import enroll
 from shared.env_registry import WSL_DEFAULT_HEALTH_PORT_BASE, health_port_env_aliases
 
 _REAL_CHECK_BROWSER_DEPS = enroll._check_browser_deps
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
@@ -64,6 +67,73 @@ def test_shared_package_init_does_not_import_settings() -> None:
         "shared/__init__.py must stay bare so `from shared import bootstrap` works on a "
         "fresh host before Settings can be built; found shared.config in imports"
     )
+
+
+def test_enroll_import_stays_settings_free_with_a_poisoned_browser_env(tmp_path: Path) -> None:
+    """The fresh-host import must not construct Settings from an invalid .env.
+
+    A transitive module-level shared.config import would make this subprocess
+    fail before enrollment could repair its host dependencies; AST guards alone
+    cannot observe that runtime import closure.
+    """
+    ava_home = tmp_path / "ava-home"
+    fake_home = tmp_path / "home"
+    ava_home.mkdir()
+    fake_home.mkdir()
+    proc = subprocess.run(
+        [sys.executable, "-c", "import cli.enroll; print('settings-free import ok')"],
+        cwd=_REPO_ROOT,
+        env={
+            **os.environ,
+            "AVA_BROWSER_ENABLED": "definitely-not-a-bool",
+            "AVA_HOME": str(ava_home),
+            "HOME": str(fake_home),
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "settings-free import ok"
+
+
+def test_first_bootstrap_write_stays_settings_free_with_a_poisoned_browser_env(
+    tmp_path: Path,
+) -> None:
+    """Fresh enrollment must write its first .env without constructing Settings.
+
+    Import-only coverage misses the snapshot path that runs during
+    ``write_bootstrap_env``. A module-level settings dependency there rejects a
+    malformed browser setting before the fresh host can persist enrollment.
+    """
+    ava_home = tmp_path / "ava-home"
+    fake_home = tmp_path / "home"
+    ava_home.mkdir()
+    fake_home.mkdir()
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os; from pathlib import Path; from cli.enroll import write_bootstrap_env; "
+            "path = Path(os.environ['AVA_HOME']) / '.env'; "
+            "write_bootstrap_env(path, gateway='https://cp', machine_name='runner'); "
+            "assert path.exists(); print('settings-free bootstrap write ok')",
+        ],
+        cwd=_REPO_ROOT,
+        env={
+            **os.environ,
+            "AVA_BROWSER_ENABLED": "definitely-not-a-bool",
+            "AVA_HOME": str(ava_home),
+            "HOME": str(fake_home),
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "settings-free bootstrap write ok"
 
 
 def test_write_bootstrap_env_required_fields(tmp_path: Path) -> None:
@@ -281,7 +351,7 @@ def test_run_enroll_reads_cluster_secret_from_environment(
 def test_run_enroll_reports_browser_deps_ready_after_writing_bootstrap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A capable enrolled host gets explicit confirmation that ava-browser will run."""
+    """A capable enrolled host gets a probe-scoped browser readiness confirmation."""
     env_path = tmp_path / ".env"
     monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
     monkeypatch.setattr(enroll, "_check_browser_deps", _REAL_CHECK_BROWSER_DEPS)
@@ -307,7 +377,10 @@ def test_run_enroll_reports_browser_deps_ready_after_writing_bootstrap(
 
     assert rc == 0
     assert env_path.exists()
-    assert "browser deps OK (display + Chrome + npx)" in capsys.readouterr().out
+    assert (
+        "browser deps OK (Chrome + npx on PATH) — ava-browser should start on this host"
+        in capsys.readouterr().out
+    )
 
 
 def test_run_enroll_prints_browser_warning_to_stdout_and_stderr(
@@ -347,17 +420,68 @@ def test_run_enroll_prints_browser_warning_to_stdout_and_stderr(
     assert "ava-browser will not run on this host until this is fixed" in captured.err
 
 
-def test_browser_explicitly_disabled_reads_the_unit_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_run_enroll_prints_a_notice_without_a_repair_box_when_display_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Only an explicit false setting suppresses the fresh-host browser check."""
+    """Headless enrollment stays successful without telling operators to install Node."""
     env_path = tmp_path / ".env"
     monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
-    assert enroll._browser_explicitly_disabled() is False
-    env_path.write_text("AVA_BROWSER_ENABLED=true\n")
-    assert enroll._browser_explicitly_disabled() is False
-    env_path.write_text("AVA_BROWSER_ENABLED = false \n")
-    assert enroll._browser_explicitly_disabled() is True
+    monkeypatch.setattr(enroll, "_check_browser_deps", _REAL_CHECK_BROWSER_DEPS)
+    monkeypatch.setattr(
+        enroll, "ensure_browser_deps", lambda: "no display (WSL without WSLg / headless server)"
+    )
+    monkeypatch.setattr(
+        enroll,
+        "_fetch_enroll_payload",
+        lambda *_args, **_kwargs: {"AVA_DB_URL": "postgresql://ava@db:5432/ava"},  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    rc = enroll.run_enroll(
+        [
+            "--gateway",
+            "https://cp",
+            "--machine-name",
+            "runner",
+            "--machine-host",
+            "10.0.0.9",
+            "--cluster-secret",
+            "sek",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert env_path.exists()
+    assert "not applicable" in captured.out
+    assert "Install Node.js" not in captured.out
+    assert "Install Node.js" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, False),
+        ("false", True),
+        ("0", True),
+        ("no", True),
+        ("off", True),
+        ("f", True),
+        ("n", True),
+        ("true", False),
+        ("1", False),
+        ("yes", False),
+        ("on", False),
+    ],
+)
+def test_browser_explicitly_disabled_matches_pydantic_falsey_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str | None, expected: bool
+) -> None:
+    """Enrollment honors every false-y spelling Settings treats as browser-disabled."""
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
+    if value is not None:
+        env_path.write_text(f"AVA_BROWSER_ENABLED = {value} \n")
+    assert enroll._browser_explicitly_disabled() is expected
 
 
 def test_run_enroll_requires_machine_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
