@@ -12,6 +12,7 @@ import redis
 
 from cli import main as cli_main
 from shared.config import settings
+from shared.platform import LockTimeoutError
 from shared.pty_sessions import allocation_freeze
 
 
@@ -67,3 +68,16 @@ def test_cli_status_surfaces_corrupt_marker_as_fail_closed(
     output = capsys.readouterr().out
     assert "status=invalid" in output
     assert f"marker={path}" in output
+
+
+def test_cli_resume_reports_allocation_lock_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _locked(_generation: str) -> bool:
+        raise LockTimeoutError("allocation lock remained held")
+
+    monkeypatch.setattr(allocation_freeze, "resume", _locked)
+
+    assert cli_main.main(["pty", "resume", "owned-generation"]) == 1
+    assert "allocation lock remained held" in capsys.readouterr().err
