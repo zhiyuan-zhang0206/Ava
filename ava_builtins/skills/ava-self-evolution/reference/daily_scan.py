@@ -138,6 +138,13 @@ def render(
     builtin_help_calls = sum(r.get("builtin_help_calls", 0) for r in records)
     builtin_help_agents = sum(bool(r.get("builtin_help_calls", 0)) for r in records)
     builtin_help_on_ava = sum(r.get("builtin_help_on_ava", 0) for r in records)
+    subprocess_calls = sum(r.get("subprocess_calls", 0) for r in records)
+    shell_run_calls = sum(
+        r["tools_called"].get("ava.shell.run", 0) for r in records if "tools_called" in r
+    )
+    subprocess_line = f"subprocess calls: {subprocess_calls}"
+    if any("tools_called" in r for r in records):
+        subprocess_line += f" (shell.run {shell_run_calls})"
     top_skills = (
         ", ".join(f"{skill} {count}" for skill, count in skill_counts.most_common(5)) or "none"
     )
@@ -150,6 +157,7 @@ def render(
         f" | corrections {corrections} | peer feedback {peer} | breached {breached} | exec-fail runs {execfail}",
         f"builtin help(): {builtin_help_calls} calls across {builtin_help_agents} agents "
         f"({builtin_help_on_ava} on ava.* targets)",
+        subprocess_line,
         f"dataset: {path}",
         "skills loaded:",
         f"  top 5: {top_skills}",
