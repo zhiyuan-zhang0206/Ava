@@ -2598,7 +2598,7 @@
     "/api/agents/{agent_id}/notices/current/dismiss": {
       "post": {
         "summary": "Post Notice Dismiss",
-        "description": "Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice\ncontract): resolution 'withdrawn' + resolve event. No open notice ->\nidempotent 204.",
+        "description": "Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice\ncontract): resolution 'withdrawn' + resolve event, plus an inspector\nsnapshot refresh when the withdrawn row required a response. No open notice\n-> idempotent 204.",
         "operationId": "post_notice_dismiss_api_agents__agent_id__notices_current_dismiss_post",
         "parameters": [
           {
