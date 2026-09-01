@@ -139,6 +139,7 @@ def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     get_p = config_sub.add_parser("get", help="print all config fields, or one field's value")
     get_p.add_argument("key", nargs="?", default=None, help="env-var or field name (optional)")
     get_p.add_argument("--machine", default=None, help="target agent-runner (host fields)")
+    get_p.add_argument("--local", action="store_true", help="read this unit's .env directly")
     get_p.set_defaults(func=_h_config_get)
 
     set_p = config_sub.add_parser("set", help="set one or more KEY=VALUE config fields")
@@ -146,6 +147,7 @@ def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         "assignments", nargs="+", metavar="KEY=VALUE", help="e.g. DEEPSEEK_API_KEY=sk-..."
     )
     set_p.add_argument("--machine", default=None, help="target agent-runner (host fields)")
+    set_p.add_argument("--local", action="store_true", help="edit this unit's .env directly")
     set_p.set_defaults(func=_h_config_set)
 
     unset_p = config_sub.add_parser(
@@ -153,6 +155,7 @@ def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     unset_p.add_argument("keys", nargs="+", help="env-var or field name(s)")
     unset_p.add_argument("--machine", default=None, help="target agent-runner (host fields)")
+    unset_p.add_argument("--local", action="store_true", help="edit this unit's .env directly")
     unset_p.set_defaults(func=_h_config_unset)
 
 
