@@ -22,10 +22,17 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=500]
-      - id: detect-private-key
       - id: check-case-conflict
       - id: mixed-line-ending
         args: [--fix=lf]
+
+  # Gitleaks supersedes detect-private-key and shares its policy with CI, so
+  # fixture exceptions cannot drift between local commits and pull requests.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        args: [--config=.gitleaks.toml]
 
   - repo: local
     hooks:

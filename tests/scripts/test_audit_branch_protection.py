@@ -16,6 +16,7 @@ _EXPECTED_CHECKS = frozenset(
         "backend (pytest + pyright)",
         "frontend (eslint + tsc + vitest)",
         "e2e (Playwright happy path)",
+        "secret scan (Gitleaks)",
     }
 )
 
@@ -29,13 +30,26 @@ queue_rules:
       - or:
           - check-success=frontend (eslint + tsc + vitest)
           - check-skipped=frontend (eslint + tsc + vitest)
+      - or:
+          - check-success=e2e (Playwright happy path)
+          - check-skipped=e2e (Playwright happy path)
+      - or:
+          - check-success=secret scan (Gitleaks)
+          - check-skipped=secret scan (Gitleaks)
     merge_conditions:
+      - label=qa-approved
       - or:
           - check-success=backend (pytest + pyright)
           - check-skipped=backend (pytest + pyright)
       - or:
           - check-success=frontend (eslint + tsc + vitest)
           - check-skipped=frontend (eslint + tsc + vitest)
+      - or:
+          - check-success=e2e (Playwright happy path)
+          - check-skipped=e2e (Playwright happy path)
+      - or:
+          - check-success=secret scan (Gitleaks)
+          - check-skipped=secret scan (Gitleaks)
 """
 
 
@@ -88,28 +102,23 @@ def _fake_gh(protection: dict[str, object], workflows: dict[str, object]):
 
 def test_expected_checks_collects_success_and_skipped_conditions() -> None:
     audit = _audit()
-    assert audit.expected_checks(_MERGIFY_FIXTURE) == frozenset(
-        {
-            "backend (pytest + pyright)",
-            "frontend (eslint + tsc + vitest)",
-        }
-    )
+    assert audit.expected_checks(_MERGIFY_FIXTURE) == _EXPECTED_CHECKS
 
 
 def test_queue_and_merge_condition_mismatch_is_drift() -> None:
     audit = _audit()
     mismatched = _MERGIFY_FIXTURE.replace(
         "    merge_conditions:\n",
-        "    merge_conditions:\n      - check-success=e2e (Playwright happy path)\n",
+        "    merge_conditions:\n      - check-success=legacy\n",
     )
 
-    assert audit.expected_checks(mismatched) == _EXPECTED_CHECKS
+    assert audit.expected_checks(mismatched) == _EXPECTED_CHECKS | {"legacy"}
     assert audit.declaration_drift(mismatched) == [
-        "merge_conditions has checks absent from queue_conditions: e2e (Playwright happy path)"
+        "merge_conditions has checks absent from queue_conditions: legacy"
     ]
 
 
-def test_real_mergify_declaration_has_the_three_required_checks() -> None:
+def test_real_mergify_declaration_has_the_required_checks() -> None:
     audit = _audit()
     text = (_REPO_ROOT / ".mergify.yml").read_text()
     assert audit.expected_checks(text) == _EXPECTED_CHECKS
@@ -203,7 +212,7 @@ def test_cli_reports_declaration_mismatch_as_drift_without_calling_github(
     audit = _audit()
     mismatched = _MERGIFY_FIXTURE.replace(
         "    merge_conditions:\n",
-        "    merge_conditions:\n      - check-success=e2e (Playwright happy path)\n",
+        "    merge_conditions:\n      - check-success=legacy\n",
     )
     mergify_file = tmp_path / ".mergify.yml"
     mergify_file.write_text(mismatched)
