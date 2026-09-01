@@ -22,6 +22,7 @@ import asyncio
 import concurrent.futures
 import json
 import threading
+from collections import deque
 from typing import Any
 
 from services.im_bridge.core import IMAdapter, InboundMessage
@@ -59,6 +60,21 @@ class FeishuAdapter(IMAdapter):
         # first inbound p2p — e.g. right after a daemon restart — fails with the
         # clear "no known user chat" error instead of an AttributeError.
         self._last_open_id = ""
+        # Polling fallback state: the platform does not deliver
+        # im.message.receive_v1 for this app (2026-09-01 diagnosis), so p2p
+        # messages are picked up by polling ListMessage instead. Chats are
+        # discovered from outbound send responses and/or the bootstrap config.
+        self._poll_task: asyncio.Task[Any] | None = None
+        self._sent_chat_ids: dict[str, str] = {}  # open_id -> p2p chat id (from sends)
+        self._poll_chats: set[str] = set()
+        self._poll_cursor: dict[str, str] = {}  # chat_id -> last delivered message_id
+        # Seeded chats are tracked separately from the cursor value: a
+        # successful round with an empty window still marks the chat seeded,
+        # so the first message that arrives afterwards is delivered instead
+        # of being mistaken for history (a fresh chat's first round is empty).
+        self._poll_seeded: set[str] = set()
+        self._poll_failures = 0  # consecutive failing rounds (backoff)
+        self._seen_messages: deque[str] = deque(maxlen=500)
 
     # -- credentials ---------------------------------------------------------
 
@@ -103,6 +119,7 @@ class FeishuAdapter(IMAdapter):
         self._ws_thread = threading.Thread(target=self._run_ws, name="feishu-ws", daemon=True)
         self._ws_thread.start()
         logger.info("FeishuAdapter: ws thread started")
+        self._start_poller()
 
     def _run_ws(self) -> None:
         """Connect the long-connection client; blocks for the process lifetime.
@@ -124,6 +141,10 @@ class FeishuAdapter(IMAdapter):
         """Close the ws connection (the SDK has no public stop; its private
         ``_disconnect`` is scheduled on the SDK's own loop). The ws thread is a
         daemon and lingers harmlessly until process exit."""
+        poll_task = self._poll_task
+        self._poll_task = None
+        if poll_task is not None:
+            poll_task.cancel()
         ws_client = self._ws_client
         ws_loop = self._ws_loop
         self._ws_client = None
@@ -272,15 +293,212 @@ class FeishuAdapter(IMAdapter):
         open_id = getattr(sender_id, "open_id", "") if sender_id is not None else ""
         if not open_id:
             return None
+        message_id = getattr(message, "message_id", None)
+        # The polling fallback may have already fed this message (or vice
+        # versa): a shared seen-set makes the two paths idempotent.
+        if message_id in self._seen_messages:
+            return None
+        if message_id:
+            self._seen_messages.append(message_id)
         self._last_open_id = open_id  # remember the p2p peer for notify_user
         return InboundMessage(
             channel=self.channel,
             chat_id=open_id,  # contract: the feishu session IS the user's open_id
             text=text,
-            message_id=getattr(message, "message_id", None),
+            message_id=message_id,
         )
 
     # -- outbound ------------------------------------------------------------
+
+    async def _register_sent_chat(self, open_id: str) -> None:
+        """Register the p2p chat resolved from the last outbound send.
+
+        ListMessage needs the chat id, which the WS event never provided for
+        this app; the create-message response carries it, so every outbound
+        send teaches the poller one more chat. Fails softly — polling is a
+        fallback, never a reason to break a send.
+        """
+        try:
+            chat_id = self._sent_chat_ids.get(open_id)
+            if chat_id:
+                self._poll_chats.add(chat_id)
+                logger.info(
+                    "FeishuAdapter: poller registered chat %s for open_id %s", chat_id, open_id
+                )
+        except Exception as exc:
+            logger.debug("FeishuAdapter: chat registration failed: {}", exc)
+
+    # -- polling fallback ------------------------------------------------------
+
+    def _start_poller(self) -> None:
+        """Start the ListMessage poll loop (main loop task)."""
+        if self._poll_task is not None and not self._poll_task.done():
+            return
+        try:
+            from shared.config import settings
+
+            interval = settings.feishu.feishu_poll_interval_seconds
+            bootstrap = (settings.feishu.feishu_poll_chat_id or "").strip()
+        except Exception:
+            interval = 1.0
+            bootstrap = ""
+        if interval <= 0:
+            logger.info("FeishuAdapter: polling disabled (AVA_FEISHU_POLL_INTERVAL_SECONDS=0)")
+            return
+        if bootstrap:
+            self._poll_chats.add(bootstrap)
+        if not self._poll_chats:
+            # No chat known yet: outbound sends add chats as they resolve.
+            logger.info(
+                "FeishuAdapter: poller idle — no chat id known yet "
+                "(set AVA_FEISHU_POLL_CHAT_ID or wait for an outbound send)"
+            )
+        self._poll_task = asyncio.create_task(self._poll_loop(interval))
+        logger.info(
+            "FeishuAdapter: poller started interval=%.1fs chats=%s",
+            interval,
+            sorted(self._poll_chats),
+        )
+
+    async def _poll_loop(self, interval: float) -> None:
+        """Poll every known p2p chat forever; one bad round never kills it.
+
+        Consecutive failing rounds back off exponentially (interval doubled,
+        capped at 32x) so a hard-down API is not hammered; any successful
+        round resets the backoff.
+        """
+        while True:
+            ok = True
+            try:
+                for chat_id in list(self._poll_chats):
+                    try:
+                        if not await self._poll_once(chat_id):
+                            ok = False
+                    except Exception as exc:
+                        ok = False
+                        logger.error("FeishuAdapter: poll failed chat=%s: {}", chat_id, exc)
+            except Exception:
+                ok = False
+                logger.exception("FeishuAdapter: poll round failed")
+            if ok:
+                self._poll_failures = 0
+            else:
+                self._poll_failures += 1
+            delay = min(interval * (2 ** min(self._poll_failures, 5)), 300.0)
+            await asyncio.sleep(delay)
+
+    async def _poll_once(self, chat_id: str) -> bool:
+        """List the chat's newest messages; feed unseen user texts to core.
+
+        The first successful round only seeds the cursor (never replays
+        history on a daemon restart); later rounds process messages newer
+        than the cursor, oldest first, deduped by message id — the WS path
+        may deliver the same message concurrently. Returns False when the
+        list call failed (drives the poll loop's backoff); the cursor only
+        advances past messages that were delivered or are permanently
+        undeliverable, so a failed inbound is retried next round.
+        """
+        if self._rest_client is None:
+            self._rest_client = await asyncio.to_thread(self._build_rest_client)
+        from lark_oapi.api.im.v1 import ListMessageRequest
+
+        request = (
+            ListMessageRequest.builder()
+            .container_id_type("chat")
+            .container_id(chat_id)
+            .page_size(20)
+            .sort_type("ByCreateTimeDesc")
+            .build()
+        )
+        response = await asyncio.to_thread(self._rest_client.im.v1.message.list, request)
+        if response.code != 0:
+            logger.warning(
+                "FeishuAdapter: poll list failed chat=%s code=%s msg=%s",
+                chat_id,
+                response.code,
+                getattr(response, "msg", ""),
+            )
+            return False
+        items: list[Any] = list((response.data.items or []) if response.data is not None else [])
+        items.reverse()  # ascending by create time
+        if chat_id not in self._poll_seeded:
+            # Seed round: remember the newest id without processing anything.
+            # The chat is marked seeded even when the window is empty, so the
+            # first real message afterwards is delivered rather than swallowed
+            # as "history". A failed round never marks seeded, preserving the
+            # no-replay guarantee across daemon restarts.
+            self._poll_seeded.add(chat_id)
+            if items and items[-1].message_id:
+                self._poll_cursor[chat_id] = items[-1].message_id
+            return True
+        cursor = self._poll_cursor.get(chat_id)
+        # Process everything after the cursor (ascending order); when the
+        # cursor rotated out of the window, fall back to the seen-id dedup.
+        pending = items
+        if cursor is not None:
+            for idx, item in enumerate(items):
+                if item.message_id == cursor:
+                    pending = items[idx + 1 :]
+                    break
+        last: str | None = None
+        for item in pending:
+            if not item.message_id:
+                # Cannot dedup or cursor on an id-less item; never deliver.
+                continue
+            if item.message_id in self._seen_messages:
+                last = item.message_id
+                continue
+            message = self._normalize_poll_item(item)
+            if message is None:
+                # Permanently undeliverable (bot send, non-text, malformed):
+                # safe to pass, otherwise the same item is re-listed forever.
+                last = item.message_id
+                continue
+            try:
+                await self.core.handle_inbound(message)
+            except Exception:
+                logger.exception("FeishuAdapter: poll inbound failed chat=%s", chat_id)
+                break  # do not advance past the failure; retry next round
+            self._seen_messages.append(item.message_id)
+            last = item.message_id
+        if last:
+            self._poll_cursor[chat_id] = last
+        return True
+
+    def _normalize_poll_item(self, item: Any) -> InboundMessage | None:
+        """Map one listed message to an InboundMessage (same contract as the
+        WS event path: p2p text from a user, never our own sends)."""
+        if not getattr(item, "message_id", ""):
+            return None
+        if getattr(item, "chat_type", "") != "p2p":
+            return None
+        if getattr(item, "msg_type", "") != "text":
+            return None
+        sender = getattr(item, "sender", None)
+        if sender is None or getattr(sender, "sender_type", "") != "user":
+            return None
+        content = ""
+        try:
+            content = (
+                json.loads(getattr(getattr(item, "body", None), "content", "") or "{}")
+                .get("text", "")
+                .strip()
+            )
+        except (TypeError, ValueError):
+            return None
+        if not content:
+            return None
+        sender_id = getattr(sender, "sender_id", None)
+        open_id = getattr(sender_id, "open_id", "") if sender_id is not None else ""
+        if not open_id:
+            return None
+        self._last_open_id = open_id
+        return InboundMessage(
+            channel=self.channel,
+            chat_id=open_id,
+            text=content,
+            message_id=getattr(item, "message_id", None),
+        )
 
     async def send(
         self,
@@ -311,9 +529,12 @@ class FeishuAdapter(IMAdapter):
             self._rest_client = await asyncio.to_thread(self._build_rest_client)
         if buttons:
             await asyncio.to_thread(self._send_card, self._rest_client, chat_id, text, buttons)
-            return
-        for segment in _segment(text, MAX_SEGMENT_CHARS):
-            await asyncio.to_thread(self._send_one, self._rest_client, chat_id, segment)
+        else:
+            for segment in _segment(text, MAX_SEGMENT_CHARS):
+                await asyncio.to_thread(self._send_one, self._rest_client, chat_id, segment)
+        # The send response carries the p2p chat id — register it for polling
+        # so the user's next message is picked up without the WS event path.
+        await self._register_sent_chat(chat_id)
 
     async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
         """Send an outbound notification to the last p2p sender (the user).
@@ -378,8 +599,14 @@ class FeishuAdapter(IMAdapter):
         response = client.im.v1.message.create(request)
         if not response.success():
             raise RuntimeError(f"feishu card send failed: code={response.code} msg={response.msg}")
+        data = response.data
+        chat_id_resolved = getattr(data, "chat_id", "") if data is not None else ""
+        if chat_id_resolved:
+            self._sent_chat_ids[chat_id] = chat_id_resolved
 
-    def _send_one(self, client: Any, chat_id: str, text: str) -> None:
+    def _send_one(self, client: Any, chat_id: str, text: str) -> str:
+        """Send one text segment; returns the p2p chat id from the response
+        ("" when the response does not carry one)."""
         from lark_oapi.api.im.v1 import (  # pyright: ignore[reportUnknownVariableType]
             CreateMessageRequest,
             CreateMessageRequestBody,
@@ -402,6 +629,11 @@ class FeishuAdapter(IMAdapter):
             # Sanitized on purpose: the SDK response may embed request internals
             # but never credentials; keep it that way in the raised error.
             raise RuntimeError(f"feishu send failed: code={response.code} msg={response.msg}")
+        data = response.data
+        chat_id_resolved = getattr(data, "chat_id", "") if data is not None else ""
+        if chat_id_resolved:
+            self._sent_chat_ids[chat_id] = chat_id_resolved
+        return chat_id_resolved
 
 
 def _segment(text: str, limit: int) -> list[str]:
