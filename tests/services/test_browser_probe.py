@@ -45,6 +45,7 @@ def _wire(
     monkeypatch.setattr(probe_mod, "find_cluster_chrome", lambda _profile: chromes)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(probe_mod, "_listens_on", lambda pid, _port: listening[pid])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(probe_mod, "_listener_pid", lambda _port: holder)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(probe_mod.macos_readiness, "degraded_wait_reason", lambda: None)
     if holder_facts is None:
         holder_facts = ("", None)
     monkeypatch.setattr(probe_mod, "_process_facts", lambda _pid: holder_facts)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -65,6 +66,21 @@ def test_cdp_unreachable_is_down_not_terminal(monkeypatch: pytest.MonkeyPatch) -
     verdict = probe_mod.probe_browser(9222, _PROFILE)
     assert verdict.verdict is ProbeVerdict.DOWN
     assert verdict.terminal is False
+
+
+def test_cdp_unreachable_names_a_deliberate_macos_readiness_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _wire(monkeypatch, cdp="CDP unreachable: ConnectionRefusedError", chromes=[], listening={})
+    monkeypatch.setattr(
+        probe_mod.macos_readiness,
+        "degraded_wait_reason",
+        lambda: "login Keychain is not ready",
+    )
+    verdict = probe_mod.probe_browser(9222, _PROFILE)
+    assert verdict.verdict is ProbeVerdict.DOWN
+    assert "waiting" in verdict.detail
+    assert "Keychain" in verdict.detail
 
 
 def test_foreign_chrome_on_the_port_is_terminal(monkeypatch: pytest.MonkeyPatch) -> None:

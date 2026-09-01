@@ -19,7 +19,7 @@ The user ruled: error lines fire on **state change**, not per probe.
 
 ## The split
 
-**The browser healthcheck** (`services/healthchecks/browser.py`) episode-gates its own ERRORs. A failure episode is keyed by a coarse condition class (`terminal` / `orphan-heal-failed` / `respawn-failed`); the first round of an episode, each condition change, and one reminder per `_EPISODE_REMINDER_S` (6h) report at ERROR — quiet rounds log the same fact at DEBUG, so the condition stays visible without re-alarming. A healthy round deletes the record and logs one INFO recovery line.
+**The browser healthcheck** (`services/healthchecks/browser.py`) episode-gates its own reporting. A failure episode is keyed by a coarse condition class (`terminal` / `orphan-heal-failed` / `respawn-failed` / `waiting-for-macos-readiness`); the first round of an episode, each condition change, and one reminder per `_EPISODE_REMINDER_S` (6h) report at ERROR, except a deliberate macOS readiness wait which reports at WARNING. Quiet rounds log the same fact at DEBUG, so the condition stays visible without re-alarming. A healthy round deletes the record and logs one INFO recovery line.
 
 The episode record lives at `$AVA_HOME/run/healthcheck-state/browser.json`. Three properties are load-bearing:
 

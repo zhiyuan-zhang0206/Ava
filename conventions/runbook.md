@@ -742,7 +742,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
 - **Profile source — fresh vs. seeded from your daily Chrome**: the dedicated
   profile is normally created empty, so the agent signs in to every site itself.
   On the **first** `ava start` on a browser-capable host, when the profile is
-  still absent/empty **and** a human is at the TTY, converge's `_ensure_browser`
+  still absent **and** a human is at the TTY, converge's `_ensure_browser`
   (`services/browser/profile.py:ensure_browser_profile`) offers to seed it by
   **copying your daily Chrome profile** (macOS `~/Library/Application Support/Google/Chrome`,
   Linux `~/.config/google-chrome`) into `~/.ava/chrome-profile/` instead. Copying
@@ -752,8 +752,9 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   fresh profile. The copy excludes lock/socket files (`Singleton*`) and
   regenerable caches, reports its size first, and refuses while Chrome is still
   running (copying live SQLite risks a corrupt import — quit Chrome and retry).
-  **Guardrails**: an already-populated profile is never touched (idempotent across
-  restarts; prod's multi-GB logged-in profile survives every start); non-interactive
+  **Guardrails**: any existing profile directory is never touched, including an
+  empty or partial first copy (idempotent across restarts; prod's multi-GB logged-in
+  profile survives every start); non-interactive
   paths (watchdog respawn, boot autostart, `ava cluster update` rollout) never prompt and
   always take the fresh default; a host with no daily Chrome degrades silently to
   fresh.
@@ -817,11 +818,19 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   next `ava start`. Chrome binds CDP to loopback:9222 only; the profile starts
   empty (no cookies). To prevent the window, set `AVA_BROWSER_ENABLED=false`
   before upgrading, or after the first start.
-- **macOS headless limitation**: `display_available()` always returns True on
-  macOS (no cheap way to distinguish a headless Mac from a headed one). A
-  headless Mac with Chrome installed will pass `browser_capable()`, but
-  Chrome may fail to open a window without a logged-in desktop — this is a
-  pre-existing probe blind spot, not introduced by the default change.
+- **macOS runtime readiness**: static capability detection still treats macOS
+  as display-capable, but the browser daemon does not launch Chrome until the
+  service account owns the active console GUI session, its `launchctl gui/<uid>`
+  namespace exists, and the login Keychain answers the read-only
+  `security show-keychain-info` query. An SSH- or boot-triggered session that
+  lacks any prerequisite stays alive and retries every five seconds instead of
+  starting Chrome without encryption material. The browser probe and healthcheck
+  expose that state as **DEGRADED** and preserve the waiting session rather than
+  respawning it. If the wait marker cannot be written, the probe and healthcheck
+  use the same bounded read-only readiness check instead. The gate never
+  unlocks a Keychain or changes Chrome data;
+  `Local State` receives existence, permission, and mtime checks only,
+  with warning-only results.
 - **First login is the user's job**: the headed window opens on the host's
   desktop; **you** sign into the target sites (e.g. Google / Xiaohongshu) once — the
   agent does not (and cannot) log in for you. The dedicated profile persists the

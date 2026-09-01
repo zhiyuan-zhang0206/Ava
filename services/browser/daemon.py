@@ -42,6 +42,8 @@ from shared.paths import logs_dir
 from shared.platform import IS_WINDOWS
 from shared.platform_probes import browser_incapability, resolve_chrome_binary
 
+from . import macos_readiness
+from . import profile as browser_profile
 from .probe import cdp_url
 from .profile import profile_dir as _profile_dir
 
@@ -277,8 +279,17 @@ def main() -> None:
     binary = resolve_chrome_binary()
     if binary is None:  # assert_browser_capable already raised if so — this narrows the type
         sys.exit(127)
+    # On macOS a detached process can see a display while lacking the active GUI
+    # login session and Keychain context Chrome needs for encrypted profile data.
+    # Wait in this supervised process instead of launching an unusable browser;
+    # the matching marker lets the healthcheck report degraded state without
+    # killing and respawning this deliberate wait.
+    macos_readiness.wait_for_browser_startup_readiness()
     profile = _profile_dir()
     profile.mkdir(parents=True, exist_ok=True)
+    local_state_warning = browser_profile.validate_local_state(profile)
+    if local_state_warning is not None:
+        logger.warning("ava-browser: Local State validation warning: {}", local_state_warning)
     # Redirect stdout/stderr to browser.log before execvp so a Chrome crash is
     # postmortem-able (same blind-spot fix as services/milvus/daemon.py).
     log_fd = os.open(str(logs_dir() / "browser.log"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
