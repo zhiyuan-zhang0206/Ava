@@ -157,6 +157,7 @@ def test_local_restart_only_runs_gateway_orchestration_without_posting(
         origin: str,
         rollout_log: str | None,
         mode: str,
+        dry_run: bool,
     ) -> int:
         captured.update(
             repo=repo,
@@ -164,6 +165,7 @@ def test_local_restart_only_runs_gateway_orchestration_without_posting(
             origin=origin,
             rollout_log=rollout_log,
             mode=mode,
+            dry_run=dry_run,
         )
         return 0
 
@@ -182,6 +184,7 @@ def test_local_restart_only_runs_gateway_orchestration_without_posting(
         "origin": "detached:restart",
         "rollout_log": None,
         "mode": "force",
+        "dry_run": False,
     }
 
 
