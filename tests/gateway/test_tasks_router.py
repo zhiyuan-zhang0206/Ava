@@ -178,7 +178,11 @@ class TestOwner:
         assert resp.json()["owner"] == new_owner
         assert _owner(db_conn, tid) == new_owner
         assert _task_notes(db_conn, new_owner) == [
-            (f'Task #{tid} "t" is now assigned to you.', "user", {"note_tag": "task"})
+            (
+                f'Task #{tid} "t" is now assigned to you.',
+                "user",
+                {"note_tag": "task", "task_id": tid},
+            )
         ]
         assert _task_notes(db_conn, owner) == [
             (
@@ -574,6 +578,10 @@ class TestGetTaskFields:
             "remind_interval_seconds",
             "last_reminded_at",
             "reminder_count",
+            "token_budget",
+            "usd_budget",
+            "token_used",
+            "usd_used",
             "ghost",
         }
         assert full_row["description"] == description
@@ -594,6 +602,10 @@ class TestGetTaskFields:
             "remind_interval_seconds",
             "last_reminded_at",
             "reminder_count",
+            "token_budget",
+            "usd_budget",
+            "token_used",
+            "usd_used",
             "ghost",
         }
         assert "description" not in summary_row
@@ -613,7 +625,8 @@ class TestGetTaskFields:
         ).partition(", a.label AS owner_label FROM agent_tasks t ")[0]
         assert selected_columns == (
             "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
-            "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+            "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+            "t.token_budget, t.usd_budget, t.token_used, t.usd_used"
         )
 
     def test_unknown_fields_value_is_rejected(self, db_conn: psycopg.Connection) -> None:

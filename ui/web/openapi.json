@@ -13517,6 +13517,18 @@
             "title": "Note Tag",
             "default": "task"
           },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
           "resurrect": {
             "type": "boolean",
             "title": "Resurrect",
@@ -13528,7 +13540,7 @@
           "content"
         ],
         "title": "SystemNoteIn",
-        "description": "POST /api/agents/{id}/system-note request body — a framework system\nnotification delivered to the agent as a system note (system_marker in\nthe timeline), never a peer chat message.\n\n`content` is the note text. `source` follows the same envelope whitelist\nas chat messages (system / agent:N / user / ...), defaulting to 'system';\nit is recorded for audit but the note itself renders without a sender\nprefix. `note_tag` picks the timeline chip — must be a NoteTag value\n(closed set); `task` is the task-notification family. `resurrect`\ncontrols whether a terminated target is woken to receive the note: task\nassignment (a delegator direction) resurrects, plain update notices do\nnot (user ruling 2026-08-27 — notifications never resurrect an owner)."
+        "description": "POST /api/agents/{id}/system-note request body — a framework system\nnotification delivered to the agent as a system note (system_marker in\nthe timeline), never a peer chat message.\n\n`content` is the note text. `source` follows the same envelope whitelist\nas chat messages (system / agent:N / user / ...), defaulting to 'system';\nit is recorded for audit but the note itself renders without a sender\nprefix. `note_tag` picks the timeline chip — must be a NoteTag value\n(closed set); `task` is the task-notification family. `resurrect`\ncontrols whether a terminated target is woken to receive the note: task\nassignment (a delegator direction) resurrects, plain update notices do\nnot (user ruling 2026-08-27 — notifications never resurrect an owner).\n`task_id` is optional but requires `note_tag='task'`; it is the explicit\nLLM-usage attribution for the turn this note drives."
       },
       "SystemStatus": {
         "properties": {
@@ -13675,6 +13687,38 @@
             "title": "Reminder Count",
             "default": 0
           },
+          "token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Budget"
+          },
+          "usd_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd Budget"
+          },
+          "token_used": {
+            "type": "integer",
+            "title": "Token Used",
+            "default": 0
+          },
+          "usd_used": {
+            "type": "number",
+            "title": "Usd Used",
+            "default": 0.0
+          },
           "ghost": {
             "type": "boolean",
             "title": "Ghost",
@@ -13786,6 +13830,38 @@
           },
           "priority": {
             "$ref": "#/components/schemas/Priority"
+          },
+          "token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Budget"
+          },
+          "usd_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd Budget"
+          },
+          "token_used": {
+            "type": "integer",
+            "title": "Token Used",
+            "default": 0
+          },
+          "usd_used": {
+            "type": "number",
+            "title": "Usd Used",
+            "default": 0.0
           },
           "ghost": {
             "type": "boolean",

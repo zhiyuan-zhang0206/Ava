@@ -378,7 +378,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     insert_inbound_message(db_conn, tid, "hello", source="user")
 
     cmd = await claim_node(
-        AgentState(),
+        AgentState(active_task_id=99),
         _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
         _config(tid),
     )
@@ -393,6 +393,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     assert msgs[0].content.startswith("User ")  # pyright: ignore[reportUnknownMemberType]
     assert "hello" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     assert cmd.update["halted"] is False  # type: ignore[index]
+    assert cmd.update["active_task_id"] is None  # type: ignore[index]
 
 
 async def test_claim_chat_expands_slash_command(
@@ -1580,7 +1581,7 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
             (
                 tid,
                 'Task #1 "my task" is now assigned to you (by agent #405).',
-                '{"note_tag": "task"}',
+                '{"note_tag": "task", "task_id": 1}',
             ),
         )
         row = cur.fetchone()
@@ -1602,11 +1603,41 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     assert 'Task #1 "my task" is now assigned to you (by agent #405).' in note.content  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("ava_note_tag") == "task"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs.get("ava_task_id") == 1  # pyright: ignore[reportUnknownMemberType]
+    assert cmd.update["active_task_id"] == 1  # pyright: ignore[index, reportOptionalSubscript]
     # The inbound row is consumed (done at claim, like other lifecycle kinds).
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (inbound_id,))
         status = cur.fetchone()
         assert status is not None and status[0] == "done"
+
+
+async def test_claim_co_batched_task_notes_leave_usage_untagged(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """One LLM turn cannot be attributed to two distinct task notes."""
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'agent:405', %s::jsonb)",
+            [
+                (tid, 'Task #1 "first" was updated.', '{"note_tag": "task", "task_id": 1}'),
+                (tid, 'Task #2 "second" was updated.', '{"note_tag": "task", "task_id": 2}'),
+            ],
+        )
+    db_conn.commit()
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+        _config(tid),
+    )
+
+    assert cmd.goto == "before_llm"
+    assert cmd.update["active_task_id"] is None  # type: ignore[index]
 
 
 async def test_claim_system_note_unknown_tag_fails_loud(

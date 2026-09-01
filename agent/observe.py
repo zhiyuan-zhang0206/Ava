@@ -23,7 +23,8 @@ def log_llm_usage(
     latency_ms: float | None = None,
     decode_ms: float | None = None,
     priced_at: datetime | None = None,
-) -> None:
+    task_id: int | None = None,
+) -> tuple[int, float] | None:
     """Log LangChain standardized usage fields from `usage_metadata`.
 
     Consistent across providers — Anthropic (via ThinkingTokensChatAnthropic),
@@ -72,6 +73,12 @@ def log_llm_usage(
     and boundary tests. Production callers omit it and select the current UTC
     catalog interval exactly once inside `quote()`.
 
+    `task_id` is an explicit turn-level attribution. It is omitted for all
+    untagged usage; an agent owning a task is not enough to imply one. It
+    feeds task-budget counters through the `llm_usage` event only: the
+    provider-call billing span is deliberately task-agnostic, because that
+    ledger contract has no task dimension.
+
     Post single-tool execute_code refactor, the core metric is `reason`
     monotonically decreasing across turns — the previous turn's thinking
     blocks transparently echo into the next turn's input (server verifies
@@ -82,7 +89,7 @@ def log_llm_usage(
     """
     um = msg.usage_metadata
     if not um:
-        return
+        return None
     in_total = um.get("input_tokens", 0) or 0
     out_total = um.get("output_tokens", 0) or 0
     cache_read = (um.get("input_token_details") or {}).get("cache_read", 0) or 0
@@ -157,6 +164,8 @@ def log_llm_usage(
         # panel sums it per bucket; absent on rows before the 2026-08-04
         # instrumentation (attributes ? 'decode_ms' keeps them out).
         decode_ms=decode_ms,
+        **({"task_id": task_id} if task_id is not None else {}),
         # the usage-time price snapshot — only when the model is priced.
         **snapshot,
     )
+    return in_total + out_total, priced.cost_usd if priced is not None else 0.0
