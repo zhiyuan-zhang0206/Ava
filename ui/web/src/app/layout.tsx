@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Inter, Geist_Mono } from "next/font/google";
+import { connection } from "next/server";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { Providers } from "@/components/providers";
@@ -22,11 +24,16 @@ export const metadata: Metadata = {
   description: "Ava agent web UI",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // A nonce exists only for a live request. Waiting for one prevents Next from
+  // prerendering framework scripts that cannot receive the request nonce.
+  await connection();
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     // suppressHydrationWarning on <html>: next-themes injects an inline
     // script that modifies the <html> class before hydration. Server
@@ -50,7 +57,7 @@ export default function RootLayout({
         suppressHydrationWarning
         className={cn("min-h-full h-full bg-background text-foreground", FLEX, FLEX_COL)}
       >
-        <Providers><AuthGuard>{children}</AuthGuard></Providers>
+        <Providers nonce={nonce}><AuthGuard>{children}</AuthGuard></Providers>
       </body>
     </html>
   );

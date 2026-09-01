@@ -2,6 +2,7 @@
 
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/lib/api";
@@ -26,6 +27,13 @@ vi.mock("@/lib/use-alerts", () => ({
 // network-free even though the real provider is intentionally auth-independent.
 vi.mock("@/components/gate-maintenance-provider", () => ({
   GateMaintenanceProvider: () => null,
+}));
+
+vi.mock("next-themes", () => ({
+  ThemeProvider: ({ children, nonce }: { children: ReactNode; nonce?: string }) => (
+    <div data-testid="theme-provider" data-nonce={nonce}>{children}</div>
+  ),
+  useTheme: () => ({ resolvedTheme: "light" }),
 }));
 
 // Two of Providers' children fire real api calls on mount if left unmocked —
@@ -106,5 +114,15 @@ describe("Providers", () => {
       </Providers>,
     );
     expect(screen.getByTestId("child")).toBeTruthy();
+  });
+
+  it("passes the request nonce to the theme bootstrap script", () => {
+    render(
+      <Providers nonce="request-nonce">
+        <span>child</span>
+      </Providers>,
+    );
+
+    expect(screen.getByTestId("theme-provider").dataset.nonce).toBe("request-nonce");
   });
 });
