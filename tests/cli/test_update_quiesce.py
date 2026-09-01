@@ -351,9 +351,9 @@ def test_orchestration_aborts_when_update_lock_held(monkeypatch: pytest.MonkeyPa
 
 def test_quiesce_timeout_smooth_is_the_configured_short_window() -> None:
     """Smooth mode's wait is the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS
-    (default 10s, user ruling 2026-08-26) — no longer exec_timeout_seconds x 1.2:
+    (default 5s, user ruling 2026-09-01) — no longer exec_timeout_seconds x 1.2:
     the default wait is short, decoupled from the sandbox exec bound."""
-    assert _up._quiesce_timeout_s("smooth") == pytest.approx(10.0)  # pyright: ignore[reportUnknownMemberType]
+    assert _up._quiesce_timeout_s("smooth") == pytest.approx(5.0)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_quiesce_timeout_smooth_accepts_a_short_configured_window(

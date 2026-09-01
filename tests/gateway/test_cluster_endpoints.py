@@ -1527,6 +1527,7 @@ class TestClusterRolloutEndpoint:
         from ops import ops_cluster as ops_mod
 
         origins: list[str] = []
+        options: list[dict[str, object]] = []
         published: list[tuple[str, str]] = []
         set_machine_identity(role="gateway")
 
@@ -1541,8 +1542,9 @@ class TestClusterRolloutEndpoint:
         monkeypatch.setattr(
             ops_mod,
             "spawn_rollout",
-            lambda origin, **_kw: (  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda origin, **kwargs: (  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
                 origins.append(origin)  # pyright: ignore[reportUnknownArgumentType]
+                or options.append(cast(dict[str, object], kwargs))
                 or {"session": "ava-test-rollout", "log": "/var/log/rollout.log"}
             ),
         )
@@ -1557,6 +1559,10 @@ class TestClusterRolloutEndpoint:
             r2 = client.post("/api/cluster/rollout", json={"origin": "agent:7"})
             assert r2.status_code == 202
             assert origins == ["user", "agent:7"]
+            assert published == [("rollout", "user"), ("rollout", "agent:7")]
+            dry = client.post("/api/cluster/rollout", json={"dry_run": True})
+            assert dry.status_code == 202
+            assert options[-1]["dry_run"] is True
             assert published == [("rollout", "user"), ("rollout", "agent:7")]
 
     def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]

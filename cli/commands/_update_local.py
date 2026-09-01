@@ -38,7 +38,6 @@ so `cli.commands(.update)._run_gateway_local_update` / `._run_frontend_only_upda
 
 from __future__ import annotations
 
-import contextlib
 import shlex
 import subprocess
 import sys
@@ -53,7 +52,6 @@ from cli.commands._update_recover import _recover_rc
 from cli.commands._update_report import _print_local_launch_failure_block
 from shared.config import refresh_data_plane_settings
 from shared.rollout_handoff import child_process_env
-from shared.rollout_telemetry import record_bytes as _record_telemetry_bytes
 from shared.rollout_telemetry import stage as _stage_telemetry
 
 # `ava cluster update` restarts only the side that actually changed. A frontend-only
@@ -415,6 +413,7 @@ def _run_gateway_local_update(
     repo: Path,
     *,
     target_sha: str | None = None,
+    pull_recover: tuple[str, set[str], Path | None] | None = None,
     restart_frontend: bool = True,
     pull: bool = True,
     force_reap_agents: bool = False,
@@ -427,10 +426,12 @@ def _run_gateway_local_update(
     orchestration only has fan-out + poll sections; each step fail-fasts to
     non-zero on failure (caller uses rc to decide whether to enter Phase B).
 
-    `target_sha` is the pinned rollout commit (required when `pull`): the host
-    force-checks-out exactly it rather than pulling origin/main, so every node in
-    the rollout lands on the same commit. `restart_frontend=False` (backend-only
-    change) leaves the `ava-frontend` session running across the
+    `target_sha` and `pull_recover` are prepared before maintenance begins when
+    `pull=True`: the host force-checks-out exactly the pinned target, while the
+    recovery tuple carries the prior SHA, schema set, and verified local dump.
+    The local leg never creates that snapshot after the stop-the-world window
+    starts. `restart_frontend=False` (backend-only change) leaves the `ava-frontend`
+    session running across the
     whole stop/start — the UI source is unchanged, so there's no point paying the
     ~30-60s rebuild.
 
@@ -449,17 +450,11 @@ def _run_gateway_local_update(
     preserve_frontend: frozenset[str] = (
         frozenset() if restart_frontend else frozenset({_FRONTEND_SESSION})
     )
-    # Snapshot last-known-good BEFORE stopping anything (pull path only); a
-    # failure here propagates while the gateway is still up — with no snapshot
-    # there is nothing to recover to (see `_snapshot_known_good`).
-    with _stage_telemetry("snapshot"):
-        pull_recover = _snapshot_known_good(pull=pull, target_sha=target_sha)
-    # The bytes the snapshot moved ride the same stage: the brief's 368s
-    # breakdown showed the dump's ~4.24GiB but its size was a hand-read `ls`.
-    if pull_recover is not None and pull_recover[2] is not None:
-        # The duration is the signal; a vanished dump is a recovery problem.
-        with contextlib.suppress(OSError):
-            _record_telemetry_bytes("snapshot", pull_recover[2].stat().st_size)
+    if pull:
+        if target_sha is None:
+            raise ValueError("_run_gateway_local_update(pull=True) requires a target_sha")
+        if pull_recover is None:
+            raise ValueError("_run_gateway_local_update(pull=True) requires pull_recover")
 
     # 1) graceful stop gateway daemons (old schema still in place; this ensures the
     # subsequent migrate is not hit by local daemons running old code).

@@ -18,6 +18,7 @@ def _h_cluster_update(args: argparse.Namespace) -> int:
         restart_only=args.restart_only,
         local=args.local,
         force=args.force,
+        dry_run=args.dry_run,
         origin=args.origin,
         rollout_log=args.rollout_log,
         mode=args.mode,
@@ -292,7 +293,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "pull/sync/migrate/restart -> fan out agent-runner self-updates); a pure "
         "agent-runner is updated by that fan-out, not by this verb.",
     )
-    cluster_update_p.add_argument(
+    update_kind = cluster_update_p.add_mutually_exclusive_group()
+    update_kind.add_argument(
         "--restart-only",
         action="store_true",
         help="bounce every service on the current code (no git pull / uv sync / migration) "
@@ -330,13 +332,19 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "`ava cluster recover`, which clears the stranded hold. Reach for --force only "
         "when the reported deploy is real but you intend to start anyway.",
     )
+    update_kind.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="run prepare checks and the maintenance-window gate without snapshotting, "
+        "pausing, stopping, or changing the cluster pin",
+    )
     cluster_update_p.add_argument(
         "--mode",
         choices=("smooth", "force"),
         default="smooth",
         help="agent-drain policy before the rollout restarts processes. "
         "'smooth' (default) waits the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS "
-        "window (default 10s) for agents to end their current turn and exit at the "
+        "window (default 5s) for agents to end their current turn and exit at the "
         "turn boundary, then force-kills any straggler. "
         "'force' waits ~10s (idle agents drain) then force-kills whoever is still "
         "running — long execs are cut short and their work is lost. Either way every "

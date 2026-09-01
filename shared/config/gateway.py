@@ -180,7 +180,7 @@ class GatewaySettings(EnvSettings):
     )
 
     update_quiesce_timeout_seconds: float = Field(
-        default=10.0,
+        default=5.0,
         ge=0,
         allow_inf_nan=False,
         alias="AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS",
@@ -188,7 +188,9 @@ class GatewaySettings(EnvSettings):
             "How long `ava cluster update` / `ava cluster rollback` (and the "
             "standalone per-host self-heal) wait for signalled agents to end "
             "their current turn and exit before force-reaping stragglers — the "
-            "'smooth' drain window. Default 10s (user ruling 2026-08-26): idle "
+            "'smooth' drain window. Default 5s (user ruling 2026-09-01): the "
+            "freeze plan deliberately targets an approximately 8s stop-the-world "
+            "window; idle "
             "and between-turn agents exit at their turn boundary inside the "
             "window; an agent mid-execute_code is cut short by the force-reap "
             "and its work lost — accepted in exchange for a fast cluster "

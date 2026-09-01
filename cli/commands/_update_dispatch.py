@@ -34,6 +34,7 @@ def cmd_update(
     restart_only: bool = False,
     local: bool = False,
     force: bool = False,
+    dry_run: bool = False,
     origin: str | None = None,
     rollout_log: str | None = None,
     mode: str = "smooth",
@@ -81,10 +82,11 @@ def cmd_update(
             origin=origin,
             rollout_log=rollout_log,
             mode=mode,
+            dry_run=dry_run,
         )
     if restart_only:
         return _post_cluster_restart(origin=origin, mode=mode)
-    return _post_cluster_rollout(origin=origin, mode=mode, force=force)
+    return _post_cluster_rollout(origin=origin, mode=mode, force=force, dry_run=dry_run)
 
 
 def _run_in_process(
@@ -93,6 +95,7 @@ def _run_in_process(
     origin: str | None,
     rollout_log: str | None,
     mode: str,
+    dry_run: bool,
 ) -> int:
     """The foreground orchestration leg (`--local`, optionally combined with
     `--restart-only`). No role check: the user explicitly asked for the local
@@ -140,10 +143,11 @@ def _run_in_process(
         origin=origin or f"cli:{machine_name()}",
         rollout_log=rollout_log,
         mode=mode,
+        dry_run=dry_run,
     )
 
 
-def _post_cluster_rollout(*, origin: str | None, mode: str, force: bool) -> int:
+def _post_cluster_rollout(*, origin: str | None, mode: str, force: bool, dry_run: bool) -> int:
     """POST /api/cluster/rollout to the gateway and translate the endpoint's
     ordinary answers into clean CLI exits (the two refusals a second operator
     is most likely to see — deploy-window conflict and nothing-to-update —
@@ -172,6 +176,7 @@ def _post_cluster_rollout(*, origin: str | None, mode: str, force: bool) -> int:
                 "origin": origin or f"cli:{machine_name()}",
                 "mode": mode,
                 "force": force,
+                "dry_run": dry_run,
             },
         )
     except httpx.TimeoutException as exc:
@@ -211,6 +216,11 @@ def _post_cluster_rollout(*, origin: str | None, mode: str, force: bool) -> int:
         return 1
     body = resp.json()
     print(f"  ✓ dispatched: session={body.get('session')} log={body.get('log')}")
+    if dry_run:
+        print(
+            "  dry-run dispatched — PASS/FAIL see rollout log (`→ prepare dry-run: PASS|FAIL` line)."
+        )
+        return 0
     print("  poll `ava cluster status` for the cluster to return.")
     return 0
 
