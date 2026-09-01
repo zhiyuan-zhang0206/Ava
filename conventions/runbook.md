@@ -156,20 +156,25 @@ prod runtime and dev workspace are split at the filesystem level:
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through the CLI `ava cluster update` (`ava.self.update()` was removed 2026-08) |
 | `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool) | freely checkout any branch, decoupled from prod |
 
-### Worktree uv iron rule (Task #1572)
+### Worktree uv iron rule (Tasks #1572, #5638)
 
 An editable install is a pointer stored in the **active virtualenv**, not a fact
-derived from the shell's current directory. Inside a worktree, every `uv`
-command must therefore discard an inherited `VIRTUAL_ENV`:
+derived from the shell's current directory. A worktree's `.venv` must be a
+real directory inside that worktree, never a symlink. Before **every** worktree
+sync, run the dependency-free preflight; it refuses an external environment,
+a symlinked `.venv`, or editable records naming another checkout. Then discard
+an inherited `VIRTUAL_ENV` for the `uv` command:
 
 ```bash
+python scripts/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync
 env -u VIRTUAL_ENV uv pip install -e .
 ```
 
 On PowerShell, apply the same rule with `Remove-Item Env:VIRTUAL_ENV
 -ErrorAction SilentlyContinue` before `uv`. Never rely on `cd` alone to select
-the worktree's `.venv`.
+the worktree's `.venv`. `scripts/install.sh --worktree` and
+`scripts/setup-worktree.sh` invoke the same preflight before their own sync.
 
 Before deleting a worktree, inspect every long-lived Ava virtualenv on the host:
 
@@ -185,10 +190,13 @@ check applies to the editable URL uv records beside the pointer — in each venv
 checkout's `file://` URL. If either record is wrong, do **not** delete the
 worktree: run `env -u VIRTUAL_ENV uv sync` from the affected stable checkout
 and recheck. `ava converge` / `ava start` independently assert and auto-repair
-both prod records, with `editable_pth_repaired` / `editable_direct_url_repaired`
-warning events; the dev-clone pointer remains part of this mandatory deletion
-check. This is the operating half of the Task #1572 editable-`.pth` guard
-specification; the incident and escape analysis are in
+both prod records, then make their site-packages directories read-only outside
+the narrow update/repair write window. Every `execute_code` spawn also checks
+the current interpreter's records: the first poisoned call repairs the install
+and returns a retryable structured error, preventing a flood of failed child
+imports. The dev-clone pointer remains part of this mandatory deletion check.
+This is the operating half of the editable-install guard specification; the
+incident and escape analysis are in
 [`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
 
 A typical small deployment runs the **gateway as a single-box unit** on an

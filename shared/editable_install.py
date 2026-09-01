@@ -6,7 +6,9 @@ polluted ``VIRTUAL_ENV`` can therefore make a worktree install repoint a
 long-lived checkout's interpreter at disposable source. Lifecycle callers use
 the repair primitives for the prod checkout only; update callers use the write
 window so an operator's emergency read-only mode does not block a legitimate
-sync.
+sync. The exec boundary runs the read/repair guard for every child spawn: its
+few file stats are negligible beside a process spawn, and deliberately remain
+uncached so a newly poisoned install cannot evade the next execution.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import contextlib
 import json
 import os
 import stat
+import sys
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +78,13 @@ def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
     return tuple(sorted(matches, key=str))
 
 
+def editable_site_packages_dirs(source_root: Path) -> tuple[Path, ...]:
+    """Existing site-packages directories holding an Ava editable-install record."""
+
+    records = editable_ava_pth_paths(source_root) + editable_direct_url_paths(source_root)
+    return tuple(sorted({path.parent for path in records}, key=str))
+
+
 def _normalized_exact_path(path: Path) -> str:
     """Platform-native exact path identity, including Windows case folding."""
 
@@ -82,13 +92,19 @@ def _normalized_exact_path(path: Path) -> str:
 
 
 def _target_is_allowed(raw_target: str, allowed_roots: frozenset[str]) -> bool:
-    if not raw_target or "\n" in raw_target or "\r" in raw_target:
+    targets = raw_target.splitlines()
+    if not targets:
         return False
-    try:
-        normalized = _normalized_exact_path(Path(raw_target))
-    except (OSError, ValueError):
-        return False
-    return normalized in allowed_roots
+    for target in targets:
+        if not target:
+            return False
+        try:
+            normalized = _normalized_exact_path(Path(target))
+        except (OSError, ValueError):
+            return False
+        if normalized not in allowed_roots:
+            return False
+    return True
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -130,15 +146,32 @@ def _write_window(paths: Iterable[Path]) -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def editable_pth_write_window(source_root: Path) -> Generator[None, None, None]:
-    """Temporarily add owner-write to read-only Ava pointers, then restore it.
+def editable_site_packages_write_window(source_root: Path) -> Generator[None, None, None]:
+    """Temporarily make protected Ava site-packages directories owner-writable.
 
-    The exact original mode is restored in ``finally`` on both successful and
-    failed syncs. If uv atomically replaces the file, the replacement receives
-    the original protection too.
+    POSIX blocks uv's atomic replacement at the directory boundary, not the
+    read-only record file. Windows ACLs have a different permission model, so
+    this is intentionally a no-op there.
     """
 
-    with _write_window(editable_ava_pth_paths(source_root)):
+    if os.name == "nt":
+        yield
+        return
+    with _write_window(editable_site_packages_dirs(source_root)):
+        yield
+
+
+@contextlib.contextmanager
+def editable_pth_write_window(source_root: Path) -> Generator[None, None, None]:
+    """Temporarily open protected Ava records and their directories, then restore.
+
+    The exact original mode is restored in ``finally`` on both successful and
+    failed syncs. Directory access covers uv's atomic replacement, while file
+    access keeps direct repair compatible with the legacy file-level guard.
+    """
+
+    records = editable_ava_pth_paths(source_root) + editable_direct_url_paths(source_root)
+    with editable_site_packages_write_window(source_root), _write_window(records):
         yield
 
 
@@ -239,7 +272,7 @@ def repair_editable_direct_url(
             {"url": resolved_source.as_uri(), "dir_info": {"editable": True}},
             separators=(",", ":"),
         )
-        with _write_window((path,)):
+        with editable_pth_write_window(resolved_source):
             _atomic_write_text(path, repaired)
         repair = EditableInstallRepair(
             path=path,
@@ -318,3 +351,55 @@ def editable_install_violations(
         if not _direct_url_is_allowed(raw_text, allowed_urls):
             violations.append(f"{record} records {raw_text.strip() or '(empty)'!r}")
     return tuple(sorted(violations))
+
+
+def current_interpreter_source_root() -> Path | None:
+    """Return this interpreter's checkout root when it is under ``.venv``.
+
+    The supported layouts are ``<root>/.venv/bin/python`` and
+    ``<root>/.venv/Scripts/python.exe``. A system interpreter or shim carries
+    no checkout authority, so callers deliberately treat it as a no-op.
+    """
+
+    # A virtualenv's Python is normally a symlink to its base interpreter. The
+    # lexical executable path carries the ``.venv`` identity; resolving it
+    # before the layout check would lose that boundary.
+    interpreter = Path(sys.executable)
+    try:
+        venv = interpreter.parents[1]
+        source_root = interpreter.parents[2]
+    except IndexError:
+        return None
+    if venv.name != ".venv" or interpreter.parent.name not in {"bin", "Scripts"}:
+        return None
+    return source_root.resolve(strict=False)
+
+
+def guard_editable_install(
+    source_root: Path,
+    *,
+    allowed_roots: Iterable[Path] = (),
+) -> tuple[str, ...]:
+    """Report and repair a poisoned install before an exec child can import it."""
+
+    effective_allowed_roots = tuple(allowed_roots) or (Path.home() / "Ava",)
+    violations = editable_install_violations(
+        source_root,
+        allowed_roots=effective_allowed_roots,
+    )
+    if not violations:
+        return ()
+    resolved_source = source_root.expanduser().resolve(strict=False)
+    shared.telemetry.emit(
+        "telemetry",
+        "exec_editable_install_poisoned",
+        level="warning",
+        source="exec_guard",
+        attributes={
+            "violations": list(violations),
+            "source_root": str(resolved_source),
+            "python": sys.executable,
+        },
+    )
+    repair_editable_install(resolved_source, allowed_roots=effective_allowed_roots)
+    return violations

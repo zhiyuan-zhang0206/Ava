@@ -455,7 +455,9 @@ install_worktree() {
     # the home. --path is the only identity input.
     target_home="${WT_PATH:-$HOME/.ava-$checkout_name}"
     command -v uv >/dev/null 2>&1 || die "--worktree needs uv on PATH (dev-host prerequisite; see conventions/dev-setup.md)"
-    (cd "$checkout_dir" && uv sync --frozen)
+    command -v python3 >/dev/null 2>&1 || die "--worktree needs python3 to run the editable-venv guard"
+    (cd "$checkout_dir" && python3 "$SCRIPT_DIR/guard_editable_venv.py" "$checkout_dir")
+    (cd "$checkout_dir" && env -u VIRTUAL_ENV uv sync --frozen)
     wt_args=("--home" "$target_home" "--role" "gateway,agent-runner" "--worktree")
     # A worktree birth is single-machine -> NO-AUTH (empty secret) by default;
     # AVA_INSTALL_CLUSTER_SECRET states one explicitly. The seed source is stated

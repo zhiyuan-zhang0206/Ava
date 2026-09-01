@@ -115,6 +115,7 @@ _ALLOWED_FILES = frozenset(
         "agent/graph/_build.py",  # _retry_phase_jitter() reads AVA_AGENT_ID (per-process agent identity set by agent/loop.py) for deterministic per-agent LLM-retry de-phasing; Settings is a module-load singleton with no per-agent identity field
         "shared/resilience.py",  # _agent_phase() reads AVA_AGENT_ID (per-process agent identity set by agent/loop.py) for deterministic per-process retry de-phasing; Settings is a module-load singleton with no per-agent identity field (same as agent/graph/_build.py)
         "scripts/migrate_skill_identity.py",  # standalone R2-B migration tool: must target an arbitrary AVA_HOME (--ava-home overrides) and build a psql subprocess env at call time; importing shared.config would freeze the settings singleton to the process's own home at import and drag the whole config stack into a script that must run against foreign / fresh homes
+        "scripts/guard_editable_venv.py",  # dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import
     }
 )
 

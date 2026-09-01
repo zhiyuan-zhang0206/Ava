@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
+import stat
 from pathlib import Path
 from typing import cast
 
@@ -139,6 +141,29 @@ def test_prod_editable_pth_guard_is_registered_as_host_global() -> None:
 
     assert step is not None
     assert step.host_global
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX site-packages protection")
+def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The prod converge boundary must harden site-packages after repairing records."""
+    source_root = tmp_path / "prod" / "source"
+    pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
+    pth.parent.mkdir(parents=True)
+    pth.write_text(str(source_root))
+    pth.parent.chmod(0o755)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    step = next(
+        step
+        for step in _converge.CONVERGE_STEPS
+        if step.name == "prod editable site-packages protection"
+    )
+
+    step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert step.host_global
+    assert stat.S_IMODE(pth.parent.stat().st_mode) == 0o555
 
 
 def test_prod_editable_pth_converge_step_repairs_and_warns(

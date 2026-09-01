@@ -35,9 +35,12 @@ callers.
   and `.claude/worktrees/` checkouts, so a worktree's own legal pointer is never
   inspected or rewritten. `ava start` inherits the same converge step.
 - Update, recovery, rollback, and start's source-integrity auto-heal route each
-  `uv sync` through `editable_pth_write_window`. A read-only pointer gains only
-  owner-write for the sync; its exact original mode is restored in `finally`,
-  including non-zero syncs and atomic replacement of the file.
+  `uv sync` through `editable_pth_write_window`. The window temporarily opens
+  both the editable records and their site-packages directories, so uv's atomic
+  replacement can complete; their exact original modes are restored in
+  `finally`, including non-zero syncs. After prod repair, converge protects the
+  record-containing POSIX directories as `0555`, which rejects an unsanctioned
+  replacement at the directory boundary.
 - The native Windows deployment chain calls
   `python -m cli.commands._update_uv_sync`, giving it the same write window as
   the in-process POSIX/WSL paths. Discovery scans Windows `Lib`, POSIX `lib`,
@@ -49,8 +52,8 @@ callers.
   any `.worktrees/*` descendant.
 - Missing `.pth` or `direct_url.json` files are a no-op; the guard does not
   change Ava's editable installation mechanism.
-- Repair changes pointer content only. The write window restores the mode that
-  existed before lifecycle code entered it.
+- Repair changes pointer content only. The write window restores every record
+  and directory mode that existed before lifecycle code entered it.
 
 ## Key dependencies
 

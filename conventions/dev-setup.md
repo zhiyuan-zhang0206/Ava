@@ -80,6 +80,12 @@ host-global symlink/PATH wiring for dev clusters). There is deliberately **no
 physically lives in this worktree (a literal `./ava` is also blocked: the repo root
 already has an `ava/` package dir).
 
+Before every manual worktree `uv sync`, run `python
+scripts/guard_editable_venv.py .` and then `env -u VIRTUAL_ENV uv sync`. The
+worktree `.venv` must be a real directory under that checkout, never a symlink;
+`scripts/install.sh --worktree` and `scripts/setup-worktree.sh` run the same
+preflight automatically.
+
 The first `ava start` from a worktree is the "editable install + deploy" step: it
 brings the in-place tree up as its own cluster (name defaults to the worktree dir
 `<name>`), giving it:
