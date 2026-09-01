@@ -392,10 +392,10 @@ repos:
         files: ^ui/web/.*\.(ts|tsx)$
         pass_filenames: false
 
-      # ESLint — aligned with frontend CI, 0 errors required to commit.
+      # ESLint — aligned with frontend CI; errors and unbaselined warnings fail.
       - id: frontend-eslint
         name: frontend eslint
-        entry: bash -c 'cd ui/web && npx --no-install eslint . --max-warnings 0'
+        entry: bash -c 'cd ui/web && npm run lint'
         language: system
         files: ^ui/web/.*\.(ts|tsx|js|mjs)$
         pass_filenames: false

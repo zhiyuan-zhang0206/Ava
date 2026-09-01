@@ -10,7 +10,7 @@
     "check:first-load-js": "node scripts/check-first-load-js.mjs",
     "start": "next start -H 127.0.0.1",
     "test": "vitest run",
-    "lint": "eslint . --max-warnings 17",
+    "lint": "eslint . --format json | node scripts/check-eslint-warnings.mjs",
     "lint:fix": "eslint . --fix",
     "typecheck": "next typegen && tsc --noEmit"
   },
