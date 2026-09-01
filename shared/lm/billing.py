@@ -26,8 +26,16 @@ _CORE_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
     ("mimo-", "xiaomi"),
     ("kimi-", "moonshot"),
     ("glm-", "zhipu"),
-    ("qwen", "alibaba"),
 )
+
+
+def _is_qwen_family(model: str) -> bool:
+    """Alibaba family ids nest directly after the stem (``qwen3.8-max``), so a
+    bare ``qwen-`` prefix would miss them. Require a digit after the stem (or an
+    exact ``qwen`` id) so a non-Alibaba ``qwenfoo-*`` id cannot be mis-attributed;
+    plugin registration already rejects such prefixes, this is a second guard.
+    """
+    return model == "qwen" or (len(model) > 4 and model[4].isdigit())
 
 
 def vendor_of_model(model: str) -> str | None:
@@ -35,6 +43,8 @@ def vendor_of_model(model: str) -> str | None:
     for prefix, vendor in _CORE_VENDOR_PREFIXES:
         if model.startswith(prefix):
             return vendor
+    if _is_qwen_family(model):
+        return "alibaba"
 
     from shared.lm import provider_api
 
