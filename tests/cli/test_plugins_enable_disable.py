@@ -3,11 +3,28 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from cli.commands import cmd_plugins_disable, cmd_plugins_enable
 
 
+@pytest.fixture(autouse=True)
+def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every plugin write in this test's tmp dir, never the worker-shared
+    session home (tests ambient-state audit H-1): a discoverable plugin or a
+    plugins_config.json left in `$AVA_HOME` changes what later tests in the same
+    worker see. Same redirection `test_converge_plugins.py` uses."""
+    from shared import paths
+    from shared.config import settings
+
+    home = tmp_path / "ava_home"
+    monkeypatch.setattr(paths, "plugins_dir", lambda: home / "plugins")
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(settings.general, "ava_home", str(home))
+
+
 def test_cmd_enable_then_disable(tmp_path: Path, capsys):
-    # conftest points AVA_HOME at a tmp dir; create a plugin on disk + seed local.
+    # Everything below lands in the per-test tmp home (see `_isolate`).
     from shared import paths
     from shared.plugins_config import local_config_path, write_local
 

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ from services.pitr.base_candidate import (
     _validate_replication_contract,
     _validate_replication_hba,
 )
+from tests._containers import _free_port
 
 # ─── completed-candidate reconciliation (QA #1147 C2) ────────────────────────
 
@@ -264,7 +266,7 @@ def test_validate_replication_hba_wraps_probe_failure(
 def _scratch_pg(tmp_path: Path) -> tuple[Path, Path, int]:
     from shared.pg_tools import pg_tool
 
-    port = 39618
+    port = _free_port()
     sock = Path(tempfile.mkdtemp(prefix="ava-pg-sock-", dir="/tmp"))
     data = tmp_path / "pg"
     log = tmp_path / "pg.log"
@@ -273,24 +275,31 @@ def _scratch_pg(tmp_path: Path) -> tuple[Path, Path, int]:
         check=True,
         capture_output=True,
     )
-    subprocess.run(  # noqa: S603
-        [
-            pg_tool("pg_ctl"),
-            "-D",
-            str(data),
-            "-l",
-            str(log),
-            "-w",
-            "-t",
-            "30",
-            "start",
-            "-o",
-            f"-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories={sock} "
-            "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
-        ],
-        check=True,
-        capture_output=True,
-    )
+    start = [
+        pg_tool("pg_ctl"),
+        "-D",
+        str(data),
+        "-l",
+        str(log),
+        "-w",
+        "-t",
+        "30",
+        "start",
+        "-o",
+        f"-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories={sock} "
+        "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
+    ]
+    # A parallel xdist worker can win the release-to-bind window and grab the
+    # port (`_free_port` documents the same race); retrying the start rides out
+    # the transient refusal instead of failing the test (audit #2245).
+    for attempt in range(3):
+        try:
+            subprocess.run(start, check=True, capture_output=True)  # noqa: S603
+            break
+        except subprocess.CalledProcessError:
+            if attempt == 2:
+                raise
+            time.sleep(1.5)
     return data, sock, port
 
 
