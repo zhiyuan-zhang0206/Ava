@@ -3,7 +3,9 @@
 ``pricing_catalog.json`` is the reviewed source of truth. Its effective
 intervals, input-token tiers, and recurring UTC windows select one exact rate
 triple for a call; ``quote`` returns that triple with its cost atomically.
-``cost_usd`` remains the compatibility surface for existing readers.
+``cost_usd`` remains the compatibility surface for existing readers. Schema v2
+requires each model entry to identify its vendor; the cross-line contract lives
+in ``pricing_catalog_schema.md``.
 
 ## Cache hit vs miss must be computed separately
 
@@ -149,6 +151,7 @@ class _EffectivePeriod:
 
 @dataclass(frozen=True)
 class _ModelPrice:
+    vendor: str | None
     source_url: str
     source_checked_at: date
     effective_time_note: str | None
@@ -268,12 +271,20 @@ def _parse_periods(model: str, raw_periods: list[dict[str, Any]]) -> tuple[_Effe
 def _load_catalog() -> dict[str, _ModelPrice]:
     path = Path(__file__).with_name("pricing_catalog.json")
     raw = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
-    if raw["schema_version"] != 1 or raw["currency"] != "USD" or raw["unit_tokens"] != 1_000_000:
+    return _parse_catalog(raw)
+
+
+def _parse_catalog(raw: dict[str, Any]) -> dict[str, _ModelPrice]:
+    schema_version = raw["schema_version"]
+    if schema_version not in (1, 2) or raw["currency"] != "USD" or raw["unit_tokens"] != 1_000_000:
         raise RuntimeError("unsupported pricing catalog schema, currency, or token unit")
     if not isinstance(raw["catalog_version"], str) or not raw["catalog_version"]:
         raise RuntimeError("pricing catalog version must be a non-empty string")
     catalog: dict[str, _ModelPrice] = {}
     for model, entry_raw in cast(dict[str, dict[str, Any]], raw["models"]).items():
+        vendor = entry_raw.get("vendor")
+        if schema_version == 2 and (not isinstance(vendor, str) or not vendor):
+            raise RuntimeError(f"pricing catalog vendor must be a non-empty string for {model!r}")
         source_url = entry_raw["source_url"]
         if not isinstance(source_url, str) or not source_url.startswith("https://"):
             raise RuntimeError(f"pricing catalog source_url must be HTTPS for {model!r}")
@@ -285,6 +296,7 @@ def _load_catalog() -> dict[str, _ModelPrice]:
                 f"pricing catalog effective_time_note must be non-empty text for {model!r}"
             )
         catalog[model] = _ModelPrice(
+            vendor=cast(str | None, vendor),
             source_url=source_url,
             source_checked_at=date.fromisoformat(entry_raw["source_checked_at"]),
             effective_time_note=effective_time_note,
@@ -294,6 +306,12 @@ def _load_catalog() -> dict[str, _ModelPrice]:
 
 
 _CATALOG = _load_catalog()
+
+
+def model_vendor(model: str) -> str | None:
+    """Vendor recorded for a catalog model, or None when not available."""
+    entry = _CATALOG.get(model)
+    return None if entry is None else entry.vendor
 
 
 @dataclass(frozen=True)
