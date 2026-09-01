@@ -69,12 +69,14 @@ def _spawn(
     state: dict[str, Any] | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
+    write_request_file: bool = True,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Write a request, run the real child, return (proc, request, result)."""
     exec_dir = tmp_path / "exec"
     request_path = make_request_path(exec_dir, agent_id=_AGENT_ID)
     result_path = make_result_path(exec_dir, agent_id=_AGENT_ID)
-    write_request(request_path, code=code, agent_id=_AGENT_ID, timeout_s=timeout_s, state=state)
+    if write_request_file:
+        write_request(request_path, code=code, agent_id=_AGENT_ID, timeout_s=timeout_s, state=state)
     proc = subprocess.run(
         [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
         capture_output=True,
@@ -102,6 +104,70 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert payload.state_update is None
     assert payload.findings == []
     assert payload.attachments == []
+
+
+def test_boot_config_failure_writes_crashed_envelope(tmp_path: Path) -> None:
+    """A Settings failure while importing ava must reach the parent's result file."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(
+        "AVA_DB_URL=postgresql://u@127.0.0.1:1/x\n"
+        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "AVA_PITR_ENABLED=true\n"
+        "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
+        "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
+        "AVA_PITR_STORE_BACKEND=oss\n"
+        "AVA_PITR_OSS_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com\n"
+        "AVA_PITR_OSS_BUCKET=some-bucket\n"
+        "AVA_PITR_OSS_CREDENTIALS_FILE=/nonexistent/cred.json\n"
+        "AVA_PITR_BACKUP_KEY_FILE=/nonexistent/key\n"
+        "AVA_PITR_BACKUP_KEY_ID=test\n",
+        encoding="utf-8",
+    )
+
+    proc, _request, result = _spawn(tmp_path, "pass", write_request_file=False)
+
+    assert proc.returncode == 0, proc.stderr
+    payload = read_result(result)
+    assert payload.kind == "crashed"
+    assert payload.exc_type == "ValidationError"
+    assert "viewer-only OSS credential" in (payload.exc_msg or "")
+    assert "exec_child" in (payload.full_traceback or "")
+    assert result.stat().st_mode & 0o777 == 0o600
+
+
+def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Path) -> None:
+    """A healthy child keeps reporting request-read failures through its envelope."""
+    proc, _request, result = _spawn(tmp_path, "pass", write_request_file=False)
+
+    assert proc.returncode == 0, proc.stderr
+    payload = read_result(result)
+    assert payload.kind == "crashed"
+    assert payload.exc_type == "FileNotFoundError"
+    assert "exec_child" in (payload.full_traceback or "")
+
+
+def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed protocol writer cannot erase an already-caught child crash."""
+    from agent import exec_child
+    from agent.graph import _exec_protocol
+
+    result = tmp_path / "result.json"
+
+    def fail_write_result(_path: Path, _payload: object) -> None:
+        raise OSError("synthetic protocol write failure")
+
+    monkeypatch.setattr(_exec_protocol, "write_result", fail_write_result)
+    exec_child._write_crashed_result(str(result), ValueError("fallback boom"))
+
+    payload = read_result(result)
+    assert payload.kind == "crashed"
+    assert payload.exc_type == "ValueError"
+    assert payload.exc_msg == "fallback boom"
+    assert "ValueError: fallback boom" in (payload.full_traceback or "")
+    assert result.stat().st_mode & 0o777 == 0o600
 
 
 def test_child_builtin_help_routes_only_ava_targets(tmp_path: Path) -> None:
@@ -337,6 +403,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     """A signal arriving during request decoding must become an in-band result,
     so SIGTERM's child handler is installed before the read begins."""
     from agent import exec_child
+    from agent.graph import _exec_protocol
     from agent.graph._exec_protocol import RequestPayload, ResultPayload
 
     old_sigint = signal.getsignal(signal.SIGINT)
@@ -365,12 +432,12 @@ def test_child_installs_signal_handlers_before_reading_request(
         return None
 
     monkeypatch.setattr(exec_child, "_line_buffered_output", lambda: None)
-    monkeypatch.setattr(exec_child, "read_request", fake_read_request)
+    monkeypatch.setattr(_exec_protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "_pop_overlay_env", lambda: (None, None))
     monkeypatch.setattr(exec_child, "_apply_overlay_scope", fake_apply_scope)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
-    monkeypatch.setattr(exec_child, "write_result", fake_write_result)
+    monkeypatch.setattr(_exec_protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava._ensure_plugins_loaded", lambda: None)
     monkeypatch.setattr("ava.security.take_findings", list)
     monkeypatch.setattr("ava._attach.take_attachments", list)
@@ -424,18 +491,14 @@ def test_child_overlay_phases_framework_then_plugin(
     scope (with the sdk_disable re-apply) BEFORE plugins load, plugin scope
     after. A single framework-only pass (the PR1 shape) silently dropped
     plugin-scope overlay fields — this locks the sequencing."""
-    from types import SimpleNamespace
-
     from agent import exec_child
+    from agent.graph import _exec_protocol
     from agent.graph._exec_protocol import RequestPayload, ResultPayload
 
     events: list[str] = []
 
     def fake_read_request(_path: Path) -> RequestPayload:
         return RequestPayload(code="pass", agent_id=None, timeout_s=0.0, state=None)
-
-    def fake_establish(*_args: object, **_kwargs: object) -> None:
-        return None
 
     def fake_init_logger(_agent_id: int | None) -> None:
         return None
@@ -458,13 +521,12 @@ def test_child_overlay_phases_framework_then_plugin(
     def fake_plugins_loaded() -> None:
         events.append("plugins")
 
-    monkeypatch.setattr(exec_child, "read_request", fake_read_request)
-    monkeypatch.setattr(exec_child, "_boot", SimpleNamespace(establish=fake_establish))
+    monkeypatch.setattr(_exec_protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "_init_logger", fake_init_logger)
     monkeypatch.setattr("agent._process_boot._apply_per_agent_sdk_disable", fake_sdk_disable)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
-    monkeypatch.setattr(exec_child, "write_result", fake_write_result)
+    monkeypatch.setattr(_exec_protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava.security.take_findings", fake_take_findings)
     monkeypatch.setattr("ava._ensure_plugins_loaded", fake_plugins_loaded)
 

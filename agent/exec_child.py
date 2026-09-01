@@ -44,15 +44,17 @@ effective settings as the agent process.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import signal
 import sys
 import threading
+import traceback
 from pathlib import Path
 from typing import Any, Literal, cast
 
 # isort: split
-# First import after stdlib, BEFORE the heavy `import ava` block below:
+# First import after stdlib, BEFORE the heavy `import ava` inside `_run`:
 # importing shared.log runs `logger.remove()` (dropping loguru's default
 # stderr handler). Without this, a Settings-construction warning that fires
 # during the ava import chain (e.g. `_warn_when_timezone_unset` on a host
@@ -64,18 +66,6 @@ from typing import Any, Literal, cast
 import shared.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side effect is the point
 
 # isort: split
-# The child runs `python -I -X utf8 -m agent.exec_child` from the same venv as the agent
-# process, so `import ava` below costs ~750ms (measured; accepted — user
-# ruling 2026-08-21: cold start is fine, no warm pool, lazy import deferred).
-import ava
-from agent.graph._exec_protocol import (
-    KILL_GRACE_S,
-    ResultKind,
-    ResultPayload,
-    read_request,
-    write_result,
-)
-from ava import _boot
 from shared.log import init_subprocess_logger, logger
 from shared.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
 
@@ -86,10 +76,18 @@ WATCHDOG_MARGIN_S = 5.0
 # Exit code the watchdog uses (the `timeout(1)` convention, same as watchers).
 WATCHDOG_EXIT_CODE = 124
 
-_RESULT_KIND: dict[type[BaseException], ResultKind] = {
+_RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
     KeyboardInterrupt: "cancelled",
     TimeoutError: "timed_out",
 }
+
+
+def _import_runtime() -> None:
+    """Load the SDK only after `main` can turn a boot failure into a result."""
+    global ava, _boot  # noqa: PLW0603
+
+    import ava
+    from ava import _boot
 
 
 def _line_buffered_output() -> None:
@@ -127,6 +125,8 @@ def _arm_watchdog(timeout_s: float) -> None:
     """Hard-exit past (timeout + parent kill grace + margin) — the belt to the
     parent's braces. Only fires when the parent itself died (or its signals
     were lost); a parent that is alive SIGKILLs this child first."""
+    from agent.graph._exec_protocol import KILL_GRACE_S
+
     margin = float(os.environ.get("AVA_EXEC_WATCHDOG_MARGIN_S", WATCHDOG_MARGIN_S))
     delay = timeout_s + KILL_GRACE_S + margin
 
@@ -216,7 +216,7 @@ def _build_state_slot(state: dict[str, Any] | None) -> None:
     ava.state_update = {}
 
 
-def _take_result_state_update(payload: ResultPayload, *, state_injected: bool) -> None:
+def _take_result_state_update(payload: Any, *, state_injected: bool) -> None:
     """Serialize this turn's plugin delta into the result envelope.
 
     A tampered slot (agent set ava.state_update to a non-dict) is reported as
@@ -240,7 +240,7 @@ def _take_result_state_update(payload: ResultPayload, *, state_injected: bool) -
     payload.state_update = update
 
 
-def _run_code(code: str, payload: ResultPayload) -> None:
+def _run_code(code: str, payload: Any) -> None:
     """Execute the agent's code with stdout/stderr on the pipe; capture
     lifecycle / crash outcomes into the payload."""
     from agent.graph._agent_traceback import (
@@ -300,6 +300,8 @@ def _run_code(code: str, payload: ResultPayload) -> None:
 def _run(request_path: str, result_path: str) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
+    _import_runtime()
+    from agent.graph._exec_protocol import ResultPayload, read_request, write_result
     from ava._attach import media_gated_members, take_attachments
     from ava._exports.discovery import _hidden_surface_members
     from ava.security import take_findings
@@ -361,11 +363,7 @@ def _run(request_path: str, result_path: str) -> None:
         try:
             write_result(Path(result_path), payload)
         except BaseException as write_exc:
-            # The envelope is the only channel home; a failure here must not
-            # crash silently — one best-effort rewrite via a bare envelope.
-            fallback = ResultPayload(kind="crashed", exc_type=type(write_exc).__name__)
-            with contextlib.suppress(OSError):
-                write_result(Path(result_path), fallback)
+            _write_crashed_result(result_path, write_exc)
 
 
 def main() -> None:
@@ -385,22 +383,71 @@ def main() -> None:
     try:
         _run(request_path, result_path)
     except BaseException as exc:
-        # Any bootstrap failure (bad envelope, import error, plugin crash)
-        # must still produce a result envelope — the parent treats a silent
-        # exit as a generic crash without the traceback.
-        payload = ResultPayload(
-            kind="crashed",
-            exc_type=type(exc).__name__,
-            exc_msg=str(exc)[:2000],
-            full_traceback=_format_current_traceback(exc),
+        _write_crashed_result(result_path, exc)
+
+
+def _write_crashed_result(result_path: str, exc: BaseException) -> None:
+    """Best-effort crash envelope that cannot itself hide the original failure."""
+    exc_type = type(exc).__name__
+    exc_msg = str(exc)[:2000]
+    full_traceback = _format_current_traceback(exc)
+    envelope: dict[str, object] = {
+        "v": 1,
+        "kind": "crashed",
+        "lifecycle_type": None,
+        "exc_type": exc_type,
+        "exc_msg": exc_msg,
+        "full_traceback": full_traceback,
+        "state_update_error": None,
+        "findings": None,
+        "attachments": None,
+    }
+    try:
+        from agent.graph._exec_protocol import ResultPayload as RuntimeResultPayload
+        from agent.graph._exec_protocol import write_result as runtime_write_result
+
+        runtime_write_result(
+            Path(result_path),
+            RuntimeResultPayload(
+                kind="crashed",
+                exc_type=exc_type,
+                exc_msg=exc_msg,
+                full_traceback=full_traceback,
+            ),
         )
+        return
+    except BaseException:
+        _write_crashed_result_stdlib(result_path, envelope)
+
+
+def _write_crashed_result_stdlib(result_path: str, envelope: dict[str, object]) -> None:
+    """Write the minimal result shape without importing application modules."""
+    path = Path(result_path)
+    fd: int | None = None
+    try:
+        data = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with contextlib.suppress(OSError):
-            write_result(Path(result_path), payload)
+            path.chmod(0o600)
+        result_file = os.fdopen(fd, "wb")
+        fd = None
+        with result_file:
+            result_file.write(data)
+    except BaseException as write_exc:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            path.unlink()
+        with contextlib.suppress(BaseException):
+            sys.stderr.write(
+                "exec child could not write crash result envelope: "
+                f"{type(write_exc).__name__}: {write_exc}\n"
+            )
+            sys.stderr.flush()
 
 
 def _format_current_traceback(exc: BaseException) -> str:
-    import traceback
-
     return "".join(traceback.format_exception(exc))
 
 
