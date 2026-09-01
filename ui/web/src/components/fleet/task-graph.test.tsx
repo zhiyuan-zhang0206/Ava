@@ -14,6 +14,7 @@ import type { TasksResult } from "@/lib/use-tasks";
 import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
 
 import { FORCE_DEFAULTS, FORCE_GROUPS, TASK_FORCE_GROUPS, type ForceGroup } from "./force-controls";
+import { STATUS_TO_LANE } from "./task-kanban";
 import { TASK_FORCE_KEY } from "./task-graph";
 import { TaskGraph } from "./task-graph";
 
@@ -68,6 +69,10 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+it("maps ongoing tasks into the In progress Kanban lane", () => {
+  expect(STATUS_TO_LANE.ongoing).toBe(0);
+});
 
 describe("TaskGraph (graph mode)", () => {
   it("uses full rows so graph and kanban retain task text", () => {

@@ -410,11 +410,34 @@ def test_update_rejects_closing_parent_with_in_progress_child(
         parent = task_registry.create(f"parent-{closing_status}", "detail", parent=root_task_id)
         child = task_registry.create(f"active-child-{closing_status}", "detail", parent=parent.id)
         message = (
-            f"task {parent.id} has 1 in_progress child tasks (e.g. #{child.id}) — "
+            f"task {parent.id} has 1 active child tasks (e.g. #{child.id}) — "
             "close or cancel them first"
         )
 
         with pytest.raises(ValueError, match=re.escape(message)):
+            task_registry.update(parent.id, status=closing_status)
+
+        assert task_registry.get(parent.id).status == "in_progress"
+    finally:
+        ava._boot._agent_id = original
+
+
+@pytest.mark.parametrize("closing_status", ["done", "cancelled"])
+def test_update_rejects_closing_parent_with_ongoing_child(
+    db_conn: psycopg.Connection, closing_status: str, root_task_id: int
+) -> None:
+    """An ongoing child is still open, so it blocks closing its parent."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create(
+            f"parent-ongoing-{closing_status}", "detail", parent=root_task_id
+        )
+        child = task_registry.create(f"ongoing-child-{closing_status}", "detail", parent=parent.id)
+        task_registry.update(child.id, status="ongoing")
+
+        with pytest.raises(ValueError, match=rf"#{child.id}"):
             task_registry.update(parent.id, status=closing_status)
 
         assert task_registry.get(parent.id).status == "in_progress"
@@ -1883,20 +1906,21 @@ def test_update_root_task_is_rejected(db_conn: psycopg.Connection, root_task_id:
         ava._boot._agent_id = original
 
 
-def test_update_non_root_rejects_ongoing_status(
-    db_conn: psycopg.Connection, root_task_id: int
+@pytest.mark.parametrize("next_status", ["in_progress", "done", "cancelled"])
+def test_update_non_root_allows_ongoing_status(
+    db_conn: psycopg.Connection, root_task_id: int, next_status: str
 ) -> None:
-    """'ongoing' is the system root's permanent state: update() refuses to
-    assign it to a regular task, and the DB CHECK backs the same rule."""
+    """A regular task can enter ongoing and later return to each allowed state."""
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("regular-task", "detail", parent=root_task_id)
-        with pytest.raises(ValueError, match="permanent state"):
-            task_registry.update(task.id, status="ongoing")
-        # The rejected write never landed.
-        assert task_registry.get(task.id).status == "in_progress"
+        task_registry.update(task.id, status="ongoing")
+        assert task_registry.get(task.id).status == "ongoing"
+
+        task_registry.update(task.id, status=next_status)
+        assert task_registry.get(task.id).status == next_status
     finally:
         ava._boot._agent_id = original
 

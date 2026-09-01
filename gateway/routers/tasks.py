@@ -3,7 +3,7 @@
 GET /api/tasks — the task list (optionally narrowed by a last-activity window).
 PATCH /api/tasks/{id} — partial update (status / title / description /
 results / remind_interval_seconds / owner). Closing a parent is rejected while
-any child remains in progress.
+any child remains active.
 """
 
 from __future__ import annotations
@@ -203,16 +203,10 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     sets: list[str] = []
     params: list[object] = []
     if body.status is not None:
-        if body.status not in ("in_progress", "done", "cancelled"):
-            if body.status == "ongoing":
-                raise HTTPException(
-                    status_code=422,
-                    detail="'ongoing' is the system root task's permanent state and cannot be "
-                    "assigned via PATCH -- the root task itself is immutable.",
-                )
+        if body.status not in ("in_progress", "ongoing", "done", "cancelled"):
             raise HTTPException(
                 status_code=422,
-                detail=f"Invalid status: {body.status!r}. Must be one of: in_progress, done, cancelled.",
+                detail=f"Invalid status: {body.status!r}. Must be one of: in_progress, ongoing, done, cancelled.",
             )
         sets.append("status = %s")
         params.append(body.status)
@@ -303,7 +297,7 @@ def _patch_task_blocking(
         if body.status in ("done", "cancelled"):
             cur.execute(
                 "SELECT id, count(*) OVER () FROM agent_tasks "
-                "WHERE parent_id = %s AND status = 'in_progress' "
+                "WHERE parent_id = %s AND status IN ('in_progress', 'ongoing') "
                 "ORDER BY id LIMIT 1",
                 (task_id,),
             )
@@ -312,7 +306,7 @@ def _patch_task_blocking(
                 child_id, child_count = active_child
                 raise HTTPException(
                     status_code=422,
-                    detail=f"task {task_id} has {child_count} in_progress child tasks "
+                    detail=f"task {task_id} has {child_count} active child tasks "
                     f"(e.g. #{child_id}) — close or cancel them first",
                 )
         # Reparenting mirrors the SDK update() checks (shared validation):
@@ -378,9 +372,8 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     """Partially update a task; omitted fields stay unchanged.
 
     status, priority, title, description, and results are taken when non-null
-    (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
-    the system root's permanent state, never assignable; a title colliding with
-    another in_progress task's is rejected). owner reassigns to another
+    (priority must be one of P0..P3; ongoing marks long-running active work; a
+    title colliding with another in_progress task's is rejected). owner reassigns to another
     agent (an explicit null is rejected — a task cannot be released).
     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
     null is rejected — reminders cannot be disabled). Any write resets the
@@ -392,7 +385,7 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     reassigned, completed, cancelled, or otherwise edited.
 
     A status change to done or cancelled is rejected with 422 while any direct
-    child remains in progress. Close or cancel those children first.
+    child remains active (in progress or ongoing). Close or cancel those children first.
     """
     task, notes = await asyncio.to_thread(
         _patch_task_blocking, request.app.state.db_pool, task_id, body

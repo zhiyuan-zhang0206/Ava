@@ -1778,3 +1778,71 @@ def test_drop_task_open_status_migration_down_restores_legacy_schema() -> None:
                 """INSERT INTO agent_tasks (title, description, status, created_by, owner)
                        VALUES ('fresh', 'd', 'in_progress', '1', 1)"""
             )
+
+
+# ─── allow-non-root-ongoing migration: current-schema execution ─────────────
+
+
+_ALLOW_NON_ROOT_ONGOING_UP = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260901T181810_allow-non-root-ongoing.sql"
+)
+_ALLOW_NON_ROOT_ONGOING_DOWN = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260901T181810_allow-non-root-ongoing.down.sql"
+)
+
+_BIDIRECTIONAL_ONGOING_AGENT_TASKS = """
+CREATE TABLE agent_tasks (
+    id BIGSERIAL PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'in_progress'
+        CHECK (status IN ('in_progress', 'done', 'cancelled', 'ongoing')),
+    is_root BOOLEAN NOT NULL DEFAULT FALSE
+);
+ALTER TABLE agent_tasks ADD CONSTRAINT agent_tasks_root_status_ongoing
+    CHECK ((is_root AND status = 'ongoing') OR (NOT is_root AND status <> 'ongoing'));
+INSERT INTO agent_tasks (id, status, is_root) VALUES
+    (1, 'ongoing', TRUE),
+    (2, 'in_progress', FALSE);
+"""
+
+
+def test_allow_non_root_ongoing_migration_permits_regular_ongoing_tasks() -> None:
+    """The new root pin permits ongoing regular tasks but keeps the root pinned."""
+    with _throwaway_database("allow-non-root-ongoing-up") as url:
+        _run_sql(url, _BIDIRECTIONAL_ONGOING_AGENT_TASKS)
+        _run_sql(url, _ALLOW_NON_ROOT_ONGOING_UP.read_text())
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("UPDATE agent_tasks SET status = 'ongoing' WHERE id = 2")
+            cur.execute("SELECT status FROM agent_tasks WHERE id = 2")
+            assert cur.fetchone() == ("ongoing",)
+
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = 1")
+
+
+def test_allow_non_root_ongoing_migration_down_restores_bidirectional_pin() -> None:
+    """Rollback resets regular ongoing tasks before restoring the old CHECK."""
+    with _throwaway_database("allow-non-root-ongoing-down") as url:
+        _run_sql(url, _BIDIRECTIONAL_ONGOING_AGENT_TASKS)
+        _run_sql(url, _ALLOW_NON_ROOT_ONGOING_UP.read_text())
+        _run_sql(url, "UPDATE agent_tasks SET status = 'ongoing' WHERE id = 2")
+        _run_sql(url, _ALLOW_NON_ROOT_ONGOING_DOWN.read_text())
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("SELECT status FROM agent_tasks WHERE id = 2")
+            assert cur.fetchone() == ("in_progress",)
+
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute("UPDATE agent_tasks SET status = 'ongoing' WHERE id = 2")
