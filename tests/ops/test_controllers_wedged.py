@@ -23,9 +23,11 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import ops.controllers.wedged as wedged_mod
+from ops import ops_lifecycle
 from ops.agent_identity import AgentProcessIdentity
 from ops.controllers.base import BlockScope
-from shared.agents import ResurrectAlreadyAlive
+from ops.rpc_schemas import RestartAgentRequest
+from shared.agents import AgentStatus, ResurrectAlreadyAlive
 from shared.config import settings
 from tests.conftest import spawn_agent
 
@@ -53,12 +55,12 @@ def sync_pool() -> Iterator[ConnectionPool]:
         pool.close()
 
 
-def _park_wedged(db_conn: psycopg.Connection, *, pid: int = 1234) -> int:
+def _park_wedged(db_conn: psycopg.Connection, *, pid: int = 1234, status: str = "running") -> int:
     aid = spawn_agent(spawner="user")
     with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
         cur.execute(
-            "UPDATE agents_meta SET status='running', pid=%s, lease_expires_at=%s WHERE id=%s",
-            (pid, datetime.now(UTC) + timedelta(minutes=10), aid),
+            "UPDATE agents_meta SET status=%s, pid=%s, lease_expires_at=%s WHERE id=%s",
+            (status, pid, datetime.now(UTC) + timedelta(minutes=10), aid),
         )
     db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
     return aid
@@ -75,6 +77,16 @@ def _add_stale_pending_chat(db_conn: psycopg.Connection, aid: int, *, age_s: flo
     db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
 
 
+def _add_pending_lifecycle_inbound(db_conn: psycopg.Connection, aid: int, *, kind: str) -> None:
+    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', %s, 'user')",
+            (aid, kind),
+        )
+    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+
+
 def _add_pending_resurrect_inbound(db_conn: psycopg.Connection, aid: int) -> None:
     with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
         cur.execute(
@@ -83,6 +95,10 @@ def _add_pending_resurrect_inbound(db_conn: psycopg.Connection, aid: int) -> Non
             (aid,),
         )
     db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+
+
+def _owned_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+    return AgentProcessIdentity.OWNED
 
 
 def _open_recovery(
@@ -119,9 +135,6 @@ def _capture_recovery_with_real_claim(
     monkeypatch.setattr(settings.daemon, "wedged_agent_enabled", True)
     monkeypatch.setattr(settings.daemon, "wedged_agent_inbound_age_seconds", 60.0)
     monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
-
-    def _owned_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
-        return AgentProcessIdentity.OWNED
 
     monkeypatch.setattr(wedged_mod, "probe_agent_process", _owned_process)
     killed: list[int] = []
@@ -189,6 +202,208 @@ class TestGuards:
 
 
 class TestRecovery:
+    @pytest.mark.asyncio
+    async def test_idling_pending_restart_is_recovered_out_of_band(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A restart waits in the same inbound queue and needs the same OOB recovery."""
+        monkeypatch.setattr(settings.daemon, "wedged_agent_inbound_age_seconds", 2400.0)
+        monkeypatch.setattr(settings.daemon, "wedged_idling_agent_inbound_age_seconds", 60.0)
+
+        def _idling_status(_agent_id: int) -> AgentStatus:
+            return AgentStatus.IDLING
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", _idling_status)
+        published: list[int] = []
+
+        async def _published(agent_id: int, inbound_id: int, *_args: object) -> None:
+            assert agent_id > 0
+            published.append(inbound_id)
+
+        monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _published)
+        monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
+        monkeypatch.setattr(wedged_mod, "probe_agent_process", _owned_process)
+        killed: list[int] = []
+        resurrected: list[int] = []
+        monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
+
+        def _capture_resurrect(agent_id: int, **_kwargs: object) -> None:
+            resurrected.append(agent_id)
+
+        monkeypatch.setattr(wedged_mod, "resurrect_agent", _capture_resurrect)
+        aid = _park_wedged(db_conn, status="idling")
+
+        response = await ops_lifecycle.restart_agent_op(
+            aid, RestartAgentRequest(source="user"), sync_pool
+        )
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute(
+                "UPDATE inbound_messages SET created_at = now() - interval '120 seconds' "
+                "WHERE agent_id = %s AND kind = 'restart'",
+                (aid,),
+            )
+            cur.execute(
+                "UPDATE agents_meta SET status_changed_at = now() - interval '120 seconds' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert response.status == "enqueued"
+        assert len(published) == 1
+        assert result.acted is True
+        assert killed == [1234]
+        assert resurrected == [aid]
+
+    def test_terminated_agent_with_live_lease_is_reaped_without_resurrection(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A user-terminated process retaining its lease must not survive as a zombie."""
+        monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
+        monkeypatch.setattr(wedged_mod, "probe_agent_process", _owned_process)
+        killed: list[int] = []
+        resurrected: list[int] = []
+        monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
+
+        def _capture_resurrect(agent_id: int, **_kwargs: object) -> None:
+            resurrected.append(agent_id)
+
+        monkeypatch.setattr(wedged_mod, "resurrect_agent", _capture_resurrect)
+        aid = _park_wedged(db_conn, status="terminated")
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute("UPDATE agents_meta SET termination_source='user' WHERE id=%s", (aid,))
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        _add_pending_lifecycle_inbound(db_conn, aid, kind="terminate")
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is True
+        assert killed == [1234]
+        assert resurrected == []
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute(
+                "SELECT status, pid, lease_expires_at, termination_source "
+                "FROM agents_meta WHERE id=%s",
+                (aid,),
+            )
+            assert cur.fetchone() == ("terminated", None, None, "user")
+
+    def test_terminated_zombie_reap_does_not_require_gateway_health(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reaping a user-terminated zombie must not wait for a future resurrect."""
+        monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: False)
+        monkeypatch.setattr(wedged_mod, "probe_agent_process", _owned_process)
+        killed: list[int] = []
+        monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
+        aid = _park_wedged(db_conn, status="terminated")
+        _add_pending_lifecycle_inbound(db_conn, aid, kind="terminate")
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is True
+        assert killed == [1234]
+
+    def test_idling_candidate_uses_short_threshold(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An idling agent cannot legitimately leave work pending for a turn budget.
+
+        Regression: the running-turn threshold let an idling process retain a
+        pending restart or chat for 40 minutes despite a live lease.
+        """
+        monkeypatch.setattr(settings.daemon, "wedged_agent_inbound_age_seconds", 2400.0)
+        monkeypatch.setattr(settings.daemon, "wedged_idling_agent_inbound_age_seconds", 60.0)
+        monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
+        monkeypatch.setattr(wedged_mod, "probe_agent_process", _owned_process)
+        killed: list[int] = []
+        resurrected: list[int] = []
+        monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
+
+        def _capture_resurrect(agent_id: int, **_kwargs: object) -> None:
+            resurrected.append(agent_id)
+
+        monkeypatch.setattr(wedged_mod, "resurrect_agent", _capture_resurrect)
+        aid = _park_wedged(db_conn, status="idling")
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute(
+                "UPDATE agents_meta SET status_changed_at = now() - interval '120 seconds' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        _add_stale_pending_chat(db_conn, aid, age_s=120.0)
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is True
+        assert killed == [1234]
+        assert resurrected == [aid]
+
+    def test_idling_pending_older_than_threshold_is_not_reaped_just_after_turn(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A long legitimate turn can finish with an old pending inbound. Its
+        idling status is new, so the normal first claim must win the short race
+        instead of the wedged controller killing a healthy process."""
+        monkeypatch.setattr(settings.daemon, "wedged_agent_inbound_age_seconds", 2400.0)
+        monkeypatch.setattr(settings.daemon, "wedged_idling_agent_inbound_age_seconds", 60.0)
+        killed, resurrected = _capture_recovery_with_real_claim(monkeypatch)
+        aid = _park_wedged(db_conn, status="idling")
+        _add_stale_pending_chat(db_conn, aid, age_s=120.0)
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is False
+        assert killed == []
+        assert resurrected == []
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (aid,))
+            assert cur.fetchone() == ("idling",)
+
+    def test_idling_pending_terminate_is_reaped_without_resurrection(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A terminal intent queued behind a dead idle loop must end that
+        process, never convert it into an automatic resurrection."""
+        aid = _park_wedged(db_conn, status="idling")
+        _add_pending_lifecycle_inbound(db_conn, aid, kind="terminate")
+        killed, resurrected = _open_recovery(
+            monkeypatch,
+            aid,
+            pid=1234,
+            identities=[AgentProcessIdentity.OWNED, AgentProcessIdentity.OWNED],
+        )
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is True
+        assert killed == [1234]
+        assert resurrected == []
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (aid,))
+            assert cur.fetchone() == ("terminated",)
+
     def test_attempt_budget_stops_wedged_recovery_at_limit(
         self,
         db_conn: psycopg.Connection,
@@ -281,6 +496,7 @@ class TestRecovery:
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("SELECT status FROM agents_meta WHERE id=%s", (aid,))
             assert cur.fetchone() == ("running",)
+        assert result.detail is None
 
     def test_identity_becoming_unreadable_under_lock_defers(
         self,
@@ -373,3 +589,67 @@ class TestClaimSQL:
         assert "now() - last_wedged_check_at" in src
         assert "lc.kind = 'resurrect'" in src
         assert "lc.status = 'pending'" in src
+
+
+class TestTerminatedZombieEvidence:
+    @pytest.mark.parametrize(
+        ("identity", "expected_kill"),
+        [
+            (AgentProcessIdentity.FOREIGN, []),
+            (AgentProcessIdentity.GONE, []),
+        ],
+    )
+    def test_foreign_or_gone_terminated_zombie_is_cleared_without_signal(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+        identity: AgentProcessIdentity,
+        expected_kill: list[int],
+    ) -> None:
+        """A stale row may name a reused pid. FOREIGN and GONE are sufficient
+        evidence to clear the zombie projection, but never to signal it."""
+        aid = _park_wedged(db_conn, status="terminated")
+        killed: list[int] = []
+        monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
+
+        def _identity(*_args: object) -> AgentProcessIdentity:
+            return identity
+
+        monkeypatch.setattr(wedged_mod, "probe_agent_process", _identity)
+
+        assert wedged_mod._reap_terminated_lease_zombie(sync_pool, aid, 1234) is True  # pyright: ignore[reportPrivateUsage]
+        assert killed == expected_kill
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute("SELECT pid, lease_expires_at FROM agents_meta WHERE id = %s", (aid,))
+            assert cur.fetchone() == (None, None)
+
+    def test_unreadable_terminated_zombie_is_deferred(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No process evidence means preserve the row for the next scan rather
+        than clearing a possibly live process's lease or PID."""
+        pool = _fake_pool()
+
+        def _unreadable(*_args: object) -> AgentProcessIdentity:
+            return AgentProcessIdentity.UNREADABLE
+
+        monkeypatch.setattr(wedged_mod, "probe_agent_process", _unreadable)
+
+        assert wedged_mod._reap_terminated_lease_zombie(pool, 7, 1234) is False  # pyright: ignore[reportPrivateUsage]
+        pool.connection.assert_not_called()
+
+    def test_concurrent_status_change_that_loses_clear_cas_is_deferred(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The zombie reaper's status/PID/lease CAS can lose to a concurrent
+        lifecycle write; no force-kill or false success may follow rowcount=0."""
+        pool = _fake_pool(rowcount=0)
+        cur = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = ("terminated", 1234, True)
+        killed: list[int] = []
+        monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
+        monkeypatch.setattr(wedged_mod, "probe_agent_process", _owned_process)
+
+        assert wedged_mod._reap_terminated_lease_zombie(pool, 7, 1234) is False  # pyright: ignore[reportPrivateUsage]
+        assert killed == []

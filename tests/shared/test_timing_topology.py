@@ -26,7 +26,7 @@ def test_default_lattice_holds() -> None:
     """The full declared lattice must hold for the settings defaults.
 
     This is the topology pin: every constraint in `shared.timing.CONSTRAINTS`
-    (13 orderings across the boot / deploy / agent-lease / updater / wedged /
+    (14 orderings across the boot / deploy / agent-lease / updater / wedged /
     restarter families) is asserted against the live default values. A change to
     any default that inverts a load-bearing ordering fails here, with the
     constraint's intent in the failure message.
@@ -146,6 +146,18 @@ def test_checker_catches_derived_violation(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr("shared.config.settings.daemon.wedged_agent_inbound_age_seconds", 500.0)
     failures = validate_clock_lattice()
     assert any("WEDGED_AGE_SEC >= EXEC_NODE_TIMEOUT_S" in f for f in failures)
+
+
+def test_checker_catches_idling_wedged_threshold_violation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An idling detector must allow two fallback SELECT rounds before recovery."""
+    monkeypatch.setattr(
+        "shared.config.settings.daemon.wedged_idling_agent_inbound_age_seconds",
+        30.0,
+    )
+    failures = validate_clock_lattice()
+    assert any("IDLING_WEDGED_AGE_SEC >= 2 * IDLE_CLAIM_BACKSTOP_S" in f for f in failures)
 
 
 def test_checker_catches_scaled_eq_violation(monkeypatch: pytest.MonkeyPatch) -> None:

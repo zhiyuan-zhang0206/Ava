@@ -309,7 +309,7 @@ class DaemonSettings(EnvSettings):
     wedged_agent_enabled: bool = Field(
         default=True,
         alias="AVA_WEDGED_AGENT_ENABLED",
-        description="Run the wedged-agent controller (agent-runner), which detects and recovers live-but-stuck agents — a running/idling agent with a live pid but a stale unconsumed pending inbound. Force-kills and resurrects the agent so it boots fresh and processes its backlog. Off does not strand anything — a new inbound still wakes the agent; this controller only closes the gap where no new message arrives and the existing pending inbound is ignored.",
+        description="Run the wedged-agent controller (agent-runner), which detects a running/idling agent with a live pid but a stale unconsumed pending inbound, then force-kills and resurrects it so it processes its backlog. It also identity-reaps a user-terminated row whose old process retains a live lease and pending terminate inbound, without resurrection. Off does not strand anything — a new inbound still wakes the agent; this controller only closes the gap where the existing pending inbound is ignored.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",
@@ -323,7 +323,20 @@ class DaemonSettings(EnvSettings):
     wedged_agent_inbound_age_seconds: float = Field(
         default=2400.0,
         alias="AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",
-        description="Minimum age (seconds) of an unconsumed pending inbound before the agent is considered wedged. Default 2400s (40 min) — exec_node_timeout_seconds (1200s) + LLM retry budget plus margin. Raise for agents doing long-running work; lower for tighter detection.",
+        description="Minimum age (seconds) of an unconsumed pending inbound before a running agent is considered wedged. Default 2400s (40 min) — exec_node_timeout_seconds (1200s) + LLM retry budget plus margin. Raise for agents doing long-running work; lower for tighter detection.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    wedged_idling_agent_inbound_age_seconds: float = Field(
+        default=180.0,
+        alias="AVA_WEDGED_IDLING_AGENT_INBOUND_AGE_SECONDS",
+        description="Minimum age (seconds) of an unconsumed pending inbound before an idling agent is considered wedged. Default 180s allows several 30-second claim-loop fallback checks plus recovery margin; it deliberately does not include running-turn exec or LLM budgets.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
