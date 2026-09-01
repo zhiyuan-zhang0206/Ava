@@ -266,6 +266,8 @@ def _repo_has_workflows() -> bool:
 
 
 MERGIFY_CHECK_PREFIX = "Mergify"
+# Must match the job name in .github/workflows/qa-approved-gate.yml — the check is
+# a QA label gate enforced by the queue at merge time, never part of the CI verdict.
 QA_APPROVED_GATE_CHECK_NAME = "qa-approved-gate"
 
 
