@@ -121,6 +121,103 @@ def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
     assert "['watch']" in code
 
 
+def test_failed_publish_kills_unpublished_codex_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = _owner(tmp_path)
+    launching = replace(active, status="launching", session_id=None, session_name=None)
+    killed: list[int] = []
+
+    def _claim(
+        _key: coding_session_owner.CodingSessionKey,
+        *,
+        tasks_file: Path,
+        work_file: Path,
+        ttl_seconds: float,
+    ) -> coding_session_owner.CodingSessionClaim:
+        assert tasks_file.name == "tasks.md"
+        assert work_file.name == "work.md"
+        assert ttl_seconds == 3600
+        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+
+    def _seed(_state_dir: Path, _workspace: Path) -> None:
+        return None
+
+    def _launch_supervisor(
+        _owner: coding_session_owner.CodingSessionOwner,
+        _ttl_seconds: float,
+    ) -> tuple[int, str]:
+        return 6, "ava-agent-41-shell-6-codex-owner-supervisor"
+
+    def _attach(
+        _key: coding_session_owner.CodingSessionKey,
+        _generation: str,
+        *,
+        session_id: int,
+        session_name: str,
+    ) -> coding_session_owner.CodingSessionOwner:
+        assert session_id == 6
+        assert session_name.endswith("-codex-owner-supervisor")
+        return launching
+
+    def _new(*, name: str, ttl: float) -> int:
+        assert name == launching.expected_suffix
+        assert ttl == 3600
+        return 7
+
+    def _send(_session_id: int, _content: str) -> None:
+        return None
+
+    def _ready(_session_id: int) -> None:
+        return None
+
+    def _publish(
+        _key: coding_session_owner.CodingSessionKey,
+        _generation: str,
+        *,
+        session_id: int,
+        session_name: str,
+    ) -> coding_session_owner.CodingSessionOwner:
+        assert session_id == 7
+        assert session_name.endswith("-codex-workspace-11111111")
+        raise coding_session_owner.CodingSessionGenerationChangedError("replacement won")
+
+    def _kill(session_id: int) -> None:
+        killed.append(session_id)
+
+    def _terminate(
+        _key: coding_session_owner.CodingSessionKey,
+        _generation: str,
+        *,
+        reason: str,
+    ) -> bool:
+        assert reason == "launch-failed"
+        return False
+
+    monkeypatch.setattr(spawn_codex, "_claim_canonical", _claim)
+    monkeypatch.setattr(spawn_codex, "_seed_codex_home", _seed)
+    monkeypatch.setattr(spawn_codex, "_launch_supervisor", _launch_supervisor)
+    monkeypatch.setattr(spawn_codex.coding_session_owner, "attach_supervisor", _attach)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "new", _new)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(spawn_codex, "_wait_for_ready", _ready)
+    monkeypatch.setattr(spawn_codex.coding_session_owner, "publish_active", _publish)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(spawn_codex.coding_session_owner, "terminate_generation", _terminate)
+
+    workspace = Path(launching.key.workspace)
+    with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
+        spawn_codex._launch(
+            workspace,
+            workspace / "tasks.md",
+            workspace / "work.md",
+            3600,
+        )
+
+    assert killed == [7]
+
+
 @pytest.mark.parametrize(
     ("status", "kwargs", "expected"),
     [

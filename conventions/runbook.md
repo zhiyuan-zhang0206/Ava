@@ -761,7 +761,7 @@ session per `(cluster, workspace, tool)`. Check it before starting work:
 ```bash
 python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.py \
   /absolute/workspace \
-  --task-file /absolute/workspace/tasks.md \
+  --tasks-file /absolute/workspace/tasks.md \
   --work-file /absolute/workspace/work.md \
   --status
 ```
@@ -786,7 +786,7 @@ launcher or `--status`:
 ```bash
 python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.py \
   /absolute/workspace \
-  --task-file /absolute/workspace/tasks.md \
+  --tasks-file /absolute/workspace/tasks.md \
   --work-file /absolute/workspace/work.md \
   --cancel-generation <generation-token>
 ```
