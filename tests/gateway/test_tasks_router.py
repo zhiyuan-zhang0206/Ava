@@ -467,7 +467,7 @@ class _TaskQueryRecordingPool:
 
 
 class TestGetTaskFields:
-    def test_full_is_backward_compatible_and_summary_uses_300_character_previews(
+    def test_full_is_backward_compatible_and_summary_is_metadata_only(
         self, db_conn: psycopg.Connection
     ) -> None:
         owner = _make_agent(db_conn)
@@ -511,8 +511,6 @@ class TestGetTaskFields:
             "id",
             "parent_id",
             "title",
-            "description_preview",
-            "results_preview",
             "status",
             "priority",
             "owner",
@@ -525,10 +523,10 @@ class TestGetTaskFields:
             "reminder_count",
             "ghost",
         }
-        assert summary_row["description_preview"] == description[:300]
-        assert summary_row["results_preview"] == results[:300]
+        assert "description" not in summary_row
+        assert "results" not in summary_row
 
-    def test_summary_projection_selects_only_preview_expressions(self) -> None:
+    def test_summary_projection_selects_only_metadata_columns(self) -> None:
         pool = _TaskQueryRecordingPool()
         request = cast(
             Request,
@@ -541,10 +539,7 @@ class TestGetTaskFields:
             "SELECT "
         ).partition(", a.label AS owner_label FROM agent_tasks t ")[0]
         assert selected_columns == (
-            "t.id, t.parent_id, t.title, "
-            "left(t.description, 300) AS description_preview, "
-            "left(t.results, 300) AS results_preview, "
-            "t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
+            "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
             "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
         )
 
@@ -721,7 +716,8 @@ class TestGetTasksWindow:
         assert set(rows) == {root, parent, child}
         assert "description" not in rows[child]
         assert "results" not in rows[child]
-        assert rows[child]["description_preview"] == "active child description"
+        assert "description_preview" not in rows[child]
+        assert "results_preview" not in rows[child]
         assert rows[parent]["ghost"] is (window != "all")
 
     def test_unknown_window_is_rejected(self, db_conn: psycopg.Connection) -> None:

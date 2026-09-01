@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Task list data flow
-description: useTasks reads compact task summaries for the task graph, Kanban board, and Inbox Queue.
+description: useTasks selects full task rows for the graph and Kanban board, and metadata summaries for the Inbox Queue.
 tags:
 - frontend
 - tasks
@@ -9,10 +9,14 @@ tags:
 
 # Task list data flow
 
-`useTasks` fetches `GET /api/tasks?fields=summary`, so every row carries
-server-truncated description and results previews rather than full task text.
-The caller controls its activity window: the Task Graph persists a graph-view
-window (default 24h), while the Inbox Queue uses `7d` for task-subtree grouping.
+`useTasks` chooses the task projection at each caller. The Task Graph and
+Kanban board fetch `GET /api/tasks?fields=full`, retaining description and
+results for their rendered text. The Inbox Queue fetches
+`GET /api/tasks?window=7d&fields=summary`, carrying only task metadata for
+task-subtree grouping.
+
+The Task Graph persists a graph-view window (default 24h); the Inbox Queue's
+seven-day window keeps active tasks and their ghost ancestors for grouping.
 
 `task_created` and `task_updated` SSE events invalidate the task cache after a
 two-second debounce. A constant 30-second reconciliation poll continues after

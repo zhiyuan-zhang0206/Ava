@@ -23,9 +23,9 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-const useTasks = vi.fn<() => TasksResult>();
+const useTasks = vi.fn<(...args: string[]) => TasksResult>();
 vi.mock("@/lib/use-tasks", () => ({
-  useTasks: () => useTasks(),
+  useTasks: (...args: string[]) => useTasks(...args),
 }));
 
 function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
@@ -33,8 +33,8 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
     id,
     parent_id: null,
     title: `Task ${id}`,
-    description_preview: `Description for task ${id}`,
-    results_preview: null,
+    description: `Description for task ${id}`,
+    results: null,
     status: "in_progress",
     priority: "P2",
     owner: null,
@@ -70,6 +70,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TaskGraph (graph mode)", () => {
+  it("uses full rows so graph and kanban retain task text", () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+
+    expect(useTasks).toHaveBeenCalledWith("24h", "full");
+  });
+
   it("explains task status colors", () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
@@ -357,10 +364,10 @@ describe("TaskGraph hover detail card", () => {
   // appearance the browser deferred — the perceived hover lag): it must show
   // the task's registry fields the moment the cursor enters the node.
   it("shows the detail card instantly on hover, with the registry fields", async () => {
-    const summaryTask = task(2, {
+    const fullTask = task(2, {
         title: "Build the widget",
-        description_preview: "A longer description\nspanning two lines",
-        results_preview: "Shipped in #1",
+        description: "A longer description\nspanning two lines",
+        results: "Shipped in #1",
         status: "in_progress",
         priority: "P1",
         parent_id: 1,
@@ -375,7 +382,7 @@ describe("TaskGraph hover detail card", () => {
       });
     const tasks: TaskRow[] = [
       task(1, { title: "root", status: "ongoing" }),
-      summaryTask,
+      fullTask,
     ];
     useTasks.mockReturnValue(ok(tasks));
     const { container } = render(

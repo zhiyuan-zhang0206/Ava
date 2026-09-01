@@ -3409,8 +3409,7 @@ export interface paths {
          * @description Return the task registry, newest first.
          *
          *     `fields=full` (the default) returns the compatibility projection. `fields=summary`
-         *     returns 300-character description/results previews without selecting the full
-         *     text columns. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
+         *     returns metadata only, selecting neither task text column. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
          *     (updated_at) on the backend, so the task graph's default 24-hour view never
          *     pulls the full registry. A windowed list still carries every kept task's
          *     out-of-window ancestors flagged ghost=True (see _windowed_tasks); without
@@ -7188,7 +7187,7 @@ export interface components {
         };
         /**
          * TaskSummaryRow
-         * @description One compact task-list row with text previews only.
+         * @description One metadata-only task-list row.
          */
         TaskSummaryRow: {
             /** Id */
@@ -7197,10 +7196,6 @@ export interface components {
             parent_id: number | null;
             /** Title */
             title: string;
-            /** Description Preview */
-            description_preview: string;
-            /** Results Preview */
-            results_preview: string | null;
             /** Status */
             status: string;
             /** Owner */

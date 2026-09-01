@@ -7,26 +7,26 @@
 // the system root). Agents with no task stay loose — they are rendered flat,
 // never forced into a pseudo-group.
 
-import type { TaskRow } from "./types";
+import type { TaskSummaryRow } from "./types";
 
 /** First real task (parent_id !== null — never the system root) owned by the
  *  agent, or null. Mirrors the board's bidirectional-sync convention
  *  (`tasks.find((t) => t.owner === agentId && t.parent_id !== null)`) so the
  *  queue and the board agree on which task an agent "is". */
-export function taskForAgent(
-  tasks: readonly TaskRow[],
+export function taskForAgent<T extends TaskSummaryRow>(
+  tasks: readonly T[],
   agentId: number,
-): TaskRow | null {
+): T | null {
   return tasks.find((t) => t.owner === agentId && t.parent_id !== null) ?? null;
 }
 
 /** Walk the parent chain up to the top-level subtree root: the ancestor whose
  *  parent is the system root (parent_id === null) or is missing from the
  *  registry. Cycle-guarded — a corrupt chain returns the last task reached. */
-export function subtreeRootOf(
-  byId: ReadonlyMap<number, TaskRow>,
-  task: TaskRow,
-): TaskRow {
+export function subtreeRootOf<T extends TaskSummaryRow>(
+  byId: ReadonlyMap<number, T>,
+  task: T,
+): T {
   let cur = task;
   const seen = new Set<number>([cur.id]);
   while (cur.parent_id !== null) {
@@ -42,8 +42,8 @@ export function subtreeRootOf(
 
 /** One render unit of the grouped queue: a task-subtree group (root non-null,
  *  all its entries pulled together) or a single loose entry (root null). */
-export interface QueueUnit<T> {
-  readonly root: TaskRow | null;
+export interface QueueUnit<T, R extends TaskSummaryRow = TaskSummaryRow> {
+  readonly root: R | null;
   readonly items: T[];
 }
 
@@ -55,15 +55,15 @@ export interface QueueUnit<T> {
  *  the group first); relative order inside a group is the incoming order.
  *  Entries with no task (null/unknown id and no owned task) stay flat at their
  *  own rank. `taskIdOf` is optional — omit it for pure owner-join grouping. */
-export function groupByTaskSubtree<T>(
+export function groupByTaskSubtree<T, R extends TaskSummaryRow = TaskSummaryRow>(
   items: readonly T[],
   agentIdOf: (item: T) => number,
-  tasks: readonly TaskRow[],
+  tasks: readonly R[],
   taskIdOf?: (item: T) => number | null,
-): QueueUnit<T>[] {
+): QueueUnit<T, R>[] {
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  const groups = new Map<number, QueueUnit<T>>();
-  const units: QueueUnit<T>[] = [];
+  const groups = new Map<number, QueueUnit<T, R>>();
+  const units: QueueUnit<T, R>[] = [];
   for (const item of items) {
     // The named task wins when it exists; a null / unknown id falls back to the
     // owner-join (the notice's task_id, or its owner agent's first task).
@@ -79,7 +79,7 @@ export function groupByTaskSubtree<T>(
     if (existing) {
       existing.items.push(item);
     } else {
-      const unit: QueueUnit<T> = { root, items: [item] };
+      const unit: QueueUnit<T, R> = { root, items: [item] };
       groups.set(root.id, unit);
       units.push(unit);
     }

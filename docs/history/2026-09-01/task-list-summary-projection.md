@@ -13,3 +13,6 @@ the established detail contract.
 The summary shares the existing window and ghost-ancestor filtering after row
 selection. The Inbox Queue uses the seven-day window; its active tasks and their
 ancestor chains remain present for subtree grouping.
+
+Update: the preview-bearing summary was superseded by the metadata-only
+projection documented in [[docs/history/2026-09-01/task-list-metadata-projection.md|Task list metadata projection]].

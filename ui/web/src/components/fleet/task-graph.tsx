@@ -157,24 +157,23 @@ function TaskHoverCard({
         </p>
       ) : null}
 
-      {/* Text arrives as server-clamped previews so list polling stays bounded. */}
-      {task.description_preview ? (
+      {task.description ? (
         <div className="mt-2 border-t border-border pt-2">
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             Description
           </p>
           <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
-            {task.description_preview}
+            {task.description}
           </p>
         </div>
       ) : null}
-      {task.results_preview ? (
+      {task.results ? (
         <div className="mt-2 border-t border-border pt-2">
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             Result
           </p>
           <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
-            {task.results_preview}
+            {task.results}
           </p>
         </div>
       ) : null}
@@ -337,7 +336,7 @@ export function TaskGraph({
       ? windowRaw
       : "24h";
   const setTaskWindow = (w: TaskWindow) => setSetting("display.task_window", w);
-  const { tasks, loading, error } = useTasks(taskWindow);
+  const { tasks, loading, error } = useTasks(taskWindow, "full");
   const showDone = settings["display.task_show_done"] === true;
   const setShowDone = (v: boolean) => setSetting("display.task_show_done", v);
   const showCanceled = settings["display.task_show_canceled"] === true;
