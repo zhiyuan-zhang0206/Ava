@@ -202,6 +202,34 @@ class TestGuards:
 
 
 class TestRecovery:
+    def test_idling_stale_claim_loop_is_recovered_without_pending_inbound(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A live lease only says the renewer runs. A stale idle claim marker
+        means no fallback SELECT is advancing and warrants OOB recovery even
+        before the next inbound arrives."""
+        monkeypatch.setattr(settings.daemon, "wedged_agent_inbound_age_seconds", 2400.0)
+        monkeypatch.setattr(settings.daemon, "wedged_idling_agent_inbound_age_seconds", 60.0)
+        killed, resurrected = _capture_recovery_with_real_claim(monkeypatch)
+        aid = _park_wedged(db_conn, status="idling")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_claim_loop_at = now() - interval '120 seconds', "
+                "status_changed_at = now() - interval '120 seconds' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is True
+        assert killed == [1234]
+        assert resurrected == [aid]
+
     @pytest.mark.asyncio
     async def test_idling_pending_restart_is_recovered_out_of_band(
         self,

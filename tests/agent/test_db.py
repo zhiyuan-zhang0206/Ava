@@ -184,6 +184,36 @@ class TestWaitForInbound:
         assert listener._redis is rebuilt_command  # pyright: ignore[reportPrivateUsage]
         assert listener._pubsub is rebuilt_pubsub  # pyright: ignore[reportPrivateUsage]
 
+    async def test_idling_claim_loop_records_each_wait_round(
+        self,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+        aredis_inbound_listener: RedisInboundListener,
+    ) -> None:
+        """The process-mode OOB detector needs a progress signal independent of
+        leases, which keep renewing even if the idle wait loop has died."""
+        tid = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, status, last_claim_loop_at) "
+                "VALUES (%s, 'idling', NULL) "
+                "ON CONFLICT (id) DO UPDATE "
+                "SET status = 'idling', last_claim_loop_at = NULL",
+                (tid,),
+            )
+        db_conn.commit()
+
+        _insert_inbound(db_conn, tid, "wake")
+        await wait_for_inbound(aops_pool, aredis_inbound_listener, agent_id=tid, timeout_s=2.0)
+
+        async with aops_pool.connection() as conn:
+            row = await (
+                await conn.execute(
+                    "SELECT last_claim_loop_at FROM agents_meta WHERE id = %s", (tid,)
+                )
+            ).fetchone()
+        assert row is not None and row[0] is not None
+
     async def test_wakes_on_chat_inbound(
         self,
         db_conn: psycopg.Connection,
