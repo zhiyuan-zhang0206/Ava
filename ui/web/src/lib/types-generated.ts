@@ -3451,8 +3451,8 @@ export interface paths {
          *     agent (an explicit null is rejected — a task cannot be released).
          *     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
          *     null is rejected — reminders cannot be disabled). Any write resets the
-         *     reminder counters, same as the SDK update path. Unlike the SDK, an owner change here
-         *     does NOT message the affected agents — this endpoint is a plain column write.
+         *     reminder counters, same as the SDK update path. An owner reassignment sends
+         *     the SDK-equivalent task system notes after the database write commits.
          *
          *     The system root task is immutable: any PATCH targeting it is rejected with
          *     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
@@ -7242,7 +7242,7 @@ export interface components {
          *     parent_id is taken when present (model_fields_set): an explicit null moves
          *     the task under the system root, an int reparents it (the parent must exist
          *     and the move must not create a cycle). Owner changes through this endpoint
-         *     do not message the affected agents (the SDK update path does).
+         *     send the SDK-equivalent task system notes to affected agents.
          */
         TaskUpdateRequest: {
             /** Status */

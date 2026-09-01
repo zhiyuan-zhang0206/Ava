@@ -54,7 +54,6 @@ cluster's private network)
 """
 
 import asyncio
-import hmac
 import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -653,15 +652,6 @@ async def _cluster_auth_middleware(
     # 2. Check Bearer token
     authorization = request.headers.get("Authorization")
     if verify_bearer(authorization, secret):
-        return await call_next(request)
-
-    # 3. Check X-Cluster-Secret bare header (DEPRECATED — audit round-2
-    # security P2): a bare header rides proxy/access logs more easily than
-    # Authorization: Bearer. No in-repo caller uses it (tests only); kept for
-    # out-of-repo legacy clients, remove once they migrate. New callers must
-    # use the Bearer scheme.
-    x_secret = request.headers.get("X-Cluster-Secret")
-    if x_secret and hmac.compare_digest(x_secret, secret):
         return await call_next(request)
 
     _log_auth401_rejection(request)
