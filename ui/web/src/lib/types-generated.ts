@@ -3446,9 +3446,8 @@ export interface paths {
          * @description Partially update a task; omitted fields stay unchanged.
          *
          *     status, priority, title, description, and results are taken when non-null
-         *     (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
-         *     the system root's permanent state, never assignable; a title colliding with
-         *     another in_progress task's is rejected). owner reassigns to another
+         *     (priority must be one of P0..P3; ongoing marks long-running active work; a
+         *     title colliding with another in_progress task's is rejected). owner reassigns to another
          *     agent (an explicit null is rejected — a task cannot be released).
          *     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
          *     null is rejected — reminders cannot be disabled). Any write resets the
@@ -3460,7 +3459,7 @@ export interface paths {
          *     reassigned, completed, cancelled, or otherwise edited.
          *
          *     A status change to done or cancelled is rejected with 422 while any direct
-         *     child remains in progress. Close or cancel those children first.
+         *     child remains active (in progress or ongoing). Close or cancel those children first.
          */
         patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;

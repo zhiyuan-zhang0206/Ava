@@ -45,9 +45,8 @@ import {
 import { TaskKanban } from "./task-kanban";
 
 // Task status → color class for the node's fill (and the Kanban left strip).
-// 'ongoing' is the system root task's permanent state (never assignable to a
-// regular task): it gets a dedicated color so the root stands apart from every
-// status-colored node in the graph — status colors have no meaning for it.
+// 'ongoing' marks long-running active work and gets a dedicated color so it is
+// distinguishable from ordinary in-progress tasks in both views.
 const STATUS_FILL: Record<string, string> = {
   // The old 'open' color — 'open' was dropped (tasks are born in_progress)
   // and the graph no longer separates the two shades (user ruling 2026-08-29).
@@ -96,7 +95,7 @@ function TaskHoverCard({
     in_progress: t("status.inProgress"),
     done: t("status.done"),
     cancelled: t("status.canceled"),
-    ongoing: t("status.root"),
+    ongoing: t("status.ongoing"),
   };
   const creator =
     task.created_by === "user"
@@ -330,7 +329,7 @@ export function TaskGraph({
     in_progress: t("status.inProgress"),
     done: t("status.done"),
     cancelled: t("status.canceled"),
-    ongoing: t("status.root"),
+    ongoing: t("status.ongoing"),
   };
   // Time filter (default 24 hours, user ruling 2026-08-30): a garbage stored
   // value falls back to the default instead of exploding.

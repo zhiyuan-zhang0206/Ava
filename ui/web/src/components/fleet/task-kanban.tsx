@@ -19,6 +19,8 @@ const KANBAN_LANE_KEYS = ["inProgress", "done", "canceled"] as const;
 
 export const STATUS_TO_LANE: Record<string, number> = {
   in_progress: 0,
+  // Ongoing tasks are active long-running work, so they share In progress.
+  ongoing: 0,
   done: 1,
   cancelled: 2,
 };
