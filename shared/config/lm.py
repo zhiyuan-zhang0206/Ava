@@ -391,8 +391,11 @@ class LmSettings(EnvSettings):
         default="gemini-3.5-flash",
         alias="AVA_UNDERSTAND_MEDIA_MODEL",
         description=(
-            "Model for `ava.understand`'s media path (image/video/audio/PDF). Must "
-            "be a Gemini model — only Gemini decodes inline media here."
+            "Model for `ava.understand`'s media path (image/video/audio/PDF). "
+            "Must be a Gemini model — the media wire format is Gemini-specific, "
+            "so a non-Gemini id fails fast with a clear error. The provider "
+            "abstraction (factory routing / endpoint override / quality knobs) "
+            "is in place for a second media provider to plug in later."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -424,6 +427,24 @@ class LmSettings(EnvSettings):
         description=(
             "Thinking level for `ava.understand`'s media path: `minimal` / `low` / "
             "`medium` / `high`. Higher = deeper but slower and pricier."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understand_media_base_url: str | None = Field(
+        default=None,
+        alias="AVA_UNDERSTAND_MEDIA_BASE_URL",
+        description=(
+            "Gemini endpoint override for `ava.understand`'s media path (the "
+            "`generativelanguage.googleapis.com` base). None = the SDK default "
+            "official endpoint. Point it at a self-hosted relay or a provider "
+            "mirror without code changes; the same auth as Gemini is sent "
+            "(GEMINI_API_KEY). Non-gemini media models ignore it."
         ),
         json_schema_extra={
             "restart_required": "agent",

@@ -16,8 +16,15 @@ Provider split by modality: text (literal strings and text files) runs on the
 text model (`settings.lm.understand_text_model`, default DeepSeek V4 Flash); binary
 media (image / video / audio / PDF) runs on the media model
 (`settings.lm.understand_media_model`, default Gemini 3.5 Flash, which natively
-decodes those bytes). `effort` (default `max`) controls the answering model's
-reasoning depth; the per-modality mapping is on the entry point below."""
+decodes those bytes). The media model's provider is picked by the model prefix
+through the same model factory every LLM path uses, and
+`AVA_UNDERSTAND_MEDIA_BASE_URL` can point the Gemini branch at a self-hosted
+relay or mirror. The media wire format is Gemini-specific, so the path currently
+supports Gemini models only — a non-Gemini media model fails fast with a clear
+error; the abstraction (factory routing, endpoint override, quality knobs) is in
+place so a second media provider can plug in with its own part conversion.
+`effort` (default `max`) controls the answering model's reasoning depth; the
+per-modality mapping is on the entry point below."""
 
 from __future__ import annotations
 
@@ -47,18 +54,26 @@ from shared.lm.attach import ATTACH_MEDIA_MIME
 from shared.lm.factory import provider_key_of_model
 
 # Provider split by modality is config-driven: settings.lm.understand_text_model
-# (default deepseek-v4-pro) handles literal strings / text files;
+# (default deepseek-v4-flash) handles literal strings / text files;
 # settings.lm.understand_media_model (default gemini-3.5-flash) handles binary
-# media. The default IDs live in shared/lm/factory.py:SUPPORTED_MODELS.
+# media. The default IDs live in shared/lm/factory.py:SUPPORTED_MODELS. The media
+# model goes through the SAME provider factory as every other LLM path
+# (`build_chat_model`); the Gemini client is the default media provider.
 
-# Gemini inline-media cap (API docs: 20MB inline). Applies only to binary media
-# read as bytes; the text path has no such cap.
+# Gemini inline-media cap (API docs: 20MB inline) — the default media provider's
+# limit. Applies only to binary media read as bytes; the text path has no such
+# cap.
 _INLINE_MAX_BYTES = 20 * 1024 * 1024
 
 # Suffix → MIME for the binary-media path. A file whose suffix is NOT listed
 # here is read as UTF-8 text instead, so .txt/.md/.csv/.json/.py/... and
 # extensionless files all flow through the text path.
 _MEDIA_MIME = ATTACH_MEDIA_MIME
+
+# Gemini media-resolution vocabulary (mapped by the gemini provider branch);
+# validated here so an invalid setting fails fast with the setting's name
+# before any model call.
+_MEDIA_RESOLUTION_LEVELS = frozenset({"low", "medium", "high"})
 
 # ── auto-save output to workspace ──────────────────────────────────────────
 _OVERFLOW_DIRNAME = ".exec_output"
@@ -160,10 +175,10 @@ def understand[TargetValue: str | list[str]](
     `effort` sets the answering model's reasoning depth, one of `none` / `low`
     / `medium` / `high` / `xhigh` / `max` (also available as
     `ava.understand.ReasoningEffort`). Default `max` — the deepest reasoning
-    the model supports. Media (Gemini) has no `max` level: `max`
-    keeps the configured `AVA_UNDERSTAND_MEDIA_THINKING_LEVEL` knob; other
-    levels map to `minimal`/`low`/`medium`/`high` (`none` → `minimal`,
-    `xhigh` → `high`).
+    the model supports. The media path maps it onto Gemini's
+    `thinking_level` (no `max` level there): `max` keeps the configured
+    `AVA_UNDERSTAND_MEDIA_THINKING_LEVEL` knob; other levels map to
+    `minimal`/`low`/`medium`/`high` (`none` → `minimal`, `xhigh` → `high`).
 
     `max_concurrent` caps parallel targets; the default runs every target
     concurrently with no ceiling.
@@ -283,8 +298,9 @@ def _understand_paths(paths: list[str | Path], prompt: str, effort: str | Reason
 
     Media files (image/video/audio/PDF by suffix) become media parts; any
     other file is read as UTF-8 text and becomes a text part. If at least one
-    part is media the whole call runs on the media model (Gemini handles text
-    parts natively); an all-text list stays on the text model. Part order
+    part is media the whole call runs on the media model (the media provider
+    handles text parts natively); an all-text list stays on the text model.
+    Part order
     follows `paths` order, prompt last.
     """
     from ava.security import scan_content
@@ -301,7 +317,7 @@ def _understand_paths(paths: list[str | Path], prompt: str, effort: str | Reason
             if len(data) > _INLINE_MAX_BYTES:
                 raise UnderstandError(
                     f"File size {len(data):,} bytes exceeds the {_INLINE_MAX_BYTES:,} byte "
-                    "Gemini inline cap"
+                    "media inline cap (the default Gemini media provider's limit)"
                 )
             parts.append({"type": "media", "data": data, "mime_type": mime})
             mimes.append(mime)
@@ -368,50 +384,58 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
 def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort) -> str:
     """Answer over a media `content` list using settings.lm.understand_media_model.
 
-    Model, resolution and thinking depth all come from settings
-    (`understand_media_model` / `understand_media_resolution` /
-    `understand_media_thinking_level`) — quality knobs the user can tune per
-    cluster or per agent. `thinking_level` is passed through and validated by the
-    model client; resolution is mapped here.
+    The provider is picked by the model's prefix through `build_chat_model`, the
+    same factory every other LLM path uses — no Gemini SDK import lives here.
+    Gemini gets its quality knobs (`media_resolution` /
+    `media_thinking_level`) via the factory's media-path parameters, and
+    `AVA_UNDERSTAND_MEDIA_BASE_URL` can point the Gemini endpoint at a
+    self-hosted relay. The media wire format is Gemini-specific, so a
+    non-Gemini model fails fast here with a clear error instead of crashing
+    later at invoke time; the abstraction is in place for a second media
+    provider to plug in with its own part conversion.
 
     `effort` maps onto Gemini's `thinking_level` via the cross-provider clamp:
     any level is clamped onto `minimal`/`low`/`medium`/`high` (`none` →
     `minimal`, `xhigh` → `high`). `max` has no gemini equivalent and keeps the
     configured `settings.lm.understand_media_thinking_level` knob instead, so
-    default calls behave exactly as before.
+    default calls behave exactly as before. (The path is Gemini-only for now —
+    see the module docstring — so the knob always applies.)
     """
-    if settings.lm.gemini_api_key is None:
-        raise UnderstandError(
-            "GEMINI_API_KEY environment variable not set — "
-            "`export GEMINI_API_KEY=...` before using ava.understand on media"
-        )
-
-    from google.genai.types import MediaResolution
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    resolutions = {
-        "low": MediaResolution.MEDIA_RESOLUTION_LOW,
-        "medium": MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-        "high": MediaResolution.MEDIA_RESOLUTION_HIGH,
-    }
-    res = settings.lm.understand_media_resolution
-    if res not in resolutions:
-        raise UnderstandError(
-            f"invalid AVA_UNDERSTAND_MEDIA_RESOLUTION={res!r} — "
-            f"must be one of {sorted(resolutions)}"
-        )
+    from shared.lm.factory import build_chat_model, provider_key_of_model
 
     model = settings.lm.understand_media_model
+    # The media part shape is Gemini-specific (see the module docstring); only
+    # the Gemini provider client understands it. Fail fast at build time with a
+    # clear error instead of letting a non-Gemini client crash at invoke time.
+    if provider_key_of_model(model) != "gemini":
+        raise UnderstandError(
+            f"media model {model!r} is not supported by ava.understand — the "
+            "media path (image/video/audio/PDF) currently supports Gemini "
+            "models only (their media wire format is the only one the factory "
+            "clients accept). Set AVA_UNDERSTAND_MEDIA_MODEL to a gemini-* model "
+            "or wait for a second media provider."
+        )
+    res = settings.lm.understand_media_resolution
+    if res not in _MEDIA_RESOLUTION_LEVELS:
+        raise UnderstandError(
+            f"invalid AVA_UNDERSTAND_MEDIA_RESOLUTION={res!r} — "
+            f"must be one of {sorted(_MEDIA_RESOLUTION_LEVELS)}"
+        )
+
     thinking_level = settings.lm.understand_media_thinking_level
     if effort != ReasoningEffort.MAX:
         thinking_level = _clamp_effort(effort, _PROVIDER_EFFORT_LEVELS["gemini"], target="gemini")
-    llm = ChatGoogleGenerativeAI(
-        model=model,
-        google_api_key=settings.lm.gemini_api_key.get_secret_value(),
-        media_resolution=resolutions[res],
-        thinking_level=thinking_level,
-        timeout=settings.lm.llm_invoke_timeout_seconds,
-    )
+    try:
+        llm = build_chat_model(
+            model,
+            reasoning_effort=effort,
+            timeout=settings.lm.llm_invoke_timeout_seconds,
+            media_resolution=res,
+            media_thinking_level=thinking_level,
+            base_url=settings.lm.understand_media_base_url,
+        )
+    except RuntimeError as e:  # missing API key etc. — surface uniformly
+        raise UnderstandError(str(e)) from e
     return invoke_text(
         llm,
         content,

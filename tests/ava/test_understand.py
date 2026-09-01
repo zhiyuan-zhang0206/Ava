@@ -3,8 +3,9 @@ per-modality provider routing (text → settings.lm.understand_text_model defaul
 DeepSeek V4 Pro / media → settings.lm.understand_media_model default Gemini 3.5
 Flash), config adjustability, and error paths.
 
-Text path mocks `shared.lm.factory.build_chat_model`; media path mocks LangChain
-`ChatGoogleGenerativeAI` constructor. Neither path hits a real API."""
+Both paths mock `shared.lm.factory.build_chat_model` (the provider factory that
+picks the model client by prefix — the media path has no Gemini SDK imports
+of its own anymore). Neither path hits a real API."""
 
 import importlib
 import os
@@ -63,24 +64,23 @@ def mock_deepseek(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 @pytest.fixture
 def mock_gemini(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Patch ChatGoogleGenerativeAI (the media path's provider) → fake llm.
-    Captures the model id passed to the constructor."""
+    """Patch `shared.lm.factory.build_chat_model` (the media path's provider
+    factory) → fake llm. Captures the model id and the media-path kwargs the
+    media path passes (media_resolution / media_thinking_level / base_url)."""
     monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("fake-key-for-test"))
-    llm = MagicMock(name="gemini_chat_model")
+    llm = MagicMock(name="media_chat_model")
     response = MagicMock()
     response.content = "fake answer"
     response.response_metadata = {}
     llm.invoke.return_value = response
     captured: dict[str, Any] = {"llm": llm}
 
-    def _fake_ctor(**kwargs: object):
+    def _fake_build(model: str, **kwargs: object):
+        captured["model"] = model
         captured["kwargs"] = kwargs
-        captured["model"] = kwargs.get("model")
         return llm
 
-    import langchain_google_genai
-
-    monkeypatch.setattr(langchain_google_genai, "ChatGoogleGenerativeAI", _fake_ctor)
+    monkeypatch.setattr("shared.lm.factory.build_chat_model", _fake_build)
     return captured
 
 
@@ -146,7 +146,7 @@ def test_media_effort_clamps_to_gemini_thinking_level(
 ) -> None:
     """Media path maps effort onto Gemini's thinking_level vocabulary via the
     cross-provider clamp: none→minimal, low→low, medium→medium, high→high,
-    xhigh→high (clamped)."""
+    xhigh→high (clamped). Rides the factory's media_thinking_level kwarg."""
     for effort, level in [
         ("none", "minimal"),
         ("low", "low"),
@@ -155,7 +155,7 @@ def test_media_effort_clamps_to_gemini_thinking_level(
         ("xhigh", "high"),
     ]:
         understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}], effort=effort)
-        assert mock_gemini["kwargs"]["thinking_level"] == level, f"effort={effort}"
+        assert mock_gemini["kwargs"]["media_thinking_level"] == level, f"effort={effort}"
 
 
 def test_media_default_effort_max_keeps_settings_knob(
@@ -165,11 +165,13 @@ def test_media_default_effort_max_keeps_settings_knob(
     AVA_UNDERSTAND_MEDIA_THINKING_LEVEL knob, so existing clusters see no
     behavior change on the media path."""
     understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
-    assert mock_gemini["kwargs"]["thinking_level"] == settings.lm.understand_media_thinking_level
+    assert (
+        mock_gemini["kwargs"]["media_thinking_level"] == settings.lm.understand_media_thinking_level
+    )
 
     monkeypatch.setattr(settings.lm, "understand_media_thinking_level", "high")
     understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}], effort="max")
-    assert mock_gemini["kwargs"]["thinking_level"] == "high"
+    assert mock_gemini["kwargs"]["media_thinking_level"] == "high"
 
 
 def test_existing_text_file_uses_deepseek(mock_deepseek: dict[str, Any], tmp_path: Path) -> None:
@@ -272,12 +274,12 @@ def test_pdf_uses_pdf_mime(mock_gemini: dict[str, Any], fake_pdf: Path) -> None:
 def test_media_default_knobs_high_res_medium_thinking(
     mock_gemini: dict[str, Any], fake_image: Path
 ) -> None:
-    """Default media quality knobs: resolution=high (see detail), thinking=medium."""
-    from google.genai.types import MediaResolution
-
+    """Default media quality knobs: resolution=high (see detail), thinking=medium.
+    The Gemini enum mapping happens in the provider branch — the factory call
+    carries the configured strings."""
     understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
-    assert mock_gemini["kwargs"]["media_resolution"] == MediaResolution.MEDIA_RESOLUTION_HIGH
-    assert mock_gemini["kwargs"]["thinking_level"] == "medium"
+    assert mock_gemini["kwargs"]["media_resolution"] == "high"
+    assert mock_gemini["kwargs"]["media_thinking_level"] == "medium"
 
 
 def test_text_model_config_flows_in(
@@ -301,12 +303,11 @@ def test_media_model_config_flows_in(
 def test_media_resolution_config_flows_in(
     monkeypatch: pytest.MonkeyPatch, mock_gemini: dict[str, Any], fake_image: Path
 ) -> None:
-    """settings.lm.understand_media_resolution maps into the model client."""
-    from google.genai.types import MediaResolution
-
+    """settings.lm.understand_media_resolution rides the factory's
+    media_resolution kwarg (the gemini branch maps it onto the enum)."""
     monkeypatch.setattr(settings.lm, "understand_media_resolution", "low")
     understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
-    assert mock_gemini["kwargs"]["media_resolution"] == MediaResolution.MEDIA_RESOLUTION_LOW
+    assert mock_gemini["kwargs"]["media_resolution"] == "low"
 
 
 def test_media_invalid_resolution_raises(
@@ -317,11 +318,45 @@ def test_media_invalid_resolution_raises(
         understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
 
 
+def test_media_base_url_config_flows_in(
+    monkeypatch: pytest.MonkeyPatch, mock_gemini: dict[str, Any], fake_image: Path
+) -> None:
+    """AVA_UNDERSTAND_MEDIA_BASE_URL rides the factory's base_url kwarg so a
+    self-hosted Gemini-compatible relay can be pointed at without code changes."""
+    monkeypatch.setattr(settings.lm, "understand_media_base_url", "http://localhost:8080/v1beta")
+    understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+    assert mock_gemini["kwargs"]["base_url"] == "http://localhost:8080/v1beta"
+
+
+def test_media_base_url_default_keeps_none(mock_gemini: dict[str, Any], fake_image: Path) -> None:
+    """No base URL configured → the factory gets None (SDK default endpoint)."""
+    understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+    assert mock_gemini["kwargs"]["base_url"] is None
+
+
+def test_media_model_non_gemini_fails_fast(
+    monkeypatch: pytest.MonkeyPatch, fake_image: Path
+) -> None:
+    """Non-Gemini media models fail fast with a clear error: the media wire
+    format is Gemini-specific, so a gpt image model would otherwise crash at
+    invoke time. Real provider routing — no build_chat_model mock — and the
+    check runs before any client is built, so no API key is needed here."""
+    monkeypatch.setattr(settings.lm, "understand_media_model", "gpt-5.5")
+    with pytest.raises(understand_mod.UnderstandError, match="Gemini"):
+        understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+
+
 # ── error paths ─────────────────────────────────────────────────────────────
 
 
-def test_media_raises_on_no_gemini_key(monkeypatch: pytest.MonkeyPatch, fake_image: Path) -> None:
-    monkeypatch.setattr(settings.lm, "gemini_api_key", None)
+def test_media_wraps_missing_gemini_key(monkeypatch: pytest.MonkeyPatch, fake_image: Path) -> None:
+    """The gemini provider branch raises RuntimeError on a missing key; the
+    media path wraps it as UnderstandError like the text path does."""
+
+    def _raise(model: str, **kwargs: object):
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    monkeypatch.setattr("shared.lm.factory.build_chat_model", _raise)
     with pytest.raises(understand_mod.UnderstandError, match="GEMINI_API_KEY"):
         understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
 

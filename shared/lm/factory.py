@@ -431,6 +431,9 @@ def build_chat_model(
     reasoning_effort: str | None = None,
     streaming: bool | None = None,
     timeout: float | None = None,
+    media_resolution: str | None = None,
+    media_thinking_level: str | None = None,
+    base_url: str | None = None,
 ) -> BaseChatModel:
     """Pick the provider by model name prefix and return the corresponding ChatModel.
 
@@ -478,6 +481,21 @@ def build_chat_model(
             paths (ava.understand / ava.web.fetch answer) pass
             settings.lm.llm_invoke_timeout_seconds so a wedged provider
             surfaces in tens of seconds instead of the SDK default (~600s).
+
+        media_resolution: media-path only (ava.understand) — the Gemini
+            low/medium/high resolution setting, mapped onto Google's
+            MediaResolution enum by the gemini branch; ignored by other
+            providers. None = the SDK default.
+        media_thinking_level: media-path only (ava.understand) — the Gemini
+            thinking_level vocabulary carried explicitly (the media path maps
+            `effort` itself, including the `max` → configured-knob special
+            case) instead of the resolved cross-provider effort; also keeps
+            include_thoughts at the SDK default, matching the media path's
+            historic wire shape. Ignored by other providers.
+        base_url: media-path only (ava.understand) — endpoint override for
+            the gemini branch (e.g. a self-hosted relay / provider mirror);
+            None = the SDK default official endpoint. Ignored by other
+            providers.
 
     Raises:
         ValueError: model prefix did not match — prompts to add a branch.
@@ -540,6 +558,9 @@ def build_chat_model(
             resolved_effort=resolved_effort,
             disable_streaming=disable_streaming,
             timeout=timeout,
+            media_resolution=media_resolution,
+            media_thinking_level=media_thinking_level,
+            base_url=base_url,
         )
     if model.startswith("gpt-"):
         return _build_gpt_model(
