@@ -148,6 +148,69 @@ async def test_generate_summary_returns_summary():
     assert summary == "a synthetic summary"
 
 
+async def test_generate_summary_emits_agent_billing_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed compaction call records its provider usage in the ledger.
+
+    The regression this catches is removing billing emission from the compact
+    path, which is the largest individual agent provider call.
+    """
+    from opentelemetry import trace as otel_trace
+
+    from shared import trace as trace_mod
+
+    class _Span:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.attributes: dict[str, Any] = {}
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            self.attributes[key] = value
+
+        def end(self) -> None:
+            pass
+
+    class _Tracer:
+        def __init__(self) -> None:
+            self.spans: list[_Span] = []
+
+        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
+            span = _Span(_name)
+            self.spans.append(span)
+            return span
+
+    tracer = _Tracer()
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    response = AIMessage(
+        content="a complete summary",
+        usage_metadata={
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "total_tokens": 1_100,
+            "input_token_details": {"cache_read": 800},
+        },
+    )
+    llm = _fake_llm(response=response)
+    llm.model_name = "deepseek-v4-pro"
+
+    assert (
+        await generate_summary([HumanMessage(content="conversation")], llm) == "a complete summary"
+    )
+
+    assert len(tracer.spans) == 1
+    span = tracer.spans[0]
+    assert span.name == "ava.billing.call"
+    assert span.attributes["ava.billing.model"] == "deepseek-v4-pro"
+    assert span.attributes["ava.billing.vendor"] == "deepseek"
+    assert span.attributes["ava.billing.usage_kind"] == "agent"
+    assert span.attributes["ava.billing.tokens_in"] == 1_000
+    assert span.attributes["ava.billing.tokens_out"] == 100
+    assert span.attributes["ava.billing.cache_read_tokens"] == 800
+
+
 async def test_generate_summary_includes_whole_conversation():
     """Request = [*whole conversation, HumanMessage(COMPACTION_INSTRUCTION)] — no more hold-out
     tail, model sees every message (including ToolMessage), instruction enters as appended message."""

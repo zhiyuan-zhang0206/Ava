@@ -215,6 +215,11 @@ async def generate_summary(
     # Gemini explicit cache is live the summary call rides it too (and its
     # stale-retry recovers a lapsed TTL), otherwise plain bind_tools.
     response = await ainvoke_with_cache_retry(llm, compaction_input)
+    model = getattr(llm, "model_name", None) or turn_settings.lm.llm_model
+    if isinstance(model, str) and model:
+        from shared.lm.billing import emit_billing_from_message
+
+        emit_billing_from_message(response, model=model, usage_kind="agent")
     summary = response.text
     if not summary.strip():
         raise RuntimeError(
