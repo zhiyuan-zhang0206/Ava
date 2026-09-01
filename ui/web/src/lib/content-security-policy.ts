@@ -36,7 +36,7 @@ function webSocketOrigin(gatewayOrigin: string): string {
 /** Return the origin the browser used, including a reverse proxy's forwarding. */
 export function browserFacingRequestUrl(request: Request): URL {
   const requestUrl = new URL(request.url);
-  const protocol = firstHeaderValue(request.headers.get("x-forwarded-proto"));
+  const protocol = firstHeaderValue(request.headers.get("x-forwarded-proto"))?.toLowerCase();
   if (protocol === "http" || protocol === "https") requestUrl.protocol = `${protocol}:`;
 
   // The gate proxies to a loopback Next.js address, so deployment must forward
@@ -79,6 +79,9 @@ export function buildContentSecurityPolicy({
 
   return [
     "default-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
     `script-src ${scriptSources.join(" ")}`,
     `style-src ${styleSources.join(" ")}`,
     // React's dynamic layout values render as style attributes. Limit the
@@ -88,8 +91,8 @@ export function buildContentSecurityPolicy({
     "img-src 'self' data: http: https:",
     "font-src 'self' data:",
     `connect-src 'self' ${resolvedGatewayOrigin} ${webSocketOrigin(resolvedGatewayOrigin)}`,
-    // Grafana is served through the same-origin /grafana proxy.
-    "frame-src 'self'",
+    // Grafana and plugin pages are mounted through the configured gateway.
+    `frame-src 'self' ${resolvedGatewayOrigin}`,
     "frame-ancestors 'none'",
   ].join("; ");
 }

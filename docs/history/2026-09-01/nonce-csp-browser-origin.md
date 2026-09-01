@@ -13,7 +13,8 @@ is the explicit compatibility exception for existing dynamic layout attributes.
 It does not relax `script-src`, which retains no unsafe directive. Development
 retains the Next.js evaluation and inline-style allowances. `connect-src` names
 only the frontend, the resolved gateway HTTP origin, and its WebSocket origin.
-`frame-src` permits only same-origin Grafana through `/grafana`.
+`frame-src` permits the frontend and the resolved gateway origin, which covers
+Grafana plus plugin iframe mounts at `pluginPageSrc` → `${API_BASE}/api/plugin-ui/...`.
 
 ## Rationale
 
