@@ -162,6 +162,9 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
                 HumanMessage(content=f"<user_request>{prompt}</user_request>"),
             ]
         )
+        from shared.lm.billing import emit_billing_from_message
+
+        emit_billing_from_message(response, model=model, usage_kind="batch")
         # Anthropic format: content may be a list (thinking/text blocks)
         # or a string. thinking blocks carry a signature field — do not
         # str()-dump the entire blob into label; only concatenate text

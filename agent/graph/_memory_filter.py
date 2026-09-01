@@ -153,6 +153,7 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
     import asyncio
 
     from shared.lm._effort import ReasoningEffort
+    from shared.lm.billing import emit_billing_from_message
     from shared.lm.factory import build_chat_model
 
     prompt = _INSTRUCTION.format(inject_k=inject_k, query=query, candidates=_render(candidates))
@@ -179,6 +180,11 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
             reply = await asyncio.wait_for(
                 model.ainvoke([HumanMessage(content=prompt)]),
                 timeout=turn_settings.agent.memory_recall_filter_timeout_seconds,
+            )
+            emit_billing_from_message(
+                reply,
+                model=turn_settings.agent.memory_recall_filter_model,
+                usage_kind="chat",
             )
             # `.text` is a property on current langchain messages and a method
             # on older ones. Read it first and only call what is not already a

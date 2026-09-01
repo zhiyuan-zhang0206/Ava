@@ -154,6 +154,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
         "http://127.0.0.1:4318",
     )
     monkeypatch.setattr(trace_mod, "cluster_label", lambda: ".ava-test")
+    monkeypatch.setattr("shared.observability.production_identity", lambda: False)
     _under_watermark(monkeypatch)
 
     calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
@@ -171,7 +172,11 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     assert "api_key" not in kw
     assert kw["telemetry_enabled"] is False
     assert kw["disable_batch"] is False
-    assert kw["resource_attributes"] == {"cluster": ".ava-test"}
+    assert kw["resource_attributes"] == {
+        "cluster": ".ava-test",
+        "service.line": "ava",
+        "environment": "dev",
+    }
 
     from traceloop.sdk.instruments import Instruments
 
@@ -216,6 +221,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     (home / "lgtm-host").touch()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True)
+    monkeypatch.setattr("shared.observability.production_identity", lambda: True)
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path / "traces")
@@ -233,7 +239,11 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     _wait_init_resolved()
 
     assert len(calls) == 1
-    assert calls[0]["resource_attributes"] == {"cluster": ".ava"}
+    assert calls[0]["resource_attributes"] == {
+        "cluster": ".ava",
+        "service.line": "ava",
+        "environment": "prod",
+    }
 
 
 def test_sdk_initialize_failure_logs_and_state_unchanged(

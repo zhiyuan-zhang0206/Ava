@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from shared.lm._call import answer_text, extract_text, invoke_text
 from shared.lm._effort import ReasoningEffort
@@ -23,8 +24,9 @@ class _FakeResponse:
 
 
 class _FakeLLM:
-    def __init__(self, response: Any) -> None:
+    def __init__(self, response: Any, *, model_name: str | None = None) -> None:
         self._response = response
+        self.model_name = model_name
         self.messages: list[Any] = []
 
     def invoke(self, messages: list[Any]) -> Any:
@@ -63,6 +65,66 @@ def test_invoke_text_returns_flattened_text() -> None:
     out = invoke_text(llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError)
     assert out == "answer"
     assert llm.messages[0].content == [{"type": "text", "text": "q"}]
+
+
+def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful shared text call records the priced provider usage it consumed.
+
+    The regression this catches is ``ava.understand`` and ``ava.web.fetch``
+    returning an answer without the one-call/one-billing-span ledger row.
+    """
+    from opentelemetry import trace as otel_trace
+
+    from shared import trace as trace_mod
+
+    class _Span:
+        def __init__(self) -> None:
+            self.attributes: dict[str, Any] = {}
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            self.attributes[key] = value
+
+        def end(self) -> None:
+            pass
+
+    class _Tracer:
+        def __init__(self) -> None:
+            self.spans: list[_Span] = []
+
+        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
+            span = _Span()
+            self.spans.append(span)
+            return span
+
+    tracer = _Tracer()
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    llm = _FakeLLM(
+        AIMessage(
+            content="answer",
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": 10,
+                "total_tokens": 110,
+                "input_token_details": {"cache_read": 20},
+            },
+        ),
+        model_name="deepseek-v4-pro",
+    )
+
+    assert (
+        invoke_text(llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError)
+        == "answer"
+    )
+
+    assert len(tracer.spans) == 1
+    assert tracer.spans[0].attributes["ava.billing.vendor"] == "deepseek"
+    assert tracer.spans[0].attributes["ava.billing.usage_kind"] == "chat"
+    assert tracer.spans[0].attributes["ava.billing.tokens_in"] == 100
+    assert tracer.spans[0].attributes["ava.billing.cache_read_tokens"] == 20
 
 
 def test_invoke_text_empty_response_raises_error_type() -> None:
