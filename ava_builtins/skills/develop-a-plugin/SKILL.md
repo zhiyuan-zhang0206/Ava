@@ -27,7 +27,8 @@ write locally  ->  test at your own restart  ->  when stable: its own git repo
 
 An external plugin is a directory `~/.ava/plugins/<name>/` with a `plugin.py`
 (entry point; hooks / SDK namespaces / config schema / services register from
-here) and optionally `setup.py` (idempotent `scaffold()`, run by converge),
+here) and optionally `setup.py` (idempotent `scaffold()`, run by explicit
+`ava memory init`),
 `skills/` (skill dirs converge syncs into the load dir), and `default_config.py`.
 Plugin discovery is a filesystem scan — a hand-placed directory is found; no
 registration step is needed to develop. Look at a builtin under

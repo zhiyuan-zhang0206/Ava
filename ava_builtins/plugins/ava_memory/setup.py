@@ -1,9 +1,9 @@
-"""Host-side scaffolding for the memory pool — this plugin's converge step.
+"""Host-side scaffolding for the explicit `ava memory init` command.
 
 Kept apart from `plugin.py` on purpose: that module imports the agent runtime
 (hooks, graph, the SDK namespace), none of which exists in the `ava` CLI
-process. This one depends on `shared` alone, so converge can load it without
-dragging an agent into a CLI command.
+process. This one depends on `shared` alone, so `ava memory init` can load it
+without dragging an agent into a CLI command.
 
 What it owns is the template laid down inside the pool checkout: the index every
 agent reads, and the commit hook enforcing the character caps. (The .gitignore is
@@ -13,12 +13,12 @@ commit, since a repo needs a file to commit; one authority, not two.)
 Before this step existed the template was a directory of files nothing copied,
 and a pool came up holding only that .gitignore: no MEMORY.md, so the index
 injection silently found nothing to inject, and no armed hook, so the caps never
-fired. Prose in a skill told an agent to copy them by hand; provisioning an
-invariant is not a thing to leave to prose.
+fired. Prose in a skill told an agent to copy them by hand; explicit provisioning
+of an invariant is not a thing to leave to prose.
 
 Idempotent, and non-destructive: an existing file is never overwritten. The
 template seeds a pool, it does not reset one — an agent's curated index must
-survive every converge.
+survive every explicit initialization.
 """
 
 from __future__ import annotations
@@ -76,20 +76,12 @@ def _arm_hooks(pool: Path) -> bool:
 
 def _ensure_memory_repo() -> None:
     """Run init() if the memory pool is not a git repo. If already init'd but on the wrong branch, fail loud."""
-    from shared.memory_repo import (
-        MemoryBranchMismatch,
-        branch_name,
-        init,
-        is_initialized,
-    )
+    from shared.memory_repo import branch_name, init, is_initialized
     from shared.paths import memory_dir
 
     if is_initialized():
-        # init() validates branch on re-call (raises on mismatch); call it once to trigger the check
-        try:
-            init()
-        except MemoryBranchMismatch as e:
-            raise RuntimeError(str(e)) from e
+        # init() validates branch on re-call (raises on mismatch); call it once to trigger the check.
+        init()
         return
 
     branch = branch_name()
@@ -161,16 +153,15 @@ def _classify_git_init_error(stderr: str, returncode: int) -> str:
 
 
 def scaffold() -> None:
-    """Bring this cluster's memory pool up — the plugin's converge step.
+    """Bring this cluster's memory pool up during explicit initialization.
 
     Three things, in order: the agent-runner's authoring checkout, the gateway's
     consolidated one (gateway-capable units only), and the template laid down
     inside the authoring checkout.
 
-    All of it used to be two framework converge steps calling into the CLI. It
-    is here because the pool is this plugin's, end to end: disable the plugin and
-    no checkout is created, no template is laid down, and no memory note reaches
-    an agent's context.
+    It is here because the pool is this plugin's, end to end: disable the plugin
+    and no checkout is created, no template is laid down, and no memory note
+    reaches an agent's context.
     """
     from shared.paths import memory_dir
 

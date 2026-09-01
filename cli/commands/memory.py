@@ -5,6 +5,7 @@ call a single command instead of hand-typing shell pipelines. Each verb is
 a standalone Python function callable from the cli/parsers dispatch tree.
 
 Verbs:
+  init          Explicitly initialize the memory pool and plugin-owned templates
   refresh       Trigger the gateway to re-index the memory pool
 """
 
@@ -16,8 +17,30 @@ import httpx
 
 from shared.http_dial import post as dial_post
 from shared.machine import gateway_api_base, gateway_auth_headers
+from shared.memory_repo import MemoryBranchMismatch
 
 _TIMEOUT_S = 30.0
+
+
+def cmd_memory_init() -> int:
+    """Explicitly initialize enabled plugin-owned memory resources.
+
+    Memory repository branch validation belongs to this operator-requested
+    provisioning path, never to converge or service startup.
+    """
+    from cli.commands._converge_plugins import run_plugin_scaffolds
+
+    print("initializing memory resources...")
+    try:
+        result = run_plugin_scaffolds()
+    except MemoryBranchMismatch as exc:
+        print(f"  ✗ {exc}", file=sys.stderr)
+        return 1
+    if result.ran:
+        print(f"scaffolded: {', '.join(result.ran)}")
+    else:
+        print("no enabled plugin scaffolds")
+    return 0
 
 
 def _refresh_index() -> None:

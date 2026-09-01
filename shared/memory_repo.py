@@ -77,7 +77,7 @@ class MemoryPoolBootstrapFailed(RuntimeError):  # noqa: N818
 
 
 class MemoryRepoUninitialized(RuntimeError):  # noqa: N818
-    """`~/.ava/memory` is not yet a git repo — `ava start`'s ensure_memory_repo() should auto-init."""
+    """`~/.ava/memory` is not yet a git repo — run `ava memory init` first."""
 
 
 class MemoryBranchMismatch(RuntimeError):  # noqa: N818
@@ -90,10 +90,10 @@ def memory_remote() -> str:
     Precedence:
     1. `settings.general.memory_remote` (env `AVA_MEMORY_REMOTE` / headless
        deployment / CI injection)
-    2. `$AVA_HOME/memory_remote` file (regular setup; `ava start`
-       first run writes it)
-    3. neither -> MemoryRemoteMissing (`ava start` catches and
-       TTY-prompts to write the file)
+    2. `$AVA_HOME/memory_remote` file (regular operator configuration)
+    3. neither -> MemoryRemoteMissing. `ava memory init` chooses its
+       role-specific local or gateway-bootstrap path; a caller that needs a
+       remote directs the operator to configure one.
 
     Raises:
         MemoryRemoteMissing: settings.general.memory_remote empty + file
@@ -108,9 +108,8 @@ def memory_remote() -> str:
         if url:
             return url
     raise MemoryRemoteMissing(
-        f"memory remote not set — `ava start` will TTY-prompt you to set up "
-        f"(default git@github.com:<gh-user>/AvaMemory.git). Manual setup: "
-        f"`echo <git-url> > {p}` or `export AVA_MEMORY_REMOTE=<git-url>`."
+        "memory remote not set. Configure one before a remote-backed memory "
+        f"operation: `echo <git-url> > {p}` or `export AVA_MEMORY_REMOTE=<git-url>`."
     )
 
 
@@ -225,7 +224,8 @@ def _init_local_repo(branch: str, cwd: Path) -> None:
 def _strip_remotes(cwd: Path) -> None:
     """Remove every git remote from the checkout at `cwd`. Keep-local mode must
     never sync off-box, so a leftover remote (e.g. a host flipped to keep-local
-    after being set up against a central remote) is dropped on every converge."""
+    after being set up against a central remote) is dropped on every explicit
+    memory initialization."""
     for name in _run_git("remote", cwd=cwd).split():
         _run_git("remote", "remove", name, cwd=cwd)
 
@@ -299,7 +299,7 @@ def bootstrap_from_gateway() -> None:
     remote silently got a stub local pool and its agents saw no shared memory.
     Note: a pool that was already initialized as a stub (pre-fix) is not
     self-healed — `init()` no-ops on an existing checkout; recover such a
-    machine by removing `$AVA_HOME/memory` and re-running `ava start`.
+    machine by removing `$AVA_HOME/memory` and running `ava memory init`.
 
     Raises:
         MemoryPoolBootstrapFailed: gateway URL missing/unreachable, non-200,
@@ -405,9 +405,9 @@ def init() -> None:
         agents silently).
       - gateway-capable unit (single-box fresh install, bench, offline
         personal dev): `git init -b <branch>` local empty repo + empty
-        commit; do not connect remote. Later `ava memory push/pull`
-        raises MemoryRemoteMissing; the user runs `ava start
-        --memory-remote <url>` to reconfigure if they want to sync.
+        commit; do not connect remote. A later remote-backed operation raises
+        MemoryRemoteMissing; configure `AVA_MEMORY_REMOTE` or
+        `$AVA_HOME/memory_remote` before using that operation.
 
     Raises:
         MachineNameMissing: `$AVA_HOME/machine_name` not set.

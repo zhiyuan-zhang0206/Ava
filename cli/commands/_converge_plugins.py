@@ -1,17 +1,16 @@
 """The plugin scaffold hook — how a plugin owns its own host-side state.
 
 A plugin opts in by shipping `setup.py` beside `plugin.py` with a zero-argument
-`scaffold()`. Converge runs it for every enabled plugin, so turning a plugin off
-leaves none of its state behind, and the framework carries no step on its behalf.
+`scaffold()`. The explicit `ava memory init` command runs it for every enabled
+plugin, so runtime memory state is never touched by converge or startup.
 
 `setup.py` is loaded on its own, NOT through `plugin.py`: plugin modules import
 the agent runtime (hooks, graph, the SDK namespace), none of which exists in a
-CLI process. Keeping the scaffold in a separate module is what lets converge
-call it at all — and it means a scaffold may depend on `shared` only.
+CLI process. Keeping the scaffold in a separate module is what lets the explicit
+CLI command call it at all — and it means a scaffold may depend on `shared` only.
 
-Lives beside `_converge_skills.py` for the same reason that one does: converge's
-step bodies stay in `_converge.py`, but a step with real logic gets its own
-module.
+It lives beside `_converge_skills.py` because both load plugin-owned host setup
+without importing the agent runtime.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ScaffoldResult:
-    """Which plugins were run, for the converge log. A plugin without `setup.py`
+    """Which plugins were run by explicit setup. A plugin without `setup.py`
     (or without a `scaffold` in it) is simply absent — not an error."""
 
     ran: list[str]
@@ -31,8 +30,8 @@ class ScaffoldResult:
 def run_plugin_scaffolds() -> ScaffoldResult:
     """Call `scaffold()` on every enabled plugin that defines one.
 
-    A scaffold that raises propagates: it is provisioning, and half-provisioned
-    is the state this hook exists to stop happening quietly.
+    A scaffold that raises propagates: it is explicit provisioning, and
+    half-provisioned is the state this hook exists to stop happening quietly.
     """
     from shared import plugins_config as plugins_cfg
 

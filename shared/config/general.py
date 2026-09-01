@@ -258,7 +258,7 @@ class GeneralSettings(EnvSettings):
     memory_keep_local: bool = Field(
         default=False,
         alias="AVA_MEMORY_KEEP_LOCAL",
-        description="Keep the memory pool purely local: no git remote, no push/pull, notes never leave the box. Default off (the pool syncs to AVA_MEMORY_REMOTE). Set true on a host whose notes must not sync off-box; converge then strips any existing remote and skips the GitHub PR capability check.",
+        description="Keep the memory pool purely local: no git remote, no push/pull, notes never leave the box. Default off (the pool syncs to AVA_MEMORY_REMOTE). Set true on a host whose notes must not sync off-box; explicit `ava memory init` then strips any existing remote and skips the GitHub PR capability check.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
