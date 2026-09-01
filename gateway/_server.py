@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import faulthandler
+import logging
 import os
 import signal
 from contextlib import suppress
@@ -16,6 +17,9 @@ from shared.machine import is_gateway
 from shared.migrations import assert_schema_current
 from shared.platform import raise_fd_limit
 from shared.transport_encryption import verify_transport_encryption
+
+_log = logging.getLogger(__name__)
+_GATEWAY_UVICORN_WORKERS = 1
 
 
 def main() -> None:
@@ -84,6 +88,11 @@ def main() -> None:
     if host != "127.0.0.1":
         verify_transport_encryption(settings.data_plane.cluster_secret, host)
     reload = settings.gateway.gateway_reload
+    if _GATEWAY_UVICORN_WORKERS != 1:
+        raise RuntimeError(
+            "gateway must run one uvicorn worker because rate limiters are process-local"
+        )
+    _log.warning("gateway starts with one uvicorn worker because rate limiters are process-local")
     # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
     # clobber the root-handler install (`_StdlibInterceptHandler`) that
     # init_gateway_process set up above, sending uvicorn's own records
@@ -101,4 +110,5 @@ def main() -> None:
         reload=reload,
         reload_dirs=["gateway", "shared", "ava", "agent"] if reload else None,
         log_config=None,
+        workers=_GATEWAY_UVICORN_WORKERS,
     )

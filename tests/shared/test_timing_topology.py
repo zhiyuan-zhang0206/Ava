@@ -19,6 +19,7 @@ import pytest
 
 import shared.boot_timing as boot
 import shared.deploy_timing as deploy
+from shared.config import settings
 from shared.timing import CLOCKS, CONSTRAINTS, assert_clock_lattice, validate_clock_lattice
 
 
@@ -26,13 +27,35 @@ def test_default_lattice_holds() -> None:
     """The full declared lattice must hold for the settings defaults.
 
     This is the topology pin: every constraint in `shared.timing.CONSTRAINTS`
-    (14 orderings across the boot / deploy / agent-lease / updater / wedged /
+    (25 orderings across the boot / deploy / agent-lease / updater / wedged /
     restarter families) is asserted against the live default values. A change to
     any default that inverts a load-bearing ordering fails here, with the
     constraint's intent in the failure message.
     """
     failures = validate_clock_lattice()
     assert failures == [], "lattice violated:\n  " + "\n  ".join(failures)
+
+
+def test_self_respawn_grace_allows_three_restarter_polls() -> None:
+    """The fallback starts after the third restarter poll, never on its deadline."""
+    poll = CLOCKS["RESTARTER_POLL_INTERVAL_S"].get()
+    grace = CLOCKS["SELF_RESPAWN_RESTARTER_GRACE_S"].get()
+    margin = CLOCKS["SELF_RESPAWN_RESTARTER_SCHEDULING_MARGIN_S"].get()
+    assert grace == 3 * poll + margin, (
+        f"self-respawn grace ({grace}s) must include the {margin}s scheduling margin after "
+        f"three restarter polls ({poll}s each)"
+    )
+    assert 3 * poll < grace
+
+
+def test_self_respawn_grace_tracks_the_restarter_poll_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing the restarter cadence keeps the fallback after three polls."""
+    monkeypatch.setattr(settings.daemon, "restarter_poll_interval_seconds", 2.0)
+
+    assert CLOCKS["SELF_RESPAWN_RESTARTER_GRACE_S"].get() == 6.1
+    assert validate_clock_lattice() == []
 
 
 def test_dispatch_client_outlives_owner_wait_and_release_preflight() -> None:

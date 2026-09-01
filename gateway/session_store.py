@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -9,9 +11,10 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 _CACHE_TTL = timedelta(seconds=30)
+_SESSION_CACHE_MAX_ENTRIES = 4096
 
 # session id -> (cache deadline, authoritative row expiry)
-_session_cache: dict[str, tuple[datetime, datetime]] = {}
+_session_cache: OrderedDict[str, tuple[datetime, datetime]] = OrderedDict()
 
 
 def _now() -> datetime:
@@ -25,7 +28,7 @@ def create_session(
     user_agent: str,
     ip: str,
 ) -> None:
-    """Insert one session and opportunistically remove expired rows."""
+    """Insert one session and evict any stale positive cache entry."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -34,7 +37,6 @@ def create_session(
             """,
             (session_id, ttl_seconds, user_agent, ip),
         )
-        cur.execute("DELETE FROM web_sessions WHERE expires_at < now()")
     _session_cache.pop(session_id, None)
 
 
@@ -52,6 +54,8 @@ def session_is_valid(
     if cached is not None:
         cache_deadline, expires_at = cached
         if checked_at < cache_deadline and checked_at < expires_at:
+            with suppress(KeyError):
+                _session_cache.move_to_end(session_id)
             return True
         _session_cache.pop(session_id, None)
 
@@ -68,6 +72,10 @@ def session_is_valid(
         return False
 
     _session_cache[session_id] = (min(checked_at + _CACHE_TTL, expires_at), expires_at)
+    with suppress(KeyError):
+        _session_cache.move_to_end(session_id)
+    if len(_session_cache) > _SESSION_CACHE_MAX_ENTRIES:
+        _session_cache.popitem(last=False)
     return True
 
 

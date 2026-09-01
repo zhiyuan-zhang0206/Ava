@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -190,7 +191,7 @@ def test_list_sessions_filters_inactive_and_sorts_newest_first(
     assert revoked["revoked_at"] is not None
 
 
-def test_create_session_cleans_up_expired_rows(
+def test_create_session_leaves_expired_rows_for_the_ttl_reaper(
     pool: ConnectionPool[psycopg.Connection[Any]],
 ) -> None:
     with pool.connection() as conn, conn.cursor() as cur:
@@ -203,7 +204,59 @@ def test_create_session_cleans_up_expired_rows(
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT id FROM web_sessions ORDER BY id")
-        assert [row[0] for row in cur.fetchall()] == ["live-row"]
+        assert [row[0] for row in cur.fetchall()] == ["expired-row", "live-row"]
+
+
+def test_session_cache_evicts_least_recently_used_entry(
+    pool: ConnectionPool[psycopg.Connection[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A long-lived gateway retains only the most recently used session cache entries."""
+    monkeypatch.setattr(session_store, "_SESSION_CACHE_MAX_ENTRIES", 2)
+    checked_at = datetime.now(UTC)
+    for session_id in ("first", "second", "third"):
+        create_session(pool, session_id, 3600, "", "")
+
+    assert session_is_valid(pool, "first", now=checked_at) is True
+    assert session_is_valid(pool, "second", now=checked_at) is True
+    assert session_is_valid(pool, "first", now=checked_at + timedelta(seconds=1)) is True
+    assert session_is_valid(pool, "third", now=checked_at) is True
+
+    assert list(session_store._session_cache) == ["first", "third"]
+
+
+def test_session_cache_tolerates_an_entry_evicted_while_touched(
+    pool: ConnectionPool[psycopg.Connection[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A concurrent cache eviction never turns a valid session into a 500."""
+
+    class _EvictedOnTouch(OrderedDict[str, tuple[datetime, datetime]]):
+        def move_to_end(self, key: str, last: bool = True) -> None:
+            self.pop(key)
+            super().move_to_end(key, last=last)
+
+    checked_at = datetime.now(UTC)
+    cache = _EvictedOnTouch(
+        {"racing-session": (checked_at + timedelta(seconds=30), checked_at + timedelta(hours=1))}
+    )
+    monkeypatch.setattr(session_store, "_session_cache", cache)
+
+    assert session_is_valid(pool, "racing-session", now=checked_at) is True
+
+
+def test_session_cache_tolerates_an_entry_evicted_after_db_lookup(
+    pool: ConnectionPool[psycopg.Connection[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An eviction after a database read never turns session validation into a 500."""
+
+    class _EvictedOnTouch(OrderedDict[str, tuple[datetime, datetime]]):
+        def move_to_end(self, key: str, last: bool = True) -> None:
+            self.pop(key)
+            super().move_to_end(key, last=last)
+
+    create_session(pool, "racing-db-session", 3600, "", "")
+    monkeypatch.setattr(session_store, "_session_cache", _EvictedOnTouch())
+
+    assert session_is_valid(pool, "racing-db-session") is True
 
 
 def test_session_ids_with_suffix_matches_active_rows_only(
