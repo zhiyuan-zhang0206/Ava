@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -460,3 +461,205 @@ def test_new_session_dead_child_records_sentinel(
     with contextlib.suppress(psutil.NoSuchProcess):
         psutil.Process(pid).kill()
     posixproc._record_path(name).unlink(missing_ok=True)
+
+
+def test_kill_session_group_kill_reaps_late_spawned_child(
+    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    tmp_path: Path,
+) -> None:
+    """A child spawned DURING the graceful wait (an unwound finally's process,
+    a bash wrapper's foreground command) shares the session's process group, so
+    the group kill takes it down — the old pre-captured children walk left it
+    orphaned (task #2249). The late child is the discriminating half: the top
+    process spawns it half a second into the kill — strictly after any
+    pre-captured children snapshot."""
+    name = "ava-test-agent-late"
+    ready_file = tmp_path / "ready"
+    late_file = tmp_path / "late.pid"
+    # The top process installs a no-op SIGTERM handler (it does NOT exit on the
+    # graceful signal — the wrapper shape), announces readiness, then spawns an
+    # ignore-SIGTERM child half a second in — strictly inside the graceful
+    # window, after any children snapshot the old walk could have captured.
+    # Single-threaded on purpose: the spawn is a plain Popen between two
+    # sleeps, no def block (a one-line `def` cannot carry `;`-joined bodies).
+    argv = [
+        sys.executable,
+        "-c",
+        "import signal,subprocess,sys,time;"
+        f"ready={str(ready_file)!r};"
+        f"late={str(late_file)!r};"
+        "signal.signal(signal.SIGTERM,lambda *a: None);"
+        "open(ready,'w').write('ready');"
+        "time.sleep(0.5);"
+        "p=subprocess.Popen([sys.executable,'-c',"
+        "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+        "time.sleep(300)']);"
+        "open(late,'w').write(str(p.pid));"
+        "time.sleep(300)",
+    ]
+    _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
+    pid = _pid(name)
+    try:
+        assert _wait(ready_file.exists), "top process never armed its SIGTERM handler"
+        ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0)
+        assert ok is True and mode == "forced"
+        assert _wait(lambda: not psutil.pid_exists(pid)), "top process must be gone"
+        assert _wait(late_file.exists), "late child never spawned"
+        late_pid = int(late_file.read_text())
+        assert _wait(lambda: not psutil.pid_exists(late_pid)), (
+            "late-spawned child must die with the group"
+        )
+    finally:
+        posixproc.kill_session(name, graceful=False)
+
+
+def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
+    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+) -> None:
+    """A bash wrapper that ignores SIGTERM (it waits for its foreground
+    command) and its background child are both taken down by the group signals:
+    SIGTERM first (both ignore it), then the SIGKILL group floor. Shape
+    coverage, not a discriminator — the old children-snapshot walk also killed
+    this pair (the child was in the snapshot); the discriminating tests are the
+    late-spawned-child and detached-descendant ones."""
+    name = "ava-test-agent-bashwrap"
+    # `trap '' TERM` makes bash ignore SIGTERM (and the exec'd sleep inherits
+    # SIG_IGN across fork+exec); `& wait` keeps a child alive under it, the
+    # shape of a wrapper sitting on a foreground command.
+    _new(name, ["/bin/bash", "-c", "trap '' TERM; sleep 300 & wait"], unit_home)  # pyright: ignore[reportUnknownArgumentType]
+    pid = _pid(name)
+    try:
+        assert _wait(lambda: psutil.pid_exists(pid) and psutil.Process(pid).children())
+        child_pid = psutil.Process(pid).children()[0].pid
+        ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5)
+        assert ok is True and mode == "forced"
+        assert _wait(lambda: not psutil.pid_exists(pid))
+        assert _wait(lambda: not psutil.pid_exists(child_pid)), (
+            "wrapper's child must die with the group"
+        )
+    finally:
+        posixproc.kill_session(name, graceful=False)
+
+
+def test_kill_session_signals_the_process_group(
+    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+) -> None:
+    """The TTL path's final executor (posixproc.kill_session, reached from the
+    page-server daemon's TTL reconcile) signals the session's process GROUP,
+    not just the recorded pid — the regression guard for the group-kill fix
+    (task #2249)."""
+    name = "ava-test-agent-grp"
+    _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
+    pid = _pid(name)
+    pgid = os.getpgid(pid)
+    calls: list[tuple[int, int]] = []
+    real_killpg = os.killpg
+
+    def spy(pg: int, sig: int) -> None:
+        calls.append((pg, sig))
+        return real_killpg(pg, sig)  # type: ignore[func-returns-value]
+
+    monkeypatch.setattr(posixproc.os, "killpg", spy)
+    try:
+        ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0)
+        assert ok is True and mode == "graceful"
+        assert (pgid, signal.SIGTERM) in calls, "graceful kill must signal the group"
+    finally:
+        posixproc.kill_session(name, graceful=False)
+
+
+def test_kill_session_group_kill_reaps_detached_descendant(
+    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    tmp_path: Path,
+) -> None:
+    """A descendant that deliberately left the session's process group (a
+    setsid'd worker) is unreachable by group signal — the pre-captured
+    children walk is the only handle on it, and the kill must reap it too
+    (review nit on #1301; pty-orphan history)."""
+    name = "ava-test-agent-detached"
+    ready = tmp_path / "ready"
+    detached_file = tmp_path / "detached.pid"
+    argv = [
+        sys.executable,
+        "-c",
+        "import subprocess,sys,time;"
+        f"ready={str(ready)!r};"
+        f"detached={str(detached_file)!r};"
+        "p=subprocess.Popen([sys.executable,'-c',"
+        "'import time;time.sleep(300)'],start_new_session=True);"
+        "open(detached,'w').write(str(p.pid));"
+        "open(ready,'w').write('ready');"
+        "time.sleep(300)",
+    ]
+    _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
+    pid = _pid(name)
+    detached_pid = -1
+    try:
+        assert _wait(ready.exists)
+        detached_pid = int(detached_file.read_text())
+        assert _wait(lambda: psutil.pid_exists(detached_pid))
+        # The descendant must really be outside the session's group, or the
+        # test proves nothing (the group signal would cover it).
+        assert os.getpgid(detached_pid) != os.getpgid(pid)
+        ok, mode = posixproc.kill_session(name, graceful=True, timeout=1.0)
+        assert ok is True and mode == "forced"  # the detached survivor forces the hard kill
+        assert _wait(lambda: not psutil.pid_exists(pid))
+        assert _wait(lambda: not psutil.pid_exists(detached_pid)), (
+            "detached descendant must die with the session"
+        )
+    finally:
+        posixproc.kill_session(name, graceful=False)
+        # The detached descendant is outside the group, so a cleanup
+        # kill_session cannot reach it — kill it directly if it survived.
+        if detached_pid > 0:
+            with contextlib.suppress(psutil.Error):
+                psutil.Process(detached_pid).kill()
+
+
+def test_process_is_live_false_for_zombie(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_process_is_live counts a zombie as dead awaiting its parent's reap. The
+    graceful verdict must not wait on init/launchd reap latency (macmini
+    failure on #1301; #1303 class)."""
+    import types
+
+    proc = types.SimpleNamespace()
+    proc.is_running = lambda: True
+    proc.status = lambda: psutil.STATUS_ZOMBIE
+    assert posixproc._process_is_live(proc) is False  # type: ignore[arg-type]
+
+
+def _group_exists(_pgid: int, _sig: int) -> None:
+    """os.killpg stub: the probe group exists (no ProcessLookupError)."""
+    return
+
+
+def _same_group(_pid: int) -> int:
+    """os.getpgid stub: every probed process belongs to the group under test."""
+    return 999
+
+
+def test_group_empty_ignores_zombie_members(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A group whose only occupants are zombies is empty for the graceful
+    verdict — killpg(pgid, 0) would still succeed on it, so the fast probe is
+    followed by a member walk that exempts zombies."""
+    import types
+
+    zombie = types.SimpleNamespace(pid=424242)
+    zombie.status = lambda: psutil.STATUS_ZOMBIE  # type: ignore[attr-defined]
+    monkeypatch.setattr(posixproc.os, "killpg", _group_exists)
+    monkeypatch.setattr(posixproc.psutil, "process_iter", lambda: iter([zombie]))  # type: ignore[arg-type]
+    monkeypatch.setattr(posixproc.os, "getpgid", _same_group)
+    assert posixproc._group_empty(999) is True
+
+
+def test_group_empty_false_with_live_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A live member keeps the group occupied."""
+    import types
+
+    live = types.SimpleNamespace(pid=1)
+    live.status = lambda: psutil.STATUS_RUNNING  # type: ignore[attr-defined]
+    monkeypatch.setattr(posixproc.os, "killpg", _group_exists)
+    monkeypatch.setattr(posixproc.psutil, "process_iter", lambda: iter([live]))  # type: ignore[arg-type]
+    monkeypatch.setattr(posixproc.os, "getpgid", _same_group)
+    assert posixproc._group_empty(999) is False

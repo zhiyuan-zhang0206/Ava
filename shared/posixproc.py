@@ -23,8 +23,8 @@ reap / status consumers dispatch to one of the two by platform:
 - stdout/stderr are redirected to `$AVA_HOME/logs/<name>.out.log` (+ an optional
   split stderr file) so a crash's last words survive the process ending;
 - liveness = the record's pid is alive *and* its start-time matches the record;
-- kill signals the process (graceful SIGTERM → the agent's finally runs) or its
-  whole tree (force SIGKILL).
+- kill signals the process's whole group (graceful SIGTERM → the agent's finally
+  runs; force SIGKILL) — a group signal also reaches children spawned mid-kill.
 
 Agent liveness of record is `agents_meta.pid` in the DB — the respawn controller
 reaps by that pid, and force-terminate kills by it. This record layer is the
@@ -35,6 +35,8 @@ it left running by enumerating these records.
 from __future__ import annotations
 
 import contextlib
+import os
+import signal
 import subprocess
 import sys
 import time
@@ -66,6 +68,10 @@ _DEAD_CHILD_SENTINEL = -1.0
 # The reparent helper double-forks + execs in microseconds; it must never hang
 # the spawner. A generous ceiling that only trips on a genuinely wedged fork.
 _SPAWN_HELPER_TIMEOUT_S = 30.0
+
+# Poll interval for the graceful group-empty wait in _terminate_tree.
+# (Name avoids the clock-lattice vocabulary; this is a polling cadence, not a clock.)
+_KILL_POLL_S = 0.05
 
 
 def _sessions_dir() -> Path:
@@ -234,33 +240,115 @@ def graceful_signal(name: str) -> bool:
     return False
 
 
+def _pgid_of(proc: psutil.Process) -> int | None:
+    """The process group the session process lives in, or None when it is gone.
+
+    ``shared._reparent`` setsid()s the helper before forking, so the launched
+    process — and every descendant that does not deliberately leave the group —
+    shares one pgid (the helper's pid; the helper itself exits at once).
+    psutil has no pgid accessor, so this reads it via ``os.getpgid``."""
+    with contextlib.suppress(OSError):
+        return os.getpgid(proc.pid)
+    return None
+
+
+def _signal_group(pgid: int | None, sig: int) -> None:
+    """Send `sig` to every process in the group, or nothing when it is unknown.
+
+    A group signal reaches children spawned after any psutil snapshot — the
+    hard-kill window the old children-list walk missed (task #2249). A dead
+    leader frees its pid for reuse; a reused pid that setsid()s into a new
+    group could then be hit here (µs window, same shape as pty_sessions/PITR
+    group kills — accepted)."""
+    if pgid is None or pgid <= 0:
+        return
+    with contextlib.suppress(OSError):
+        os.killpg(pgid, sig)
+
+
+def _group_empty(pgid: int | None) -> bool:
+    """True when no LIVE process remains in the group (identity unknown → True).
+
+    Fast path: a gone group is empty. A surviving group is checked member by
+    member: a zombie still occupies the group (and makes ``os.killpg(pgid, 0)``
+    succeed) until init/launchd reaps it, and the graceful verdict must not
+    wait on that reap latency — same class as the zombie-aware liveness of
+    task #1303."""
+    if pgid is None or pgid <= 0:
+        return True
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False  # exists but un-signallable — treat as occupied
+    for process in psutil.process_iter():
+        try:
+            if os.getpgid(process.pid) == pgid and process.status() != psutil.STATUS_ZOMBIE:
+                return False
+        except (psutil.Error, ProcessLookupError):
+            continue
+    return True
+
+
 def _terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> bool:
-    """Terminate `proc` and, if it does not go on its own, its whole tree.
+    """Terminate `proc` and its whole process group.
 
-    graceful: first SIGTERM **only the top process** and wait up to `timeout` —
-    the process converts SIGTERM to a `KeyboardInterrupt`/`SystemExit` unwind and
-    runs its finally (an agent closes the MCP daemon + Claude Code subprocess it
-    tracks; a service daemon closes its pidfile and pools), then exits, taking
-    its own children with it. Whatever is still alive after the wait is
-    hard-killed.
-    force: SIGKILL the whole tree immediately.
+    The session process runs in its own process group (``shared._reparent``
+    setsid()s the helper; the launched process and every descendant that does
+    not deliberately leave the group share that pgid). Signaling the GROUP —
+    SIGTERM to all members, wait, SIGKILL to all members — closes the window
+    the old psutil-only walk left open: a child spawned DURING the graceful
+    wait (a bash wrapper's foreground command, a process an unwound finally
+    spawns) was not in the pre-captured children list, so the hard-kill walk
+    missed it and it survived as an orphan (task #2249).
 
-    Returns True when the graceful signal alone ended the tree — the caller
-    reports that as the `mode`, so an escalation to SIGKILL cannot be
-    mislabelled a clean stop.
+    graceful: first SIGTERM **the whole group** and wait up to `timeout` for
+    it to empty — the process converts SIGTERM to a
+    KeyboardInterrupt/SystemExit unwind and runs its finally (an agent closes
+    the MCP daemon + Claude Code subprocess it tracks; a service daemon closes
+    its pidfile and pools), and its children die with it. Whatever is still
+    alive after the wait is hard-killed.
+    force: SIGKILL the whole group immediately.
+
+    Returns True when the graceful signal alone emptied the group AND every
+    pre-existing descendant — the caller reports that as the `mode`, so an
+    escalation to SIGKILL cannot be mislabelled a clean stop.
     """
-    children = proc.children(recursive=True)
+    # Snapshot BEFORE the graceful signal: a descendant that deliberately left
+    # the group (a setsid'd worker) is unreachable by group signal, and once
+    # the leader dies it reparents to init — this walk is the only handle on
+    # it, so the graceful verdict checks it and the hard kill reaps it. An
+    # already-gone leader yields an empty list.
+    children: list[psutil.Process] = []
+    with contextlib.suppress(*_GONE):
+        children = proc.children(recursive=True)
+    pgid = _pgid_of(proc)
     if graceful:
+        # SIGTERM the whole group, not just the top process: a bash wrapper
+        # delays its own SIGTERM until its foreground command ends, and a
+        # command an unwound finally spawns mid-wait is not in any children
+        # snapshot — only a group signal reaches both.
+        _signal_group(pgid, signal.SIGTERM)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if (
+                not _process_is_live(proc)
+                and _group_empty(pgid)
+                and all(not _process_is_live(c) for c in children)
+            ):
+                return True
+            time.sleep(_KILL_POLL_S)
+    # Hard kill: the group first (a SIGTERM-ignoring straggler or a child
+    # spawned during the graceful wait dies here), then the pre-captured walk
+    # for a descendant that left the group (a setsid'd worker) — the group
+    # signal cannot reach it, and once the leader dies it reparents to init.
+    _signal_group(pgid, signal.SIGKILL)
+    for child in [*children, proc]:
         with contextlib.suppress(*_GONE):
-            proc.terminate()  # SIGTERM → the process's lifecycle handler runs finally
-        _gone, alive = psutil.wait_procs([proc, *children], timeout=timeout)
-        if not alive:
-            return True
-    # Hard kill: children first so a parent can't respawn a child mid-teardown.
-    for p in [*children, proc]:
-        with contextlib.suppress(*_GONE):
-            p.kill()  # SIGKILL
-    psutil.wait_procs([proc, *children], timeout=5)
+            child.kill()
+    with contextlib.suppress(*_GONE):
+        psutil.wait_procs([proc, *children], timeout=5)
     return False
 
 
@@ -291,7 +379,8 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
     # success it did not achieve turns a live-but-unbacked session into a
     # service nothing starts. The contract (session_backend.py) says `ok`
     # means the session is confirmed gone; on a survivor we keep the record —
-    # the no-DB reap's only view of the process — and say so.
+    # the no-DB reap's only view of the process — and say so. A zombie is not
+    # a survivor: it is dead, just awaiting its parent's reap.
     if _process_is_live(proc):
         logger.error(
             "posixproc kill {name}: pid {pid} is still running after the kill — leaving "
