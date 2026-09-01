@@ -132,8 +132,10 @@ def write_fields(
     `.env` is snapshotted before the write (recoverable) and every unset is logged
     (never silent — a silent full-replace once dropped a cluster's secrets).
     """
-    amap = _field_alias_map()
     path = env_file_path()
+    if not updates and not removals:
+        return path.read_bytes() if capture_bytes and path.exists() else None
+    amap = _field_alias_map()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Cross-process exclusive, for the whole snapshot-and-rewrite section. Each
     # `set_key` / `unset_key` READS the file and rewrites it, so two writers
@@ -180,6 +182,7 @@ def write_fields(
             from shared.env_audit import record_env_write
 
             record_env_write(
+                path,
                 {amap[name] for name in updates},
                 {amap[name] for name in removals},
                 site=audit_site,
@@ -278,7 +281,7 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
             path.write_text("".join(out))
             from shared.env_audit import record_env_write
 
-            record_env_write(keys_written, keys_removed, site="migrate_rename_env_keys")
+            record_env_write(path, keys_written, keys_removed, site="migrate_rename_env_keys")
     return changed
 
 
@@ -365,7 +368,9 @@ def migrate_skip_alias_env_keys(env_path: Path) -> list[str]:
             env_path.write_text("".join(out))
             from shared.env_audit import record_env_write
 
-            record_env_write(keys_written, keys_removed, site="migrate_skip_alias_env_keys")
+            record_env_write(
+                env_path, keys_written, keys_removed, site="migrate_skip_alias_env_keys"
+            )
     return changed
 
 

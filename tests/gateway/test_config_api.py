@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from gateway.routers import config as config_router
 from ops import cluster_rpc as _cluster_rpc
+from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
 from shared import host_config_validators, runtime_config
 from shared.config import settings
 from shared.machine import machine_name
@@ -595,6 +596,36 @@ def test_put_self_edits_writable_host_capability_field(
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
     assert runtime_config.read_env_aliases()["AVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_put_self_host_field_skips_empty_cluster_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host-only self PUT must not append an empty gateway cluster record."""
+    host_result = ConfigWriteOpResult(
+        machine=machine_name(),
+        results={"cross_machine_transfer_backend": FieldWriteResult(ok=True)},
+        applied=True,
+        restart_required=[],
+    )
+    dispatch = AsyncMock(return_value=host_result)
+    writes: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _write_fields(*args: object, **kwargs: object) -> None:
+        writes.append((args, kwargs))
+
+    def _assert_machine_known(_machine: str) -> None:
+        return None
+
+    monkeypatch.setattr(config_router, "_assert_machine_known", _assert_machine_known)
+    monkeypatch.setattr(config_router, "_dispatch_config_write", dispatch)
+    monkeypatch.setattr(config_router.runtime_config, "write_fields", _write_fields)
+
+    result = await config_router.put_config({"cross_machine_transfer_backend": "none"})
+
+    assert result.applied is True
+    assert writes == []
 
 
 def test_put_self_rejects_readonly_identity_field(_clean_overrides: Path) -> None:

@@ -115,7 +115,7 @@ def upsert_env(path: Path, updates: dict[str, str], *, audit_site: str | None = 
         if audit_site is not None:
             from shared.env_audit import record_env_write
 
-            record_env_write(set(updates), set(), site=audit_site)
+            record_env_write(path, set(updates), set(), site=audit_site)
 
 
 def _chmod_private(path: Path) -> None:
@@ -147,7 +147,7 @@ def remove_env(path: Path, keys: set[str], *, audit_site: str | None = None) -> 
         if audit_site is not None:
             from shared.env_audit import record_env_write
 
-            record_env_write(set(), keys, site=audit_site)
+            record_env_write(path, set(), keys, site=audit_site)
 
 
 def replace_env_bytes_cas(
@@ -197,6 +197,6 @@ def replace_env_bytes_cas(
                     for line in payload.decode().splitlines()
                     if line.strip() and not line.lstrip().startswith("#") and "=" in line
                 }
-                record_env_write(after_keys, before_keys - after_keys, site=audit_site)
+                record_env_write(path, after_keys, before_keys - after_keys, site=audit_site)
         finally:
             staged.unlink(missing_ok=True)
