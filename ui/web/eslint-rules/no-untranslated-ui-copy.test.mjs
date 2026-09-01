@@ -18,17 +18,17 @@ const tester = new RuleTester({
 
 tester.run("no-untranslated-ui-copy", rule, {
   valid: [
-    { code: '<div>{t("fleet.title")}</div>' },
-    { code: '<Button aria-label={t("backToAgents")} />' },
+    { code: 'import { useTranslations } from "next-intl"; const t = useTranslations("fleet"); const element = <div>{t("title")}</div>;' },
+    { code: 'import { useTranslations } from "next-intl"; const t = useTranslations("fleet"); const button = <Button aria-label={t("backToAgents")} />;' },
     { code: '<Button title="—" />' },
     { code: '<span>24h · 7d</span>' },
     { code: "<button>↺</button>" },
     { code: "<span>⚠</span>" },
     { code: '<Button aria-label={label} />' },
     { code: '<Button placeholder={`${agentId}`} />' },
-    { code: 'const labels = [t("back")]; const button = <Button aria-label={labels[0]} />;' },
-    { code: 'const props = { "aria-label": t("back") }; const button = <Button {...props} />;' },
-    { code: 'const runTimelineT = useTranslations("runTimeline"); const button = <Button aria-label={runTimelineT("zoom")} />;' },
+    { code: 'import { useTranslations } from "next-intl"; const t = useTranslations("fleet"); const labels = [t("back")]; const button = <Button aria-label={labels[0]} />;' },
+    { code: 'import { useTranslations } from "next-intl"; const t = useTranslations("fleet"); const props = { "aria-label": t("back") }; const button = <Button {...props} />;' },
+    { code: 'import { useTranslations } from "next-intl"; const runTimelineT = useTranslations("runTimeline"); const button = <Button aria-label={runTimelineT("zoom")} />;' },
     { code: '<span>{`${hours}h`}</span>' },
   ],
   invalid: [
@@ -74,6 +74,18 @@ tester.run("no-untranslated-ui-copy", rule, {
     },
     {
       code: 'const props = { "aria-label": "Back to conversation" }; const button = <Button {...props} />;',
+      errors: [{ messageId: "untranslatedCopy" }],
+    },
+    {
+      code: 'const copy = "Decision"; const element = <span>{copy}</span>;',
+      errors: [{ messageId: "untranslatedCopy" }],
+    },
+    {
+      code: 'const t = () => "Back"; const button = <Button aria-label={t()} />;',
+      errors: [{ messageId: "untranslatedCopy" }],
+    },
+    {
+      code: 'import { useTranslations } from "not-next-intl"; const t = useTranslations("fleet"); const button = <Button aria-label={t("back")} />;',
       errors: [{ messageId: "untranslatedCopy" }],
     },
   ],
