@@ -47,17 +47,29 @@ def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
     with _POLICY.open("rb") as policy_file:
         policy = tomllib.load(policy_file)
     assert policy["extend"]["useDefault"] is True
-    allowlisted_regexes = "\n".join(policy["allowlist"]["regexes"])
+    allowlists = policy["allowlists"]
+    fixture_allowlist = allowlists[0]
+    allowlisted_regexes = "\n".join(fixture_allowlist["regexes"])
     for fixture in ("ava_dev_only", "pw123", "s3cr3t", "new-db", "new-runner-db"):
         assert fixture in allowlisted_regexes
-    assert set(policy["allowlist"]["commits"]) == {
+    assert set(fixture_allowlist["commits"]) == {
         "e0270b05d28524401b6caf5b0a300ab91a4d1c6a",
         "14e008cd0f9ab4b791330f16d098d8155726d392",
-        "40a3e60c3cea5994c402634bde54a5898debe62e",
-        "71ebd7d4e70b4f0d7506d58282c79a36fc098d0c",
-        "cb9e783af600b2b5ac53b776f68b33514885e896",
-        "c0bb257d84d3a7d6212be23339cbf6ca921ac5e3",
         "c15f00344d4805b82ed2e0cda824a7527cc0b943",
+    }
+    assert allowlists[1] == {
+        "description": "Empty Telegram bot-token placeholder in the environment template",
+        "condition": "AND",
+        "paths": [r"^\.env\.example$"],
+        "regexTarget": "match",
+        "regexes": [r"(?s)AVA_TELEGRAM_BOT_TOKEN=\nAVA_TELEGRAM_OWNER_ID=0"],
+    }
+    assert allowlists[2] == {
+        "description": "Weekly planner demo localStorage key",
+        "condition": "AND",
+        "paths": [r"^demos/goal-mode/weekly-planner/store\.js$"],
+        "regexTarget": "match",
+        "regexes": [r"STORAGE_KEY = 'weekly-planner\.v1'"],
     }
 
     assert not (_REPO_ROOT / ".gitguardian.yml").exists()
