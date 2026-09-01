@@ -124,7 +124,7 @@ def config_write_op(overrides: dict[str, Any], *, local: bool = False) -> Config
     if applied:
         writes, removals = split_reducer_patch(overrides, metas)
         if writes or removals:
-            runtime_config.write_fields(writes, removals)
+            runtime_config.write_fields(writes, removals, audit_site="ops_config_write")
         restart_required = sorted(
             {metas[f].restart_required for f in set(writes) | removals if metas[f].restart_required}
         )

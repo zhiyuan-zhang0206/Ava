@@ -23,7 +23,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
-| audit (category=audit) | `events` | 21 | events table |
+| audit (category=audit) | `events` | 23 | events table |
 | telemetry (category=telemetry) | `events` | 129 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
@@ -55,7 +55,7 @@ spans go through the trace channel (30d).
 
 ---
 
-## 2. Audit events (21 primary category=audit; 21 status_change with extra_categories)
+## 2. Audit events (23 primary category=audit; 23 status_change with extra_categories)
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -84,6 +84,8 @@ Emit sites and consumers: see the comments at each emit point.
 | `task_update` | task updated | business | status | events |
 | `report_breached` | guarantee report breached | business | — | events |
 | `computer_action` | computer-use desktop action (executed or refused) | business | action, app, outcome, error, coords, path, task_id | events |
+| `env_write` | official .env config write (actor and keys; values never recorded) | business | — | events |
+| `env_unauthorized_write` | out-of-band .env modification detected (no official write recorded) | anomaly | — | events |
 | `computer_session_start` | computer-use task session opened (first action with a task_id) | business | task_id, first_tool, first_action_at | events |
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |

@@ -420,6 +420,7 @@ def write_env(state: RotationState) -> None:
             "AVA_DB_URL": db_url,
             "AVA_REDIS_URL": redis_url,
         },
+        audit_site="rotate_data_plane_secrets",
     )
 
 

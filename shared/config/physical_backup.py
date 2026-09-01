@@ -241,6 +241,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_gcs_bucket: str = Field(
@@ -252,6 +253,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_gcs_prefix: str = Field(
@@ -263,6 +265,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_oss_endpoint: str = Field(
@@ -340,6 +343,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_spool_warn_bytes: int = Field(
@@ -352,6 +356,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_spool_hard_bytes: int = Field(
@@ -364,6 +369,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_unacked_warn_seconds: int = Field(
@@ -376,6 +382,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_unacked_critical_seconds: int = Field(
@@ -388,6 +395,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_retained_weekly_chains: int = Field(
@@ -401,6 +409,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_backup_key_file: Path | None = Field(
@@ -448,6 +457,7 @@ class PhysicalBackupSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
     pitr_replication_db_url: str = Field(

@@ -191,6 +191,7 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
     upsert_env(
         env_path,
         {"AVA_REDIS_URL": url_with_userinfo(raw, identity, runtime_password)},
+        audit_site="converge_redis_identity",
     )
     print(f"  · backfilled AVA_REDIS_URL username {identity!r} (legacy URL carried none)")
 

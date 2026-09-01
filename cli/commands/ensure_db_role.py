@@ -88,7 +88,11 @@ def cmd_ensure_db_role() -> int:
         base_admin_url=base_admin_url,
         runner_password=runner_password,
     )
-    upsert_env(env_path, {cl.RUNNER_DB_PASSWORD_ENV: runner_password})
+    upsert_env(
+        env_path,
+        {cl.RUNNER_DB_PASSWORD_ENV: runner_password},
+        audit_site="ensure_runner_db_role",
+    )
     print(
         f"✓ ensured role {cl.RUNNER_ROLE} (LOGIN NOSUPERUSER) + table grants on "
         f"db {identity!r}; password persisted to {env_path}"

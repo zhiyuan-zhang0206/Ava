@@ -279,6 +279,7 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
             "AVA_DB_URL": transition.db_url,
             "AVA_REDIS_URL": transition.redis_url,
         },
+        audit_site="data_plane_admin_secrets",
     )
     _apply_transition_to_process(transition)
     _transition_path().unlink()
