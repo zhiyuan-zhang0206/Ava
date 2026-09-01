@@ -80,13 +80,17 @@ def _emit_audit_event(event_type: str, payload: dict[str, object]) -> None:
 
 
 def _machine_name() -> str:
-    """Return a machine label without letting damaged config block detection."""
+    """Return a machine label without letting damaged config block detection.
+
+    No Settings/os.environ fallback: a broken Settings is exactly what this
+    guard detects, and the unified event stream stamps its own machine field
+    regardless — an empty label here only degrades the payload's copy."""
     try:
         from shared.machine import machine_name
 
         return machine_name()
     except Exception:
-        return os.environ.get("AVA_MACHINE_NAME", "")
+        return ""
 
 
 def _string_names(value: object) -> set[str]:

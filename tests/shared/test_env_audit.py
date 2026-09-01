@@ -41,7 +41,9 @@ def test_record_env_write_records_metadata_without_config_values(audit_home: Pat
     assert last_env_write_record() == record
 
 
-def test_record_env_write_redacts_command_arguments(audit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_record_env_write_redacts_command_arguments(
+    audit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A process argument must not let a configuration value enter the audit."""
 
     class Process:
@@ -89,7 +91,9 @@ def test_integrity_guard_records_one_out_of_band_write(audit_home: Path) -> None
     assert detection["last_official_site"] == "test"
     assert detection["keys"] == ["AVA_EXEC_TIMEOUT_SECONDS"]
     assert check_env_integrity() is None
-    records = [json.loads(line) for line in (audit_home / ".env.audit.jsonl").read_text().splitlines()]
+    records = [
+        json.loads(line) for line in (audit_home / ".env.audit.jsonl").read_text().splitlines()
+    ]
     assert records[-1]["kind"] == "unauthorized"
 
 
