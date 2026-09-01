@@ -34,6 +34,9 @@ import type { NoticesFeed,
   WireFleetGraph,
   GuideDraftResponse,
   TaskListResponse,
+  TaskFields,
+  TaskRow,
+  TaskSummaryRow,
   InventoryAggregate,
   InventoryWriteResult,
   SkillView,
@@ -467,15 +470,18 @@ export const api = {
   },
 
   // --- tasks ---
-  // The task registry (GET /api/tasks) — the full agent_tasks table. Data
-  // source for the Task Graph (free force-directed view). `window`
-  // (7d | 30d | all) narrows the list by last activity on the backend;
-  // omitted = all (the gateway default).
-  getTasks: (opts?: { window?: string }): Promise<TaskListResponse> => {
+  // The task registry (GET /api/tasks). `fields` chooses the full or metadata
+  // projection; `window` narrows the list by last activity on the backend.
+  getTasks: <T extends TaskFields = "full">(
+    opts?: { window?: string; fields?: T },
+  ): Promise<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>> => {
     const params = new URLSearchParams();
     if (opts?.window != null) params.set("window", opts.window);
+    if (opts?.fields != null) params.set("fields", opts.fields);
     const qs = params.toString();
-    return f(`/api/tasks${qs ? `?${qs}` : ""}`).then(ok<TaskListResponse>);
+    return f(`/api/tasks${qs ? `?${qs}` : ""}`).then(
+      ok<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>>,
+    );
   },
 
   // --- memory graph ---

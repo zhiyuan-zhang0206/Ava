@@ -3408,8 +3408,9 @@ export interface paths {
          * Get Tasks
          * @description Return the task registry, newest first.
          *
-         *     `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
-         *     (updated_at) on the backend, so the task graph's default 7-day view never
+         *     `fields=full` (the default) returns the compatibility projection. `fields=summary`
+         *     returns metadata only, selecting neither task text column. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
+         *     (updated_at) on the backend, so the task graph's default 24-hour view never
          *     pulls the full registry. A windowed list still carries every kept task's
          *     out-of-window ancestors flagged ghost=True (see _windowed_tasks); without
          *     a window the full table is returned unchanged.
@@ -7135,15 +7136,15 @@ export interface components {
         };
         /**
          * TaskListResponse
-         * @description GET /api/tasks response — the full task registry.
+         * @description GET /api/tasks response — full rows or compact list summaries.
          */
         TaskListResponse: {
             /** Tasks */
-            tasks: components["schemas"]["TaskRow"][];
+            tasks: (components["schemas"]["TaskRow"] | components["schemas"]["TaskSummaryRow"])[];
         };
         /**
          * TaskRow
-         * @description One row from the agent_tasks table.
+         * @description One full task row for PATCH and GET /api/tasks?fields=full.
          */
         TaskRow: {
             /** Id */
@@ -7178,6 +7179,45 @@ export interface components {
              * @default 0
              */
             reminder_count: number;
+            /**
+             * Ghost
+             * @default false
+             */
+            ghost: boolean;
+        };
+        /**
+         * TaskSummaryRow
+         * @description One metadata-only task-list row.
+         */
+        TaskSummaryRow: {
+            /** Id */
+            id: number;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Title */
+            title: string;
+            /** Status */
+            status: string;
+            /** Owner */
+            owner: number | null;
+            /** Owner Label */
+            owner_label?: string | null;
+            /** Created By */
+            created_by: string;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Remind Interval Seconds */
+            remind_interval_seconds?: number | null;
+            /** Last Reminded At */
+            last_reminded_at?: string | null;
+            /**
+             * Reminder Count
+             * @default 0
+             */
+            reminder_count: number;
+            priority: components["schemas"]["Priority"];
             /**
              * Ghost
              * @default false
@@ -11679,6 +11719,7 @@ export interface operations {
         parameters: {
             query?: {
                 window?: string;
+                fields?: "full" | "summary";
             };
             header?: never;
             path?: never;

@@ -645,12 +645,10 @@ export type TaskStatus = "in_progress" | "done" | "cancelled" | "ongoing";
 // notice priority, so it reuses the PRIORITY_* style maps in lib/notices.ts.
 export type TaskPriority = "P0" | "P1" | "P2" | "P3";
 
-export interface TaskRow {
+export interface TaskSummaryRow {
   readonly id: number;
   readonly parent_id: number | null;
   readonly title: string;
-  readonly description: string;
-  readonly results: string | null;
   readonly status: TaskStatus;
   readonly priority: TaskPriority;
   readonly owner: number | null;
@@ -669,8 +667,15 @@ export interface TaskRow {
   readonly ghost?: boolean;
 }
 
-export interface TaskListResponse {
-  readonly tasks: readonly TaskRow[];
+export interface TaskRow extends TaskSummaryRow {
+  readonly description: string;
+  readonly results: string | null;
+}
+
+export type TaskFields = "full" | "summary";
+
+export interface TaskListResponse<T extends TaskSummaryRow = TaskSummaryRow> {
+  readonly tasks: readonly T[];
 }
 
 

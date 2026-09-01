@@ -88,6 +88,15 @@ describe("useTasks", () => {
     expect(result.current.error).toBe(false);
   });
 
+  it("defaults to the full task projection", async () => {
+    getTasks.mockResolvedValue(RESPONSE);
+
+    const { result } = renderHook(() => useTasks(), { wrapper: withClient(freshClient()) });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(getTasks).toHaveBeenCalledWith({ window: "all", fields: "full" });
+  });
+
   it("cold error: empty list, loading=false, error=true", async () => {
     getTasks.mockRejectedValue(new Error("HTTP 500"));
 

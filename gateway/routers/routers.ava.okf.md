@@ -44,7 +44,7 @@ Gateway's 38 route modules, split by business domain under `gateway/routers/<dom
 - **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over the unified `events` stream
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)
-- **tasks** (`/api/tasks` GET + `/api/tasks/{id}` PATCH) — task registry read + partial update (no create; PATCH does not notify owner); rows carry `priority` (`P0`..`P3`, validated, illegal 422)
+- **tasks** (`/api/tasks` GET + `/api/tasks/{id}` PATCH) — task registry read + partial update (no create; PATCH does not notify owner); GET defaults to a full compatibility row or serves a metadata-only SQL projection with `fields=summary`; rows carry `priority` (`P0`..`P3`, validated, illegal 422)
 - **memory** (`/api/memory/search`, `/refresh`, `/graph`) — Memory pool search/refresh/graph
 - **commands** (`/api/commands`) — slash command list acceptable by composer
 - **auth** (`/api/auth/login|logout|check|sessions`) — opaque server-side session login, validation, listing, and per-session revocation

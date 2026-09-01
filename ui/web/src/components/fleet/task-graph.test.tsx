@@ -23,9 +23,9 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-const useTasks = vi.fn<() => TasksResult>();
+const useTasks = vi.fn<(...args: string[]) => TasksResult>();
 vi.mock("@/lib/use-tasks", () => ({
-  useTasks: () => useTasks(),
+  useTasks: (...args: string[]) => useTasks(...args),
 }));
 
 function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
@@ -70,6 +70,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TaskGraph (graph mode)", () => {
+  it("uses full rows so graph and kanban retain task text", () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+
+    expect(useTasks).toHaveBeenCalledWith("24h", "full");
+  });
+
   it("explains task status colors", () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
@@ -135,6 +142,7 @@ describe("TaskGraph (graph mode)", () => {
     // Done and Canceled columns are hidden when empty (by default Done/Canceled
     // tasks are toggled off so those lanes have zero cards).
     await waitFor(() => expect(screen.getAllByText("In progress").length).toBeGreaterThanOrEqual(1));
+    expect(screen.getByText("Description for task 2")).toBeTruthy();
     // Done and Canceled lane headers do not render when empty.
   });
 
@@ -356,9 +364,7 @@ describe("TaskGraph hover detail card", () => {
   // appearance the browser deferred — the perceived hover lag): it must show
   // the task's registry fields the moment the cursor enters the node.
   it("shows the detail card instantly on hover, with the registry fields", async () => {
-    const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
-      task(2, {
+    const fullTask = task(2, {
         title: "Build the widget",
         description: "A longer description\nspanning two lines",
         results: "Shipped in #1",
@@ -373,7 +379,10 @@ describe("TaskGraph hover detail card", () => {
         remind_interval_seconds: 7200,
         last_reminded_at: "2026-01-02T00:00:00Z",
         reminder_count: 3,
-      }),
+      });
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      fullTask,
     ];
     useTasks.mockReturnValue(ok(tasks));
     const { container } = render(

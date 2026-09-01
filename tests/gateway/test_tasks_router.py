@@ -17,12 +17,17 @@ owned-task invariants at the HTTP boundary:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import cast
+
 import httpx2
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from gateway.app import app
+from gateway.routers.tasks import get_tasks
 
 
 def _make_agent(db: psycopg.Connection) -> int:
@@ -43,15 +48,17 @@ def _make_task(
     owner: int,
     remind_interval_seconds: int = 1800,
     title: str = "t",
+    description: str = "d",
+    results: str | None = None,
     status: str = "in_progress",
     parent_id: int | None = None,
 ) -> int:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks "
-            "(title, description, status, owner, created_by, remind_interval_seconds, parent_id) "
-            "VALUES (%s, 'd', %s, %s, 'user', %s, %s) RETURNING id",
-            (title, status, owner, remind_interval_seconds, parent_id),
+            "(title, description, results, status, owner, created_by, remind_interval_seconds, parent_id) "
+            "VALUES (%s, %s, %s, %s, %s, 'user', %s, %s) RETURNING id",
+            (title, description, results, status, owner, remind_interval_seconds, parent_id),
         )
         tid = cur.fetchone()[0]  # type: ignore[index]
     db.commit()
@@ -420,6 +427,128 @@ class TestTimestampOffset:
         assert row["updated_at"].endswith("+00:00")
 
 
+class _TaskQueryRecordingCursor:
+    def __init__(self) -> None:
+        self.query = ""
+
+    def __enter__(self) -> _TaskQueryRecordingCursor:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def execute(self, query: str) -> None:
+        self.query = query
+
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return []
+
+
+class _TaskQueryRecordingConnection:
+    def __init__(self) -> None:
+        self.recording_cursor = _TaskQueryRecordingCursor()
+
+    def __enter__(self) -> _TaskQueryRecordingConnection:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def cursor(self) -> _TaskQueryRecordingCursor:
+        return self.recording_cursor
+
+
+class _TaskQueryRecordingPool:
+    def __init__(self) -> None:
+        self.recording_connection = _TaskQueryRecordingConnection()
+
+    def connection(self) -> _TaskQueryRecordingConnection:
+        return self.recording_connection
+
+
+class TestGetTaskFields:
+    def test_full_is_backward_compatible_and_summary_is_metadata_only(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        owner = _make_agent(db_conn)
+        description = "d" * 301
+        results = "r" * 301
+        tid = _make_task(db_conn, owner=owner, description=description, results=results)
+        with TestClient(app) as client:
+            default = client.get("/api/tasks")
+            full = client.get("/api/tasks", params={"fields": "full"})
+            summary = client.get("/api/tasks", params={"fields": "summary"})
+
+        assert default.status_code == 200
+        assert full.status_code == 200
+        assert summary.status_code == 200
+        assert full.json() == default.json()
+
+        full_row = next(t for t in full.json()["tasks"] if t["id"] == tid)
+        assert set(full_row) == {
+            "id",
+            "parent_id",
+            "title",
+            "description",
+            "results",
+            "status",
+            "priority",
+            "owner",
+            "owner_label",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "remind_interval_seconds",
+            "last_reminded_at",
+            "reminder_count",
+            "ghost",
+        }
+        assert full_row["description"] == description
+        assert full_row["results"] == results
+
+        summary_row = next(t for t in summary.json()["tasks"] if t["id"] == tid)
+        assert set(summary_row) == {
+            "id",
+            "parent_id",
+            "title",
+            "status",
+            "priority",
+            "owner",
+            "owner_label",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "remind_interval_seconds",
+            "last_reminded_at",
+            "reminder_count",
+            "ghost",
+        }
+        assert "description" not in summary_row
+        assert "results" not in summary_row
+
+    def test_summary_projection_selects_only_metadata_columns(self) -> None:
+        pool = _TaskQueryRecordingPool()
+        request = cast(
+            Request,
+            SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=pool))),
+        )
+        response = get_tasks(request, window="all", fields="summary")
+
+        assert response.tasks == []
+        selected_columns = pool.recording_connection.recording_cursor.query.removeprefix(
+            "SELECT "
+        ).partition(", a.label AS owner_label FROM agent_tasks t ")[0]
+        assert selected_columns == (
+            "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
+            "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+        )
+
+    def test_unknown_fields_value_is_rejected(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            response = client.get("/api/tasks", params={"fields": "compact"})
+        assert response.status_code == 422
+
+
 class TestGetTasksWindow:
     """GET /api/tasks?window= — backend-side last-activity filtering for the
     task graph time filter (Task #1969): window on updated_at, in_progress
@@ -556,6 +685,40 @@ class TestGetTasksWindow:
             rows = resp.json()["tasks"]
             assert old_done in self._ids(resp)
             assert all(t["ghost"] is False for t in rows)
+
+    @pytest.mark.parametrize("window", ["24h", "7d", "30d", "all"])
+    def test_summary_preserves_every_window_and_ghost_ancestors(
+        self, db_conn: psycopg.Connection, window: str
+    ) -> None:
+        owner = _make_agent(db_conn)
+        root = _make_root_task(db_conn)
+        parent = _make_task(
+            db_conn,
+            owner=owner,
+            status="done",
+            parent_id=root,
+            title="old-parent",
+            description="old parent description",
+        )
+        child = _make_task(
+            db_conn,
+            owner=owner,
+            parent_id=parent,
+            title="active-child",
+            description="active child description",
+        )
+        self._backdate(db_conn, parent, 40)
+        with TestClient(app) as client:
+            response = client.get("/api/tasks", params={"window": window, "fields": "summary"})
+
+        assert response.status_code == 200
+        rows = {t["id"]: t for t in response.json()["tasks"]}
+        assert set(rows) == {root, parent, child}
+        assert "description" not in rows[child]
+        assert "results" not in rows[child]
+        assert "description_preview" not in rows[child]
+        assert "results_preview" not in rows[child]
+        assert rows[parent]["ghost"] is (window != "all")
 
     def test_unknown_window_is_rejected(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
