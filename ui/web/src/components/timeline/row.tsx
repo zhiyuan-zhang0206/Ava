@@ -66,7 +66,7 @@ export const TimelineRow = memo(function TimelineRow({
 
   if (config === null) {
     return (
-      <div data-item-id={item.item_id} className="timeline-item">
+      <div data-item-id={item.item_id} aria-live="off" className="timeline-item">
         <ItemErrorBoundary resetKey={item.payload}>
           <ItemView item={item} streaming={streaming} />
         </ItemErrorBoundary>
@@ -95,7 +95,7 @@ export const TimelineRow = memo(function TimelineRow({
   ) : null;
 
   return (
-    <div data-item-id={item.item_id} className="timeline-item">
+    <div data-item-id={item.item_id} aria-live="off" className="timeline-item">
       {/* Boundary wraps header + content together: the header's summary
           derivation parses the payload too, so a malformed payload must
           not escape the per-item fallback. */}

@@ -209,6 +209,7 @@ function CompactHistoryDivider({ rank }: { readonly rank: number }) {
     <div
       data-testid="compact-history-divider"
       data-segment-rank={rank}
+      aria-live="off"
       className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
     >
       <span aria-hidden="true" className={cn("h-px bg-border/60", FLEX_1)} />
@@ -932,66 +933,64 @@ export function TimelineView({
             </span>
           ) : null}
           <ConnectionNotice />
-          {/* Streaming rows update frequently and history prepends in bulk;
-              keep both out of the live region. The direct child above is the
-              sole concise announcement for a turn boundary. */}
-          <div aria-live="off" className="space-y-3">
-            {groups.map((entry) => {
-              const group = entry.group;
-              const groupKey =
-                group.kind === "single" ? group.item.item_id : group.items[0].item_id;
-              const renderedGroup = (() => {
-                if (group.kind === "single") {
-                  return renderRow(group.item, entry.indexOffset + group.index);
-                }
-                // Every secondary run (even a single item) becomes a collapsible work
-                // block. The last turn auto-expands while the agent is active so the
-                // streaming item is visible. Run id = the first member's item_id
-                // (stable across streaming commits).
-                const turnId = group.items[0].item_id;
-                // The turn is "last" only when it is the last group overall — not just
-                // the last turn-kind group. When a primary item follows this turn, the
-                // turn is no longer last and its live clock must stop immediately.
-                const isLastTurn = entry === groups[groups.length - 1];
-                const runExpanded = turnOverrides.has(turnId)
-                  ? (turnOverrides.get(turnId) ?? false)
-                  : effectiveDetailsMode === "all"
-                    ? true
-                    : effectiveDetailsMode === "last"
-                      ? isLastTurn && turnActive
-                      : false;
-                return (
-                  <TurnBlock
-                    id={turnId}
-                    memberIds={group.items.map((it) => it.item_id)}
-                    summary={group.summary}
-                    expanded={runExpanded}
-                    onToggle={() => toggleTurn(turnId, runExpanded)}
-                    turnActive={turnActive && isLastTurn}
-                  >
-                    {runExpanded
-                      ? group.items.map((it, i) =>
-                          renderRow(
-                            it,
-                            entry.indexOffset + group.startIndex + i,
-                            runExpanded,
-                          ),
-                        )
-                      : null}
-                  </TurnBlock>
-                );
-              })();
+          {/* Rows and history dividers opt out individually so streaming and
+              prepends stay quiet without changing the direct-child timeline
+              structure used by scroll anchoring and compact-history dividers. */}
+          {groups.map((entry) => {
+            const group = entry.group;
+            const groupKey =
+              group.kind === "single" ? group.item.item_id : group.items[0].item_id;
+            const renderedGroup = (() => {
+              if (group.kind === "single") {
+                return renderRow(group.item, entry.indexOffset + group.index);
+              }
+              // Every secondary run (even a single item) becomes a collapsible work
+              // block. The last turn auto-expands while the agent is active so the
+              // streaming item is visible. Run id = the first member's item_id
+              // (stable across streaming commits).
+              const turnId = group.items[0].item_id;
+              // The turn is "last" only when it is the last group overall — not just
+              // the last turn-kind group. When a primary item follows this turn, the
+              // turn is no longer last and its live clock must stop immediately.
+              const isLastTurn = entry === groups[groups.length - 1];
+              const runExpanded = turnOverrides.has(turnId)
+                ? (turnOverrides.get(turnId) ?? false)
+                : effectiveDetailsMode === "all"
+                  ? true
+                  : effectiveDetailsMode === "last"
+                    ? isLastTurn && turnActive
+                    : false;
               return (
-                <Fragment key={`segment-group:${groupKey}`}>
-                  {entry.dividerRank === null ? null : (
-                    <CompactHistoryDivider rank={entry.dividerRank} />
-                  )}
-                  {renderedGroup}
-                </Fragment>
+                <TurnBlock
+                  id={turnId}
+                  memberIds={group.items.map((it) => it.item_id)}
+                  summary={group.summary}
+                  expanded={runExpanded}
+                  onToggle={() => toggleTurn(turnId, runExpanded)}
+                  turnActive={turnActive && isLastTurn}
+                >
+                  {runExpanded
+                    ? group.items.map((it, i) =>
+                        renderRow(
+                          it,
+                          entry.indexOffset + group.startIndex + i,
+                          runExpanded,
+                        ),
+                      )
+                    : null}
+                </TurnBlock>
               );
-            })}
-            <div ref={endRef} />
-          </div>
+            })();
+            return (
+              <Fragment key={`segment-group:${groupKey}`}>
+                {entry.dividerRank === null ? null : (
+                  <CompactHistoryDivider rank={entry.dividerRank} />
+                )}
+                {renderedGroup}
+              </Fragment>
+            );
+          })}
+          <div ref={endRef} />
         </div>
       </ScrollArea>
       <ScrollToBottomButton atBottom={atBottom} onClick={handleScrollToBottom} />
