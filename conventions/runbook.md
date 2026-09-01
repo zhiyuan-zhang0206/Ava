@@ -741,6 +741,58 @@ is unavailable. A malformed marker fails closed; inspect the marker path shown
 by `ava pty status` and perform an audited manual repair rather than treating
 corruption as an implicit resume.
 
+For a bounded host cleanup, keep the order explicit:
+
+1. Freeze allocation and retain the returned generation token.
+2. Snapshot the official PTY inventory and the durable desired state that will
+   be rebuilt.
+3. Stop or fence every reconciler that can create replacement sessions.
+4. Terminate only the selected sessions through the identity-aware PTY API.
+5. Verify that no later session start crossed the freeze boundary.
+6. Rebuild the selected durable state.
+7. Resume with the exact freeze token, then restore controllers one at a time;
+   restore any capacity guard last.
+
+### Canonical Codex workspace sessions
+
+The Codex launcher in `ava-use-claude-code-and-codex` owns one canonical
+session per `(cluster, workspace, tool)`. Check it before starting work:
+
+```bash
+python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.py \
+  /absolute/workspace \
+  --task-file /absolute/workspace/tasks.md \
+  --work-file /absolute/workspace/work.md \
+  --status
+```
+
+A live record is adopted across agent changes instead of launching a duplicate.
+Each ownership generation has a private
+`$AVA_HOME/run/coding-tools/codex/<workspace-key>/<generation>/` state
+directory and a fresh numeric PTY identity. `CODEX_HOME` points there and is
+seeded only with the required authentication and configuration snapshot; no
+mutable Codex database, session log, or transcript is shared between
+generations. A rebuilt worker derives context from the workspace task file,
+work log, collaboration contract, and Git state.
+
+The launcher starts a quiet supervisor for the ownership generation. It closes
+the full Codex PTY and terminalizes the record when `work.md` reaches `DONE` or
+`HANDOFF`, the owner agent terminates, the Codex session crashes, the task
+expires, or an operator cancels that exact generation. The default task TTL is
+four hours and can be changed with `--ttl-seconds`; TTL is the fallback, not
+the normal lifecycle boundary. Cancel only the generation printed by the
+launcher or `--status`:
+
+```bash
+python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.py \
+  /absolute/workspace \
+  --task-file /absolute/workspace/tasks.md \
+  --work-file /absolute/workspace/work.md \
+  --cancel-generation <generation-token>
+```
+
+A stale generation token cannot terminate a replacement owner.
+
 ### Agent-stack warm-up at start
 
 After launching the service sessions, `ava start` fires a detached, best-effort

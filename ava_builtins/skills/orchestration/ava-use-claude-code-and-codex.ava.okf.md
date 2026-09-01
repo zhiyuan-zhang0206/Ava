@@ -17,7 +17,24 @@ tags:
 - **Which one**: if you need a specific model's reasoning / long context, choose the tool backed by that model; for diff review, use `codex exec review` or `claude -p`. A machine may only have one installed — verify with `--version`/`--help` beforehand.
 - **Persistent sessions are the default**: start in `ava.shell.sessions`, steer across rounds; headless one-shot (`claude -p` / `codex exec`) is rarely needed. **Flags and models drift with versions**, text is a snapshot not a contract.
 
+## Canonical Codex lifecycle
+
+`reference/spawn_codex.py` creates or adopts one generation keyed by resolved
+cluster home plus resolved workspace plus `codex`. The canonical record returns
+the current owner and full Persistent Shell handle across Ava-agent callers;
+workspace basename appears only in display suffixes. Launching is serialized by
+[[shared/coding-session-owner.ava.okf.md|the host-local owner journal]].
+
+Every fresh generation receives a private `CODEX_HOME` seeded only with the
+authentication file and a configuration snapshot. Codex always starts fresh
+from task/work/Git state; shared SQLite, logs, and resume state are not copied.
+The launcher starts a quiet supervisor before Codex. It terminalizes the exact
+generation and reclaims its PTY/private state on current-generation `DONE` or
+`HANDOFF`, explicit cancel, owner termination, Codex death, or absolute expiry.
+Notifications use non-resurrecting system notes.
+
 ## Key dependencies
 - [[ava_builtins/skills/orchestration/orchestration.ava.okf.md|Workflow orchestration skill]] — belongs to functional group
 - [[ava/shell/shell.ava.okf.md|ava.shell]] — `sessions` (new/send/send_keys/capture/kill) session primitive itself
 - [[ava/watcher.ava.okf.md|ava.watcher]] — wait for it to produce results when supervising long tasks
+- [[shared/coding-session-owner.ava.okf.md]] — canonical generation admission, adoption, transfer, and cleanup

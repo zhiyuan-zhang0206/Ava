@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
+from shared.platform import LockTimeoutError
 from shared.pty_sessions import allocation_freeze
 
 
@@ -47,7 +48,12 @@ def cmd_pty_status() -> int:
 def cmd_pty_resume(*, generation: str) -> int:
     try:
         resumed = allocation_freeze.resume(generation)
-    except (OSError, ValueError, allocation_freeze.InvalidPtyAllocationFreezeError) as exc:
+    except (
+        LockTimeoutError,
+        OSError,
+        ValueError,
+        allocation_freeze.InvalidPtyAllocationFreezeError,
+    ) as exc:
         print(f"PTY allocation resume refused: {exc}", file=sys.stderr)
         _print_freeze(allocation_freeze.read(), stream=sys.stderr)
         return 1

@@ -1,85 +1,171 @@
-"""Reference watcher body: wake when the coding agent's work file calls for action.
+"""Supervise a coding agent through its durable work file.
 
-Launch this in the background with `ava.watcher.launch(code=..., timeout=..., name="...")` after
-substituting WORK_FILE. Take that path from the `work_file=` line the spawn script
-printed -- do not rebuild it from a filename convention, since the work file is
-relocatable via `--work-file`. It polls that file's `STATUS:` line and only calls
-`ava.agents.send_message(ava.self.AGENT_ID, ...)` when there is
-something for you to do -- so you supervise a long coding session without watching
-its screen and without burning turns polling.
-
-Runtime notes:
-- This program runs under the same Python environment, configuration, and machine
-  credentials as the agent that launched it.
-- It reads the work file directly; it does NOT look at the coding agent's screen
-  (a background watcher cannot resolve your sessions). When it reports a possible
-  stall, you -- the launching agent -- capture the screen yourself, since you hold
-  the session id, to see whether the agent crashed or is waiting on something.
-- `ava.agents.send_message(ava.self.AGENT_ID, content)` delivers `content` back to you (the launching agent) as
-  a new incoming message.
+Generic use wakes the launching Ava agent on actionable status or a stall.
+Canonical Codex use additionally owns terminal cleanup: DONE, HANDOFF, owner
+termination, process death, expiry, or work-file deletion closes the recorded
+PTY and reclaims its generation-private ``CODEX_HOME`` before this process exits.
 """
 
+from __future__ import annotations
+
+import contextlib
+import datetime as dt
 import re
 import time
 from pathlib import Path
 
 import ava
+from shared import coding_session_owner
+from shared.agents import AgentNotFound, AgentStatus
 
-# Substitute before launching: the `work_file=` path the spawn script printed.
 WORK_FILE = "/path/to/work.md"
-
-# How often to re-check the file.
 POLL_SECONDS = 60
-
-# How long STATUS may sit at WORKING with no change to the file before it counts
-# as a possible stall worth a screen check.  Claude Code (Opus 4.8 / Fable 5) with xhigh
-# effort may work 10-15 minutes without touching the work file; raise this to 900 for
-# those runs to avoid false stall alerts.
 STALL_SECONDS = 600
-
-# Heartbeat: wake the agent after this many seconds even if the file is still
-# being updated -- catches the case where the coding agent keeps writing to
-# the work file but never changes STATUS away from WORKING, or forgets to write a
-# STATUS line entirely.  Set shorter than STALL_SECONDS so periodic check-ins
-# fire before the stall alarm.
 HEARTBEAT_SECONDS = 480
-
-# Hard limit: wake the agent after this many seconds no matter what --
-# even if STATUS=WORKING and the file is still being updated.  Prevents
-# a watcher bug from causing infinite silent waiting.  Set longer than
-# STALL_SECONDS (this is the last-resort safety net, not the first alarm).
 HARD_LIMIT_SECONDS = 7200
 
-# The agent overwrites a single `STATUS: <TOKEN>` line every turn. These three
-# need you; WORKING means "still going, leave it alone".
 ACTIONABLE = ("DONE", "NEED_INPUT", "HANDOFF")
 _STATUS = re.compile(r"^STATUS:\s*(\w+)", re.MULTILINE)
 
 
 def read_status(path: str) -> str | None:
-    """Return the current STATUS token in the file (first match), or None if it is not there yet."""
+    """Return the first STATUS token, or None when absent/unreadable."""
     try:
         text = Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
-        ava.agents.send_message(
-            ava.self.AGENT_ID,
-            f"work file deleted: {path} -- the coding agent may have removed its workspace",
-        )
         return None
     matches = _STATUS.findall(text)
     return matches[0] if matches else None
 
 
-def watch(path: str) -> None:
-    """Poll `path` until its STATUS needs you, a heartbeat fires, or it stalls;
-    remind once, return."""
+def terminal_reason(
+    status: str | None,
+    *,
+    status_is_current: bool,
+    owner_terminated: bool,
+    session_crashed: bool,
+    expired: bool,
+    work_file_deleted: bool,
+    hard_limit_reached: bool,
+) -> str | None:
+    """Pure terminal-decision contract, ordered by semantic owner intent."""
+    if status_is_current and status == "DONE":
+        return "collaboration-done"
+    if status_is_current and status == "HANDOFF":
+        return "collaboration-handoff"
+    if owner_terminated:
+        return "owner-terminated"
+    if session_crashed:
+        return "session-crashed"
+    if expired:
+        return "expired"
+    if work_file_deleted:
+        return "work-file-deleted"
+    if hard_limit_reached:
+        return "supervisor-hard-limit"
+    return None
+
+
+def _owner_terminated(agent_id: int) -> bool:
+    try:
+        return ava.agents.get_status(agent_id) is AgentStatus.TERMINATED
+    except AgentNotFound:
+        return True
+    except Exception:
+        # Gateway unavailability is not proof of termination. The PTY liveness
+        # and absolute expiry checks remain local and continue to protect it.
+        return False
+
+
+def _session_crashed(owner: coding_session_owner.CodingSessionOwner) -> bool:
+    if owner.status == "launching":
+        return coding_session_owner.launch_is_stale(owner)
+    if owner.status != "active" or owner.session_name is None:
+        return False
+    from shared.session_backend import get_shell_backend
+
+    return not get_shell_backend().has_session(owner.session_name)
+
+
+def _notify(agent_id: int, content: str, *, canonical: bool) -> None:
+    if canonical:
+        ava.agents.send_system_note(agent_id, content, tag="task", resurrect=False)
+    else:
+        ava.agents.send_message(agent_id, content)
+
+
+def _canonical_context(
+    *,
+    cluster: str | None,
+    workspace: str | None,
+    generation: str | None,
+    owner_agent_id: int | None,
+) -> tuple[coding_session_owner.CodingSessionKey, str, int] | None:
+    values = (cluster, workspace, generation, owner_agent_id)
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise ValueError("canonical supervision requires cluster, workspace, generation, and owner")
+    assert cluster is not None and workspace is not None  # noqa: S101
+    assert generation is not None and owner_agent_id is not None  # noqa: S101
+    key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=cluster)
+    return key, generation, owner_agent_id
+
+
+def _terminalize(
+    key: coding_session_owner.CodingSessionKey,
+    generation: str,
+    owner_agent_id: int,
+    reason: str,
+) -> bool:
+    try:
+        stopped = coding_session_owner.terminate_generation(key, generation, reason=reason)
+    except Exception as exc:
+        if reason != "owner-terminated":
+            with contextlib.suppress(Exception):
+                _notify(
+                    owner_agent_id,
+                    f"Codex cleanup failed for generation {generation}: {exc}",
+                    canonical=True,
+                )
+        return False
+    if stopped and reason != "owner-terminated":
+        with contextlib.suppress(Exception):
+            _notify(
+                owner_agent_id,
+                f"Codex generation {generation} terminalized ({reason}).",
+                canonical=True,
+            )
+    return stopped
+
+
+def watch(
+    path: str,
+    *,
+    cluster: str | None = None,
+    workspace: str | None = None,
+    generation: str | None = None,
+    owner_agent_id: int | None = None,
+) -> None:
+    """Poll until generic wake or canonical generation terminalization."""
+    canonical_context = _canonical_context(
+        cluster=cluster,
+        workspace=workspace,
+        generation=generation,
+        owner_agent_id=owner_agent_id,
+    )
+    target_agent = owner_agent_id if owner_agent_id is not None else ava.self.AGENT_ID
     start_time = time.monotonic()
     last_change = time.monotonic()
     last_wake = time.monotonic()
     last_mtime: float | None = None
+    last_actionable_mtime: float | None = None
+    saw_work_file = Path(path).exists()
+
     while True:
         try:
             mtime: float | None = Path(path).stat().st_mtime
+            saw_work_file = True
         except FileNotFoundError:
             mtime = None
         if mtime != last_mtime:
@@ -87,62 +173,107 @@ def watch(path: str) -> None:
             last_change = time.monotonic()
 
         status = read_status(path)
-        if status is None and not Path(path).exists() and last_mtime is not None:
-            # read_status already reminded; stop polling so we do not spam
-            return
         elapsed_total = time.monotonic() - start_time
         elapsed_change = time.monotonic() - last_change
         elapsed_wake = time.monotonic() - last_wake
 
-        # Hard limit: wake no matter what after HARD_LIMIT_SECONDS.
+        if canonical_context is not None:
+            key, expected_generation, canonical_owner = canonical_context
+            owner = coding_session_owner.read(key)
+            if owner.generation != expected_generation or owner.status in (
+                "inactive",
+                "terminal",
+                "invalid",
+            ):
+                return
+            status_is_current = bool(
+                mtime is not None
+                and owner.created_at is not None
+                and mtime >= owner.created_at.timestamp()
+            )
+            reason = terminal_reason(
+                status,
+                status_is_current=status_is_current,
+                owner_terminated=_owner_terminated(canonical_owner),
+                session_crashed=_session_crashed(owner),
+                expired=bool(
+                    owner.expires_at is not None and dt.datetime.now(dt.UTC) >= owner.expires_at
+                ),
+                work_file_deleted=saw_work_file and mtime is None,
+                # Canonical supervision uses the generation's persisted expiry;
+                # the generic watcher's shorter wake-only hard limit must not
+                # silently shorten a task-adapted Codex lease.
+                hard_limit_reached=False,
+            )
+            if reason is not None:
+                if _terminalize(key, expected_generation, canonical_owner, reason):
+                    return
+                time.sleep(POLL_SECONDS)
+                continue
+
+            if status == "NEED_INPUT" and status_is_current and mtime != last_actionable_mtime:
+                _notify(
+                    target_agent,
+                    f"coding agent reported STATUS: NEED_INPUT in {path} -- read the file and reply",
+                    canonical=True,
+                )
+                last_actionable_mtime = mtime
+                last_wake = time.monotonic()
+            elif elapsed_change > STALL_SECONDS and elapsed_wake > HEARTBEAT_SECONDS:
+                _notify(
+                    target_agent,
+                    f"coding agent has made no work-file change for {elapsed_change:.0f}s: {path}",
+                    canonical=True,
+                )
+                last_wake = time.monotonic()
+            time.sleep(POLL_SECONDS)
+            continue
+
+        if status is None and saw_work_file and mtime is None:
+            _notify(
+                target_agent,
+                f"work file deleted: {path} -- the coding agent may have removed its workspace",
+                canonical=False,
+            )
+            return
         if elapsed_total > HARD_LIMIT_SECONDS:
-            ava.agents.send_message(
-                ava.self.AGENT_ID,
-                f"hard limit reached: watcher has been polling {path} for over "
-                f"{HARD_LIMIT_SECONDS}s -- capture the coding agent's screen to check progress",
+            _notify(
+                target_agent,
+                f"hard limit reached while polling {path} for over {HARD_LIMIT_SECONDS}s",
+                canonical=False,
             )
             return
-
-        # DONE / NEED_INPUT / HANDOFF → wake immediately.
         if status in ACTIONABLE:
-            ava.agents.send_message(
-                ava.self.AGENT_ID,
-                f"coding agent reported STATUS: {status} in {path} -- "
-                "read that file and decide the next step",
+            _notify(
+                target_agent,
+                f"coding agent reported STATUS: {status} in {path} -- read that file",
+                canonical=False,
             )
             return
-
-        # WORKING (or missing STATUS — the agent may have forgotten the line).
         if status in (None, "WORKING"):
-            # Stall: file hasn't changed at all for STALL_SECONDS → likely stuck.
             if elapsed_change > STALL_SECONDS:
-                ava.agents.send_message(
-                    ava.self.AGENT_ID,
+                _notify(
+                    target_agent,
                     f"coding agent has been WORKING with no change to {path} for over "
-                    f"{STALL_SECONDS}s -- capture its screen to check for a stall",
+                    f"{STALL_SECONDS}s -- capture its screen",
+                    canonical=False,
                 )
                 return
-
-            # Heartbeat: too long since last wake, even if the file is changing.
-            # Catches the case where the agent writes but never updates STATUS.
             if elapsed_wake > HEARTBEAT_SECONDS:
-                status_label = status if status else "MISSING"
-                ava.agents.send_message(
-                    ava.self.AGENT_ID,
-                    f"coding agent heartbeat: STATUS is '{status_label}' in {path}, "
-                    f"last file change was {elapsed_change:.0f}s ago -- "
-                    "read that file and check progress",
+                label = status if status else "MISSING"
+                _notify(
+                    target_agent,
+                    f"coding agent heartbeat: STATUS is {label!r} in {path}",
+                    canonical=False,
                 )
                 return
         else:
-            # Unknown STATUS token — wake so the agent can investigate.
-            ava.agents.send_message(
-                ava.self.AGENT_ID,
-                f"coding agent reported unknown STATUS: '{status}' in {path} -- "
-                "read that file and investigate",
+            _notify(
+                target_agent,
+                f"coding agent reported unknown STATUS: {status!r} in {path}",
+                canonical=False,
             )
             return
-
         time.sleep(POLL_SECONDS)
 
 
