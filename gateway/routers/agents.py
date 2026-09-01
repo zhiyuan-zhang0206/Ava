@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
 from gateway.routers.agents_forward import _forward_spawn_to_remote
-from gateway.schemas import AgentRow, LabelPatchRequest, ModelsResponse
+from gateway.schemas import AgentCompact, AgentRow, AgentSummary, LabelPatchRequest, ModelsResponse
 from ops.agent_spawn import create_agent_row
 from ops.ops_lifecycle import _spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
@@ -117,7 +117,8 @@ def get_models() -> ModelsResponse:
 def get_agents(
     request: Request,
     scope: Annotated[agent_snapshot.AgentListScope, Query()] = "all",
-) -> list[AgentRow]:
+    fields: Annotated[agent_snapshot.AgentListFields, Query()] = "full",
+) -> list[AgentRow | AgentSummary | AgentCompact]:
     """List agent snapshots for the requested roster scope.
 
     ``all`` is the compatibility default for SDK / ops callers.
@@ -125,12 +126,17 @@ def get_agents(
     terminated history before evaluating the per-agent snapshot lookups.
     The sidebar's explicit history toggle requests ``terminated`` separately.
 
-    All scopes remain unpaginated for wire compatibility.  The default live
-    path is bounded by the currently active roster; terminated history is only
-    paid for when a caller asks for it explicitly.
+    ``fields=full`` preserves the historical response. ``fields=summary`` is
+    the reduced SQL projection used by roster consumers; ``fields=compact``
+    serves the CLI's three-column table. Detail and SSE keep the full snapshot.
+    All scopes remain unpaginated for wire compatibility.
     """
     with request.app.state.db_pool.connection() as conn:
-        snapshots = agent_snapshot.select_all(conn, scope=scope)
+        snapshots = agent_snapshot.select_all(conn, scope=scope, fields=fields)
+    if fields == "summary":
+        return [AgentSummary.model_validate(s.model_dump()) for s in snapshots]
+    if fields == "compact":
+        return [AgentCompact.model_validate(s.model_dump()) for s in snapshots]
     return [AgentRow.model_validate(s.model_dump()) for s in snapshots]
 
 

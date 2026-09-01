@@ -56,3 +56,66 @@ def test_all_scope_preserves_the_unfiltered_compatibility_query() -> None:
     conn = _RecordingConnection()
     select_all(cast(psycopg.Connection[Any], conn))
     assert "WHERE a.status" not in conn.recording_cursor.query
+
+
+def test_summary_projection_omits_detail_only_columns_in_sql() -> None:
+    """The list summary must not transfer fields that only detail/SSE readers use."""
+    conn = _RecordingConnection()
+    select_all(cast(psycopg.Connection[Any], conn), scope="live", fields="summary")
+    query = conn.recording_cursor.query
+    selected_columns = query.removeprefix("SELECT ").partition(" FROM agents_meta a ")[0]
+
+    assert selected_columns == (
+        "a.id, a.spawner, a.fork_source_agent_id, a.status, a.pid, "
+        "a.spawned_at, a.started_at, "
+        "COALESCE(a.last_active_at, a.started_at, a.spawned_at) AS last_active_at, "
+        "COALESCE(im.last_inbound_at, a.started_at, a.spawned_at) AS last_inbound_at, "
+        "t.label, a.machine, a.heartbeat_paused_until, a.liveness_state, "
+        "COALESCE("
+        "(SELECT json_agg(json_build_object("
+        "'id', n.id, 'title', n.title, 'content', n.content, 'priority', n.priority, "
+        "'blocking', n.blocking, 'created_at', n.created_at, 'task_id', n.task_id) ORDER BY n.created_at) "
+        "FROM agent_notices n "
+        "WHERE n.agent_id = a.id AND n.require_response AND n.resolved_at IS NULL), "
+        "'[]'::json) AS notices_awaiting_response, "
+        "(SELECT count(*) FROM agent_notices n "
+        "WHERE n.agent_id = a.id AND NOT n.require_response AND n.resolved_at IS NULL "
+        "AND n.created_at > now() - interval '30 days') AS unread_notice_count, "
+        "a.config_overlay ->> 'llm_model' AS effective_model"
+    )
+
+    assert "WHERE a.status <> 'terminated'" in query
+    assert "a.fork_source_agent_id" in query  # frontend fork-tree lineage
+    assert "fork_source_checkpoint_id" not in query
+    assert "last_probe_at" not in query
+    assert "a.config_overlay," not in query
+    assert "a.config_overlay ->> 'llm_model' AS effective_model" in query
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected_query"),
+    [
+        (
+            "all",
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "ORDER BY a.id",
+        ),
+        (
+            "live",
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "WHERE a.status <> 'terminated' ORDER BY a.id",
+        ),
+        (
+            "terminated",
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "WHERE a.status = 'terminated' ORDER BY a.id",
+        ),
+    ],
+)
+def test_compact_projection_reads_only_cli_columns_in_sql(
+    scope: AgentListScope, expected_query: str
+) -> None:
+    """Every compact scope must avoid roster-only lookups for three columns."""
+    conn = _RecordingConnection()
+    select_all(cast(psycopg.Connection[Any], conn), scope=scope, fields="compact")
+    assert conn.recording_cursor.query == expected_query

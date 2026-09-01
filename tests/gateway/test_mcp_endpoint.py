@@ -171,12 +171,54 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
     }
 
 
-def test_list_agents_returns_compact_rows() -> None:
+def test_list_agents_uses_summary_projection_and_returns_compact_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gateway import mcp_endpoint
+    from shared.agent_snapshot import AgentListSummary
+
+    seen: dict[str, str] = {}
+    snapshot = AgentListSummary.model_validate(
+        {
+            "agent_id": 1,
+            "spawner": "mcp",
+            "fork_source_agent_id": None,
+            "status": "idling",
+            "pid": 123,
+            "spawned_at": "2026-09-01T00:00:00Z",
+            "started_at": "2026-09-01T00:00:01Z",
+            "last_active_at": "2026-09-01T00:00:02Z",
+            "last_inbound_at": "2026-09-01T00:00:02Z",
+            "label": "MCP worker",
+            "machine": "test-machine",
+            "supports_vision": True,
+            "liveness_state": "online",
+            "notices_awaiting_response": [],
+            "unread_notice_count": 0,
+            "heartbeat_paused_until": None,
+        }
+    )
+
+    def fake_select_all(_conn: object, *, fields: str) -> list[AgentListSummary]:
+        seen["fields"] = fields
+        return [snapshot]
+
+    monkeypatch.setattr(mcp_endpoint.agent_snapshot, "select_all", fake_select_all)
     with TestClient(app) as client:
         token = _create_token(client)
         result = _tool_call(client, token, "list_agents", {})
     rows = _tool_result(result)
-    assert rows == []  # empty fleet in this test DB
+    assert seen == {"fields": "summary"}
+    assert rows == [
+        {
+            "agent_id": 1,
+            "status": "idling",
+            "label": "MCP worker",
+            "machine": "test-machine",
+            "spawner": "mcp",
+            "last_active_at": "2026-09-01T00:00:02+00:00",
+        }
+    ]
     assert not result["result"].get("isError")
 
 

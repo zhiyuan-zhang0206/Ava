@@ -281,7 +281,6 @@ function makeAgent(overrides: Partial<AgentRow>): AgentRow {
     agent_id: 1,
     spawner: "user",
     fork_source_agent_id: null,
-    fork_source_checkpoint_id: null,
     status: "idling",
     pid: 100,
     spawned_at: "2026-05-15T00:00:00Z",
@@ -294,7 +293,6 @@ function makeAgent(overrides: Partial<AgentRow>): AgentRow {
     unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
-    last_probe_at: null,
     ...overrides,
   };
 }
