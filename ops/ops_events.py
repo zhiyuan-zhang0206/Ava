@@ -44,8 +44,8 @@ async def publish_page_closed(agent_id: int, name: str) -> None:
 
 
 async def publish_notice_resolved(agent_id: int, notice_id: int) -> None:
-    """Publish NoticeResolved to the events channel — frontend drops it from the
-    unread FYI feed and decrements the agent's unread badge. Best-effort, never raises."""
+    """Publish NoticeResolved to refresh the open and resolved Inbox views.
+    Best-effort, never raises."""
     ev = NoticeResolved(agent_id=agent_id, notice_id=notice_id)
     await publish_best_effort(
         settings.data_plane.events_channel, ev.model_dump_json(), context="notice_resolved"
@@ -55,9 +55,9 @@ async def publish_notice_resolved(agent_id: int, notice_id: int) -> None:
 async def publish_notice_posted(
     agent_id: int, notice_id: int, priority: str, title: str, task_id: int | None = None
 ) -> None:
-    """Publish NoticePosted to the events channel — frontend adds the notice to
-    the unread FYI feed. Best-effort, never raises. `task_id` groups the feed by
-    task without a refetch."""
+    """Publish NoticePosted so the frontend refreshes the open Inbox queue.
+    Best-effort, never raises. `task_id` groups the feed by task without a
+    refetch."""
     ev = NoticePosted(
         agent_id=agent_id, notice_id=notice_id, priority=priority, title=title, task_id=task_id
     )

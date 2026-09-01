@@ -411,6 +411,63 @@ def test_edit_notice_partial_update(_load_activity_plugin: None, db_conn: psycop
         ava._boot._agent_id = original
 
 
+def test_response_notice_content_edits_publish_refreshed_snapshot(
+    _load_activity_plugin: None,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Content-only edits keep a response-required notice in the live snapshot.
+
+    The inspector consumes ``AgentUpdated.snapshot.notices_awaiting_response``.
+    ``NoticePosted`` refreshes the unified Inbox queue, while this snapshot
+    refreshes the inspector's response-required worklist and its detail body.
+    """
+    from gateway.routers import notices as notices_router
+
+    published_agent_ids: list[int] = []
+
+    def _capture_snapshot(_conn: psycopg.Connection, published_agent_id: int) -> None:
+        published_agent_ids.append(published_agent_id)
+
+    # The route must publish this after every durable create/edit. It is absent
+    # before the regression fix, so the assertion below proves the missing
+    # inspector projection rather than merely the row's database state.
+    monkeypatch.setattr(
+        notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
+    )
+
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        ava.ui.notify(  # type: ignore[attr-defined]
+            "decision needed",
+            content="revision 0",
+            priority="P1",
+            require_response=True,
+            blocking=True,
+        )
+        for revision in range(1, 11):
+            content = f"revision {revision}"
+            ava.ui.edit_notice(content=content)  # type: ignore[attr-defined]
+
+        # One AgentUpdated for creation plus one per content-only edit keeps the
+        # inspector's cached snapshot authoritative through the whole chain.
+        assert published_agent_ids == [agent_id] * 11
+        db_conn.rollback()
+        snapshot = select_one(db_conn, agent_id)
+        assert snapshot is not None
+        awaiting = snapshot.notices_awaiting_response
+        assert len(awaiting) == 1
+        notice = awaiting[0]
+        assert notice.title == "decision needed"
+        assert notice.content == "revision 10"
+        assert notice.priority == "P1"
+        assert notice.blocking is True
+    finally:
+        ava._boot._agent_id = original
+
+
 def test_edit_notice_validation_and_guards(
     _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
