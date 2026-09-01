@@ -1,0 +1,23 @@
+version: 0.1
+
+# Trunk Merge Queue waits on these statuses while testing a queued PR. This overrides the
+# branch-protection default. The 16 matrix job names (backend shard (N/12), e2e shard (N/4))
+# are deliberately NOT listed: when a matrix is fully skipped (docs-only PR), GitHub reports a
+# single check with the raw template name "backend shard (${{ matrix.group }}/12)" — the
+# evaluated names never appear, so a queue waiting on them could stall forever. The aggregator
+# jobs below already fan in the shards (their success requires every shard green), so the full
+# suite stays enforced. All 11 names report on every PR (success or skipped, which counts as
+# success per GitHub semantics). Verified from live check runs on 2026-09-01.
+merge:
+  required_statuses:
+    - backend (pytest + pyright)
+    - backend serial (flaky)
+    - backend static (ruff + pyright + migration smoke)
+    - backend structure (pre-commit lint + codegen freshness)
+    - backend vendored pgvector smoke (Linux)
+    - classify change
+    - e2e (Playwright happy path)
+    - e2e env guard (serial)
+    - e2e hosted (agent-runner-as-server happy path)
+    - frontend (eslint + tsc + vitest)
+    - repo language (no raw CJK)
