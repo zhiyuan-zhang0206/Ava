@@ -137,6 +137,7 @@ from agent.startup import (
     _repair_dangling_tool_use_at_startup,
 )
 from agent.state import BaseAgentState
+from services.agent_host.dispatcher import PendingInboundWake
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
@@ -462,6 +463,37 @@ class AgentHost:
                 )
             ).fetchone()
         return None if row is None else row[0]
+
+    async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
+        """Return local runnable agents with pending work for the dispatcher scan.
+
+        Every pending row gets a wake: this is the durable replacement for a
+        lost Redis pub/sub notification. ``stale`` is intentionally stricter:
+        both the pending row and the completed-turn activity clock must exceed
+        the idling threshold, so a newly-arrived message does not cancel a
+        legitimate long-running hosted turn merely because its previous LLM
+        step was old.
+        """
+        async with self._pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT m.id, "
+                    "  m.last_active_at < now() - make_interval(secs => %s) "
+                    "  AND EXISTS ("
+                    "    SELECT 1 FROM inbound_messages stale "
+                    "    WHERE stale.agent_id = m.id AND stale.status = 'pending' "
+                    "      AND stale.created_at < now() - make_interval(secs => %s)"
+                    "  ) "
+                    "FROM agents_meta m "
+                    "WHERE m.machine = %s AND m.status = 'idling' "
+                    "  AND EXISTS ("
+                    "    SELECT 1 FROM inbound_messages pending "
+                    "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
+                    "  )",
+                    (stale_after_s, stale_after_s, self._machine),
+                )
+            ).fetchall()
+        return [PendingInboundWake(agent_id=row[0], stale=row[1]) for row in rows]
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
