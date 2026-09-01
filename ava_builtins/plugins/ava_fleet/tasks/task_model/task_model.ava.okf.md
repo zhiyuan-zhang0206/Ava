@@ -29,6 +29,10 @@ class Task:
     last_reminded_at: datetime | None = None   # last reminder time; cleared on any write
     reminder_count: int = 0                     # reminder count; cleared on any write
     priority: str = "P2"                     # "P0".."P3"; added in #663
+    token_budget: int | None = None          # optional explicit task-token ceiling
+    usd_budget: float | None = None          # optional explicit task-USD ceiling
+    token_used: int = 0                      # task-tagged LLM tokens only
+    usd_used: float = 0.0                    # task-tagged priced LLM cost only
 ```
 
 > The `is_root` column (`agent_tasks.is_root BOOLEAN`) is a database-side system marker — not in the `Task` data class.
@@ -38,6 +42,7 @@ class Task:
 - **Always parented**: every task has a parent — explicit or the root; `parent_id IS NULL` only on root.
 - **Always owned**: every task has an owner except root; ownership transfers between agents, never released.
 - **Always reminded**: reminders cannot be turned off (default 30 min, max 24h); any write resets the window.
+- **Explicitly metered**: only task-associated system-note turns add LLM usage to a task; the gateway accepts that attribution only when the task exists and is owned by the receiving agent. Ownership and untagged work do not count.
 - **Root immutable**: the root task rejects all mutations (SDK `ValueError`, API `422`).
 
 ## Reference

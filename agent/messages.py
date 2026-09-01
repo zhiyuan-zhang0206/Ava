@@ -110,7 +110,7 @@ def inbound_message(
 
 
 def system_note_message(
-    *, content: str, tag: NoteTag, created_at: datetime | None = None
+    *, content: str, tag: NoteTag, task_id: int | None = None, created_at: datetime | None = None
 ) -> HumanMessage:
     """A framework-injected, system-styled note added to the conversation.
     Covers one-time guidance notes (SDK-primitive hints, the agent-reply
@@ -126,15 +126,19 @@ def system_note_message(
     additional_kwargs:
         ava_msg_type: "system_note"
         ava_note_tag: the NoteTag value (drives the timeline chip)
+        ava_task_id: task attribution for a task-driven turn. Omitted otherwise.
         ava_created_at: ISO-8601 wall-clock the note was injected. Omitted when
             not supplied.
     """
+    kwargs: dict[str, object] = {
+        "ava_msg_type": AvaMsgType.SYSTEM_NOTE.value,
+        "ava_note_tag": tag.value,
+    }
+    if task_id is not None:
+        kwargs["ava_task_id"] = task_id
     return HumanMessage(
         content=f"[system] {content}",
-        additional_kwargs=_stamp_created_at(
-            {"ava_msg_type": AvaMsgType.SYSTEM_NOTE.value, "ava_note_tag": tag.value},
-            created_at,
-        ),
+        additional_kwargs=_stamp_created_at(kwargs, created_at),
     )
 
 

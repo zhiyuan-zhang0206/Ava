@@ -69,7 +69,9 @@ class LlmUsage(TypedDict):
     ``ava_llm_usage_calls_total`` (per-agent/per-model call counts come from a
     Counter, not from a histogram's count, which drops the agent_id key).
     ``unpriced`` is 1 exactly when the price snapshot is absent (so unpriced
-    call volume is countable in Prometheus); it is omitted on priced calls."""
+    call volume is countable in Prometheus); it is omitted on priced calls.
+    ``task_id`` is present only when the turn was explicitly driven by a
+    task-associated system note; untagged calls do not belong to a task."""
 
     model: str
     calls: int
@@ -84,6 +86,7 @@ class LlmUsage(TypedDict):
     price_hit: float | None
     price_out: float | None
     unpriced: int | None
+    task_id: NotRequired[int]
 
 
 class TurnEnd(TypedDict):
@@ -405,10 +408,17 @@ class AgentBootFailed(TypedDict):
     error: str
 
 
-class RecallFilter(TypedDict):
-    """`recall_filter` payload — _memory_filter.py; `body` = verdict text."""
+class RecallFilter(TypedDict, total=False):
+    """`recall_filter` payload — _memory_filter.py; `body` = verdict text.
+
+    Successful verdicts add a process-keyed ``query_hmac_sha256`` (never the
+    query text) and a bounded basename-only ``picked_paths`` sample. Failures
+    only have ``body`` because no verdict exists to retain.
+    """
 
     body: str
+    query_hmac_sha256: str
+    picked_paths: list[str]
 
 
 class PassiveRecall(TypedDict, total=False):
@@ -1470,6 +1480,7 @@ HEARTBEAT_PAUSED_KEYS = _sql_keys("heartbeat_paused")
 TASK_UPDATE_KEYS = _sql_keys("task_update")
 PROCESS_EXIT_KEYS = _sql_keys("process_exit")
 RECALL_FILTER_KEYS = _sql_keys("recall_filter")
+PASSIVE_RECALL_KEYS = _sql_keys("passive_recall")
 GATEWAY_LATENCY_KEYS = _sql_keys("gateway_latency")
 LOG_KEYS = _sql_keys("log")
 

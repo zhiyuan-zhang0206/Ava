@@ -45,12 +45,14 @@ _TASK_WINDOWS = {
 _TASK_COLS = (
     "t.id, t.parent_id, t.title, t.description, t.results, t.status, t.owner, "
     "t.created_by, t.created_at, t.updated_at, "
-    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+    "t.token_budget, t.usd_budget, t.token_used, t.usd_used"
 )
 
 _TASK_SUMMARY_COLS = (
     "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
-    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+    "t.token_budget, t.usd_budget, t.token_used, t.usd_used"
 )
 
 
@@ -91,6 +93,10 @@ def _row_to_task(
             last_reminded_at=row[9].isoformat() if row[9] else None,
             reminder_count=row[10],
             priority=row[11],
+            token_budget=row[12],
+            usd_budget=row[13],
+            token_used=row[14],
+            usd_used=row[15],
         )
     return TaskRow(
         id=row[0],
@@ -108,6 +114,10 @@ def _row_to_task(
         last_reminded_at=row[11].isoformat() if row[11] else None,
         reminder_count=row[12],
         priority=row[13],
+        token_budget=row[14],
+        usd_budget=row[15],
+        token_used=row[16],
+        usd_used=row[17],
     )
 
 
@@ -390,7 +400,12 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     for note in notes:
         await post_agent_system_note(
             note.agent_id,
-            SystemNoteIn(content=note.content, source="user", resurrect=note.resurrect),
+            SystemNoteIn(
+                content=note.content,
+                source="user",
+                task_id=task_id if note.resurrect else None,
+                resurrect=note.resurrect,
+            ),
             request,
         )
     return task

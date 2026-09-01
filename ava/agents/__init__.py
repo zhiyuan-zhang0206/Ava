@@ -344,6 +344,7 @@ def send_system_note(
     content: str,
     *,
     tag: str = "task",
+    task_id: int | None = None,
     resurrect: bool = True,
 ) -> int:
     """Deliver a framework system note to another agent.
@@ -356,16 +357,24 @@ def send_system_note(
     directions (a task assignment), never for plain notifications (user
     ruling 2026-08-27).
 
+    `task_id` explicitly attributes the target's subsequent LLM work to one
+    task. Leave it unset for a notification that does not drive task work.
+
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content")
     tag = coerce_str(tag, "tag")
+    task_id = coerce_typed(task_id, "task_id", int, allow_none=True)
+    if task_id is not None and task_id <= 0:
+        raise ValueError(f"task_id must be a positive integer, got {task_id!r}")
     try:
         NoteTag(tag)
     except ValueError as exc:
         valid_tags = ", ".join(member.value for member in NoteTag)
         raise ValueError(f"tag must be one of: {valid_tags}; got {tag!r}") from exc
+    if task_id is not None and tag != NoteTag.TASK.value:
+        raise ValueError("task_id requires tag='task'")
     resurrect = coerce_typed(resurrect, "resurrect", bool)
     source = ava._boot.require_actor()
     return _client.send_system_note(
@@ -373,6 +382,7 @@ def send_system_note(
         content=content,
         note_tag=tag,
         source=source,
+        task_id=task_id,
         resurrect=resurrect,
     )
 

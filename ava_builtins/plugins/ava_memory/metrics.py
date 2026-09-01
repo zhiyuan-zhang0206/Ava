@@ -1,8 +1,7 @@
 """ava_memory Grafana + inspector metrics — registered at import time.
 
-``scripts/gen_plugin_dashboard.py`` imports this module (inside a
-PluginContext) to collect the registrations below; the plugin name comes from
-the context. Query templates target the unified event stream in Loki
+Plugin loading imports this module inside a ``PluginContext`` to collect the
+registrations below; the plugin name comes from the context. Query templates target the unified event stream in Loki
 (task #180: the PG ``events`` table is a frozen archive since the LGTM
 cutover — every metric reads the event stream through LogQL, the same read
 the core panels use, task #1280).
@@ -16,13 +15,15 @@ panels use a fixed ``[5m]`` window. Every count wraps in
 ``sum(...)``: the unknown_service family has >500 streams over a day, and an
 unaggregated count_over_time hits Loki's per-query series cap.
 
-Data provenance: the only memory-domain event in the stream is
-``recall_filter`` (agent/graph/_memory_filter.py, the passive-recall relevance
-filter), emitted with an explicit ``event="recall_filter"`` and mapped to
-category='telemetry' (90d retention; event_name-category final convention, 2026-08-05,
-tracker #762 — the metrics below were moved off the legacy ``recall-filter``
-spelling + category='log' pair that stopped matching the stream after the W8
-rename). Two levels carry distinct meaning:
+Data provenance: ``recall_filter`` (agent/graph/_memory_filter.py) records
+the passive-recall relevance verdict, while ``passive_recall``
+(agent/graph/_memory_recall.py) records its successful search and filter
+durations. ``recall_filter`` is emitted with an explicit
+``event="recall_filter"`` and mapped to category='telemetry' (90d retention;
+event_name-category final convention, 2026-08-05, tracker #762 — the metrics
+below were moved off the legacy ``recall-filter`` spelling + category='log'
+pair that stopped matching the stream after the W8 rename). Its two levels
+carry distinct meaning:
 
 - INFO — the filter judged N candidates: body ``"N candidate(s) -> M kept"``.
   M=0 means nothing was judged relevant enough to inject (an empty recall).
@@ -35,7 +36,7 @@ over INFO rows (the body label is the json-flattened ``attributes.body``) —
 the empty-recall share, reported as its inverse framing (the hit-rate proxy).
 """
 
-from shared.events.contract import RECALL_FILTER_KEYS
+from shared.events.contract import PASSIVE_RECALL_KEYS, RECALL_FILTER_KEYS
 from shared.plugin_metrics import MetricSpec, ThresholdStep, register_metric
 
 # The event stream + json pipeline every template starts with. The selector
@@ -49,6 +50,7 @@ _SEL = '{service_name="unknown_service"}'
 # payload key fails loudly here instead of silently NULLing out) — the same
 # pattern the core panels use (_LLM_ATTR etc.).
 _RECALL_ATTR = {k: f"attributes_{k}" for k in RECALL_FILTER_KEYS}
+_PASSIVE_RECALL_ATTR = {k: f"attributes_{k}" for k in PASSIVE_RECALL_KEYS}
 
 # Category filter: keep the |log alternative for pre-convention rows (the
 # core panels' pattern). {category_re} renders the category UNQUOTED for the
@@ -83,6 +85,59 @@ register_metric(
         query_type="logql",
         target_names=["runs"],
         output=["grafana"],
+    )
+)
+
+
+def _passive_recall_average_ms(field: str) -> str:
+    """Average one recall leg's successful duration in a five-minute bucket."""
+    attr = _PASSIVE_RECALL_ATTR[field]
+    successful = f'{_CAT} | level="info" | {attr}!=""'
+    numerator = (
+        f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+        f"{successful} | unwrap {attr} [5m]))"
+    )
+    denominator = _count(successful, "5m", matchers="event_name={event_name}")
+    return f"{numerator} / {denominator}"
+
+
+register_metric(
+    MetricSpec(
+        name="ava_memory_recall_search_latency_ms",
+        title="Memory recall search latency",
+        description=(
+            "Average successful passive-recall semantic-search duration in milliseconds "
+            "(5-minute buckets; event_name='passive_recall', category='telemetry')."
+        ),
+        event_name="passive_recall",
+        category="telemetry",
+        unit="ms",
+        panel="timeseries",
+        query=_passive_recall_average_ms("search_ms"),
+        query_type="logql",
+        target_names=["avg search ms"],
+        custom={"axisLabel": "ms"},
+        output=["grafana", "inspector"],
+    )
+)
+
+register_metric(
+    MetricSpec(
+        name="ava_memory_recall_filter_latency_ms",
+        title="Memory recall filter latency",
+        description=(
+            "Average successful passive-recall relevance-filter duration in milliseconds "
+            "(5-minute buckets; event_name='passive_recall', category='telemetry')."
+        ),
+        event_name="passive_recall",
+        category="telemetry",
+        unit="ms",
+        panel="timeseries",
+        query=_passive_recall_average_ms("filter_ms"),
+        query_type="logql",
+        target_names=["avg filter ms"],
+        custom={"axisLabel": "ms"},
+        output=["grafana", "inspector"],
     )
 )
 
