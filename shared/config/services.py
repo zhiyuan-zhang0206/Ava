@@ -832,6 +832,34 @@ class ServiceSettings(EnvSettings):
     # second unit states its base once with `ava enroll --health-port-base`;
     # `ava start` refuses to launch onto a port another unit already answers on.
     # The sibling `*_health_url` / `*_pidfile` fields were already `host`.
+    gateway_watchdog_health_port: int | None = Field(
+        default=None,
+        alias="AVA_GATEWAY_WATCHDOG_HEALTH_PORT",
+        description="Gateway watchdog /healthz port override (per unit). Unset = shared default 8119.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    agent_runner_watchdog_health_port: int | None = Field(
+        default=None,
+        alias="AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT",
+        description="Agent-runner watchdog /healthz port override (per unit). Unset = shared default 8120.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     restarter_health_port: int | None = Field(
         default=None,
         alias="AVA_RESTARTER_HEALTH_PORT",

@@ -409,6 +409,7 @@ class SchemaController:
     the schema)."""
 
     name = "schema"
+    timeout_s: float | None = None
 
     def reconcile(self, role: MachineRole) -> ReconcileResult:  # noqa: ARG002 — host-level, uniform Controller signature
         blocks, detail = schema_reconcile()

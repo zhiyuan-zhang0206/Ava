@@ -141,7 +141,24 @@ class ControllerManager:
         round is never silent — a silent block is what made a 3-hour reconcile gap
         look identical to a healthy host."""
         for controller in self._controllers:
-            result = await asyncio.to_thread(controller.reconcile, role)
+            timeout_s = controller.timeout_s
+            try:
+                if timeout_s is None:
+                    result = await asyncio.to_thread(controller.reconcile, role)
+                else:
+                    async with asyncio.timeout(timeout_s):
+                        result = await asyncio.to_thread(controller.reconcile, role)
+            except TimeoutError:
+                result = ReconcileResult(
+                    dimension=controller.name,
+                    blocks=BlockScope.ALL,
+                    detail=f"reconcile exceeded {timeout_s:.1f}s",
+                )
+                _log.error(
+                    "[ops.manager] %s reconcile exceeded %.1fs; skipping the rest of the round",
+                    controller.name,
+                    timeout_s,
+                )
             self._last[controller.name] = result
             if result.blocks is not BlockScope.NONE:
                 self._note_blocked(result)

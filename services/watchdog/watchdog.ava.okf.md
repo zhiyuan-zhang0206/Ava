@@ -25,6 +25,13 @@ A gate blocks by **scope**: how wide its finding is, matched against each servic
 - **Dispatch by capability**: `--role gateway` monitors gateway services, `--role agent-runner` monitors agent-runner services; single machine gateway,agent-runner runs two instances (two sessions, two pidfiles).
 - **Healthcheck every 60s**: imports and sequentially runs the corresponding healthcheck modules, failure → kills the session → re-spawns.
 - **First tick delayed one interval**: so services started sequentially by `ava start` have time to warm up, avoiding false-kill of a just-started gateway.
+- **Watchdog freshness**: each capability binds its own per-unit `/healthz`
+  listener (`gateway_watchdog` / `agent_runner_watchdog`) and advances its
+  liveness only after a complete round. The endpoint includes
+  `last_tick_at`, while the `watchdog_tick` ObservableGauge provides the same
+  completed-round timestamp to Prometheus. A 90-second round deadline logs an
+  error and leaves both signals stale rather than claiming that a wedged
+  controller or healthcheck made progress.
 
 ## Healthcheck checklist
 The derived roster, hand-added pseudo-checks, capability gates, and exact

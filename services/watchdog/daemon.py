@@ -63,6 +63,7 @@ import asyncio
 import importlib
 import logging
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,7 +84,9 @@ from services.healthchecks.brew_pin import main as brew_pin_healthcheck
 from services.healthchecks.lgtm import main as lgtm_healthcheck
 from services.healthchecks.pgbouncer import main as pgbouncer_healthcheck
 from services.healthchecks.redis_acl import main as redis_acl_healthcheck
+from shared import telemetry
 from shared.config import settings
+from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.disabled_services import is_skipped, read_skipped
 from shared.log import init_gateway_process
@@ -94,6 +97,12 @@ _log = logging.getLogger("services.watchdog.daemon")
 # 60s matches the original cron `* * * * *` behavior. Add env override
 # for dev/test (e2e tests do not want to wait 60s per round).
 _INTERVAL_S = settings.services.watchdog_interval_seconds
+
+# A controller or healthcheck that never returns cannot leave this process
+# looking healthy forever. The deadline exceeds the 60s cadence by enough to
+# allow a normal sequential round, while producing an explicit skipped round
+# instead of a permanently wedged watchdog.
+_TICK_DEADLINE_S = 90.0
 
 # The reconcile controllers this daemon runs before its healthchecks. A single
 # module-level manager so its per-dimension last-result state (surfaced by
@@ -116,6 +125,22 @@ class _Check:
     requires_db: bool
 
 
+@dataclass
+class _TickProgress:
+    """The wall-clock freshness fact shared by health and Prometheus."""
+
+    last_completed_at: float | None = None
+
+    def record_completed(self) -> None:
+        """Record one fully completed round after all controller/check work returned."""
+        self.last_completed_at = time.time()
+        telemetry.emit(
+            "telemetry",
+            "watchdog_tick",
+            attributes={"last_tick_timestamp_seconds": self.last_completed_at},
+        )
+
+
 # Each capability's watchdog uses its own pidfile so the two daemons on a
 # single-box host do not mistake each other's pid for a duplicate start.
 def _pidfile_for_role(role: MachineRole) -> Path:
@@ -124,6 +149,13 @@ def _pidfile_for_role(role: MachineRole) -> Path:
     if role == "agent-runner":
         return settings.services.agent_runner_watchdog_pidfile
     raise ValueError(f"unknown watchdog role: {role!r}")
+
+
+def _health_name_for_role(role: MachineRole) -> str:
+    """The distinct health listener for one capability watchdog."""
+    if role not in ("gateway", "agent-runner"):
+        raise ValueError(f"unknown watchdog role: {role!r}")
+    return f"{role.replace('-', '_')}_watchdog"
 
 
 def _resolve_healthcheck(module: str) -> Callable[[], None]:
@@ -458,6 +490,28 @@ async def _tick(role: MachineRole) -> None:
         await _run_check(check.name, check.run)
 
 
+async def _run_tick_with_deadline(role: MachineRole, progress: _TickProgress) -> bool:
+    """Run one watchdog round within its hard deadline.
+
+    ``asyncio.timeout`` cancels the coroutine waiting on a stalled worker and
+    lets the next interval begin. A thread already inside synchronous controller
+    or healthcheck work cannot be killed safely, so the timeout deliberately
+    skips this round rather than recording a false completion timestamp.
+    """
+    try:
+        async with asyncio.timeout(_TICK_DEADLINE_S):
+            await _tick(role)
+    except TimeoutError:
+        _log.error(
+            "[watchdog] %s tick exceeded %.1fs; skipping the rest of the round",
+            role,
+            _TICK_DEADLINE_S,
+        )
+        return False
+    progress.record_completed()
+    return True
+
+
 async def run(role: MachineRole) -> None:
     """Start the daemon for one capability: write its pidfile -> enter main loop.
 
@@ -488,15 +542,28 @@ async def run(role: MachineRole) -> None:
 
     _write_pidfile(pidfile)
     _log.info("[watchdog] %s pidfile written: %s", role, pidfile)
+    health_name = _health_name_for_role(role)
+    progress = _TickProgress()
+    liveness = Liveness(_TICK_DEADLINE_S)
+    health: asyncio.Server | None = None
     _log.info(
         "[watchdog] %s daemon started, interval=%.1fs (first tick delayed)", role, _INTERVAL_S
     )
     try:
+        health = await start_health_server(
+            health_name,
+            liveness=liveness,
+            extra=lambda: {"last_tick_at": progress.last_completed_at},
+        )
+        _log.info("[watchdog] %s healthz listening on :%s", role, health_port(health_name))
         while True:
             # sleep first, tick second — see docstring re cmd_start race.
             await asyncio.sleep(_INTERVAL_S)
-            await _tick(role)
+            if await _run_tick_with_deadline(role, progress):
+                liveness.beat()
     finally:
+        if health is not None:
+            await stop_health_server(health)
         _remove_pidfile(pidfile)
         _log.info("[watchdog] %s daemon stopped", role)
 

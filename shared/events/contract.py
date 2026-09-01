@@ -544,6 +544,16 @@ class MemorySearchStats(TypedDict):
     last_save_seconds: float
 
 
+class WatchdogTick(TypedDict):
+    """`watchdog_tick` payload — services/watchdog/daemon.py.
+
+    One fully completed watchdog round replaces the previous timestamp. The
+    OTLP metric is a gauge so Prometheus can calculate a role's tick age.
+    """
+
+    last_tick_timestamp_seconds: float
+
+
 class TelemetryReadStale(TypedDict):
     """`telemetry_read_stale` payload — gateway/telemetry_staleness.py."""
 
@@ -1203,6 +1213,12 @@ EVENTS: dict[str, EventSpec] = {
         "memory_search_stats",
         "memory search store rows + last save duration (absolute state, 60s sample)",
         payload=MemorySearchStats,
+        tier="noise",
+    ),
+    "watchdog_tick": _telemetry(
+        "watchdog_tick",
+        "watchdog completed one full healthcheck and reconcile round",
+        payload=WatchdogTick,
         tier="noise",
     ),
     "telemetry_read_stale": _telemetry(

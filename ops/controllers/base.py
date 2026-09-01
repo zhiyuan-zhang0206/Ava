@@ -95,5 +95,10 @@ class Controller(Protocol):
     """
 
     name: str
+    # A controller may put an upper bound on its blocking reconcile work. The
+    # manager turns an expired bound into an ALL-scoped block: work launched in
+    # a thread cannot be safely killed, so letting later controllers or service
+    # healthchecks race its unknown outcome would be unsafe.
+    timeout_s: float | None
 
     def reconcile(self, role: MachineRole) -> ReconcileResult: ...

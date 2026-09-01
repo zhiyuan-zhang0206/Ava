@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -26,6 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PATH = REPO_ROOT / "deploy/lgtm/docker-compose.yml"
 RUNTIME_ENV_PATH = REPO_ROOT / "deploy/lgtm/config/grafana/runtime.env"
 DASHBOARD_DIR = REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards"
+PROVISIONING_DIR = REPO_ROOT / "deploy/lgtm/config/grafana/provisioning"
+ALERT_RULES_PATH = PROVISIONING_DIR / "alerting/rules.yml"
 TRACE_ID = "70d53b9c44efa6d116f9b26a950e3309"
 
 
@@ -61,6 +64,11 @@ def _shipped_grafana_version() -> str:
 
 def _dashboard(filename: str) -> dict[str, Any]:
     return json.loads((DASHBOARD_DIR / filename).read_text(encoding="utf-8"))
+
+
+def _shipped_alert_rule_uids() -> set[str]:
+    document: dict[str, Any] = yaml.safe_load(ALERT_RULES_PATH.read_text(encoding="utf-8"))
+    return {rule["uid"] for group in document["groups"] for rule in group["rules"]}
 
 
 def _free_port() -> int:
@@ -148,6 +156,71 @@ def test_default_dashboard_refresh_is_load_bounded() -> None:
         dashboard = json.loads(path.read_text(encoding="utf-8"))
         assert dashboard["refresh"] == "10m"
         assert dashboard["time"] == {"from": "now-6h", "to": "now"}
+
+
+def test_shipped_alert_rules_provision_against_native_grafana(tmp_path: Path) -> None:
+    """Grafana itself must accept every shipped alert expression on startup.
+
+    YAML loading and structural tests cannot prove datasource query grammar or
+    alert-expression wiring. CI runs this checksum-pinned native Grafana binary
+    with the whole shipped provisioning tree and checks the provisioned API.
+    """
+    binary, home = _grafana_distribution()
+    shipped = _grafana_environment()
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}/grafana"
+    admin_user = "native-alert-contract-admin"
+    admin_password = f"native-alert-contract-{TRACE_ID}"
+    admin_headers = {
+        "Authorization": "Basic "
+        + base64.b64encode(f"{admin_user}:{admin_password}".encode()).decode()
+    }
+    expected_uids = _shipped_alert_rule_uids()
+    shutil.copytree(PROVISIONING_DIR, tmp_path / "provisioning")
+
+    env = os.environ.copy()
+    env.update(shipped)
+    env.update(
+        {
+            "GF_SERVER_HTTP_ADDR": "127.0.0.1",
+            "GF_SERVER_HTTP_PORT": str(port),
+            "GF_SERVER_ROOT_URL": f"{base_url}/",
+            "GF_PATHS_DATA": str(tmp_path / "data"),
+            "GF_PATHS_LOGS": str(tmp_path / "logs"),
+            "GF_PATHS_PLUGINS": str(tmp_path / "plugins"),
+            "GF_PATHS_PROVISIONING": str(tmp_path / "provisioning"),
+            "GF_LOG_LEVEL": "error",
+            "GF_LOG_MODE": "console",
+            "GF_SECURITY_ADMIN_USER": admin_user,
+            "GF_SECURITY_ADMIN_PASSWORD": admin_password,
+        }
+    )
+    for directory in ("data", "logs", "plugins"):
+        (tmp_path / directory).mkdir()
+
+    process = subprocess.Popen(  # noqa: S603 - checksum-pinned test binary
+        [str(binary), "server", "--homepath", str(home)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        _wait_until_healthy(base_url, process, _shipped_grafana_version())
+        status, _, body = _request(
+            f"{base_url}/api/v1/provisioning/alert-rules",
+            headers=admin_headers,
+        )
+        assert status == 200, (status, body[:500])
+        provisioned_rules: list[dict[str, Any]] = json.loads(body)
+        assert {rule["uid"] for rule in provisioned_rules} == expected_uids
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
 
 
 def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> None:
