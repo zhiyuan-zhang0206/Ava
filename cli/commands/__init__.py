@@ -190,6 +190,8 @@ from cli.commands.update import (
     _run_gateway_orchestration,
     apply_pending_migrations,
     cmd_update,
+    dry_run_checks,
+    estimate_maintenance_window,
     git_pull_main,
 )
 from cli.commands.update import (
@@ -345,6 +347,8 @@ __all__ = [
     "cmd_watchdog_probe_register",
     "cmd_watchdog_probe_unregister",
     "converge_host",
+    "dry_run_checks",
+    "estimate_maintenance_window",
     "gateway_readiness_detail",
     "git_pull_main",
     "os",

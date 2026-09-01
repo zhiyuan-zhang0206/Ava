@@ -194,6 +194,48 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
     assert path.name == "ava-20260609T190000Z.dump.enc"
 
 
+def test_pre_update_backup_can_defer_offsite_publish(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prepare-phase snapshot retains a verified local artifact without a network publish."""
+    published: list[Path] = []
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
+        if cmd[0].endswith("pg_dump"):
+            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"dump")
+        else:
+            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted")
+        return _Ok()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+    monkeypatch.setattr(backup, "_publish_offsite", published.append)
+
+    artifact = backup.run_backup(
+        _dt(2026, 6, 10, 3, 0), db_url="dbname=ava", pre_update=True, publish=False
+    )
+
+    assert artifact.exists()
+    assert published == []
+
+
+def test_publish_offsite_module_entry_publishes_the_named_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The detached uploader entry delegates one existing artifact to idempotent publishing."""
+    artifact = tmp_path / "ava-pre-update.dump.enc"
+    artifact.write_bytes(b"encrypted")
+    published: list[Path] = []
+    monkeypatch.setattr(backup, "_publish_offsite", published.append)
+
+    assert backup._main(["--publish-offsite", str(artifact)]) == 0
+
+    assert published == [artifact]
+
+
 def test_db_size_breakdown_real_db(db_conn: Any) -> None:
     """The composition query itself is pinned against a real throwaway DB: a
     fresh DB with no checkpoint tables reads 0 instead of failing (the

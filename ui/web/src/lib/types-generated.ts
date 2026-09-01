@@ -4341,6 +4341,11 @@ export interface components {
              * @default false
              */
             force: boolean;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
         };
         /**
          * ClusterPanel

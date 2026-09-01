@@ -1,70 +1,10 @@
 """Multi-machine `ava cluster update` orchestration core.
 
-`ava cluster update` is a thin POST client to the gateway (user ruling
-2026-08-21, issue #216): every CLI POSTs /api/cluster/rollout regardless of
-role; the gateway's detached `ava-rollout` session (spawned via
-`ops.cluster_deploy.spawn_rollout`, which runs `ava cluster update --local`)
-executes `_run_gateway_orchestration` — three phases (Phase A -> local -> Phase B).
+The detached gateway rollout prepares and gates the pinned target before commit
+(Phase A -> local -> readiness -> Phase B); upload detaches after finalization.
 
-Gateway three-phase details:
-  Phase A: pause the local restarter first (so no agent exiting from here on
-           can be respawned on old code), then parallel cluster_stop op to
-           every agent-runner's ops server — they pause the host (posture row) +
-           kill restarter; gateway middleware enters 503 mode
-  Quiesce: signal every live agent (running/idling) to restart via the central
-           inbound table, then wait until none are left running. With every
-           restarter paused (Phase A), each agent stays down
-           until Phase B brings its host back on new code — so no old-code
-           agent writes the central DB while the migration runs. The trigger
-           itself is not an agent — a detached `ava-rollout` session — so the
-           signal never touches it.
-  Local:   the orchestration pins one `target_sha` (origin/main, resolved once)
-           and force-checks-out every node to it; the gateway graceful-stops
-           daemons -> checkout target_sha / uv sync, then `ava start` runs as a
-           fresh subprocess on the new code (start applies pending migrations itself
-           early in boot; order is stop first to prevent old code from reading a
-           half-migrated schema)
-  Ready:   before Phase B is allowed to fan out, wait for THIS gateway to actually
-           serve the endpoint each runner's own preflight probes
-           (`_gateway_ready.await_gateway_serving`). The local `ava start` above
-           exiting 0 does not mean the gateway is serving — its readiness wait is 15 s
-           and non-fatal — and a runner told to update before it is will correctly
-           decline without stopping anything. Bounded; a non-SERVING verdict skips the
-           fan-out and reports `RolloutOutcome.INCOMPLETE`.
-  Phase B: parallel cluster_update op to every agent-runner's ops server **except
-           this host** (`_phase_b_targets`: a co-located gateway,agent-runner box was
-           already updated by the local leg, and its redundant self-update would kill
-           the gateway the readiness gate just blessed); the gateway polls
-           /api/cluster/status until each reports paused=false, provably stops
-           (POLL_STALLED), or the family's no-progress bound elapses
-           (POLL_CONVERGING) — see `shared.deploy_timing` for why that bound is
-           not a number of its own
-
-Offline agent-runner (unreachable at Phase 0's pre-flight fetch or Phase A):
-skip + log; once back online its watchdog pin-drift self-heals it to the pin —
-an offline machine never takes down a rollout. Only a REACHABLE host that fails
-(a fetch failure in Phase 0, any 5xx in Phase A) aborts the whole update (no
-migration yet, safe). A Phase-B host that does not come back cannot be rolled
-back — the gateway has already migrated — so the rollout keeps its deploy lease
-held over exactly those hosts (a settle hold) and reports
-`RolloutOutcome.INCOMPLETE` with a non-zero rc: deliberately NOT the same
-report as a clean finish or an abort.
-
-This module is the orchestration core only; the steps it composes live in
-sibling helper modules (re-imported here + re-exported through `cli.commands`
-so the `cli.commands(.update)` seams keep resolving for the detached rollout
-subprocess use and the test monkeypatch surfaces):
-`_update_git.py` (git + migration helpers), `_update_recover.py` (failed-update
-recovery + `RolloutOutcome` / `finalize_rollout`), `_update_agent_runner.py`
-(the agent-runner leg), `_update_orchestration.py` (classification + pin +
-fan-out target resolution), `_gateway_ready.py` (Phase B's gateway-readiness
-precondition), `_update_dispatch.py` (`cmd_update` — the POST client),
-`_update_preflight.py` (Phase 0 fetch + classify + pin), `_update_quiesce.py`
-(quiesce convergence), `_update_pause.py` (Phase A + stop-the-world),
-`_update_local.py` (the gateway's local stop/checkout/sync/start leg),
-`_update_fanout.py` (parallel fan-out machinery + timeouts),
-`_update_phase_b.py` (Phase-B fan-out, poll, verdicts) and
-`_update_report.py` (aftermath reporting / verdict lookups).
+This module composes sibling `_update_*` helpers, re-exporting their seams
+through `cli.commands` for the detached subprocess and focused tests.
 """
 
 from __future__ import annotations
@@ -86,6 +26,21 @@ from cli.commands._update_agent_runner import (
 )
 from cli.commands._update_dispatch import (
     cmd_update as cmd_update,
+)
+from cli.commands._update_dryrun import (
+    dry_run_checks,
+    estimate_maintenance_window,
+    maintenance_window_breakdown,
+    maintenance_window_estimate_note,
+)
+from cli.commands._update_dryrun import (
+    finalize_commit_telemetry as _finalize_commit_telemetry,
+)
+from cli.commands._update_dryrun import (
+    prepare_commit as _prepare_commit,
+)
+from cli.commands._update_dryrun import (
+    spawn_async_offsite_upload as _spawn_async_offsite_upload,
 )
 from cli.commands._update_fanout import (
     _PHASE_A_TIMEOUT_S as _PHASE_A_TIMEOUT_S,
@@ -113,6 +68,9 @@ from cli.commands._update_fanout import (
 )
 from cli.commands._update_fanout import (
     _print_fan_out_results as _print_fan_out_results,
+)
+from cli.commands._update_finalize import (
+    finalize_orchestration as _finalize_orchestration,
 )
 from cli.commands._update_git import (
     GitPullFailed as GitPullFailed,
@@ -167,6 +125,9 @@ from cli.commands._update_local import (
 )
 from cli.commands._update_orchestration import (
     _classify_rollout as _classify_rollout,
+)
+from cli.commands._update_orchestration import (
+    _clear_stale_stop_marker as _clear_stale_stop_marker,
 )
 from cli.commands._update_orchestration import (
     _persist_cluster_pin,
@@ -246,6 +207,15 @@ from cli.commands._update_preflight import (
     _rollout_preflight,
     _run_preflight_fetch,
 )
+from cli.commands._update_prepare import (
+    build_prepare_gate as _build_prepare_gate,
+)
+from cli.commands._update_prepare import (
+    print_dry_run_verdict as _print_dry_run_verdict,
+)
+from cli.commands._update_prepare import (
+    refuse_normal_prepare as _refuse_normal_prepare,
+)
 from cli.commands._update_quiesce import (
     _force_reap_local_agents as _force_reap_local_agents,
 )
@@ -314,6 +284,7 @@ def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped life
     origin: str,
     rollout_log: str | None = None,
     mode: str = "smooth",
+    dry_run: bool = False,
 ) -> int:
     """`ava cluster update` on the gateway — take the cluster-wide update lock, then run
     the three-phase orchestration. A second update that finds the lock held by a *live*
@@ -334,6 +305,16 @@ def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped life
     `ava cluster update` in on 2026-07-29 and cost two healthy agents, so that case converts
     the lease into a bounded settle hold instead — which `ops.deploy_window` ends the
     moment every host reaches the pin, rather than idling out the full window."""
+    if dry_run:
+        return _run_gateway_orchestration_inner(
+            repo,
+            restart_only=restart_only,
+            origin=origin,
+            rollout_log=rollout_log,
+            mode=mode,
+            dry_run=True,
+            deploy_capability={"deploy_holder": "dry-run", "deploy_acquired_at": "dry-run"},
+        )
     holder = self_holder()
     # kind: the explicit "what is happening" the old session-name probe used to
     # answer. A restart-only bounce is a `restart`; everything else that takes
@@ -487,6 +468,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     rollout_log: str | None = None,
     unconverged: list[str] | None = None,
     mode: str = "smooth",
+    dry_run: bool = False,
     deploy_capability: ClusterOpPayload,
 ) -> int:
     """`ava cluster update` three-phase orchestration body (runs under the update lock — see
@@ -514,7 +496,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     telemetry = _activate_telemetry()
     with _stage_telemetry("preflight"):
         early_rc, restart_frontend, target_sha = _rollout_preflight(
-            repo, restart_only=restart_only, origin=origin
+            repo, restart_only=restart_only, origin=origin, prepare_only=dry_run
         )
     if early_rc is not None:
         telemetry.print_summary()
@@ -528,12 +510,12 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     # `finally`. Best-effort, because a rollout against a sick data plane is worth
     # attempting anyway — and an unwritten row simply leaves the previous record
     # standing, which the surfaces label honestly.
-    _begin_update_record(target_sha, origin=origin, rollout_log=rollout_log)
+    if not dry_run:
+        _begin_update_record(target_sha, origin=origin, rollout_log=rollout_log)
 
-    # The fan-out list, reconciled against a live probe of every host the
-    # `stopped_at` filter would drop and reported as "N of M" — a stale stop
-    # marker must not silently shrink the rollout (see `_resolve_fanout_targets`).
-    agent_runners = _ns._resolve_fanout_targets()
+    # A stale stopped marker is reconciled for safety, but never cleared until
+    # after a commit decision: prepare itself must not mutate rollout state.
+    agent_runners = _ns._resolve_fanout_targets(clear_stale_markers=False)
     # Report state for the aftermath summary the `finally` prints when the rollout did
     # not finish clean: how it ended (three outcomes, not a bool — see
     # `RolloutOutcome`), and whether the pin advanced (the gateway landed the new
@@ -588,7 +570,54 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     runner_urls: dict[str, str | None] = dict(agent_runners)
     hosts_to_resume: list[tuple[str, str | None]] = list(agent_runners)
 
+    if dry_run:
+        gate = _build_prepare_gate(
+            _prepare_commit,
+            repo,
+            target_sha,
+            pull=False,
+            snapshotter=_snapshot_known_good,
+            check_runner=dry_run_checks,
+            estimate_runner=lambda: estimate_maintenance_window(persist_seed=False),
+            breakdown_runner=maintenance_window_breakdown,
+            note_runner=maintenance_window_estimate_note,
+            persist_seed=False,
+        )
+        rc = _print_dry_run_verdict(gate)
+        telemetry.print_summary()
+        return rc
+
+    pull_recover: tuple[str, set[str], Path | None] | None = None
     try:
+        try:
+            gate = _build_prepare_gate(
+                _prepare_commit,
+                repo,
+                target_sha,
+                pull=not restart_only,
+                snapshotter=_snapshot_known_good,
+                check_runner=dry_run_checks,
+                estimate_runner=estimate_maintenance_window,
+                breakdown_runner=maintenance_window_breakdown,
+                note_runner=maintenance_window_estimate_note,
+                persist_seed=True,
+            )
+        except Exception as exc:
+            print(
+                f"\n✗ prepare failed before maintenance ({type(exc).__name__}): {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        if (refusal := _refuse_normal_prepare(gate)) is not None:
+            return refusal
+        pull_recover = gate.prepared.pull_recover
+
+        # The prepare reconciliation is deliberately read-only. Its vetted
+        # candidates become mutable only at this commit boundary, immediately
+        # before the stop-the-world operation consumes the same set.
+        for name, _url in agent_runners:
+            _clear_stale_stop_marker(name)
+
         # 1-1c) pause restarters (local + remote) + quiesce all agents. None = a
         #       Phase-A 5xx; abort with nothing migrated (the finally resumes).
         with _stage_telemetry("stop_the_world"):
@@ -619,6 +648,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             rc = _ns._run_gateway_local_update(
                 repo,
                 target_sha=target_sha,
+                pull_recover=pull_recover,
                 restart_frontend=restart_frontend,
                 pull=not restart_only,
                 force_reap_agents=force_reap,
@@ -731,62 +761,22 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             outcome, rc = RolloutOutcome.INCOMPLETE, 1
         return rc
     finally:
-        from ops.cluster import unpause_local_cluster
-
-        # The local leg ran (or failed) above and may have rotated data-plane
-        # credentials on disk; this process's in-memory Settings still holds
-        # the pre-leg values. Refresh before the compensating writes so the
-        # unpause and the update-lock release never die on SASL auth —
-        # 2026-08-25: both failed that way, leaving every host paused and the
-        # update lock held past the rollout.
-        refresh_data_plane_settings()
-
-        # Always unpause the local host — ava start clears the flag
-        # on the success path (idempotent no-op), but if the local update
-        # failed or an unexpected exception escaped, the finally ensures the
-        # flag is removed and the restarter is respawned.
-        unpause_local_cluster()
-        # Generation-scoped successful-finalize of the local pause-owner
-        # journal: on a co-located gateway,agent-runner box Phase A's own
-        # cluster/stop op journaled the exact generation, and the bare unpause
-        # above would leave it `paused` forever (2026-08-26 residue). Never
-        # raises — it runs in a `finally` that may already be unwinding.
-        from ops.cluster_pause import finalize_pause_owner_journal
-
-        finalize_pause_owner_journal()
-        # Best-effort resume of every still-paused remote, then — on an abnormal
-        # exit — a residual-state + manual-recovery summary. `finalize_rollout`
-        # never raises: it runs in a `finally` that may already be unwinding an
-        # exception, so a raise here would mask it (the 2026-07-20 incident, where
-        # the compensating resume's own Postgres read raised and buried the root
-        # cause under a second traceback).
-        finalize_rollout(
-            hosts_to_resume,
-            _ns._fan_out,
-            _PHASE_A_TIMEOUT_S,
+        _finalize_orchestration(
+            hosts_to_resume=hosts_to_resume,
+            fan_out=_ns._fan_out,
+            phase_a_timeout_s=_PHASE_A_TIMEOUT_S,
             outcome=outcome,
             deploy_capability=deploy_capability,
             pin_advanced=pin_advanced,
             failing_step=failing_step,
             recovered=recovered,
             local_launch_failures=local_launch_failures,
+            telemetry=telemetry,
+            refresh_settings=refresh_data_plane_settings,
+            finalize_rollout_runner=finalize_rollout,
+            finalize_commit_telemetry=_finalize_commit_telemetry,
+            spawn_offsite_upload=_spawn_async_offsite_upload,
+            repo=repo,
+            pull_recover=pull_recover,
+            skipped=skipped,
         )
-        # The skipped hosts were never paused and never updated, so nothing above
-        # resumes them — their forward path is the watchdog's pin-drift self-heal
-        # once the host is back online. Naming them is the point: a rollout that
-        # finished CLEAN for every host it reached leaves them off-pin, and the
-        # operator reading the log gets the line that says who.
-        if skipped:
-            print(
-                f"\n⚠ {len(skipped)} agent-runner(s) unreachable and skipped: "
-                f"{', '.join(sorted(skipped))} — never paused or updated by this rollout; "
-                "they converge at the next rollout, or when `ava cluster update` runs on "
-                "that host (`ava cluster status` shows them off-pin until then).",
-                file=sys.stderr,
-            )
-        # One machine-readable line at the end of every rollout log: each phase's
-        # duration (Task #1820), the bytes moved (the pre-update snapshot), and
-        # per-host updater stages where the poll captured them. The per-stage
-        # lines above already make a killed rollout readable; this is the
-        # aggregate the 368s breakdown was reconstructed from by hand.
-        telemetry.print_summary()

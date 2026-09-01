@@ -205,6 +205,51 @@ def _drive_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
     cluster_mod.spawn_rollout("test-origin")
 
 
+@pytest.mark.real_cluster_spawn
+def test_dry_run_rollout_does_not_wait_for_a_ui_owner(
+    native_host: _FakeSessionBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dry run has no maintenance marker for the detached parent to await."""
+    monkeypatch.setattr(
+        cluster_deploy,
+        "update_check",
+        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+    )
+    waited: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        cluster_deploy,
+        "_wait_for_ui_owner",
+        lambda **kwargs: waited.append(kwargs),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    cluster_mod.spawn_rollout("test-origin", dry_run=True)
+
+    assert waited == []
+    assert "--dry-run" in native_host.spawned[0][1]
+
+
+@pytest.mark.real_cluster_spawn
+def test_normal_rollout_waits_for_its_ui_owner(
+    native_host: _FakeSessionBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A committing rollout still publishes its maintenance owner before returning."""
+    monkeypatch.setattr(
+        cluster_deploy,
+        "update_check",
+        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+    )
+    waited: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        cluster_deploy,
+        "_wait_for_ui_owner",
+        lambda **kwargs: waited.append(kwargs),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    cluster_mod.spawn_rollout("test-origin")
+
+    assert waited == [{"session": "ava-test-rollout", "kind": "rollout", "origin": "test-origin"}]
+
+
 def _drive_restart(monkeypatch: pytest.MonkeyPatch) -> None:
     cluster_mod.spawn_restart("test-origin")
 

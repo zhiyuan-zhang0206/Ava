@@ -29,6 +29,9 @@ class ClusterOpRequest(BaseModel):
     force: bool = False
     """Agent-drain policy for the rollout's quiesce step: 'smooth' (default)
     waits the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window (default
-    10s) then force-reaps stragglers; 'force' waits ~10s then force-reaps.
+    5s) then force-reaps stragglers; 'force' waits ~10s then force-reaps.
     Both restart every agent onto the new code; 'smooth' just gives them a
     short window to land cleanly first."""
+
+    dry_run: bool = False
+    """Rollout only: run prepare checks and the estimate gate without commit."""

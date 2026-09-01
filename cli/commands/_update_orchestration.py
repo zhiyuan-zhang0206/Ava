@@ -149,7 +149,7 @@ async def _probe_stopped_agent_runners(
     return dict(await asyncio.gather(*[_one(name, url) for name, url in stopped]))
 
 
-def _resolve_fanout_targets() -> list[tuple[str, str | None]]:
+def _resolve_fanout_targets(*, clear_stale_markers: bool = True) -> list[tuple[str, str | None]]:
     """The rollout's agent-runner fan-out list, reconciled against a live probe of
     every host the `stopped_at` filter would drop — and reported as N of M.
 
@@ -200,7 +200,8 @@ def _resolve_fanout_targets() -> list[tuple[str, str | None]]:
                 file=sys.stderr,
             )
             reconciled.append((name, url))
-            _clear_stale_stop_marker(name)
+            if clear_stale_markers:
+                _clear_stale_stop_marker(name)
         elif verdict == "mismatch":
             print(
                 f"  ✗ {name}: marked stopped, and the probe at its registered URL answered "
