@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import withBundleAnalyzer from "@next/bundle-analyzer";
 
 // No rewrites proxy for /api — the Turbopack dev proxy buffers SSE, so the
 // frontend connects directly to FastAPI. Same-origin reverse proxy in prod
@@ -71,4 +72,9 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withBundleAnalyzer({
+  // Webpack reports are generated only for the opt-in `npm run build:analyze`.
+  enabled: process.env.ANALYZE === "true",
+  analyzerMode: "static",
+  openAnalyzer: false,
+})(nextConfig);

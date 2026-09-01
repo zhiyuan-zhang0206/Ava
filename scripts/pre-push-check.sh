@@ -78,7 +78,7 @@ if [ "$HAS_FRONTEND" -eq 1 ]; then
     npx --no-install vitest run || EXIT_CODE=1
 
     echo "  eslint …"
-    npx --no-install eslint . --max-warnings 0 || EXIT_CODE=1
+    npm run lint || EXIT_CODE=1
 
     echo "  tsc …"
     npx --no-install next typegen && npx --no-install tsc --noEmit || EXIT_CODE=1

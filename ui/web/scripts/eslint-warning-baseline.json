@@ -1,0 +1,99 @@
+{
+  "warnings": [
+    {
+      "file": "scripts/check-first-load-js.mjs",
+      "rule": "@typescript-eslint/no-unnecessary-condition",
+      "line": 64
+    },
+    {
+      "file": "src/app/control/config/page.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/app/control/guide/page.test.tsx",
+      "rule": "@typescript-eslint/no-unnecessary-type-assertion",
+      "line": 60
+    },
+    {
+      "file": "src/app/control/schedules/page.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/app/insights/status/page.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/app/memory/graph/page.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/components/agent-row.tsx",
+      "rule": "local/source-lines",
+      "line": 33
+    },
+    {
+      "file": "src/components/composer.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/components/fleet/force-graph.tsx",
+      "rule": "local/source-lines",
+      "line": 15
+    },
+    {
+      "file": "src/components/fleet/task-graph.tsx",
+      "rule": "local/source-lines",
+      "line": 19
+    },
+    {
+      "file": "src/components/inspector-panel.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/components/spawn-button.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/components/timeline/card.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/components/timeline/index.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
+      "file": "src/lib/api.ts",
+      "rule": "local/source-lines",
+      "line": 9
+    },
+    {
+      "file": "src/lib/fold/timeline.ts",
+      "rule": "local/source-lines",
+      "line": 60
+    },
+    {
+      "file": "src/lib/timeline-store.ts",
+      "rule": "local/source-lines",
+      "line": 32
+    },
+    {
+      "file": "src/lib/types.ts",
+      "rule": "local/source-lines",
+      "line": 11
+    },
+    {
+      "file": "src/lib/useEventStream.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    }
+  ]
+}
