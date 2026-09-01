@@ -60,13 +60,20 @@ def test_corrupt_marker_fails_closed_and_refusal_removes_envfile(
     path.parent.mkdir(parents=True)
     path.write_text("{broken-json")
     spawned: list[str] = []
-    monkeypatch.setattr(pty_cli, "_reap_orphaned_hosts", lambda _name: 0)
-    monkeypatch.setattr(pty_cli, "has_session", lambda _name: False)
-    monkeypatch.setattr(
-        pty_cli,
-        "_spawn_host",
-        lambda name, *_args: spawned.append(name) or 0,  # pyright: ignore[reportUnknownLambdaType]
-    )
+
+    def _reap_none(_name: str) -> int:
+        return 0
+
+    def _has_no_session(_name: str) -> bool:
+        return False
+
+    def _record_spawn(name: str, *_args: str) -> int:
+        spawned.append(name)
+        return 0
+
+    monkeypatch.setattr(pty_cli, "_reap_orphaned_hosts", _reap_none)
+    monkeypatch.setattr(pty_cli, "has_session", _has_no_session)
+    monkeypatch.setattr(pty_cli, "_spawn_host", _record_spawn)
     envfile = tmp_path / "handoff.env"
     envfile.write_text("A=1\n")
 
@@ -82,14 +89,20 @@ def test_frozen_new_reuses_live_name_but_refuses_missing_until_resume(
 ) -> None:
     live = {"ava-agent-1-shell-0-existing"}
     spawned: list[str] = []
-    monkeypatch.setattr(pty_cli, "_reap_orphaned_hosts", lambda _name: 0)
-    monkeypatch.setattr(pty_cli, "has_session", lambda name: name in live)
+
+    def _reap_none(_name: str) -> int:
+        return 0
+
+    def _has_session(name: str) -> bool:
+        return name in live
 
     def _spawn(name: str, *_args: str) -> int:
         spawned.append(name)
         live.add(name)
         return 0
 
+    monkeypatch.setattr(pty_cli, "_reap_orphaned_hosts", _reap_none)
+    monkeypatch.setattr(pty_cli, "has_session", _has_session)
     monkeypatch.setattr(pty_cli, "_spawn_host", _spawn)
     frozen = allocation_freeze.freeze(holder="operator", reason="manifest and cleanup")
     assert frozen.generation is not None
