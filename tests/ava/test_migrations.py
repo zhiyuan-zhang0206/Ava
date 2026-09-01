@@ -2,10 +2,12 @@
 
 The session test DB (conftest's `ava_test_<...>`) is bootstrapped from
 `db/schema.sql`, which since the 2026-07-19 re-baseline creates a
-`schema_migrations(name, applied_at)` table and stamps the single baseline
-sentinel row (see the bottom of db/schema.sql). So every test here starts from
-the "baselined, no post-baseline delta" state; the autouse fixture rebuilds that
-state before/after each test (cutover tests swap the table to the legacy shape).
+`schema_migrations(name, applied_at)` table and stamps the baseline sentinel
+plus migration names already folded into that current schema (see the bottom of
+db/schema.sql). The autouse fixture starts each migration-runner test with only
+the baseline sentinel, so it can model its own post-baseline applied set without
+production seed markers leaking into synthetic migration layouts; teardown
+restores the full schema.sql seed for tests outside this module.
 
 Coverage of the three cutover paths the design requires:
 - legacy `version INT` at exactly {1..81} -> converted to the baseline
@@ -24,6 +26,8 @@ import time
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from queue import Queue
+from threading import Thread
 from typing import Any, LiteralString, cast
 
 import psycopg
@@ -60,6 +64,23 @@ _FORCE_FENCE_MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "migrations"
     / "20260821T104519_add-force-terminate-inbound-fence.sql"
+)
+_LAST_CLAIM_LOOP_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260901T065353_add-last-claim-loop-at.sql"
+)
+_LAST_CLAIM_LOOP_MIGRATION_NAME = _LAST_CLAIM_LOOP_MIGRATION.stem
+_SNAPSHOT_RETIREMENT_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260901T141933_drop-expired-backfill-snapshots.sql"
+)
+_SNAPSHOT_RETIREMENT_MIGRATION_NAME = _SNAPSHOT_RETIREMENT_MIGRATION.stem
+_RETIRED_SNAPSHOT_TABLES = (
+    "fork_lineage_fix_backfill_agents_meta",
+    "fork_lineage_fix_backfill_events",
+    "ledger_unpriced_backfill_20260824",
 )
 
 # A syntactically-valid synthetic post-baseline migration name (far-future
@@ -125,13 +146,13 @@ def _reset_schema_migrations_state() -> Iterator[None]:
     pre-cutover suite used.
     """
 
-    def _reseed() -> None:
+    def _reseed(names: list[str]) -> None:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
-            _set_table_to(conn, "set", [_BASELINE_NAME])
+            _set_table_to(conn, "set", names)
 
-    _reseed()
+    _reseed([_BASELINE_NAME])
     yield
-    _reseed()
+    _reseed([_BASELINE_NAME, _LAST_CLAIM_LOOP_MIGRATION_NAME])
 
 
 # ─── required / applied set ───────────────────────────────────────────────────
@@ -262,7 +283,10 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(schema)  # type: ignore[arg-type]  # trusted multi-statement schema
             row = conn.execute("SELECT name FROM schema_migrations").fetchall()
-            assert row == [(_BASELINE_NAME,)]
+            assert set(row) == {
+                (_BASELINE_NAME,),
+                (_LAST_CLAIM_LOOP_MIGRATION_NAME,),
+            }
             presets = conn.execute("SELECT name FROM agent_presets").fetchall()
             assert {r[0] for r in presets} == {
                 "coder",
@@ -271,12 +295,13 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
                 "orchestrator",
                 "explorer",
             }
-        # apply on the baselined DB: the real post-baseline migrations replay
-        # cleanly on the fresh schema (fresh-replay), then a second apply is a
-        # no-op. This is what guards against a migration that fails on a fresh DB.
+        # Apply on the baselined DB: the folded migration marker makes the strict
+        # ALTER skip a fresh schema that already carries the column; all other
+        # post-baseline migrations replay cleanly, then a second apply is a no-op.
         with psycopg.connect(url) as conn:
             assert set(apply_pending_migrations(conn)) == required_migration_set() - {
-                _BASELINE_NAME
+                _BASELINE_NAME,
+                _LAST_CLAIM_LOOP_MIGRATION_NAME,
             }
         with psycopg.connect(url) as conn:
             assert apply_pending_migrations(conn) == []
@@ -288,6 +313,198 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
                 (name,),
             )
             cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+
+
+def test_last_claim_loop_migration_fails_on_unrecorded_drift(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An existing DB with the column but no applied marker is a loud drift."""
+    _set_table_to(db_conn, "set", [_BASELINE_NAME])
+    up = tmp_path / _LAST_CLAIM_LOOP_MIGRATION.name
+    down = tmp_path / _LAST_CLAIM_LOOP_MIGRATION.with_suffix(".down.sql").name
+    up.write_text(_LAST_CLAIM_LOOP_MIGRATION.read_text())
+    down.write_text(_LAST_CLAIM_LOOP_MIGRATION.with_suffix(".down.sql").read_text())
+    _init_repo(tmp_path)
+    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        with pytest.raises(MigrationFailed) as exc_info:
+            apply_pending_migrations(conn)
+        assert isinstance(exc_info.value.__cause__, psycopg.errors.DuplicateColumn)
+        row = conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE name = %s",
+            (_LAST_CLAIM_LOOP_MIGRATION_NAME,),
+        ).fetchone()
+        assert row is None
+
+
+def _stage_snapshot_retirement_migration(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Configure the real retirement migration as the only pending delta."""
+    up = tmp_path / _SNAPSHOT_RETIREMENT_MIGRATION.name
+    down = tmp_path / _SNAPSHOT_RETIREMENT_MIGRATION.with_suffix(".down.sql").name
+    up.write_text(_SNAPSHOT_RETIREMENT_MIGRATION.read_text())
+    down.write_text(_SNAPSHOT_RETIREMENT_MIGRATION.with_suffix(".down.sql").read_text())
+    _init_repo(tmp_path)
+    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+
+
+def _create_retired_snapshot_tables(db_conn: psycopg.Connection) -> None:
+    """Create the historical snapshot shapes required by the retirement migration."""
+    db_conn.execute(
+        "CREATE TABLE fork_lineage_fix_backfill_agents_meta (id BIGINT, spawner TEXT);"
+        "CREATE TABLE fork_lineage_fix_backfill_events (id BIGINT, target_agent_id BIGINT);"
+        "CREATE TABLE ledger_unpriced_backfill_20260824 (agent_id BIGINT);"
+    )
+    db_conn.commit()
+
+
+def _drop_retired_snapshot_tables(db_conn: psycopg.Connection) -> None:
+    """Remove test-only snapshot tables preserved by a failed retirement."""
+    db_conn.execute(
+        "DROP TABLE IF EXISTS public.fork_lineage_fix_backfill_agents_meta;"
+        "DROP TABLE IF EXISTS public.fork_lineage_fix_backfill_events;"
+        "DROP TABLE IF EXISTS public.ledger_unpriced_backfill_20260824;"
+    )
+    db_conn.commit()
+
+
+def test_snapshot_retirement_migration_drops_empty_snapshots(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Empty rollback snapshots may be retired and the migration records its apply."""
+    _set_table_to(db_conn, "set", [_BASELINE_NAME])
+    _stage_snapshot_retirement_migration(monkeypatch, tmp_path)
+    _create_retired_snapshot_tables(db_conn)
+
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        assert apply_pending_migrations(conn) == [_SNAPSHOT_RETIREMENT_MIGRATION_NAME]
+        for table in _RETIRED_SNAPSHOT_TABLES:
+            assert conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone() == (
+                None,
+            )
+
+
+def test_snapshot_retirement_migration_rejects_nonempty_snapshots(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A populated correction snapshot must fail before any snapshot is dropped."""
+    _set_table_to(db_conn, "set", [_BASELINE_NAME])
+    _stage_snapshot_retirement_migration(monkeypatch, tmp_path)
+    _create_retired_snapshot_tables(db_conn)
+    db_conn.execute("INSERT INTO ledger_unpriced_backfill_20260824 (agent_id) VALUES (1)")
+    db_conn.commit()
+
+    try:
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            with pytest.raises(MigrationFailed) as exc_info:
+                apply_pending_migrations(conn)
+            assert isinstance(exc_info.value.__cause__, psycopg.errors.RaiseException)
+            assert "must be archived before retirement" in str(exc_info.value.__cause__)
+            for table in _RETIRED_SNAPSHOT_TABLES:
+                assert conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone() == (
+                    f"{table}",
+                )
+            row = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE name = %s",
+                (_SNAPSHOT_RETIREMENT_MIGRATION_NAME,),
+            ).fetchone()
+            assert row is None
+    finally:
+        _drop_retired_snapshot_tables(db_conn)
+
+
+def test_snapshot_retirement_migration_checks_public_snapshots_with_shadowed_search_path(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A shadow schema cannot hide a populated public correction snapshot."""
+    _set_table_to(db_conn, "set", [_BASELINE_NAME])
+    _stage_snapshot_retirement_migration(monkeypatch, tmp_path)
+    _create_retired_snapshot_tables(db_conn)
+    db_conn.execute("CREATE SCHEMA snapshot_shadow")
+    db_conn.execute(
+        "CREATE TABLE snapshot_shadow.fork_lineage_fix_backfill_agents_meta "
+        "(id BIGINT, spawner TEXT);"
+        "CREATE TABLE snapshot_shadow.fork_lineage_fix_backfill_events "
+        "(id BIGINT, target_agent_id BIGINT);"
+        "CREATE TABLE snapshot_shadow.ledger_unpriced_backfill_20260824 (agent_id BIGINT);"
+        "INSERT INTO public.ledger_unpriced_backfill_20260824 (agent_id) VALUES (1);"
+    )
+    db_conn.commit()
+
+    try:
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            conn.execute("SET search_path TO snapshot_shadow, public")
+            with pytest.raises(MigrationFailed) as exc_info:
+                apply_pending_migrations(conn)
+            assert isinstance(exc_info.value.__cause__, psycopg.errors.RaiseException)
+            assert "ledger_unpriced_backfill_20260824 must be archived before retirement" in str(
+                exc_info.value.__cause__
+            )
+    finally:
+        db_conn.execute("DROP SCHEMA snapshot_shadow CASCADE")
+        db_conn.commit()
+        _drop_retired_snapshot_tables(db_conn)
+
+
+def test_snapshot_retirement_migration_rechecks_after_a_concurrent_snapshot_write(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A writer committed during retirement makes the migration fail without a drop."""
+    _set_table_to(db_conn, "set", [_BASELINE_NAME])
+    _stage_snapshot_retirement_migration(monkeypatch, tmp_path)
+    _create_retired_snapshot_tables(db_conn)
+    relation = db_conn.execute(
+        "SELECT 'public.ledger_unpriced_backfill_20260824'::regclass::oid"
+    ).fetchone()
+    assert relation is not None
+
+    writer = psycopg.connect(settings.data_plane.db_url)
+    results: Queue[object] = Queue()
+
+    def _apply() -> None:
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            try:
+                results.put(apply_pending_migrations(conn))
+            except BaseException as exc:  # pass the migration outcome to the test thread
+                results.put(exc)
+
+    try:
+        writer.execute("INSERT INTO public.ledger_unpriced_backfill_20260824 (agent_id) VALUES (1)")
+        worker = Thread(target=_apply)
+        worker.start()
+        try:
+            for _ in range(100):
+                waiting = db_conn.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE relation = %s AND NOT granted)",
+                    (relation[0],),
+                ).fetchone()
+                assert waiting is not None
+                if waiting[0]:
+                    break
+                time.sleep(0.01)
+            else:
+                pytest.fail("migration did not wait for the concurrent snapshot writer")
+        finally:
+            writer.commit()
+            writer.close()
+
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+        result = results.get_nowait()
+        assert isinstance(result, MigrationFailed)
+        assert isinstance(result.__cause__, psycopg.errors.RaiseException)
+        assert db_conn.execute(
+            "SELECT to_regclass('public.ledger_unpriced_backfill_20260824')"
+        ).fetchone() == ("ledger_unpriced_backfill_20260824",)
+        assert (
+            db_conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE name = %s",
+                (_SNAPSHOT_RETIREMENT_MIGRATION_NAME,),
+            ).fetchone()
+            is None
+        )
+    finally:
+        _drop_retired_snapshot_tables(db_conn)
 
 
 def test_force_terminate_fence_migration_backfills_current_death_intent() -> None:

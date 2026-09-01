@@ -19,7 +19,24 @@
 --   - `shared.migrations.apply_pending_migrations` — it applies the post-baseline
 --     `migrations/*.sql` deltas one by one, doesn't read this file. A fresh DB is
 --     already at the baseline (via one of the paths above), so apply then only
---     runs whatever deltas accrued since; production self-update goes through it.
+--     runs deltas not already folded into this file's applied-set seed;
+--     production self-update goes through it.
+--
+-- Postgres trust boundary:
+--   - The `ava_gateway` service dials the cluster-main role, which owns this
+--     schema and is the only role allowed DDL or unbounded application writes.
+--   - `ava_runner` is a separate LOGIN NOSUPERUSER role. It has SELECT over the
+--     public schema but may write only runner-local surfaces: inbound_messages
+--     (claiming and self-lifecycle); agents_meta and agents (process state and
+--     its own label); machine_units, machines, and host_deploy_state (unit
+--     registration and deploy posture); api_idempotency (runner /ops dedupe);
+--     agent_tasks, agent_watchers, agent_pages, and agent_shell_ttls (SDK
+--     lifecycle); heartbeat_pause_log (pause history); and the LangGraph
+--     checkpoints, checkpoint_blobs, and checkpoint_writes (agent state).
+--   - `shared.cluster.provision.ensure_runner_role` is the sole grant list and
+--     re-affirms it after migrations. All other writes travel through
+--     `ava_gateway`, so runner credentials cannot create agents, run DDL, or
+--     mutate gateway-owned tables.
 --
 -- LangGraph PostgresSaver creates only at fresh install; later versions are
 -- mirrored by paired Ava migrations so cluster rollback can reverse them:
@@ -447,37 +464,6 @@ CREATE TABLE agent_model_tokens_daily (
     unpriced_calls   BIGINT NOT NULL DEFAULT 0,
     estimated_calls  BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, day, model)
-);
-
--- Rollback snapshots retained by the 2026-08-27 fork-lineage-target-fix
--- migration. A production upgrade fills them from the pre-fix state; a fresh
--- database keeps them empty because there is no historical misrecorded fork
--- lineage to restore.
-CREATE TABLE fork_lineage_fix_backfill_agents_meta (
-    id       BIGINT,
-    spawner  TEXT
-);
-
-CREATE TABLE fork_lineage_fix_backfill_events (
-    id               BIGINT,
-    target_agent_id  BIGINT
-);
-
--- Rollback snapshot retained by the 2026-08-24 unpriced-cost backfill. A
--- production upgrade fills it from the ledger's pre-state; a fresh database
--- keeps it empty because there is no historical ledger state to restore.
-CREATE TABLE ledger_unpriced_backfill_20260824 (
-    agent_id       BIGINT,
-    day            DATE,
-    model          TEXT,
-    llm_calls      BIGINT,
-    costed_calls   BIGINT,
-    unpriced_calls BIGINT,
-    tokens_in      BIGINT,
-    tokens_out     BIGINT,
-    tokens_cached  BIGINT,
-    tokens_reasoning BIGINT,
-    cost_usd       DOUBLE PRECISION
 );
 
 -- One row per Loki-sourced rollup day. source_count is the event-family count
@@ -1313,8 +1299,9 @@ CREATE INDEX IF NOT EXISTS web_sessions_expires_idx ON web_sessions (expires_at)
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `shared.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
--- the squashed baseline, so a fresh DB stamps the single baseline sentinel row
--- below instead of replaying history. Post-baseline deltas live in
+-- the squashed baseline, so a fresh DB stamps the baseline sentinel and any
+-- non-idempotent deltas already folded into this schema instead of replaying
+-- them. Post-baseline deltas live in
 -- `migrations/YYYYMMDDTHHMMSS_*.sql`; after a successful apply the runner INSERTs
 -- the new name. Keep `_BASELINE_NAME` in `shared/migrations.py` in sync with the
 -- sentinel below (CI lint checks it).
@@ -1325,5 +1312,10 @@ CREATE TABLE schema_migrations (
 
 -- Seed: stamp the squashed baseline (this file IS the baseline). A fresh DB is
 -- "already at the baseline"; `apply_pending_migrations` then applies only the
--- post-baseline files in migrations/.
+-- post-baseline files in migrations/ that are not folded below.
 INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');
+
+-- This strict ADD COLUMN is already represented above. Fresh DBs must not replay
+-- it, while existing DBs without this applied marker still run the migration and
+-- fail loudly if the column was added outside migration tracking.
+INSERT INTO schema_migrations (name) VALUES ('20260901T065353_add-last-claim-loop-at');

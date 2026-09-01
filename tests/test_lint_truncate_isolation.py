@@ -51,7 +51,7 @@ _MIGRATIONS_DIR = _REPO_ROOT / "migrations"
 _CREATE_TABLE_RE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)")
 
 
-_DROP_TABLE_RE = re.compile(r"DROP TABLE (?:IF EXISTS )?(\w+)")
+_DROP_TABLE_RE = re.compile(r"DROP TABLE (?:IF EXISTS )?(?:\w+\.)?(\w+)")
 
 
 def _schema_tables() -> set[str]:
