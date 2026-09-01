@@ -252,8 +252,9 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
 
     - no pending handoff survives the failure (`updater_handoff.read()` is
       inactive) and no pause survives (posture writes are paused then idle);
-    - nothing outside the child's own home is touched: the operator's real
-      production handoff file is byte-identical before and after.
+    - nothing outside the child's own home is touched: the modeled production
+      handoff file (under the child's fake HOME, audit M-1) is byte-identical
+      before and after.
 
     The child's home also passes the prod-home checkout guard (non-prod home),
     proving the guard does not block legitimate non-prod deploy targets."""
@@ -266,8 +267,16 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
     # suite home's .env).
     shutil.copy(ava_home() / ".env", scratch / ".env")
 
-    prod_handoff = _PROD_HOME / "run" / "updater-handoff.json"
-    before = prod_handoff.read_bytes() if prod_handoff.exists() else None
+    # The "production" home the child must never touch is modeled, not the
+    # operator's real ~/.ava (audit M-1): the child runs with HOME=fake_home,
+    # so any Path.home()/.ava write lands here, where the sentinel catches it —
+    # and the test no longer reads (or depends on) the operator's real handoff
+    # file, which can change mid-run during a real update.
+    fake_home = tmp_path / "fake-home"
+    prod_handoff = fake_home / ".ava" / "run" / "updater-handoff.json"
+    prod_handoff.parent.mkdir(parents=True)
+    prod_handoff.write_text("sentinel: the updater machinery must never touch this file\n")
+    before = prod_handoff.read_bytes()
 
     script = textwrap.dedent(f"""        import json, os, sys
 
@@ -322,7 +331,12 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
         text=True,
         timeout=120,
         check=False,
-        env={**os.environ, "AVA_HOME": str(scratch), "AVA_HOME_OVERRIDE": "1"},
+        env={
+            **os.environ,
+            "HOME": str(fake_home),
+            "AVA_HOME": str(scratch),
+            "AVA_HOME_OVERRIDE": "1",
+        },
     )
     assert done.returncode == 0, done.stderr[-2000:]
     payload = json.loads(done.stdout.strip().splitlines()[-1])
@@ -332,5 +346,5 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
         "a failed spawn must undo its pause (the incident left production paused)"
     )
 
-    after = prod_handoff.read_bytes() if prod_handoff.exists() else None
+    after = prod_handoff.read_bytes()
     assert after == before, "the updater machinery must never touch the production handoff file"
