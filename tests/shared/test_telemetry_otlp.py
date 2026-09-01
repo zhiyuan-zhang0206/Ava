@@ -321,6 +321,29 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
     assert _attrs_of(warning.data.data_points[0])["window"] == "6h"
 
 
+def test_watchdog_tick_uses_latest_timestamp_gauge(otlp_backend) -> None:
+    """A newer completed tick replaces the old timestamp; a watchdog's age is
+    absolute state, not an event count or a duration distribution."""
+    backend, _, metric_reader = otlp_backend
+    backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
+        [
+            _event(
+                event_name="watchdog_tick",
+                attributes={"last_tick_timestamp_seconds": 1_725_000_000.0},
+            ),
+            _event(
+                event_name="watchdog_tick",
+                attributes={"last_tick_timestamp_seconds": 1_725_000_060.0},
+            ),
+        ]
+    )
+    backend.flush()  # pyright: ignore[reportUnknownMemberType]
+
+    tick = _metrics(metric_reader)["ava_watchdog_tick_last_tick_timestamp"]
+    assert tick.unit == "s"
+    assert tick.data.data_points[0].value == 1_725_000_060.0
+
+
 def test_metric_disposition_cost_counter_price_excluded(otlp_backend) -> None:
     """The per-field disposition overrides: cost_usd (a float that is a SUM)
     records as a float Counter; the price_* rate snapshot mints no metric at

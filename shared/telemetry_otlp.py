@@ -171,6 +171,9 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     # Histogram — both are latest-value gauges.
     ("memory_search_stats", "rows"): "gauge",
     ("memory_search_stats", "last_save_seconds"): "gauge",
+    # A watchdog timestamp is absolute freshness state. Summing it or
+    # histogramming it would hide the age alert's only input.
+    ("watchdog_tick", "last_tick_timestamp_seconds"): "gauge",
     # The hourly maintenance pass refreshes these table high-water marks; a
     # gauge preserves the latest measurement between samples. The *_live
     # fields are the live tuple counts, emitted alongside so physical size can

@@ -5,8 +5,8 @@ LGTM read side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as
 OTLP logs under {service_name="unknown_service"} with event_name/agent_id
 promoted to stream labels since the 2026-08-23 cutover (Task #1467); event
 filters live in the stream selector, `| json` flattens each line for the
-level/category/attributes filters), R4 queries Prometheus (the
-ava_llm_usage_latency_milliseconds histogram).
+level/category/attributes filters). R4, the gateway-metrics silence rule, and
+the watchdog-tick staleness rule query Prometheus.
 Keeps the rules in sync with the emitter's LogQL/OTLP contract.
 
 R8-R12 (issue #46) are the infrastructure layer and query a DIFFERENT
@@ -50,6 +50,7 @@ _EXPECTED_UIDS = {
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
     "ava-ops-gateway-metrics-silent",
+    "ava-ops-watchdog-tick-stale",
     "ava-ops-checkpoint-blobs-warning",
     "ava-ops-checkpoint-blobs-error",
     "ava-ops-trace-disk-watermark",
@@ -96,7 +97,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [19, 7]
+    assert [len(group["rules"]) for group in groups] == [20, 7]
     return groups
 
 
@@ -286,6 +287,28 @@ def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
     assert _exprs(rule, "prometheus") == ["absent_over_time(ava_gateway_latency_count_total[5m])"]
     assert _threshold_params(rule) == [[0]]
     assert rule["for"] == "5m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+
+
+def test_watchdog_tick_staleness_tracks_each_recent_capability() -> None:
+    """A live process is insufficient when its watchdog round is wedged.
+
+    Keep the capability's ``machine`` / ``process`` dimensions through the
+    historical/current set subtraction so one silent gateway or runner is
+    named, while a retired capability naturally leaves the 24-hour set.
+    """
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-watchdog-tick-stale"]
+    expr = _exprs(rule, "prometheus")[0]
+    assert "ava_watchdog_tick_last_tick_timestamp_seconds" in expr
+    assert "max_over_time" in expr
+    assert "[24h]" in expr
+    assert "[3m]" in expr
+    assert "unless on(machine, process)" in expr
+    assert "max by (machine, process)" in expr
+    assert _threshold_params(rule) == [[0]]
+    assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
 

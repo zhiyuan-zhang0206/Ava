@@ -79,8 +79,12 @@ PORT_OFFSETS: dict[str, int] = {
     # slot: existing records pin their block base, so renumbering a live
     # offset would move a running daemon's port out from under it.
     "memory_search": 24,
+    # The two capability watchdogs now expose their own health endpoints.
+    # They must occupy distinct slots because a single-box unit runs both.
+    "gateway_watchdog": 25,
+    "agent_runner_watchdog": 26,
 }
-BLOCK_SIZE = 25
+BLOCK_SIZE = 27
 BLOCK_START = 18000
 BLOCK_MAX = 20000
 
@@ -138,6 +142,8 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     "pg_backup": 8116,
     "pitr_uploader": 8117,
     "pitr_base_backup": 8118,
+    "gateway_watchdog": 8119,
+    "agent_runner_watchdog": 8120,
     # The memory search service's TCP port (like milvus's 19530, not a health
     # port — its healthcheck probes the real /search endpoint).
     "memory_search": 19531,
