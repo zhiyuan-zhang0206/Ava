@@ -242,7 +242,7 @@ def test_write_env_syncs_urls_with_the_active_scoped_passwords(
     state = _state("runner")
     writes: list[dict[str, str]] = []
 
-    def _upsert_env(_path: Path, values: dict[str, str]) -> None:
+    def _upsert_env(_path: Path, values: dict[str, str], *, audit_site: str | None = None) -> None:
         writes.append(values)
 
     monkeypatch.setattr(rotate, "upsert_env", _upsert_env)

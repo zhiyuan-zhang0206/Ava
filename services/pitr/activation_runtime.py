@@ -88,6 +88,7 @@ def _restore_exact_file(
             payload=payload,
             expected_digest=expected_digest,
             target_digest=target_digest,
+            audit_site="pitr_activation_rollback",
         )
         return
     if hashlib.sha256(payload).hexdigest() != target_digest:
@@ -162,6 +163,7 @@ def _enable_pitr_services(expected_digest: str) -> bytes:
         set(),
         capture_bytes=True,
         expected_digest=expected_digest,
+        audit_site="pitr_activation",
     )
     if captured is None:
         raise RuntimeError("PITR environment write did not return owned bytes")

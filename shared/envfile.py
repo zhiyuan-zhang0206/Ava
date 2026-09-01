@@ -88,7 +88,7 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         return None
 
 
-def upsert_env(path: Path, updates: dict[str, str]) -> None:
+def upsert_env(path: Path, updates: dict[str, str], *, audit_site: str | None = None) -> None:
     """Set each key in a unit's `.env`, preserving unrelated lines.
 
     Cross-process exclusive for the whole read-modify-write, like every other door
@@ -112,6 +112,10 @@ def upsert_env(path: Path, updates: dict[str, str]) -> None:
         for k, v in remaining.items():
             out.append(f"{k}={v}")
         write_private_bytes(path, ("\n".join(out) + "\n").encode())
+        if audit_site is not None:
+            from shared.env_audit import record_env_write
+
+            record_env_write(path, set(updates), set(), site=audit_site)
 
 
 def _chmod_private(path: Path) -> None:
@@ -124,7 +128,7 @@ def _chmod_private(path: Path) -> None:
         _log.warning("could not chmod 0600 %s", path, exc_info=True)
 
 
-def remove_env(path: Path, keys: set[str]) -> None:
+def remove_env(path: Path, keys: set[str], *, audit_site: str | None = None) -> None:
     """Remove the named keys from a unit's .env, preserving unrelated lines.
 
     The counterpart of `upsert_env` for keys that must LEAVE the surface (e.g.
@@ -140,10 +144,19 @@ def remove_env(path: Path, keys: set[str]) -> None:
             return  # nothing to remove — no snapshot churn
         snapshot_env(path)
         write_private_bytes(path, ("\n".join(out) + "\n").encode())
+        if audit_site is not None:
+            from shared.env_audit import record_env_write
+
+            record_env_write(path, set(), keys, site=audit_site)
 
 
 def replace_env_bytes_cas(
-    path: Path, *, payload: bytes, expected_digest: str, target_digest: str
+    path: Path,
+    *,
+    payload: bytes,
+    expected_digest: str,
+    target_digest: str,
+    audit_site: str | None = None,
 ) -> None:
     """Restore exact env bytes while holding the shared cross-process lock."""
 
@@ -171,5 +184,19 @@ def replace_env_bytes_cas(
                 os.fsync(directory_fd)
             finally:
                 os.close(directory_fd)
+            if audit_site is not None:
+                from shared.env_audit import record_env_write
+
+                before_keys = {
+                    line.split("=", 1)[0].strip()
+                    for line in current.decode().splitlines()
+                    if line.strip() and not line.lstrip().startswith("#") and "=" in line
+                }
+                after_keys = {
+                    line.split("=", 1)[0].strip()
+                    for line in payload.decode().splitlines()
+                    if line.strip() and not line.lstrip().startswith("#") and "=" in line
+                }
+                record_env_write(path, after_keys, before_keys - after_keys, site=audit_site)
         finally:
             staged.unlink(missing_ok=True)

@@ -121,6 +121,7 @@ def write_fields(
     *,
     capture_bytes: bool = False,
     expected_digest: str | None = None,
+    audit_site: str | None = None,
 ) -> bytes | None:
     """Set each field's alias in this unit's `.env`, and unset each removed field's.
 
@@ -131,7 +132,6 @@ def write_fields(
     `.env` is snapshotted before the write (recoverable) and every unset is logged
     (never silent — a silent full-replace once dropped a cluster's secrets).
     """
-    amap = _field_alias_map()
     path = env_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Cross-process exclusive, for the whole snapshot-and-rewrite section. Each
@@ -148,6 +148,9 @@ def write_fields(
     # taken mid-rewrite would preserve a state that never existed.
     captured: bytes | None = None
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
+        if not updates and not removals:
+            return path.read_bytes() if capture_bytes and path.exists() else None
+        amap = _field_alias_map()
         if expected_digest is not None:
             import hashlib
 
@@ -173,6 +176,17 @@ def write_fields(
             path.chmod(0o600)
         except OSError:
             _log.warning("write_fields: could not chmod 0600 %s", path, exc_info=True)
+        if audit_site is not None:
+            # Lazy import avoids a module cycle: the audit helper resolves this
+            # module's env_file_path only after this writer has acquired the lock.
+            from shared.env_audit import record_env_write
+
+            record_env_write(
+                path,
+                {amap[name] for name in updates},
+                {amap[name] for name in removals},
+                site=audit_site,
+            )
         if capture_bytes:
             captured = path.read_bytes()
     if removals:
@@ -244,6 +258,8 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
         raw = dotenv_values(path)
         changed: list[str] = []
+        keys_written: set[str] = set()
+        keys_removed: set[str] = set()
         lines = path.read_text().splitlines(keepends=True)
         out: list[str] = []
         for line in lines:
@@ -253,13 +269,19 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
                 if new_key in raw and raw[new_key] is not None:
                     # New key already present and set — the legacy line is stale.
                     changed.append(f"{key} dropped ({new_key} authoritative)")
+                    keys_removed.add(key)
                     continue
                 out.append(f"{new_key}={line.split('=', 1)[1]}")
                 changed.append(f"{key} -> {new_key}")
+                keys_removed.add(key)
+                keys_written.add(new_key)
                 continue
             out.append(line)
         if changed:
             path.write_text("".join(out))
+            from shared.env_audit import record_env_write
+
+            record_env_write(path, keys_written, keys_removed, site="migrate_rename_env_keys")
     return changed
 
 
@@ -309,33 +331,46 @@ def migrate_skip_alias_env_keys(env_path: Path) -> list[str]:
     """
     if not env_path.exists():
         return []
-    raw = dotenv_values(env_path)
-    changed: list[str] = []
-    lines = env_path.read_text().splitlines(keepends=True)
-    out: list[str] = []
-    for line in lines:
-        key = line.split("=", 1)[0].strip()
-        if key not in _SKIP_ALIAS_RENAMES:
-            out.append(line)
-            continue
-        new_key = _SKIP_ALIAS_RENAMES[key]
-        if new_key in raw and raw[new_key] is not None:
-            # New key already present and set — the legacy line is stale.
-            changed.append(f"{key} dropped ({new_key} authoritative)")
-            continue
-        value = line.split("=", 1)[1] if "=" in line else ""
-        token = value.strip().lower()
-        if token in _SKIP_ALIAS_TRUE:
-            out.append(f"{new_key}=false")
-            changed.append(f"{key}=true -> {new_key}=false")
-        elif token in _SKIP_ALIAS_FALSE:
-            out.append(f"{new_key}=true")
-            changed.append(f"{key}=false -> {new_key}=true")
-        else:
-            # Unparseable — keep the line verbatim; Settings will fail fast.
-            out.append(line)
-    if changed:
-        env_path.write_text("".join(out))
+    with file_lock(env_lock_path(env_path), timeout_s=ENV_LOCK_TIMEOUT_S):
+        raw = dotenv_values(env_path)
+        changed: list[str] = []
+        keys_written: set[str] = set()
+        keys_removed: set[str] = set()
+        lines = env_path.read_text().splitlines(keepends=True)
+        out: list[str] = []
+        for line in lines:
+            key = line.split("=", 1)[0].strip()
+            if key not in _SKIP_ALIAS_RENAMES:
+                out.append(line)
+                continue
+            new_key = _SKIP_ALIAS_RENAMES[key]
+            if new_key in raw and raw[new_key] is not None:
+                # New key already present and set — the legacy line is stale.
+                changed.append(f"{key} dropped ({new_key} authoritative)")
+                keys_removed.add(key)
+                continue
+            value = line.split("=", 1)[1] if "=" in line else ""
+            token = value.strip().lower()
+            if token in _SKIP_ALIAS_TRUE:
+                out.append(f"{new_key}=false")
+                changed.append(f"{key}=true -> {new_key}=false")
+                keys_removed.add(key)
+                keys_written.add(new_key)
+            elif token in _SKIP_ALIAS_FALSE:
+                out.append(f"{new_key}=true")
+                changed.append(f"{key}=false -> {new_key}=true")
+                keys_removed.add(key)
+                keys_written.add(new_key)
+            else:
+                # Unparseable — keep the line verbatim; Settings will fail fast.
+                out.append(line)
+        if changed:
+            env_path.write_text("".join(out))
+            from shared.env_audit import record_env_write
+
+            record_env_write(
+                env_path, keys_written, keys_removed, site="migrate_skip_alias_env_keys"
+            )
     return changed
 
 
@@ -378,7 +413,7 @@ def migrate_host_json_to_env() -> None:
     for name, value in to_write.items():
         _ensure_migratable(name, value)
     if to_write:
-        write_fields(to_write, set())
+        write_fields(to_write, set(), audit_site="migrate_host_json_to_env")
     archived = src.parent / (src.name + ".migrated")
     try:
         src.rename(archived)

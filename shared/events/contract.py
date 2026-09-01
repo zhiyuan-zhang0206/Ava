@@ -731,8 +731,10 @@ class EventSpec:
     doc: str = ""
 
 
-def _audit(name: str, doc: str, *, payload: Any | None = None) -> EventSpec:
-    return EventSpec(name=name, category="audit", tier="business", payload=payload, doc=doc)
+def _audit(
+    name: str, doc: str, *, payload: Any | None = None, tier: EventTier = "business"
+) -> EventSpec:
+    return EventSpec(name=name, category="audit", tier=tier, payload=payload, doc=doc)
 
 
 def _telemetry_audit(name: str, doc: str, *, payload: Any | None = None) -> EventSpec:
@@ -800,6 +802,15 @@ EVENTS: dict[str, EventSpec] = {
         "computer_action",
         "computer-use desktop action (executed or refused)",
         payload=ComputerAction,
+    ),
+    "env_write": _audit(
+        "env_write",
+        "official .env config write (actor and keys; values never recorded)",
+    ),
+    "env_unauthorized_write": _audit(
+        "env_unauthorized_write",
+        "out-of-band .env modification detected (no official write recorded)",
+        tier="anomaly",
     ),
     "computer_session_start": _audit(
         "computer_session_start",

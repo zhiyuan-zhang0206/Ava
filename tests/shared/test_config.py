@@ -441,6 +441,22 @@ def test_bootstrap_fields_derived_from_scope() -> None:
     assert not ({"machine_name", "gateway_pidfile", "sdk_disable"} & set(BOOTSTRAP_FIELDS))
 
 
+def test_physical_backup_cluster_pinned_fields_are_never_bootstrap_served() -> None:
+    """A runner must never receive backup enablement without its host credentials."""
+    from shared.config import BOOTSTRAP_FIELDS, FIELD_INFOS, field_domain
+
+    physical_backup_cluster_pinned = {
+        name
+        for name, field in FIELD_INFOS.items()
+        if field_domain(name) == "physical_backup"
+        and isinstance(field.json_schema_extra, dict)
+        and field.json_schema_extra.get("scope") == "cluster-pinned"  # pyright: ignore[reportUnknownMemberType]
+    }
+
+    assert physical_backup_cluster_pinned
+    assert not (set(BOOTSTRAP_FIELDS) & physical_backup_cluster_pinned)
+
+
 def test_bootstrap_distributes_a_behavior_knob(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-default agent-behavior knob is now distributed to agent-runners."""
     from shared import config as cfg

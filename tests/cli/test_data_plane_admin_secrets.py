@@ -158,7 +158,7 @@ def test_missing_values_are_minted_activated_and_persisted(
     def _ensure_cluster_redis_acl(*_args: object, **kwargs: object) -> None:
         acl_calls.append(kwargs)
 
-    def _upsert_env(_path: Path, values: dict[str, str]) -> None:
+    def _upsert_env(_path: Path, values: dict[str, str], *, audit_site: str | None = None) -> None:
         writes.append(values)
 
     monkeypatch.setattr(split.secrets, "token_urlsafe", _token_urlsafe)

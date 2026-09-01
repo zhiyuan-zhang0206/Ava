@@ -53,7 +53,7 @@ def test_preflight_checks_bootstrap_bearer_and_rejection(monkeypatch: pytest.Mon
 def test_write_env_changes_only_the_bearer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     writes: list[tuple[Path, dict[str, str]]] = []
 
-    def _upsert(path: Path, values: dict[str, str]) -> None:
+    def _upsert(path: Path, values: dict[str, str], *, audit_site: str | None = None) -> None:
         writes.append((path, values))
 
     monkeypatch.setattr(rotate, "ava_home", lambda: tmp_path)

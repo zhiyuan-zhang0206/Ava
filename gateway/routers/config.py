@@ -45,6 +45,7 @@ from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 from shared import runtime_config
 from shared.config import env_override_values, get_config_metadata, settings
 from shared.config.editing import ConfigPatchPlan
+from shared.env_audit import check_env_integrity
 from shared.machine import MachineRole, machine_name
 
 router = APIRouter()
@@ -224,6 +225,7 @@ async def get_config(machine: str | None = None) -> ConfigView:
     machine-addressed view (`?machine=<name>`, even == this gateway on a dual-role
     box) deltas against that host's remotely-writable host set.
     """
+    await asyncio.to_thread(check_env_integrity)
     target = machine or machine_name()
     await asyncio.to_thread(_assert_machine_known, target)
     read = await _dispatch_config_read(target)
@@ -418,9 +420,12 @@ async def put_config(body: dict[str, object], machine: str | None = None) -> Con
         # process picks it up on its next restart (restart_required says which).
         host_result = await _dispatch_config_write(target, plan.host_body, local=True)
         cluster_changed: set[str] = set()
-        if host_result.applied:
+        if host_result.applied and (plan.cluster_writes or plan.cluster_removals):
             await asyncio.to_thread(
-                runtime_config.write_fields, plan.cluster_writes, plan.cluster_removals
+                runtime_config.write_fields,
+                plan.cluster_writes,
+                plan.cluster_removals,
+                audit_site="gateway_config_put",
             )
             cluster_changed = set(plan.cluster_writes) | plan.cluster_removals
         cluster_restart = {
