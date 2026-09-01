@@ -337,7 +337,7 @@ class FeishuAdapter(IMAdapter):
             if chat_id:
                 self._poll_chats.add(chat_id)
                 logger.info(
-                    "FeishuAdapter: poller registered chat %s for open_id %s", chat_id, open_id
+                    "FeishuAdapter: poller registered chat {} for open_id {}", chat_id, open_id
                 )
         except Exception as exc:
             logger.debug("FeishuAdapter: chat registration failed: {}", exc)
@@ -369,7 +369,7 @@ class FeishuAdapter(IMAdapter):
             )
         self._poll_task = asyncio.create_task(self._poll_loop(interval))
         logger.info(
-            "FeishuAdapter: poller started interval=%.1fs chats=%s",
+            "FeishuAdapter: poller started interval={:.1f}s chats={}",
             interval,
             sorted(self._poll_chats),
         )
@@ -393,7 +393,7 @@ class FeishuAdapter(IMAdapter):
                             failed += 1
                     except Exception as exc:
                         failed += 1
-                        logger.error("FeishuAdapter: poll failed chat=%s: {}", chat_id, exc)
+                        logger.error("FeishuAdapter: poll failed chat={}: {}", chat_id, exc)
             except Exception:
                 failed = total
                 logger.exception("FeishuAdapter: poll round failed")
@@ -439,7 +439,7 @@ class FeishuAdapter(IMAdapter):
         response = await asyncio.to_thread(self._rest_client.im.v1.message.list, request)
         if response.code != 0:
             logger.warning(
-                "FeishuAdapter: poll list failed chat=%s code=%s msg=%s",
+                "FeishuAdapter: poll list failed chat={} code={} msg={}",
                 chat_id,
                 response.code,
                 getattr(response, "msg", ""),
@@ -507,11 +507,11 @@ class FeishuAdapter(IMAdapter):
                 retries = self._poison_retries.get(key, 0) + 1
                 self._poison_retries[key] = retries
                 if retries < POISON_MAX_RETRIES:
-                    logger.exception("FeishuAdapter: poll inbound failed chat=%s", chat_id)
+                    logger.exception("FeishuAdapter: poll inbound failed chat={}", chat_id)
                     break  # do not advance past the failure; retry next round
                 self._poison_retries.pop(key, None)
                 logger.error(
-                    "FeishuAdapter: poll inbound failed %d times chat=%s msg=%s; skipping message",
+                    "FeishuAdapter: poll inbound failed {} times chat={} msg={}; skipping message",
                     retries,
                     chat_id,
                     item.message_id,
