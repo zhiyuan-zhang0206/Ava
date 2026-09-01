@@ -759,7 +759,7 @@
       },
       "get": {
         "summary": "Get Agent Messages",
-        "description": "Raw state.messages for one agent — the data layer beneath the\nrendered GET .../timeline view. Consumers (ops scripts / other agents /\nevals) get each message as a LangChain BaseMessage `model_dump()`\n(type / content / tool_calls / id / additional_kwargs / ...) rather than\nthe per-block TimelineItem rendering.\n\nSame path as `POST /api/agents/{id}/messages` but different method: the\nPOST enqueues a new chat inbound for delivery; this GET reads back the\nfull conversation history.\n\nWindowing is an absolute-integer-index analog of the timeline's tail-window\nmode (the timeline cursor is an `item_id` string + `has_more`; here the\ncursor is an absolute index into `state.messages`). No `limit` and no\n`before` returns every message (`start_index=0`). `before=<index>` without\n`limit` returns everything before the cursor — the prefix\n`state.messages[0:before]`. With `limit`, the newest `limit` messages are\nreturned by default; `before=<index>` (exclusive) pages further back — the\nwindow is the `limit` messages immediately older than `state.messages[before]`.\n`messages[i]` corresponds to `state.messages[start_index + i]`; `msg_count`\nis the total length.\n\n404: agent_id does not exist (same precondition as the timeline GET).\n503: the checkpoint store could not be read — a programmatic data endpoint\n    does not disguise a read failure as an empty history; the caller retries\n    or checks store health.",
+        "description": "Raw state.messages for one agent — the data layer beneath the\nrendered GET .../timeline view. Consumers (ops scripts / other agents /\nevals) get each message as a LangChain BaseMessage `model_dump()`\n(type / content / tool_calls / id / additional_kwargs / ...) rather than\nthe per-block TimelineItem rendering.\n\nSame path as `POST /api/agents/{id}/messages` but different method: the\nPOST enqueues a new chat inbound for delivery; this GET reads back the\nfull conversation history.\n\nWindowing is an absolute-integer-index analog of the timeline's tail-window\nmode (the timeline cursor is an `item_id` string + `has_more`; here the\ncursor is an absolute index into `state.messages`). No `limit` returns the\nnewest 100 messages; `before=<index>` without a limit returns the newest\n100 messages before that exclusive cursor. An explicit `limit` (1..10000)\npreserves the requested page size. `messages[i]` corresponds to\n`state.messages[start_index + i]`; `msg_count` is the total length, and\n`has_more` tells the caller whether `start_index` can be supplied as the\nnext `before` cursor for an older page.\n\n404: agent_id does not exist (same precondition as the timeline GET).\n503: the checkpoint store could not be read — a programmatic data endpoint\n    does not disguise a read failure as an empty history; the caller retries\n    or checks store health.",
         "operationId": "get_agent_messages_api_agents__agent_id__messages_get",
         "parameters": [
           {
@@ -6870,16 +6870,21 @@
           "start_index": {
             "type": "integer",
             "title": "Start Index"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
           }
         },
         "type": "object",
         "required": [
           "messages",
           "msg_count",
-          "start_index"
+          "start_index",
+          "has_more"
         ],
         "title": "AgentMessagesResponse",
-        "description": "GET /api/agents/{id}/messages response — the raw, unrendered\nstate.messages for programmatic consumers (ops scripts / other agents /\nevals). The rendered, frontend-facing view is GET .../timeline; this is\nthe data layer beneath it.\n\n`messages[i]` is one LangChain BaseMessage `model_dump()` (raw fields:\ntype / content / tool_calls / id / additional_kwargs / ...) and\ncorresponds to `state.messages[start_index + i]`. `msg_count` is the\ntotal length of state.messages; `start_index` is the absolute index of\nthe first returned message (0 for a full / un-windowed read). Together\nthey let a paging consumer place the window without inferring offsets."
+        "description": "GET /api/agents/{id}/messages response — the raw, unrendered\nstate.messages for programmatic consumers (ops scripts / other agents /\nevals). The rendered, frontend-facing view is GET .../timeline; this is\nthe data layer beneath it.\n\n`messages[i]` is one LangChain BaseMessage `model_dump()` (raw fields:\ntype / content / tool_calls / id / additional_kwargs / ...) and\ncorresponds to `state.messages[start_index + i]`. `msg_count` is the\ntotal length of state.messages; `start_index` is the absolute index of\nthe first returned message. `has_more` reports whether older messages\nexist; when true, `start_index` is the exclusive `before` cursor for the\nnext older page."
       },
       "AgentMetricsItem": {
         "properties": {

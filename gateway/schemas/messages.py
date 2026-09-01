@@ -268,13 +268,15 @@ class AgentMessagesResponse(BaseModel):
     type / content / tool_calls / id / additional_kwargs / ...) and
     corresponds to `state.messages[start_index + i]`. `msg_count` is the
     total length of state.messages; `start_index` is the absolute index of
-    the first returned message (0 for a full / un-windowed read). Together
-    they let a paging consumer place the window without inferring offsets.
+    the first returned message. `has_more` reports whether older messages
+    exist; when true, `start_index` is the exclusive `before` cursor for the
+    next older page.
     """
 
     messages: list[dict[str, Any]]
     msg_count: int
     start_index: int
+    has_more: bool
 
 
 class LastMessageResponse(BaseModel):

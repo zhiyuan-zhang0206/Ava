@@ -543,14 +543,13 @@ export interface paths {
          *
          *     Windowing is an absolute-integer-index analog of the timeline's tail-window
          *     mode (the timeline cursor is an `item_id` string + `has_more`; here the
-         *     cursor is an absolute index into `state.messages`). No `limit` and no
-         *     `before` returns every message (`start_index=0`). `before=<index>` without
-         *     `limit` returns everything before the cursor — the prefix
-         *     `state.messages[0:before]`. With `limit`, the newest `limit` messages are
-         *     returned by default; `before=<index>` (exclusive) pages further back — the
-         *     window is the `limit` messages immediately older than `state.messages[before]`.
-         *     `messages[i]` corresponds to `state.messages[start_index + i]`; `msg_count`
-         *     is the total length.
+         *     cursor is an absolute index into `state.messages`). No `limit` returns the
+         *     newest 100 messages; `before=<index>` without a limit returns the newest
+         *     100 messages before that exclusive cursor. An explicit `limit` (1..10000)
+         *     preserves the requested page size. `messages[i]` corresponds to
+         *     `state.messages[start_index + i]`; `msg_count` is the total length, and
+         *     `has_more` tells the caller whether `start_index` can be supplied as the
+         *     next `before` cursor for an older page.
          *
          *     404: agent_id does not exist (same precondition as the timeline GET).
          *     503: the checkpoint store could not be read — a programmatic data endpoint
@@ -3891,8 +3890,9 @@ export interface components {
          *     type / content / tool_calls / id / additional_kwargs / ...) and
          *     corresponds to `state.messages[start_index + i]`. `msg_count` is the
          *     total length of state.messages; `start_index` is the absolute index of
-         *     the first returned message (0 for a full / un-windowed read). Together
-         *     they let a paging consumer place the window without inferring offsets.
+         *     the first returned message. `has_more` reports whether older messages
+         *     exist; when true, `start_index` is the exclusive `before` cursor for the
+         *     next older page.
          */
         AgentMessagesResponse: {
             /** Messages */
@@ -3903,6 +3903,8 @@ export interface components {
             msg_count: number;
             /** Start Index */
             start_index: number;
+            /** Has More */
+            has_more: boolean;
         };
         /**
          * AgentMetricsItem
