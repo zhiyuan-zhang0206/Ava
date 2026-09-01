@@ -304,10 +304,8 @@ def pool(
 ) -> ConnectionPool:
     """Open a ConnectionPool on the cluster Postgres (opened eagerly).
 
-    Same role as connect() for the long-lived daemon pools that all spelled out
-    the identical `ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2,
-    open=True)`. Dials `settings.data_plane.db_url` (the one access URL — PgBouncer
-    when enabled) unless `direct=True`. The caller owns the pool and must `close()` it.
+    Long-lived callers dial the cluster's one access URL (PgBouncer when
+    enabled) unless `direct=True`; the caller owns and closes the pool.
 
     `min_size` / `max_size` default to the config fields (themselves the
     historical 1 / 2), so a remote/SaaS plane tunes its pool from config; an
@@ -317,16 +315,8 @@ def pool(
     exist for short-lived read pools whose callers must preserve a direct-read
     contract while still inheriting the shared pool's transport settings.
 
-    **This function is the only sanctioned way to build a sync pool**, because the
-    two things a pool must carry are decided here rather than restated per site:
-    `prepare_threshold=None` (transaction-pooling-safe borrows — see connect()) and
-    `PG_KEEPALIVE_KWARGS`. The keepalives are the half of it a call site is likely
-    to forget, and the one whose absence is invisible until it matters: pool
-    connections are long-lived, so a runner that sleeps or changes networks wakes
-    holding dead TCP flows, and a query already in flight on a borrowed half-dead
-    socket has no application-level bound — it waits out the OS TCP-retransmit
-    timeout. `scripts/lint_pool_keepalives.py` fails any new `ConnectionPool(` built
-    outside this function without them.
+    This only sanctioned sync-pool builder applies `prepare_threshold=None`,
+    `PG_KEEPALIVE_KWARGS`; `scripts/lint_pool_keepalives.py` rejects bypasses.
 
     `timeout` bounds how long `pool.connection()` waits for a connection before
     raising `PoolTimeout`. It is worth knowing about, not just tuning: `open=True`

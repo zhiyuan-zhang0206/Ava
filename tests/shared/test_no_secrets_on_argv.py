@@ -337,15 +337,21 @@ def test_self_respawn_fallback(secret_env: None, monkeypatch: pytest.MonkeyPatch
 
     import psycopg
 
+    from agent import db as agent_db
     from agent.db import schedule_self_respawn
 
     class _FakeCursor:
         rowcount = 1
 
-        def execute(self, *_a: Any, **_kw: Any) -> None:
-            pass
+        def __init__(self) -> None:
+            self.query = ""
+
+        def execute(self, query: str, *_a: Any, **_kw: Any) -> None:
+            self.query = query
 
         def fetchone(self) -> tuple[object, object]:
+            if self.query.startswith("SELECT status"):
+                return ("restarting", None)
             return ({"deepseek_api_key": _API_KEY}, None)
 
         def __enter__(self) -> _FakeCursor:
@@ -364,6 +370,8 @@ def test_self_respawn_fallback(secret_env: None, monkeypatch: pytest.MonkeyPatch
     registered: list[Any] = []
     monkeypatch.setattr(atexit, "register", registered.append)
     monkeypatch.setattr(time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    clock = iter((0.0, 0.0, agent_db.self_respawn_restarter_grace_s()))
+    monkeypatch.setattr(agent_db.time, "monotonic", lambda: next(clock))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(psycopg, "connect", lambda *_a, **_kw: _FakeConn())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     launched: list[tuple[list[str], dict[str, str]]] = []
     monkeypatch.setattr(
