@@ -75,7 +75,20 @@ def _run_agent_runner_self_update(
     )
 
     owned_generation = handoff_generation
-    if not post_checkout and not try_acquire_updater_lock():
+    if post_checkout:
+        # The pre-checkout image's flock must have survived the POSIX exec:
+        # acquiring the lock here would mean it did not, and running the
+        # stop/start leg unlocked would invite a concurrent updater into the
+        # same checkout (task #1181's race). Fail fast rather than find out
+        # on the host. The Windows continuation is a child that holds no lock
+        # by design (its pre-exec parent waits and owns cleanup), so the
+        # guard is POSIX-only.
+        if os.name != "nt" and try_acquire_updater_lock():
+            raise RuntimeError(
+                "post-checkout updater unexpectedly acquired the updater lock — "
+                "the pre-checkout flock did not survive the exec boundary"
+            )
+    elif not try_acquire_updater_lock():
         # Mutual exclusion first: two concurrent updaters on one host race each
         # other's checkout/converge writes (win 2026-08-11, task #1181 — a second
         # updater tore the schtasks XML mid-write and converge failed with
@@ -556,8 +569,13 @@ def main(argv: list[str] | None = None) -> int:
         help="revision to restore if the checked-out tree fails migration-layout validation",
     )
     args = parser.parse_args(argv)
-    if args.post_checkout and args.from_sha is None:
-        parser.error("--post-checkout requires --from-sha")
+    if args.post_checkout:
+        if args.target_sha is None:
+            parser.error("--post-checkout requires --target-sha")
+        if args.from_sha is None:
+            parser.error("--post-checkout requires --from-sha")
+        if args.restart_only:
+            parser.error("--post-checkout is incompatible with --restart-only")
     return _run_agent_runner_self_update(
         _repo_root(),
         target_sha=args.target_sha,

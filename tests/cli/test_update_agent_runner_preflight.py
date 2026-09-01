@@ -24,6 +24,7 @@ import pytest
 
 import cli.commands as _ns
 from cli.commands import _update_agent_runner as ar
+from shared import host_deploy_state
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.migrations import MigrationLayoutError
 from shared.platform_backend import MacPlatformBackend, WindowsPlatformBackend
@@ -58,6 +59,7 @@ def test_agent_runner_reverts_and_skips_stop_on_broken_layout(
         checkouts.append(sha)
         return "oldsha0000"  # from_sha returned by the forward checkout
 
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType] — post-checkout POSIX guard: flock survived
     monkeypatch.setattr(ar, "git_checkout_sha", _checkout)
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "run_uv_sync", lambda _repo: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
@@ -83,6 +85,7 @@ def test_agent_runner_proceeds_to_stop_on_valid_layout(
     checkouts: list[str] = []
     stopped: list[bool] = []
 
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType] — post-checkout POSIX guard: flock survived
     monkeypatch.setattr(ar, "git_checkout_sha", lambda sha: checkouts.append(sha) or "oldsha0000")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "run_uv_sync", lambda _repo: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
@@ -109,6 +112,7 @@ def test_agent_runner_aborts_when_preflight_probes_fail(
     """When preflight probes fail, abort without stopping services."""
     stopped: list[bool] = []
 
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType] — post-checkout POSIX guard: flock survived
     monkeypatch.setattr(ar, "git_checkout_sha", lambda _sha: "oldsha0000")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "run_uv_sync", lambda _repo: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]

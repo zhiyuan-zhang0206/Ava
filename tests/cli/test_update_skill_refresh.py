@@ -18,6 +18,7 @@ import pytest
 import cli.commands as _cli
 from cli.commands import _update_agent_runner as _runner
 from cli.commands import _update_local as _local
+from shared import host_deploy_state
 
 
 @pytest.fixture
@@ -93,6 +94,7 @@ def test_runner_leg_refreshes_after_checkout(monkeypatch: pytest.MonkeyPatch, re
     def _record(_repo: Path, _ava_bin: Path) -> None:
         refresh_calls.append((_repo, _ava_bin))
 
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType] — post-checkout POSIX guard
     monkeypatch.setattr(_runner, "validate_migrations_at_ref", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_runner, "platform_backend", _FakeBackend)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_runner, "_refresh_builtin_skills", _record)  # pyright: ignore[reportUnknownArgumentType]
