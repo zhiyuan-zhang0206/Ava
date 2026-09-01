@@ -9,13 +9,13 @@ health and the total event rate. Replaces the information content of the
 retired Metrics page (shared/metrics.py).
 
 Migrated plugin -> core (user ruling 2026-08-06: core metrics + plugin
-metrics two-tier architecture): the 15 MetricSpec definitions below are
-verbatim from the retired plugin's metrics.py, registered with
-``core_metrics.register_core_metric`` instead of ``register_metric`` — the
-same query safety validation, no PluginContext, ``plugin`` auto-filled to
-"core". Registration happens at import time (``core_metrics.collect_core_metrics``
-imports this module through the ``_CORE_DEFINITION_MODULES`` tuple); templates
-use the {event_name}/{category} placeholders and, on inspector-only metrics, the
+metrics two-tier architecture): the 21 MetricSpec definitions below register
+with ``core_metrics.register_core_metric`` instead of ``register_metric`` —
+the same query safety validation, no PluginContext, ``plugin`` auto-filled to
+"core". Registration happens at import time
+(``core_metrics.collect_core_metrics`` imports this module through the
+``_CORE_DEFINITION_MODULES`` tuple); templates use the
+{event_name}/{category} placeholders and, on inspector-only metrics, the
 {{agent_id}} placeholder.
 
 Query dialect (Task #1280): every query reads the event stream from Loki —
@@ -240,6 +240,56 @@ core_metrics.register_core_metric(
             "(rate(ava_turn_end_duration_seconds_bucket[10m])))",
         ],
         target_names=["p95_s", "p50_s"],
+        output=["grafana"],
+    )
+)
+
+
+# ── compaction ───────────────────────────────────────────────────────────────
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="ava_obs_compaction_summary_history_ratio",
+        title="Compaction ratio (summary/history)",
+        description=(
+            "Mean percentage of discarded conversation characters retained in "
+            "the replacement summary. The completed event is emitted where "
+            "the history replacement is applied, not when a compact request "
+            "or agent-authored summary is created; empty histories omit the "
+            "ratio rather than manufacturing a zero denominator. "
+            "event_name='compaction_completed', category='telemetry'."
+        ),
+        event_name="compaction_completed",
+        category="telemetry",
+        unit="percent",
+        panel="timeseries",
+        query_type="logql",
+        query=(
+            '100 * avg_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+            "category={category} | unwrap attributes_summary_history_ratio [$__interval])"
+        ),
+        target_names=["summary/history %"],
+        output=["grafana"],
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="ava_obs_compaction_rate",
+        title="Completed compactions",
+        description=(
+            "Applied history replacements per minute (5-minute buckets / 5). "
+            "Counts compaction_completed rather than compact requests, so the "
+            "series represents replacements that actually occurred. "
+            "event_name='compaction_completed', category='telemetry'."
+        ),
+        event_name="compaction_completed",
+        category="telemetry",
+        unit="short",
+        panel="timeseries",
+        query_type="logql",
+        query=_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
+        target_names=["compactions/min"],
         output=["grafana"],
     )
 )

@@ -49,6 +49,7 @@ import os
 import signal
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -68,6 +69,11 @@ import shared.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side e
 # isort: split
 from shared.log import init_subprocess_logger, logger
 from shared.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
+
+# Covers child runtime setup after initial module imports, ending immediately
+# before agent-authored code begins. The parent-owned exec duration includes
+# this interval but cannot isolate it from user code.
+_CHILD_BOOT_STARTED_AT = time.perf_counter()
 
 # Watchdog margin beyond (timeout + parent's kill grace) before the child
 # hard-exits — overridable so tests do not wait for the 5s default.
@@ -202,6 +208,16 @@ def _init_logger(agent_id: int | None) -> None:
             "for this exec reach the file sink only",
             agent_id=agent_id,
         )
+
+
+def _emit_child_boot_timing() -> None:
+    """Record the child-ready boundary before executing agent-authored code."""
+    duration_ms = (time.perf_counter() - _CHILD_BOOT_STARTED_AT) * 1000
+    logger.info(
+        "exec child boot completed in {duration_ms:.1f}ms",
+        event="exec_child_boot",
+        duration_ms=duration_ms,
+    )
 
 
 def _build_state_slot(state: dict[str, Any] | None) -> None:
@@ -343,6 +359,7 @@ def _run(request_path: str, result_path: str) -> None:
         _arm_watchdog(request.timeout_s)
 
     try:
+        _emit_child_boot_timing()
         _run_code(request.code, payload)
         # Deliver queued SDK-call events before a clean exit. sync() lands the
         # pipeline's held batch (queue + drain-thread batch), flush() then

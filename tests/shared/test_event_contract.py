@@ -124,8 +124,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # reconcile close path's re-serve notice) raises it to 129; `llm_retry`
     # records retry duration and `watchdog_tick` records freshness, bringing
     # the current total to 132; exec_editable_install_poisoned (the pre-exec
-    # poisoned-install guard, Task #2285) raises it to 133.
-    assert len(_TELEMETRY_KINDS) == 133
+    # poisoned-install guard, Task #2285) raises it to 133; exec_child_boot
+    # and compaction_completed (Task #5643) bring the current total to 135.
+    assert len(_TELEMETRY_KINDS) == 135
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
@@ -161,6 +162,22 @@ def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
         ("checkpoint_table_sizes", "checkpoints_live"): "gauge",
         ("checkpoint_table_sizes", "writes_live"): "gauge",
     }
+
+
+def test_exec_child_boot_payload_exposes_ready_duration() -> None:
+    """The exec-child readiness event owns the boot duration measurement."""
+    assert payload_keys("exec_child_boot") == ("duration_ms",)
+
+
+def test_compaction_completion_payload_exposes_ratio_and_frequency() -> None:
+    """Completed compactions report a character ratio and an event counter."""
+    assert payload_keys("compaction_completed") == (
+        "compact_kind",
+        "compactions",
+        "history_chars",
+        "summary_chars",
+        "summary_history_ratio",
+    )
 
 
 def test_agent_registry_payload_and_metric_disposition() -> None:

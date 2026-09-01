@@ -5286,6 +5286,120 @@
      "legendFormat": "{{agent_id}}"
     }
    ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Mean percentage of discarded conversation characters retained in the replacement summary. The completed event is emitted where the history replacement is applied, not when a compact request or agent-authored summary is created; empty histories omit the ratio rather than manufacturing a zero denominator. event_name='compaction_completed', category='telemetry'.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "percent"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 278
+   },
+   "id": 50,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Compaction ratio (summary/history)",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "100 * avg_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | unwrap attributes_summary_history_ratio [$__interval])",
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "summary/history %"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Applied history replacements per minute (5-minute buckets / 5). Counts compaction_completed rather than compact requests, so the series represents replacements that actually occurred. event_name='compaction_completed', category='telemetry'.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 278
+   },
+   "id": 51,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Completed compactions",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" [5m])) / 5",
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "compactions/min"
+    }
+   ]
   }
  ],
  "refresh": "10m",

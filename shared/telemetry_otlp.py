@@ -154,6 +154,11 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("llm_usage", "price_hit"): None,
     ("llm_usage", "price_out"): None,
     ("llm_usage", "cost_usd"): "counter",
+    # A compaction's source and replacement sizes are independent samples,
+    # not cumulative byte counts. Its explicit `compactions=1` field remains
+    # the counter used for frequency.
+    ("compaction_completed", "history_chars"): "histogram",
+    ("compaction_completed", "summary_chars"): "histogram",
     # Absolute unresolved/dismissed counts are non-monotonic. An
     # ObservableGauge holds the last value rather than adding each
     # five-minute sample forever.

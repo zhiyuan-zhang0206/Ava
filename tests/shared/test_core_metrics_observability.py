@@ -1,7 +1,7 @@
 """Core observability metrics pack tests (Task #882 migration, #1280 Loki).
 
 Covers the generic observability pack migrated from the retired
-``ava_observability`` plugin to core metrics: registration shape (19 metrics
+``ava_observability`` plugin to core metrics: registration shape (21 metrics
 across grafana / inspector surfaces, plugin == "core"), the LogQL template
 safety validation, and every rendered query's structure — the stream selector,
 the ``| json`` pipeline, the event_name/category placeholders, and the
@@ -28,6 +28,20 @@ EXPECTED = {
     "ava_obs_llm_error_rate": ("timeseries", ["grafana", "inspector"], "llm_usage", "telemetry", 4),
     "ava_obs_turn_ok_rate": ("timeseries", ["grafana", "inspector"], "turn_end", "telemetry", 1),
     "ava_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 2),
+    "ava_obs_compaction_summary_history_ratio": (
+        "timeseries",
+        ["grafana"],
+        "compaction_completed",
+        "telemetry",
+        1,
+    ),
+    "ava_obs_compaction_rate": (
+        "timeseries",
+        ["grafana"],
+        "compaction_completed",
+        "telemetry",
+        1,
+    ),
     "ava_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 6),
     "ava_obs_syntax_fix_by_kind": ("timeseries", ["grafana"], "syntax_fix", "telemetry", 7),
     "ava_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 1),
@@ -224,6 +238,25 @@ def test_turn_duration_uses_the_alert_histogram_quantiles() -> None:
         "histogram_quantile(0.5, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
     ]
     assert spec.target_names == ["p95_s", "p50_s"]
+
+
+def test_compaction_panels_measure_applied_ratio_and_frequency() -> None:
+    """Only completed compactions feed the ratio and rate panels.
+
+    Requests are audit records and agent-authored summaries can still lose a
+    claim race; the completed event is emitted at the history replacement.
+    """
+    _load_pack()
+    rendered = _all_rendered()
+    ratio = rendered["ava_obs_compaction_summary_history_ratio"][0]
+    rate = rendered["ava_obs_compaction_rate"][0]
+
+    assert "unwrap attributes_summary_history_ratio" in ratio
+    assert "100 * avg_over_time" in ratio
+    assert 'event_name="compaction_completed"' in ratio
+    assert 'event_name="compaction_completed"' in rate
+    assert "sum(count_over_time(" in rate
+    assert rate.endswith(" / 5")
 
 
 def test_halt_breakdown_buckets() -> None:
