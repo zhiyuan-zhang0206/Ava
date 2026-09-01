@@ -346,10 +346,12 @@ def agent_id_from_channel(channel: str) -> int | None:
 class PendingInboundWake:
     """One local hosted agent with a pending inbound row.
 
-    ``stale`` means BOTH that one pending inbound has passed the idling grace
-    and that the agent has made no completed-turn progress for that grace. A
-    fresh pending row still receives the scan's normal wake, but does not
-    interrupt a legitimate turn that happens to be running.
+    ``stale`` means BOTH that one pending inbound has passed the running
+    turn grace and that the agent has made no completed-turn progress for
+    that grace (the same grace process mode's wedged controller applies to
+    running turns; an active turn may legitimately run up to the exec +
+    LLM-retry budget). A fresh pending row still receives the scan's normal
+    wake, but does not interrupt a legitimate turn that happens to be running.
     """
 
     agent_id: int

@@ -470,15 +470,17 @@ class AgentHost:
         Every pending row gets a wake: this is the durable replacement for a
         lost Redis pub/sub notification. ``stale`` is intentionally stricter:
         both the pending row and the completed-turn activity clock must exceed
-        the idling threshold, so a newly-arrived message does not cancel a
-        legitimate long-running hosted turn merely because its previous LLM
-        step was old.
+        the running-turn grace (the same grace process mode's wedged
+        controller applies to running turns), so a newly-arrived message does
+        not cancel a legitimate long-running hosted turn merely because its
+        previous LLM step was old.
         """
         async with self._pool.connection() as conn:
             rows = await (
                 await conn.execute(
                     "SELECT m.id, "
-                    "  m.last_active_at < now() - make_interval(secs => %s) "
+                    "  (m.last_active_at IS NULL "
+                    "   OR m.last_active_at < now() - make_interval(secs => %s)) "
                     "  AND EXISTS ("
                     "    SELECT 1 FROM inbound_messages stale "
                     "    WHERE stale.agent_id = m.id AND stale.status = 'pending' "
