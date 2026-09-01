@@ -561,6 +561,98 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
         ava._boot._agent_id = original
 
 
+def test_dismissing_response_notice_refreshes_inspector_snapshot(
+    _load_activity_plugin: None,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Removing the dismiss snapshot refresh leaves the inspector stale."""
+    from gateway.routers import notices as notices_router
+
+    published_awaiting: list[list[str]] = []
+
+    def _capture_snapshot(conn: psycopg.Connection, published_agent_id: int) -> None:
+        snapshot = select_one(conn, published_agent_id)
+        assert snapshot is not None
+        published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
+
+    monkeypatch.setattr(
+        notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
+    )
+
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        ava.ui.notify("decision needed", require_response=True)  # type: ignore[attr-defined]
+        ava.ui.dismiss_notice()  # type: ignore[attr-defined]
+
+        # The first snapshot announces the newly posted question. Dismissal
+        # must publish a second, now-empty snapshot for the inspector.
+        assert published_awaiting == [["decision needed"], []]
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
+    _load_activity_plugin: None,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Each cross-type replacement announces both consumers' new state."""
+    from gateway.routers import notices as notices_router
+
+    published_awaiting: list[list[str]] = []
+    posted: list[int] = []
+    resolved: list[int] = []
+
+    def _capture_snapshot(conn: psycopg.Connection, published_agent_id: int) -> None:
+        snapshot = select_one(conn, published_agent_id)
+        assert snapshot is not None
+        published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
+
+    async def _capture_posted(_agent_id: int, notice_id: int, *_args: object) -> None:
+        posted.append(notice_id)
+
+    async def _capture_resolved(_agent_id: int, notice_id: int) -> None:
+        resolved.append(notice_id)
+
+    monkeypatch.setattr(
+        notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
+    )
+    monkeypatch.setattr(notices_router._ops, "publish_notice_posted", _capture_posted)
+    monkeypatch.setattr(notices_router._ops, "publish_notice_resolved", _capture_resolved)
+
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        ava.ui.notify("FYI old")  # type: ignore[attr-defined]
+        ava.ui.notify("question", require_response=True)  # type: ignore[attr-defined]
+        ava.ui.notify("FYI new")  # type: ignore[attr-defined]
+
+        db_conn.rollback()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, title FROM agent_notices WHERE agent_id = %s ORDER BY local_id",
+                (agent_id,),
+            )
+            notice_ids = {str(title): int(notice_id) for notice_id, title in cur.fetchall()}
+
+        # NoticeResolved evicts each old Inbox row; NoticePosted adds each new
+        # one. AgentUpdated shows the question appear, then disappear when its
+        # FYI replacement supersedes it.
+        assert resolved == [notice_ids["FYI old"], notice_ids["question"]]
+        assert posted == [
+            notice_ids["FYI old"],
+            notice_ids["question"],
+            notice_ids["FYI new"],
+        ]
+        assert published_awaiting == [["question"], []]
+    finally:
+        ava._boot._agent_id = original
+
+
 def test_notice_return_int_and_edit_dismiss_take_no_id(
     _load_activity_plugin: None, db_conn: psycopg.Connection
 ):

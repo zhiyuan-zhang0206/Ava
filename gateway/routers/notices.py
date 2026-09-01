@@ -492,14 +492,15 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
         with pool.connection() as conn, conn.cursor() as cur:
             # Auto-resolve any existing open notice (supersede).
             cur.execute(
-                "SELECT id, local_id FROM agent_notices "
+                "SELECT id, local_id, require_response FROM agent_notices "
                 "WHERE agent_id = %s AND resolved_at IS NULL FOR UPDATE",
                 (agent_id,),
             )
             existing = cur.fetchall()
             superseded_local: list[int] = []
             superseded_global: list[int] = []
-            for global_id, local_id in existing:
+            superseded_response_required = False
+            for global_id, local_id, require_response in existing:
                 cur.execute(
                     "UPDATE agent_notices SET resolved_at = now(), resolution = 'superseded' "
                     "WHERE id = %s",
@@ -513,6 +514,9 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
                 # snapshot refresh (audit cc-backend-runtime P2).
                 superseded_local.append(int(local_id))
                 superseded_global.append(int(global_id))
+                superseded_response_required = superseded_response_required or bool(
+                    require_response
+                )
             # Insert the new notice with the agent's next local id.
             cur.execute(
                 "INSERT INTO agent_notices "
@@ -535,10 +539,10 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
             if row is None:  # pragma: no cover — RETURNING always yields
                 raise RuntimeError("notice insert returned no row")
             notice_global_id, notice_local_id = int(row[0]), int(row[1])
-            # Publish only after the durable row is visible to the snapshot
+            # Publish only after the durable rows are visible to the snapshot
             # query; a pre-commit AgentUpdated would preserve the stale view.
             conn.commit()
-            if body.require_response:
+            if body.require_response or superseded_response_required:
                 _publish_response_required_snapshot(conn, agent_id)
             return notice_global_id, notice_local_id, superseded_global, superseded_local
 
@@ -662,19 +666,24 @@ async def patch_notice_edit(agent_id: int, body: NoticeEditIn, request: Request)
 @router.post("/api/agents/{agent_id}/notices/current/dismiss", status_code=204, response_model=None)
 async def post_notice_dismiss(agent_id: int, request: Request) -> Response:
     """Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice
-    contract): resolution 'withdrawn' + resolve event. No open notice ->
-    idempotent 204."""
+    contract): resolution 'withdrawn' + resolve event, plus an inspector
+    snapshot refresh when the withdrawn row required a response. No open notice
+    -> idempotent 204."""
 
     def _dismiss(pool: ConnectionPool) -> int | None:
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE agent_notices SET resolved_at = now(), resolution = 'withdrawn' "
-                "WHERE agent_id = %s AND resolved_at IS NULL RETURNING id",
+                "WHERE agent_id = %s AND resolved_at IS NULL RETURNING id, require_response",
                 (agent_id,),
             )
             row = cur.fetchone()
-            dismissed = int(row[0]) if row is not None else None
             conn.commit()
+            if row is None:
+                return None
+            dismissed, require_response = int(row[0]), bool(row[1])
+            if require_response:
+                _publish_response_required_snapshot(conn, agent_id)
             return dismissed
 
     dismissed = await asyncio.to_thread(_dismiss, request.app.state.db_pool)
