@@ -314,7 +314,13 @@ def test_disable_service_start_leaves_no_marker_in_the_session_home(
     from shared.config import settings
 
     marker = Path(settings.general.ava_home) / "disabled_services"
-    marker.unlink(missing_ok=True)  # the suite home is freshly provisioned per worker
+    # Never delete an upstream leak: if the marker is already in the shared
+    # session home, that is another test's ambient state to surface, not ours
+    # to hide (tests ambient-state audit H-2).
+    assert not marker.exists(), (
+        "an upstream test leaked the durable --disable-service marker into the "
+        "shared session home; failing here instead of cleaning it up keeps the leak visible"
+    )
     monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
