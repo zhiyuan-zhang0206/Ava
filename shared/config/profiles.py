@@ -91,6 +91,10 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "observability",
             # ops/spec.py gates the pitr-uploader roster entry on AVA_PITR_ENABLED.
             "physical_backup",
+            # shared/timing.py's IDLE_CLAIM_BACKSTOP_S clock (imported by the
+            # wedged controller) reads settings.agent.db_notify_wait_timeout_seconds
+            # — the restarter's assert_clock_lattice() evaluates it at startup.
+            "agent",
         }
     ),
 }
