@@ -16,6 +16,7 @@ tags:
 ## Selection
 
 - The reviewed JSON catalog is the sole volatile pricing source: every model has official-source provenance (`source_url` + `source_checked_at`) plus gapless effective periods, input-token tiers, and optional recurring UTC rate windows. The registry carries no duplicate price tuples.
+- Every catalog entry carries a schema-v2 `vendor`; its separation from the bare model key matches the cross-line billing-event schema ([`pricing_catalog_schema.md`](pricing_catalog_schema.md)).
 - `rates_at(model, at, input_tokens)` selects one exact 3-rate tuple `(cache_miss, cache_hit, out)` USD/M. `quote()` returns those rates and the computed cost atomically, so a scheduled boundary cannot split the event snapshot; `cost_usd()` remains the compatibility reader and returns `None` for unknown models.
 - Cache-hit and cache-miss input are priced separately on purpose — a 2-tuple once overestimated a 30-case batch by ~70x ($56.38 against $0.8).
 - Date-only future increases with no provider timezone use the documented conservative UTC+14 boundary and carry an `effective_time_note`; exact published instants are used unchanged.
