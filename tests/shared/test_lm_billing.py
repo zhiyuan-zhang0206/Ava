@@ -135,6 +135,9 @@ def test_emit_billing_from_message_skips_missing_usage_metadata(
         ("kimi-k2.7-code", "moonshot"),
         ("glm-5", "zhipu"),
         ("qwen3.8-max", "alibaba"),
+        # Alibaba family ids nest directly after the stem; a bare dash prefix
+        # would miss them, and a non-Alibaba "qwenfoo-*" must not be attributed.
+        ("qwenfoo-fast", None),
         ("unregistered-model", None),
     ],
 )
