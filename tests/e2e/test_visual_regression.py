@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Page, Route, expect
+from playwright.sync_api import Browser, Page, Route
 
 from tests.e2e._ports import FRONTEND_URL
+from tests.e2e._visual_snapshot import assert_visual_snapshot
 
 _AGENT = {
     "agent_id": 1,
@@ -113,28 +115,28 @@ def _open(page: Page, path: str) -> None:
     page.goto(f"{FRONTEND_URL}{path}", wait_until="domcontentloaded")
 
 
-def _assert_screenshot(page: Page, name: str) -> None:
-    expect(page).to_have_screenshot(
-        name,
-        animations="disabled",
-        caret="hide",
-        full_page=True,
-        max_diff_pixel_ratio=0.001,
-    )
-
-
 def test_home_visual_regression(visual_page: Page) -> None:
     """Desktop conversation shell stays visually stable."""
     _open(visual_page, "/")
     visual_page.wait_for_selector("textarea:not([disabled])", timeout=15_000)
-    _assert_screenshot(visual_page, "home.png")
+    assert_visual_snapshot(
+        visual_page,
+        test_file=Path(__file__).stem,
+        test_name="test_home_visual_regression",
+        name="home.png",
+    )
 
 
 def test_fleet_visual_regression(visual_page: Page) -> None:
     """Desktop fleet shell stays visually stable."""
     _open(visual_page, "/fleet")
     visual_page.wait_for_selector("text=Fleet", timeout=15_000)
-    _assert_screenshot(visual_page, "fleet.png")
+    assert_visual_snapshot(
+        visual_page,
+        test_file=Path(__file__).stem,
+        test_name="test_fleet_visual_regression",
+        name="fleet.png",
+    )
 
 
 def test_mobile_visual_regression(visual_page: Page) -> None:
@@ -142,4 +144,9 @@ def test_mobile_visual_regression(visual_page: Page) -> None:
     visual_page.set_viewport_size({"width": 390, "height": 844})
     _open(visual_page, "/")
     visual_page.wait_for_selector("textarea:not([disabled])", timeout=15_000)
-    _assert_screenshot(visual_page, "mobile.png")
+    assert_visual_snapshot(
+        visual_page,
+        test_file=Path(__file__).stem,
+        test_name="test_mobile_visual_regression",
+        name="mobile.png",
+    )

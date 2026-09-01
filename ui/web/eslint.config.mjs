@@ -112,6 +112,17 @@ export default tseslint.config(
     },
   },
 
+  // Build-budget scripts run under Node rather than the browser app runtime.
+  {
+    files: ["scripts/**/*.{js,mjs,cjs,ts}"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+  },
+
   // ── Next.js ──
   {
     plugins: { "@next/next": nextPlugin },
