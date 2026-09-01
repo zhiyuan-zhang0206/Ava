@@ -175,6 +175,22 @@ class ExecEnvelope(TypedDict):
     serialize_ms: float
 
 
+class ExecChildBoot(TypedDict):
+    """`exec_child_boot` payload — child bootstrap duration before agent code."""
+
+    duration_ms: float
+
+
+class CompactionCompleted(TypedDict):
+    """`compaction_completed` payload — one applied history replacement."""
+
+    compact_kind: str
+    compactions: int
+    history_chars: int
+    summary_chars: int
+    summary_history_ratio: float | None
+
+
 class ExecSubprocessKilled(TypedDict):
     """`exec_subprocess_killed` payload — a child survived the signal grace
     and the parent SIGKILLed its process group."""
@@ -917,6 +933,18 @@ EVENTS: dict[str, EventSpec] = {
         "exec_envelope",
         "exec envelope transfer cost (size + serialize time) — request snapshot / result delta",
         payload=ExecEnvelope,
+    ),
+    "exec_child_boot": _telemetry(
+        "exec_child_boot",
+        "exec child bootstrap duration before agent-authored code",
+        payload=ExecChildBoot,
+        tier="noise",
+    ),
+    "compaction_completed": _telemetry(
+        "compaction_completed",
+        "applied context compaction size reduction and completed count",
+        payload=CompactionCompleted,
+        tier="noise",
     ),
     "exec_cancelled": _telemetry("exec_cancelled", "execute_code cancelled", tier="anomaly"),
     "exec(timeout)": _telemetry(

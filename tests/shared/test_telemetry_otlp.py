@@ -270,6 +270,38 @@ def test_metric_mapping_int_counter_float_histogram(otlp_backend) -> None:
     assert "ava_llm_usage_ok" not in metrics  # bools are attributes, not metrics
 
 
+def test_compaction_completed_maps_size_samples_and_frequency_counter(otlp_backend) -> None:
+    """A completed compaction contributes distribution samples and one rate increment."""
+    backend, _, metric_reader = otlp_backend
+    backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
+        [
+            _event(
+                event_name="compaction_completed",
+                attributes={
+                    "compact_kind": "auto",
+                    "compactions": 1,
+                    "history_chars": 5000,
+                    "summary_chars": 1500,
+                    "summary_history_ratio": 0.3,
+                },
+            )
+        ]
+    )
+    backend.flush()  # pyright: ignore[reportUnknownMemberType]
+
+    metrics = _metrics(metric_reader)
+    count = metrics["ava_compaction_completed_compactions"].data.data_points[0]
+    assert count.value == 1
+    assert _attrs_of(count)["compact_kind"] == "auto"
+    for field, value in (("history_chars", 5000), ("summary_chars", 1500)):
+        sample = metrics[f"ava_compaction_completed_{field}"].data.data_points[0]
+        assert sample.count == 1
+        assert sample.sum == value
+    ratio = metrics["ava_compaction_completed_summary_history_ratio"].data.data_points[0]
+    assert ratio.count == 1
+    assert ratio.sum == 0.3
+
+
 def test_metrics_resource_carries_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(telemetry_otlp, "cluster_label", lambda: ".ava-preview")
 

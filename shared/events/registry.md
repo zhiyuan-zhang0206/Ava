@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 23 | events table |
-| telemetry (category=telemetry) | `events` | 133 | events table |
+| telemetry (category=telemetry) | `events` | 135 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -90,7 +90,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 133)
+## 3. Telemetry events (category=telemetry, 135)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -117,6 +117,8 @@ consumers: see the comments at each emit point.
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events |
 | `plugin_load_failed` | enabled plugin skipped because it failed to load (fail-soft) | anomaly | plugin, error | — | events |
 | `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events |
+| `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events |
+| `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, compactions, history_chars, summary_chars, summary_history_ratio | — | events |
 | `exec_cancelled` | execute_code cancelled | anomaly | — | — | events |
 | `exec(timeout)` | historical parenthesized name (migration target) | anomaly | — | — | events |
 | `exec(failed)` | historical parenthesized name (migration target) | anomaly | — | — | events |

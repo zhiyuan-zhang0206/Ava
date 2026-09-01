@@ -381,7 +381,9 @@ async def test_auto_compact_hook_returns_none_when_under_threshold(monkeypatch: 
     assert result is None
 
 
-async def test_auto_compact_hook_clears_history_and_parks_summary(monkeypatch: pytest.MonkeyPatch):
+async def test_auto_compact_hook_clears_history_and_parks_summary(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+):
     """Over threshold → the hook empties the window and hands the rebuild to
     `init_context`: messages is the REMOVE_ALL sentinel alone, the summary is
     parked as the tail to lay down behind the standing head, and the turn is
@@ -407,6 +409,21 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(monkeypatch: p
     assert isinstance(reset.tail[0], HumanMessage)  # pyright: ignore[reportUnknownMemberType]
     assert reset.resume == "llm"  # pyright: ignore[reportUnknownMemberType]
     assert result["goto"] == "init_context"
+    [monitoring] = [
+        record
+        for record in loguru_records
+        if record["extra"].get("event") == "compaction_completed"
+    ]
+    assert monitoring["extra"] | {"msg": None} == {
+        "agent_id": 1,
+        "compact_kind": "auto",
+        "compactions": 1,
+        "history_chars": 5000,
+        "summary_chars": len(_LONG_SUMMARY),
+        "summary_history_ratio": pytest.approx(len(_LONG_SUMMARY) / 5000),  # pyright: ignore[reportUnknownMemberType]
+        "event": "compaction_completed",
+        "msg": None,
+    }
 
 
 async def test_auto_compact_hook_skips_when_no_conversation(monkeypatch: pytest.MonkeyPatch):
@@ -818,7 +835,9 @@ async def test_compact_summary_replaces_whole_history_no_tail(
 
 
 async def test_compact_summary_emits_compact_done(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    loguru_records: list[dict[str, Any]],
 ):
     """When claim processes compact_summary (agent-written summary), emit CompactDone
     at the same place where history is replaced — so UI refreshes, aligning with auto path (agent/hooks/compact.py).
@@ -841,6 +860,23 @@ async def test_compact_summary_emits_compact_done(
 
     emitted = [call.args[0] for call in publisher.emit.call_args_list]
     assert any('"compact_done"' in e for e in emitted), f"no CompactDone emitted; saw {emitted}"
+    [monitoring] = [
+        record
+        for record in loguru_records
+        if record["extra"].get("event") == "compaction_completed"
+    ]
+    assert monitoring["extra"] | {"msg": None} == {
+        "agent_id": tid,
+        "compact_kind": "compact_summary",
+        "compactions": 1,
+        "history_chars": len("history-0") * 4,
+        "summary_chars": len("summary after compact"),
+        "summary_history_ratio": pytest.approx(  # pyright: ignore[reportUnknownMemberType]
+            len("summary after compact") / (len("history-0") * 4)
+        ),
+        "event": "compaction_completed",
+        "msg": None,
+    }
 
 
 async def test_consecutive_compacts_both_processed(

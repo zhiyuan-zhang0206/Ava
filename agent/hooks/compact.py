@@ -174,6 +174,35 @@ def conversation_messages(messages: list[AnyMessage]) -> list[AnyMessage]:
     return messages[1:] if has_system else messages
 
 
+def emit_compaction_monitoring(
+    messages: list[AnyMessage], summary: str, *, agent_id: int, compact_kind: str
+) -> None:
+    """Record one applied compaction's size reduction and completed count.
+
+    Requests and agent-authored summaries are audit events, but neither proves
+    that the history replacement happened. This event is emitted only by the
+    two paths that apply the replacement, so its counter is compaction
+    frequency. The ratio intentionally excludes Ava's standing system prompt:
+    it is rebuilt after compaction and is not part of the discarded history.
+    """
+    history_chars = sum(
+        len(message.content) if isinstance(message.content, str) else len(str(message.content))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        for message in conversation_messages(messages)
+    )
+    summary_chars = len(summary)
+    summary_history_ratio = summary_chars / history_chars if history_chars else None
+    logger.info(
+        "compaction completed: {history_chars} history chars -> {summary_chars} summary chars",
+        event="compaction_completed",
+        agent_id=agent_id,
+        compact_kind=compact_kind,
+        compactions=1,
+        history_chars=history_chars,
+        summary_chars=summary_chars,
+        summary_history_ratio=summary_history_ratio,
+    )
+
+
 async def generate_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
@@ -487,6 +516,12 @@ async def auto_compact_before_llm(
     )
 
     agent_id = agent_id_from_config(config)
+    emit_compaction_monitoring(
+        state.messages,
+        summary,
+        agent_id=agent_id,
+        compact_kind="auto",
+    )
     pool = runtime.context.ops_pool
 
     # Record the compact in event_log (best-effort: a failure only loses the

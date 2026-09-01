@@ -125,7 +125,8 @@ def test_dashboard_json_matches_core_registrations() -> None:
     queries, datasource, and query mode against either registry or JSON
     drifting independently. A ``$__range`` aggregate is a window total and
     must be instant; fixed-width bucket queries must be range queries. The
-    class-resolution gauges are the deliberate Prometheus exception.
+    class-resolution gauges are the deliberate Prometheus exception. Every
+    panel also owns a unique rectangle in the classic Grafana grid.
     """
     specs = [spec for spec in _load_core() if "grafana" in spec.output]
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
@@ -133,6 +134,20 @@ def test_dashboard_json_matches_core_registrations() -> None:
     panels_by_title = {panel.get("title"): panel for panel in data["panels"]}
 
     assert len(panels_by_title) == len(data["panels"]), "dashboard panel titles must be unique"
+    for index, panel in enumerate(data["panels"]):
+        grid = panel["gridPos"]
+        for other in data["panels"][index + 1 :]:
+            other_grid = other["gridPos"]
+            overlaps = (
+                grid["x"] < other_grid["x"] + other_grid["w"]
+                and other_grid["x"] < grid["x"] + grid["w"]
+                and grid["y"] < other_grid["y"] + other_grid["h"]
+                and other_grid["y"] < grid["y"] + grid["h"]
+            )
+            assert not overlaps, (
+                f"dashboard gridPos overlap: panel {panel['id']} ({panel['title']!r}) and "
+                f"panel {other['id']} ({other['title']!r})"
+            )
     for spec in specs:
         panel = panels_by_title[spec.title]
         targets = panel["targets"]
@@ -167,8 +182,8 @@ def test_dashboard_json_matches_core_registrations() -> None:
         assert all(target["queryType"] == expected_query_type for target in targets)
 
 
-def test_dashboard_has_91_loki_targets() -> None:
-    """Recall timing views add two Loki targets to the dashboard."""
+def test_dashboard_has_93_loki_targets() -> None:
+    """Recall timing and compaction views each add two Loki targets."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -177,7 +192,7 @@ def test_dashboard_has_91_loki_targets() -> None:
         for target in panel.get("targets", [])
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
-    assert len(loki_targets) == 91
+    assert len(loki_targets) == 93
 
 
 def test_unresolved_gauge_names_match_the_otlp_contract() -> None:

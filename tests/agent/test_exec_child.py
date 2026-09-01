@@ -464,6 +464,23 @@ def test_child_installs_signal_handlers_before_reading_request(
         signal.signal(signal.SIGTERM, old_sigterm)
 
 
+def test_child_boot_timing_emits_ready_duration(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """The child emits its own ready boundary, separating bootstrap cost from user code."""
+    from agent import exec_child
+
+    monkeypatch.setattr(exec_child, "_CHILD_BOOT_STARTED_AT", 100.0)
+    monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
+
+    exec_child._emit_child_boot_timing()
+
+    [record] = [
+        record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
+    ]
+    assert record["extra"]["duration_ms"] == pytest.approx(250.0)  # pyright: ignore[reportUnknownMemberType]
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_watchdog_hard_exits_124(tmp_path: Path) -> None:
     """With no parent to signal it, the child's own watchdog os._exit(124)s
