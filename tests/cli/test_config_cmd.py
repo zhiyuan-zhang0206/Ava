@@ -390,6 +390,50 @@ def test_local_unset_removes_key(local_env_home: Path) -> None:
     assert "AVA_OPS_CONCURRENCY" not in runtime_config.read_env_aliases()
 
 
+def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
+    """`set --local` lands a valid patch on the broken `.env` it exists to repair.
+
+    Regression: the backup snapshot forced Settings construction (cluster_tz()
+    through the lazy proxy), so any write to an incident-shaped env crashed
+    with ValidationError before landing — the headline repair verb was dead.
+    Runs in a subprocess because a broken env can only coexist with the lazy
+    settings proxy (AVA_CONFIG_FETCH=skip); an in-process import would eagerly
+    build Settings from the test process's own env.
+    """
+    _write_incident_env(local_env_home)
+    before = (local_env_home / ".env").read_bytes()
+    repo_root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from cli.commands.config import cmd_config_set; "
+                "raise SystemExit(cmd_config_set("
+                "['AVA_PITR_RESTORE_PROOF_ENABLED=false'], None, local=True))"
+            ),
+        ],
+        cwd=repo_root,
+        env={
+            "AVA_CONFIG_FETCH": "skip",
+            "AVA_HOME": str(local_env_home),
+            "AVA_HOME_OVERRIDE": "1",
+            "PATH": os.environ["PATH"],
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    # The patch lands (values are stored quoted; compare through the alias
+    # view like the sibling valid-env test).
+    assert runtime_config.read_env_aliases()["AVA_PITR_RESTORE_PROOF_ENABLED"] == "false"
+    # Unrelated incident lines survive the repair write.
+    assert "AVA_PITR_OSS_ENDPOINT" in runtime_config.read_env_aliases()
+    assert (local_env_home / ".env").read_bytes() != before
+
+
 def test_set_rejected_result_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
     """A host-validated rejection (applied False) surfaces per-field reasons + rc=1."""
     monkeypatch.setattr(cfg, "_get_config", lambda _machine: _view())  # pyright: ignore[reportUnknownArgumentType]
