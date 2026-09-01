@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import SecretStr
 
+from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT
 from shared.config import settings
 
 understand_mod = cast(Any, importlib.import_module("ava.understand"))
@@ -641,21 +642,30 @@ def test_batch_mixed_paths_and_text(mock_deepseek: dict[str, Any], tmp_path: Pat
     assert calls_by_prompt["extract"] == "# Project\nDescription here."
 
 
-def test_batch_concurrency_is_unbounded(mock_deepseek: dict[str, Any]) -> None:
-    """Every target runs at once — there is no throttle to serialize them.
+def test_batch_default_concurrency_uses_the_shared_ceiling(mock_deepseek: dict[str, Any]) -> None:
+    """Omitted `max_concurrent` must not exceed the public default cap.
 
-    A barrier of N proves it without a sleep-and-hope timing assertion: each
-    in-flight call blocks until all N have arrived, so the batch can only
-    finish if all N are genuinely in flight together. A ceiling below N would
-    deadlock the barrier and surface as BrokenBarrierError.
+    The default executor can have fewer workers than the request ceiling, so
+    the contract is an upper bound rather than a saturation guarantee.
     """
     import threading
+    import time
 
-    n = 4
-    barrier = threading.Barrier(n, timeout=30)
+    from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT
+
+    n = DEFAULT_BATCH_MAX_CONCURRENT + 2
+    lock = threading.Lock()
+    inflight = 0
+    peak = 0
 
     def _tracking_invoke(messages: Any):
-        barrier.wait()
+        nonlocal inflight, peak
+        with lock:
+            inflight += 1
+            peak = max(peak, inflight)
+        time.sleep(0.05)
+        with lock:
+            inflight -= 1
         response = MagicMock()
         response.content = "ok"
         response.response_metadata = {}
@@ -666,6 +676,7 @@ def test_batch_concurrency_is_unbounded(mock_deepseek: dict[str, Any]) -> None:
     targets = [{"prompt": f"q{i}", "text": f"m{i}"} for i in range(n)]
     results = understand_mod.understand(targets)
     assert results == ["ok"] * n
+    assert peak <= DEFAULT_BATCH_MAX_CONCURRENT
 
 
 def test_max_concurrent_validation(mock_deepseek: dict[str, Any]) -> None:
@@ -889,15 +900,13 @@ def test_one_question_is_a_one_element_batch(mock_deepseek: dict[str, Any]) -> N
 
 
 def test_signature_is_targets_effort_max_concurrent() -> None:
-    """`targets` plus an `effort` knob (default `max`) and an optional
-    `max_concurrent` throttle — None (the default) keeps unbounded concurrency,
-    a positive int caps in-flight calls, and single-call keywords stay rejected."""
+    """`understand` defaults to the shared safe batch ceiling."""
     import inspect
 
     sig = inspect.signature(understand_mod.understand)
     assert list(sig.parameters) == ["targets", "effort", "max_concurrent"]
     assert sig.parameters["effort"].default == "max"
-    assert sig.parameters["max_concurrent"].default is None
+    assert sig.parameters["max_concurrent"].default == DEFAULT_BATCH_MAX_CONCURRENT
 
 
 # ─── injection scan (audit round-2 up-security-trust P1-4) ────────────────

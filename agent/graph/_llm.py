@@ -46,7 +46,7 @@ import contextlib
 import io
 import time
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Any, Literal, NoReturn, cast
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import RunnableConfig
@@ -93,6 +93,9 @@ from ._llm_errors import (
 )
 from ._llm_errors import (
     FatalProviderError as FatalProviderError,
+)
+from ._llm_errors import (
+    LLMRetryBudgetExceededError as LLMRetryBudgetExceededError,
 )
 from ._llm_errors import (
     LLMStreamCorruptedError as LLMStreamCorruptedError,
@@ -212,12 +215,55 @@ Before using any `ava.*` function, you must explicitly `import ava` in your code
 LlmGoto = Literal["before_exec", "after_exec"]
 
 
-_consecutive_silent_idle: dict[str, int] = {}
-"""thread_id -> consecutive silent-idle count. Separate from _consecutive_errors
-because that tracker is cleared on every successful stream (a silent idle IS a
-successful stream), so it cannot bound a continue-loop. This counter increments
-on each silent-idle turn and resets on the first turn that produces text or a
-tool_call. Module-level; agent process lifecycle resets it naturally on restart."""
+_silent_idle_output_tokens: dict[str, int] = {}
+"""thread_id -> output-token budget units across consecutive silent-idle turns.
+
+Separate from _consecutive_errors because a silent idle is a successful stream.
+Every silent idle consumes at least one unit, so a provider that reports
+reasoning content with zero output tokens cannot bypass the bound. The budget
+resets on the first turn that produces text or a tool call; process lifecycle
+resets it naturally on restart.
+"""
+_RETRY_REMAINING_ATTR = "_ava_retry_budget_remaining_seconds"
+
+
+def _retry_elapsed_seconds(runtime: Runtime[AvaContext]) -> tuple[int, float] | None:
+    """Return this node's retry attempt and cumulative elapsed time when retried."""
+    execution_info = runtime.execution_info
+    if execution_info is None or execution_info.node_first_attempt_time is None:
+        return None
+    return (
+        execution_info.node_attempt,
+        max(0.0, time.time() - execution_info.node_first_attempt_time),
+    )
+
+
+def _log_llm_retry_duration(
+    runtime: Runtime[AvaContext],
+    *,
+    outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"],
+) -> None:
+    """Emit the final wall-clock duration for a retried LLM node."""
+    timing = _retry_elapsed_seconds(runtime)
+    if timing is None:
+        return
+    attempt, duration_seconds = timing
+    if attempt < 2:
+        return
+    logger.info(
+        "LLM retry sequence {outcome} after {duration_seconds:.2f}s",
+        event="llm_retry",
+        outcome=outcome,
+        duration_seconds=duration_seconds,
+    )
+
+
+def _raise_retry_budget_exhausted(attempt: int) -> NoReturn:
+    """End an LLM node before its expired retry budget permits another call."""
+    raise LLMRetryBudgetExceededError(
+        "LLM retry wall-clock budget "
+        f"({settings.lm.llm_retry_max_total_seconds:.0f}s) exhausted before attempt {attempt}"
+    )
 
 
 def _finalize_turn_observability(
@@ -308,8 +354,30 @@ async def llm_node(
         agent_id=agent_id_from_config(config),
     ):
         try:
+            timing = _retry_elapsed_seconds(runtime)
+            if timing is not None and timing[1] >= settings.lm.llm_retry_max_total_seconds:
+                _log_llm_retry_duration(runtime, outcome="budget_exhausted")
+                _raise_retry_budget_exhausted(timing[0])
             result = await _llm_node_impl(state, runtime, config)
-        except BaseException:
+        except BaseException as exc:
+            timing = _retry_elapsed_seconds(runtime)
+            if timing is not None and isinstance(exc, Exception):
+                attempt, duration_seconds = timing
+                remaining_seconds = settings.lm.llm_retry_max_total_seconds - duration_seconds
+                if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
+                    _log_llm_retry_duration(runtime, outcome="budget_exhausted")
+                elif not isinstance(exc, (FatalLLMStreamError, FatalProviderError)):
+                    from shared.lm.registry import resolve_setting
+
+                    max_attempts = resolve_setting(
+                        "llm_retry_max_attempts", model=turn_settings.lm.llm_model
+                    )
+                    if attempt >= max_attempts:
+                        _log_llm_retry_duration(runtime, outcome="attempts_exhausted")
+                # `_build._build_llm_retry` consumes this transient attribute
+                # synchronously before it decides and schedules the next retry.
+                with contextlib.suppress(Exception):
+                    setattr(exc, _RETRY_REMAINING_ATTR, remaining_seconds)
             logger.opt(exception=True).warning(
                 "turn ended in {duration_seconds:.2f}s ok=False — _llm_node_impl raised",
                 event="turn_end",
@@ -324,6 +392,9 @@ async def llm_node(
             # _llm_node_impl itself).
             raise
         else:
+            timing = _retry_elapsed_seconds(runtime)
+            if timing is not None and timing[0] >= 2:
+                _log_llm_retry_duration(runtime, outcome="succeeded")
             logger.info(
                 "turn ended in {duration_seconds:.2f}s ok=True",
                 event="turn_end",
@@ -379,37 +450,57 @@ def _silent_idle_command(final_msg: AIMessage, agent_id: int) -> Command[LlmGoto
     Keeps the reasoning in context and loops straight back to the LLM
     (halted=False -> claim's multi-step continue path) so the ava_silent_idle
     plugin can inject a Continue nudge before the next turn. A per-process
-    consecutive-count guard bounds a model that habitually reasons without
-    acting: at the cap, halt to idle instead of looping forever. The streak
-    resets on the first non-silent-idle turn (the caller pops it). Returns
-    None when the turn is not a silent idle.
+    output-token budget bounds a model that habitually reasons without acting:
+    each silent idle consumes at least one unit, even when its provider reports
+    zero output tokens. At the cap, halt to idle instead of spending another
+    model call. The budget resets on the first non-silent-idle turn (the caller
+    pops it). Returns None when the turn is not a silent idle.
     """
     if not _is_silent_idle(final_msg):
         return None
     tid = str(agent_id)
-    streak = _consecutive_silent_idle.get(tid, 0) + 1
-    cap = settings.lm.llm_silent_idle_max_consecutive
-    if cap > 0 and streak >= cap:
-        _consecutive_silent_idle.pop(tid, None)
+    usage = final_msg.usage_metadata or {}
+    output_tokens = int(usage.get("output_tokens", 0) or 0)
+    budget_tokens = max(output_tokens, 1)
+    cumulative_output_tokens = _silent_idle_output_tokens.get(tid, 0) + budget_tokens
+    cap = settings.lm.llm_silent_idle_max_output_tokens
+    from shared.lm.pricing import quote
+
+    priced = quote(turn_settings.lm.llm_model, 0, output_tokens, 0)
+    estimated_cost_usd = priced.cost_usd if priced is not None else None
+    if cap > 0 and cumulative_output_tokens >= cap:
+        _silent_idle_output_tokens.pop(tid, None)
         logger.warning(
             "[{label}] {body}",
             label="silent-idle",
             event="silent_idle",
             body=(
-                f"reasoning-only output {streak} turns in a row (cap {cap}) — "
+                f"reasoning-only output reached {cumulative_output_tokens} budget tokens (cap {cap}) — "
                 "halting to idle instead of looping"
             ),
+            output_tokens=output_tokens,
+            cumulative_output_tokens=cumulative_output_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            halted=True,
         )
         return Command[LlmGoto](
             update={"messages": [final_msg], "halted": True},
             goto=AFTER_EXEC,
         )
-    _consecutive_silent_idle[tid] = streak
+    _silent_idle_output_tokens[tid] = cumulative_output_tokens
     logger.info(
         "[{label}] {body}",
         label="silent-idle",
         event="silent_idle",
-        body=f"reasoning-only output (streak {streak}/{cap or 'inf'}) — continue-loop with nudge",
+        body=(
+            f"reasoning-only output {output_tokens} tokens "
+            f"(budget {budget_tokens}; cumulative {cumulative_output_tokens}/{cap or 'inf'}) "
+            "— continue-loop with nudge"
+        ),
+        output_tokens=output_tokens,
+        cumulative_output_tokens=cumulative_output_tokens,
+        estimated_cost_usd=estimated_cost_usd,
+        halted=False,
     )
     return Command[LlmGoto](
         update={"messages": [final_msg], "halted": False},
@@ -534,7 +625,7 @@ async def _llm_node_impl(
         return silent_idle_cmd
 
     # Any non-silent-idle turn ends the streak — a single real action clears it.
-    _consecutive_silent_idle.pop(str(agent_id), None)
+    _silent_idle_output_tokens.pop(str(agent_id), None)
 
     if not final_msg.tool_calls:
         # No tool_call = stop turn — halted=True makes after_exec route back

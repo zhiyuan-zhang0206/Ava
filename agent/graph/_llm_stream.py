@@ -276,7 +276,7 @@ async def _stream_with_cache_retry(
     # logical LLM call. A raised call never stamps (no llm_usage row exists
     # for it either — usage is logged only on success).
     #
-    # The concurrency limiter (AVA_LLM_MAX_CONCURRENT, disabled by default)
+    # The concurrency limiter (AVA_LLM_MAX_CONCURRENT, DeepSeek capped by default)
     # wraps the whole exchange — stream, non-streaming fallback and the
     # stale-cache retry share one slot, so a cap is about in-flight requests
     # to the provider, not about retry attempts.

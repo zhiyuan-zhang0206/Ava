@@ -120,9 +120,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # agent_swapped_in (Task #1976 phase 2) drops it back to 127;
     # memory_search_stats (Task #2088's row-growth monitoring) raises it
     # back to 128; page_restore_notified (Task #2212 direction B — the
-    # reconcile close path's re-serve notice) raises it to 129; watchdog_tick
-    # (P1-4's completed-round freshness gauge) raises it to 131.
-    assert len(_TELEMETRY_KINDS) == 131
+    # reconcile close path's re-serve notice) raises it to 129; `llm_retry`
+    # records retry duration and `watchdog_tick` records freshness, bringing
+    # the current total to 132.
+    assert len(_TELEMETRY_KINDS) == 132
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

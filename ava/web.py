@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from ava._batch import run_batch, validate_max_concurrent
+from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.config import settings
@@ -130,14 +130,14 @@ class SearchResult:
 
 
 def search(
-    queries: list[str], count: int = 10, max_concurrent: int | None = None
+    queries: list[str], count: int = 10, max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT
 ) -> list[list[SearchResult]]:
     """Search each query in parallel.
 
     `count` caps results per query (at most 20).
 
-    `max_concurrent` caps parallel queries; the default runs every query
-    concurrently with no ceiling.
+    `max_concurrent` caps parallel queries; the default is 12. Pass a positive
+    integer to choose a different ceiling.
 
     Returns:
         One result list per query, in input order.
@@ -226,7 +226,7 @@ def fetch(
     targets: list[tuple[str, str]],
     max_chars: int = 50_000,
     effort: str | ReasoningEffort | None = None,
-    max_concurrent: int | None = None,
+    max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
 ) -> list[str]:
     """Fetch web pages in parallel and answer a prompt about each.
 
@@ -239,8 +239,8 @@ def fetch(
     (default) keeps the configured `settings.web.web_fetch_reasoning`
     (default `none`) — pass `effort="high"` per call for deeper summaries.
 
-    `max_concurrent` caps parallel fetches; the default runs every target
-    concurrently with no ceiling.
+    `max_concurrent` caps parallel fetches; the default is 12. Pass a positive
+    integer to choose a different ceiling.
 
     Returns:
         One answer per pair, in input order.
