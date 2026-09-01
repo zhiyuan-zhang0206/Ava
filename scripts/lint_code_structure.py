@@ -155,10 +155,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     "shared/events/contract.py": ("#405", 500, "2026-12-31"),
     # Structured logger + unified-event pipeline adapter (stderr/file/JSONL/OTLP sink registration, deploy quieting, event-pipeline filter). Was 798 lines on main before the #1637 INFO-sampling filter.
     "shared/log.py": ("#405", 800, "2026-12-31"),
-    # The whole Loki read-side query surface — history slice, counts,
-    # aggregates, grouped rows share the LogQL pipeline builders. The
-    # audit-priority split (query builder / transport) is tracked.
-    "gateway/loki_events.py": ("#405", 500, "2026-12-31"),
     # Aggregate fetch + report assemblers + injected LokiBackend contract —
     # one unit sharing the EventAggregate shape.
     "shared/metrics_aggregate.py": ("#405", 500, "2026-12-31"),
