@@ -272,10 +272,17 @@ def _launch(
         _print_owner(claim.owner, adopted=True)
         return 0
     owner = claim.owner
-    if owner.generation is None or owner.expected_suffix is None or owner.state_dir is None:
+    if (
+        owner.generation is None
+        or owner.expected_suffix is None
+        or owner.state_dir is None
+        or owner.owner_agent_id is None
+    ):
         raise RuntimeError("new canonical owner is missing launch fields")
     generation = owner.generation
     expected_suffix = owner.expected_suffix
+    owner_agent_id = owner.owner_agent_id
+    sid: int | None = None
     try:
         _seed_codex_home(owner.state_dir, workspace)
         watcher_id, watcher_name = _launch_supervisor(owner, ttl_seconds)
@@ -286,7 +293,7 @@ def _launch(
             session_name=watcher_name,
         )
         sid = ava.shell.sessions.new(name=expected_suffix, ttl=ttl_seconds)
-        full_name = coding_session_owner.full_session_name(ava.self.AGENT_ID, sid, expected_suffix)
+        full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
         ava.shell.sessions.send(sid, _codex_command(owner, workspace))
         _wait_for_ready(sid)
         ava.shell.sessions.send(sid, _bootstrap_message(workspace, tasks_file, work_file))
@@ -297,6 +304,12 @@ def _launch(
             session_name=full_name,
         )
     except BaseException:
+        # A replacement may own the canonical record by now, so its generation
+        # CAS cannot find this unpublished PTY. The old launcher still owns the
+        # numeric id and must reclaim it directly before rolling back its record.
+        if sid is not None:
+            with contextlib.suppress(Exception):
+                ava.shell.sessions.kill(sid)
         with contextlib.suppress(Exception):
             coding_session_owner.terminate_generation(
                 key,

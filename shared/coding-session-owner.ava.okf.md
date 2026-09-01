@@ -41,6 +41,10 @@ the private mutable tool-state path. Invalid records fail closed.
   verifies it is no longer live, removes private state, then publishes the
   terminal reason. A stale generation is a no-op.
 
+Record cleanup intentionally does not kill the supervisor PTY: the supervisor
+may be the caller performing terminalization. It exits after observing terminal
+state or a replacement generation, with its own TTL as the final backstop.
+
 The generation state directory is
 `$AVA_HOME/run/coding-tools/<tool>/<canonical-key-digest>/<generation>/`.
 Cleanup validates that exact derived path before removal.
