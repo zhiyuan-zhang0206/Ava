@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useCallback, type ReactNode, useEffect, useRef } from "react";
 
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
+import { WindowSelect } from "@/components/window-select";
 import { api } from "@/lib/api";
 import { useNow } from "@/lib/use-now";
 import { useBreakpoint } from "@/lib/breakpoint";
@@ -234,18 +235,16 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         >
           <RefreshCw className={cn("size-3.5", isFetching && "animate-spin")} />
         </button>
-        <select
-          value={hours ?? "all"}
-          onChange={(e) => setHours(e.target.value === "all" ? null : Number(e.target.value))}
-          aria-label={t("windowAriaLabel")}
+        <WindowSelect
+          value={hours == null ? "all" : String(hours)}
+          options={WINDOWS.map((w) => ({
+            value: String(w.value ?? "all"),
+            label: t(w.labelKey as Parameters<typeof t>[0]),
+          }))}
+          onChange={(v) => setHours(v === "all" ? null : Number(v))}
+          ariaLabel={t("windowAriaLabel")}
           className="shrink-0 cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"
-        >
-          {WINDOWS.map((w) => (
-            <option key={w.labelKey} value={w.value ?? "all"}>
-              {t(w.labelKey as Parameters<typeof t>[0])}
-            </option>
-          ))}
-        </select>
+        />
       </header>
 
       <div className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>

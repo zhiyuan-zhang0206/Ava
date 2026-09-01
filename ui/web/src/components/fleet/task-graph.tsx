@@ -499,6 +499,10 @@ export function TaskGraph({
     return edges;
   }, [graphTasks]);
 
+  // Visible subtasks (server-delivered out-of-window ancestors excluded) —
+  // shared by the Kanban and Graph toolbar labels.
+  const visibleSubtaskCount = subtasks.filter((t) => t.ghost !== true).length;
+
   if (loading) {
     return (
       <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
@@ -556,7 +560,7 @@ export function TaskGraph({
             </span>
           </div>
           <span className="text-xs text-muted-foreground">
-            {subtasks.filter((t) => t.ghost !== true).length} task{subtasks.filter((t) => t.ghost !== true).length !== 1 ? "s" : ""}
+            {visibleSubtaskCount} task{visibleSubtaskCount !== 1 ? "s" : ""}
           </span>
           <StaleBadge show={error} />
           <FilterCluster
@@ -599,7 +603,7 @@ export function TaskGraph({
           </button>
         </div>
         <span className="text-xs text-muted-foreground">
-          {subtasks.filter((t) => t.ghost !== true).length} task{subtasks.filter((t) => t.ghost !== true).length !== 1 ? "s" : ""}
+          {visibleSubtaskCount} task{visibleSubtaskCount !== 1 ? "s" : ""}
         </span>
         <StaleBadge show={error} />
         <FilterCluster
