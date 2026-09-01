@@ -104,9 +104,17 @@ def _resolve(session_id: int) -> str:
 _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 
 
+_MAX_TTL_SECONDS = 86_400  # 24h — a session lives at most one day (user ruling 2026-09-01)
+
+
 def _validate_ttl(ttl: float) -> float:
     if not math.isfinite(ttl) or ttl <= 0:
         raise ValueError("ttl must be finite and greater than zero")
+    if ttl > _MAX_TTL_SECONDS:
+        raise ValueError(
+            f"ttl must be at most {_MAX_TTL_SECONDS} seconds (24 hours) — "
+            "sessions live at most one day"
+        )
     return ttl
 
 
