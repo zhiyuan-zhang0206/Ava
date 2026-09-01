@@ -142,6 +142,10 @@ def _create_session(
             f"session name {name!r} invalid — use a lowercase slug like 'dev-server' "
             "([a-z][a-z0-9-]*)"
         )
+    # Validate here, not at call sites, so every ttl-carrying caller is capped at
+    # the write point; the watcher path (ttl=None) intentionally skips it.
+    if ttl is not None:
+        ttl = _validate_ttl(ttl)
     session_id = _next_session_index_from_db()
     full = f"{_shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
     # Forward this agent process's AVA_* env onto the session. The PTY
@@ -199,7 +203,7 @@ def new(name: str, *, ttl: float) -> int:
             `ava.watcher` instead."""
     name = coerce_str(name, "name")
     ttl = coerce_typed(ttl, "ttl", (int, float))
-    session_id, _ = _create_session(name, ttl=_validate_ttl(ttl))
+    session_id, _ = _create_session(name, ttl=ttl)
     return session_id
 
 

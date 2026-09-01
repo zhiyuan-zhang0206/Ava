@@ -193,7 +193,7 @@ def run_background(
     aid = _boot.agent_id()
     if cwd is None:
         cwd = str(workspace_dir(aid))
-    session_id, _full = sessions._create_session(name, cwd=cwd, ttl=sessions._validate_ttl(ttl))
+    session_id, _full = sessions._create_session(name, cwd=cwd, ttl=ttl)
     output_path = _background.allocate_output_path(session_id, name)
     line = _background.notified_line(
         cmd,
