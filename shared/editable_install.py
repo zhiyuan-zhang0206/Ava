@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import cast
 
 import shared.telemetry
+from shared.log import logger
 
 EDITABLE_PTH_NAME = "_editable_impl_ava.pth"
 EDITABLE_DIST_INFO_GLOB = "ava-*.dist-info/direct_url.json"
@@ -380,7 +381,13 @@ def guard_editable_install(
     *,
     allowed_roots: Iterable[Path] = (),
 ) -> tuple[str, ...]:
-    """Report and repair a poisoned install before an exec child can import it."""
+    """Report and repair a poisoned install before an exec child can import it.
+
+    The default exact-root allowance for ``~/Ava`` mirrors converge: a
+    long-lived dev clone may be a legal editable target, while its disposable
+    worktree descendants remain disallowed. Repair is independent of telemetry
+    delivery so an event-contract drift cannot block the import recovery.
+    """
 
     effective_allowed_roots = tuple(allowed_roots) or (Path.home() / "Ava",)
     violations = editable_install_violations(
@@ -390,16 +397,22 @@ def guard_editable_install(
     if not violations:
         return ()
     resolved_source = source_root.expanduser().resolve(strict=False)
-    shared.telemetry.emit(
-        "telemetry",
-        "exec_editable_install_poisoned",
-        level="warning",
-        source="exec_guard",
-        attributes={
-            "violations": list(violations),
-            "source_root": str(resolved_source),
-            "python": sys.executable,
-        },
-    )
     repair_editable_install(resolved_source, allowed_roots=effective_allowed_roots)
+    try:
+        shared.telemetry.emit(
+            "telemetry",
+            "exec_editable_install_poisoned",
+            level="warning",
+            source="exec_guard",
+            attributes={
+                "violations": list(violations),
+                "source_root": str(resolved_source),
+                "python": sys.executable,
+            },
+        )
+    except Exception:
+        logger.opt(exception=True).warning(
+            "exec editable-install repair completed but telemetry emission failed",
+            event="exec_editable_install_poisoned",
+        )
     return violations
