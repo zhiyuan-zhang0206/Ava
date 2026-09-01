@@ -10,6 +10,8 @@ to deliver (frontend resurrect button).
 
 from __future__ import annotations
 
+import asyncio
+import importlib
 from typing import Any
 
 import psycopg
@@ -165,3 +167,52 @@ def test_local_home_machine_is_forwarded(
     assert resp.json() == {"status": "spawned"}
     assert captured["target"] == "local-test"
     assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit-v2"
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_forward_uses_a_short_idempotent_retry_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreachable remote host must produce a gateway error before the
+    caller's request deadline, without giving up retry-safe lifecycle dispatch."""
+    forward = importlib.reload(forward_module)
+    captured: dict[str, Any] = {}
+
+    async def _dispatch(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "enqueued"}
+
+    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
+        forward._cluster_rpc, "dispatch_to_machine", _dispatch
+    )
+
+    result = await forward._enqueue_lifecycle("offline-runner", "/restart", {})
+
+    assert result == {"status": "enqueued"}
+    assert isinstance(captured["timeout_s"], float)
+    assert captured["timeout_s"] < 15.0
+    assert captured["retries"] == 1
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transport that ignores its own per-attempt timeout is still bounded at
+    the router boundary, where the user receives a named 502 instead of silence."""
+    forward = importlib.reload(forward_module)
+    never = asyncio.Event()
+
+    async def _never_dispatch(**_kwargs: Any) -> dict[str, Any]:
+        await never.wait()
+        return {}
+
+    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
+        forward._cluster_rpc, "dispatch_to_machine", _never_dispatch
+    )
+    monkeypatch.setattr(forward, "_LIFECYCLE_DISPATCH_DEADLINE_S", 0.01, raising=False)
+
+    with pytest.raises(CrossMachineGatewayUnavailable, match="did not answer"):
+        await asyncio.wait_for(
+            forward._enqueue_lifecycle("offline-runner", "/restart", {}), timeout=0.2
+        )

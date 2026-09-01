@@ -29,6 +29,16 @@ from shared.agents import (
     ErrorReason,
 )
 
+# Browser clients and the agent UI give lifecycle requests a short response
+# window. The generic cluster-RPC policy is intentionally more patient for
+# rollout work, but an offline runner must become a clear 502 before this
+# caller-facing request expires. The one retry retains the server-side
+# idempotency envelope for a transient connection drop without risking a long
+# silent wait.
+_LIFECYCLE_DISPATCH_DEADLINE_S = 12.0
+_LIFECYCLE_DISPATCH_TIMEOUT_S = 5.0
+_LIFECYCLE_DISPATCH_RETRIES = 1
+
 
 def _raise_proxied_wire_error_from_payload(payload: dict[str, object]) -> None:
     """Reconstruct + raise the target-side AvaAgentError from a failed
@@ -98,11 +108,19 @@ async def _enqueue_lifecycle(target: str, path: str, json_body: dict) -> dict:
     original semantics.
     """
     try:
-        return await _cluster_rpc.dispatch_to_machine(
-            target_machine=target,
-            kind="lifecycle",
-            payload={"path": path, "body": json_body},
-        )
+        async with asyncio.timeout(_LIFECYCLE_DISPATCH_DEADLINE_S):
+            return await _cluster_rpc.dispatch_to_machine(
+                target_machine=target,
+                kind="lifecycle",
+                payload={"path": path, "body": json_body},
+                timeout_s=_LIFECYCLE_DISPATCH_TIMEOUT_S,
+                retries=_LIFECYCLE_DISPATCH_RETRIES,
+            )
+    except TimeoutError as exc:
+        raise CrossMachineGatewayUnavailable(
+            f"target machine={target!r} lifecycle op did not answer within "
+            f"{_LIFECYCLE_DISPATCH_DEADLINE_S:.0f}s"
+        ) from exc
     except _cluster_rpc.ClusterOpUnreachable as exc:
         raise CrossMachineGatewayUnavailable(
             f"target machine={target!r} ops server unreachable for lifecycle op: {exc!s}"
