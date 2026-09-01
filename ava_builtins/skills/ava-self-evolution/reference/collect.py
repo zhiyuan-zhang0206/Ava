@@ -204,7 +204,11 @@ def _builtin_help_counts(events: list[tuple]) -> tuple[int, int]:
 
 
 def _subprocess_call_count(events: list[tuple]) -> int:
-    """Count raw subprocess calls across an agent's executed code blocks."""
+    """Count raw subprocess calls across executed code blocks with a regex.
+
+    This includes matching names in comments, docstrings, and string literals.
+    It does not count ``asyncio.create_subprocess_*`` or ``subprocess.getoutput``.
+    """
     return sum(
         len(_SUBPROCESS_CALL_RE.findall(str(payload.get("body", ""))))
         for event, payload in events
