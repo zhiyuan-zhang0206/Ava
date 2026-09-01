@@ -17,6 +17,7 @@ import httpx
 
 from shared.http_dial import post as dial_post
 from shared.machine import gateway_api_base, gateway_auth_headers
+from shared.memory_repo import MemoryBranchMismatch
 
 _TIMEOUT_S = 30.0
 
@@ -30,7 +31,11 @@ def cmd_memory_init() -> int:
     from cli.commands._converge_plugins import run_plugin_scaffolds
 
     print("initializing memory resources...")
-    result = run_plugin_scaffolds()
+    try:
+        result = run_plugin_scaffolds()
+    except MemoryBranchMismatch as exc:
+        print(f"  ✗ {exc}", file=sys.stderr)
+        return 1
     if result.ran:
         print(f"scaffolded: {', '.join(result.ran)}")
     else:
