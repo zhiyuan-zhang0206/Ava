@@ -95,7 +95,7 @@ function TaskHoverCard({
     in_progress: t("status.inProgress"),
     done: t("status.done"),
     cancelled: t("status.canceled"),
-    ongoing: t("status.root"),
+    ongoing: t("status.ongoing"),
   };
   const creator =
     task.created_by === "user"
@@ -329,7 +329,7 @@ export function TaskGraph({
     in_progress: t("status.inProgress"),
     done: t("status.done"),
     cancelled: t("status.canceled"),
-    ongoing: t("status.root"),
+    ongoing: t("status.ongoing"),
   };
   // Time filter (default 24 hours, user ruling 2026-08-30): a garbage stored
   // value falls back to the default instead of exploding.

@@ -25,16 +25,21 @@ import ava._boot
 from ava_builtins.plugins.ava_fleet import task_registry
 
 
-def _seed_agent(db: psycopg.Connection, *, status: str = "running") -> int:
+def _seed_agent(db: psycopg.Connection, *, status: str = "running", spawner: str = "test") -> int:
     with db.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         aid = cur.fetchone()[0]  # type: ignore[index]
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', %s)",
-            (aid, status),  # pyright: ignore[reportUnknownArgumentType]
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, %s, %s)",
+            (aid, spawner, status),  # pyright: ignore[reportUnknownArgumentType]
         )
     db.commit()
     return aid
+
+
+def _ignore_system_note(_agent_id: int, _content: str, **_kwargs: object) -> int:
+    """Keep task-registry tests on the database-side behavior under test."""
+    return 0
 
 
 @pytest.fixture(autouse=True)
@@ -1910,7 +1915,7 @@ def test_update_root_task_is_rejected(db_conn: psycopg.Connection, root_task_id:
 def test_update_non_root_allows_ongoing_status(
     db_conn: psycopg.Connection, root_task_id: int, next_status: str
 ) -> None:
-    """A regular task can enter ongoing and later return to each allowed state."""
+    """An owning agent can enter ongoing and later return to each allowed state."""
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
@@ -1920,6 +1925,101 @@ def test_update_non_root_allows_ongoing_status(
         assert task_registry.get(task.id).status == "ongoing"
 
         task_registry.update(task.id, status=next_status)
+        assert task_registry.get(task.id).status == next_status
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_ongoing_allows_owner_delegator(
+    db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent that spawned the owner may make its task ongoing."""
+    delegator = _seed_agent(db_conn)
+    owner = _seed_agent(db_conn, spawner=f"agent:{delegator}")
+    original = ava._boot._agent_id
+    ava._boot._agent_id = owner
+    try:
+        task = task_registry.create("delegated-ongoing", "detail", parent=root_task_id, owner=owner)
+        ava._boot._agent_id = delegator
+        monkeypatch.setattr(ava.agents, "send_system_note", _ignore_system_note)
+
+        task_registry.update(task.id, status="ongoing")
+
+        assert task_registry.get(task.id).status == "ongoing"
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_ongoing_rejects_unrelated_agent(
+    db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A peer outside the owner's spawn lineage cannot set ongoing."""
+    owner = _seed_agent(db_conn)
+    stranger = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = owner
+    try:
+        task = task_registry.create("protected-ongoing", "detail", parent=root_task_id, owner=owner)
+        ava._boot._agent_id = stranger
+        monkeypatch.setattr(ava.agents, "send_system_note", _ignore_system_note)
+
+        with pytest.raises(
+            ValueError, match="only the owner or a delegator can set a task to ongoing"
+        ):
+            task_registry.update(task.id, status="ongoing")
+
+        assert task_registry.get(task.id).status == "in_progress"
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_ongoing_allows_non_agent_context(
+    db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """System tooling without an agent identity is outside the ownership gate."""
+    owner = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = owner
+    try:
+        task = task_registry.create("system-ongoing", "detail", parent=root_task_id)
+        ava._boot._agent_id = None
+        monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+        live_events: list[tuple[int, int]] = []
+
+        def _record_live_event(agent_id: int, task_id: int) -> None:
+            live_events.append((agent_id, task_id))
+
+        monkeypatch.setattr(task_registry, "publish_task_updated_sync", _record_live_event)
+
+        task_registry.update(task.id, status="ongoing")
+
+        assert task_registry.get(task.id).status == "ongoing"
+        assert live_events == []
+    finally:
+        ava._boot._agent_id = original
+
+
+@pytest.mark.parametrize("next_status", ["in_progress", "done", "cancelled"])
+def test_update_statuses_other_than_ongoing_ignore_ownership_gate(
+    db_conn: psycopg.Connection,
+    root_task_id: int,
+    next_status: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ongoing ownership rule leaves all other peer status writes unchanged."""
+    owner = _seed_agent(db_conn)
+    stranger = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = owner
+    try:
+        task = task_registry.create(
+            "peer-status-change", "detail", parent=root_task_id, owner=owner
+        )
+        ava._boot._agent_id = stranger
+        monkeypatch.setattr(ava.agents, "send_system_note", _ignore_system_note)
+
+        task_registry.update(task.id, status=next_status)
+
         assert task_registry.get(task.id).status == next_status
     finally:
         ava._boot._agent_id = original

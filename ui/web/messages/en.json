@@ -730,7 +730,7 @@
         "inProgress": "In progress",
         "done": "Done",
         "canceled": "Canceled",
-        "root": "Root"
+        "ongoing": "Ongoing"
       },
       "agent": "Agent #{id}",
       "unowned": "Unowned",
