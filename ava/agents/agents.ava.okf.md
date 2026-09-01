@@ -28,7 +28,7 @@ tags:
 - `get_last_message(agent_id) → str | None` — read the last AI message text from the agent (None if none).
 
 ### Discovery
-- `list_agents(filter_by_status=(RUNNING, IDLING)) → list[AgentRow]` — list agents filtered by status through the compact roster projection; fetch one agent when full lifecycle details are needed.
+- `list_agents(filter_by_status=(RUNNING, IDLING)) → list[AgentRow]` — list agents filtered by status through the summary roster projection; fetch one agent when full lifecycle details are needed.
 - `get_status(agent_id) → AgentStatus` — current status of a single agent (alternative to list_agents then manual filter).
 - `list_machines() → list[Machine]` — list all machines and their alive status.
 - `get_neighbors(agent_id, depth=1, limit=20) → list[Neighbor]` — related agents ranked by connection strength. Connections are established on spawn/fork/resurrect/send_message and decay over time.

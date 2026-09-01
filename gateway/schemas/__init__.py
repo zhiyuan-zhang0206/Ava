@@ -12,6 +12,7 @@ their unchanged OpenAPI names, so `cli` validates them without importing up into
 """
 
 from gateway.schemas.agents import (
+    AgentCompact,
     AgentRow,
     AgentSummary,
 )
@@ -181,6 +182,7 @@ from shared.api_contracts import (
 
 __all__ = [
     "AgentActivity",
+    "AgentCompact",
     "AgentCost",
     "AgentEventRow",
     "AgentEventsResponse",

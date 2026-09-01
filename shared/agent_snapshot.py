@@ -104,7 +104,7 @@ _FROM = (
 _GROUP = ""
 
 AgentListScope = Literal["all", "live", "terminated"]
-AgentListFields = Literal["full", "summary"]
+AgentListFields = Literal["full", "summary", "compact"]
 
 
 # Scope is part of the query text, not a post-fetch Python filter.  The three
@@ -129,6 +129,22 @@ def _select_all_sql(columns: str) -> dict[AgentListScope, LiteralString]:
 _SELECT_ALL_SQL: dict[AgentListFields, dict[AgentListScope, LiteralString]] = {
     "full": _select_all_sql(_FULL_COLS),
     "summary": _select_all_sql(_SUMMARY_COLS),
+    # This deliberately does not reuse `_FROM`: the CLI needs only three
+    # columns, so its query must avoid the roster's LATERAL and notice lookups.
+    "compact": {
+        "all": (
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "ORDER BY a.id"
+        ),
+        "live": (
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "WHERE a.status <> 'terminated' ORDER BY a.id"
+        ),
+        "terminated": (
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "WHERE a.status = 'terminated' ORDER BY a.id"
+        ),
+    },
 }
 
 
@@ -179,6 +195,14 @@ class AgentListSummary(BaseModel):
     notices_awaiting_response: list[OpenNotice]
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
+
+
+class AgentListCompact(BaseModel):
+    """The three fields rendered by ``ava agents ls``."""
+
+    agent_id: int
+    status: AgentStatus
+    label: str | None
 
 
 class AgentSnapshot(BaseModel):
@@ -292,6 +316,16 @@ def _row_to_summary(row: tuple[Any, ...]) -> AgentListSummary:
     )
 
 
+def _row_to_compact(row: tuple[Any, ...]) -> AgentListCompact:
+    return AgentListCompact.model_validate(
+        {
+            "agent_id": row[0],
+            "status": AgentStatus(row[1]),
+            "label": row[2],
+        }
+    )
+
+
 def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     with conn.cursor() as cur:
@@ -321,19 +355,22 @@ def select_all(
     *,
     scope: AgentListScope = "all",
     fields: AgentListFields = "full",
-) -> list[AgentSnapshot] | list[AgentListSummary]:
-    """List full snapshots or list-consumer summaries for ``scope``.
+) -> list[AgentSnapshot] | list[AgentListSummary] | list[AgentListCompact]:
+    """List full snapshots, roster summaries, or compact CLI rows for ``scope``.
 
     ``all`` preserves the historical SDK / ops contract.  Frontend roster
     readers request ``live`` so terminated history is excluded by Postgres
     before the snapshot's per-agent lookups run.  ``terminated`` is the
-    explicit history surface. ``summary`` does not select full-only values.
+    explicit history surface. ``summary`` does not select full-only values;
+    ``compact`` avoids every roster-only lookup for the CLI's three columns.
     """
     with conn.cursor() as cur:
         cur.execute(_SELECT_ALL_SQL[fields][scope])
         rows = cur.fetchall()
     if fields == "summary":
         return [_row_to_summary(r) for r in rows]
+    if fields == "compact":
+        return [_row_to_compact(r) for r in rows]
     return [_row_to_snapshot(r) for r in rows]
 
 

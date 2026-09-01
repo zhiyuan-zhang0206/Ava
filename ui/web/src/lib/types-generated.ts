@@ -252,8 +252,9 @@ export interface paths {
          *     The sidebar's explicit history toggle requests ``terminated`` separately.
          *
          *     ``fields=full`` preserves the historical response. ``fields=summary`` is
-         *     the reduced SQL projection used by roster consumers; detail and SSE keep
-         *     the full snapshot. All scopes remain unpaginated for wire compatibility.
+         *     the reduced SQL projection used by roster consumers; ``fields=compact``
+         *     serves the CLI's three-column table. Detail and SSE keep the full snapshot.
+         *     All scopes remain unpaginated for wire compatibility.
          */
         get: operations["get_agents_api_agents_get"];
         put?: never;
@@ -3638,6 +3639,17 @@ export interface components {
             llm_seconds: number;
             /** Exec Seconds */
             exec_seconds: number;
+        };
+        /**
+         * AgentCompact
+         * @description One row of ``GET /api/agents?fields=compact`` for the CLI.
+         */
+        AgentCompact: {
+            /** Agent Id */
+            agent_id: number;
+            status: components["schemas"]["AgentStatus"];
+            /** Label */
+            label: string | null;
         };
         /**
          * AgentCost
@@ -7904,7 +7916,7 @@ export interface operations {
         parameters: {
             query?: {
                 scope?: "all" | "live" | "terminated";
-                fields?: "full" | "summary";
+                fields?: "full" | "summary" | "compact";
             };
             header?: never;
             path?: never;
@@ -7918,7 +7930,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": (components["schemas"]["AgentRow"] | components["schemas"]["AgentSummary"])[];
+                    "application/json": (components["schemas"]["AgentRow"] | components["schemas"]["AgentSummary"] | components["schemas"]["AgentCompact"])[];
                 };
             };
             /** @description Validation Error */
