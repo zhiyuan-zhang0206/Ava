@@ -44,10 +44,28 @@ from shared.ui_update_state import UiUpdateSnapshot
 
 _log = logging.getLogger("services.gate")
 
-# Headers forwarded to the app / gateway on proxied requests. Everything else
-# (Host, hop-by-hop, cookies beyond the session one) is dropped — the app and
-# the auth check do not need them.
-_FORWARD_HEADERS = ("accept", "accept-language", "cookie", "content-type")
+# Headers forwarded to the app / gateway on proxied requests. The app needs the
+# browser Host to derive the same gateway origin its client uses; everything
+# else (hop-by-hop headers and cookies beyond the session one) is dropped.
+_FORWARD_HEADERS = (
+    "accept",
+    "accept-language",
+    "cookie",
+    "content-type",
+    "host",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+)
+
+# Browser security headers originate at Next.js. They must cross the public
+# gate with the app response or the browser never enforces its CSP and related
+# hardening headers.
+_FORWARD_RESPONSE_HEADERS = (
+    "content-security-policy",
+    "referrer-policy",
+    "x-content-type-options",
+    "x-frame-options",
+)
 
 _PROBE_TIMEOUT_S = 3.0
 
@@ -203,7 +221,12 @@ class Gate:
                 status, headers, body = e.code, e.headers, e.read()
             handler.send_response(status)
             for name, value in headers.items():
-                if name.lower() in ("content-type", "cache-control", "etag"):
+                if name.lower() in (
+                    "content-type",
+                    "cache-control",
+                    "etag",
+                    *_FORWARD_RESPONSE_HEADERS,
+                ):
                     handler.send_header(name, value)
             handler.send_header("Content-Length", str(len(body)))
             handler.end_headers()
