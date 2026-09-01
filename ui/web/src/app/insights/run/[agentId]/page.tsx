@@ -133,11 +133,15 @@ export default function RunTimelinePage({
   };
 
   if (paramsResolved && agentId === null) {
-    return <p className="p-6 font-mono text-sm text-destructive">{t("invalidAgent")}</p>;
+    return (
+      <main id="main-content">
+        <p className="p-6 font-mono text-sm text-destructive">{t("invalidAgent")}</p>
+      </main>
+    );
   }
 
   return (
-    <main className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
+    <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
       <header className={cn("items-center gap-3 border-b border-border px-4 py-2", FLEX)}>
         <Link href="/insights" className={buttonVariants({ size: "sm", variant: "ghost" })}>
           {t("backToInsights")}

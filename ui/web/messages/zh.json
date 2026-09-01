@@ -434,6 +434,7 @@
     "terminateConfirm": "终止 Agent #{id}？该 agent 将完成当前轮次后退出。",
     "restartConfirm": "重启 Agent #{id}？该 agent 将完成当前轮次后以全新进程重启。",
     "resurrectConfirm": "复活 Agent #{id}",
+    "rename": "重命名 agent {id}",
     "promptTitle": "提示词",
     "spawning": "创建中",
     "agentId": "#{id} · {label}",
