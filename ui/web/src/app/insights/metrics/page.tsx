@@ -75,37 +75,36 @@ export default function MetricsRedirectPage() {
       <div className="w-full max-w-md space-y-4 rounded-md border border-border p-6 text-center">
         <LineChart className="mx-auto size-8 text-muted-foreground" aria-hidden />
         <div>
-          <h3 className="text-sm font-semibold">Metrics moved to Grafana</h3>
+          <h3 className="text-sm font-semibold">{t("movedTitle")}</h3>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            The standalone Metrics page is retired. The{" "}
+            {t("intro")} {" "}
             <Link href="/insights#ops" className="underline underline-offset-2 hover:text-foreground">
-              Ops section
+              {t("opsSection")}
             </Link>{" "}
-            links to the Grafana dashboard (LLM usage + latency, tokens,
-            errors, restarts, delivery backlog, and plugin metrics).{" "}
+            {t("introAfterOps")} {" "}
             {proxyUp === false
               ? t("grafanaUnavailable")
-              : "Redirecting…"}
+              : t("redirecting")}
           </p>
         </div>
         <div className={cn("justify-center gap-2", FLEX)}>
           <Link href="/insights#ops" className={buttonVariants({ size: "sm" })}>
-            Open the Ops dashboard
+            {t("openOpsDashboard")}
           </Link>
           <a
             href={GRAFANA_DIRECT}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             <ExternalLink className="mr-1.5 size-3.5" aria-hidden />
-            Open Grafana
+            {t("openGrafana")}
           </a>
         </div>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          If Grafana doesn&apos;t load, the gateway&apos;s /grafana proxy may be off
-          (AVA_GRAFANA_PROXY_ENABLED). The raw aggregates are still available via
-          <code className="mx-1 rounded bg-muted px-1 py-0.5 font-mono">scripts/metrics.py</code>
-          and
-          <code className="ml-1 rounded bg-muted px-1 py-0.5 font-mono">GET /api/metrics</code>.
+          {t("fallbackBefore")} {" "}
+          <code className="mx-1 rounded bg-muted px-1 py-0.5 font-mono">{t("metricsScript")}</code>{" "}
+          {t("fallbackMiddle")} {" "}
+          <code className="ml-1 rounded bg-muted px-1 py-0.5 font-mono">{t("metricsApi")}</code>
+          {t("fallbackAfter")}
         </p>
       </div>
     </div>

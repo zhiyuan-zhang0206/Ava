@@ -7,6 +7,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
 import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notices";
@@ -14,7 +15,7 @@ import type { TaskRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 
-export const KANBAN_LANES = ["In progress", "Done", "Canceled"] as const;
+const KANBAN_LANE_KEYS = ["inProgress", "done", "canceled"] as const;
 
 export const STATUS_TO_LANE: Record<string, number> = {
   in_progress: 0,
@@ -39,6 +40,8 @@ export function TaskKanban({
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
 }) {
+  const t = useTranslations("fleet.task");
+  const laneLabels = [t("status.inProgress"), t("status.done"), t("status.canceled")] as const;
   const router = useRouter();
   // Track last agent-sync trigger to avoid overriding manual clicks.
   const lastSyncedAgentRef = useRef<number | null>(null);
@@ -74,7 +77,7 @@ export function TaskKanban({
     // Sections stack vertically and the whole board is the single scrollport;
     // each section is shrink-0 so a long list scrolls instead of squashing.
     <div className={cn("h-full gap-3 overflow-y-auto p-3", FLEX, MIN_H_0, FLEX_COL)}>
-      {KANBAN_LANES.map((label, lane) => {
+      {KANBAN_LANE_KEYS.map((statusKey, lane) => {
         // Priority-first within the section (P0 on top); Array.sort is stable, so
         // same-priority cards keep the incoming created_at-desc order.
         const cards = tasks
@@ -83,12 +86,12 @@ export function TaskKanban({
         if (cards.length === 0) return null;
         return (
           <div
-            key={label}
+            key={statusKey}
             className={cn("shrink-0 rounded-lg border border-border bg-background", FLEX, FLEX_COL)}
           >
             <div className={cn("shrink-0 items-center gap-2 border-b border-border px-3 py-2", FLEX)}>
               <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {label}
+                {laneLabels[lane]}
               </span>
               <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
                 {cards.length}
@@ -137,6 +140,7 @@ function KanbanCard({
   selectedAgentId: number | null;
   router: ReturnType<typeof useRouter>;
 }) {
+  const t = useTranslations("fleet.task");
   return (
     <div
       role="button"
@@ -197,11 +201,11 @@ function KanbanCard({
             {task.owner_label ? (
               <>{task.owner_label} <span className="text-muted-foreground/60">#{task.owner}</span></>
             ) : (
-              <>Agent #{task.owner}</>
+              <>{t("agent", { id: task.owner })}</>
             )}
           </span>
         ) : (
-          <span className="text-amber-500">Unowned</span>
+          <span className="text-amber-500">{t("unowned")}</span>
         )}
       </div>
     </div>
