@@ -157,6 +157,37 @@ def test_transcript_uses_full_checkpoint_loader(
     assert called == {"agent_id": 42}
 
 
+def test_subprocess_call_count_counts_raw_calls_and_textual_mentions(collect_mod: Any) -> None:
+    """The metric intentionally regex-scans code bodies rather than parsing Python."""
+    events = [
+        (
+            "code",
+            {
+                "body": '''
+subprocess.run(["a"])
+subprocess.Popen(["b"])
+subprocess.check_output(["c"])
+subprocess.check_call(["d"])
+subprocess.call(["e"])
+# subprocess.run(["comment"])
+"""subprocess.Popen(["docstring"])"""
+example = "subprocess.check_output([\"literal\"])"
+asyncio.create_subprocess_exec("not-counted")
+subprocess.getoutput("not-counted")
+'''
+            },
+        ),
+        ("turn_end", {"body": 'subprocess.call(["not-code"])'}),
+    ]
+
+    assert collect_mod._subprocess_call_count(events) == 8
+    docstring = collect_mod._subprocess_call_count.__doc__
+    assert docstring is not None
+    assert "comments, docstrings, and string literals" in docstring
+    assert "asyncio.create_subprocess_*" in docstring
+    assert "subprocess.getoutput" in docstring
+
+
 # ── Loki fetcher tests (mocked httpx) ─────────────────────────────────────
 
 
