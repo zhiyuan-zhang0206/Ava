@@ -64,6 +64,18 @@ def _agent_row(agent_id: int = 7, status: str = "running") -> dict[str, Any]:
     }
 
 
+def _summary_agent_row(agent_id: int = 7, status: str = "running") -> dict[str, Any]:
+    """The list projection contains the fields the MCP compaction reads."""
+    return {
+        "agent_id": agent_id,
+        "status": status,
+        "label": "researcher",
+        "machine": "mac-mini",
+        "spawner": "mcp",
+        "last_active_at": "2026-07-01T00:05:00Z",
+    }
+
+
 @pytest.fixture(autouse=True)
 def _gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
@@ -145,10 +157,10 @@ async def test_descriptions_are_english_and_flag_the_destructive_tool() -> None:
 
 
 async def test_list_agents_compacts_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = _patch_http(monkeypatch, lambda _r: httpx.Response(200, json=[_agent_row()]))
+    captured = _patch_http(monkeypatch, lambda _r: httpx.Response(200, json=[_summary_agent_row()]))
     result = await _call("list_agents", {})
 
-    assert str(captured["request"].url) == "http://gw:8000/api/agents"
+    assert str(captured["request"].url) == "http://gw:8000/api/agents?fields=summary"
     assert captured["request"].method == "GET"
     assert result == {
         "result": [

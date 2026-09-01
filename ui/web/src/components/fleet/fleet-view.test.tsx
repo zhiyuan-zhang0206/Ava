@@ -126,7 +126,6 @@ function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
   return {
     spawner: "user",
     fork_source_agent_id: null,
-    fork_source_checkpoint_id: null,
     status: "running",
     pid: 1,
     spawned_at: "2026-06-06T00:00:00Z",
@@ -138,7 +137,6 @@ function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
     notices_awaiting_response: [], unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
-    last_probe_at: null,
     ...over,
   };
 }
