@@ -1125,6 +1125,11 @@ EVENTS: dict[str, EventSpec] = {
         "poisoned editable-install direct_url repaired to the prod source root",
         tier="anomaly",
     ),
+    "exec_editable_install_poisoned": _telemetry(
+        "exec_editable_install_poisoned",
+        "poisoned editable install repaired before an exec child spawn",
+        tier="anomaly",
+    ),
     "source_tree_reset": _telemetry(
         "source_tree_reset",
         "prod source checkout reset to the installed commit / cleaned of untracked files",

@@ -43,6 +43,7 @@ from agent.graph._exec_result import (
     lifecycle_exception_from_name,
 )
 from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
+from shared import editable_install
 from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from shared.paths import exec_run_dir
 from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
@@ -53,6 +54,41 @@ from . import _exec_process
 # Same cadence as the old worker-thread poll loop: near-free, and cancel /
 # timeout response latency stays <= 50ms + signal delivery.
 _POLL_INTERVAL_S = 0.05
+
+
+def _default_editable_guard() -> tuple[str, ...]:
+    """Repair this interpreter's poisoned editable install, or no-op outside a venv."""
+    source_root = editable_install.current_interpreter_source_root()
+    if source_root is None:
+        return ()
+    return editable_install.guard_editable_install(source_root)
+
+
+def _editable_guard_failure(
+    editable_guard: Callable[[], tuple[str, ...]] | None,
+) -> _ExecCrashed | None:
+    """Return the agent-visible guard failure before any exec artifacts exist."""
+    try:
+        violations = (editable_guard or _default_editable_guard)()
+    except Exception as exc:
+        return _ExecCrashed(
+            output=(
+                f"exec editable-install guard could not repair the interpreter: {exc}\n\n"
+                "Do not retry this execute_code call. Report the error to the operator."
+            ),
+            exc=exc,
+        )
+    if not violations:
+        return None
+    output = (
+        "exec editable install was poisoned, auto-repaired, and no child was started. "
+        "Retry this execute_code call.\n\n"
+        "Polluted records:\n" + "\n".join(f"- {violation}" for violation in violations)
+    )
+    return _ExecCrashed(
+        output=output,
+        exc=ExecChildError("exec_editable_install_poisoned", output, None),
+    )
 
 
 def _build_child_env(
@@ -276,6 +312,7 @@ async def _run_in_subprocess(
     exec_dir: Path | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
+    editable_guard: Callable[[], tuple[str, ...]] | None = None,
 ) -> tuple[_ExecResult, ResultPayload | None]:
     """Run `code` in one disposable child process; poll every 50ms monitoring
     exit / cancel_event / deadline (same priority as the old thread loop:
@@ -288,6 +325,9 @@ async def _run_in_subprocess(
     The child's outcome kinds map onto the result with the parent's flags
     authoritative.
     """
+    guard_failure = _editable_guard_failure(editable_guard)
+    if guard_failure is not None:
+        return guard_failure, None
     if exec_dir is None:
         exec_dir = exec_run_dir()
     request_path = make_request_path(exec_dir, agent_id)
