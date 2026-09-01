@@ -35,7 +35,7 @@ Playwright layout-invariant layers share `LAYOUT_INVARIANTS`.
 
 ```bash
 npx vitest run    # unit + component tests
-npx eslint . --max-warnings 17      # lint (the current 500-line soft-budget warnings)
+npm run lint      # errors and warnings absent from scripts/eslint-warning-baseline.json fail
 npx tsc --noEmit  # type check
 npm run build:analyze  # optional local Webpack bundle report
 ```

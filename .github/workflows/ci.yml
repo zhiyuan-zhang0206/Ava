@@ -500,7 +500,7 @@ jobs:
           npm run check:first-load-js
       - name: ESLint
         working-directory: ui/web
-        run: npx eslint . --max-warnings 17
+        run: npm run lint
       - name: Unit tests (vitest run)
         working-directory: ui/web
         run: npx vitest run --coverage
