@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 23 | events table |
-| telemetry (category=telemetry) | `events` | 129 | events table |
+| telemetry (category=telemetry) | `events` | 130 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -90,7 +90,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 129)
+## 3. Telemetry events (category=telemetry, 130)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -127,6 +127,7 @@ consumers: see the comments at each emit point.
 | `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events |
 | `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are lost; the delivery watchdog re-publish covers them) | noise | — | — | events |
+| `host_dispatcher_restart_required` | hosted dispatcher could not unwind a stale turn — exiting for supervisor recovery | anomaly | — | — | events |
 | `host_dispatcher_bad_channel` | hosted dispatcher ignored a wake whose channel name carried no agent id | anomaly | — | — | events |
 | `host_turn_crashed` | a hosted turn task raised — the task is dropped and the next wake retries from the checkpoint; neighbours are unaffected | anomaly | — | — | events |
 | `host_agent_prepared` | the host built an agent's per-agent runtime (chat model + startup reconcile) on a cold path — carries duration_ms and a reason of cold / config_changed / evicted, so a wake that pays the cold cost is distinguishable from one that does not, and a cache thrashing on config churn is visible as reason mix | noise | — | — | events |
