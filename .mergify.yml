@@ -1,7 +1,7 @@
 # Mergify merge queue — this repo's PR merge automation.
 #
 # Flow: CI green → QA applies `qa-approved` → post `@mergifyio queue` as a PR
-# comment → Mergify batches queued PRs (batch_size 8) into one speculative
+# comment → Mergify batches queued PRs (batch_size 4) into one speculative
 # draft PR, re-runs CI on the combined tree, and lands every PR in the batch
 # on green (rebase merges, linear history). A red batch is bisected
 # automatically to evict the culprit. The speculative draft PRs ride branches
@@ -10,7 +10,7 @@
 #
 # Queue tuning (2026-08-31, EMERGENCY ROLLBACK of the 2026-08-30 P0-2
 # tuning, cluster-ops #1818 / Ava P0 lead #405): `max_parallel_checks: 2` +
-# static `batch_size: 8` + `batch_max_wait_time: 300s` + no batch retry —
+# static `batch_size: 4` + `batch_max_wait_time: 300s` + no batch retry —
 # the 08-29 known-stable values. On 2026-08-31 ~21:58Z (UTC), right after
 # the first `max_checks_retries: 1` cycle completed (#1202 -> #1203), the
 # queue engine stopped creating speculative draft PRs ("The draft pull
@@ -55,7 +55,13 @@ queue_rules:
     merge_bot_account: zhiyuan-zhang0206
     # Batch queued PRs into one speculative verification (draft PR); a red
     # batch bisects automatically.
-    batch_size: 8
+    #
+    # 2026-09-01 mitigation (QA dequeue incidents, #405-approved, cluster-ops
+    # #1818): 8 -> 4 while the queue engine mis-handles transient attempt-1
+    # flake failures (whole-train dequeue + member misclose); smaller trains
+    # shrink the blast radius per incident. Revisit on 2026-09-02 in the
+    # low-peak window, together with the batch-retry knob validation.
+    batch_size: 4
     # Wait up to 300s for a burst to fill the batch before processing: burst
     # PRs merge into one speculative batch (one CI cycle instead of several).
     # A lone PR pays up to 5 min queue latency — accepted for the burst case.
