@@ -116,7 +116,11 @@ def print_plan(state: RotationState, *, dry_run: bool) -> None:
 def write_env(state: RotationState) -> None:
     """Stage the new bearer locally. Data-plane credentials are untouched; restart
     this gateway before attempting the new bearer."""
-    upsert_env(ava_home() / ".env", {"AVA_CLUSTER_SECRET": state.new_secret})
+    upsert_env(
+        ava_home() / ".env",
+        {"AVA_CLUSTER_SECRET": state.new_secret},
+        audit_site="rotate_cluster_secret",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

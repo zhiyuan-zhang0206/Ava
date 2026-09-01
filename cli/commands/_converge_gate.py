@@ -200,7 +200,11 @@ def _ensure_app_port(home: Path) -> int:
             rec.ports["app"] = app_port
             save_record_locked(rec)
             logger.info("backfilled app port %d into %s's registry record", app_port, home)
-    upsert_env(home / ".env", {"AVA_APP_PORT": str(app_port)})
+    upsert_env(
+        home / ".env",
+        {"AVA_APP_PORT": str(app_port)},
+        audit_site="converge_gateway_port",
+    )
     return app_port
 
 

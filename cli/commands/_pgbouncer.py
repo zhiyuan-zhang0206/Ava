@@ -769,8 +769,8 @@ def _ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
             if port != want and port in (pg, pooler):
                 normalized = url_with_port(current, want)
     if normalized:
-        upsert_env(env_path, {"AVA_DB_URL": normalized})
-    remove_env(env_path, {"AVA_PGBOUNCER_PORT"})
+        upsert_env(env_path, {"AVA_DB_URL": normalized}, audit_site="converge_pgbouncer")
+    remove_env(env_path, {"AVA_PGBOUNCER_PORT"}, audit_site="converge_pgbouncer")
     if not settings.data_plane.pgbouncer_enabled:
         return
     binary = pgbouncer_bin()
