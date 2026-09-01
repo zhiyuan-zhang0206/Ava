@@ -1,15 +1,16 @@
 ---
 name: ava-self-evolution
-description: Mines real Ava runs for skill and plugin regressions and produces concrete quality fixes. Use when spawned by the weekly self-evolution schedule, when reviewing real-task quality trends, or when asked to evaluate behavior from trace datasets.
+description: Mines real Ava runs for skill and plugin regressions and produces concrete quality fixes. Use for each ~100-run batch, the Monday weekly summary, or real-task quality trends.
 ---
 
 # Self-Evolution
 
-Ava improves by looking at its own real usage. Every week this skill turns
-the past week of real runs into a **trace dataset**, finds the runs that went
-badly, ties them to the skills/plugins that changed recently, and proposes
-concrete fixes. The dataset is the durable asset — it grows every week and is
-the material you iterate skills and plugins against.
+Ava improves by looking at its own real usage. Every ~100 accumulated runs
+(daily traffic is ~100-270, so roughly daily), the batch flow builds a **trace
+dataset**, finds the runs that went badly, ties them to recently changed
+skills/plugins, and proposes concrete fixes. Monday is a summary pass over the
+whole week. The dataset is durable — it grows batch by batch and is the
+material you iterate skills and plugins against.
 
 This is NOT a pre-merge gate, a benchmark, or a synthetic test suite. It reads
 what actually happened.
@@ -30,7 +31,7 @@ The backward pass is **80% agent self-reflection** (`evaluate.debrief()`)
 and **20% trace-mining by a separate worker** — the agent that ran the task
 knows best what tripped it up.
 
-## The weekly flow
+## The batch flow
 
 ```
 collect dataset -> detect what changed -> mine bad runs + analyze -> (replay) -> report
@@ -43,14 +44,15 @@ scripts with `.venv/bin/python`). Output lands under
 ### 1. Collect the dataset
 
 ```
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 7
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 1  # Batch run (~100 accumulated runs)
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 7  # Monday weekly summary
 ```
 
-Reads the past week's runs from the existing tables and writes one JSON record
-per run to `$AVA_HOME/self_evolution/dataset/<this-monday>.jsonl`. Each record
-holds the task prompt, the complete transcript (see Data source), the tools called, objective signals
-(turns, exec failures, compactions, delivery breach, user re-prompts, user
-corrections, peer agent feedback), the skills it touched, and a rule-based
+The batch command reads the past day; the Monday summary reads the past week.
+Both write one JSON record per run to `$AVA_HOME/self_evolution/dataset/<this-monday>.jsonl`.
+Each record holds the task prompt, complete transcript (see Data source), tools called, objective
+signals (turns, exec failures, compactions, delivery breach, user re-prompts,
+user corrections, peer agent feedback), skills it touched, and a rule-based
 `label` of **ok / fumbled / failed** (see `reference/label.py`). The script
 prints the run counts.
 
@@ -66,7 +68,7 @@ prints the run counts.
 
 Both feed `label.py`: any non-empty `corrections` or `peer_feedback` → fumbled at minimum.
 
-Collecting is the point on its own — grow the dataset every week even in a quiet week.
+Collecting is the point on its own — grow the dataset on every batch, even in a quiet one.
 
 ### 2. Detect what changed
 
@@ -74,7 +76,7 @@ Kernel-resident skills and plugins (L4 of the four-layer modification model —
 `decisions/2026-08-19-four-layer-modification-model.md`):
 
 ```
-git -C ~/.ava/source log --since='7 days ago' --name-only --pretty='%h %cI %s' -- ava_builtins/skills/ ava_builtins/plugins/ .agents/skills/
+git -C ~/.ava/source log --since='1 day ago' --name-only --pretty='%h %cI %s' -- ava_builtins/skills/ ava_builtins/plugins/ .agents/skills/
 ```
 
 External extensions (L1–L3) never appear in the kernel repo's log — a plugin
@@ -86,7 +88,7 @@ import json, os, subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 home = Path(os.environ.get("AVA_HOME") or Path.home() / ".ava")
-cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+cutoff = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 reg = json.loads((home / "installed.json").read_text())  # install registry
 print([p["name"] for p in reg["packages"] if (p.get("updated_at") or "") >= cutoff])
 for d in (home / "plugins").iterdir():                    # hand-cloned plugin repos
@@ -100,9 +102,9 @@ for d in (home / "plugins").iterdir():                    # hand-cloned plugin r
 (When issue #39's cluster registry lands, its version-change feed replaces
 this per-machine sweep.)
 
-List the skills/plugins whose files changed this week, with dates — these
-are your suspects. If nothing changed, write a short report noting the dataset
-grew and stop early.
+For each batch, list the skills/plugins whose files changed in the past day,
+with dates — these are your suspects. On Monday, use the past week's changes.
+If nothing changed, write a short report noting the dataset grew and stop early.
 
 ### 3. Mine the bad runs and analyze
 
@@ -110,7 +112,7 @@ grew and stop early.
 $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/mine.py
 ```
 
-Clusters this week's `failed`/`fumbled` runs and prints a markdown digest —
+Clusters the active window's `failed`/`fumbled` runs and prints a markdown digest —
 which run ids, what went wrong — in two passes: by the skill they touched, and
 by the plugin contribution (`<plugin>/<surface>/<identifier>`) that fired in
 them. The plugin pass reads `plugins_activated` — each time a plugin hook,
@@ -119,11 +121,13 @@ hook's regression is attributable to the exact contribution rather than
 invisible.
 
 For each cluster that (a) has several bad runs AND (b) overlaps a skill/plugin
-that changed this week, ask the original agents directly with `evaluate.debrief()` (80% of signal), then spawn one deep-dive worker with `ava.agents.spawn` for the remaining 20%:
+that changed in the active window, ask the original agents directly with
+`evaluate.debrief()` (80% of signal), then spawn one deep-dive worker with
+`ava.agents.spawn` for the remaining 20%:
 
 - Give it the skill name, the run ids, the dataset path
   (`$AVA_HOME/self_evolution/dataset/<week>.jsonl`), and that skill's `git diff`
-  for the week.
+  for the active window.
 - Task it: read the runs' `transcript` in the dataset file and the skill's
   SKILL.md + diff. Did this skill's change cause the failures? Name the root
   cause and the exact edit that would fix it; reply in 3-5 lines.
@@ -133,7 +137,7 @@ Collect the workers' replies with `ava.agents.get_last_message`. Attribution
 combines a logged `skill_invoked` signal with a content scan of the trace — a
 strong suspicion, confirmed by the worker reading the real trace.
 
-Write findings to `$AVA_HOME/self_evolution/proposals/<week>-<skill>.md`:
+Write findings to `$AVA_HOME/self_evolution/proposals/<window>-<skill>.md`:
 phenomenon, real run ids, root cause, concrete fix.
 
 **Optional deep dive.** The dataset's transcript is usually enough. When a
@@ -165,14 +169,14 @@ listed as `invalid` and excluded from the mean.
 
 ### 5. Report
 
-Write `$AVA_HOME/self_evolution/reports/<week>.md`:
+Write `$AVA_HOME/self_evolution/reports/<window>.md`:
 
-1. **Dataset** — runs collected this week (ok / fumbled / failed), weeks accrued.
-2. **Changes** — skills/plugins that changed this week.
+1. **Dataset** — runs collected in the batch or Monday summary (ok / fumbled / failed), batches accrued.
+2. **Changes** — skills/plugins that changed in the active window.
 3. **Findings** — per confirmed regression: skill, real run ids, root cause,
    the fix, and (if run) re-run scores. Mark fixes you are opening as PRs.
-4. **No-signal changes** — changes with no related regression, so next week
-   knows they were checked.
+4. **No-signal changes** — changes with no related regression, so the next
+   batch or Monday summary knows they were checked.
 
 Then notify the user with `ava.ui.notify(title="Self-evolution: <N> changes, <M> suspected regressions", content="<report path>")`.
 
@@ -193,7 +197,7 @@ skill    = the weights        (the SKILL.md text under test)
 iterate  = backpropagation    (measure -> propose edit -> re-measure -> keep the best)
 ```
 
-For each skill that changed this week, run this loop (2-3 rounds):
+For each skill that changed in the batch (or the full week on Monday), run this loop (2-3 rounds):
 
 1. **Pick tasks.** From the dataset, take that skill's tasks (the `mine.py`
    clusters point at them). `evaluate.py` only spawns **replay-safe** ones, so
@@ -257,36 +261,32 @@ stay. "Complete" = full history since the compact-boundary retention rule
 (Task #1125, effective 2026-08-10); earlier trimmed history is not
 reconstructed — detail: the `evaluation` sub-skill.
 
-## Daily incremental scan
+## Daily threshold scan
 
-Between weekly runs, a daily schedule (`self-evolution-daily`, 00:00 deployment
-timezone) runs `reference/daily_scan.py --days 1`: it collects the past day's
-runs into `$AVA_HOME/self_evolution/daily/<date>.jsonl` (weekly `dataset/` files
-are never touched), prints a compact report, and exits 2 (ALERT) whenever any
-run is labeled `failed` or `fumbled`, or 0 runs were collected with no
-TEST- only explanation (data source outage) — waking this agent to review. The threshold is deliberately low: an alert costs
-one cheap review, a missed bad run costs the weekly cycle its earliest signal.
-A missing script or a hard failure also wakes this agent, so a silently broken
-scan cannot hide.
+The supervisor's daily scan (`self-evolution-daily`, 00:00 deployment timezone)
+checks the runs accumulated since the last batch. At roughly 100 runs, it wakes
+this agent to run the batch flow above; daily traffic of ~100-270 runs makes
+that roughly daily. The batch command collects one day; Monday's summary
+collects seven. Failed/fumbled runs, an unexplained empty window, a missing
+scan, or a hard failure also wake this agent so a broken data source cannot hide.
 
 **Loki-failure fallback.** On dense windows `/api/events` can 500; run
 `reference/mirror_backfill.py <days> [week]` — collect from the local event mirror (rows deduped by event id).
 
 ## Cron integration
 
-This skill is driven by a weekly schedule on the gateway (schedule id 1, `self-evolution-weekly`; managed via the `ava schedules` CLI):
+This skill has two supervisor-driven wakes on the gateway (managed through the
+`ava schedules` CLI):
 
-| field | value |
-|-------|-------|
-| name | `self-evolution-weekly` |
-| schedule | `0 0 * * 2` (Tuesdays 00:00 Asia/Shanghai = Mondays 09:00 PT) |
-| agent_prompt | `Read and run $AVA_HOME/skills/ava-self-evolution/SKILL.md for this week.` |
-| agent_label | `self-evolution` |
+| run | trigger | collection |
+|-----|---------|------------|
+| batch flow | daily scan reaches ~100 accumulated runs | `collect.py --days 1` |
+| Monday summary | `self-evolution-weekly`: Tuesdays 00:00 Asia/Shanghai = Mondays 09:00 PT | `collect.py --days 7` |
 
 ## Principles
 
-- **The dataset is the deliverable.** Grow it every week; analysis is built on
-  top of it, not instead of it.
+- **The dataset is the deliverable.** Grow it every batch; the Monday summary
+  covers the whole week. Analysis is built on it, not instead of it.
 - **Read what happened; do not re-run by default.** A failure is already in the
   trace — you rarely need to reproduce it. Replay is a targeted verification
   step, not the main loop.
