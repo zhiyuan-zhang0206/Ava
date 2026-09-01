@@ -126,6 +126,47 @@ class _FakePool:
         return _FakeConnCtx(self)
 
 
+class _PendingScanCursor:
+    def __init__(self, rows: list[tuple[int, bool]]) -> None:
+        self._rows = rows
+
+    async def fetchall(self) -> list[tuple[int, bool]]:
+        return self._rows
+
+
+class _PendingScanConn:
+    def __init__(self, pool: _PendingScanPool) -> None:
+        self._pool = pool
+
+    async def execute(self, sql: str, params: tuple[object, ...]) -> _PendingScanCursor:
+        self._pool.sql = sql
+        self._pool.params = params
+        return _PendingScanCursor(self._pool.rows)
+
+
+class _PendingScanPool:
+    """One host backstop query with captured SQL and returned candidates."""
+
+    def __init__(self, rows: list[tuple[int, bool]]) -> None:
+        self.rows = rows
+        self.sql = ""
+        self.params: tuple[object, ...] = ()
+
+    def connection(self) -> _PendingScanCtx:
+        return _PendingScanCtx(self)
+
+
+class _PendingScanCtx:
+    def __init__(self, pool: _PendingScanPool) -> None:
+        self._pool = pool
+
+    async def __aenter__(self) -> _PendingScanConn:
+        return _PendingScanConn(self._pool)
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
+
+
 class _Model:
     """A stand-in chat model that remembers which model name built it."""
 
@@ -264,6 +305,31 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
 
 
 # ── 1. isolation ─────────────────────────────────────────────────────────────
+
+
+class TestPendingInboundBackstop:
+    async def test_local_pending_rows_become_stale_aware_wake_candidates(self) -> None:
+        """The hosted dispatcher scans only this machine's runnable rows. A
+        fresh pending inbound wakes its agent; only the database predicate marks
+        a long-silent one stale enough for cancellation recovery."""
+        pool = _PendingScanPool([(17, True), (23, False)])
+        host = AgentHost(
+            pool=pool,  # pyright: ignore[reportArgumentType]
+            checkpointer=object(),  # pyright: ignore[reportArgumentType]
+            graph=object(),  # pyright: ignore[reportArgumentType]
+            machine="this-box",
+        )
+
+        candidates = await host.pending_inbound_wakes(180.0)
+
+        assert [(candidate.agent_id, candidate.stale) for candidate in candidates] == [
+            (17, True),
+            (23, False),
+        ]
+        assert pool.params == (180.0, 180.0, "this-box")
+        assert "m.status = 'idling'" in pool.sql
+        assert "m.machine = %s" in pool.sql
+        assert "pending.status = 'pending'" in pool.sql
 
 
 class TestConcurrentAgentIsolation:
