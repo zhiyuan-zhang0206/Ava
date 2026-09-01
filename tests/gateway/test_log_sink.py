@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 import psycopg
@@ -39,6 +40,23 @@ def sink_logger():
     _global_logger.configure(extra={"agent_id": "-"})
     yield _global_logger
     _global_logger.remove(sink_id)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test's event mirror lives in its own tmp dir, never the
+    worker-shared session home (audit M-2): the drain thread appends to
+    `logs_dir()` by day, so a later test in the same worker would otherwise
+    read earlier tests' lines (order-dependent failures or false passes).
+
+    `paths.ava_home` is the patch target rather than `paths.logs_dir` because
+    the telemetry module bound `logs_dir` at import time — patching the path
+    function itself would make the drain write to the session home while
+    `_last_event` read the tmp dir. Both sides resolve `ava_home()` at call
+    time, so one patch redirects the whole pipeline consistently."""
+    from shared import paths
+
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "ava_home")
 
 
 def _last_event() -> tuple[str, int | None, str, dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]

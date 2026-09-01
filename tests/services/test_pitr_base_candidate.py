@@ -266,7 +266,6 @@ def test_validate_replication_hba_wraps_probe_failure(
 def _scratch_pg(tmp_path: Path) -> tuple[Path, Path, int]:
     from shared.pg_tools import pg_tool
 
-    port = _free_port()
     sock = Path(tempfile.mkdtemp(prefix="ava-pg-sock-", dir="/tmp"))
     data = tmp_path / "pg"
     log = tmp_path / "pg.log"
@@ -275,32 +274,45 @@ def _scratch_pg(tmp_path: Path) -> tuple[Path, Path, int]:
         check=True,
         capture_output=True,
     )
-    start = [
-        pg_tool("pg_ctl"),
-        "-D",
-        str(data),
-        "-l",
-        str(log),
-        "-w",
-        "-t",
-        "30",
-        "start",
-        "-o",
-        f"-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories={sock} "
-        "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
-    ]
     # A parallel xdist worker can win the release-to-bind window and grab the
-    # port (`_free_port` documents the same race); retrying the start rides out
-    # the transient refusal instead of failing the test (audit #2245).
+    # port (`_free_port` documents the same race). Each attempt binds a FRESH
+    # port (pg_tools._allocate_port semantics, review P2): a transient holder
+    # clears between attempts, and a long-lived holder (another worker's
+    # scratch PG) stops mattering because the new attempt binds elsewhere.
     for attempt in range(3):
+        port = _free_port()
         try:
-            subprocess.run(start, check=True, capture_output=True)  # noqa: S603
-            break
-        except subprocess.CalledProcessError:
+            subprocess.run(  # noqa: S603
+                [
+                    pg_tool("pg_ctl"),
+                    "-D",
+                    str(data),
+                    "-l",
+                    str(log),
+                    "-w",
+                    "-t",
+                    "30",
+                    "start",
+                    "-o",
+                    f"-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories={sock} "
+                    "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            return data, sock, port
+        except subprocess.CalledProcessError as exc:
+            # Keep each failing attempt's diagnostic before the sleep — the
+            # capture_output above swallows it otherwise (review P2).
+            tail = (exc.stderr or b"").decode(errors="replace").strip()
+            if tail:
+                sys.stderr.write(
+                    f"[_scratch_pg] pg_ctl start attempt {attempt + 1} failed:\n{tail}\n"
+                )
             if attempt == 2:
                 raise
             time.sleep(1.5)
-    return data, sock, port
+    raise AssertionError("unreachable")
 
 
 def test_validate_replication_contract_fails_closed_without_replication_row(
