@@ -106,10 +106,24 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert payload.attachments == []
 
 
-def test_boot_config_failure_writes_crashed_envelope(tmp_path: Path) -> None:
+def test_boot_config_failure_writes_crashed_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A Settings failure while importing ava must reach the parent's result file."""
+    for name in tuple(os.environ):
+        if name.startswith("AVA_PITR_"):
+            monkeypatch.delenv(name)
     home = tmp_path / "home"
     home.mkdir()
+    backup_key = tmp_path / "backup.key"
+    backup_key.write_bytes(b"k" * 32)
+    backup_key.chmod(0o600)
+    oss_credentials = tmp_path / "oss-credentials.json"
+    oss_credentials.write_text(
+        json.dumps({"access_key_id": "test-ak", "access_key_secret": "test-secret"}),
+        encoding="utf-8",
+    )
+    oss_credentials.chmod(0o600)
     (home / ".env").write_text(
         "AVA_DB_URL=postgresql://u@127.0.0.1:1/x\n"
         "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
@@ -119,9 +133,10 @@ def test_boot_config_failure_writes_crashed_envelope(tmp_path: Path) -> None:
         "AVA_PITR_STORE_BACKEND=oss\n"
         "AVA_PITR_OSS_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com\n"
         "AVA_PITR_OSS_BUCKET=some-bucket\n"
-        "AVA_PITR_OSS_CREDENTIALS_FILE=/nonexistent/cred.json\n"
-        "AVA_PITR_BACKUP_KEY_FILE=/nonexistent/key\n"
-        "AVA_PITR_BACKUP_KEY_ID=test\n",
+        f"AVA_PITR_OSS_CREDENTIALS_FILE={oss_credentials}\n"
+        f"AVA_PITR_BACKUP_KEY_FILE={backup_key}\n"
+        "AVA_PITR_BACKUP_KEY_ID=test\n"
+        "AVA_PITR_REPLICATION_DB_URL=postgresql://repl@127.0.0.1:1/x\n",
         encoding="utf-8",
     )
 
