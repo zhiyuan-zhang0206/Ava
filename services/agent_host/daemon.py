@@ -189,6 +189,77 @@ async def _beat_forever(liveness: Liveness) -> None:
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
 
+class _PageEventPublisher:
+    """Best-effort page events on the shared Redis channel — the daemon's
+    stand-in for a per-agent SSE publisher (turns build their own; none
+    exists outside a turn). Mirrors the gateway ttl_reaper's pattern so the
+    frontend drops closed rows the daemon's scan closes; pages still heal
+    without it, the events only keep the open-pages popover accurate.
+    """
+
+    def __init__(self) -> None:
+        self._tasks: set[asyncio.Task[object]] = set()
+
+    def emit(self, payload: str) -> None:
+        from shared.config import settings
+        from shared.redis_client import publish_best_effort
+
+        # Fire-and-forget: publish_best_effort never raises; the task set
+        # keeps a strong ref so the publish cannot be GC'd mid-flight.
+        task = asyncio.create_task(
+            publish_best_effort(
+                settings.data_plane.events_channel, payload, context="agent_host_page"
+            )
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+
+async def _page_reconcile_forever(pool: AsyncConnectionPool) -> None:
+    """Periodically probe + restore every hosted agent's open pages.
+
+    The heartbeat check-in only reaches idle agents, and this daemon runs no
+    per-agent page_reconcile_loop (task #2260: hosted turns are driven by
+    services/agent_host/host.py, not agent/loop.py:main()), so a busy hosted
+    agent's pages would otherwise stay dead for as long as its turn lasts —
+    the 2026-09-01 incident shape. The FIRST pass runs immediately at daemon
+    start (the process-mode equivalent of the boot scan), then every
+    heartbeat interval (AVA_HEARTBEAT_INTERVAL_SECONDS) — the process-mode
+    cadence — skipping agents another path (their heartbeat scan) already
+    reconciled within the interval. Self-protecting like the other daemon
+    loops: any failure is logged and the loop waits for the next interval.
+    """
+    from agent.startup import reconcile_all_open_pages
+    from shared.config import settings
+
+    interval_s = float(settings.daemon.heartbeat_interval_seconds)
+    publisher = _PageEventPublisher()
+    while True:
+        try:
+            await reconcile_all_open_pages(pool, interval_s=interval_s, event_publisher=publisher)
+        except Exception:
+            _log.exception(
+                "[agent-host] periodic page reconcile pass failed — retrying next interval"
+            )
+        await asyncio.sleep(interval_s)
+
+
+def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task[object]]:
+    """Create the daemon's two long-lived background tasks — the plugins
+    watch and the page reconciler.
+
+    Split out of `run()` so the wiring is testable without booting the
+    dispatcher: the reconciler's existence is what closes the
+    busy-hosted-agent dead-page gap (task #2260), and a regression that
+    dropped its creation must turn a test red rather than silently reopen
+    the gap.
+    """
+    return {
+        "plugins_watch": asyncio.create_task(_watch_plugins_for_restart()),
+        "page_reconciler": asyncio.create_task(_page_reconcile_forever(pool)),
+    }
+
+
 async def _build_checkpointer(
     pool: AsyncConnectionPool[psycopg.AsyncConnection],
 ) -> AsyncPostgresSaver:
@@ -269,7 +340,10 @@ async def run() -> None:
             port=health_port("agent_host"),
             bound=settings.daemon.host_max_concurrent_turns,
         )
-        plugins_watch = asyncio.create_task(_watch_plugins_for_restart())
+        # Task #2260: heartbeat-independent page-liveness scan for hosted
+        # agents — busy agents get no heartbeats, and the hosted daemon runs
+        # no per-agent page_reconcile_loop (loop.py:main() is process-only).
+        background = _spawn_background_tasks(pool)
         try:
             await InboundWakeDispatcher(
                 settings.data_plane.redis_url,
@@ -280,9 +354,11 @@ async def run() -> None:
                 subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
             ).run()
         finally:
-            plugins_watch.cancel()
+            for task in background.values():
+                task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await plugins_watch
+                for task in background.values():
+                    await task
             # Turns are checkpointed, so cancelling one loses at most the
             # in-flight step — the same recovery path a runner restart already
             # exercises, and the reason a rolling restart is cheap here.
