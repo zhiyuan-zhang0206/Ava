@@ -145,6 +145,30 @@ function makeItem(overrides: Partial<BackendTimelineItem> & Pick<BackendTimeline
   };
 }
 
+describe("TimelineView accessibility", () => {
+  it("is a polite log and announces turn boundaries without streaming chunks", () => {
+    const { rerender } = render(<TimelineView items={[]} />);
+    const log = screen.getByRole("log");
+    expect(log.getAttribute("aria-live")).toBe("polite");
+    expect(log.getAttribute("aria-relevant")).toBe("additions");
+    expect(screen.queryByTestId("timeline-turn-announcement")).toBeNull();
+
+    rerender(<TimelineView items={[]} turnActive />);
+    expect(screen.getByTestId("timeline-turn-announcement").textContent).toBe("Agent is responding.");
+
+    rerender(
+      <TimelineView
+        turnActive
+        items={[makeItem({ kind: "agent_chat", payload: "A streaming chunk" })]}
+      />,
+    );
+    expect(screen.getByTestId("timeline-turn-announcement").textContent).toBe("Agent is responding.");
+
+    rerender(<TimelineView items={[]} />);
+    expect(screen.getByTestId("timeline-turn-announcement").textContent).toBe("Agent response complete.");
+  });
+});
+
 describe("compact history segment dividers", () => {
   it("renders one localized divider between each compact summary and its raw history", () => {
     const items = [

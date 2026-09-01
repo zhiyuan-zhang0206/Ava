@@ -362,6 +362,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                   <input
                     autoFocus
                     value={draft}
+                    aria-label={`Rename agent ${agent.agent_id}`}
                     onChange={(e) => setDraft(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
                     onBlur={submit}

@@ -402,6 +402,8 @@
     "actionThinking": "thinking",
     "actionCode": "code",
     "actionOutput": "output",
+    "agentResponding": "Agent is responding.",
+    "agentResponseComplete": "Agent response complete.",
     "copied": "Copied"
   },
   "markers": {
