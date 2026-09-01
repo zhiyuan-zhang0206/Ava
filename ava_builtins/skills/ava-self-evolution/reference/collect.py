@@ -57,6 +57,7 @@ TASK_SOURCES = ["user"]  # plus "agent:%" matched via LIKE in the query
 
 _BUILTIN_HELP_CALL_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(")
 _BUILTIN_HELP_ON_AVA_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(\s*ava\.")
+_SUBPROCESS_CALL_RE = re.compile(r"subprocess\.(run|Popen|check_output|check_call|call)\b")
 
 
 # ─────── Loki-backed event fetches (paged via the gateway /api/events) ───────
@@ -200,6 +201,15 @@ def _builtin_help_counts(events: list[tuple]) -> tuple[int, int]:
         calls += len(_BUILTIN_HELP_CALL_RE.findall(body))
         on_ava += len(_BUILTIN_HELP_ON_AVA_RE.findall(body))
     return calls, on_ava
+
+
+def _subprocess_call_count(events: list[tuple]) -> int:
+    """Count raw subprocess calls across an agent's executed code blocks."""
+    return sum(
+        len(_SUBPROCESS_CALL_RE.findall(str(payload.get("body", ""))))
+        for event, payload in events
+        if event == "code"
+    )
 
 
 # ─────── Loki paging constants ─────────────────────────────────────────────
@@ -375,6 +385,7 @@ def collect_with_counts(
         record["builtin_help_calls"], record["builtin_help_on_ava"] = _builtin_help_counts(
             agent_events
         )
+        record["subprocess_calls"] = _subprocess_call_count(agent_events)
         records.append(record)
     counts = {"seen": len(ids), "excluded_test": excluded_test, "skipped_meta": skipped_meta}
     return records, counts
@@ -452,6 +463,7 @@ def collect_one(
         raise ValueError(f"no agents_meta row for agent {agent_id}")
     record = build_record(agent_id, week, events, log_events, inbounds, meta, leak_paths=leak_paths)
     record["builtin_help_calls"], record["builtin_help_on_ava"] = _builtin_help_counts(events)
+    record["subprocess_calls"] = _subprocess_call_count(events)
     return record
 
 
