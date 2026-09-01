@@ -223,7 +223,7 @@ class RedisInboundListener:
             ch=self._channel,
         )
 
-    async def _consume_wake_key(self) -> bool:
+    async def _consume_wake_key(self, timeout: float) -> bool:
         """Whether a durable wake breadcrumb exists for this agent; consume it.
 
         The inbound publisher SETEXes `wake_key(agent_id)` alongside every
@@ -231,17 +231,29 @@ class RedisInboundListener:
         so a wake lost to pub/sub's fire-and-forget semantics (the publish
         landed while this connection was down or not yet subscribed) still
         makes the caller's SELECT recheck run immediately instead of after the
-        full wait budget. Best-effort: any failure returns False and the caller
-        falls back to its normal wait.
+        full wait budget. The caller-provided remaining budget also bounds this
+        command: a timeout drops both Redis handles before returning False, so
+        the caller can run its SELECT recheck and a later wait can reconnect.
+        Other failures return False and fall back to the normal wait.
         """
         redis = self._redis
-        if redis is None:
+        if redis is None or timeout <= 0:
             return False
         try:
             # redis-py types getdel()'s return as Unknown; bool() narrows it.
             return bool(  # pyright: ignore[reportUnknownMemberType]
-                await redis.getdel(wake_key(self._agent_id))
+                await asyncio.wait_for(redis.getdel(wake_key(self._agent_id)), timeout=timeout)
             )
+        except TimeoutError:
+            logger.warning(
+                "RedisInboundListener[agent={a}]: wake-key GETDEL did not complete "
+                "within {t:.1f}s budget — discarding Redis connections before SELECT recheck",
+                a=self._agent_id,
+                t=timeout,
+            )
+            async with self._lock:
+                await self._close_inner()
+            return False
         except Exception:
             return False
 
@@ -324,7 +336,10 @@ class RedisInboundListener:
                 # so the caller's SELECT recheck runs NOW instead of after a
                 # full wait budget — this turns a lost wake into (near-)instant
                 # delivery instead of the 30s fallback.
-                if await self._consume_wake_key():
+                if await self._consume_wake_key(remaining):
+                    return
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
                     return
                 # Consume with bounded budget (see `_CONSUME_ABANDON_GRACE`).
                 consume_task = asyncio.ensure_future(self._consume_one(pubsub, remaining))

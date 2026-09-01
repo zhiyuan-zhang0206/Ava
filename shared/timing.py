@@ -254,7 +254,17 @@ CLOCKS: dict[str, Clock] = {
     "WEDGED_AGE_SEC": Clock(
         "wedged",
         lambda: settings.daemon.wedged_agent_inbound_age_seconds,
-        "age of an unconsumed pending inbound that presumes an agent wedged",
+        "running-agent age of an unconsumed pending inbound that presumes an agent wedged",
+    ),
+    "IDLING_WEDGED_AGE_SEC": Clock(
+        "wedged",
+        lambda: settings.daemon.wedged_idling_agent_inbound_age_seconds,
+        "idling-agent age of an unconsumed pending inbound that presumes its claim loop wedged",
+    ),
+    "IDLE_CLAIM_BACKSTOP_S": Clock(
+        "wedged",
+        lambda: settings.agent.db_notify_wait_timeout_seconds,
+        "process idle claim loop's Redis-wake fallback SELECT cadence",
     ),
     "EXEC_NODE_TIMEOUT_S": Clock(
         "wedged",
@@ -451,6 +461,13 @@ CONSTRAINTS: list[Constraint] = [
         "EXEC_NODE_TIMEOUT_S + LLM_RETRY_BUDGET_ESTIMATE_S",
         "the wedged threshold must cover a healthy agent's longest legitimate "
         "stall: one exec node plus the LLM retry budget (2400 >= 1200 + 770)",
+    ),
+    Constraint(
+        ">=",
+        "IDLING_WEDGED_AGE_SEC",
+        "2 * IDLE_CLAIM_BACKSTOP_S",
+        "an idling claim loop gets at least two fallback SELECT rounds before wedged recovery; "
+        "it is deliberately independent of running-turn exec and LLM budgets",
     ),
     # --- stop family: the hosted runner's shutdown waits must fit inside the
     # stop path's force-kill window, or the host is killed before it can emit
