@@ -402,6 +402,8 @@
     "actionThinking": "思考",
     "actionCode": "代码",
     "actionOutput": "输出",
+    "agentResponding": "Agent 正在回复。",
+    "agentResponseComplete": "Agent 回复已完成。",
     "copied": "已复制"
   },
   "markers": {

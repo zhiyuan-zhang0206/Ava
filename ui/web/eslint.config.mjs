@@ -2,6 +2,7 @@ import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import nextPlugin from "@next/eslint-plugin-next";
 import reactHooks from "eslint-plugin-react-hooks";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 
 import sentenceCase from "./eslint-rules/sentence-case.mjs";
 import layoutPrimitive from "./eslint-rules/layout-primitive.mjs";
@@ -131,6 +132,21 @@ export default tseslint.config(
       ...nextPlugin.configs["core-web-vitals"].rules,
       // App Router projects have no pages/ directory
       "@next/next/no-html-link-for-pages": "off",
+    },
+  },
+
+  // ── JSX accessibility ──
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ...jsxA11y.flatConfigs.recommended,
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+      // Focus is intentionally moved when a user opens a scoped editing flow;
+      // the rule cannot distinguish that action from focus on initial page load.
+      "jsx-a11y/no-autofocus": "off",
+      // React uses onChange for native-select selection changes. Deferring these
+      // immediate preference/configuration updates to blur would alter behavior.
+      "jsx-a11y/no-onchange": "off",
     },
   },
 

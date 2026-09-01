@@ -538,6 +538,7 @@ describe("ConfigPage render", () => {
     fireEvent.click(screen.getByTestId("edit-api_key"));
     const input = screen.getByTestId<HTMLInputElement>("input-api_key");
     expect(input.getAttribute("type")).toBe("password");
+    expect(screen.getByLabelText("Replace AVA_API_KEY")).toBe(input);
     expect(input.value).toBe("");
     // A non-empty value replaces the secret; the delta carries the new value.
     fireEvent.change(input, { target: { value: "sk-NEW" } });

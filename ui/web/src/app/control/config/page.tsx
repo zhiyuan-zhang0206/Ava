@@ -749,6 +749,7 @@ function ConfigRow({
                 autoFocus
                 type="password"
                 value={editValue}
+                aria-label={t("replace", { env: field.env_var })}
                 placeholder={t("newValue")}
                 onChange={(e) => onEditValueChange(e.target.value)}
                 onKeyDown={onEditKeyDown}
