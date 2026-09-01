@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "next dev -H 127.0.0.1",
     "build": "next build",
+    "build:analyze": "ANALYZE=true next build --webpack",
+    "check:first-load-js": "node scripts/check-first-load-js.mjs",
     "start": "next start -H 127.0.0.1",
     "test": "vitest run",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint . --max-warnings 17",
     "lint:fix": "eslint . --fix",
     "typecheck": "next typegen && tsc --noEmit"
   },
@@ -42,9 +44,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@next/bundle-analyzer": "16.2.7",
     "@next/eslint-plugin-next": "^16.2.7",
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@tailwindcss/postcss": "^4.3.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",

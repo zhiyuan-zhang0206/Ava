@@ -1,0 +1,12 @@
+[
+  {
+    "route": "/",
+    "firstLoadUncompressedJsBytes": 1207268,
+    "firstLoadChunkPaths": []
+  },
+  {
+    "route": "/fleet",
+    "firstLoadUncompressedJsBytes": 1210630,
+    "firstLoadChunkPaths": []
+  }
+]
