@@ -647,8 +647,11 @@ def _trunk_post(
         return {}, None
     try:
         data = json.loads(body)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        return None, f"invalid JSON response: {error}"
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # submitPullRequest / cancelPullRequest answer 200 with a plain-text
+        # "OK" body (verified live 2026-09-01); a 200 is a success regardless
+        # of body shape, so a non-JSON body must not be read as an error.
+        return {}, None
     if not isinstance(data, dict):
         return None, "response was not a JSON object"
     return data, None

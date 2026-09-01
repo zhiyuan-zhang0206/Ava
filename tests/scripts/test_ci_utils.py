@@ -278,3 +278,45 @@ def test_trunk_queue_check_does_not_block_all_green_predicate() -> None:
     assert result.trunk_checks == [
         {"name": "Trunk Merge Queue", "status": "IN_PROGRESS", "conclusion": ""}
     ]
+
+
+class _PlainTextResponse(_TrunkResponse):
+    """A 200 response whose body is plain text, like submitPullRequest's "OK"."""
+
+    def read(self) -> bytes:
+        return b"OK"
+
+
+def test_trunk_submit_accepts_plain_text_ok_body(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """submitPullRequest answers 200 with a plain-text 'OK' body (verified live
+    2026-09-01); a 200 must count as success regardless of body shape, or a
+    successful submit would be misread as an error and retried into a 409."""
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [
+                _PlainTextResponse({}),
+                _TrunkResponse({"state": "merged"}),
+            ],
+            requests,
+        ),
+    )
+    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+
+    rc = ci_utils._trunk_merge_flow(
+        "42",
+        "zhiyuan-zhang0206/Ava",
+        "medium",
+        every=1,
+        timeout=0,
+        token="trunk-token",  # noqa: S106 — test fixture
+    )
+
+    assert rc == 0
+    assert capsys.readouterr().out == "PR #42 merged by the Trunk merge queue\n"
