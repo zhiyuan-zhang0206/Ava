@@ -46,6 +46,20 @@ _ORPHAN_HOST_KILL_WAIT_S = 3.0
 _PTY_HOST_MODULE = "shared.pty_sessions.host"
 
 
+def _host_is_live(proc: psutil.Process) -> bool:
+    """Whether `proc` is a live (non-zombie) host process.
+
+    A SIGKILLed/died host lingers as a zombie until init reaps it, and
+    ``is_running()`` stays True through that window. The force-reap contract
+    is "no LIVE host survives", so a zombie counts as reaped (the
+    exec-teardown #1044 lesson: judge by status, not by pid existence).
+    """
+    try:
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:
+        return False
+
+
 def _host_answers_ping(name: str) -> bool:
     """Whether the named host's socket answers a short successful ping.
 
@@ -167,14 +181,14 @@ def _reap_orphaned_hosts(name: str, *, force_unresponsive: bool = False) -> int:
     )
     for proc in processes.values():
         with contextlib.suppress(psutil.Error):
-            if proc.is_running():
+            if _host_is_live(proc):
                 proc.kill()
     deadline = time.monotonic() + _ORPHAN_HOST_KILL_WAIT_S
     while time.monotonic() < deadline:
-        if not any(proc.is_running() for proc in processes.values()):
+        if not any(_host_is_live(proc) for proc in processes.values()):
             return len(hosts)
         time.sleep(0.05)
-    if not any(proc.is_running() for proc in processes.values()):
+    if not any(_host_is_live(proc) for proc in processes.values()):
         return len(hosts)
-    survivors = sorted(proc.pid for proc in processes.values() if proc.is_running())
+    survivors = sorted(proc.pid for proc in processes.values() if _host_is_live(proc))
     raise RuntimeError(f"recordless pty host {name} survived force-reap: pids={survivors}")
