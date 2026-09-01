@@ -67,9 +67,9 @@ jobs:
     name: classify change
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Draft PRs skip CI — EXCEPT Mergify's speculative batch drafts
-    # (mergify/merge-queue/*), which are exactly the runs that must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') }}
+    # Draft PRs skip CI except Mergify speculative batch drafts and Trunk test branches
+    # (mergify/merge-queue/*, trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
       backend: ${{ steps.decide.outputs.backend }}
@@ -113,7 +113,9 @@ jobs:
     name: repo language (no raw CJK)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') }}
+    # Draft PRs skip CI except Mergify speculative batch drafts and Trunk test branches
+    # (mergify/merge-queue/*, trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

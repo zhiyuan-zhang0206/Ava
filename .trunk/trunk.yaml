@@ -1,0 +1,34 @@
+version: 0.1
+
+# Trunk Merge Queue waits on these statuses while testing a queued PR. This overrides the
+# branch-protection default: all 27 CI job check names from .github/workflows/ci.yml were
+# verified from live check runs on 2026-09-01; skipped checks count as success per GitHub semantics.
+merge:
+  required_statuses:
+    - backend (pytest + pyright)
+    - backend serial (flaky)
+    - backend shard (1/12)
+    - backend shard (2/12)
+    - backend shard (3/12)
+    - backend shard (4/12)
+    - backend shard (5/12)
+    - backend shard (6/12)
+    - backend shard (7/12)
+    - backend shard (8/12)
+    - backend shard (9/12)
+    - backend shard (10/12)
+    - backend shard (11/12)
+    - backend shard (12/12)
+    - backend static (ruff + pyright + migration smoke)
+    - backend structure (pre-commit lint + codegen freshness)
+    - backend vendored pgvector smoke (Linux)
+    - classify change
+    - e2e (Playwright happy path)
+    - e2e env guard (serial)
+    - e2e hosted (agent-runner-as-server happy path)
+    - e2e shard (1/4)
+    - e2e shard (2/4)
+    - e2e shard (3/4)
+    - e2e shard (4/4)
+    - frontend (eslint + tsc + vitest)
+    - repo language (no raw CJK)
