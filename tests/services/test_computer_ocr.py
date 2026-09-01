@@ -29,10 +29,11 @@ class _FakeCompleted:
 
 
 @pytest.fixture
-def fake_bin(monkeypatch: pytest.MonkeyPatch) -> Path:
+def fake_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A prebuilt binary, older than the real ocr.swift, so _binary() runs
-    the OCR subprocess without recompiling."""
-    bin_path = Path("/tmp/fake-ocr-bin/ocr")  # noqa: S108
+    the OCR subprocess without recompiling. Lives in the test's own tmp dir,
+    never a fixed /tmp path (audit M-3)."""
+    bin_path = tmp_path / "fake-ocr-bin" / "ocr"
     bin_path.parent.mkdir(parents=True, exist_ok=True)
     bin_path.write_text("fake")
     os.utime(bin_path, (time.time(), time.time()))
@@ -47,8 +48,13 @@ def _stub_run(monkeypatch: pytest.MonkeyPatch, results: list[_FakeCompleted]) ->
     monkeypatch.setattr(subprocess, "run", _run)
 
 
-def _force_rebuild(monkeypatch: pytest.MonkeyPatch, bin_path: Path, src_path: Path) -> None:
-    """Make _binary() see a stale binary + newer source (the swiftc path)."""
+def _force_rebuild(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str) -> None:
+    """Make _binary() see a stale binary + newer source (the swiftc path).
+
+    The fake binary/source live under the test's own tmp dir (audit M-3),
+    keyed by `name` so one test's rebuild state never touches another's."""
+    bin_path = tmp_path / name / "ocr"
+    src_path = tmp_path / name / "s.swift"
     bin_path.parent.mkdir(parents=True, exist_ok=True)
     bin_path.write_text("old")
     src_path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,15 +102,15 @@ def test_empty_output_is_empty_list(fake_bin: Path, monkeypatch: pytest.MonkeyPa
     assert ocr_image("/tmp/x.png") == []  # noqa: S108
 
 
-def test_missing_swiftc_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_rebuild(monkeypatch, Path("/tmp/fake-rebuild1/ocr"), Path("/tmp/fake-rebuild1/s.swift"))  # noqa: S108
+def test_missing_swiftc_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_rebuild(monkeypatch, tmp_path, "rebuild1")
     monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     with pytest.raises(OcrError, match="swiftc"):
         ocr_image("/tmp/x.png")  # noqa: S108
 
 
-def test_swiftc_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_rebuild(monkeypatch, Path("/tmp/fake-rebuild2/ocr"), Path("/tmp/fake-rebuild2/s.swift"))  # noqa: S108
+def test_swiftc_failure_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_rebuild(monkeypatch, tmp_path, "rebuild2")
     monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: "/usr/bin/swiftc")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
     def _run(cmd: list[str], **kw: Any) -> _FakeCompleted:
