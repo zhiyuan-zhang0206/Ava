@@ -422,8 +422,9 @@ class NoticePosted(_Base):
 
 class NoticeResolved(_Base):
     """Published when an open notice leaves the queue. The frontend refetches the
-    open and resolved Inbox views; response-required resolutions also refresh the
-    agent snapshot through their delivery path."""
+    open and resolved Inbox views. The resolution's write or delivery path also
+    publishes AgentUpdated when it removes a response-required notice, keeping
+    the inspector snapshot independent of this Inbox event."""
 
     role: Literal["notice_resolved"] = "notice_resolved"
     notice_id: int

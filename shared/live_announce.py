@@ -81,11 +81,8 @@ def publish_agent_updated_sync(conn: psycopg.Connection, agent_id: int) -> None:
 def publish_notice_posted_sync(
     agent_id: int, notice_id: int, priority: str, title: str, task_id: int | None = None
 ) -> None:
-    """Publish NoticePosted from a sync context (the SDK ava.ui.notify() /
-    ava.ui.edit_notice() call on an FYI notice). No snapshot read — FYI notices
-    stay off the snapshot, so the event carries the lightweight header directly.
-    `task_id` is the task the notice belongs to (None when it names none), so the
-    frontend groups the FYI feed by task without a refetch."""
+    """Publish NoticePosted from a sync context. The unified Inbox refetches its
+    queue from this lightweight header; `task_id` groups it without a refetch."""
     ev = NoticePosted(
         agent_id=agent_id, notice_id=notice_id, priority=priority, title=title, task_id=task_id
     )
@@ -95,9 +92,8 @@ def publish_notice_posted_sync(
 
 
 def publish_notice_resolved_sync(agent_id: int, notice_id: int) -> None:
-    """Publish NoticeResolved from a sync context (the SDK ava.ui.dismiss_notice()
-    call on an FYI notice). The frontend drops the notice from the unread feed —
-    same mechanism as the async gateway-side publish_notice_resolved."""
+    """Publish NoticeResolved from a sync context to refresh the Inbox queue.
+    This is the same event as the async gateway-side publisher."""
     ev = NoticeResolved(agent_id=agent_id, notice_id=notice_id)
     publish_best_effort_sync(
         settings.data_plane.events_channel, ev.model_dump_json(), context="notice_resolved"
