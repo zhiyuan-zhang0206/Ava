@@ -23,6 +23,14 @@ Every session has a **record** (`$AVA_HOME/run/sessions/<name>.json`: pid + star
   - e.g., `ava-agent-1485-shell-2-okf-build` indicates agent 1485's shell #2, named okf-build
 - `ava-updater` / `ava-rollout` / `ava-cluster-restart` — orchestration sessions (their logs additionally tee to `$AVA_HOME/logs/{updater,rollout,cluster-restart}-<epoch>.log` on POSIX)
 
+The integer `<n>` is a monotonic, per-agent runtime handle, not durable desired
+state. Session zero is valid for a fresh agent. Once a session is killed its id
+is never reused; a stateless rebuild receives and must publish the next id.
+Consequently `ava.shell.sessions.capture(old_id)` correctly rejects a pre-rebuild
+handle instead of crossing into another owner or silently addressing the new
+session. The physical record namespace is also per `$AVA_HOME`; neither an id
+nor a name grants access across homes.
+
 ### Environment Variable Forwarding (⚠️ Critical Cross-Cutting Concern)
 When an agent process starts, `ava.self.AGENT_ID` is set via command-line argument (`agent/loop.py:main()` establishes identity + `os.environ["AVA_AGENT_ID"]`). Child sessions receive a **built env dict** handed to the backend at spawn (`shared/session_env.forward_env_dict()`) — the caller's HOST-scope env (machine identity, paths, health ports, the gateway URL), while cluster-scope values (db/redis URLs, the cluster secret, provider keys, model knobs) are deliberately NOT forwarded — the child re-sources them at its own boot (fetch on a pure runner, own .env on a gateway host). Detached agent processes get `ops.agent_launch.agent_spawn_env_dict()` (bootstrap keys only). Both passthrough a small set of host environment variables (`$DISPLAY` / `$WAYLAND_DISPLAY`) for capability detection/tools reading OS-native names.
 

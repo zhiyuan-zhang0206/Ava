@@ -72,6 +72,7 @@ import psutil
 
 from shared.log import logger
 from shared.paths import run_dir
+from shared.platform import LockTimeoutError
 from shared.pty_sessions._paths import (
     host_identity,
     host_log_path,
@@ -81,6 +82,7 @@ from shared.pty_sessions._paths import (
     socket_path,
     transcript_path,
 )
+from shared.pty_sessions.allocation_freeze import locked_freeze_state, state_path
 from shared.pty_sessions.orphan_reaper import _reap_orphaned_hosts
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
@@ -440,7 +442,14 @@ def _spawn_host(name: str, cwd: str, envfile: str, cmd_b64: str) -> int:
     try:
         host_pid = int(spawned.stdout.strip())
     except ValueError:
-        host_pid = 0
+        sys.stderr.write(
+            f"cannot establish spawned pty host identity for {name}: {spawned.stdout!r}\n"
+        )
+        try:
+            _reap_orphaned_hosts(name, force_unresponsive=True)
+        except RuntimeError as exc:
+            sys.stderr.write(f"cannot reap unidentified pty host for {name}: {exc}\n")
+        return 1
     deadline = time.monotonic() + _SPAWN_READY_TIMEOUT_S
     while time.monotonic() < deadline:
         with contextlib.suppress(OSError, ValueError):
@@ -458,7 +467,41 @@ def _spawn_host(name: str, cwd: str, envfile: str, cmd_b64: str) -> int:
     with contextlib.suppress(OSError):
         tail = "\n".join(log.read_text(errors="replace").splitlines()[-8:])
     sys.stderr.write(f"pty session host for {name} did not come up; log tail ({log}):\n{tail}\n")
+    _abort_failed_spawn(name, host_pid)
     return 1
+
+
+def _abort_failed_spawn(name: str, host_pid: int) -> None:
+    """Make a failed allocation terminal before its admission lock is released.
+
+    A host that merely missed the ready deadline could otherwise write its
+    record after a concurrent freeze acknowledged. Snapshot descendants while
+    the known host is alive, kill the host first so it cannot fork more work,
+    then kill the snapshot and remove only provably dead session artifacts.
+    """
+    processes: list[psutil.Process] = []
+    with contextlib.suppress(psutil.Error):
+        host = psutil.Process(host_pid)
+        processes = [host, *host.children(recursive=True)]
+    for proc in processes:
+        with contextlib.suppress(psutil.Error):
+            proc.kill()
+    if processes:
+        _gone, alive = psutil.wait_procs(processes, timeout=3.0)
+        survivors: list[int] = []
+        for proc in alive:
+            with contextlib.suppress(psutil.Error):
+                if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                    survivors.append(proc.pid)
+        if survivors:
+            sys.stderr.write(
+                f"failed pty allocation for {name} left live process(es): {sorted(survivors)}\n"
+            )
+    _sweep_dead(name)
+    try:
+        _reap_orphaned_hosts(name, force_unresponsive=True)
+    except RuntimeError as exc:
+        sys.stderr.write(f"failed pty allocation for {name} left an orphaned host: {exc}\n")
 
 
 def _op_new(name: str, rest: list[str]) -> int:
@@ -468,22 +511,47 @@ def _op_new(name: str, rest: list[str]) -> int:
     cwd, envfile = rest[0], rest[1]
     cmd_b64 = rest[2] if len(rest) == 3 else ""
     try:
-        reaped = _reap_orphaned_hosts(name)
-    except RuntimeError as exc:
-        with contextlib.suppress(OSError):
-            Path(envfile).unlink()
-        sys.stderr.write(f"cannot reap orphan pty host for {name}: {exc}\n")
+        with locked_freeze_state() as freeze:
+            try:
+                reaped = _reap_orphaned_hosts(name)
+            except RuntimeError as exc:
+                sys.stderr.write(f"cannot reap orphan pty host for {name}: {exc}\n")
+                return 1
+            if reaped:
+                logger.warning(
+                    "pty new {name}: reaped {count} orphan host(s)", name=name, count=reaped
+                )
+            if has_session(name):
+                # Already exists = idempotent no-op, including while frozen. A
+                # freeze protects absent -> live allocation, never use of an
+                # existing session.
+                return 0
+            if freeze.status == "frozen":
+                sys.stderr.write(
+                    "pty allocation refused: host allocation is frozen by "
+                    f"{freeze.holder!r} (generation {freeze.generation!r}): {freeze.reason}\n"
+                )
+                return 1
+            if freeze.status == "invalid":
+                sys.stderr.write(
+                    f"pty allocation refused: host freeze marker {state_path()} is invalid "
+                    f"({freeze.error}); repair it before allocating new sessions\n"
+                )
+                return 1
+            # Keep the host-wide lock until ready. Once a concurrent freeze
+            # returns, every allocation before it has a visible live record and
+            # every allocation after it observes the marker above.
+            return _spawn_host(name, cwd, envfile, cmd_b64)
+    except (LockTimeoutError, OSError) as exc:
+        sys.stderr.write(
+            f"pty allocation for {name} could not take the host allocation lock: {exc}\n"
+        )
         return 1
-    if reaped:
-        logger.warning("pty new {name}: reaped {count} orphan host(s)", name=name, count=reaped)
-    if has_session(name):
-        # Already exists = idempotent no-op. The envfile is still consumed
-        # (its handoff job is done whether or not a session was created) so
-        # a caller that retries never leaks 0600 files.
+    finally:
+        # The host consumes the handoff on successful creation. Every other
+        # outcome, including freeze refusal and idempotent reuse, owns cleanup.
         with contextlib.suppress(OSError):
             Path(envfile).unlink()
-        return 0
-    return _spawn_host(name, cwd, envfile, cmd_b64)
 
 
 def _op_send(name: str, rest: list[str]) -> int:

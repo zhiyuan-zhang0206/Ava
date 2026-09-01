@@ -21,7 +21,7 @@ Two kinds of module live here, distinguished by filename:
 
 - **public** (`start.py`, `stop.py`, `status.py`, `logs.py`, `update.py`,
   `cluster.py`, `agents.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`,
-  `memory.py`, `presets.py`, `schedules.py`, `trace.py`, `migrations.py`,
+  `memory.py`, `presets.py`, `pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
   `cluster_lifecycle.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
   directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge` /

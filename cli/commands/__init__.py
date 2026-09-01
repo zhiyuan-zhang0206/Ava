@@ -137,6 +137,7 @@ from cli.commands.plugins import (
     cmd_plugins_update,
     cmd_plugins_upgrade,
 )
+from cli.commands.pty import cmd_pty_freeze, cmd_pty_resume, cmd_pty_status
 from cli.commands.skill import (
     cmd_skill_disable,
     cmd_skill_enable,
@@ -328,6 +329,9 @@ __all__ = [
     "cmd_plugins_uninstall",
     "cmd_plugins_update",
     "cmd_plugins_upgrade",
+    "cmd_pty_freeze",
+    "cmd_pty_resume",
+    "cmd_pty_status",
     "cmd_restart",
     "cmd_rollback",
     "cmd_skill_disable",

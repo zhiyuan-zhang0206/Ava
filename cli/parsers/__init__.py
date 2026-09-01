@@ -43,6 +43,7 @@ from cli.parsers.management import (
 from cli.parsers.mcp import _add_mcp_parser, _add_memory_parser
 from cli.parsers.pitr import _add_pitr_parser
 from cli.parsers.plugins import _add_plugins_parser, _add_skill_parser
+from cli.parsers.pty import _add_pty_parser
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_stop_parser(sub)
     _add_restart_parser(sub)
     _add_status_parser(sub)
+    _add_pty_parser(sub)
     _add_converge_parser(sub)
     _add_firewall_parser(sub)
     _add_lgtm_parser(sub)
