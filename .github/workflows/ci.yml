@@ -3,8 +3,8 @@
 # Hosted minutes are free and unmetered for public repos and public forks, so one
 # lane runs everywhere with no canonical-vs-fork gating — and the same economics
 # make SHARDING the speed lever: the pytest suite dominates wall clock, so it
-# fans out over pytest-split shards (duration-balanced via the committed
-# .test_durations — slow tests only, >=0.2s, 87% of total runtime; tests
+# fans out over pytest-split shards (LPT duration-balanced via the committed
+# .test_durations and least_duration — slow tests only, >=0.2s, 87% of total runtime; tests
 # absent from it are costed at this run's average. Refreshed nightly by
 # scripts/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
@@ -273,6 +273,7 @@ jobs:
         run: >
           uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4
           --splits 12 --group ${{ matrix.group }}
+          --splitting-algorithm least_duration
           --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
           --cov=ops --cov=services --cov=ava_builtins
 
