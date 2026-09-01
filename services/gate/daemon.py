@@ -78,6 +78,7 @@ def _valid_forwarded_header(name: str, value: str) -> bool:
         return value.lower() in ("http", "https")
     return True
 
+
 _PROBE_TIMEOUT_S = 3.0
 
 # Auth-probe failure categories (audit #1736). The gate's verdict is
