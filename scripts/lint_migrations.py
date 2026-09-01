@@ -55,7 +55,7 @@ _CREATE_TABLE_RE = re.compile(
     re.IGNORECASE,
 )
 _DROP_TABLE_IF_EXISTS_RE = re.compile(
-    r"\bDROP\s+TABLE\s+IF\s+EXISTS\s+(?P<table>[a-z_][a-z0-9_]*)\b",
+    r"\bDROP\s+TABLE\s+IF\s+EXISTS\s+(?:[a-z_][a-z0-9_]*\.)?(?P<table>[a-z_][a-z0-9_]*)\b",
     re.IGNORECASE,
 )
 _DOLLAR_QUOTE_TAG_RE = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_]*)?$")
@@ -292,10 +292,10 @@ def _check_backfill_snapshot_drop_plans() -> list[str]:
     """Require every temporary `*_backfill_*` table to have a later drop migration.
 
     The check intentionally reads only up migrations: a down migration removes a
-    snapshot when rolling a correction back, but is not the forward retention
-    plan that reclaims it after the rollback window expires. This is a naming
-    convention, not a SQL parser; migration table names are unquoted lowercase
-    identifiers by repository convention.
+    snapshot when rolling a correction back, but is not the forward retirement
+    plan that reclaims it once recovery data is no longer needed. This is a
+    naming convention, not a SQL parser; migration table names are unquoted
+    lowercase identifiers by repository convention.
     """
     creations: list[tuple[str, str]] = []
     drops: dict[str, list[str]] = {}
@@ -318,7 +318,7 @@ def _check_backfill_snapshot_drop_plans() -> list[str]:
             continue
         errors.append(
             f"{created_by}: backfill snapshot table {table!r} has no later drop plan — "
-            "add a later up migration with DROP TABLE IF EXISTS after its retention window"
+            "add a later up migration with DROP TABLE IF EXISTS after its recovery data is archived"
         )
     return errors
 

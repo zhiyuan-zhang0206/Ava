@@ -1,5 +1,5 @@
--- Restore the retired snapshot shapes for a schema rollback. Their expired
--- retention data is intentionally not recoverable.
+-- Restore the retired snapshot shapes for a schema rollback. A successful
+-- retirement only removes empty snapshots, so no correction data is recreated.
 
 CREATE TABLE fork_lineage_fix_backfill_agents_meta (
     id       BIGINT,

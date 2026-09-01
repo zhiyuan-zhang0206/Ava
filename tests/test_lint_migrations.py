@@ -138,6 +138,18 @@ def test_backfill_snapshot_requires_later_drop_plan(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
+def test_backfill_snapshot_drop_plan_accepts_publicly_qualified_drop(monkeypatch, tmp_path):
+    """A retirement migration may pin its drop target to the public schema."""
+    lint, d = _lint(monkeypatch, tmp_path)
+    snapshot = "agent_state_backfill_snapshot"
+    (d / f"{_TS}_record-backfill.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
+    (d / f"{_TS}_record-backfill.down.sql").write_text(f"DROP TABLE IF EXISTS {snapshot};")
+    (d / f"{_TS2}_drop-backfill.sql").write_text(f"DROP TABLE IF EXISTS public.{snapshot};")
+    (d / f"{_TS2}_drop-backfill.down.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
+
+    assert lint.main() == 0
+
+
 def test_backfill_snapshot_drop_plan_ignores_comments_and_literals(monkeypatch, tmp_path):
     """Only executable static SQL can retire a backfill snapshot."""
     lint, d = _lint(monkeypatch, tmp_path)
