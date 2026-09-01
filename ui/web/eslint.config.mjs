@@ -5,6 +5,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 import sentenceCase from "./eslint-rules/sentence-case.mjs";
 import layoutPrimitive from "./eslint-rules/layout-primitive.mjs";
+import noUntranslatedUiCopy from "./eslint-rules/no-untranslated-ui-copy.mjs";
 
 // Proper nouns / acronyms / brands allowed inside a Title-Case run (local/
 // sentence-case). A run is permitted only when EVERY word is listed, so
@@ -253,6 +254,26 @@ export default tseslint.config(
     },
   },
 
+  // ── next-intl migration gate ──
+  // These surfaces have completed their translation sweep. Keep the gate
+  // deliberately scoped until the remaining routes migrate; applying it to all
+  // src/ now would turn this focused change into an unrelated UI-copy rewrite.
+  {
+    files: [
+      "src/components/fleet/**/*.{ts,tsx}",
+      "src/app/insights/**/*.{ts,tsx}",
+      "src/app/memory/graph/**/*.{ts,tsx}",
+      "src/components/spawn-button.tsx",
+    ],
+    ignores: ["**/*.test.{ts,tsx}"],
+    rules: {
+      "local/no-untranslated-ui-copy": [
+        "error",
+        { allow: ["$AVA_HOME/logs/rollout-<epoch>.log"] },
+      ],
+    },
+  },
+
   // Custom local rule (eslint-rules/layout-primitive.mjs): the six layout-contract
   // classes (flex/flex-1/flex-col/min-w-0/min-h-0/overflow-hidden) must come from
   // @/lib/layout as constants — the jsdom class-contract layer of invariants I1–I6
@@ -266,7 +287,15 @@ export default tseslint.config(
   {
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["**/*.test.{ts,tsx}"],
-    plugins: { local: { rules: { "sentence-case": sentenceCase, "layout-primitive": layoutPrimitive } } },
+    plugins: {
+      local: {
+        rules: {
+          "sentence-case": sentenceCase,
+          "layout-primitive": layoutPrimitive,
+          "no-untranslated-ui-copy": noUntranslatedUiCopy,
+        },
+      },
+    },
     rules: {
       "local/sentence-case": ["error", { allow: SENTENCE_CASE_ALLOW }],
       "local/layout-primitive": "error",

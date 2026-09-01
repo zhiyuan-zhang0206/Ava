@@ -2,6 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/markdown";
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
@@ -23,6 +24,7 @@ export function CompactDetail({
   onBack: () => void;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("fleet.inboxPanel");
   return (
     <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
       <div className={cn("shrink-0 items-center gap-2 border-b border-border px-4 py-2", FLEX)}>
@@ -30,7 +32,7 @@ export function CompactDetail({
           type="button"
           onClick={onBack}
           className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
-          aria-label="Back to list"
+          aria-label={t("backToList")}
         >
           <ArrowLeft className="size-4" />
         </button>
@@ -110,8 +112,13 @@ export function ResolvedDetail({
   notice: NoticeItem;
   agentStatus: PublicAgentStatus | null;
 }) {
+  const t = useTranslations("fleet.inboxPanel");
   const label =
-    notice.resolution === "dismissed" ? "Dismissed" : notice.resolution === "read" ? "Read" : "Your answer";
+    notice.resolution === "dismissed"
+      ? t("dismissed")
+      : notice.resolution === "read"
+        ? t("read")
+        : t("yourAnswer");
   return (
     <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
       <div className={cn("overflow-y-auto px-4 py-3", FLEX_1)}>
@@ -122,7 +129,9 @@ export function ResolvedDetail({
         />
         <div className={cn("items-center gap-2", FLEX)}>
           <PriorityBadge priority={notice.priority} muted />
-          <span className="text-[10px] text-muted-foreground">{notice.require_response ? "Decision" : "FYI"}</span>
+          <span className="text-[10px] text-muted-foreground">
+            {notice.require_response ? t("decision") : t("fyi")}
+          </span>
         </div>
         <h3 className="mt-2 text-sm font-medium break-words">{notice.title}</h3>
         {notice.content && (
