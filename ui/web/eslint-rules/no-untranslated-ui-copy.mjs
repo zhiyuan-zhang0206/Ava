@@ -17,14 +17,6 @@ function isNonCopyText(value, allow) {
   return trimmed === "" || allow.has(trimmed) || NON_COPY_TEXT.test(value);
 }
 
-function isTranslationCall(node) {
-  return (
-    node.type === "CallExpression"
-    && node.callee.type === "Identifier"
-    && node.callee.name === "t"
-  );
-}
-
 function isNonCopyTemplate(node, allow) {
   return isNonCopyText(
     node.quasis.map((quasi) => quasi.value.cooked ?? quasi.value.raw).join("0"),
@@ -137,8 +129,17 @@ const rule = {
       return null;
     }
 
+    function isUseTranslationsImport(node) {
+      return localVariable(node)?.defs.some((definition) =>
+        definition.type === "ImportBinding"
+        && definition.node.type === "ImportSpecifier"
+        && definition.node.imported.type === "Identifier"
+        && definition.node.imported.name === "useTranslations"
+        && definition.parent?.source.value === "next-intl",
+      ) ?? false;
+    }
+
     function isKnownTranslationCall(node) {
-      if (isTranslationCall(node)) return true;
       if (node.type !== "CallExpression" || node.callee.type !== "Identifier") return false;
 
       const initializer = localVariable(node.callee)?.defs.find(
@@ -146,7 +147,7 @@ const rule = {
       )?.node.init;
       return initializer?.type === "CallExpression"
         && initializer.callee.type === "Identifier"
-        && initializer.callee.name === "useTranslations";
+        && isUseTranslationsImport(initializer.callee);
     }
 
     function isAllowedIdentifier(node) {
@@ -230,6 +231,24 @@ const rule = {
 
     function isAllowedChildExpression(node) {
       switch (node.type) {
+        case "Identifier": {
+          const initializer = localVariable(node)?.defs.find(
+            (definition) => definition.type === "Variable",
+          )?.node.init;
+          return initializer == null || isAllowedChildExpression(initializer);
+        }
+        case "MemberExpression": {
+          const value = staticMemberValue(node);
+          return value == null || isAllowedChildExpression(value);
+        }
+        case "CallExpression":
+          // Dynamic calls can produce values such as formatted timestamps.
+          // Calls to a local binding could be a hidden static copy helper, so
+          // only a verified next-intl translation is permitted there.
+          return isKnownTranslationCall(node)
+            || !(node.callee.type === "Identifier" && localVariable(node.callee)?.defs.some(
+              (definition) => definition.type !== "ImportBinding",
+            ));
         case "Literal":
           return typeof node.value !== "string" || isNonCopyText(node.value, allow);
         case "TemplateLiteral":
@@ -243,6 +262,8 @@ const rule = {
         case "TypeCastExpression":
           return isAllowedChildExpression(node.expression);
         default:
+          // Expressions other than the static forms above represent runtime
+          // data or JSX, which this lightweight rule cannot classify safely.
           return true;
       }
     }
