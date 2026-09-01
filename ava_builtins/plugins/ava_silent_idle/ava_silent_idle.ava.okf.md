@@ -35,7 +35,7 @@ register_before_llm(silent_idle_continue_before_llm)
 
 **Behavior**:
 - Injects a `HumanMessage` (`_NUDGE`): "The previous turn produced reasoning but no output. You must now produce either text or a tool call. If your task is complete, state so in text — do not end a turn with reasoning alone."
-- Consecutive silent idle has a counting limit (per-process consecutive-count guard in `agent/graph/_llm.py`); after exceeding the limit the kernel halts — perhaps the model truly cannot continue
+- Consecutive silent idles consume the kernel's per-process output-token budget; each consumes at least one unit even when the provider reports zero output tokens, and the kernel halts at the cap
 
 **Mutual exclusion**:
 - If auto-compact would also trigger on the same turn, defer (return None)
@@ -56,4 +56,4 @@ register_before_llm(silent_idle_continue_before_llm)
 
 - The kernel already handles the "no dropped token" retry for silent idle (halted=False → claim's multi-step continue); this plugin adds a **reminder** — a text nudge for the agent
 - Accompanying kernel behavior: reasoning is kept in context, directly returning to the LLM loop, no need to waste tokens re-streaming
-- This is a "one-shot" nudge — if the agent continues silent after the nudge, the kernel's counting guard takes over
+- This is a "one-shot" nudge — if the agent continues silent after the nudge, the kernel's output-token budget takes over
