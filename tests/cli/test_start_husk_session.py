@@ -28,6 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+import psutil
 import pytest
 
 import cli.commands as _cli
@@ -67,6 +68,9 @@ class _FakeProc:
 
     def is_running(self) -> bool:
         return self._alive
+
+    def status(self) -> str:
+        return psutil.STATUS_RUNNING
 
     def children(self, recursive: bool = False) -> list[object]:
         return []
