@@ -106,6 +106,19 @@ def test_render_is_quiet_on_clean_day(daily_scan: Any) -> None:
     assert "ALERT" not in out
 
 
+def test_render_reports_subprocess_and_shell_run_totals(daily_scan: Any) -> None:
+    out = daily_scan.render(
+        [
+            _record("ok", subprocess_calls=3, tools_called={"ava.shell.run": 5}),
+            _record("ok", agent_id=2, subprocess_calls=4, tools_called={"ava.shell.run": 6}),
+        ],
+        Path("daily.jsonl"),
+        1,
+    )
+
+    assert "subprocess calls: 7 (shell.run 11)" in out.splitlines()
+
+
 def test_scan_passes_include_test_flag_through(
     daily_scan: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
