@@ -70,3 +70,32 @@ def test_summary_projection_omits_detail_only_columns_in_sql() -> None:
     assert "last_probe_at" not in query
     assert "a.config_overlay," not in query
     assert "a.config_overlay ->> 'llm_model' AS effective_model" in query
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected_query"),
+    [
+        (
+            "all",
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "ORDER BY a.id",
+        ),
+        (
+            "live",
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "WHERE a.status <> 'terminated' ORDER BY a.id",
+        ),
+        (
+            "terminated",
+            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
+            "WHERE a.status = 'terminated' ORDER BY a.id",
+        ),
+    ],
+)
+def test_compact_projection_reads_only_cli_columns_in_sql(
+    scope: AgentListScope, expected_query: str
+) -> None:
+    """Every compact scope must avoid roster-only lookups for three columns."""
+    conn = _RecordingConnection()
+    select_all(cast(psycopg.Connection[Any], conn), scope=scope, fields="compact")
+    assert conn.recording_cursor.query == expected_query

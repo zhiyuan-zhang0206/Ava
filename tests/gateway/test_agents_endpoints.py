@@ -914,6 +914,16 @@ class TestList:
         assert "fork_source_checkpoint_id" in detail.json()
         assert "last_probe_at" in detail.json()
 
+    def test_get_agents_compact_has_only_cli_columns(self, db_conn: psycopg.Connection) -> None:
+        """The CLI projection contains exactly the three columns it renders."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            client.patch(f"/api/agents/{agent_id}", json={"label": "alpha"})
+            response = client.get("/api/agents", params={"fields": "compact"})
+
+        assert response.status_code == 200
+        assert response.json() == [{"agent_id": agent_id, "status": "idling", "label": "alpha"}]
+
     def test_get_agents_rejects_unknown_fields_projection(self) -> None:
         with TestClient(app) as client:
             response = client.get("/api/agents", params={"fields": "minimal"})

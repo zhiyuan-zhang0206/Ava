@@ -30,7 +30,7 @@ class _FakeResp:
 
 
 def _agent_row(agent_id: int, status: str, label: str | None) -> dict[str, object]:
-    """A summary /api/agents row; `cmd_agents_ls` needs only three fields."""
+    """A compact /api/agents row; `cmd_agents_ls` needs only three fields."""
     return {
         "agent_id": agent_id,
         "status": status,
@@ -72,7 +72,7 @@ def test_agents_ls_renders_rows(
 
     monkeypatch.setattr(httpx, "get", fake_get)
     assert _agents.cmd_agents_ls() == 0
-    assert seen["url"] == "http://gw:8000/api/agents?fields=summary"
+    assert seen["url"] == "http://gw:8000/api/agents?fields=compact"
     out = capsys.readouterr().out
     assert "idling" in out and "alpha" in out
     assert "22" in out and "terminated" in out

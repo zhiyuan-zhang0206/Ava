@@ -308,7 +308,7 @@
     "/api/agents": {
       "get": {
         "summary": "Get Agents",
-        "description": "List agent snapshots for the requested roster scope.\n\n``all`` is the compatibility default for SDK / ops callers.\nFrontend fleet/sidebar readers request ``live`` so Postgres excludes\nterminated history before evaluating the per-agent snapshot lookups.\nThe sidebar's explicit history toggle requests ``terminated`` separately.\n\n``fields=full`` preserves the historical response. ``fields=summary`` is\nthe reduced SQL projection used by roster consumers; detail and SSE keep\nthe full snapshot. All scopes remain unpaginated for wire compatibility.",
+        "description": "List agent snapshots for the requested roster scope.\n\n``all`` is the compatibility default for SDK / ops callers.\nFrontend fleet/sidebar readers request ``live`` so Postgres excludes\nterminated history before evaluating the per-agent snapshot lookups.\nThe sidebar's explicit history toggle requests ``terminated`` separately.\n\n``fields=full`` preserves the historical response. ``fields=summary`` is\nthe reduced SQL projection used by roster consumers; ``fields=compact``\nserves the CLI's three-column table. Detail and SSE keep the full snapshot.\nAll scopes remain unpaginated for wire compatibility.",
         "operationId": "get_agents_api_agents_get",
         "parameters": [
           {
@@ -333,7 +333,8 @@
             "schema": {
               "enum": [
                 "full",
-                "summary"
+                "summary",
+                "compact"
               ],
               "type": "string",
               "default": "full",
@@ -355,6 +356,9 @@
                       },
                       {
                         "$ref": "#/components/schemas/AgentSummary"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AgentCompact"
                       }
                     ]
                   },
@@ -6370,6 +6374,36 @@
         ],
         "title": "AgentActivity",
         "description": "Active-rate: the share of an agent's alive wall-clock it spent actively\nworking versus idle-waiting for its next input. The complement\n(`1 - active_rate`) is how much of its life the agent sat blocked on a\nhuman/peer message — the metric's reason for being: surface how much an\nagent is gated on people. A project-lead agent that decides/approves every\nminute reads near 100%; one woken once a week reads near 0%; a worker that\nruns flat-out then terminates reads ~100%.\n\n`active_seconds` = Σ `duration_seconds` of every non-`claim` graph\n`node_exit` in the window — llm generation + execute_code + before/after\nhooks, i.e. all real processing. `llm_seconds` = Σ `duration_seconds` of\nevery `turn_end` event within the window — the model's generation wall-clock\n(reasoning + output). `exec_seconds` = Σ `duration_seconds` of every\n`node_exit` for the `exec` node — the code execution wall-clock. The `claim`\nnode is excluded because its wall-clock IS the idle-wait (it parks the agent\nin the inbound wait between turns), so it falls into the blocked remainder.\n`alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate\nintervals, open tail to now), clipped to the same window — the same lifecycle\nbasis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped\nat 1.0 (a node that began before the window's leading edge counts in full, so\nraw active can momentarily exceed windowed alive); 0.0 when alive is 0. All\nfields follow the request's `?hours=` / `?since_compact=` window."
+      },
+      "AgentCompact": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "status",
+          "label"
+        ],
+        "title": "AgentCompact",
+        "description": "One row of ``GET /api/agents?fields=compact`` for the CLI."
       },
       "AgentCost": {
         "properties": {

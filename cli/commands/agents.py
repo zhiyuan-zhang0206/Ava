@@ -42,7 +42,7 @@ def cmd_agents_ls() -> int:
     from shared.http_dial import get as dial_get
     from shared.machine import gateway_api_base, gateway_auth_headers
 
-    url = f"{gateway_api_base()}/api/agents?fields=summary"
+    url = f"{gateway_api_base()}/api/agents?fields=compact"
     resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
     resp.raise_for_status()
     rows = [_AgentListItem.model_validate(r) for r in resp.json()]
