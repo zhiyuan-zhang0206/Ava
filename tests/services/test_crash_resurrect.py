@@ -1094,7 +1094,8 @@ class TestWedgedForceTerminatePublishesPageClosed:
         def _claimed_candidate(
             _pool: ConnectionPool,
             _machine: str,
-            _age_s: float,
+            _running_age_s: float,
+            _idling_age_s: float,
             _backoff_s: float,
         ) -> list[tuple[int, int, datetime]]:
             return [(aid, 12345, datetime.now(UTC))]
