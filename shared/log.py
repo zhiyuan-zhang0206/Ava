@@ -210,6 +210,17 @@ def _install_stdlib_intercept() -> None:
     # logger to ERROR so only real pool faults survive.
     logging.getLogger("psycopg.pool").setLevel(logging.ERROR)
 
+    # A prior default Uvicorn config installs child and parent handlers and
+    # disables their propagation. Clear that configuration too: otherwise
+    # uvicorn.error bypasses this root intercept even though this function
+    # replaced the root handler. The gateway passes log_config=None, but init
+    # must be idempotent in a process whose logging was configured before it
+    # started (#970).
+    for uvicorn_logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(uvicorn_logger_name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True
+
     # uvicorn.access logs one INFO line per HTTP request — with the gateway's
     # uvicorn.run(log_config=None) those would flood the file sink and the
     # events table (a busy gateway emits thousands/day). Gate to WARNING:
