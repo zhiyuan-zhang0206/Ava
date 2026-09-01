@@ -26,5 +26,6 @@ def test_first_tab_focuses_skip_link_to_main_content(
 
     skip_link = playwright_page.locator('a[href="#main-content"]')
     assert skip_link.evaluate("element => document.activeElement === element")
-    assert skip_link.bounding_box() is not None
-    assert skip_link.bounding_box()["width"] > 1
+    box = skip_link.bounding_box()
+    assert box is not None
+    assert box["width"] > 1

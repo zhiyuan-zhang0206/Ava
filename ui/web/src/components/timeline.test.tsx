@@ -151,6 +151,7 @@ describe("TimelineView accessibility", () => {
     const log = screen.getByRole("log");
     expect(log.getAttribute("aria-live")).toBe("polite");
     expect(log.getAttribute("aria-relevant")).toBe("additions");
+    expect(log.querySelector('[aria-live="off"]')).not.toBeNull();
     expect(screen.queryByTestId("timeline-turn-announcement")).toBeNull();
 
     rerender(<TimelineView items={[]} turnActive />);

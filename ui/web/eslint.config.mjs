@@ -141,12 +141,22 @@ export default tseslint.config(
     ...jsxA11y.flatConfigs.recommended,
     rules: {
       ...jsxA11y.flatConfigs.recommended.rules,
-      // Focus is intentionally moved when a user opens a scoped editing flow;
-      // the rule cannot distinguish that action from focus on initial page load.
-      "jsx-a11y/no-autofocus": "off",
       // React uses onChange for native-select selection changes. Deferring these
       // immediate preference/configuration updates to blur would alter behavior.
       "jsx-a11y/no-onchange": "off",
+    },
+  },
+
+  // ── Contextual editing focus ──
+  // These inputs mount only after a user explicitly opens the rename or search
+  // flow. Login remains covered, so page-load autofocus cannot regress.
+  {
+    files: [
+      "src/components/agent-row.tsx",
+      "src/components/agent-sidebar/search-overlay.tsx",
+    ],
+    rules: {
+      "jsx-a11y/no-autofocus": "off",
     },
   },
 
