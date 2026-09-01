@@ -9,7 +9,11 @@ crashing (blast radius: exactly one session). This is what makes the SDK's
 "sessions persist across terminate/restart/update" promise structurally true
 (decisions/2026-08-13-per-session-pty-hosts.md).
 
-Three modules:
+Four modules:
+
+- ``allocation_freeze.py`` — the host-wide, generation-owned marker and
+  allocation lock shared by every co-located cluster; operator freeze/resume
+  never interrupts an existing session;
 
 - ``host.py`` — the per-session host: owns the ``pty.fork()`` shell, feeds
   its raw bytes into a pyte screen model + ring buffer + byte log, and

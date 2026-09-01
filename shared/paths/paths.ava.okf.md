@@ -56,6 +56,9 @@ $AVA_HOME/
 `~/.ava/clusters.json` is the exception — a **host-level** registry keyed by home
 path (overridable with `AVA_CLUSTER_REGISTRY`), shared across every cluster on
 the box, so it lives in the default home regardless of which unit reads it.
+The host-wide PTY allocation gate stores `pty-allocation-freeze.json` and its
+stable `pty-allocation.lock` beside that registry, so every co-located home
+crosses one admission boundary for the shared kernel PTY pool.
 
 ## Notes
 

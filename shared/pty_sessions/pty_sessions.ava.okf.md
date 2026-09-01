@@ -16,7 +16,11 @@ tags:
 host process per session**, no supervisor daemon. The SDK keeps its
 named-session surface (`ava.shell.sessions`, watchers, schedules) unchanged.
 
-Three modules:
+Four modules:
+
+- `allocation_freeze.py` — the host-wide marker and allocation mutex. The
+  marker carries one operator-owned generation; only that generation can
+  resume allocation. It has no gateway or data-plane dependency.
 
 - `host.py` — the per-session host: the `pty.fork()` shell, a reader thread
   feeding a pyte screen model + raw byte ring buffer + byte transcript, and
@@ -59,6 +63,12 @@ Everything per-session lives under `$AVA_HOME/run/pty/`:
 - `<name>.sock` — the session's socket (sun_path-bounded names fall back to
   a hashed tempdir path, computed identically by host and CLI).
 
+Allocation control is deliberately outside every per-home namespace. Beside
+the host-level cluster registry are `pty-allocation-freeze.json` and the stable
+`pty-allocation.lock`; changing `$AVA_HOME` therefore cannot bypass a freeze.
+The marker stores schema version, random generation, holder, reason, and UTC
+creation time. A malformed marker means frozen, never inactive.
+
 Deliberately NOT `run/sessions/` (the posixproc/winproc dir): the record
 scan IS the session listing (`list`, `list-started-at`, and the backend's
 in-process enumeration — task #1200's snapshot cost, now zero round-trips),
@@ -73,8 +83,16 @@ subtree.
 
 ## Lifecycle
 
-- **create** — CLI `new`: idempotent (`has` first), then `_reparent` →
-  `host.py <name> <cwd> <envfile> [cmd_b64]`. The host consumes the 0600
+- **create** — CLI `new`: under the host allocation lock, reap name-specific
+  orphans, return success for an already-live same-name session, refuse an
+  absent session when the marker is frozen or invalid, otherwise `_reparent`
+  → `host.py <name> <cwd> <envfile> [cmd_b64]`. The lock stays held until the
+  host answers ready, so a completed `ava pty freeze` is an exact boundary:
+  every earlier allocation is visible and every later allocation is refused.
+  A host that misses its ready deadline is terminated with its process tree
+  before the lock is released, so it cannot publish a late record across that
+  boundary.
+  The host consumes the 0600
   envfile (values never on argv, #974), binds its socket, forks the shell
   (child drops `AVA_PROCESS_PROFILE`, overlays the envfile), writes the
   record, and answers `ping`; the CLI waits for readiness and fails fast
@@ -89,13 +107,18 @@ subtree.
 - **signals** — the host SIG_IGNs SIGHUP/SIGTERM/SIGPIPE: a stray hangup or
   a TERM aimed at the shell's tree must not take the session down; ending a
   session is the kill op's job. SIGKILL ends host + session.
+- **operator freeze** — `ava pty freeze --holder HOLDER --reason REASON`
+  atomically creates one random generation without killing anything;
+  `ava pty status` reads it locally; `ava pty resume GENERATION` removes only
+  that exact generation. A stale token cannot clear a replacement freeze.
 
 ## Consumers
 
 `shared/session_backend.PtySessionBackend` (`get_shell_backend()` on POSIX)
 — mutating ops via CLI subprocess, enumeration via the in-process record
 scan. Above it: `ava.shell.sessions`, `ava.watcher`, the gateway
-ScheduleManager, `ops.ops_cluster.capture_shell`, `ava stop`'s shell reap.
+ScheduleManager, the page-server daemon, `ops.ops_cluster.capture_shell`, and
+`ava stop`'s shell reap. Every creation path crosses the same host lock.
 
 ## Boundaries
 
@@ -103,6 +126,9 @@ ScheduleManager, `ops.ops_cluster.capture_shell`, `ava stop`'s shell reap.
   [conventions/windows-setup.md](../../conventions/windows-setup.md)).
 - One pty per session counts against the host-wide `kern.tty.ptmx_max`
   ceiling (macOS default 511) — see `shared/platform.py`.
+- Freeze affects allocation only. Existing sessions and every non-creation
+  operation continue normally. A corrupt marker fails closed and must be
+  repaired by an operator; it is never silently replaced or cleared.
 - A machine reboot ends every session (hosts are processes, not state);
   the watcher registry ([[shared/watcher_registry.ava.okf.md]]) is the
   rebuild net for watchers, and page servers self-heal via the heartbeat

@@ -694,6 +694,36 @@ every live session — services, orchestration (updater / rollout / cluster-rest
 agent processes and shells. Raw session stdout is queried in Loki (see
 Logging / diagnostics below).
 
+### Emergency PTY allocation freeze
+
+Freeze new PTY allocation before a host-wide inspection or bounded cleanup:
+
+```bash
+ava pty freeze --holder idle-fix-operator --reason "manifest and bounded cleanup"
+ava pty status
+```
+
+The command takes the host allocation lock and prints a random generation
+token. Its acknowledgement is the boundary: an allocation already in flight is
+ready and recorded before the command returns, while every later missing-name
+allocation is refused before a host is forked. All co-located `$AVA_HOME`
+values cross the same gate. Existing sessions remain usable, and a request for
+an already-live name remains an idempotent success. Refused requests remove
+their 0600 environment handoff files; they may leave harmless gaps in an
+agent's monotonic shell IDs, which are never rolled back or reused.
+
+Resume with the exact token printed by the freeze that this operator owns:
+
+```bash
+ava pty resume <generation-token>
+```
+
+A stale token cannot clear a newer freeze. `freeze`, `status`, and `resume` are
+local host operations and remain usable while the gateway, Postgres, or Redis
+is unavailable. A malformed marker fails closed; inspect the marker path shown
+by `ava pty status` and perform an audited manual repair rather than treating
+corruption as an implicit resume.
+
 ### Agent-stack warm-up at start
 
 After launching the service sessions, `ava start` fires a detached, best-effort

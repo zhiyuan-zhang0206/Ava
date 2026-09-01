@@ -45,3 +45,8 @@ def test_restart_is_not_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_stop_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     """`stop` is the recovery verb and must keep working with the gateway down."""
     assert _dispatched_fetch_env(monkeypatch, ["stop"]) == "skip"
+
+
+def test_pty_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The allocation gate is an offline host recovery surface."""
+    assert _dispatched_fetch_env(monkeypatch, ["pty", "status"]) == "skip"

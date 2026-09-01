@@ -148,13 +148,11 @@ def _create_session(
         ttl = _validate_ttl(ttl)
     session_id = _next_session_index_from_db()
     full = f"{_shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
-    # Forward this agent process's AVA_* env onto the session. The PTY
-    # supervisor daemon starts the login shell with its OWN env (frozen at
-    # daemon start — a host-wide process), so without this a shell or watcher
-    # would inherit whatever cluster the daemon was started under — binding to
-    # the wrong cluster on a host running more than one. The agent's own env is
-    # authoritative (the gateway forwarded the correct cluster into it at
-    # spawn), so re-forwarding it keeps every child on the same cluster.
+    # Forward this agent process's AVA_* env onto the session. The detached
+    # per-session host starts outside the agent process tree, so the explicit
+    # handoff keeps its shell or watcher bound to the same cluster as the agent.
+    # The agent's own env is authoritative because the gateway forwarded the
+    # correct cluster into it at spawn.
     #
     # It rides a 0600 envfile the backend writes, NOT argv: the env carries the
     # agent's provider keys and data-plane URLs, and argv is world-readable
@@ -166,6 +164,10 @@ def _create_session(
         # (same fallback as ava.shell.run — the DB call above already raised
         # pre-bootstrap, so this is only about resolving the base).
         cwd = str(workspace_dir(agent_id)) if agent_id is not None else str(Path.home())  # pyright: ignore[reportUnnecessaryComparison]
+    # The id is allocated before the host-level PTY admission gate. During an
+    # operator freeze a refused attempt therefore leaves a harmless gap in this
+    # monotonic per-agent sequence. Never roll it back or reuse it: an old
+    # numeric handle must remain stale instead of naming a later session.
     ok = backend.new_session(full, "", Path(cwd), env=forward_env_dict())
     if not ok:
         raise RuntimeError(f"failed to create session {full!r}")
