@@ -23,8 +23,8 @@ frontend-only fast path and the frontend session relaunch it shares:
   synced revision, not this stale interpreter (start applies pending migrations
   itself early in boot).
 - `_restart_schedule_sessions` — after a code-change boot, bounce the old
-  checkout's schedule runner sessions so the fresh gateway's ScheduleManager
-  relaunches them on the new code.
+  checkout's schedule runner sessions through a fresh interpreter so the fresh
+  gateway's ScheduleManager relaunches them on the new code.
 - `_adopt_child_data_plane_credentials` — refresh the surviving orchestrator's
   credential view after that child returns, before any pin or recovery DB write.
 - `_run_gateway_local_update` — the composed local leg; every failure recovers
@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import contextlib
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -160,6 +161,11 @@ def _restart_schedule_sessions() -> None:
     check is the backstop. Callers only invoke it on the pull path after a
     successful boot, so sessions are never bounced for a restart-only bounce
     (same code) or when the rollout is recovering to last-known-good.
+
+    This helper runs behind this module's ``--bounce-schedule-sessions`` entry:
+    after a gateway checkout, this rollout interpreter could otherwise retain an
+    old ``shared.session_backend`` while importing the new helper. That is the
+    module-cache skew the agent-runner leg prevents with its post-checkout exec.
     """
     from shared.session_backend import get_shell_backend
 
@@ -184,6 +190,31 @@ def _restart_schedule_sessions() -> None:
             print(f"  ! schedule session {name} kill failed (non-fatal)", file=sys.stderr)
             continue
         print(f"  ✓ {name} killed — the schedule manager relaunches it on the new code")
+
+
+def _bounce_schedule_sessions_fresh(repo: Path) -> None:
+    """Ask a fresh post-checkout interpreter to bounce schedule runner sessions.
+
+    This is never fatal: a non-zero child outcome or launch failure leaves the
+    old runner serving, and the post-rollout leftover-schedule_runner check is the
+    backstop.
+    """
+    try:
+        rc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "cli.commands._update_local",
+                "--bounce-schedule-sessions",
+            ],
+            cwd=repo,
+            check=False,
+        ).returncode
+    except OSError as exc:
+        print(f"  ! schedule session bounce failed (non-fatal): {exc}", file=sys.stderr)
+    else:
+        if rc != 0:
+            print(f"  ! schedule session bounce failed (non-fatal): rc={rc}", file=sys.stderr)
 
 
 def _run_frontend_only_update(repo: Path, origin: str) -> int:
@@ -550,5 +581,27 @@ def _run_gateway_local_update(
         # new code within a poll interval (Task #1746). A no-op update
         # (from == target) changes no code and must not interrupt in-flight
         # fires for nothing (review, PR #713).
-        _restart_schedule_sessions()
+        _bounce_schedule_sessions_fresh(repo)
     return start_rc
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the post-checkout schedule-session bounce in a fresh interpreter."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python -m cli.commands._update_local")
+    parser.add_argument(
+        "--bounce-schedule-sessions",
+        action="store_true",
+        help="restart gateway schedule runner sessions after a code-change rollout",
+    )
+    args = parser.parse_args(argv)
+    if args.bounce_schedule_sessions:
+        _restart_schedule_sessions()
+        return 0
+    parser.error("--bounce-schedule-sessions is required")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

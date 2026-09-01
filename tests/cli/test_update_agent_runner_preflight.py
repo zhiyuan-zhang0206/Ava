@@ -1,13 +1,14 @@
 """validate-before-kill on the agent-runner self-update leg.
 
-`_run_agent_runner_self_update` force-checks-out the target, then vets the
-checked-out tree's migrations/ layout and the `ava` launcher it will relaunch
-through, all BEFORE the graceful stop. Every one of those failures would
-otherwise only surface after the stop has taken the host down, and step 5 is the
-only thing that brings it back: a broken migrations/ layout fails the trailing
-`ava start` migrate, and a launcher at the wrong path raises FileNotFoundError
-out of a host that is already dark. The leg instead aborts (reverting the
-checkout where it made one) with the host still serving.
+The pre-checkout updater force-checks out the target and syncs the venv, then a
+fresh interpreter vets the checked-out tree's migrations/layout and the `ava`
+launcher it will relaunch through, all BEFORE the graceful stop. Every one of
+those failures would otherwise only surface after the stop has taken the host
+down, and step 5 is the only thing that brings it back: a broken migrations/
+layout fails the trailing `ava start` migrate, and a launcher at the wrong path
+raises FileNotFoundError out of a host that is already dark. The fresh leg
+instead aborts (reverting the checkout where it made one) with the host still
+serving.
 
 The launcher path is platform-named — `.venv/bin/ava` vs `.venv\\Scripts\\ava.exe`
 — and used to be hardcoded POSIX, so a Windows agent-runner stopped itself and
@@ -63,10 +64,15 @@ def test_agent_runner_reverts_and_skips_stop_on_broken_layout(
     monkeypatch.setattr(ar, "validate_migrations_at_ref", _raise_layout)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = ar._run_agent_runner_self_update(Path("/unused"), target_sha="newsha1111")
+    rc = ar._run_agent_runner_self_update(
+        Path("/unused"),
+        target_sha="newsha1111",
+        from_sha="oldsha0000",
+        post_checkout=True,
+    )
 
     assert rc == 1
-    assert checkouts == ["newsha1111", "oldsha0000"], "must revert to the prior commit"
+    assert checkouts == ["oldsha0000"], "must revert to the prior commit"
     assert stopped == [], "must not stop after a failed layout vet"
     assert "reverting" in capsys.readouterr().err
 
@@ -85,10 +91,15 @@ def test_agent_runner_proceeds_to_stop_on_valid_layout(
     monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)  # skip real gateway probe
     monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = ar._run_agent_runner_self_update(repo, target_sha="newsha1111")
+    rc = ar._run_agent_runner_self_update(
+        repo,
+        target_sha="newsha1111",
+        from_sha="oldsha0000",
+        post_checkout=True,
+    )
 
     assert rc == 0
-    assert checkouts == ["newsha1111"], "valid layout → forward checkout only, no revert"
+    assert checkouts == [], "the post-checkout leg must not check out again"
     assert stopped == [True]
 
 
@@ -106,7 +117,12 @@ def test_agent_runner_aborts_when_preflight_probes_fail(
     monkeypatch.setattr(_ns, "_preflight_probes", lambda: 1)  # simulate failure
     monkeypatch.setattr(_ns, "_release_self_heal_pause", lambda: None)
 
-    rc = ar._run_agent_runner_self_update(Path("/unused"), target_sha="newsha1111")
+    rc = ar._run_agent_runner_self_update(
+        Path("/unused"),
+        target_sha="newsha1111",
+        from_sha="oldsha0000",
+        post_checkout=True,
+    )
 
     # Not merely non-zero: a refusal BEFORE the stop reports its own code, so a
     # caller can tell "still serving" from "stopped and possibly down".
@@ -257,6 +273,8 @@ class TestModuleEntry:
                 "mode": "none",
                 "force_reap": True,
                 "handoff_generation": None,
+                "post_checkout": False,
+                "from_sha": None,
             }
         ]
 
@@ -275,6 +293,8 @@ class TestModuleEntry:
                 "mode": "smooth",
                 "force_reap": False,
                 "handoff_generation": None,
+                "post_checkout": False,
+                "from_sha": None,
             }
         ]
 
