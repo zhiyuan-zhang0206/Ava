@@ -334,7 +334,7 @@ class TestRootTaskImmutable:
         with TestClient(app) as client:
             resp = client.patch(f"/api/tasks/{tid}", json={"status": "open"})
         assert resp.status_code == 422
-        assert "Must be one of: in_progress, done, cancelled" in resp.json()["detail"]
+        assert "Must be one of: in_progress, ongoing, done, cancelled" in resp.json()["detail"]
         assert _status(db_conn, tid) == "in_progress"  # unchanged
 
 
