@@ -730,7 +730,7 @@
         "inProgress": "进行中",
         "done": "已完成",
         "canceled": "已取消",
-        "root": "根任务"
+        "ongoing": "进行中"
       },
       "agent": "Agent #{id}",
       "unowned": "未分配",

@@ -576,24 +576,24 @@ def _write_task_update(
     note: str | None,
     owner: int | None,
     owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
-    actor: int,
+    actor: int | None,
 ) -> tuple[int | None, str, int | None]:
     """Apply an update() row write inside the caller's transaction.
 
-    Holds the row FOR UPDATE, enforces root immutability, parent-close, and
-    title-uniqueness rules, writes the row + optional note, and records the
-    event log. Returns (old_owner, current_title, new_owner) for the post-commit
-    notification."""
+    Holds the row FOR UPDATE, enforces root immutability, ongoing ownership,
+    parent-close, and title-uniqueness rules, writes the row + optional note,
+    and records the event log. Returns (old_owner, current_title, new_owner)
+    for the post-commit notification."""
     # FOR UPDATE holds the row across the read -> write so two concurrent
     # reassignments cannot both act on the same stale owner.
     cur.execute(
-        "SELECT owner, title, is_root FROM agent_tasks WHERE id = %s FOR UPDATE",
+        "SELECT owner, title, is_root, status FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),
     )
     row = cur.fetchone()
     if row is None:
         raise ValueError(f"task {task_id} does not exist")
-    old_owner, current_title, is_root = row
+    old_owner, current_title, is_root, current_status = row
     # The system root task is immutable: it is the anchor of the task tree
     # and the parent of the cluster's top-level tasks, so it can never be
     # reassigned, completed, cancelled, or otherwise edited. Fail fast rather
@@ -603,6 +603,26 @@ def _write_task_update(
             f"task {task_id} is the system root task and is immutable — "
             f"it cannot be reassigned, completed, cancelled, or otherwise edited"
         )
+    # A process identity is the same value agents read as ava.self.AGENT_ID.
+    # System tooling runs without one and deliberately remains outside this
+    # agent-to-agent ownership gate.
+    if (
+        status == "ongoing"
+        and status != current_status
+        and actor is not None
+        and actor != old_owner
+    ):
+        cur.execute(
+            "WITH RECURSIVE owner_lineage(id, spawner) AS ("
+            "SELECT id, spawner FROM agents_meta WHERE id = %s "
+            "UNION "
+            "SELECT parent.id, parent.spawner FROM agents_meta parent "
+            "JOIN owner_lineage child ON child.spawner = 'agent:' || parent.id::TEXT"
+            ") SELECT 1 FROM owner_lineage WHERE id = %s LIMIT 1",
+            (old_owner, actor),
+        )
+        if cur.fetchone() is None:
+            raise ValueError("only the owner or a delegator can set a task to ongoing")
     if status in ("done", "cancelled"):
         cur.execute(
             "SELECT id, count(*) OVER () FROM agent_tasks "
@@ -672,7 +692,7 @@ def _owner_change_payload(
 
 
 def _log_task_update(
-    actor: int,
+    actor: int | None,
     payload: dict[str, object],
     owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
     new_owner: int | None,
@@ -712,7 +732,9 @@ def update(
     Args:
         status: one of "in_progress", "ongoing", "done", "cancelled".
             ongoing marks long-running active work. Closing a task is rejected
-            while any direct child is in progress or ongoing.
+            while any direct child is in progress or ongoing. Only the owner or
+            its delegator may change a task into ongoing; calls without an
+            agent identity remain allowed for system tooling.
         results: replaces the whole field; use note to append instead.
         owner: agent id to reassign to. None means no change — a task always
             has an owner.
@@ -780,25 +802,23 @@ def update(
         if parent_id is not _UNSET:
             changes.append("parent → root" if parent_id is None else f"parent → #{parent_id}")
 
-    # Side effects run after the row change commits: telling an agent auto-wakes
-    # it, so keep it out of the transaction. A reassignment carries the change
-    # summary to the new owner; any other non-owner write notifies the
-    # (unchanged) owner of what changed and by whom — so a task cancelled
-    # behind its owner's back never goes unnoticed.
-    _notify_after_update(
-        task_id,
-        title,
-        current_title,
-        old_owner,
-        new_owner,
-        owner_changing,
-        actor,
-        changes,
-        parent_only,
-    )
-
-    # Live-refresh every open task board (fleet-wide invalidate + refetch).
-    publish_task_updated_sync(actor, task_id)
+    # Agent-scoped side effects run after the row change commits: telling an
+    # agent auto-wakes it, so keep it out of the transaction. System tooling
+    # has no actor for a task note or TaskUpdated; like gateway PATCH, its
+    # committed write relies on the board's normal poll.
+    if actor is not None:  # pyright: ignore[reportUnnecessaryComparison] -- agent_id() is None before bootstrap.
+        _notify_after_update(
+            task_id,
+            title,
+            current_title,
+            old_owner,
+            new_owner,
+            owner_changing,
+            actor,
+            changes,
+            parent_only,
+        )
+        publish_task_updated_sync(actor, task_id)
 
 
 def _should_notify_previous_owner(old_owner: int | None, actor: int) -> TypeGuard[int]:

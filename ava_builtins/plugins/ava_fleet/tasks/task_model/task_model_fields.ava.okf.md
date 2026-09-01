@@ -22,7 +22,7 @@ Constraint: a child is always created after its parent (`created_at` monotonical
 
 ## `title` / `description`
 
-- `title`: Short one-line name shown in `list` results and notifications. Renamable via `update(title=...)`; must be unique among `in_progress` tasks (same check as `create`).
+- `title`: Short one-line name shown in `list` results and notifications. Renamable via `update(title=...)`; must be unique among `in_progress` tasks only (same check as `create`), so `ongoing` tasks may share a title.
 - `description`: Full description — what and why, the first read for the assignee. Set at `create`, revisable via `update(description=...)`.
 
 Old field name `brief` is a deprecated alias (Task attribute + `create` parameter), to be removed.
@@ -35,7 +35,7 @@ Old field name `content` is a deprecated alias (Task attribute + `update` parame
 
 ## `status`
 
-One of four values a task may hold (`CHECK` constraint): `"in_progress"`, `"ongoing"`, `"done"`, `"cancelled"`. A task is born `"in_progress"` (DB default — the `"open"` state was dropped by user ruling 2026-08-29: creation starts the work immediately). `"ongoing"` marks long-running active work and is assignable to regular tasks through `update()`/PATCH; the system root is pinned to it by the `agent_tasks_root_status_ongoing` DB constraint. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
+One of four values a task may hold (`CHECK` constraint): `"in_progress"`, `"ongoing"`, `"done"`, `"cancelled"`. A task is born `"in_progress"` (DB default — the `"open"` state was dropped by user ruling 2026-08-29: creation starts the work immediately). `"ongoing"` marks long-running active work and is assignable to regular tasks through `update()`/PATCH; the system root is pinned to it by the `agent_tasks_root_status_ongoing` DB constraint. SDK callers changing a task to `"ongoing"` must be its owner or an owner-lineage delegator, while no-identity system tooling and the human-facing gateway PATCH remain ungated. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
 
 ## `owner`
 
