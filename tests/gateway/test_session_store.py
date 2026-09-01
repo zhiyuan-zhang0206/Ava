@@ -190,7 +190,7 @@ def test_list_sessions_filters_inactive_and_sorts_newest_first(
     assert revoked["revoked_at"] is not None
 
 
-def test_create_session_cleans_up_expired_rows(
+def test_create_session_leaves_expired_rows_for_the_ttl_reaper(
     pool: ConnectionPool[psycopg.Connection[Any]],
 ) -> None:
     with pool.connection() as conn, conn.cursor() as cur:
@@ -203,7 +203,24 @@ def test_create_session_cleans_up_expired_rows(
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT id FROM web_sessions ORDER BY id")
-        assert [row[0] for row in cur.fetchall()] == ["live-row"]
+        assert [row[0] for row in cur.fetchall()] == ["expired-row", "live-row"]
+
+
+def test_session_cache_evicts_least_recently_used_entry(
+    pool: ConnectionPool[psycopg.Connection[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A long-lived gateway retains only the most recently used session cache entries."""
+    monkeypatch.setattr(session_store, "_SESSION_CACHE_MAX_ENTRIES", 2)
+    checked_at = datetime.now(UTC)
+    for session_id in ("first", "second", "third"):
+        create_session(pool, session_id, 3600, "", "")
+
+    assert session_is_valid(pool, "first", now=checked_at) is True
+    assert session_is_valid(pool, "second", now=checked_at) is True
+    assert session_is_valid(pool, "first", now=checked_at + timedelta(seconds=1)) is True
+    assert session_is_valid(pool, "third", now=checked_at) is True
+
+    assert list(session_store._session_cache) == ["first", "third"]
 
 
 def test_session_ids_with_suffix_matches_active_rows_only(

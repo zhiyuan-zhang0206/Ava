@@ -7,6 +7,7 @@ agent-not-found -> 404, filename sanitization.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -16,6 +17,30 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+
+
+@pytest.mark.asyncio
+async def test_upload_lock_cache_evicts_idle_locks_but_keeps_held_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A busy agent's upload mutex remains stable while stale idle locks are evicted."""
+    from gateway.routers import uploads as uploads_router
+
+    uploads_router._agent_locks.clear()
+    monkeypatch.setattr(uploads_router, "_AGENT_LOCK_CACHE_MAX_ENTRIES", 2)
+    held: asyncio.Lock | None = None
+    try:
+        lock = await uploads_router._agent_lock(1)
+        held = lock
+        await lock.acquire()
+        await uploads_router._agent_lock(2)
+        await uploads_router._agent_lock(3)
+
+        assert list(uploads_router._agent_locks) == [1, 3]
+    finally:
+        if held is not None and held.locked():
+            held.release()
+        uploads_router._agent_locks.clear()
 
 
 def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:

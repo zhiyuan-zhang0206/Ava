@@ -6,8 +6,8 @@ makes a TTL **mandatory** for every persistent shell session created via
 ``ava.shell.sessions.new(ttl=)`` / ``run_background(ttl=)`` (the
 idle-shell-reminder daemon is gone; TTL is the only reclamation mechanism).
 This loop is the enforcer, scanning
-``agent_pages.expires_at`` and ``agent_shell_ttls.expires_at`` for rows past
-their deadline:
+``agent_pages.expires_at``, ``agent_shell_ttls.expires_at``, and
+``web_sessions.expires_at`` for rows past their deadline:
 
 - **Pages** — the row is terminalized with ``expired_at`` (the reverse proxy
   then answers the page's link with the friendly "page expired" notice), a
@@ -17,6 +17,8 @@ their deadline:
 - **Shells** — a ``shell_kill`` op is dispatched to the owning agent's machine;
   the tracking row is removed once the session is killed or found already
   gone. A row whose machine is unreachable is left for the next pass.
+- **Browser sessions** — expired rows are deleted in the gateway's periodic
+  pass, so cleanup does not depend on the next login.
 
 Owners are notified (inbound, source ``"system"``) only when the agent is
 running or idling — a terminated agent's page expiring is exactly the cleanup
@@ -164,6 +166,13 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
             context="ttl_reaper_page",
         )
     return reaped
+
+
+def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
+    """Delete browser sessions whose authoritative expiry has elapsed."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM web_sessions WHERE expires_at < now()")
+        return cur.rowcount
 
 
 def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int, datetime, datetime]]:
@@ -329,11 +338,13 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
         try:
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool)
-            if pages or shells:
+            sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
+            if pages or shells or sessions:
                 _log.info(
-                    "[ttl-reaper] reclaimed %d page(s), %d shell(s)",
+                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s)",
                     len(pages),
                     len(shells),
+                    sessions,
                 )
         except Exception:
             _log.warning("[ttl-reaper] pass failed", exc_info=True)

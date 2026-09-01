@@ -443,6 +443,36 @@ async def test_caller_supplied_idempotency_key_rides_envelope(
 
 
 @pytest.mark.asyncio
+async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Business keys replay one effect, but never cross target/payload boundaries."""
+    import json
+
+    captured = _patch(
+        monkeypatch,
+        handler=lambda _r: httpx.Response(  # pyright: ignore[reportUnknownLambdaType]
+            200, json={"status": "completed", "result": {"id": 42}}
+        ),
+    )
+
+    for target, payload in (
+        ("wsl", {"agent_id": 42, "name": "one"}),
+        ("wsl", {"name": "one", "agent_id": 42}),
+        ("linux", {"agent_id": 42, "name": "one"}),
+        ("wsl", {"agent_id": 42, "name": "two"}),
+    ):
+        result = await cluster_rpc.dispatch_to_machine(target, "spawn-launch", payload, retries=0)
+        assert result == {"id": 42}
+
+    keys = [json.loads(request.content)["idempotency_key"] for request in captured["requests"]]
+    assert keys[0] == keys[1]
+    assert keys[0].startswith("spawn-launch:wsl:42:")
+    assert keys[2] != keys[0]
+    assert keys[3] != keys[0]
+
+
+@pytest.mark.asyncio
 async def test_idempotent_kind_carries_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Idempotent kinds (status_probe etc.) send no idempotency_key — no dedup
     row, no server-side storage."""

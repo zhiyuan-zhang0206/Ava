@@ -35,6 +35,54 @@ from shared.pages_copy import PAGE_LANGUAGE_DEFAULT, PAGE_SERVER_DOWN_BODY, PAGE
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
 
+def test_machine_dial_host_cache_evicts_least_recently_used_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The page-proxy allowlist cache remains bounded while preserving recent hosts."""
+
+    class _Cursor:
+        machine = ""
+
+        def execute(self, _query: str, params: tuple[str]) -> None:
+            self.machine = params[0]
+
+        def fetchall(self) -> list[tuple[str]]:
+            return [(f"http://{self.machine}.internal:8106",)]
+
+        def __enter__(self) -> _Cursor:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class _Connection:
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+        def __enter__(self) -> _Connection:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class _Pool:
+        def connection(self) -> _Connection:
+            return _Connection()
+
+    pages_router.reset_page_host_cache_for_tests()
+    monkeypatch.setattr(pages_router, "_PAGE_HOST_CACHE_MAX_ENTRIES", 2)
+    pool = _Pool()
+    try:
+        pages_router._machine_dial_hosts(pool, "first")  # pyright: ignore[reportArgumentType]
+        pages_router._machine_dial_hosts(pool, "second")  # pyright: ignore[reportArgumentType]
+        pages_router._machine_dial_hosts(pool, "first")  # pyright: ignore[reportArgumentType]
+        pages_router._machine_dial_hosts(pool, "third")  # pyright: ignore[reportArgumentType]
+
+        assert list(pages_router._page_host_cache) == ["first", "third"]
+    finally:
+        pages_router.reset_page_host_cache_for_tests()
+
+
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         pass

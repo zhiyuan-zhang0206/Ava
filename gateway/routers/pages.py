@@ -21,6 +21,7 @@ import ipaddress
 import re as _re
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from urllib.parse import urlparse
 
@@ -63,7 +64,8 @@ router = APIRouter()
 # live SSE stream or a slow large download keeps flowing.
 _PROXY_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0)
 _PAGE_HOST_CACHE_TTL_S = 60.0
-_page_host_cache: dict[str, tuple[float, frozenset[str]]] = {}
+_PAGE_HOST_CACHE_MAX_ENTRIES = 4096
+_page_host_cache: OrderedDict[str, tuple[float, frozenset[str]]] = OrderedDict()
 _page_host_cache_lock = threading.Lock()
 
 
@@ -429,6 +431,7 @@ def _machine_dial_hosts(pool: ConnectionPool, machine: str) -> frozenset[str]:
     with _page_host_cache_lock:
         cached = _page_host_cache.get(machine)
         if cached is not None and cached[0] > now:
+            _page_host_cache.move_to_end(machine)
             return cached[1]
     hosts = {machine}
     with pool.connection() as conn, conn.cursor() as cur:
@@ -444,6 +447,9 @@ def _machine_dial_hosts(pool: ConnectionPool, machine: str) -> frozenset[str]:
     allowed = frozenset(hosts)
     with _page_host_cache_lock:
         _page_host_cache[machine] = (now + _PAGE_HOST_CACHE_TTL_S, allowed)
+        _page_host_cache.move_to_end(machine)
+        if len(_page_host_cache) > _PAGE_HOST_CACHE_MAX_ENTRIES:
+            _page_host_cache.popitem(last=False)
     return allowed
 
 

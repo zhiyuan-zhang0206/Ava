@@ -80,6 +80,10 @@ from shared.redis_listener import RedisInboundListener
 # env override: `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS`.
 DEFAULT_WAIT_TIMEOUT_S = settings.agent.db_notify_wait_timeout_seconds
 
+# The fallback gives the restarter three chances at its default one-second
+# cadence, while polling lets it yield as soon as the authoritative row moves.
+_SELF_RESPAWN_RESTARTER_GRACE_S = 3.0
+
 # A successful borrow that took at least this long still gets a WARNING — a
 # healthy pg hands a conn back in milliseconds, so seconds means it is under
 # load (or reconnecting). Below the acquire timeout, so a slow-but-served
@@ -622,6 +626,24 @@ async def renew_agent_lease(
         )
 
 
+def _restarter_claimed_before_deadline(cur: psycopg.Cursor, agent_id: int) -> bool:
+    """Poll the authoritative row until the restarter wins or its grace ends."""
+    deadline = time.monotonic() + _SELF_RESPAWN_RESTARTER_GRACE_S
+    while True:
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+        if row is None or row[0] != "restarting":
+            logger.debug(
+                "[self-respawn] agent %s: restarter claimed restart, skipping self-respawn",
+                agent_id,
+            )
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(settings.daemon.restarter_poll_interval_seconds, remaining))
+
+
 def schedule_self_respawn(agent_id: int) -> None:
     """Register an atexit handler that self-respawns this agent if the restarter
     daemon doesn't pick it up within a few seconds.
@@ -702,18 +724,6 @@ def schedule_self_respawn(agent_id: int) -> None:
         return updates
 
     def _respawn() -> None:
-        # Brief sleep — give the restarter a head start. If it is alive and
-        # unpaused, it processes this restart in <1s and flips the row past
-        # 'restarting'; our CAS below then becomes a no-op. This is NOT just an
-        # optimization: respawn_agent (the restarter's path) is the only one
-        # that INSERTs the restart_completed inbound, which the new process's
-        # claim turns into the "You have been restarted by X" lifecycle marker
-        # (tests/e2e/test_self_restart.py locks this contract). The CAS-first
-        # variant of this audit note was attempted and reverted for exactly
-        # that reason — self-respawn winning the race silently drops the
-        # marker (2026-08-08, PR #1969 e2e catch).
-        time.sleep(3)
-
         argv = list(base_argv)
         from shared.platform import (
             CREATE_NO_WINDOW,
@@ -724,17 +734,17 @@ def schedule_self_respawn(agent_id: int) -> None:
 
             from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
 
-            # PG_KEEPALIVE_KWARGS bounds this at 5s. The CAS below is only an
-            # optimization — the `except Exception` fallback launches the
-            # replacement anyway — but a bare connect against a black-holing
-            # database never *raises*, so it would park this atexit handler on
-            # the OS TCP-retransmit timeout and the replacement process would
-            # never be spawned at all.
+            # Poll before the fallback CAS until a fixed deadline. The restarter
+            # owns the preferred path because it records restart_completed; an
+            # early CAS would silently lose that lifecycle marker. Autocommit
+            # makes every poll observe the restarter's latest status change.
             conn = psycopg.connect(
                 settings.data_plane.db_url, autocommit=True, **PG_STATEMENT_TIMEOUT_KWARGS
             )
             try:
                 with conn.cursor() as cur:
+                    if _restarter_claimed_before_deadline(cur, agent_id):
+                        return
                     cur.execute(
                         "UPDATE agents_meta SET status = 'idling', pid = NULL, "
                         "started_at = NULL, lease_expires_at = NULL "
