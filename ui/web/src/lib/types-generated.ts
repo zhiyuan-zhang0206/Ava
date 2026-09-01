@@ -1599,8 +1599,9 @@ export interface paths {
         /**
          * Post Notice Dismiss
          * @description Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice
-         *     contract): resolution 'withdrawn' + resolve event. No open notice ->
-         *     idempotent 204.
+         *     contract): resolution 'withdrawn' + resolve event, plus an inspector
+         *     snapshot refresh when the withdrawn row required a response. No open notice
+         *     -> idempotent 204.
          */
         post: operations["post_notice_dismiss_api_agents__agent_id__notices_current_dismiss_post"];
         delete?: never;
