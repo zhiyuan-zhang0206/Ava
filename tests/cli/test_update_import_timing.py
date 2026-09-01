@@ -1,29 +1,26 @@
-"""The agent-runner self-update's in-process stop must kill with POST-checkout code.
+"""The agent-runner self-update keeps its pre-checkout import closure narrow.
 
-`cli/commands/_update_agent_runner.py` calls `_ns._do_stop(...)` **in-process**
-after the `git checkout` + `uv sync` above it. In-process means the stop executes
-whatever is already in `sys.modules`, so whether it kills this host's sessions with
-the just-pulled session-kill code or with the pre-pull code is decided entirely by
-import timing. Nothing the updater imports before the checkout may reach
-`shared.session_backend` or `shared.session_record`: every path to the former
-(`cli/commands/_session_lifecycle.py`, `cli/commands/stop.py`) imports it
-*method-locally*, and it in turn reaches the platform supervisors method-locally.
-`shared.session_record` must be deferred too: `shared.proc` is in the updater's
-closure, and its former module-scope import left the old record module resident.
-The new `shared.posixproc` then imported `pid_starttime_ticks` from that stale
-module after checkout and crashed the stop. So the whole kill chain is first loaded
-when the stop actually kills something — after the checkout, off the fresh files on
-disk. That is what this module pins.
+`cli/commands/_update_agent_runner.py` now execs a fresh interpreter after
+`git checkout` + `uv sync`; only that post-checkout image calls `_ns._do_stop(...)`.
+The boundary prevents any old ``sys.modules`` entry from satisfying a new-tree
+import. The assertions here remain defense in depth: nothing the pre-checkout
+updater imports may reach `shared.session_backend` or `shared.session_record`, so
+a regression that folds the post-checkout leg back into the old image fails loudly.
+Every path to the former (`cli/commands/_session_lifecycle.py`,
+`cli/commands/stop.py`) imports it *method-locally*, and it in turn reaches the
+platform supervisors method-locally. `shared.session_record` must be deferred too:
+`shared.proc` is in the updater's closure, and its former module-scope import left
+the old record module resident. The post-checkout process then loads the whole kill
+chain from its fresh files on disk. The exec-boundary regression proves that; this
+module pins the additional narrow-closure invariant.
 
-The arrangement is load-bearing, and its failure mode is invisible. PR #932 fixed a
-`winproc.kill_session` that walked past a session boundary and killed the updater's
-own session, leaving the Windows agent-runner stopped *and* un-updated. That fix
-lands on the very next Windows self-update **because of** the deferred import. Let
-anything the updater imports at module scope start reaching the kill chain and the
-stop reverts to running pre-pull code — i.e. a rollout that ships a kill fix cannot
-benefit from it, which is the whole reason the Windows box got stuck in the first
-place. Nothing else in the suite notices; it surfaces only as a failed rollout on
-the fleet's one Windows box, diagnosed from Windows logs.
+The arrangement is still load-bearing. PR #932 fixed a `winproc.kill_session` that
+walked past a session boundary and killed the updater's own session, leaving the
+Windows agent-runner stopped *and* un-updated. The fresh interpreter makes that fix
+available on the rollout that ships it; keeping the old closure narrow ensures a
+future refactor cannot silently reintroduce the stale-import shape. Nothing else in
+the suite notices; it surfaces only as a failed rollout on the fleet's one Windows
+box, diagnosed from Windows logs.
 
 Shape of the assertion, and why it is not vacuous on the POSIX host CI runs on:
 
@@ -52,10 +49,9 @@ Shape of the assertion, and why it is not vacuous on the POSIX host CI runs on:
   is never imported at all off Windows, so its absence there proves nothing by
   itself.
 - A **positive control** pins that the subject still exists: `cli.commands.stop`
-  (which owns `_do_stop`) must BE resident. That is the invariant's exact shape —
-  the stop's entry point is pre-checkout code, the killer underneath it is not yet
-  loaded — and it fails if the updater ever stops reaching the stop at all, which
-  would otherwise make the absence assertions true for the wrong reason.
+  (which owns `_do_stop`) must BE resident in the pre-checkout closure. It proves
+  this remains a meaningful shape check rather than an absence assertion detached
+  from the updater's command namespace.
 - Every name is checked to actually resolve, so renaming a module cannot silently
   disarm an absence assertion into a tautology.
 
@@ -95,7 +91,7 @@ _MUST_BE_LAZY = (
     "shared.session_record",
 )
 
-# Positive control — the stop's own entry point, which IS pre-checkout code.
+# Positive control — the old command namespace still includes the stop entrypoint.
 _MUST_BE_RESIDENT = ("cli.commands.stop",)
 
 
@@ -150,12 +146,12 @@ def test_session_kill_chain_is_not_in_the_updaters_import_closure() -> None:
     hoisted to module scope in a module that is already in the closure. It also
     fails if `shared.proc` imports `shared.session_record` at module scope: the
     freshly loaded posixproc would then see its old API after checkout. Either way
-    the in-process `_do_stop` after the checkout kills with pre-pull code or fails.
+    a future in-process post-checkout `_do_stop` would kill with pre-pull code or fail.
     """
     eager = _resident(_MUST_BE_LAZY)
     assert eager == set(), (
         f"{sorted(eager)} is loaded before `_run_agent_runner_self_update`'s git "
-        f"checkout, so the in-process `_do_stop` after it would kill this host's "
+        f"checkout, so an in-process post-checkout `_do_stop` would kill this host's "
         f"sessions with PRE-PULL code — the failure mode PR #932 fixed on Windows, "
         f"where the stop killed the updater's own session. The kill chain and its "
         f"session-record dependency must stay reachable only through method-local "
@@ -165,14 +161,14 @@ def test_session_kill_chain_is_not_in_the_updaters_import_closure() -> None:
 
 
 def test_the_stop_entrypoint_itself_is_resident() -> None:
-    """Positive control for the test above: the updater does still reach the stop.
+    """Positive control for the test above: the updater still has the stop entrypoint.
 
-    `_do_stop` lives in `cli.commands.stop` and is imported at module scope, so it
-    is pre-checkout code by construction — only the killer *beneath* it is deferred.
-    If this goes red the absence assertions have stopped describing a real path and
-    need rewriting against wherever the stop moved.
+    `_do_stop` lives in `cli.commands.stop` and remains in the pre-checkout command
+    namespace, while the current implementation executes it only after a fresh
+    interpreter boundary. If this goes red the absence assertions have stopped
+    describing a real updater shape and need rewriting against wherever stop moved.
     """
     assert _resident(_MUST_BE_RESIDENT) == set(_MUST_BE_RESIDENT), (
         "cli.commands.stop is no longer in the updater's import closure — the "
-        "in-process stop this file protects has moved or gone away."
+        "stop entrypoint this file uses as its positive control has moved or gone away."
     )

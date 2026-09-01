@@ -360,6 +360,12 @@ def try_acquire_updater_lock() -> bool:
         else:
             import fcntl
 
+            # The agent-runner updater replaces itself after checkout so a fresh
+            # interpreter cannot mix old cached modules with new-tree imports.
+            # Python makes `os.open` descriptors close-on-exec by default; retain
+            # this flock across that POSIX exec so no second updater can enter the
+            # post-checkout leg while the first still owns it.
+            os.set_inheritable(fd, True)  # noqa: FBT003 — exec must retain this flock
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as exc:
         if fd >= 0:

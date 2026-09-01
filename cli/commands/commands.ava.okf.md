@@ -49,6 +49,12 @@ schema change catches the DB up on its own.
   service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].
 - The gateway/runner update boundary, readiness proof, Phase-B verdicts, and
   failed-update recovery are one subject in [[rollout-boundary.ava.okf.md]].
+- A full agent-runner update checks out, syncs, and records the installed SHA in
+  its pre-checkout image, then re-execs `_update_agent_runner` with its private
+  post-checkout flags before validation, quiesce, stop, or start. The gateway's
+  post-boot schedule-session bounce likewise runs `_update_local` in a fresh
+  subprocess; neither path imports new-tree modules into a process with old
+  `sys.modules` entries.
 - `_converge_firewall` reconciles the per-binary Application Firewall manifest.
   Version-stamped Python, Postgres, Homebrew, browser, and observability paths mean
   an upgrade can orphan the old ALF identity while loopback keeps working — issue

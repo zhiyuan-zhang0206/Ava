@@ -34,14 +34,20 @@ def _run_agent_runner_self_update(
     mode: str = "smooth",
     force_reap: bool = False,
     handoff_generation: str | None = None,
+    post_checkout: bool = False,
+    from_sha: str | None = None,
 ) -> int:
     """`ava cluster update` implementation on an agent-runner — local self-update.
 
-    Flow: force-checkout the pinned target / uv sync / vet the new tree's
-    migrations/ layout (validate-before-kill: revert + abort on a broken layout
-    rather than stop into a boot that can't migrate) / graceful stop / a fresh
-    `ava start` subprocess (see step 4 for why start runs in a child process).
-    Does not run migrations itself; the gateway is the single schema writer.
+    The pre-checkout image force-checks out the pinned target, syncs its venv,
+    records the installed revision, then replaces itself with the post-checkout
+    leg. The boundary is load-bearing: f22f5eb -> faf061d imported a new
+    ``ops.updater_outcome`` against old ``shared.deploy_timing`` in
+    ``sys.modules`` and failed before quiesce. The replacement image vets the
+    new tree's migrations/layout (validate-before-kill: revert + abort on a
+    broken layout rather than stop into a boot that cannot migrate), gracefully
+    stops, and starts a fresh `ava` child. Does not run migrations itself; the
+    gateway is the single schema writer.
 
     `target_sha` is the pinned rollout commit: a direct operator `ava cluster update`
     leaves it None and this resolves origin/main itself. Either way the checkout is
@@ -68,14 +74,15 @@ def _run_agent_runner_self_update(
         try_acquire_updater_lock,
     )
 
-    # Mutual exclusion first: two concurrent updaters on one host race each
-    # other's checkout/converge writes (win 2026-08-11, task #1181 — a second
-    # updater tore the schtasks XML mid-write and converge failed with
-    # WinError 87, leaving the host offline). The loser declines like any other
-    # preflight refusal; Phase B / the watchdog self-heal read that as
-    # "provably stopped" and move on. Fail-soft: try_acquire returns False only
-    # for a genuine concurrent holder, never for a filesystem quirk.
-    if not try_acquire_updater_lock():
+    owned_generation = handoff_generation
+    if not post_checkout and not try_acquire_updater_lock():
+        # Mutual exclusion first: two concurrent updaters on one host race each
+        # other's checkout/converge writes (win 2026-08-11, task #1181 — a second
+        # updater tore the schtasks XML mid-write and converge failed with
+        # WinError 87, leaving the host offline). The loser declines like any other
+        # preflight refusal; Phase B / the watchdog self-heal read that as
+        # "provably stopped" and move on. Fail-soft: try_acquire returns False only
+        # for a genuine concurrent holder, never for a filesystem quirk.
         if handoff_generation is not None:
             with contextlib.suppress(Exception), ui_update_state.lifecycle_lock():
                 updater_handoff.clear(handoff_generation)
@@ -86,42 +93,43 @@ def _run_agent_runner_self_update(
         return RESTART_DECLINED_EXIT_CODE
 
     try:
-        from shared.cluster import session_name
+        if not post_checkout:
+            from shared.cluster import session_name
 
-        expected_session = (
-            session_name("updater")
-            if handoff_generation is not None
-            else f"direct-updater:pid{os.getpid()}"
-        )
-        owned_generation = handoff_generation
-        with ui_update_state.lifecycle_lock():
-            if owned_generation is None:
-                try:
-                    owned_generation = updater_handoff.begin(
-                        expected_session=expected_session
-                    ).generation
-                except updater_handoff.UpdaterHandoffActive:
-                    owned_generation = None
-            claimed = owned_generation is not None and updater_handoff.claim_running(
-                owned_generation,
-                expected_session=expected_session,
+            expected_session = (
+                session_name("updater")
+                if handoff_generation is not None
+                else f"direct-updater:pid{os.getpid()}"
             )
-        if not claimed or owned_generation is None:
-            if owned_generation is not None:
-                with contextlib.suppress(Exception):
-                    updater_handoff.clear(owned_generation)
-            print(
-                "[updater] spawn handoff ownership does not match this updater — "
-                "declining without touching checkout or services"
-            )
-            return RESTART_DECLINED_EXIT_CODE
+            with ui_update_state.lifecycle_lock():
+                if owned_generation is None:
+                    try:
+                        owned_generation = updater_handoff.begin(
+                            expected_session=expected_session
+                        ).generation
+                    except updater_handoff.UpdaterHandoffActive:
+                        owned_generation = None
+                claimed = owned_generation is not None and updater_handoff.claim_running(
+                    owned_generation,
+                    expected_session=expected_session,
+                )
+            if not claimed or owned_generation is None:
+                if owned_generation is not None:
+                    with contextlib.suppress(Exception):
+                        updater_handoff.clear(owned_generation)
+                print(
+                    "[updater] spawn handoff ownership does not match this updater — "
+                    "declining without touching checkout or services"
+                )
+                return RESTART_DECLINED_EXIT_CODE
 
-        # R1 (Task #1021): this process IS the updater. The DB lease is a
-        # fail-soft observation used by Phase B, while the running handoff's
-        # exact PID identity is the local recovery proof even if the DB write or
-        # detached-session record is unavailable. Keep it for the complete
-        # updater lifetime; clearing it after one successful touch would reopen
-        # the same liveness gap when that lease later expires.
+        # R1 (Task #1021): this process IS the updater. The DB lease is a fail-soft
+        # observation used by Phase B, while the running handoff's exact PID identity
+        # is the local recovery proof even if the DB write or detached-session record
+        # is unavailable. Keep it for the complete updater lifetime; clearing it after
+        # one successful touch would reopen the same liveness gap when that lease later
+        # expires. The post-checkout image touches the same lease without trying to
+        # re-acquire its inherited flock or re-claim its already-running handoff.
         with contextlib.suppress(Exception):
             touch_updater_lease()
 
@@ -132,14 +140,43 @@ def _run_agent_runner_self_update(
                 restart_only=restart_only,
                 mode=mode,
                 force_reap=force_reap,
+                post_checkout=post_checkout,
+                from_sha=from_sha,
+                handoff_generation=owned_generation,
             )
         finally:
             with contextlib.suppress(Exception):
                 clear_updater_lease()
-            with contextlib.suppress(Exception):
-                updater_handoff.clear(owned_generation)
+            if owned_generation is not None:
+                with contextlib.suppress(Exception):
+                    updater_handoff.clear(owned_generation)
     finally:
+        # A POSIX exec image has an empty `_updater_lock_fds`; its inherited lock
+        # is released by the OS at exit. On Windows the pre-exec parent still owns
+        # the descriptor and reaches this same finally after its child returns.
         release_updater_lock()
+
+
+def _exec_post_checkout(argv: list[str]) -> int:
+    """Run the post-checkout leg without carrying old modules into the new tree.
+
+    POSIX ``execv`` preserves the updater PID, creation time, and inherited flock,
+    so the detached handoff keeps identifying one uninterrupted updater. Windows
+    replaces the PID on exec, invalidating that handoff identity; it instead waits
+    for a child while the pre-exec parent retains the flock and owns final cleanup.
+    """
+    if os.name != "nt":
+        try:
+            os.execv(sys.executable, argv)  # noqa: S606 — replaces this trusted updater image
+        except OSError as exc:
+            print(f"[updater] post-checkout exec failed: {exc}", file=sys.stderr)
+            return 1
+
+    try:
+        return subprocess.run(argv, check=False).returncode
+    except OSError as exc:
+        print(f"[updater] post-checkout child failed to launch: {exc}", file=sys.stderr)
+        return 1
 
 
 def _refresh_builtin_skills(repo: Path, ava_bin: Path) -> None:
@@ -196,21 +233,28 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     restart_only: bool = False,
     mode: str = "smooth",
     force_reap: bool = False,
+    post_checkout: bool = False,
+    from_sha: str | None = None,
+    handoff_generation: str | None = None,
 ) -> int:
-    """The body of `_run_agent_runner_self_update` (lease wrapper above)."""
+    """The body of `_run_agent_runner_self_update` (lease wrapper above).
+
+    The ordinary leg performs only checkout, sync, and installed-SHA bookkeeping
+    before handing off. Every new-tree import begins in ``post_checkout=True`` so
+    a module cached before checkout cannot skew a newly imported dependency.
+    """
     # Lazy `cli.commands` for `_do_stop` (and so tests can stub it); avoids a
     # top-level cycle (cli.commands imports this module via update.py's re-export).
     #
-    # This is also where the stop's import closure is fixed: everything reachable
-    # from here at module scope becomes PRE-checkout code, since step 4's stop runs
-    # in-process. `shared.session_backend` and the platform supervisors under it are
-    # deliberately NOT in that closure (see step 4 and
-    # tests/cli/test_update_import_timing.py).
+    # This imports the old command namespace before checkout for the pre-exec leg;
+    # after checkout it is used only to build the exec argv. The post-checkout image
+    # imports its own command namespace from the new tree before it reaches stop.
     import cli.commands as _ns
 
+    sha: str | None = None
     if restart_only:
         print("\n→ restart-only: skip git checkout / uv sync (bounce on current code)")
-    else:
+    elif not post_checkout:
         # 1+2) force-checkout the pinned target + uv sync, inside the
         # source-switch window. Phase B passes target_sha; a direct operator
         # `ava cluster update` resolves origin/main itself. The checkout lands on
@@ -251,11 +295,38 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
         except Exception as exc:
             print(f"  · installed_sha update failed (non-fatal): {exc}", file=sys.stderr)
 
-        # 2.5) validate-before-kill: the just-checked-out tree's `ava start` (step 4)
-        #    fails its migrate / schema-assert on a broken migrations/ layout
-        #    (duplicate / non-contiguous version) — but only after the stop below has
-        #    already taken this host down. Vet the new tree now; on a broken layout
-        #    revert to the prior commit and abort with this host still serving.
+        argv = [
+            sys.executable,
+            "-m",
+            "cli.commands._update_agent_runner",
+            "--post-checkout",
+            "--target-sha",
+            sha,
+            "--from-sha",
+            from_sha,
+            "--mode",
+            mode,
+        ]
+        if force_reap:
+            argv.append("--force-reap")
+        if handoff_generation is not None:
+            argv.extend(("--handoff-generation", handoff_generation))
+        return _exec_post_checkout(argv)
+    elif target_sha is None or from_sha is None:
+        raise ValueError("post_checkout requires target_sha and from_sha")
+    else:
+        sha = target_sha
+
+    # 2.5) validate-before-kill: the just-checked-out tree's `ava start` (step 4)
+    #    fails its migrate / schema-assert on a broken migrations/ layout
+    #    (duplicate / non-contiguous version) — but only after the stop below has
+    #    already taken this host down. Vet the new tree now; on a broken layout
+    #    revert to the prior commit and abort with this host still serving.
+    if not restart_only:
+        if sha is None or from_sha is None:
+            raise RuntimeError(
+                "non-restart self-update reached validation without checkout revisions"
+            )
         try:
             validate_migrations_at_ref(sha, repo_root=repo)
         except MigrationLayoutError as e:
@@ -343,16 +414,11 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     #    orchestrator's own DB polling mid-Phase-B (it dies before releasing
     #    the cluster update lock, blocking further rollouts for the lock TTL).
     #
-    #    In-process, and deliberately so: it must NOT be a subprocess through the
-    #    `ava` launcher, because a mid-flow `ava stop` would then take the updater
-    #    itself out. The consequence is that this stop runs whatever `sys.modules`
-    #    already holds — which is why the session-kill chain is kept out of the
-    #    closure above. It is not yet loaded here, so `_do_stop` imports it now and
-    #    reads the code the checkout just wrote: a `kill_session` fix (PR #932's
-    #    Windows session-boundary fix, say) applies on the rollout that ships it
-    #    rather than one rollout late. `shared/session_backend.py`'s method-local
-    #    imports are what make that true; `tests/cli/test_update_import_timing.py`
-    #    fails if either end of the arrangement is broken.
+    #    In-process in the fresh post-checkout image: a subprocess through the
+    #    `ava` launcher would let a mid-flow `ava stop` take the updater itself
+    #    out. The exec boundary means this process has no old modules in
+    #    `sys.modules`, while the existing lazy session-kill chain remains a second
+    #    defense against importing an unrelated stale dependency before the stop.
     with updater_stage("stop"):
         _ns._do_stop(
             repo,
@@ -479,7 +545,19 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="generation-scoped pause-to-lease handoff from the detached parent",
     )
+    parser.add_argument(
+        "--post-checkout",
+        action="store_true",
+        help="internal continuation after checkout/sync in a fresh interpreter",
+    )
+    parser.add_argument(
+        "--from-sha",
+        default=None,
+        help="revision to restore if the checked-out tree fails migration-layout validation",
+    )
     args = parser.parse_args(argv)
+    if args.post_checkout and args.from_sha is None:
+        parser.error("--post-checkout requires --from-sha")
     return _run_agent_runner_self_update(
         _repo_root(),
         target_sha=args.target_sha,
@@ -487,6 +565,8 @@ def main(argv: list[str] | None = None) -> int:
         mode=args.mode,
         force_reap=args.force_reap,
         handoff_generation=args.handoff_generation,
+        post_checkout=args.post_checkout,
+        from_sha=args.from_sha,
     )
 
 

@@ -13,12 +13,14 @@ backstop.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-import cli.commands as _cli
 from cli.commands import _update_local as _local
+from cli.commands import update as _update
 from shared.cluster import session_name
 
 
@@ -36,6 +38,18 @@ class _FakeBackend:
         return True, "forced"
 
 
+class _RecordingSubprocess:
+    """Fake only the local module's fresh-bounce child, never global subprocess."""
+
+    def __init__(self, calls: list[tuple[list[str], Path]]) -> None:
+        self.calls = calls
+
+    def run(self, argv: list[str], *, cwd: Path, check: bool) -> SimpleNamespace:
+        assert check is False
+        self.calls.append((argv, cwd))
+        return SimpleNamespace(returncode=0)
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     r = tmp_path / "repo"
@@ -51,72 +65,75 @@ def _patch_leg(monkeypatch: pytest.MonkeyPatch, *, from_sha: str = "old123") -> 
     monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: (from_sha, set(), None))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_update, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
 
-def test_pull_path_bounces_schedule_sessions(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
+def test_pull_path_bounces_schedule_sessions_in_a_fresh_interpreter(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
-    """A code-change rollout (host on old123, target abc123) kills the old
-    checkout's live schedule sessions so the fresh gateway's reconcile loop
-    relaunches them on the new code."""
-    backend = _FakeBackend([session_name("schedule-1"), session_name("schedule-2")])
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
+    """A code-change rollout launches the bounce from the checked-out tree."""
+    calls: list[tuple[list[str], Path]] = []
+
+    monkeypatch.setattr(_local, "subprocess", _RecordingSubprocess(calls))
     _patch_leg(monkeypatch, from_sha="old123")
 
     assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    assert calls == [
+        (
+            [
+                sys.executable,
+                "-m",
+                "cli.commands._update_local",
+                "--bounce-schedule-sessions",
+            ],
+            repo,
+        )
+    ]
 
-    assert backend.killed == [session_name("schedule-1"), session_name("schedule-2")]
-    assert "restart schedule runner session" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
-
-def test_noop_update_skips_schedule_bounce(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_noop_update_skips_schedule_bounce(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """A no-op rollout (host already on the target commit) changes no code —
     sessions must not be bounced (an in-flight fire is not interrupted for
     nothing), even though the gateway still restarts."""
-    backend = _FakeBackend([session_name("schedule-1")])
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
+    calls: list[tuple[list[str], Path]] = []
+    monkeypatch.setattr(_local, "subprocess", _RecordingSubprocess(calls))
     _patch_leg(monkeypatch, from_sha="abc123")
 
     assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
 
-    assert backend.killed == []
+    assert calls == []
 
 
-def test_restart_only_skips_schedule_bounce(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_restart_only_skips_schedule_bounce(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """A restart-only bounce changes no code — the sessions are current, so they
     must not be killed (an in-flight fire is not interrupted for nothing)."""
-    backend = _FakeBackend([session_name("schedule-1")])
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
+    calls: list[tuple[list[str], Path]] = []
+    monkeypatch.setattr(_local, "subprocess", _RecordingSubprocess(calls))
     _patch_leg(monkeypatch)
 
     assert _local._run_gateway_local_update(repo, pull=False) == 0
 
-    assert backend.killed == []
+    assert calls == []
 
 
 def test_failed_boot_skips_schedule_bounce(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """A failed `ava start` recovers to last-known-good — the sessions are running
     the recovered (current-again) code, so they must not be bounced."""
-    backend = _FakeBackend([session_name("schedule-1")])
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
+    calls: list[tuple[list[str], Path]] = []
+    monkeypatch.setattr(_local, "subprocess", _RecordingSubprocess(calls))
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set(), None))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_update, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_recover_rc", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
     assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 1
 
-    assert backend.killed == []
+    assert calls == []
 
 
 def test_kill_failure_is_non_fatal(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     """A session that refuses to die must not fail the rollout — the old runner
     keeps serving and the post-rollout leftover check is the backstop."""
@@ -127,24 +144,60 @@ def test_kill_failure_is_non_fatal(
 
     backend = _StubbornBackend([session_name("schedule-1")])
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
-    _patch_leg(monkeypatch)
-
-    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    _local._restart_schedule_sessions()
 
     assert "kill failed (non-fatal)" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_no_sessions_is_a_noop(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     backend = _FakeBackend([])
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
-    _patch_leg(monkeypatch)
-
-    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    _local._restart_schedule_sessions()
 
     assert backend.killed == []
     assert "no schedule runner sessions" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_bounce_subprocess_failure_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """The post-boot backstop remains a warning when the fresh child cannot start."""
+
+    class _FailingSubprocess:
+        def run(self, *_args: object, **_kwargs: object) -> object:
+            raise OSError("python vanished")
+
+    monkeypatch.setattr(_local, "subprocess", _FailingSubprocess())
+    _patch_leg(monkeypatch)
+
+    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    assert "schedule session bounce failed (non-fatal)" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_bounce_subprocess_nonzero_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A failed fresh bounce leaves the gateway rollout successful."""
+
+    class _NonzeroSubprocess:
+        def run(self, *_args: object, **_kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(returncode=7)
+
+    monkeypatch.setattr(_local, "subprocess", _NonzeroSubprocess())
+    _patch_leg(monkeypatch)
+
+    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    assert "schedule session bounce failed (non-fatal): rc=7" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_bounce_schedule_sessions_entry_calls_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
+    monkeypatch.setattr(_local, "_restart_schedule_sessions", lambda: calls.append(True))
+
+    assert _local.main(["--bounce-schedule-sessions"]) == 0
+    assert calls == [True]
 
 
 def test_scan_failure_is_non_fatal(

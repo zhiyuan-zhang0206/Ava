@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -224,6 +226,58 @@ def test_updater_lock_contends_across_processes_on_one_stable_inode(
     assert hds.try_acquire_updater_lock() is True
     hds.release_updater_lock()
     assert path.stat().st_ino == inode
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows runs the post-checkout leg in a child")
+def test_updater_lock_survives_the_posix_post_checkout_exec(tmp_path: Path) -> None:
+    """The exec image must retain the pre-checkout flock until it exits.
+
+    ``os.open`` creates non-inheritable descriptors by default. A replacement
+    image that loses this fd has the same PID but no mutex, allowing a second
+    updater to race its post-checkout stop/start leg.
+    """
+    lock_path = tmp_path / "updater.lock"
+    probe = f"""
+from pathlib import Path
+
+from shared import host_deploy_state as hds
+
+hds._updater_lock_path = lambda: Path({str(lock_path)!r})
+print(hds.try_acquire_updater_lock())
+"""
+    continuation = f"""
+import subprocess
+import sys
+
+result = subprocess.run(
+    [sys.executable, "-c", {probe!r}],
+    capture_output=True,
+    text=True,
+    check=False,
+)
+assert result.returncode == 0, result.stderr
+assert result.stdout == "False\\n", result.stdout
+"""
+    pre_exec = f"""
+import os
+import sys
+from pathlib import Path
+
+from shared import host_deploy_state as hds
+
+hds._updater_lock_path = lambda: Path({str(lock_path)!r})
+assert hds.try_acquire_updater_lock()
+os.execv(sys.executable, [sys.executable, "-c", {continuation!r}])
+"""
+    proc = subprocess.run(  # noqa: S603 — fixed argv and test-controlled lock path
+        [sys.executable, "-c", pre_exec],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_updater_lock_uncontended_on_fresh_host(
