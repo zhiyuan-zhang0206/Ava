@@ -179,13 +179,32 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
     assert not [cwd for cwd in git_cwds if cwd.is_relative_to(memory_pool)]
 
 
-def test_memory_init_preserves_the_wrong_branch_guard() -> None:
+def test_memory_init_returns_a_clean_error_for_the_wrong_branch_guard(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _install_memory_plugin()
     set_identity(role="agent-runner", name="test-runner")
     _make_dirty_memory_repo(paths.memory_dir(), "main")
+    branch_mismatches: list[memory_repo.MemoryBranchMismatch] = []
 
-    with pytest.raises(memory_repo.MemoryBranchMismatch):
-        memory.cmd_memory_init()
+    def _record_branch_mismatch() -> ScaffoldResult:
+        try:
+            return run_plugin_scaffolds()
+        except memory_repo.MemoryBranchMismatch as exc:
+            branch_mismatches.append(exc)
+            raise
+
+    monkeypatch.setattr(
+        "cli.commands._converge_plugins.run_plugin_scaffolds", _record_branch_mismatch
+    )
+
+    assert memory.cmd_memory_init() == 1
+
+    stderr = capsys.readouterr().err
+    assert len(branch_mismatches) == 1
+    assert f"✗ {branch_mismatches[0]}" in stderr
+    assert "Manually switch:" in stderr
+    assert "Traceback" not in stderr
 
 
 def test_memory_init_seeds_a_dirty_correct_branch_pool(capsys: pytest.CaptureFixture[str]) -> None:
