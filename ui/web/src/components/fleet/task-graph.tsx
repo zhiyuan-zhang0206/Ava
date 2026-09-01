@@ -157,8 +157,6 @@ function TaskHoverCard({
         </p>
       ) : null}
 
-      {/* Long text — clamped so the card stays a hover preview; the full text
-          lives in the task registry. */}
       {task.description ? (
         <div className="mt-2 border-t border-border pt-2">
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
@@ -338,7 +336,7 @@ export function TaskGraph({
       ? windowRaw
       : "24h";
   const setTaskWindow = (w: TaskWindow) => setSetting("display.task_window", w);
-  const { tasks, loading, error } = useTasks(taskWindow);
+  const { tasks, loading, error } = useTasks(taskWindow, "full");
   const showDone = settings["display.task_show_done"] === true;
   const setShowDone = (v: boolean) => setSetting("display.task_show_done", v);
   const showCanceled = settings["display.task_show_canceled"] === true;

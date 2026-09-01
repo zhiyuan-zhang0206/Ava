@@ -9,12 +9,12 @@ any child remains in progress.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal, overload
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gateway.routers._eval_guard import deny_isolated_result_read
-from gateway.schemas import TaskListResponse, TaskRow, TaskUpdateRequest
+from gateway.schemas import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
 from shared.task_reparent import resolve_reparent
 
 router = APIRouter()
@@ -38,10 +38,50 @@ _TASK_COLS = (
     "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
 )
 
+_TASK_SUMMARY_COLS = (
+    "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
+    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+)
 
-def _row_to_task(row: tuple[Any, ...], owner_label: str | None = None) -> TaskRow:
-    """Build a TaskRow from a row selected in _TASK_COLS order, plus an
-    optional owner_label from a LEFT JOIN with the agents table."""
+
+@overload
+def _row_to_task(
+    row: tuple[Any, ...],
+    fields: Literal["full"],
+    owner_label: str | None = None,
+) -> TaskRow: ...
+
+
+@overload
+def _row_to_task(
+    row: tuple[Any, ...],
+    fields: Literal["summary"],
+    owner_label: str | None = None,
+) -> TaskSummaryRow: ...
+
+
+def _row_to_task(
+    row: tuple[Any, ...],
+    fields: Literal["full", "summary"],
+    owner_label: str | None = None,
+) -> TaskRow | TaskSummaryRow:
+    """Build a task row from the selected projection plus its owner label."""
+    if fields == "summary":
+        return TaskSummaryRow(
+            id=row[0],
+            parent_id=row[1],
+            title=row[2],
+            status=row[3],
+            owner=row[4],
+            owner_label=owner_label,
+            created_by=row[5],
+            created_at=row[6].isoformat(),
+            updated_at=row[7].isoformat(),
+            remind_interval_seconds=row[8],
+            last_reminded_at=row[9].isoformat() if row[9] else None,
+            reminder_count=row[10],
+            priority=row[11],
+        )
     return TaskRow(
         id=row[0],
         parent_id=row[1],
@@ -61,7 +101,9 @@ def _row_to_task(row: tuple[Any, ...], owner_label: str | None = None) -> TaskRo
     )
 
 
-def _windowed_tasks(tasks: list[TaskRow], window: str) -> list[TaskRow]:
+def _windowed_tasks(
+    tasks: list[TaskRow | TaskSummaryRow], window: str
+) -> list[TaskRow | TaskSummaryRow]:
     """Narrow the registry to a last-activity window, keeping tree structure.
 
     Kept tasks: the system root (parent_id NULL), every not-finished task
@@ -94,7 +136,7 @@ def _windowed_tasks(tasks: list[TaskRow], window: str) -> list[TaskRow]:
             parent = by_id.get(pid)
             pid = parent.parent_id if parent is not None else None
 
-    result: list[TaskRow] = []
+    result: list[TaskRow | TaskSummaryRow] = []
     for t in tasks:
         if t.id in kept:
             result.append(t)
@@ -107,11 +149,13 @@ def _windowed_tasks(tasks: list[TaskRow], window: str) -> list[TaskRow]:
 def get_tasks(
     request: Request,
     window: str = Query("all", pattern="^(24h|7d|30d|all)$"),
+    fields: Literal["full", "summary"] = Query("full"),
 ) -> TaskListResponse:
     """Return the task registry, newest first.
 
-    `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
-    (updated_at) on the backend, so the task graph's default 7-day view never
+    `fields=full` (the default) returns the compatibility projection. `fields=summary`
+    returns metadata only, selecting neither task text column. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
+    (updated_at) on the backend, so the task graph's default 24-hour view never
     pulls the full registry. A windowed list still carries every kept task's
     out-of-window ancestors flagged ghost=True (see _windowed_tasks); without
     a window the full table is returned unchanged.
@@ -122,12 +166,12 @@ def get_tasks(
     """
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_TASK_COLS}, a.label AS owner_label "  # noqa: S608
+            f"SELECT {_TASK_COLS if fields == 'full' else _TASK_SUMMARY_COLS}, a.label AS owner_label "  # noqa: S608
             "FROM agent_tasks t "
             "LEFT JOIN agents a ON t.owner = a.id "
             "ORDER BY t.created_at DESC"
         )
-        tasks = [_row_to_task(r[:-1], owner_label=r[-1]) for r in cur.fetchall()]
+        tasks = [_row_to_task(r[:-1], fields, owner_label=r[-1]) for r in cur.fetchall()]
     if window == "all":
         return TaskListResponse(tasks=tasks)
     return TaskListResponse(tasks=_windowed_tasks(tasks, window))
@@ -300,4 +344,4 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
         if row is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
 
-    return _row_to_task(row[:-1], owner_label=row[-1])
+    return _row_to_task(row[:-1], "full", owner_label=row[-1])

@@ -177,7 +177,7 @@ function KanbanCard({
       >
         {task.priority}
       </span>
-      {/* Title + description take the full remaining width of the row. */}
+      {/* Title + description take the full remaining row width. */}
       <div className={cn(MIN_W_0, FLEX_1)}>
         <div className="break-words text-xs font-semibold text-foreground">
           <span className="text-muted-foreground">#{task.id}</span> {task.title}

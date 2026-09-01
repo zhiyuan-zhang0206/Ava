@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskRow } from "@/lib/types";
+import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/types";
 import type { NoticesFeed } from "@/lib/use-notices";
 
 // Echo the timestamp back so a test can tell WHICH timestamp a row rendered
@@ -33,10 +33,12 @@ vi.mock("@/lib/use-notices", () => ({
 
 // The queue joins entries to the task registry client-side (grouping); feed it a
 // controlled task list. Default: none — every entry stays a flat row.
-const useTasksMock = vi.fn<() => { tasks: TaskRow[]; loading: boolean; error: boolean }>(
+const useTasksMock = vi.fn<(window?: string, fields?: string) => { tasks: TaskSummaryRow[]; loading: boolean; error: boolean }>(
   () => ({ tasks: [], loading: false, error: false }),
 );
-vi.mock("@/lib/use-tasks", () => ({ useTasks: () => useTasksMock() }));
+vi.mock("@/lib/use-tasks", () => ({
+  useTasks: (window?: string, fields?: string) => useTasksMock(window, fields),
+}));
 
 // The fleet-wide open-pages feed drives the "agent's live page" affordances.
 // Stub the hook (default: no pages).
@@ -400,13 +402,11 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
 
 // ── Task-subtree grouping (unchanged join; entries can be either kind) ──
 
-function tk(id: number, over: Partial<TaskRow> = {}): TaskRow {
+function tk(id: number, over: Partial<TaskSummaryRow> = {}): TaskSummaryRow {
   return {
     id,
     parent_id: null,
     title: `Task ${id}`,
-    description: "",
-    results: null,
     status: "in_progress",
     priority: "P2",
     owner: null,
@@ -432,6 +432,12 @@ describe("InboxQueue — task grouping", () => {
       error: false,
     });
   }
+
+  it("bounds task grouping to the seven-day registry window", () => {
+    withRegistry();
+    renderQueue([]);
+    expect(useTasksMock).toHaveBeenCalledWith("7d", "summary");
+  });
 
   it("groups entries under the top-level task subtree with a count", () => {
     withRegistry();
