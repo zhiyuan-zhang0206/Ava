@@ -92,8 +92,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     telemetry_read_recovered / otlp_backend_disabled / otlp_backend_recovered
     (runner-observability staleness and OTLP recovery state) + exec_envelope
     (2026-08-24 runner batch R-4 — exec envelope transfer size/time cost) +
-    editable_pth_repaired + editable_direct_url_repaired (Task #1572's prod
-    editable-install repair audit, extended to the direct_url record) +
+    editable_pth_repaired + editable_direct_url_repaired +
+    exec_editable_install_poisoned (editable-install repair audit, including
+    the pre-exec poisoned-install guard) +
     checkpoint_table_sizes (Task #1545a's post-vacuum absolute gauges) +
     agent_boot_failed (Task #1704's visible process-boot failure marker) +
     gate_auth_probe_failed (Task #1736's gate auth-probe failure
@@ -122,8 +123,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # back to 128; page_restore_notified (Task #2212 direction B — the
     # reconcile close path's re-serve notice) raises it to 129; `llm_retry`
     # records retry duration and `watchdog_tick` records freshness, bringing
-    # the current total to 132.
-    assert len(_TELEMETRY_KINDS) == 132
+    # the current total to 132; exec_editable_install_poisoned (the pre-exec
+    # poisoned-install guard, Task #2285) raises it to 133.
+    assert len(_TELEMETRY_KINDS) == 133
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

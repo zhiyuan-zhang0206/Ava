@@ -355,7 +355,12 @@ def test_guard_editable_install_repairs_all_records_and_emits_exec_event(
     assert len(violations) == 2
     assert pth.read_text() == str(source_root)
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
-    assert emitted[0] == (
+    assert [entry[0][1] for entry in emitted] == [
+        "editable_pth_repaired",
+        "editable_direct_url_repaired",
+        "exec_editable_install_poisoned",
+    ]
+    assert emitted[-1] == (
         ("telemetry", "exec_editable_install_poisoned"),
         {
             "level": "warning",
@@ -367,6 +372,42 @@ def test_guard_editable_install_repairs_all_records_and_emits_exec_event(
             },
         },
     )
+
+
+def test_guard_editable_install_repairs_with_registered_real_emitter(tmp_path: Path) -> None:
+    """The exec guard must repair through the real telemetry contract wiring."""
+    source_root = tmp_path / "prod" / "source"
+    deleted_worktree = tmp_path / "deleted-worktree"
+    pth = _write_pth(source_root, deleted_worktree)
+    direct_url = _write_direct_url(source_root, deleted_worktree.as_uri())
+
+    violations = editable_install.guard_editable_install(source_root)
+
+    assert len(violations) == 2
+    assert pth.read_text() == str(source_root)
+    assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
+
+
+def test_guard_editable_install_repairs_when_telemetry_emit_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Telemetry drift must not block the repair that restores exec imports."""
+    source_root = tmp_path / "prod" / "source"
+    deleted_worktree = tmp_path / "deleted-worktree"
+    pth = _write_pth(source_root, deleted_worktree)
+    direct_url = _write_direct_url(source_root, deleted_worktree.as_uri())
+
+    def raise_exec_guard_emit(*args: object, **_kwargs: object) -> None:
+        if args[1] == "exec_editable_install_poisoned":
+            raise ValueError("unregistered telemetry event")
+
+    monkeypatch.setattr("shared.telemetry.emit", raise_exec_guard_emit)
+
+    violations = editable_install.guard_editable_install(source_root)
+
+    assert len(violations) == 2
+    assert pth.read_text() == str(source_root)
+    assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
 
 
 def test_guard_editable_install_leaves_healthy_records_byte_identical(
