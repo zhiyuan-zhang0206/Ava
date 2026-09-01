@@ -43,7 +43,8 @@ const RETIRED_STATUS_ANCHOR_TARGETS: Record<string, string> = {
 };
 
 export default function InsightsPage() {
-  const t = useTranslations("runTimeline");
+  const t = useTranslations("insights");
+  const runTimelineT = useTranslations("runTimeline");
   // Honor a #anchor on first load / direct link (including forwards from old
   // /control#status deep links): resolve the target once, from the URL hash
   // at mount (later hash changes come from nav clicks, which scroll
@@ -64,15 +65,15 @@ export default function InsightsPage() {
   return (
     <div className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
       <header className={cn("shrink-0 items-center gap-1.5 border-b border-border px-4 py-2", FLEX)}>
-        <h1 className="text-sm font-semibold">Insights</h1>
+        <h1 className="text-sm font-semibold">{t("title")}</h1>
         <div className={cn(FLEX_1)} />
         <Link
           href="/"
           className={cn("items-center gap-1.5 rounded px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground", FLEX)}
-          aria-label="Back to agents"
+          aria-label={t("backToAgents")}
         >
           <MessageSquare className="size-4 shrink-0" aria-hidden />
-          <span className="hidden sm:inline">Back to agents</span>
+          <span className="hidden sm:inline">{t("backToAgents")}</span>
         </Link>
       </header>
 
@@ -82,38 +83,38 @@ export default function InsightsPage() {
         <ControlNav
           sections={INSIGHTS_SECTIONS}
           scrollId={INSIGHTS_SCROLL_ID}
-          ariaLabel="Insights sections"
+          ariaLabel={t("sections")}
         />
         <div id={INSIGHTS_SCROLL_ID} className={cn("overflow-y-auto overflow-x-hidden", FLEX_1)}>
           <div className={cn("mx-auto max-w-4xl space-y-12 px-6 py-6 font-mono text-sm", MIN_W_0)}>
             <ControlSection
               id="status"
-              label="Status"
-              description="Live cluster health: services and agents."
+              label={t("statusLabel")}
+              description={t("statusDescription")}
             >
               <StatusPage />
             </ControlSection>
 
             <ControlSection
               id="ops"
-              label="Ops"
-              description="Grafana dashboard link — SSE/event-log backlog, LLM latency + TPS, process restarts, host resources."
+              label={t("ops")}
+              description={t("opsDescription")}
             >
               <OpsPage />
             </ControlSection>
 
             <ControlSection
               id="run-timeline"
-              label={t("insightsEntry")}
-              description={t("insightsEntryDescription")}
+              label={runTimelineT("insightsEntry")}
+              description={runTimelineT("insightsEntryDescription")}
             >
               <RunTimelineEntry />
             </ControlSection>
 
             <ControlSection
               id="alerts"
-              label="Alerts"
-              description="System alerts — separate from notices. Unresolved-first history, live via SSE."
+              label={t("alerts")}
+              description={t("alertsDescription")}
             >
               <AlertsSection />
             </ControlSection>

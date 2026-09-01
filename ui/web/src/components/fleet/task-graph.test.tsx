@@ -727,17 +727,17 @@ describe("TaskGraph layout controls", () => {
     groups.map((g) => ({ label: g.label, sliders: g.sliders.map((s) => `${s.key}:${s.label}`) }));
 
   it("Node group is a single Size slider — no min/max band (ruling 2026-08-10 #1127)", () => {
-    const nodeGroup = TASK_FORCE_GROUPS.find((g) => g.label === "Node")!;
-    expect(nodeGroup.sliders).toEqual([{ key: "nodeSizeMin", label: "Size", min: 6, max: 48, step: 1 }]);
+    const nodeGroup = TASK_FORCE_GROUPS.find((g) => g.label === "node")!;
+    expect(nodeGroup.sliders).toEqual([{ key: "nodeSizeMin", label: "size", min: 6, max: 48, step: 1 }]);
     // the other groups are identical to the Agent Graph's
     expect(surface(TASK_FORCE_GROUPS.slice(1))).toEqual(surface(FORCE_GROUPS.slice(1)));
-    expect(TASK_FORCE_GROUPS.map((g) => g.label)).toEqual(["Node", "Edge", "Layout", "Zoom"]);
+    expect(TASK_FORCE_GROUPS.map((g) => g.label)).toEqual(["node", "edge", "layout", "zoom"]);
   });
 
   it("repulsion max is at least 10000 on BOTH graphs (user ruling 2026-08-10 #1140)", () => {
     const repulsion = (groups: ForceGroup[]) =>
       groups
-        .find((g) => g.label === "Layout")!
+        .find((g) => g.label === "layout")!
         .sliders.find((s) => s.key === "repulsion")!;
     expect(repulsion(FORCE_GROUPS).max).toBeGreaterThanOrEqual(10000);
     expect(repulsion(TASK_FORCE_GROUPS).max).toBeGreaterThanOrEqual(10000);
