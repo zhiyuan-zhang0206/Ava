@@ -31,6 +31,7 @@ from agent.hooks.compact import (
     build_compact_transition,
     conversation_messages,
     emergency_compact_summary,
+    emit_compaction_monitoring,
     trim_checkpoints_after_compact,
 )
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
@@ -140,6 +141,12 @@ async def decide(
     if st.compact_payload is not None:
         summary_text, compact_kind = st.compact_payload
         assert ctx.event_publisher is not None, "decide compact path requires ctx.event_publisher"  # noqa: S101
+        emit_compaction_monitoring(
+            state.messages,
+            summary_text,
+            agent_id=agent_id,
+            compact_kind=compact_kind,
+        )
         ctx.event_publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
         await trim_checkpoints_after_compact(ctx.ops_pool, agent_id)
         # Defer any chats co-batched with the compact: they arrived while the
