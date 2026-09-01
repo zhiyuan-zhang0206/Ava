@@ -189,10 +189,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_LAUNCH_CONFIRM_POLL_INTERVAL_SEC",
     ): "independent: poll granularity (50 ms), orders nothing",
     (
-        "ops/ci_autoscale/controller.py",
-        "BOOT_GRACE_SECONDS",
-    ): "independent subsystem (ci_autoscale), own boot grace, no cross-family neighbour",
-    (
         "gateway/schedule_runner.py",
         "_STALL_TIMEOUT_S",
     ): "independent family (schedule breaker): settings alias, not part of the audited lattice",
