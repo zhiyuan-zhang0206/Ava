@@ -8,13 +8,23 @@ any child remains in progress.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, overload
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from psycopg_pool import ConnectionPool
 
 from gateway.routers._eval_guard import deny_isolated_result_read
-from gateway.schemas import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
+from gateway.routers.agents_state import post_agent_system_note
+from gateway.schemas import (
+    SystemNoteIn,
+    TaskListResponse,
+    TaskRow,
+    TaskSummaryRow,
+    TaskUpdateRequest,
+)
+from shared.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
 from shared.task_reparent import resolve_reparent
 
 router = APIRouter()
@@ -236,26 +246,13 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     return sets, params
 
 
-@router.patch("/api/tasks/{task_id}")
-def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskRow:
-    """Partially update a task; omitted fields stay unchanged.
+def _patch_task_blocking(
+    pool: ConnectionPool[Any], task_id: int, body: TaskUpdateRequest
+) -> tuple[TaskRow, list[TaskOwnerNotification]]:
+    """Run the task transaction and return committed owner-change notes.
 
-    status, priority, title, description, and results are taken when non-null
-    (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
-    the system root's permanent state, never assignable; a title colliding with
-    another in_progress task's is rejected). owner reassigns to another
-    agent (an explicit null is rejected — a task cannot be released).
-    remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
-    null is rejected — reminders cannot be disabled). Any write resets the
-    reminder counters, same as the SDK update path. Unlike the SDK, an owner change here
-    does NOT message the affected agents — this endpoint is a plain column write.
-
-    The system root task is immutable: any PATCH targeting it is rejected with
-    422 (mirrors the SDK update() guard), so the task-tree anchor can never be
-    reassigned, completed, cancelled, or otherwise edited.
-
-    A status change to done or cancelled is rejected with 422 while any direct
-    child remains in progress. Close or cancel those children first.
+    The route awaits task-note delivery after this function returns, so no
+    network or process wake can roll back the owner assignment.
     """
     sets, params = _collect_updates(body)
     if "parent_id" in body.model_fields_set:
@@ -274,15 +271,21 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor() as cur:
         # The system root task is immutable (the task-tree anchor / default
         # parent) — reject any edit before writing, same rule as the SDK
         # update() path. Check existence here too so a missing task still 404s.
-        cur.execute("SELECT is_root FROM agent_tasks WHERE id = %s FOR UPDATE", (task_id,))
+        cur.execute(
+            "SELECT t.owner, t.is_root, a.status "
+            "FROM agent_tasks t LEFT JOIN agents_meta a ON a.id = t.owner "
+            "WHERE t.id = %s FOR UPDATE OF t",
+            (task_id,),
+        )
         guard = cur.fetchone()
         if guard is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
-        if guard[0]:
+        previous_owner, is_root, previous_owner_status = guard
+        if is_root:
             raise HTTPException(
                 status_code=422,
                 detail=f"Task {task_id} is the system root task and is immutable.",
@@ -344,4 +347,50 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
         if row is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
 
-    return _row_to_task(row[:-1], "full", owner_label=row[-1])
+    task = _row_to_task(row[:-1], "full", owner_label=row[-1])
+    if "owner" not in body.model_fields_set or previous_owner == task.owner:
+        return task, []
+    return (
+        task,
+        owner_change_notifications(
+            task.id,
+            task.title,
+            previous_owner,
+            task.owner,
+            actor=None,
+            previous_owner_terminated=previous_owner_status in (None, "terminated"),
+        ),
+    )
+
+
+@router.patch("/api/tasks/{task_id}")
+async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskRow:
+    """Partially update a task; omitted fields stay unchanged.
+
+    status, priority, title, description, and results are taken when non-null
+    (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
+    the system root's permanent state, never assignable; a title colliding with
+    another in_progress task's is rejected). owner reassigns to another
+    agent (an explicit null is rejected — a task cannot be released).
+    remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
+    null is rejected — reminders cannot be disabled). Any write resets the
+    reminder counters, same as the SDK update path. An owner reassignment sends
+    the SDK-equivalent task system notes after the database write commits.
+
+    The system root task is immutable: any PATCH targeting it is rejected with
+    422 (mirrors the SDK update() guard), so the task-tree anchor can never be
+    reassigned, completed, cancelled, or otherwise edited.
+
+    A status change to done or cancelled is rejected with 422 while any direct
+    child remains in progress. Close or cancel those children first.
+    """
+    task, notes = await asyncio.to_thread(
+        _patch_task_blocking, request.app.state.db_pool, task_id, body
+    )
+    for note in notes:
+        await post_agent_system_note(
+            note.agent_id,
+            SystemNoteIn(content=note.content, source="user", resurrect=note.resurrect),
+            request,
+        )
+    return task

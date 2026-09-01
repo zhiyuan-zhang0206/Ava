@@ -1,10 +1,9 @@
 """Contract tests for cluster-secret + cookie session auth.
 
 The auth middleware gates every API route except /api/health, /api/auth/login,
-and /api/auth/check. Three auth methods are accepted:
+and /api/auth/check. Two auth methods are accepted:
 1. Session cookie (``ava_session``) — for browser users.
 2. ``Authorization: Bearer <secret>`` — for SDK / agent callers.
-3. ``X-Cluster-Secret: <secret>`` — backward compat bare header.
 
 An empty cluster secret is the no-auth posture: the middleware passes every
 request through and the app starts without one (single-box clusters birth
@@ -41,10 +40,6 @@ _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
 def _auth() -> dict[str, str]:
     return bearer_header(_SECRET)
-
-
-def _x_cluster_secret_header() -> dict[str, str]:
-    return {"X-Cluster-Secret": _SECRET}
 
 
 def _session_cookie(token: str) -> dict[str, str]:
@@ -821,13 +816,13 @@ def test_api_bootstrap_accepts_bearer() -> None:
     assert resp.status_code == 200
 
 
-# ── X-Cluster-Secret header works ─────────────────────────────────────
+# ── X-Cluster-Secret header is rejected ────────────────────────────────
 
 
-def test_api_agents_accepts_x_cluster_secret() -> None:
+def test_api_agents_rejects_x_cluster_secret() -> None:
     with TestClient(app) as client:
-        resp = client.get("/api/agents", headers=_x_cluster_secret_header())
-    assert resp.status_code == 200
+        resp = client.get("/api/agents", headers={"X-Cluster-Secret": _SECRET})
+    assert resp.status_code == 401
 
 
 # ── Session cookie works on protected routes ──────────────────────────
@@ -1071,12 +1066,6 @@ def test_middleware_bounds_session_touch_bookkeeping(
 def test_api_agents_rejects_wrong_bearer_secret() -> None:
     with TestClient(app) as client:
         resp = client.get("/api/agents", headers=bearer_header("wrong-secret"))
-    assert resp.status_code == 401
-
-
-def test_api_agents_rejects_wrong_x_cluster_secret() -> None:
-    with TestClient(app) as client:
-        resp = client.get("/api/agents", headers={"X-Cluster-Secret": "wrong-secret"})
     assert resp.status_code == 401
 
 
