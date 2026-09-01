@@ -39,7 +39,7 @@ tags:
 - `ops/cluster_deploy.py:_updater_hung` — the stalled-updater reaper's liveness judgment: expired lease → hung; live lease → fine; no lease → legacy updater, fall back to log-mtime.
 ### Updater mutex
 
-- **Updater mutex** (`$AVA_HOME/run/updater.lock`, flock/msvcrt): the updater lease is a LIVENESS claim, not a mutex — two updaters on one host can both hold live leases (the 2026-08-11 WinError 87/32 collision, task #1181). The lock is the mutual-exclusion half, held for the updater's whole run; the OS releases it when the holder dies, so there is no stale-lock handling. Fail-soft: only a genuine concurrent holder returns False.
+- **Updater mutex** (`$AVA_HOME/run/updater.lock`, flock/msvcrt): the updater lease is a LIVENESS claim, not a mutex — two updaters on one host can both hold live leases (the 2026-08-11 WinError 87/32 collision, task #1181). The lock is the mutual-exclusion half, held for the updater's whole run; the OS releases it when the holder dies, so there is no stale-lock handling. POSIX marks its fd inheritable so the post-checkout exec retains the flock; Windows keeps the parent alive while a child runs that continuation. Fail-soft: only a genuine concurrent holder returns False.
 
 ## Key Dependencies
 
