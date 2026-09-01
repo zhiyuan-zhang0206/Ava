@@ -96,6 +96,94 @@ class TestWaitForInbound:
     pending kinds and dispatches itself; wait only cares whether agent_id has pending (if
     agent_id is provided)."""
 
+    async def test_half_open_redis_command_cannot_block_select_recheck(
+        self,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A connected-looking cross-machine socket can still stop responding.
+
+        Regression: an unbounded GETDEL on this shape parked the claim loop
+        forever, so the fallback SELECT never saw the inbound inserted while it
+        was stuck.
+        """
+
+        class _HalfOpenCommandConnection:
+            is_connected = True
+
+            def __init__(self) -> None:
+                self.release = asyncio.Event()
+                self.closed = False
+
+            async def getdel(self, _key: str) -> None:
+                await self.release.wait()
+
+            async def aclose(self) -> None:
+                self.closed = True
+
+        class _LivePubSub:
+            is_connected = True
+
+            def __init__(self) -> None:
+                self.closed = False
+
+            async def aclose(self) -> None:
+                self.closed = True
+
+        tid = create_agent(db_conn)
+        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=tid)
+        command = _HalfOpenCommandConnection()
+        pubsub = _LivePubSub()
+        listener._redis = command  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+        listener._pubsub = pubsub  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+        rebuilt_command = _HalfOpenCommandConnection()
+        rebuilt_command.release.set()
+        rebuilt_pubsub = _LivePubSub()
+        rebuilds = 0
+
+        async def _subscribed() -> _LivePubSub:
+            nonlocal rebuilds
+            if listener._pubsub is None:
+                rebuilds += 1
+                listener._redis = rebuilt_command  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+                listener._pubsub = rebuilt_pubsub  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+                return rebuilt_pubsub
+            return pubsub
+
+        async def _consume_immediately(*_args: object) -> None:
+            return None
+
+        monkeypatch.setattr(listener, "_ensure_subscribed", _subscribed)
+        monkeypatch.setattr(listener, "_consume_one", _consume_immediately)
+
+        async def _insert_while_waiting() -> None:
+            await asyncio.sleep(0.02)
+            _insert_inbound(db_conn, tid, "wake")
+
+        insertion = asyncio.create_task(_insert_while_waiting())
+        started = time.monotonic()
+        waiter = asyncio.create_task(
+            wait_for_inbound(aops_pool, listener, agent_id=tid, timeout_s=0.1)
+        )
+        done, pending = await asyncio.wait({waiter}, timeout=1.0)
+        if pending:
+            command.release.set()
+            await asyncio.wait({waiter}, timeout=1.0)
+            pytest.fail("half-open GETDEL blocked wait_for_inbound past its recheck budget")
+        await insertion
+
+        assert waiter in done
+        assert time.monotonic() - started < 1.0
+        assert command.closed, "GETDEL timeout must discard the half-open command socket"
+        assert pubsub.closed, "GETDEL timeout must discard the paired pubsub connection"
+
+        await listener.wait_one(0.01)
+
+        assert rebuilds == 1
+        assert listener._redis is rebuilt_command  # pyright: ignore[reportPrivateUsage]
+        assert listener._pubsub is rebuilt_pubsub  # pyright: ignore[reportPrivateUsage]
+
     async def test_wakes_on_chat_inbound(
         self,
         db_conn: psycopg.Connection,

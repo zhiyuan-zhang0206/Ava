@@ -9,6 +9,10 @@ exactly this pattern: a check-in inbound is delivered, the agent ignores it
 from the sleep/wake diagnosis), and the row stays ``running``/``idling`` with a
 pending inbound forever — permanent limbo, invisible to every other detector.
 
+A separate terminated zombie shape retains a live lease, pid, and pending
+``terminate`` inbound after the user has already terminated the agent. It is
+identity-checked and reaped without resurrection, preserving that user intent.
+
 This controller scans for those agents and re-checks process identity under the
 agent row lock. An OWNED process is force-killed before the reaper transition
 commits; FOREIGN or GONE proves the old agent is absent, so it is transitioned
@@ -28,8 +32,9 @@ is usually just a ``heartbeat`` which is not in ``_WORK_INBOUND_KINDS``).
 **Gating**: ``wedged_agent_enabled`` (default True), scan throttle (30s, same
 as the reaper), per-agent backoff (``last_wedged_check_at``, same clock shape
 as ``last_resurrect_at``), and the shared ``auto_resurrect_max_attempts`` budget
-of unconsumed lifecycle rows. Gateway-health gated like the other controllers:
-a resurrect while the gateway is down would crash-loop.
+of unconsumed lifecycle rows. Live-agent recovery is gateway-health gated because
+a resurrect while the gateway is down would crash-loop; terminated-zombie reaping
+does not require a gateway.
 
 Extracted as a Controller so the restarter daemon runs it alongside
 RespawnController and CrashResurrectController.
@@ -58,13 +63,12 @@ from shared.timing import CONTROLLER_SCAN_INTERVAL_S
 
 _log = logging.getLogger("ops.controllers.wedged")
 
-# Inbound age threshold (seconds). An agent holding an unconsumed pending inbound
-# this long is presumed wedged — the exec timeout is 1200s + LLM retry budget
-# ~770s ≈ 2000s, rounded up for margin. Override via env
-# (`AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS`); the derivation is registered as a
-# lattice constraint in `shared/timing.py` (WEDGED_AGE_SEC >= EXEC_NODE_TIMEOUT_S
-# + LLM_RETRY_BUDGET_ESTIMATE_S), so an override that shrinks it below the
-# derivation is caught at restarter startup.
+# Inbound age thresholds (seconds). A running agent needs the long
+# `AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS` threshold: it covers the exec timeout
+# plus LLM retry budget and is constrained by the `WEDGED_AGE_SEC` timing
+# lattice. An idling agent instead uses the short
+# `AVA_WEDGED_IDLING_AGENT_INBOUND_AGE_SECONDS` threshold, which covers several
+# idle claim-loop fallback checks and is independent of turn work budgets.
 #
 # Scan throttle — matched to the respawn reaper's cadence
 # (`shared.timing.CONTROLLER_SCAN_INTERVAL_S`). A wedged agent is not
@@ -77,7 +81,11 @@ _BACKOFF_S = 600.0
 
 
 def _claim_wedged_candidates(
-    pool: ConnectionPool, local_machine: str, age_s: float, backoff_s: float
+    pool: ConnectionPool,
+    local_machine: str,
+    running_age_s: float,
+    idling_age_s: float,
+    backoff_s: float,
 ) -> list[tuple[int, int, datetime]]:
     """Atomically claim wedged candidates: ``(agent_id, pid, claim_time)``.
 
@@ -86,8 +94,8 @@ def _claim_wedged_candidates(
     rows for the caller to re-check under lock and recover.
 
     Selects ``running``/``idling`` rows on this host with a recorded pid, holding an
-    unconsumed ``pending`` inbound older than ``age_s``, and either never checked
-    or past the per-agent backoff. The UPDATE's RETURNING is the atomic claim —
+    unconsumed ``pending`` inbound older than its status-specific threshold,
+    and either never checked or past the per-agent backoff. The UPDATE's RETURNING is the atomic claim —
     the caller processes every returned row through the OWNED/FOREIGN/GONE/
     UNREADABLE identity matrix under the agent row lock. Each wedged recovery
     inserts its own ``kind='resurrect'`` inbound, so the shared unconsumed-attempt
@@ -108,17 +116,103 @@ def _claim_wedged_candidates(
             "  SELECT 1 FROM inbound_messages im "
             "  WHERE im.agent_id = agents_meta.id "
             "    AND im.status = 'pending' "
-            "    AND im.created_at < now() - make_interval(secs => %s)"
+            "    AND im.created_at < now() - make_interval(secs => CASE "
+            "        WHEN agents_meta.status = 'idling' THEN %s ELSE %s END)"
             ") "
             "RETURNING id, pid, last_wedged_check_at",
             (
                 local_machine,
                 backoff_s,
                 settings.daemon.auto_resurrect_max_attempts,
-                age_s,
+                idling_age_s,
+                running_age_s,
             ),
         )
         return [(r[0], r[1], r[2]) for r in cur.fetchall()]
+
+
+def _claim_terminated_lease_zombies(
+    pool: ConnectionPool, local_machine: str, backoff_s: float
+) -> list[tuple[int, int]]:
+    """Claim terminated rows whose old process still owns a live lease.
+
+    A force termination can record the user's intent while a wedged process
+    survives long enough to renew its lease. A pending terminate inbound makes
+    that contradictory state explicit. The claimed row is reaped only; unlike
+    ordinary wedged recovery it must never resurrect the user-terminated agent.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET last_wedged_check_at = now() "
+            "WHERE status = 'terminated' AND lease_expires_at > now() "
+            "AND machine = %s AND pid IS NOT NULL "
+            "AND (last_wedged_check_at IS NULL "
+            "     OR now() - last_wedged_check_at >= make_interval(secs => %s)) "
+            "AND EXISTS ("
+            "  SELECT 1 FROM inbound_messages im "
+            "  WHERE im.agent_id = agents_meta.id "
+            "    AND im.status = 'pending' AND im.kind = 'terminate'"
+            ") "
+            "RETURNING id, pid",
+            (local_machine, backoff_s),
+        )
+        return [(r[0], r[1]) for r in cur.fetchall()]
+
+
+def _reap_terminated_lease_zombie(pool: ConnectionPool, agent_id: int, pid: int) -> bool:
+    """Identity-check and reap a terminated agent's still-live process.
+
+    The terminated state is the user's lifecycle intent, so this deliberately
+    clears the stale process projection without changing `termination_source`
+    or launching a replacement.
+    """
+    first_identity = probe_agent_process(pid, agent_id)
+    if first_identity is AgentProcessIdentity.UNREADABLE:
+        _log.info(
+            "[ops.wedged] terminated agent %s pid %s identity unreadable; deferring",
+            agent_id,
+            pid,
+        )
+        return False
+
+    try:
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, pid, lease_expires_at > now() "
+                "FROM agents_meta WHERE id = %s FOR UPDATE",
+                (agent_id,),
+            )
+            row = cur.fetchone()
+            locked_identity = probe_agent_process(pid, agent_id)
+            if (
+                row is None
+                or row[0] != "terminated"
+                or row[1] != pid
+                or row[2] is not True
+                or locked_identity is AgentProcessIdentity.UNREADABLE
+            ):
+                return False
+            cur.execute(
+                "UPDATE agents_meta SET pid = NULL, lease_expires_at = NULL "
+                "WHERE id = %s AND status = 'terminated' "
+                "AND pid = %s AND lease_expires_at > now()",
+                (agent_id, pid),
+            )
+            if cur.rowcount != 1:
+                return False
+            if locked_identity is AgentProcessIdentity.OWNED:
+                force_kill(pid)
+        _log.warning(
+            "[ops.wedged] reaped terminated agent %s zombie pid %s (identity %s); "
+            "preserved termination without resurrection",
+            agent_id,
+            pid,
+            locked_identity.value,
+        )
+        return True
+    except Exception:
+        _log.exception("[ops.wedged] failed to reap terminated zombie agent %s", agent_id)
+        return False
 
 
 class WedgedAgentController:
@@ -145,12 +239,16 @@ class WedgedAgentController:
 
         local_machine = machine_name()
 
-        # Gateway-health gate: a resurrect while the gateway is down crash-loops.
-        if not _gateway_healthy():
-            return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
-
-        age_s = float(settings.daemon.wedged_agent_inbound_age_seconds)
-        candidates = _claim_wedged_candidates(self._pool, local_machine, age_s, _BACKOFF_S)
+        running_age_s = float(settings.daemon.wedged_agent_inbound_age_seconds)
+        idling_age_s = float(settings.daemon.wedged_idling_agent_inbound_age_seconds)
+        # A live-agent recovery ends in a resurrect, so it must wait for a
+        # reachable gateway. A user-terminated zombie only needs reaping and
+        # runs below without that dependency.
+        candidates = []
+        if _gateway_healthy():
+            candidates = _claim_wedged_candidates(
+                self._pool, local_machine, running_age_s, idling_age_s, _BACKOFF_S
+            )
 
         acted = False
         for agent_id, pid, claimed_at in candidates:
@@ -167,10 +265,12 @@ class WedgedAgentController:
 
             _log.warning(
                 "[ops.wedged] agent %s (recorded pid %s) has stale pending "
-                "inbound > %.0fs — reconciling process identity",
+                "inbound beyond its status-aware threshold (running %.0fs, idling %.0fs) "
+                "— reconciling process identity",
                 agent_id,
                 pid,
-                age_s,
+                running_age_s,
+                idling_age_s,
             )
 
             try:
@@ -250,7 +350,12 @@ class WedgedAgentController:
             except Exception:
                 _log.exception("[ops.wedged] failed to recover agent %s", agent_id)
 
-        detail = f"recovered {sum(1 for _ in candidates)} agent(s)" if candidates else None
+        zombie_candidates = _claim_terminated_lease_zombies(self._pool, local_machine, _BACKOFF_S)
+        for agent_id, pid in zombie_candidates:
+            acted = _reap_terminated_lease_zombie(self._pool, agent_id, pid) or acted
+
+        candidate_count = len(candidates) + len(zombie_candidates)
+        detail = f"recovered {candidate_count} agent(s)" if candidate_count else None
         return ReconcileResult(
             dimension=self.name, blocks=BlockScope.NONE, acted=acted, detail=detail
         )
