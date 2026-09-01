@@ -8,13 +8,133 @@ contract (None, not a fabricated $0).
 
 from __future__ import annotations
 
+import copy
+import json
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
-from shared.lm.pricing import CostQuote, Rates, cost_usd, quote, rates_at
+from shared.lm.pricing import (
+    CostQuote,
+    Rates,
+    _parse_catalog,
+    cost_usd,
+    model_vendor,
+    quote,
+    rates_at,
+)
 
 _M = 1_000_000
+
+
+def _pricing_catalog_raw() -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        json.loads(
+            (Path(__file__).resolve().parents[2] / "shared/lm/pricing_catalog.json").read_text()
+        ),
+    )
+
+
+def _pricing_catalog_models(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    models = raw["models"]
+    assert isinstance(models, dict)
+    return cast(dict[str, dict[str, Any]], models)
+
+
+def test_pricing_catalog_schema_v2_vendor_lock() -> None:
+    raw = _pricing_catalog_raw()
+    models = _pricing_catalog_models(raw)
+
+    assert raw["schema_version"] == 2
+    assert all(
+        isinstance(entry.get("vendor"), str) and entry["vendor"].strip()
+        for entry in models.values()
+    )
+    # Vocabulary lock: every vendor must come from the billing-event schema's
+    # registered set (CTO ruling 2026-09-01); additions require registration
+    # first, but a new model reusing a registered vendor needs no test edit.
+    assert {entry["vendor"] for entry in models.values()} <= {
+        "anthropic",
+        "deepseek",
+        "google",
+        "openai",
+        "xiaomi",
+        "moonshot",
+        "zhipu",
+        "alibaba",
+    }
+    assert {
+        "deepseek-v4-pro": models["deepseek-v4-pro"]["vendor"],
+        "claude-opus-4-8": models["claude-opus-4-8"]["vendor"],
+        "gemini-3.7-flash": models["gemini-3.7-flash"]["vendor"],
+        "gpt-5.6-sol": models["gpt-5.6-sol"]["vendor"],
+        "mimo-v2.5-pro": models["mimo-v2.5-pro"]["vendor"],
+        "kimi-k3": models["kimi-k3"]["vendor"],
+        "glm-5.3": models["glm-5.3"]["vendor"],
+        "qwen3.8-max": models["qwen3.8-max"]["vendor"],
+    } == {
+        "deepseek-v4-pro": "deepseek",
+        "claude-opus-4-8": "anthropic",
+        "gemini-3.7-flash": "google",
+        "gpt-5.6-sol": "openai",
+        "mimo-v2.5-pro": "xiaomi",
+        "kimi-k3": "moonshot",
+        "glm-5.3": "zhipu",
+        "qwen3.8-max": "alibaba",
+    }
+
+
+def test_model_vendor_returns_catalog_vendor_or_none() -> None:
+    assert model_vendor("deepseek-v4-pro") == "deepseek"
+    assert model_vendor("qwen3.8-flash") == "alibaba"
+    assert model_vendor("no-such-model") is None
+
+
+@pytest.mark.parametrize("vendor", [None, "", "   "])
+def test_parse_catalog_v2_rejects_missing_or_empty_vendor(vendor: str | None) -> None:
+    raw = copy.deepcopy(_pricing_catalog_raw())
+    raw["schema_version"] = 2
+    models = _pricing_catalog_models(raw)
+    entry = models["deepseek-v4-pro"]
+    if vendor is None:
+        entry.pop("vendor", None)
+    else:
+        entry["vendor"] = vendor
+
+    with pytest.raises(RuntimeError, match="deepseek-v4-pro"):
+        _parse_catalog(raw)
+
+
+def test_parse_catalog_v1_allows_missing_vendor() -> None:
+    raw = copy.deepcopy(_pricing_catalog_raw())
+    raw["schema_version"] = 1
+    models = _pricing_catalog_models(raw)
+    for entry in models.values():
+        entry.pop("vendor", None)
+
+    catalog = _parse_catalog(raw)
+
+    assert catalog["deepseek-v4-pro"].vendor is None
+
+
+def test_parse_catalog_rejects_empty_models_mapping() -> None:
+    raw = copy.deepcopy(_pricing_catalog_raw())
+    raw["schema_version"] = 2
+    raw["models"] = {}
+
+    with pytest.raises(RuntimeError, match="models must be a non-empty mapping"):
+        _parse_catalog(raw)
+
+
+def test_parse_catalog_rejects_unknown_schema_version() -> None:
+    raw = copy.deepcopy(_pricing_catalog_raw())
+    raw["schema_version"] = 3
+
+    with pytest.raises(RuntimeError, match="unsupported pricing catalog schema"):
+        _parse_catalog(raw)
 
 
 @pytest.mark.parametrize(
