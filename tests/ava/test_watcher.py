@@ -172,16 +172,21 @@ def test_watcher_child_dies_when_pty_host_dies(_agent_row: int, tmp_path: pathli
     from ava.shell import sessions as _sessions
 
     pidfile = tmp_path / "child.pid"
+    pending_pidfile = tmp_path / "child.pid.pending"
     code = (
         "import os, signal, time\n"
         "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
-        f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        f"with open({str(pending_pidfile)!r}, 'w') as _pidfile:\n"
+        "    _pidfile.write(str(os.getpid()))\n"
+        f"os.replace({str(pending_pidfile)!r}, {str(pidfile)!r})\n"
         "while True:\n"
         "    time.sleep(60)\n"
     )
     wid = watcher.launch(code, timeout="1h", name="test-orphan-guard")
 
     deadline = time.time() + 20
+    # The child publishes the ready file atomically after its contents are
+    # closed, so existence means the PID is complete rather than merely open.
     while time.time() < deadline and not pidfile.exists():
         time.sleep(0.2)
     assert pidfile.exists(), "watcher child never started"
