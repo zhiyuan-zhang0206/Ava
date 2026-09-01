@@ -21,8 +21,9 @@ value lives in exactly one place.
 Third-party-library-consumed secrets (ANTHROPIC_API_KEY, ...) are modeled
 as fields — our own Python code accesses via `settings.<domain>.X.get_secret_value()`;
 the LangChain SDK still reads `os.environ` itself (we do not prevent it).
-`load_ava_env(~/.ava/.env)` runs at import time so both Settings and third-party
-consumers can see .env content.
+`load_ava_env(~/.ava/.env)` runs during normal config import. Settings-lite
+maintenance verbs set `AVA_CONFIG_FETCH=skip`, which defers it until the first
+real `settings` read so a broken `.env` remains repairable.
 
 The metadata machinery (`get_config_metadata`, `BOOTSTRAP_FIELDS`,
 `bootstrap_config_values`, …) walks the sub-models and keys everything by the flat
@@ -94,6 +95,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import UTC, datetime
+from threading import RLock
 from typing import Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -181,10 +183,9 @@ from shared.url_secret import (
     url_with_host as url_with_host,  # re-export: tests use config.url_with_host
 )
 
-# The flat field registry (shared/config_registry.py) is imported BEFORE the
-# Settings singleton below constructs, and built eagerly here: its module-level
-# consumers (BOOTSTRAP_FIELDS etc.) and the re-exported names must see a built
-# registry regardless of import order.
+# The flat field registry (shared/config_registry.py) is built eagerly here so
+# its module-level consumers (BOOTSTRAP_FIELDS etc.) and re-exported names see
+# every declared field before the normal Settings boot or its settings-lite defer.
 
 
 # ── Flat field registry (name -> owning sub-model + FieldInfo) ──
@@ -304,27 +305,6 @@ class Settings(BaseModel):
         return name in PROCESS_PROFILES[cast("ProcessProfile", profile)]
 
 
-load_ava_env()
-
-# Config source is role-derived (AVA_CONFIG_SOURCE deleted 2026-08-01):
-# - a gateway-capable unit keeps the cluster's config in its own .env — local
-#   source, never fetched;
-# - a configured pure agent-runner (serve_agent_runner flag on + gateway URL
-#   present) fetches the cluster's config from the gateway at EVERY process
-#   start. The fetched values are authoritative (inject overrides env/.env), so
-#   there is no .env cache that could go stale — a cluster edit reaches a runner
-#   on its next restart;
-# - a bare checkout with no role flags (CI, lint scripts, dev tools) and a
-#   not-yet-enrolled runner construct locally with no fetch and no error —
-#   `ava start`'s preflight gate refuses the unenrolled runner.
-# Maintenance verbs (ava stop/status/watchdog-probe/...) set AVA_CONFIG_FETCH=skip
-# so they construct Settings while the gateway is down (settings-lite): the
-# cluster-scope fields then fall back to never-dialed placeholders, which is fine
-# because lite verbs never touch the data plane.
-# Importing a sub-model above only defines its class — no env is read until
-# construction (below, at `Settings()`) — so this still lands before any field
-# reads the environment.
-
 # A settings-lite process's placeholder for the required redis URL (the db URL
 # placeholder is UNANCHORED_DB_SENTINEL, which shared/db.connect already refuses
 # with an actionable error). Lite verbs never dial the data plane, so the values
@@ -341,22 +321,6 @@ def _plant_lite_placeholders() -> None:
 
     os.environ.setdefault("AVA_DB_URL", UNANCHORED_DB_SENTINEL)
     os.environ.setdefault("AVA_REDIS_URL", _LITE_REDIS_URL)
-
-
-if config_source_is_local():
-    pass  # a gateway-capable unit: the local .env IS the source of truth
-elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
-    # settings-lite (maintenance verbs): construct with the gateway down.
-    _plant_lite_placeholders()
-elif should_fetch_from_gateway():
-    from shared.bootstrap import inject_config_from_gateway
-
-    inject_config_from_gateway()
-else:
-    # A bare checkout (no role flags) or a not-yet-enrolled runner: not a
-    # configured unit yet, so build Settings from local env/.env with no fetch.
-    # `ava start`'s preflight gate is the fail-fast for the unenrolled runner.
-    _plant_lite_placeholders()
 
 
 # ── Cluster timezone — one clock for the whole cluster (Task #1758) ──
@@ -475,16 +439,58 @@ def apply_cluster_timezone() -> None:
     _tzset()
 
 
-settings = Settings()
+_settings_lock = RLock()
 
-# One cluster clock (user ruling 2026-08-27, Task #1758): a configured
-# process that holds an authoritative AVA_TIMEZONE applies it as its own TZ
-# (os.environ["TZ"] + time.tzset() on POSIX) so every naive local-time read
-# — datetime.now(), no-arg .astimezone(), loguru's {time} stamp, subprocess
-# children — follows the cluster timezone instead of the host's OS zone. A
-# settings-lite / bare-checkout process has no authoritative value and is
-# left on its host zone (the documented lite degradation). See
-apply_cluster_timezone()
+
+class _SettingsState:
+    value: Settings | None = None
+
+
+_settings_state = _SettingsState()
+
+
+def _settings_instance() -> Settings:
+    """Construct Settings on first use, leaving field inspection settings-free."""
+    if _settings_state.value is not None:
+        return _settings_state.value
+    with _settings_lock:
+        if _settings_state.value is not None:
+            return _settings_state.value
+        load_ava_env()
+        if config_source_is_local():
+            pass  # a gateway-capable unit: the local .env IS the source of truth
+        elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
+            _plant_lite_placeholders()
+        elif should_fetch_from_gateway():
+            from shared.bootstrap import inject_config_from_gateway
+
+            inject_config_from_gateway()
+        else:
+            _plant_lite_placeholders()
+        _settings_state.value = Settings()
+        # Apply the clock only after the singleton exists: cluster_tz_name()
+        # reads it through the public facade below.
+        apply_cluster_timezone()
+        return _settings_state.value
+
+
+class _SettingsProxy:
+    """Resolve the established ``settings`` public object only when read."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_settings_instance(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(_settings_instance(), name, value)
+
+
+# Imports throughout the project keep their public type and behavior. Settings-
+# lite maintenance verbs defer construction; every normal config import retains
+# the established fail-fast boot contract.
+settings = cast("Settings", _SettingsProxy())
+
+if os.environ.get(CONFIG_FETCH_ENV) != CONFIG_FETCH_SKIP:
+    settings = _settings_instance()
 
 
 def refresh_data_plane_settings() -> None:

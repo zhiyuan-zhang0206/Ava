@@ -6,14 +6,15 @@ which runs before Settings exists, can consume the registry's projections
 through `shared/env_registry.py` without a timing dependency).
 
 It lives OUTSIDE the `shared.config` package on purpose: importing any
-`shared.config.*` submodule executes `shared/config/__init__.py`, which
-constructs the Settings singleton (reads env / fetches from the gateway), and
-the registry must stay importable before Settings exists. The sub-model class
-imports are therefore deferred into the build (first use), so importing this
-module or `shared/env_registry.py` never touches the package — the build
-completes against a partially-initialized `shared.config` when one is already
-in flight (the standalone `load_ava_env()` boot path, e.g.
-and the double build that results is idempotent.
+`shared.config.*` submodule executes `shared/config/__init__.py`, which normally
+constructs the Settings singleton (reads env / fetches from the gateway). The
+settings-lite `AVA_CONFIG_FETCH=skip` mode defers that construction, and the
+registry must stay importable before either path has a current value. The
+sub-model class imports are therefore deferred into the build (first use), so
+importing this module or `shared/env_registry.py` never touches the package —
+the build completes against a partially-initialized `shared.config` when one is
+already in flight (for example, the standalone `load_ava_env()` boot path), and
+the double build that results is idempotent.
 
 **Unique declaration point** (R2 design, convergence point A): a new env key is
 declared exactly once —
@@ -42,7 +43,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Literal, cast
+from types import UnionType
+from typing import Any, Literal, Union, cast, get_args, get_origin
 
 from pydantic.fields import FieldInfo
 
@@ -83,9 +85,9 @@ _DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
 _DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in _DOMAIN_MODELS)
 
 # The sub-model classes are imported INSIDE the build (see module docstring):
-# importing them at module level would execute the `shared.config` package
-# __init__ (Settings construction) at registry-import time, breaking the
-# dotenv_boot pre-Settings boot.
+# importing them at module level would execute the `shared.config` package while
+# this registry is still initializing, breaking the dotenv_boot pre-Settings
+# boot.
 _MODEL_CLASSES = {
     "LmSettings": "shared.config.lm",
     "SandboxSettings": "shared.config.sandbox",
@@ -167,9 +169,8 @@ def _build_registry() -> dict[str, _FieldRef]:
     for attr, label, model_name, default_capability in _DOMAIN_MODELS:
         if isinstance(model_name, str):
             # Deferred import (see module docstring): the sub-model classes live
-            # under the `shared.config` package, whose __init__ constructs the
-            # Settings singleton — importing them here, at build time, is what
-            # keeps the registry importable before Settings exists.
+            # under the `shared.config` package. Importing them only at build time
+            # keeps this registry importable before Settings construction.
             model = cast(
                 "type[EnvSettings]",
                 getattr(import_module(_MODEL_CLASSES[model_name]), model_name),
@@ -312,6 +313,29 @@ def field_alias(name: str) -> str:
     """The `.env` / env-var alias a field reads from (serialization alias wins)."""
     info = _fields()[name].info
     return info.serialization_alias or info.alias or name.upper()
+
+
+def field_editor_type(annotation: object) -> tuple[str, list[str] | None]:
+    """Return the config editor type and enum choices declared by ``annotation``.
+
+    Optional fields retain the editor for their concrete member rather than
+    degrading to free text. This is shared by the gateway metadata export and
+    the settings-free local config CLI.
+    """
+    union_args = get_args(annotation)
+    if get_origin(annotation) in (Union, UnionType) and type(None) in union_args:
+        non_none = [item for item in union_args if item is not type(None)]
+        if len(non_none) == 1:
+            annotation = non_none[0]
+    if annotation is bool:
+        return "bool", None
+    if annotation is int:
+        return "int", None
+    if annotation is float:
+        return "float", None
+    if get_origin(annotation) is Literal:
+        return "enum", [str(item) for item in get_args(annotation)]
+    return "string", None
 
 
 def field_alias_map() -> dict[str, str]:

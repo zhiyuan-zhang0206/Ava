@@ -8,6 +8,10 @@ is an explicit null), the read-only / unknown-key guards, and the restart hint.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +209,185 @@ def test_unset_sends_explicit_null(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_set_machine_is_forwarded(captured_put: dict[str, Any]) -> None:
     cfg.cmd_config_set(["AVA_OPS_CONCURRENCY=4"], machine="runner-2")
     assert captured_put["machine"] == "runner-2"
+
+
+def _write_incident_env(home: Path) -> tuple[Path, Path]:
+    """Create the OSS restore-proof shape that prevents ``Settings()`` from booting."""
+    backup_key = home / "backup.key"
+    backup_key.write_bytes(b"k" * 32)
+    backup_key.chmod(0o600)
+    oss_credentials = home / "oss-uploader.json"
+    oss_credentials.write_text(
+        json.dumps({"access_key_id": "uploader", "access_key_secret": "fake-secret"})
+    )
+    oss_credentials.chmod(0o600)
+    (home / ".env").write_text(
+        "\n".join(
+            (
+                "AVA_DB_URL=postgresql://ava@127.0.0.1:5432/ava",
+                "AVA_REDIS_URL=redis://127.0.0.1:6380/0",
+                "AVA_MACHINE_SERVE_GATEWAY=true",
+                "AVA_PITR_ENABLED=true",
+                "AVA_PITR_BASE_BACKUP_ENABLED=true",
+                "AVA_PITR_RESTORE_PROOF_ENABLED=true",
+                "AVA_PITR_STORE_BACKEND=oss",
+                "AVA_PITR_OSS_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com",
+                "AVA_PITR_OSS_BUCKET=test-bucket",
+                f"AVA_PITR_BACKUP_KEY_FILE={backup_key}",
+                "AVA_PITR_BACKUP_KEY_ID=test-key",
+                "AVA_PITR_REPLICATION_DB_URL=postgresql://replicator@127.0.0.1:5432/postgres",
+                f"AVA_PITR_OSS_CREDENTIALS_FILE={oss_credentials}",
+            )
+        )
+        + "\n"
+    )
+    return backup_key, oss_credentials
+
+
+def _write_valid_gcs_env_with_incomplete_oss_transition(home: Path) -> None:
+    """Seed a valid GCS configuration whose writable OSS switch would be invalid."""
+    backup_key, oss_credentials = _write_incident_env(home)
+    gcs_uploader = home / "gcs-uploader.json"
+    gcs_uploader.write_text(
+        json.dumps(
+            {
+                "type": "service_account",
+                "client_email": "uploader@example.com",
+                "project_id": "test-project",
+                "private_key_id": "uploader-key",
+            }
+        )
+    )
+    gcs_uploader.chmod(0o600)
+    gcs_viewer = home / "gcs-viewer.json"
+    gcs_viewer.write_text(
+        json.dumps(
+            {
+                "type": "service_account",
+                "client_email": "viewer@example.com",
+                "project_id": "test-project",
+                "private_key_id": "viewer-key",
+            }
+        )
+    )
+    gcs_viewer.chmod(0o600)
+    (home / ".env").write_text(
+        "\n".join(
+            (
+                "AVA_MACHINE_SERVE_GATEWAY=true",
+                "AVA_PITR_ENABLED=true",
+                "AVA_PITR_BASE_BACKUP_ENABLED=true",
+                "AVA_PITR_RESTORE_PROOF_ENABLED=true",
+                "AVA_PITR_STORE_BACKEND=gcs",
+                "AVA_PITR_GCS_PROJECT=test-project",
+                "AVA_PITR_GCS_BUCKET=test-bucket",
+                f"AVA_PITR_BACKUP_KEY_FILE={backup_key}",
+                "AVA_PITR_BACKUP_KEY_ID=test-key",
+                "AVA_PITR_REPLICATION_DB_URL=postgresql://replicator@127.0.0.1:5432/postgres",
+                f"AVA_PITR_GCS_CREDENTIALS_FILE={gcs_uploader}",
+                f"AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE={gcs_viewer}",
+                "AVA_PITR_OSS_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com",
+                "AVA_PITR_OSS_BUCKET=test-bucket",
+                f"AVA_PITR_OSS_CREDENTIALS_FILE={oss_credentials}",
+            )
+        )
+        + "\n"
+    )
+
+
+def test_cli_module_imports_without_settings(tmp_path: Path) -> None:
+    """The local read path remains usable when the current `.env` cannot boot Settings."""
+    _write_incident_env(tmp_path)
+    repo_root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from cli.commands.config import cmd_config_get; "
+                "raise SystemExit(cmd_config_get(None, None, local=True))"
+            ),
+        ],
+        cwd=repo_root,
+        env={
+            "AVA_CONFIG_FETCH": "skip",
+            "AVA_HOME": str(tmp_path),
+            "AVA_HOME_OVERRIDE": "1",
+            "PATH": os.environ["PATH"],
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "AVA_PITR_OSS_CREDENTIALS_FILE" in result.stdout
+
+
+@pytest.fixture
+def local_env_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    return tmp_path
+
+
+@pytest.mark.parametrize("key", ("AVA_GATEWAY_URL", "AVA_PRIMARY_GATEWAY_URL"))
+def test_gateway_base_reads_local_env_without_settings(
+    local_env_home: Path, monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    monkeypatch.delenv("AVA_GATEWAY_URL", raising=False)
+    monkeypatch.delenv("AVA_PRIMARY_GATEWAY_URL", raising=False)
+    (local_env_home / ".env").write_text(f"{key}=http://gateway.test:8000\n")
+
+    assert cfg._gateway_base() == "http://gateway.test:8000"
+
+
+def test_local_get_masks_sensitive(
+    local_env_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    credential_path = "/private/fake-oss-credentials.json"
+    (local_env_home / ".env").write_text(f"AVA_PITR_OSS_CREDENTIALS_FILE={credential_path}\n")
+
+    rc = cfg.cmd_config_get(None, machine=None, local=True)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "AVA_PITR_OSS_CREDENTIALS_FILE" in out
+    assert "••••••••" in out
+    assert credential_path not in out
+
+
+def test_local_set_validates_candidate_and_rejects_incident_shape(
+    local_env_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_valid_gcs_env_with_incomplete_oss_transition(local_env_home)
+    before = (local_env_home / ".env").read_bytes()
+
+    rc = cfg.cmd_config_set(["AVA_PITR_STORE_BACKEND=oss"], machine=None, local=True)
+
+    assert rc == 1
+    assert "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE" in capsys.readouterr().err
+    assert (local_env_home / ".env").read_bytes() == before
+
+
+def test_local_set_applies_valid_patch(
+    local_env_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (local_env_home / ".env").write_text("OTHER=kept\n")
+
+    rc = cfg.cmd_config_set(["ops_concurrency=7"], machine=None, local=True)
+
+    assert rc == 0
+    assert runtime_config.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "7"
+    assert "restart to apply" in capsys.readouterr().out
+
+
+def test_local_unset_removes_key(local_env_home: Path) -> None:
+    (local_env_home / ".env").write_text("AVA_OPS_CONCURRENCY=7\n")
+
+    rc = cfg.cmd_config_unset(["AVA_OPS_CONCURRENCY"], machine=None, local=True)
+
+    assert rc == 0
+    assert "AVA_OPS_CONCURRENCY" not in runtime_config.read_env_aliases()
 
 
 def test_set_rejected_result_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
