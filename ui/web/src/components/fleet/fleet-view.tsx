@@ -310,7 +310,7 @@ const MobileLayout = memo(function MobileLayout({
       </div>
 
       {/* Tab bar — fixed at the bottom */}
-      <nav
+      <div
         className={cn("shrink-0 items-center border-t border-border bg-background", FLEX)}
         role="tablist"
         aria-label={t("sections")}
@@ -333,7 +333,7 @@ const MobileLayout = memo(function MobileLayout({
           active={mobileTab === "inbox"}
           onClick={() => setMobileTab("inbox")}
         />
-      </nav>
+      </div>
     </>
   );
 });
