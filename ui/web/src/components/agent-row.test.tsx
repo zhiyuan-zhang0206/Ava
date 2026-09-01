@@ -209,6 +209,24 @@ describe("AgentRow tree-guide rendering", () => {
   });
 });
 
+describe("AgentRow inline rename accessibility", () => {
+  it("names the inline rename input", () => {
+    render(
+      <AgentRow
+        {...baseProps}
+        agent={ag(1)}
+        label="Focus"
+        depth={0}
+        ancestorsIsLast={[]}
+      />,
+    );
+
+    fireEvent.doubleClick(screen.getByText("#1 · Focus"));
+
+    expect(screen.getByLabelText("Rename agent 1")).toBeTruthy();
+  });
+});
+
 describe("AgentRow action button visibility", () => {
   // Alive rows carry no on-row action buttons — restart / terminate moved
   // into the right-click context menu (covered by its own describe below).

@@ -2,6 +2,7 @@ import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import nextPlugin from "@next/eslint-plugin-next";
 import reactHooks from "eslint-plugin-react-hooks";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 
 import sentenceCase from "./eslint-rules/sentence-case.mjs";
 import layoutPrimitive from "./eslint-rules/layout-primitive.mjs";
@@ -131,6 +132,67 @@ export default tseslint.config(
       ...nextPlugin.configs["core-web-vitals"].rules,
       // App Router projects have no pages/ directory
       "@next/next/no-html-link-for-pages": "off",
+    },
+  },
+
+  // ── JSX accessibility ──
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ...jsxA11y.flatConfigs.recommended,
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+      // React uses onChange for native-select selection changes. Deferring these
+      // immediate preference/configuration updates to blur would alter behavior.
+      "jsx-a11y/no-onchange": "off",
+    },
+  },
+
+  // ── Contextual editing focus ──
+  // These inputs mount only after a user explicitly opens an editing, prompt,
+  // inbox-detail, rename, or search flow. Login remains covered, so page-load
+  // autofocus cannot regress.
+  {
+    files: [
+      "src/app/control/config/page.tsx",
+      "src/components/agent-prompt-dialog.tsx",
+      "src/components/agent-row.tsx",
+      "src/components/agent-sidebar/search-overlay.tsx",
+      "src/components/fleet/inbox-queue/detail.tsx",
+    ],
+    rules: {
+      "jsx-a11y/no-autofocus": "off",
+    },
+  },
+
+  // ── JSX accessibility static-analysis boundaries ──
+  {
+    // Shadcn's Input renders a native input, but the rule cannot follow the
+    // custom component through the wrapping label in these existing editors.
+    files: [
+      "src/app/control/presets/page.tsx",
+      "src/app/control/schedules/page.tsx",
+    ],
+    rules: {
+      "jsx-a11y/label-has-associated-control": "off",
+    },
+  },
+  {
+    // react-markdown provides anchor children through the spread props; the
+    // static rule cannot see that each rendered anchor has content.
+    files: ["src/components/markdown.tsx"],
+    rules: {
+      "jsx-a11y/anchor-has-content": "off",
+    },
+  },
+  {
+    // The focus-managed lightbox closes on the global Escape handler and its
+    // backdrop click. Those handlers are covered by timeline tests, but are
+    // intentionally not co-located where the static rules can inspect them.
+    files: ["src/components/timeline/item.tsx"],
+    rules: {
+      "jsx-a11y/click-events-have-key-events": "off",
+      "jsx-a11y/no-noninteractive-element-interactions": "off",
+      "jsx-a11y/no-static-element-interactions": "off",
     },
   },
 
