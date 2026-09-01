@@ -57,13 +57,22 @@ def test_run_background_tracks_explicit_ttl(db_conn: psycopg.Connection, _agent_
             ava.shell.sessions.kill(handle.session_id)
 
 
-@pytest.mark.parametrize("ttl", [0.0, -1.0, float("inf"), float("nan")])
+@pytest.mark.parametrize("ttl", [0.0, -1.0, float("inf"), float("nan"), 86400.1, 1e9])
 def test_sessions_new_rejects_invalid_ttl(ttl: float) -> None:
     with pytest.raises(ValueError, match="ttl"):
         ava.shell.sessions.new("test-invalid", ttl=ttl)
 
 
-@pytest.mark.parametrize("ttl", [0.0, -1.0, float("inf"), float("nan")])
+@pytest.mark.parametrize("ttl", [0.0, -1.0, float("inf"), float("nan"), 86400.1, 1e9])
 def test_run_background_rejects_invalid_ttl(ttl: float) -> None:
     with pytest.raises(ValueError, match="ttl"):
         ava.shell.run_background("true", name="test-invalid", ttl=ttl)
+
+
+def test_validate_ttl_accepts_exactly_max() -> None:
+    """The cap is inclusive: exactly 86400s (24h) is allowed (ruling 2026-09-01)."""
+    from ava.shell.sessions import _validate_ttl
+
+    assert _validate_ttl(86400.0) == 86400.0
+    with pytest.raises(ValueError, match="ttl"):
+        _validate_ttl(86400.001)
