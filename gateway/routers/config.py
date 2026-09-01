@@ -413,27 +413,31 @@ async def put_config(body: dict[str, object], machine: str | None = None) -> Con
             status_code=400,
             detail="cluster config is machine-independent; edit it on the Cluster view",
         )
-    candidate_writes = dict(plan.cluster_writes)
-    candidate_removals = set(plan.cluster_removals)
-    # A local host field shares the gateway's `.env`. Include only host edits
-    # from a cluster-touched domain: this catches a cross-scope PITR transition
-    # before its host write, without changing the existing host capability-result
-    # contract for unrelated fields.
-    cluster_domains = {field_domain(name) for name in set(candidate_writes) | candidate_removals}
-    if machine is None and cluster_domains:
-        host_writes, host_removals = split_reducer_patch(plan.host_body, metas)
-        for name, value in host_writes.items():
-            if field_domain(name) in cluster_domains:
-                candidate_writes[name] = value
-        candidate_removals.update(
-            name for name in host_removals if field_domain(name) in cluster_domains
-        )
-    candidate = validate_env_patch_for_write(candidate_writes, candidate_removals)
-    if candidate.errors:
-        raise HTTPException(
-            status_code=400,
-            detail="candidate config rejected: " + "; ".join(candidate.errors),
-        )
+    has_cluster_patch = bool(plan.cluster_writes or plan.cluster_removals)
+    if has_cluster_patch:
+        candidate_writes = dict(plan.cluster_writes)
+        candidate_removals = set(plan.cluster_removals)
+        # A local host field shares the gateway's `.env`. Include only host edits
+        # from a cluster-touched domain: this catches a cross-scope PITR transition
+        # before its host write, without changing the existing host capability-result
+        # contract for unrelated fields.
+        cluster_domains = {
+            field_domain(name) for name in set(candidate_writes) | candidate_removals
+        }
+        if machine is None and cluster_domains:
+            host_writes, host_removals = split_reducer_patch(plan.host_body, metas)
+            for name, value in host_writes.items():
+                if field_domain(name) in cluster_domains:
+                    candidate_writes[name] = value
+            candidate_removals.update(
+                name for name in host_removals if field_domain(name) in cluster_domains
+            )
+        candidate = validate_env_patch_for_write(candidate_writes, candidate_removals)
+        if candidate.errors:
+            raise HTTPException(
+                status_code=400,
+                detail="candidate config rejected: " + "; ".join(candidate.errors),
+            )
 
     if machine is None:
         # Host first: if a host field is rejected the write returns applied=False
@@ -442,7 +446,7 @@ async def put_config(body: dict[str, object], machine: str | None = None) -> Con
         # process picks it up on its next restart (restart_required says which).
         host_result = await _dispatch_config_write(target, plan.host_body, local=True)
         cluster_changed: set[str] = set()
-        if host_result.applied and (plan.cluster_writes or plan.cluster_removals):
+        if host_result.applied and has_cluster_patch:
             # A successful host write can legitimately change this same local
             # file. Revalidate the cluster patch against that new image and use
             # its digest as the compare-and-swap precondition for persistence.
