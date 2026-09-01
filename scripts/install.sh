@@ -263,6 +263,19 @@ warn_node_macos() {
     echo "  Run \`brew install node\` for the web UI, or run the gateway headless (\`ava start --disable-service frontend\`)." >&2
 }
 
+# warn_browser_deps: the ava-browser service runs chrome-devtools-mcp through
+# npx, so Node.js is a hard install-time dependency. After node provisioning,
+# re-check npx and warn loudly with the fix — an install must never leave a
+# host whose ava-browser silently skips forever (company-mini, 2026-08-27).
+warn_browser_deps() {
+    command -v npx >/dev/null 2>&1 && return 0
+    echo "install.sh: WARNING ava-browser needs Node.js (npx); it is not on PATH — ava-browser will stay skipped on this host." >&2
+    case "$OS" in
+        Darwin) echo "  Run \`brew install node@22\` (or \`brew install node\`) then re-run this install." >&2 ;;
+        Linux)  echo "  Run \`curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs\` then re-run this install." >&2 ;;
+    esac
+}
+
 # ===========================================================================
 # common_host_wiring: shared by both roles.
 #   - installs uv + Python 3.12 if missing
@@ -322,7 +335,11 @@ install_gateway() {
             # (cli/commands/_cluster_instance.py) creates the `ava` role + db
             # on first boot and runs the per-cluster data plane under $AVA_HOME.
             bash "$SCRIPT_DIR/provision/database.sh"
-            # the gateway runs the frontend; macOS cannot install node silently.
+            # The gateway runs the frontend and ava-browser needs npx; attempt
+            # the shared idempotent provisioner before its existing UI warning.
+            if ! bash "$SCRIPT_DIR/provision/node.sh"; then
+                echo "install.sh: WARNING Node.js provisioning failed; see the next warning for manual repair." >&2
+            fi
             warn_node_macos
             ;;
         Linux)
@@ -345,13 +362,23 @@ install_gateway() {
 
 # ===========================================================================
 # agent-runner path: NO local pg/redis (connects to gateway's instance).
-#   Both macOS and Linux follow the same path — just uv + Python + sync.
+#   Both macOS and Linux provision Node.js for ava-browser, then install uv +
+#   Python + sync. There is no local pg/redis on this role.
 # ===========================================================================
 install_agent_runner() {
     case "$OS" in
         Darwin|Linux) ;;
         *) die "unsupported OS: $OS (supported: Darwin / Linux)" ;;
     esac
+
+    # The runner's shared headed browser (ava-browser) needs Node.js for its
+    # chrome-devtools-mcp upstream — provision it at install time instead of
+    # leaving the service silently skipped at every start (company-mini
+    # 2026-08-27: enrolled runner, no npx, browser skipped since).
+    if ! bash "$SCRIPT_DIR/provision/node.sh"; then
+        echo "install.sh: WARNING Node.js provisioning failed; see the next warning for manual repair." >&2
+    fi
+    warn_browser_deps
 
     common_host_wiring
 }

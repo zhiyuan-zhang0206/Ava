@@ -165,6 +165,41 @@ def test_incapability_checks_display_first(monkeypatch: pytest.MonkeyPatch) -> N
     assert pp.browser_incapability() == "no display (WSL without WSLg / headless server)"
 
 
+# ─── browser_deps_incapability ───────────────────────────────────────────
+
+
+def _all_platform_browser_deps_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the settings-free browser dependency prongs pass."""
+    monkeypatch.setattr(pp, "display_available", lambda: True)
+    monkeypatch.setattr(pp, "_platform_chrome_binary", lambda: "/chrome")
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+
+def test_browser_deps_incapability_none_when_all_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    _all_platform_browser_deps_present(monkeypatch)
+    assert pp.browser_deps_incapability() is None
+
+
+def test_browser_deps_incapability_returns_display_reason_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _all_platform_browser_deps_present(monkeypatch)
+    monkeypatch.setattr(pp, "display_available", lambda: False)
+    assert pp.browser_deps_incapability() == "no display (WSL without WSLg / headless server)"
+
+
+def test_browser_deps_incapability_returns_chrome_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    _all_platform_browser_deps_present(monkeypatch)
+    monkeypatch.setattr(pp, "_platform_chrome_binary", lambda: None)
+    assert pp.browser_deps_incapability() == "no Chrome (install it or set AVA_CHROME_BINARY)"
+
+
+def test_browser_deps_incapability_returns_npx_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    _all_platform_browser_deps_present(monkeypatch)
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    assert pp.browser_deps_incapability() == "no npx (install Node.js for chrome-devtools-mcp)"
+
+
 # ─── unix_sockets_available / browser_mcp_incapability ───────────────────
 
 

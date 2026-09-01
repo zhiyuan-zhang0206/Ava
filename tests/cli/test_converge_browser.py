@@ -35,10 +35,9 @@ def test_enabled_runs_preflight_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
-    import services.browser.daemon as bd
     import services.browser.profile as bp
 
-    monkeypatch.setattr(bd, "assert_browser_capable", lambda: None)
+    monkeypatch.setattr(cv, "browser_incapability", lambda: None)
     monkeypatch.setattr(bp, "ensure_browser_profile", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     cv._ensure_browser(_ctx(tmp_path))
     assert not _plugin_path(tmp_path).exists()
@@ -50,10 +49,9 @@ def test_capable_offers_profile_seed_with_tty_flag(
     """When the host is browser-capable, the step invokes the profile-seed offer,
     passing interactive = both stdin AND stdout are TTYs."""
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
-    import services.browser.daemon as bd
     import services.browser.profile as bp
 
-    monkeypatch.setattr(bd, "assert_browser_capable", lambda: None)
+    monkeypatch.setattr(cv, "browser_incapability", lambda: None)
     monkeypatch.setattr(cv.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(cv.sys.stdout, "isatty", lambda: False)
     seen: list[bool] = []
@@ -71,13 +69,9 @@ def test_incapable_host_does_not_offer_profile_seed(
 ) -> None:
     """A headless host must return before ever offering the profile-seed choice."""
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
-    import services.browser.daemon as bd
     import services.browser.profile as bp
 
-    def _boom() -> None:
-        raise RuntimeError("no display")
-
-    monkeypatch.setattr(bd, "assert_browser_capable", _boom)
+    monkeypatch.setattr(cv, "browser_incapability", lambda: "no display")
 
     def _must_not_call(**_k: object) -> None:
         raise AssertionError("profile seed offered on an incapable host")
@@ -87,19 +81,15 @@ def test_incapable_host_does_not_offer_profile_seed(
 
 
 def test_enabled_but_incapable_warns_not_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """On a headless machine, _ensure_browser prints a warning and returns
     without raising — converge proceeds, browser is just skipped."""
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
-    import services.browser.daemon as bd
-
-    def _boom() -> None:
-        raise RuntimeError("no display")
-
-    monkeypatch.setattr(bd, "assert_browser_capable", _boom)
-    # Must NOT raise — the step should catch RuntimeError and warn.
+    monkeypatch.setattr(cv, "browser_incapability", lambda: "no display")
+    # Must NOT raise — incapable hosts warn and return.
     cv._ensure_browser(_ctx(tmp_path))
+    assert "ava-browser will not run on this host until this is fixed" in capsys.readouterr().err
     # Legacy plugin file is still shed.
     assert not _plugin_path(tmp_path).exists()
 

@@ -41,10 +41,12 @@ from cli.commands._lgtm_native import ensure_lgtm_native_step
 from cli.commands._otel_collector import ensure_otel_collector_step
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
+from shared.browser_deps import browser_deps_warning
 from shared.cluster import is_default_home
 from shared.config import settings
 from shared.machine import MachineRoles
 from shared.platform_backend import get_backend
+from shared.platform_probes import browser_incapability
 from shared.runtime_config import migrate_permissions_helper_env_keys
 from shared.screen_capture import clear_status, write_status
 
@@ -246,18 +248,16 @@ def _ensure_browser(ctx: ConvergeCtx) -> None:
     chrome's MCP config now ships in `<repo>/ava_builtins/mcps/chrome/.mcp.json` (a built-in
     source the loader scans), so this step no longer writes a plugin `.mcp.json`;
     it just removes the one earlier versions wrote. When the browser is enabled,
-    probe host capability; on a headless machine warn instead of failing so the
-    rest of converge (and ava start) can proceed.
+    probe host capability; on an incapable machine emit a prominent actionable
+    warning instead of failing so the rest of converge (and ava start) proceeds.
     """
     (ctx.ava_home / "plugins" / "ava_chrome" / ".mcp.json").unlink(missing_ok=True)
     if not settings.services.browser_enabled:
         return
-    from services.browser.daemon import assert_browser_capable
-
-    try:
-        assert_browser_capable()
-    except RuntimeError as e:
-        print(f"  ! browser: {e}", file=sys.stderr)
+    reason = browser_incapability()
+    if reason is not None:
+        print(f"  ! browser: {reason}", file=sys.stderr)
+        print(browser_deps_warning(reason), file=sys.stderr)
         print("    (ava-browser will not start on this host)", file=sys.stderr)
         return
     # Host is browser-capable. Offer, once, to seed the dedicated Chrome profile
