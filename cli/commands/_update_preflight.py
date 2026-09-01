@@ -167,7 +167,7 @@ def _run_preflight_fetch(
 
 
 def _rollout_preflight(
-    repo: Path, *, restart_only: bool, origin: str
+    repo: Path, *, restart_only: bool, origin: str, prepare_only: bool = False
 ) -> tuple[int | None, bool, str | None]:
     """Classify the imminent change + pin the rollout target, before anything pauses.
 
@@ -179,12 +179,16 @@ def _rollout_preflight(
     bounce). Ordering is load-bearing: the frontend-only fast path must skip the
     pin resolution (and Phase A) entirely.
     """
-    # 0) Classify the change + fast-path the cases that skip the full orchestration
-    #    (docs-only pull, frontend-only rebuild). A non-None early_rc means return
-    #    it now; otherwise restart_frontend feeds the full orchestration below.
-    early_rc, restart_frontend = _classify_rollout(repo, restart_only=restart_only, origin=origin)
-    if early_rc is not None:
-        return early_rc, restart_frontend, None
+    # A dry-run must inspect a pinned target even when normal classification
+    # would fast-path docs or a frontend-only update; it does not modify either.
+    if prepare_only:
+        restart_frontend = True
+    else:
+        early_rc, restart_frontend = _classify_rollout(
+            repo, restart_only=restart_only, origin=origin
+        )
+        if early_rc is not None:
+            return early_rc, restart_frontend, None
 
     # Pin the rollout target ONCE (resolved here, threaded to the local update +
     # every agent-runner's Phase-B self-update) so all nodes check out the *same*

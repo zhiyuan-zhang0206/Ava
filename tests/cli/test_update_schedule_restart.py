@@ -57,12 +57,11 @@ def repo(tmp_path: Path) -> Path:
     return r
 
 
-def _patch_leg(monkeypatch: pytest.MonkeyPatch, *, from_sha: str = "old123") -> None:
+def _patch_leg(monkeypatch: pytest.MonkeyPatch) -> None:
     """Drive `_run_gateway_local_update` with every external step stubbed.
 
-    `from_sha` is the pre-update HEAD the known-good snapshot records — the
-    rollout's no-op test passes the same value as the target."""
-    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: (from_sha, set(), None))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    The pre-update recovery tuple belongs to orchestration, so callers pass it
+    directly when they exercise the pull path."""
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_update, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -75,9 +74,14 @@ def test_pull_path_bounces_schedule_sessions_in_a_fresh_interpreter(
     calls: list[tuple[list[str], Path]] = []
 
     monkeypatch.setattr(_local, "subprocess", _RecordingSubprocess(calls))
-    _patch_leg(monkeypatch, from_sha="old123")
+    _patch_leg(monkeypatch)
 
-    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    assert (
+        _local._run_gateway_local_update(
+            repo, target_sha="abc123", pull_recover=("old123", set(), None), pull=True
+        )
+        == 0
+    )
     assert calls == [
         (
             [
@@ -97,9 +101,14 @@ def test_noop_update_skips_schedule_bounce(monkeypatch: pytest.MonkeyPatch, repo
     nothing), even though the gateway still restarts."""
     calls: list[tuple[list[str], Path]] = []
     monkeypatch.setattr(_local, "subprocess", _RecordingSubprocess(calls))
-    _patch_leg(monkeypatch, from_sha="abc123")
+    _patch_leg(monkeypatch)
 
-    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    assert (
+        _local._run_gateway_local_update(
+            repo, target_sha="abc123", pull_recover=("abc123", set(), None), pull=True
+        )
+        == 0
+    )
 
     assert calls == []
 
@@ -122,12 +131,16 @@ def test_failed_boot_skips_schedule_bounce(monkeypatch: pytest.MonkeyPatch, repo
     calls: list[tuple[list[str], Path]] = []
     monkeypatch.setattr(_local, "subprocess", _RecordingSubprocess(calls))
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_local, "_snapshot_known_good", lambda **_kw: ("abc123", set(), None))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_update, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_local, "_recover_rc", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 1
+    assert (
+        _local._run_gateway_local_update(
+            repo, target_sha="abc123", pull_recover=("abc123", set(), None), pull=True
+        )
+        == 1
+    )
 
     assert calls == []
 
@@ -172,7 +185,12 @@ def test_bounce_subprocess_failure_is_non_fatal(
     monkeypatch.setattr(_local, "subprocess", _FailingSubprocess())
     _patch_leg(monkeypatch)
 
-    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    assert (
+        _local._run_gateway_local_update(
+            repo, target_sha="abc123", pull_recover=("old123", set(), None), pull=True
+        )
+        == 0
+    )
     assert "schedule session bounce failed (non-fatal)" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -188,7 +206,12 @@ def test_bounce_subprocess_nonzero_is_non_fatal(
     monkeypatch.setattr(_local, "subprocess", _NonzeroSubprocess())
     _patch_leg(monkeypatch)
 
-    assert _local._run_gateway_local_update(repo, target_sha="abc123", pull=True) == 0
+    assert (
+        _local._run_gateway_local_update(
+            repo, target_sha="abc123", pull_recover=("old123", set(), None), pull=True
+        )
+        == 0
+    )
     assert "schedule session bounce failed (non-fatal): rc=7" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 

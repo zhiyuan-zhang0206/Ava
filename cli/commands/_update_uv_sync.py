@@ -75,7 +75,9 @@ def _uv_cache_dir() -> str | None:
     return str(ava_home() / "uv-cache")
 
 
-def run_uv_sync(repo: Path) -> subprocess.CompletedProcess[bytes]:
+def run_uv_sync(
+    repo: Path, *, timeout_s: float = UV_SYNC_TIMEOUT_S
+) -> subprocess.CompletedProcess[bytes]:
     """Run production ``uv sync`` while preserving the editable pointer's exact mode.
 
     Bounded by `UV_SYNC_TIMEOUT_S` through `shared.proc.run_bounded` — the bound
@@ -96,11 +98,11 @@ def run_uv_sync(repo: Path) -> subprocess.CompletedProcess[bytes]:
                 _PROD_SYNC_ARGS,
                 cwd=repo,
                 capture_output=False,
-                timeout=UV_SYNC_TIMEOUT_S,
+                timeout=timeout_s,
             )
         except subprocess.TimeoutExpired:
             print(
-                f"  ✗ uv sync timed out after {UV_SYNC_TIMEOUT_S:.0f}s — the sync stopped "
+                f"  ✗ uv sync timed out after {timeout_s:.0f}s — the sync stopped "
                 "making progress (a stalled download or a wedged uv); its process tree "
                 "was killed. The verbose lines above show the last package uv was "
                 "downloading.",

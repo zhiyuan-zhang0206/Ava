@@ -587,6 +587,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
             dump_path = run_backup(
                 timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
                 pre_update=True,
+                publish=False,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(

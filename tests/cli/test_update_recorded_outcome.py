@@ -39,7 +39,7 @@ def _orchestration_seams(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_iden
     monkeypatch.setattr("shared.last_update.begin_update", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_run_preflight_fetch", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_stop_the_world", lambda _runners, **_kw: (set(), True))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_resolve_fanout_targets", list)
+    monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
