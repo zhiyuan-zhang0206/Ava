@@ -59,6 +59,31 @@ def test_retry_policy_default_on_is_callable() -> None:
     assert callable(policy.retry_on), "retry_on must be callable (no regression to tuple mode)"
 
 
+def test_retry_policy_stops_when_its_total_time_budget_is_exhausted() -> None:
+    """A retry failure after the wall-clock budget must end the retry loop."""
+    from agent.graph._build import _RETRY_REMAINING_ATTR
+    from shared.config.lm import LmSettings
+
+    assert LmSettings().llm_retry_max_total_seconds == 420.0
+    exc = ConnectionError("budget exhausted")
+    setattr(exc, _RETRY_REMAINING_ATTR, 0.0)
+
+    assert not _build_llm_retry().retry_on(exc)  # type: ignore[arg-type]
+
+
+def test_retry_policy_clips_the_next_wait_to_the_remaining_total_budget() -> None:
+    """The final retry sleep must not consume more than the node has left."""
+    from agent.graph._build import _RETRY_REMAINING_ATTR
+
+    policy = _build_llm_retry()
+    exc = ConnectionError("retryable")
+    setattr(exc, _RETRY_REMAINING_ATTR, 1.5)
+
+    assert policy.retry_on(exc)  # type: ignore[arg-type]
+    assert policy.max_interval == 0.5  # reserves LangGraph's at-most-one-second jitter
+    assert policy.jitter is True  # consumes the per-attempt handoff
+
+
 # --- LLM retry fleet de-phasing (task #960) ---
 
 

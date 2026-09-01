@@ -2,9 +2,9 @@
 
 Sibling to `shared/lm/stop.py`: where that normalizes a *successful* response's
 terminal reason, this normalizes a *failed* call's exception into one
-provider-agnostic `ErrorClass`, so the LLM node decides retry-in-turn vs
-fail-fast-to-idle without scattering `isinstance` / `status_code` checks, and the
-postmortem log carries a structured `(error_class, provider, status)` triple
+provider-agnostic `ErrorClass`, so streaming and synchronous call paths decide
+retry vs fail-fast without scattering `isinstance` / `status_code` checks. Its
+shared emitter carries a structured `(error_class, provider, status)` triple
 instead of a scraped message string.
 
 LangChain surfaces each provider SDK's own exception unchanged: `anthropic.*` for
@@ -41,6 +41,8 @@ import enum
 from typing import Any, NamedTuple, cast
 
 import httpx
+
+from shared.log import logger
 
 
 class ErrorClass(enum.Enum):
@@ -314,3 +316,36 @@ def classify_error(exc: BaseException) -> ErrorClassification:
     return ErrorClassification(
         ErrorClass.UNKNOWN, provider, None, error_type, error_code, error_message
     )
+
+
+def emit_provider_error(
+    exc: Exception,
+    *,
+    model: str,
+    fatal: bool,
+    classification: ErrorClassification | None = None,
+) -> ErrorClassification:
+    """Classify and emit one provider failure for streams and synchronous SDK calls.
+
+    The `llm_provider_error` event is the shared source for provider billing
+    and rate-limit alerts. Keeping its emission here prevents agent streaming
+    and batch SDK paths from silently diverging.
+    """
+    resolved = classification or classify_error(exc)
+    from shared.lm.factory import provider_key_of_model
+
+    logger.opt(exception=True).warning(
+        "[{label}] {error_class} provider={provider} status={status} fatal={fatal}",
+        event="llm_provider_error",
+        label="llm_provider_error",
+        error_class=resolved.error_class.value,
+        provider=resolved.provider,
+        status=resolved.status,
+        error_type=resolved.error_type,
+        fatal=fatal,
+        billing=resolved.billing,
+        context_overflow=resolved.context_overflow,
+        vendor=provider_key_of_model(model),
+        model=model,
+    )
+    return resolved

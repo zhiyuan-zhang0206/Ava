@@ -40,7 +40,7 @@ from typing import Any, cast, overload
 from zoneinfo import ZoneInfo
 
 from ava import files as _files
-from ava._batch import run_batch, validate_max_concurrent
+from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava._sdk_validation import coerce_str
 from shared.config import settings
 from shared.lm._call import invoke_text
@@ -145,7 +145,7 @@ class UnderstandError(Exception):
 def understand(
     targets: list[dict[str, str]],
     effort: str | ReasoningEffort = ReasoningEffort.MAX,
-    max_concurrent: int | None = None,
+    max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
 ) -> list[str]: ...
 
 
@@ -153,14 +153,14 @@ def understand(
 def understand(
     targets: list[dict[str, str | list[str]]],
     effort: str | ReasoningEffort = ReasoningEffort.MAX,
-    max_concurrent: int | None = None,
+    max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
 ) -> list[str]: ...
 
 
 def understand[TargetValue: str | list[str]](
     targets: list[dict[str, TargetValue]],
     effort: str | ReasoningEffort = ReasoningEffort.MAX,
-    max_concurrent: int | None = None,
+    max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
 ) -> list[str]:
     """Answer a prompt about each target in parallel.
 
@@ -180,8 +180,8 @@ def understand[TargetValue: str | list[str]](
     `AVA_UNDERSTAND_MEDIA_THINKING_LEVEL` knob; other levels map to
     `minimal`/`low`/`medium`/`high` (`none` → `minimal`, `xhigh` → `high`).
 
-    `max_concurrent` caps parallel targets; the default runs every target
-    concurrently with no ceiling.
+    `max_concurrent` caps parallel targets; the default is 12. Pass a positive
+    integer to choose a different ceiling.
 
     Every result is auto-saved to `.exec_output/` in your workspace; the path
     is logged at debug level.
