@@ -57,13 +57,23 @@ _FALSY = frozenset({"0", "false", "no", "off"})
 
 def _serve_flag(env_key: str, file_name: str) -> bool:
     """Settings-free mirror of one capability flag's resolution: env
-    `AVA_MACHINE_SERVE_*` > `$AVA_HOME/<file>` > False (shared.machine's
-    `_resolve_serve` reads the flag through Settings, which does not exist yet
-    while this module runs). A malformed value resolves False here; the real
-    resolver raises on it loudly later, so the config-source decision can never
-    silently disagree with the machine role.
+    `AVA_MACHINE_SERVE_*` > `$AVA_HOME/.env` > `$AVA_HOME/<file>` > False.
+
+    Normal config boot has already loaded the `.env` before this function runs,
+    so its value is in the environment. Settings-lite maintenance commands do
+    not load it: read the file directly so `ava config --local` correctly sees
+    a gateway unit without constructing Settings. `shared.machine` reads the
+    flag through Settings, which does not exist yet while this module runs. A
+    malformed value resolves False here; the real resolver raises on it loudly
+    later, so the config-source decision can never silently disagree with the
+    machine role.
     """
     raw = os.environ.get(env_key)
+    if raw is not None and raw.strip():
+        return raw.strip().lower() in _TRUTHY
+    from shared import runtime_config
+
+    raw = runtime_config.read_env_aliases().get(env_key)
     if raw is not None and raw.strip():
         return raw.strip().lower() in _TRUTHY
     path = Path(os.environ.get("AVA_HOME") or Path.home() / ".ava").expanduser() / file_name
@@ -83,10 +93,10 @@ def config_source_is_local() -> bool:
     role flags — CI, lint scripts, dev tools — is not a unit yet and resolves
     locally with no fetch.
 
-    The serve-gateway flag is read settings-free (env > `$AVA_HOME/
-    machine_serve_gateway` file > False) because this runs DURING the Settings
-    import, before shared.machine can resolve the role. `cli.main` opts the
-    maintenance verbs out of the fetch with AVA_CONFIG_FETCH=skip (see
+    The serve-gateway flag is read settings-free (env > `$AVA_HOME/.env` >
+    `$AVA_HOME/machine_serve_gateway` file > False) because this runs DURING
+    the Settings import, before shared.machine can resolve the role. `cli.main`
+    opts the maintenance verbs out of the fetch with AVA_CONFIG_FETCH=skip (see
     CONFIG_FETCH_ENV); that is orthogonal to this derivation.
     """
     return _serve_flag("AVA_MACHINE_SERVE_GATEWAY", "machine_serve_gateway")
