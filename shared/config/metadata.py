@@ -15,12 +15,11 @@ would be circular).
 from __future__ import annotations
 
 from pathlib import Path
-from types import UnionType
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Any
 
 from pydantic_core import PydanticUndefined
 
-from shared.config_registry import Capability
+from shared.config_registry import Capability, field_editor_type
 
 # Stand-in a sensitive field carries in `raw_overrides` instead of its cleartext
 # value: the panel/CLI round-trips it unchanged on a full-replace PUT, and the
@@ -80,32 +79,7 @@ def get_config_metadata() -> list[ConfigFieldMeta]:
     for name, ref in _FIELDS.items():
         field_info = ref.info
         extra = _schema_extra(field_info)
-        annotation = field_info.annotation
-
-        # Unwrap `T | None`: per-model-defaultable fields carry None as their
-        # "unset -> resolve the per-model default" sentinel (see
-        # shared/lm/registry.py), but the panel should still render T's editor
-        # (bool switch / float input / enum select), not a free-text string.
-        union_args = get_args(annotation)
-        if get_origin(annotation) in (Union, UnionType) and type(None) in union_args:
-            non_none = [a for a in union_args if a is not type(None)]
-            if len(non_none) == 1:
-                annotation = non_none[0]
-
-        type_name = "string"
-        choices: list[str] | None = None
-        if annotation is bool:
-            type_name = "bool"
-        elif annotation is int:
-            type_name = "int"
-        elif annotation is float:
-            type_name = "float"
-        elif get_origin(annotation) is Literal:
-            # A Literal[...] field is a closed set of string choices — the frontend
-            # renders a select rather than a free-text input, and the write path
-            # rejects a value outside the set (fail-fast on an unknown enum).
-            type_name = "enum"
-            choices = [str(arg) for arg in get_args(annotation)]
+        type_name, choices = field_editor_type(field_info.annotation)
 
         current = values[name]
         if isinstance(current, Path):

@@ -72,11 +72,18 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         if existing and existing[-1].read_text() == content:
             return None
         # Local-time stamp with microseconds: filename sorts chronologically and
-        # stays unique across rapid successive writes.
-        dest = (
-            backup_dir
-            / f".env.{datetime.now().astimezone(cluster_tz()).strftime('%Y%m%d-%H%M%S-%f')}"
-        )
+        # stays unique across rapid successive writes. The zone is cosmetic
+        # (snapshots only sort and dedupe), so a broken `.env` that makes
+        # Settings unconstructable must not block the backup the write depends
+        # on: fall back to the host zone — the same signal cluster_tz() itself
+        # returns when no authoritative timezone is set — instead of letting
+        # the Settings ValidationError escape (it is a ValueError, below the
+        # OSError/RuntimeError best-effort boundary).
+        try:
+            tz = cluster_tz()
+        except (ValueError, RuntimeError):
+            tz = None
+        dest = backup_dir / f".env.{datetime.now().astimezone(tz).strftime('%Y%m%d-%H%M%S-%f')}"
         dest.write_text(content)
         ensure_private_file(dest)
         if keep > 0:
