@@ -30,6 +30,7 @@ from services.pitr.restore_proof import RestoreSpaceBudget
 from services.pitr.retention_planner import DryRunResult
 from services.pitr.retention_scheduler import RetentionDryRunState
 from services.pitr.retention_scheduler import health_component as retention_health_component
+from shared import telemetry
 from shared.platform import LockTimeoutError
 from shared.process_env import restricted_process_env
 
@@ -693,7 +694,7 @@ def test_retention_refresh_emits_backend_inventory_gauges(
     monkeypatch.setattr(config, "pitr_restore_gcs_credentials_file", tmp_path / "viewer.json")
     monkeypatch.setattr(config, "pitr_retained_weekly_chains", 2)
     monkeypatch.setattr(config, "pitr_store_backend", "oss")
-    calls: list[tuple[str, str, dict[str, int | str]]] = []
+    calls: list[tuple[telemetry.Category, str, dict[str, object]]] = []
 
     class _StoreGroup:
         @staticmethod
@@ -703,15 +704,21 @@ def test_retention_refresh_emits_backend_inventory_gauges(
     def get_store_group() -> _StoreGroup:
         return _StoreGroup()
 
+    def write_plan(*_args: object, **_kwargs: object) -> DryRunResult:
+        return result
+
+    def record_emit(
+        category: telemetry.Category,
+        event_name: str,
+        *,
+        attributes: dict[str, object] | None = None,
+    ) -> None:
+        calls.append((category, event_name, attributes or {}))
+
     monkeypatch.setattr(retention_scheduler, "get_store_group", get_store_group)
-    monkeypatch.setattr(retention_scheduler, "write_dry_run_plan", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(retention_scheduler, "write_dry_run_plan", write_plan)
     monkeypatch.setattr(retention_scheduler, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(
-        "shared.telemetry.emit",
-        lambda category, event_name, *, attributes: calls.append(
-            (category, event_name, attributes)
-        ),
-    )
+    monkeypatch.setattr("shared.telemetry.emit", record_emit)
 
     assert retention_scheduler.refresh(config) == result
     assert calls == [
