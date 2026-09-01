@@ -44,7 +44,7 @@ def test_removed_bringup_groups_are_gone() -> None:
 
 
 def test_core_verbs_exist() -> None:
-    assert {"start", "stop", "status", "cluster"} <= _top_choices()
+    assert {"start", "stop", "status", "pty", "cluster"} <= _top_choices()
 
 
 def test_cluster_group_has_ls_down_and_destroy() -> None:

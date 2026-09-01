@@ -1,17 +1,15 @@
 """ava.shell unit tests — one-shot `run(cmd)` + persistent PTY session wrapper.
 
-Runs against the real PTY supervisor daemon + real bash (S6 step 2). The
-`_pty_sessions_env` fixture (session-scoped, tests/ava/conftest.py) bootstraps
-the daemon under the tmp test home; POSIX-only, skips entirely on Windows.
+Runs against real detached per-session PTY hosts + real bash. The
+`_pty_sessions_env` fixture (session-scoped, tests/ava/conftest.py) pins a tmp
+test home and sweeps its sessions; POSIX-only, skips entirely on Windows.
 
-Sessions are pty sessions owned by the supervisor daemon, distinguished by
-name prefix. Parallel xdist workers each use a reserved high-range fake
-agent-id (`_TEST_AGENT_BASE`) for isolation; tests clean up only their own
-agent-prefixed sessions via prefix-scoped `kill_all`.
+Sessions are distinguished by name prefix. Parallel xdist workers each use a
+reserved high-range fake agent-id (`_TEST_AGENT_BASE`) for isolation; tests
+clean up only their own agent-prefixed sessions via prefix-scoped `kill_all`.
 
-Session naming format: `ava-<cluster>-agent-{agent_id}-shell-{shell_id}[-<name>]`.
-Tests pin cluster to `test-cluster` via monkeypatch so session names are
-deterministic regardless of the real host identity.
+Session naming format: `ava-agent-{agent_id}-shell-{shell_id}[-<name>]`; the
+per-home record namespace provides cluster isolation.
 """
 
 import contextlib
@@ -28,10 +26,10 @@ from ava import shell
 from shared.platform import IS_WINDOWS
 
 pytestmark = [
-    pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
+    pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions are POSIX-only"),
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); only the
     # pty-backed session tests want it. `_pty_sessions_env` must come first: the
-    # isolation fixture's own kill_all/list calls hit the daemon.
+    # isolation fixture's own kill_all/list calls hit the session backend.
     pytest.mark.usefixtures("_pty_sessions_env", "_isolated_agent"),
 ]
 
@@ -294,12 +292,31 @@ def test_kill_removes_session(_agent_row: int) -> None:
     assert sid not in shell.list()
 
 
+def test_rebuild_uses_new_id_and_old_handle_stays_rejected(_agent_row: int) -> None:
+    """A destroyed Persistent Shell id is a stale handle, not a rebuild key.
+
+    The per-agent counter is monotonic, so stateless rebuild publishes its new
+    id and capture of the pre-flip id remains correctly rejected.
+    """
+    old_id = shell.new("before-flip", ttl=120)
+    shell.kill(old_id)
+    new_id = shell.new("after-flip", ttl=120)
+    try:
+        assert (old_id, new_id) == (0, 1)
+        with pytest.raises(ValueError, match="not this agent's"):
+            shell.capture(old_id)
+        assert shell.list()[new_id] == "after-flip"
+        assert new_id != old_id
+    finally:
+        shell.kill(new_id)
+
+
 def test_stale_session_cleanup_spares_lone_shell(_agent_row: int) -> None:
     """Resurrect/respawn's stale-session cleanup must not kill a surviving shell.
 
     `_kill_stale_session` targets the agent PROCESS — a native-supervisor
-    record (`ava-<cluster>-agent-{id}`) — never the shell backend. The agent's
-    shells live in a different subsystem (PTY supervisor) under a longer name,
+    record (`ava-agent-{id}`) — never the shell backend. The agent's shells
+    live in a different subsystem (per-session PTY hosts) under a longer name,
     so a stale-process kill can never reach them. Here no process record exists
     (the common post-exit state), so the kill is a noop and the lone shell
     survives.
@@ -320,7 +337,7 @@ def test_stale_session_cleanup_kills_process_session_spares_shell(_agent_row: in
     Companion to test_stale_session_cleanup_spares_lone_shell: when a stale agent
     PROCESS (a native-supervisor record, here a real detached `sleep`) IS still
     present — the resurrect/respawn race — the kill removes it, while the agent's
-    shell (a different subsystem — the PTY supervisor) is left untouched. No
+    shell (a different subsystem — the PTY session backend) is left untouched. No
     prefix-match hazard is even possible now: the process and its shells no
     longer share a namespace.
     """
@@ -344,16 +361,16 @@ def test_stale_session_cleanup_kills_process_session_spares_shell(_agent_row: in
         posixproc.kill_session(agent_sess, graceful=False)
 
 
-# ─── send_keys + PTY supervisor integration (S6 step 2) ─────────────────────
+# ─── send_keys + per-session PTY integration ──────────────────────────────
 #
-# These run against the REAL supervisor daemon + REAL bash -l -i (the
+# These run against REAL detached session hosts + REAL bash -l -i (the
 # `_pty_sessions_env` fixture), exercising the PtySessionBackend end to end:
 # sessions.new -> send -> capture, the key vocabulary (Enter / C-c / Up), and
 # kill. A short poll replaces fixed sleeps so a loaded box does not flake.
 
 
 def _wait_for(predicate, timeout: float = 30.0, interval: float = 0.1) -> bool:
-    # 30s default: the daemon's reader thread shares the box with the whole
+    # 30s default: the host's reader thread shares the box with the whole
     # parallel suite, and under CI runner CPU oversubscription the reap can
     # lag well past 10s (2026-08-09: 4 CI runs failed on the same kill test
     # in a busy window; the same runner passed minutes earlier).
@@ -447,7 +464,7 @@ def test_send_keys_up_arrow_recalls_history(_agent_row: int) -> None:
 
 def test_new_default_cwd_is_agent_workspace(_agent_row: int) -> None:
     """A session created without an explicit cwd starts in the agent's
-    workspace — the same base ava.shell.run uses (the PTY daemon needs a real
+    workspace — the same base ava.shell.run uses (the PTY host needs a real
     directory; the workspace is created on demand)."""
     from shared.paths import workspace_dir
 
