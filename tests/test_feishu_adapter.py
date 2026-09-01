@@ -17,7 +17,12 @@ from typing import Any
 
 import pytest
 
-from services.im_bridge.adapters.feishu import MAX_SEGMENT_CHARS, FeishuAdapter, _segment
+from services.im_bridge.adapters.feishu import (
+    MAX_SEGMENT_CHARS,
+    FeishuAdapter,
+    _backoff_delay,
+    _segment,
+)
 from services.im_bridge.core import InboundMessage
 
 
@@ -665,6 +670,97 @@ def test_start_poller_honors_zero_interval(monkeypatch: pytest.MonkeyPatch) -> N
     adapter = FeishuAdapter(FakeCore())
     adapter._start_poller()
     assert adapter._poll_task is None
+
+
+def test_poll_round_delay_partial_failure_keeps_cadence(adapter: FeishuAdapter) -> None:
+    """D1: one chat's persistent failure must not slow the healthy chats —
+    only an all-chats-failed round backs off (and resets the counter)."""
+    adapter._poll_failures = 2  # prior all-chats-failed rounds
+    assert adapter._round_delay(failed=1, total=2, interval=1.0) == 1.0
+    assert adapter._poll_failures == 0
+
+
+def test_poll_round_delay_healthy_round_resets(adapter: FeishuAdapter) -> None:
+    adapter._poll_failures = 3
+    assert adapter._round_delay(failed=0, total=2, interval=1.0) == 1.0
+    assert adapter._poll_failures == 0
+
+
+def test_poll_round_delay_all_chats_failed_backs_off(adapter: FeishuAdapter) -> None:
+    """D1: when every chat fails the round, the delay backs off exponentially
+    (interval x2, x4, x8) and the counter accumulates."""
+    assert adapter._round_delay(failed=2, total=2, interval=1.0) == 2.0
+    assert adapter._round_delay(failed=2, total=2, interval=1.0) == 4.0
+    assert adapter._round_delay(failed=2, total=2, interval=1.0) == 8.0
+    assert adapter._poll_failures == 3
+
+
+def test_backoff_delay_never_clamps_above_interval() -> None:
+    """D2: the absolute cap never drops below the configured interval — a
+    3600s interval keeps its own cadence instead of being clamped to 300s."""
+    assert _backoff_delay(3600.0, 0) == 3600.0
+    assert _backoff_delay(3600.0, 5) == 3600.0
+    assert _backoff_delay(1.0, 0) == 1.0
+    assert _backoff_delay(1.0, 5) == 32.0
+    assert _backoff_delay(300.0, 6) == 300.0
+
+
+async def test_poll_seed_anchors_newest_id_carrying_item(adapter: FeishuAdapter) -> None:
+    """D3: an id-less newest item (defensive) must not leave the seed round
+    without a cursor — anchor on the newest item that carries an id."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        make_list_response(
+            [
+                make_list_item(message_id=None, content='{"text": "no id"}'),
+                make_list_item(message_id="om_3"),
+                make_list_item(message_id="om_2"),
+                make_list_item(message_id="om_1"),
+            ]
+        )
+    ]
+    await adapter._poll_once("oc_p2p_1")
+    assert adapter.core.received == []
+    assert adapter._poll_cursor == {"oc_p2p_1": "om_3"}
+
+
+async def test_poll_poison_message_skipped_after_retries(adapter: FeishuAdapter) -> None:
+    """D4: a message that keeps crashing inbound handling is skipped after
+    POISON_MAX_RETRIES consecutive failures instead of wedging the chat."""
+
+    class AlwaysFailingCore(FakeCore):
+        async def handle_inbound(self, message: InboundMessage) -> None:
+            raise RuntimeError("boom")
+
+    core = AlwaysFailingCore()
+    rest = FakeRestClient()
+    adapter = FeishuAdapter(core)
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    window = make_list_response(
+        [
+            make_list_item(message_id="om_5", content='{"text": "poison"}'),
+            make_list_item(message_id="om_0"),
+        ]
+    )
+    rest.list_responses = [
+        make_list_response([make_list_item(message_id="om_0")]),
+        window,
+        window,
+        window,
+    ]
+    await adapter._poll_once("oc_p2p_1")  # seed at om_0
+    await adapter._poll_once("oc_p2p_1")  # om_5 fails (1)
+    assert adapter._poll_cursor == {"oc_p2p_1": "om_0"}
+    await adapter._poll_once("oc_p2p_1")  # om_5 fails (2)
+    assert adapter._poll_cursor == {"oc_p2p_1": "om_0"}
+    assert adapter._poison_retries == {"oc_p2p_1:om_5": 2}
+    await adapter._poll_once("oc_p2p_1")  # om_5 skipped after 3rd failure
+    assert adapter._poll_cursor == {"oc_p2p_1": "om_5"}
+    assert adapter._poison_retries == {}
+    assert core.received == []
 
 
 async def test_poll_empty_seed_round_delivers_first_message(adapter: FeishuAdapter) -> None:

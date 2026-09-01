@@ -30,6 +30,19 @@ from shared.log import logger
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.
 MAX_SEGMENT_CHARS = 8000
+# A message that repeatedly crashes inbound handling is skipped after this
+# many consecutive failures (see the poller's poison-message handling).
+POISON_MAX_RETRIES = 3
+
+
+def _backoff_delay(interval: float, failures: int) -> float:
+    """Poll delay after `failures` consecutive all-chats-failed rounds.
+
+    Doubles the interval per failure (capped at 32x); the absolute cap never
+    drops below the configured interval, so a >300s interval keeps its own
+    cadence instead of being clamped to 300s.
+    """
+    return min(interval * (2 ** min(failures, 5)), max(300.0, interval))
 
 
 class FeishuAdapter(IMAdapter):
@@ -73,7 +86,8 @@ class FeishuAdapter(IMAdapter):
         # so the first message that arrives afterwards is delivered instead
         # of being mistaken for history (a fresh chat's first round is empty).
         self._poll_seeded: set[str] = set()
-        self._poll_failures = 0  # consecutive failing rounds (backoff)
+        self._poll_failures = 0  # consecutive all-chats-failed rounds (backoff)
+        self._poison_retries: dict[str, int] = {}  # "chat:msg" -> inbound failures
         self._seen_messages: deque[str] = deque(maxlen=500)
 
     # -- credentials ---------------------------------------------------------
@@ -363,29 +377,41 @@ class FeishuAdapter(IMAdapter):
     async def _poll_loop(self, interval: float) -> None:
         """Poll every known p2p chat forever; one bad round never kills it.
 
-        Consecutive failing rounds back off exponentially (interval doubled,
-        capped at 32x) so a hard-down API is not hammered; any successful
-        round resets the backoff.
+        Backoff is all-or-nothing: a round where EVERY chat failed backs off
+        exponentially (a hard-down API is not hammered), while a round where
+        only some chats failed keeps the normal cadence — one chat's
+        persistent failure (e.g. the user deleted the bot) must never slow
+        the healthy chats. Any fully-healthy round resets the backoff.
         """
         while True:
-            ok = True
+            failed = 0
+            total = len(self._poll_chats)
             try:
                 for chat_id in list(self._poll_chats):
                     try:
                         if not await self._poll_once(chat_id):
-                            ok = False
+                            failed += 1
                     except Exception as exc:
-                        ok = False
+                        failed += 1
                         logger.error("FeishuAdapter: poll failed chat=%s: {}", chat_id, exc)
             except Exception:
-                ok = False
+                failed = total
                 logger.exception("FeishuAdapter: poll round failed")
-            if ok:
-                self._poll_failures = 0
-            else:
-                self._poll_failures += 1
-            delay = min(interval * (2 ** min(self._poll_failures, 5)), 300.0)
+            delay = self._round_delay(failed, total, interval)
             await asyncio.sleep(delay)
+
+    def _round_delay(self, failed: int, total: int, interval: float) -> float:
+        """Poll delay after one round, mutating the all-chats-failed counter.
+
+        All-or-nothing backoff: a round where every chat failed backs off
+        exponentially; any round with at least one healthy chat keeps the
+        normal cadence and resets the counter.
+        """
+        if failed == 0 or failed < total:
+            self._poll_failures = 0
+            return interval
+        self._poll_failures += 1
+        return _backoff_delay(interval, self._poll_failures)
 
     async def _poll_once(self, chat_id: str) -> bool:
         """List the chat's newest messages; feed unseen user texts to core.
@@ -428,8 +454,12 @@ class FeishuAdapter(IMAdapter):
             # as "history". A failed round never marks seeded, preserving the
             # no-replay guarantee across daemon restarts.
             self._poll_seeded.add(chat_id)
-            if items and items[-1].message_id:
-                self._poll_cursor[chat_id] = items[-1].message_id
+            # Anchor on the newest item that carries an id: an id-less newest
+            # item (defensive — the API guarantees ids) must not leave the
+            # chat without a cursor, which would replay the whole window.
+            seed_item = next((item for item in reversed(items) if item.message_id), None)
+            if seed_item is not None:
+                self._poll_cursor[chat_id] = seed_item.message_id
             return True
         cursor = self._poll_cursor.get(chat_id)
         # Process everything after the cursor (ascending order); when the
@@ -440,11 +470,28 @@ class FeishuAdapter(IMAdapter):
                 if item.message_id == cursor:
                     pending = items[idx + 1 :]
                     break
+        last = await self._poll_deliver(pending, chat_id)
+        if last:
+            self._poll_cursor[chat_id] = last
+        return True
+
+    async def _poll_deliver(self, pending: list[Any], chat_id: str) -> str | None:
+        """Feed unseen user texts to core; return the newest message id the
+        cursor may advance to (delivered, skipped, or permanently
+        undeliverable), or None when a delivery failed and the round must
+        not advance past it.
+
+        A message that keeps crashing inbound handling is skipped after
+        POISON_MAX_RETRIES consecutive failures with a loud log, so it cannot
+        wedge the chat forever (core swallows nearly everything, so this is a
+        last resort, not a normal path).
+        """
         last: str | None = None
         for item in pending:
             if not item.message_id:
                 # Cannot dedup or cursor on an id-less item; never deliver.
                 continue
+            key = f"{chat_id}:{item.message_id}"
             if item.message_id in self._seen_messages:
                 last = item.message_id
                 continue
@@ -457,13 +504,25 @@ class FeishuAdapter(IMAdapter):
             try:
                 await self.core.handle_inbound(message)
             except Exception:
-                logger.exception("FeishuAdapter: poll inbound failed chat=%s", chat_id)
-                break  # do not advance past the failure; retry next round
+                retries = self._poison_retries.get(key, 0) + 1
+                self._poison_retries[key] = retries
+                if retries < POISON_MAX_RETRIES:
+                    logger.exception("FeishuAdapter: poll inbound failed chat=%s", chat_id)
+                    break  # do not advance past the failure; retry next round
+                self._poison_retries.pop(key, None)
+                logger.error(
+                    "FeishuAdapter: poll inbound failed %d times chat=%s msg=%s; skipping message",
+                    retries,
+                    chat_id,
+                    item.message_id,
+                )
+                self._seen_messages.append(item.message_id)
+                last = item.message_id
+                continue
             self._seen_messages.append(item.message_id)
+            self._poison_retries.pop(key, None)
             last = item.message_id
-        if last:
-            self._poll_cursor[chat_id] = last
-        return True
+        return last
 
     def _normalize_poll_item(self, item: Any) -> InboundMessage | None:
         """Map one listed message to an InboundMessage (same contract as the
