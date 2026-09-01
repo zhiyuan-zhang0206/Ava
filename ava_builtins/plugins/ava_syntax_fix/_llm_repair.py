@@ -101,6 +101,14 @@ async def _repair_once(llm: Any, messages: list[Any]) -> str | None:
             err=f"{type(exc).__name__}: {exc}",
         )
         return None
+    from shared.lm.billing import emit_billing_from_message
+
+    emit_billing_from_message(
+        resp,
+        model=_REPAIR_MODEL,
+        usage_kind="chat",
+        start_time_ns=time.time_ns() - int((time.monotonic() - started) * 1_000_000_000),
+    )
     return _strip_code_fence(_extract_text(resp.content)).strip() or None
 
 

@@ -147,6 +147,120 @@ def test_price_snapshot_rides_payload(loguru_records):
     assert "cost" not in loguru_records[0]["message"]  # pyright: ignore[reportUnknownArgumentType]
 
 
+def test_log_llm_usage_emits_agent_billing_span(
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A streamed agent response emits its quoted usage as one billing span.
+
+    The regression this catches is a log-only price snapshot that leaves the
+    billing ledger without the completed provider call.
+    """
+    from opentelemetry import trace as otel_trace
+
+    from shared import trace as trace_mod
+    from shared.lm.pricing import quote
+
+    class _Span:
+        def __init__(self, start_time: int | None) -> None:
+            self.start_time = start_time
+            self.attributes: dict[str, Any] = {}
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            self.attributes[key] = value
+
+        def end(self) -> None:
+            pass
+
+    class _Tracer:
+        def __init__(self) -> None:
+            self.spans: list[_Span] = []
+
+        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
+            span = _Span(start_time)
+            self.spans.append(span)
+            return span
+
+    tracer = _Tracer()
+    priced_at = datetime(2026, 8, 17, 0, 0, tzinfo=UTC)
+    expected = quote("deepseek-v4-pro", 1_000, 100, 800, at=priced_at)
+    assert expected is not None
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("time.time_ns", lambda: 5_000_000_000)
+    message = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "total_tokens": 1_100,
+            "input_token_details": {"cache_read": 800},
+        },
+    )
+
+    log_llm_usage(
+        message,
+        model="deepseek-v4-pro",
+        latency_ms=1_234.5,
+        priced_at=priced_at,
+    )
+
+    assert len(tracer.spans) == 1
+    span = tracer.spans[0]
+    assert span.start_time == 3_765_500_000
+    assert span.attributes["ava.billing.vendor"] == "deepseek"
+    assert span.attributes["ava.billing.usage_kind"] == "agent"
+    assert span.attributes["ava.billing.tokens_in"] == 1_000
+    assert span.attributes["ava.billing.tokens_out"] == 100
+    assert span.attributes["ava.billing.cache_read_tokens"] == 800
+    assert span.attributes["ava.billing.cost"] == round(expected.cost_usd, 6)
+    assert loguru_records[0]["extra"]["cost_usd"] == pytest.approx(expected.cost_usd)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incomplete standardized usage remains observable but is not billable.
+
+    The regression this catches is a provider response lacking one token total
+    becoming a misleading partial or zero-token billing ledger event.
+    """
+    from opentelemetry import trace as otel_trace
+
+    from shared import trace as trace_mod
+
+    class _Span:
+        def set_attribute(self, _key: str, _value: Any) -> None:
+            pass
+
+        def end(self) -> None:
+            pass
+
+    class _Tracer:
+        def __init__(self) -> None:
+            self.spans: list[_Span] = []
+
+        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
+            span = _Span()
+            self.spans.append(span)
+            return span
+
+    tracer = _Tracer()
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    message = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 100, "output_tokens": 0, "total_tokens": 100},
+    )
+    object.__setattr__(message, "usage_metadata", {"input_tokens": 100, "total_tokens": 100})
+
+    log_llm_usage(message, model="deepseek-v4-pro")
+
+    assert tracer.spans == []
+
+
 def test_price_snapshot_absent_for_unpriced_model(
     loguru_records: list[dict[str, Any]],
 ) -> None:

@@ -97,6 +97,39 @@ class TestNormalize:
         assert _normalize("   ") == ""
 
 
+@pytest.mark.asyncio
+async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A label response is accounted as a batch call before label validation.
+
+    The regression this catches is a provider call that returns an unusable
+    label being absent from the billing ledger despite consuming tokens.
+    """
+    emitted: list[tuple[AIMessage, dict[str, object]]] = []
+    response = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+    )
+
+    class _ResponseLLM:
+        async def ainvoke(self, _messages: list[Any]) -> AIMessage:
+            return response
+
+    def _emit(message: AIMessage, **kwargs: object) -> None:
+        emitted.append((message, kwargs))
+
+    monkeypatch.setattr(
+        labels_module,
+        "build_chat_model",
+        lambda _model, **_kwargs: _ResponseLLM(),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr("shared.lm.billing.emit_billing_from_message", _emit)
+
+    assert await generate_label_async(1, "prompt", "deepseek-v4-pro") is False
+    assert emitted == [(response, {"model": "deepseek-v4-pro", "usage_kind": "batch"})]
+
+
 class TestGenerateLabelAsync:
     @pytest.mark.asyncio
     async def test_writes_label_when_null_and_publishes(

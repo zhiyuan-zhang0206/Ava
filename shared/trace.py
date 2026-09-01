@@ -381,6 +381,8 @@ def _arm_tracing(endpoint: str) -> None:
         from traceloop.sdk import Traceloop
         from traceloop.sdk.instruments import Instruments
 
+        from shared.observability import production_identity
+
         # Mirror the LLM call paths Ava actually uses. LangGraph rides on the
         # LANGCHAIN instrumentor (its callback handler nests node spans), so
         # there is no separate LANGGRAPH instrument. LiteLLM, when used,
@@ -418,7 +420,11 @@ def _arm_tracing(endpoint: str) -> None:
                     instruments=instruments,
                     disable_batch=False,
                     telemetry_enabled=False,
-                    resource_attributes={"cluster": cluster_label()},
+                    resource_attributes={
+                        "cluster": cluster_label(),
+                        "service.line": "ava",
+                        "environment": "prod" if production_identity() else "dev",
+                    },
                 )
                 logger.info(
                     "trace recording enabled",
