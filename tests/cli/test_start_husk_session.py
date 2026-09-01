@@ -70,6 +70,8 @@ class _FakeProc:
         return self._alive
 
     def status(self) -> str:
+        # The kill path's liveness check is zombie-aware (_process_is_live); a
+        # fake that is alive is a running process, never a zombie.
         return psutil.STATUS_RUNNING
 
     def children(self, recursive: bool = False) -> list[object]:
