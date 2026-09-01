@@ -93,8 +93,24 @@ class TurnEnd(TypedDict):
     duration_seconds: float
 
 
+class SilentIdle(TypedDict):
+    """`silent_idle` payload — output-token cost-boundary verdict."""
+
+    output_tokens: int
+    cumulative_output_tokens: int
+    estimated_cost_usd: float | None
+    halted: bool
+
+
+class LlmRetry(TypedDict):
+    """`llm_retry` payload — final duration of a retry sequence."""
+
+    outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"]
+    duration_seconds: float
+
+
 class LlmProviderError(TypedDict):
-    """`llm_provider_error` payload — agent/graph/_llm_errors.py.
+    """`llm_provider_error` payload — shared/lm/errors.py.
 
     One row per classified provider failure — every class, so a postmortem sees
     the retried transients too; ``fatal`` says whether this one aborted the turn.
@@ -1179,7 +1195,12 @@ EVENTS: dict[str, EventSpec] = {
         payload=HookTiming,
         tier="noise",
     ),
-    "silent_idle": _telemetry("silent_idle", "silent idle verdict", tier="noise"),
+    "silent_idle": _telemetry(
+        "silent_idle", "silent idle cost-boundary verdict", payload=SilentIdle, tier="noise"
+    ),
+    "llm_retry": _telemetry(
+        "llm_retry", "LLM retry sequence completion", payload=LlmRetry, tier="observation"
+    ),
     "last_msg": _telemetry("last_msg", "last-message check", tier="noise"),
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
     # by gateway/_latency.py — one event per (route, bucket), never per request

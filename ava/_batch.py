@@ -13,6 +13,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 
+# The SDK's convenience batches must not turn one agent action into an
+# account-wide request burst. Callers can opt into a different positive ceiling
+# with `max_concurrent`; this default bounds the omitted-argument path.
+DEFAULT_BATCH_MAX_CONCURRENT = 12
+
 
 def validate_max_concurrent(max_concurrent: int | None, *, example: str) -> None:
     """Validate the `max_concurrent` knob shared by every SDK batch API.
