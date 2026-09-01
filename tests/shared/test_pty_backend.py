@@ -138,16 +138,20 @@ def test_new_session_login_shell_false_raises(cli_calls):  # pyright: ignore[rep
 def test_new_session_failure_returns_false_and_cleans_envfile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
     cli_calls,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
 ):
     calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
     monkeypatch.setattr("shared.session_backend.run_dir", lambda: tmp_path)
-    script[("s", "new")] = _FakeCompletedProcess(returncode=1, stderr="boom")
+    script[("s", "new")] = _FakeCompletedProcess(
+        returncode=1, stderr="pty allocation refused: generation 'freeze-1'"
+    )
     backend = _backend()
     ok = backend.new_session("s", "", Path("/"), env={"PATH": "/bin"})
     assert ok is False
     envfile = Path(_argv(calls)[3])  # pyright: ignore[reportUnknownArgumentType]
     assert not envfile.exists()  # the failed handoff must not linger
+    assert "pty allocation refused: generation 'freeze-1'" in caplog.text
 
 
 def test_new_session_env_null_byte_raises(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]

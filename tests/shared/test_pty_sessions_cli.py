@@ -28,13 +28,14 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared.platform import IS_LINUX, IS_WINDOWS
+from shared.platform import IS_LINUX, IS_WINDOWS, LockTimeoutError, file_lock
+from shared.pty_sessions import allocation_freeze, orphan_reaper
 from shared.pty_sessions import cli as pty_cli
 from shared.pty_sessions import host as pty_host
-from shared.pty_sessions import orphan_reaper
 from shared.pty_sessions._paths import host_identity, record_path, socket_path
 from shared.pty_sessions.cli import write_env_file
 from shared.pty_sessions.host import PtySession, _parse_request
+from shared.session_backend import PtySessionBackend
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
@@ -92,6 +93,28 @@ def _new(
     result = _run_cli(home, name, "new", str(cwd or home), str(envfile))
     assert result.returncode == 0, f"new {name} failed: {result.stderr}"
     assert not envfile.exists(), "envfile must be consumed by the host"
+
+
+def _start_new(home: Path, name: str) -> tuple[subprocess.Popen[str], Path]:
+    """Start one real CLI allocation without waiting for host readiness."""
+    envfile = write_env_file({})
+    proc = subprocess.Popen(  # noqa: S603 — repo-internal interpreter + module argv
+        [
+            sys.executable,
+            "-m",
+            "shared.pty_sessions.cli",
+            name,
+            "new",
+            str(home),
+            str(envfile),
+        ],
+        cwd=REPO,
+        env={**os.environ, "AVA_HOME": str(home)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return proc, envfile
 
 
 def _send(home: Path, name: str, text: str, *, enter: bool = True) -> None:
@@ -624,6 +647,116 @@ def test_new_is_idempotent_for_live_session(sessions: Path) -> None:
     assert _record(home, name) == first, "idempotent new must not relaunch"
     _send(home, name, "echo still-one-shell")
     _output_until(home, name, "still-one-shell")
+
+
+def test_freeze_ack_has_no_later_session_start_during_concurrent_allocations(
+    sessions: Path,
+) -> None:
+    """Freeze waits behind an in-flight allocation and fences every later one.
+
+    The started-at assertion is the externally observable boundary: once
+    ``freeze`` acknowledges, no record may carry a later launch time.
+    """
+    home = sessions
+    launches = [_start_new(home, f"ava-freeze-race-{index}") for index in range(12)]
+    frozen: allocation_freeze.PtyAllocationFreeze | None = None
+
+    def _allocation_lock_is_held() -> bool:
+        try:
+            with file_lock(allocation_freeze.lock_path(), timeout_s=0):
+                return False
+        except LockTimeoutError:
+            return True
+
+    try:
+        assert _wait(_allocation_lock_is_held, timeout=10.0, interval=0.01)
+        frozen = allocation_freeze.freeze(holder="ci-race", reason="prove freeze acknowledgement")
+        assert frozen.generation is not None and frozen.created_at is not None
+        results: list[subprocess.CompletedProcess[str]] = []
+        for proc, envfile in launches:
+            stdout, stderr = proc.communicate(timeout=60)
+            results.append(subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr))
+            assert not envfile.exists()
+        assert any(result.returncode == 0 for result in results)
+        assert all(result.returncode in (0, 1) for result in results)
+
+        records = pty_cli.live_sessions(prefix="ava-freeze-race-")
+        acknowledged_at = frozen.created_at.timestamp()
+        assert records
+        assert all(record.started_at <= acknowledged_at for record in records.values())
+
+        refused_env = write_env_file({})
+        refused = _run_cli(
+            home,
+            "ava-freeze-race-after-ack",
+            "new",
+            str(home),
+            str(refused_env),
+        )
+        assert refused.returncode == 1
+        assert "allocation refused" in refused.stderr
+        assert not refused_env.exists()
+        assert "ava-freeze-race-after-ack" not in pty_cli.live_sessions()
+    finally:
+        if frozen is not None and frozen.generation is not None:
+            assert allocation_freeze.resume(frozen.generation)
+        for proc, _envfile in launches:
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=10)
+
+
+def test_failed_allocation_cannot_publish_after_freeze_ack(
+    sessions: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host that misses readiness is terminal before admission unlocks."""
+    home = sessions
+    name = "ava-freeze-failed-before-ack"
+    envfile = write_env_file({})
+    monkeypatch.setattr(pty_cli, "_SPAWN_READY_TIMEOUT_S", 0.0)
+
+    assert pty_cli._op_new(name, [str(home), str(envfile)]) == 1
+    frozen = allocation_freeze.freeze(holder="ci-timeout", reason="prove no late record")
+    assert frozen.generation is not None
+    try:
+        assert not envfile.exists()
+        assert not _wait(lambda: pty_cli.has_session(name), timeout=1.0)
+        assert not record_path(name).exists()
+    finally:
+        assert allocation_freeze.resume(frozen.generation)
+
+
+def test_desired_state_session_families_rebuild_once_after_resume(sessions: Path) -> None:
+    """Page, schedule, and watcher reconcilers share this deepest backend.
+
+    Their own suites pin desired-state decisions and this test pins the common
+    allocation result: none can recreate while frozen, then each name is
+    created exactly once after resume even when reconciliation retries.
+    """
+    home = sessions
+    backend = PtySessionBackend()
+    names = (
+        "ava-agent-41-shell-2-page-dashboard",
+        "ava-schedule-7",
+        "ava-agent-41-shell-3-watcher",
+    )
+    frozen = allocation_freeze.freeze(holder="ci-reconcile", reason="desired-state cleanup")
+    assert frozen.generation is not None
+    try:
+        for name in names:
+            assert not backend.new_session(name, "", home, env={})
+        assert not set(names) & set(backend.list_sessions())
+    finally:
+        assert allocation_freeze.resume(frozen.generation)
+
+    started: dict[str, float | None] = {}
+    for name in names:
+        assert backend.new_session(name, "", home, env={})
+        started[name] = backend.session_started_at(name)
+    for name in names:
+        assert backend.new_session(name, "", home, env={})
+        assert backend.session_started_at(name) == started[name]
+    assert set(names) <= set(backend.list_sessions())
 
 
 def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
