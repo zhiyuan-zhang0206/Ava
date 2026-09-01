@@ -62,6 +62,37 @@ def test_private_file_repairs_mode_drift(tmp_path: Path) -> None:
     assert _mode(target) == 0o600
 
 
+def test_private_tree_recursively_repairs_existing_mode_drift(tmp_path: Path) -> None:
+    """Converge makes every existing private-tree node owner-only."""
+    root = tmp_path / "private"
+    nested = root / "agent" / "artifacts"
+    nested.mkdir(parents=True)
+    payload = nested / "result.txt"
+    payload.write_text("secret")
+    for directory in (root, root / "agent", nested):
+        directory.chmod(0o755)
+    payload.chmod(0o644)
+
+    assert private_storage.converge_private_tree(root) == root
+
+    assert _mode(root) == 0o700
+    assert _mode(root / "agent") == 0o700
+    assert _mode(nested) == 0o700
+    assert _mode(payload) == 0o600
+
+
+def test_private_tree_rejects_nested_symlink(tmp_path: Path) -> None:
+    """Converge refuses a link instead of chmodding an outside target."""
+    root = tmp_path / "private"
+    root.mkdir()
+    target = tmp_path / "outside"
+    target.mkdir()
+    (root / "link").symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match=rf"{re.escape(str(root / 'link'))}.*symlink"):
+        private_storage.converge_private_tree(root)
+
+
 def test_private_write_replaces_existing_content_without_permissive_intermediate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

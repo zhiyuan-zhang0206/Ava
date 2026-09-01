@@ -82,5 +82,10 @@ remains mandatory and is never pruned by physical-backup retention.
 2. **Restore drill — delivered.** `scripts/restore_drill.py` decrypts the
    latest managed artifact (or a supplied path), restores it into scratch
    Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
-   reader sample, and a service smoke. The operator schedules the first
-   production-sized execution separately.
+   reader sample, and a service smoke.
+
+> **Update 2026-09-01:** the gateway-owned scheduler runs the isolated logical
+> restore drill once after the Sunday 03:00 cluster-time dump. A failure emits
+> a typed recovery-drill event and alert; success is recorded privately. The
+> physical-PITR monthly proof and the retention planner remain separately
+> gated, dry-run-safe work owned for deployment by 1818.

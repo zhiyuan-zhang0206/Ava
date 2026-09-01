@@ -121,12 +121,14 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # agent_swapped_in (Task #1976 phase 2) drops it back to 127;
     # memory_search_stats (Task #2088's row-growth monitoring) raises it
     # back to 128; page_restore_notified (Task #2212 direction B — the
-    # reconcile close path's re-serve notice) raises it to 129; `llm_retry`
-    # records retry duration and `watchdog_tick` records freshness, bringing
-    # the current total to 132; exec_editable_install_poisoned (the pre-exec
-    # poisoned-install guard, Task #2285) raises it to 133; exec_child_boot
-    # and compaction_completed (Task #5643) bring the current total to 135.
-    assert len(_TELEMETRY_KINDS) == 135
+    # reconcile close path's re-serve notice) raises it to 129; watchdog_tick
+    # (P1-4's completed-round freshness gauge) raises it to 131; `llm_retry`
+    # records retry duration and exec_editable_install_poisoned (the pre-exec
+    # poisoned-install guard, Task #2285) bring it to 133; exec_child_boot
+    # and compaction_completed (Task #5643) bring the current total to 135;
+    # remote PITR inventory and scheduled recovery-proof failures raise it to
+    # 137.
+    assert len(_TELEMETRY_KINDS) == 137
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
@@ -213,6 +215,23 @@ def test_watchdog_tick_payload_and_metric_disposition() -> None:
 
     assert payload_keys("watchdog_tick") == ("last_tick_timestamp_seconds",)
     assert _METRIC_DISPOSITION[("watchdog_tick", "last_tick_timestamp_seconds")] == "gauge"
+
+
+def test_pitr_remote_inventory_payload_and_metric_disposition() -> None:
+    """A remote inventory sample is absolute backend-scoped state, never a sum."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("pitr_remote_inventory") == ("backend", "object_count", "bytes")
+    assert _METRIC_DISPOSITION[("pitr_remote_inventory", "object_count")] == "gauge"
+    assert _METRIC_DISPOSITION[("pitr_remote_inventory", "bytes")] == "gauge"
+
+
+def test_recovery_drill_failed_payload() -> None:
+    """A failed drill names its proof type without placing failure detail in labels."""
+    from shared.events.contract import payload_keys
+
+    assert payload_keys("recovery_drill_failed") == ("drill", "detail")
 
 
 def test_category_for_kind() -> None:

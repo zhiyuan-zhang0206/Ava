@@ -48,6 +48,27 @@ def ensure_private_file(path: Path) -> None:
     path.chmod(0o600)
 
 
+def converge_private_tree(path: Path) -> Path:
+    """Recursively converge a private directory tree to owner-only modes.
+
+    A unit's logs, workspaces, and memory checkout can predate the private
+    storage convention. Converge owns their durable permission repair, but it
+    must never follow a symlink out of the tree while doing so.
+    """
+    ensure_private_dir(path)
+    for child in path.iterdir():
+        current = child.lstat()
+        if stat.S_ISLNK(current.st_mode):
+            raise _private_path_error(child, "is a symlink")
+        if stat.S_ISDIR(current.st_mode):
+            converge_private_tree(child)
+            continue
+        if not stat.S_ISREG(current.st_mode):
+            raise _private_path_error(child, "is not a regular file or directory")
+        ensure_private_file(child)
+    return path
+
+
 def write_private_bytes(path: Path, data: bytes) -> None:
     """Atomically replace `path` with owner-only `data` in its private directory."""
     ensure_private_dir(path.parent)
