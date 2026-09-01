@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -194,24 +195,35 @@ async def test_round_deadline_skips_an_overdue_tick_without_advancing_freshness(
     The regression is an indefinitely blocked controller/check preventing any
     later round while the watchdog process remains alive and looks healthy.
     """
-    tick_started = asyncio.Event()
-    release_tick = asyncio.Event()
+    tick_started = threading.Event()
+    release_tick = threading.Event()
+    calls: list[str] = []
 
     async def _blocked_tick(_role: str) -> None:
-        tick_started.set()
-        await release_tick.wait()
+        def _block() -> None:
+            calls.append("tick")
+            tick_started.set()
+            assert release_tick.wait(timeout=1)
+
+        await asyncio.to_thread(_block)
 
     monkeypatch.setattr(wd, "_tick", _blocked_tick)
     monkeypatch.setattr(wd, "_TICK_DEADLINE_S", 0.01)
     progress = wd._TickProgress()
 
+    in_flight: asyncio.Task[None] | None = None
     try:
         with caplog.at_level(logging.ERROR, logger="services.watchdog.daemon"):
             assert await wd._run_tick_with_deadline("gateway", progress) is False
+            in_flight = progress.in_flight
+            assert await wd._run_tick_with_deadline("gateway", progress) is False
     finally:
         release_tick.set()
+        if in_flight is not None:
+            await in_flight
 
     assert tick_started.is_set()
+    assert calls == ["tick"]
     assert progress.last_completed_at is None
     assert any("tick exceeded 0.0s" in message for message in caplog.messages)
 
