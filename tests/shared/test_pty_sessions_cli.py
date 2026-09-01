@@ -726,7 +726,9 @@ def test_failed_allocation_cannot_publish_after_freeze_ack(
         assert allocation_freeze.resume(frozen.generation)
 
 
-def test_desired_state_session_families_rebuild_once_after_resume(sessions: Path) -> None:
+def test_desired_state_session_families_rebuild_once_after_resume(
+    sessions: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Page, schedule, and watcher reconcilers share this deepest backend.
 
     Their own suites pin desired-state decisions and this test pins the common
@@ -734,6 +736,9 @@ def test_desired_state_session_families_rebuild_once_after_resume(sessions: Path
     created exactly once after resume even when reconciliation retries.
     """
     home = sessions
+    # unit_home redirects in-process settings only. This backend crosses a real
+    # subprocess boundary, so pin the live child environment to the same home.
+    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     backend = PtySessionBackend()
     names = (
         "ava-agent-41-shell-2-page-dashboard",
@@ -749,10 +754,12 @@ def test_desired_state_session_families_rebuild_once_after_resume(sessions: Path
     finally:
         assert allocation_freeze.resume(frozen.generation)
 
-    started: dict[str, float | None] = {}
+    started: dict[str, float] = {}
     for name in names:
         assert backend.new_session(name, "", home, env={})
-        started[name] = backend.session_started_at(name)
+        started_at = backend.session_started_at(name)
+        assert started_at is not None
+        started[name] = started_at
     for name in names:
         assert backend.new_session(name, "", home, env={})
         assert backend.session_started_at(name) == started[name]
