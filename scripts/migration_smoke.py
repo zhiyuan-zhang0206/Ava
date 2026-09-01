@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 """Run scripts/test_migrations_apply.sh against a throwaway native Postgres.
 
-The migration smoke applies migrations/*.sql in order + exercises trigger paths
-on a fresh DB (catches migration bodies referencing wrong columns — see the
-script's header). It needs a real Postgres server; this wrapper starts an
-ephemeral native cluster (no Docker) via the shared `throwaway_postgres` helper.
+The migration smoke applies baseline-pending migrations in order + exercises
+trigger paths on a fresh DB (catches migration bodies referencing wrong columns
+— see the script's header). It needs a real Postgres server; this wrapper starts
+an ephemeral native cluster (no Docker) via the shared `throwaway_postgres`
+helper.
 """
 
 import os

@@ -103,13 +103,24 @@ BEGIN
 END $$;
 SQL
 
-echo "-> convergence: db/schema.sql alone vs schema.sql + all migrations (pg_dump --schema-only)"
+echo "-> convergence: db/schema.sql alone vs baseline-pending migrations (pg_dump --schema-only)"
 psql -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $FULL_DB"
 psql -d "$FULL_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql
 for f in migrations/*.sql; do
     case "$f" in
         *.down.sql) continue ;;
     esac
+    migration_name="${f##*/}"
+    migration_name="${migration_name%.sql}"
+    # A current baseline can fold a non-idempotent migration and stamp its name
+    # in schema_migrations. Match the runtime applier: fresh DBs skip that
+    # already-represented delta; existing DBs without the marker execute it.
+    if psql -d "$FULL_DB" -v ON_ERROR_STOP=1 -v migration_name="$migration_name" -Atq <<'SQL' | grep -qx 't'
+SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE name = :'migration_name');
+SQL
+    then
+        continue
+    fi
     psql -d "$FULL_DB" -v ON_ERROR_STOP=1 -q -f "$f"
 done
 
@@ -122,10 +133,10 @@ pg_dump -d "$FULL_DB" --schema-only -O -x > "$FULL_DUMP"
 sed -i '' '/^\\restrict /d; /^\\unrestrict /d' "$BASELINE_DUMP" "$FULL_DUMP" 2>/dev/null     || sed -i '/^\\restrict /d; /^\\unrestrict /d' "$BASELINE_DUMP" "$FULL_DUMP"
 if ! diff -u "$BASELINE_DUMP" "$FULL_DUMP"; then
     echo "FAIL: db/schema.sql is NOT the squashed net effect of the migrations —"
-    echo "the diff above is what the post-baseline migrations add/change vs the"
-    echo "baseline. A new migration must also reflect its change in db/schema.sql"
-    echo "(audit P1-1; a fresh baseline replays the deltas, so a lagging baseline"
-    echo "only stays green because every migration is idempotent)."
+    echo "the diff above is what the baseline-pending migrations add/change vs"
+    echo "the baseline. A new migration must also reflect its change in db/schema.sql"
+    echo "and mark its name in the baseline seed when that folded delta is"
+    echo "deliberately non-idempotent."
     rm -f "$BASELINE_DUMP" "$FULL_DUMP"
     exit 1
 fi

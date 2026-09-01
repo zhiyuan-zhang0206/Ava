@@ -2,10 +2,11 @@
 
 The session test DB (conftest's `ava_test_<...>`) is bootstrapped from
 `db/schema.sql`, which since the 2026-07-19 re-baseline creates a
-`schema_migrations(name, applied_at)` table and stamps the single baseline
-sentinel row (see the bottom of db/schema.sql). So every test here starts from
-the "baselined, no post-baseline delta" state; the autouse fixture rebuilds that
-state before/after each test (cutover tests swap the table to the legacy shape).
+`schema_migrations(name, applied_at)` table and stamps the baseline sentinel
+plus migration names already folded into that current schema (see the bottom of
+db/schema.sql). The autouse fixture instead seeds only the baseline sentinel,
+so each migration-runner test can model its own post-baseline applied set
+without production seed markers leaking into synthetic migration layouts.
 
 Coverage of the three cutover paths the design requires:
 - legacy `version INT` at exactly {1..81} -> converted to the baseline
@@ -61,6 +62,12 @@ _FORCE_FENCE_MIGRATION = (
     / "migrations"
     / "20260821T104519_add-force-terminate-inbound-fence.sql"
 )
+_LAST_CLAIM_LOOP_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260901T065353_add-last-claim-loop-at.sql"
+)
+_LAST_CLAIM_LOOP_MIGRATION_NAME = _LAST_CLAIM_LOOP_MIGRATION.stem
 
 # A syntactically-valid synthetic post-baseline migration name (far-future
 # timestamp so it never clashes with a real one).
@@ -262,7 +269,10 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(schema)  # type: ignore[arg-type]  # trusted multi-statement schema
             row = conn.execute("SELECT name FROM schema_migrations").fetchall()
-            assert row == [(_BASELINE_NAME,)]
+            assert set(row) == {
+                (_BASELINE_NAME,),
+                (_LAST_CLAIM_LOOP_MIGRATION_NAME,),
+            }
             presets = conn.execute("SELECT name FROM agent_presets").fetchall()
             assert {r[0] for r in presets} == {
                 "coder",
@@ -271,12 +281,13 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
                 "orchestrator",
                 "explorer",
             }
-        # apply on the baselined DB: the real post-baseline migrations replay
-        # cleanly on the fresh schema (fresh-replay), then a second apply is a
-        # no-op. This is what guards against a migration that fails on a fresh DB.
+        # Apply on the baselined DB: the folded migration marker makes the strict
+        # ALTER skip a fresh schema that already carries the column; all other
+        # post-baseline migrations replay cleanly, then a second apply is a no-op.
         with psycopg.connect(url) as conn:
             assert set(apply_pending_migrations(conn)) == required_migration_set() - {
-                _BASELINE_NAME
+                _BASELINE_NAME,
+                _LAST_CLAIM_LOOP_MIGRATION_NAME,
             }
         with psycopg.connect(url) as conn:
             assert apply_pending_migrations(conn) == []
@@ -288,6 +299,29 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
                 (name,),
             )
             cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+
+
+def test_last_claim_loop_migration_fails_on_unrecorded_drift(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An existing DB with the column but no applied marker is a loud drift."""
+    _set_table_to(db_conn, "set", [_BASELINE_NAME])
+    up = tmp_path / _LAST_CLAIM_LOOP_MIGRATION.name
+    down = tmp_path / _LAST_CLAIM_LOOP_MIGRATION.with_suffix(".down.sql").name
+    up.write_text(_LAST_CLAIM_LOOP_MIGRATION.read_text())
+    down.write_text(_LAST_CLAIM_LOOP_MIGRATION.with_suffix(".down.sql").read_text())
+    _init_repo(tmp_path)
+    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        with pytest.raises(MigrationFailed) as exc_info:
+            apply_pending_migrations(conn)
+        assert isinstance(exc_info.value.__cause__, psycopg.errors.DuplicateColumn)
+        row = conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE name = %s",
+            (_LAST_CLAIM_LOOP_MIGRATION_NAME,),
+        ).fetchone()
+        assert row is None
 
 
 def test_force_terminate_fence_migration_backfills_current_death_intent() -> None:
