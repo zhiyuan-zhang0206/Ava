@@ -79,6 +79,41 @@ def test_ensure_ava_home_dirs(home, tmp_path: Path):
     assert (ava_home / "logs" / ".metadata_never_index").is_file()
 
 
+def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(home, tmp_path: Path):
+    ava_home = tmp_path / "avahome"
+    targets = (
+        ava_home / "logs" / "daemon" / "current.log",
+        ava_home / "workspaces" / "7" / "download.txt",
+        ava_home / "memory" / ".git" / "config",
+    )
+    for target in targets:
+        target.parent.mkdir(parents=True)
+        target.write_text("private")
+        target.chmod(0o644)
+        for parent in (target.parent, target.parent.parent):
+            parent.chmod(0o755)
+
+    _converge._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
+
+    for target in targets:
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+        assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(target.parent.parent.stat().st_mode) == 0o700
+
+
+def test_ensure_ava_home_dirs_rejects_logs_symlink_before_writing_marker(home, tmp_path: Path):
+    ava_home = tmp_path / "avahome"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    ava_home.mkdir()
+    (ava_home / "logs").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match=r"logs.*symlink"):
+        _converge._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
+
+    assert not (outside / ".metadata_never_index").exists()
+
+
 def test_converge_host_runs_universal_and_skips_unit_state_when_role_none(home, tmp_path: Path):
     calls: list[str] = []
     steps = (

@@ -233,3 +233,102 @@ def test_failed_backup_retries_before_tomorrow(monkeypatch: pytest.MonkeyPatch) 
     assert sleeps == [daemon.BACKUP_RETRY_INTERVAL_S]
     assert state.running is False
     assert state.last_error == "temporary failure"
+
+
+@pytest.mark.asyncio
+async def test_due_local_restore_drill_runs_after_a_successful_dump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 30, 3, tzinfo=UTC)
+    calls: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_local_dump_restore_success", lambda: None)
+    monkeypatch.setattr(
+        daemon,
+        "local_dump_restore_due",
+        lambda current, *, last_success: current == now and last_success is None,
+    )
+    monkeypatch.setattr(daemon, "run_local_dump_restore", lambda: calls.append("restore"))
+    monkeypatch.setattr(
+        daemon,
+        "record_local_dump_restore_success",
+        lambda current: calls.append(current.isoformat()),
+    )
+
+    await daemon._run_due_local_dump_restore(now)
+
+    assert calls == ["restore", now.isoformat()]
+
+
+@pytest.mark.asyncio
+async def test_due_local_restore_drill_reports_failure_without_publishing_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 30, 3, tzinfo=UTC)
+    emitted: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(daemon, "load_local_dump_restore_success", lambda: None)
+    monkeypatch.setattr(daemon, "local_dump_restore_due", lambda *_args, **_kwargs: True)
+
+    def fail_restore() -> None:
+        raise RuntimeError("scratch restore failed")
+
+    monkeypatch.setattr(daemon, "run_local_dump_restore", fail_restore)
+    monkeypatch.setattr(
+        daemon,
+        "record_local_dump_restore_success",
+        lambda _now: pytest.fail("failed restore must not publish success"),
+    )
+    monkeypatch.setattr(
+        daemon.telemetry, "emit", lambda *args, **kwargs: emitted.append((*args, kwargs))
+    )
+
+    await daemon._run_due_local_dump_restore(now)
+
+    assert emitted == [
+        (
+            "telemetry",
+            "recovery_drill_failed",
+            {
+                "level": "error",
+                "attributes": {"drill": "logical_dump", "detail": "scratch restore failed"},
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_local_restore_marker_reports_failure_without_running_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 30, 3, tzinfo=UTC)
+    emitted: list[tuple[object, ...]] = []
+
+    def invalid_marker() -> None:
+        raise RuntimeError("logical restore drill success marker is invalid")
+
+    monkeypatch.setattr(daemon, "load_local_dump_restore_success", invalid_marker)
+    monkeypatch.setattr(
+        daemon,
+        "run_local_dump_restore",
+        lambda: pytest.fail("invalid marker must not run the restore"),
+    )
+    monkeypatch.setattr(
+        daemon.telemetry, "emit", lambda *args, **kwargs: emitted.append((*args, kwargs))
+    )
+
+    await daemon._run_due_local_dump_restore(now)
+
+    assert emitted == [
+        (
+            "telemetry",
+            "recovery_drill_failed",
+            {
+                "level": "error",
+                "attributes": {
+                    "drill": "logical_dump",
+                    "detail": "logical restore drill success marker is invalid",
+                },
+            },
+        )
+    ]

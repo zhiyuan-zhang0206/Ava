@@ -596,6 +596,31 @@ class WatchdogTick(TypedDict):
     last_tick_timestamp_seconds: float
 
 
+class PitrRemoteInventory(TypedDict):
+    """`pitr_remote_inventory` payload — retention scheduler snapshot.
+
+    The viewer-only inventory refresh emits the backend-scoped object and byte
+    footprint as absolute gauges. A remote retention delete path does not
+    exist here; the planner remains dry-run-only.
+    """
+
+    backend: str
+    object_count: int
+    bytes: int
+
+
+class RecoveryDrillFailed(TypedDict):
+    """`recovery_drill_failed` payload — scheduled logical/PITR proofs.
+
+    ``drill`` identifies the recovery path that needs intervention. ``detail``
+    is the bounded failure diagnostic retained in the event stream; it is not a
+    Prometheus measurement or alert grouping key.
+    """
+
+    drill: str
+    detail: str
+
+
 class TelemetryReadStale(TypedDict):
     """`telemetry_read_stale` payload — gateway/telemetry_staleness.py."""
 
@@ -1284,6 +1309,18 @@ EVENTS: dict[str, EventSpec] = {
         "watchdog completed one full healthcheck and reconcile round",
         payload=WatchdogTick,
         tier="noise",
+    ),
+    "pitr_remote_inventory": _telemetry(
+        "pitr_remote_inventory",
+        "PITR remote object inventory (backend-scoped absolute object and byte state)",
+        payload=PitrRemoteInventory,
+        tier="noise",
+    ),
+    "recovery_drill_failed": _telemetry(
+        "recovery_drill_failed",
+        "scheduled logical dump or PITR recovery proof failed",
+        payload=RecoveryDrillFailed,
+        tier="anomaly",
     ),
     "telemetry_read_stale": _telemetry(
         "telemetry_read_stale",

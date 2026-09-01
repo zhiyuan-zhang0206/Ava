@@ -15,6 +15,7 @@ import pytest
 
 import services.pitr.base_operation_runtime as restore_runtime
 import services.pitr.base_scheduler_daemon as daemon
+from services.pitr import retention_scheduler
 from services.pitr.activation_state import ActivationRecord, write_record
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
@@ -680,6 +681,61 @@ def test_retention_health_is_explicitly_dry_run_only(tmp_path: Path) -> None:
     assert retention["delete_enabled"] is False
     assert retention["eligible_objects"] == 2
     assert retention["eligible_bytes"] == 20
+
+
+def test_retention_refresh_emits_backend_inventory_gauges(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shared.config import settings
+
+    result = DryRunResult(tmp_path / "plan", "digest", False, 3, 2, 30, 20, 9, 90)
+    config = settings.physical_backup
+    monkeypatch.setattr(config, "pitr_restore_gcs_credentials_file", tmp_path / "viewer.json")
+    monkeypatch.setattr(config, "pitr_retained_weekly_chains", 2)
+    monkeypatch.setattr(config, "pitr_store_backend", "oss")
+    calls: list[tuple[str, str, dict[str, int | str]]] = []
+
+    class _StoreGroup:
+        @staticmethod
+        def retention_inventory_reader() -> object:
+            return object()
+
+    def get_store_group() -> _StoreGroup:
+        return _StoreGroup()
+
+    monkeypatch.setattr(retention_scheduler, "get_store_group", get_store_group)
+    monkeypatch.setattr(retention_scheduler, "write_dry_run_plan", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(retention_scheduler, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "shared.telemetry.emit",
+        lambda category, event_name, *, attributes: calls.append(
+            (category, event_name, attributes)
+        ),
+    )
+
+    assert retention_scheduler.refresh(config) == result
+    assert calls == [
+        (
+            "telemetry",
+            "pitr_remote_inventory",
+            {"backend": "oss", "object_count": 9, "bytes": 90},
+        )
+    ]
+
+
+def test_restore_proof_runs_once_after_the_monthly_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.general, "timezone", "UTC")
+    before_window = datetime(2026, 9, 1, 5, 59, tzinfo=UTC)
+    window = datetime(2026, 9, 1, 6, tzinfo=UTC)
+
+    assert not daemon.restore_proof_due(before_window, last_success=None)
+    assert daemon.restore_proof_due(window, last_success=None)
+    assert not daemon.restore_proof_due(window, last_success=window.timestamp())
+    assert daemon.restore_proof_due(
+        datetime(2026, 10, 1, 6, tzinfo=UTC), last_success=window.timestamp()
+    )
 
 
 def test_retention_health_never_exposes_stale_or_failed_eligibility(tmp_path: Path) -> None:
