@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-01.1",
+  "catalog_version": "2026-09-02.1",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -262,6 +262,29 @@
               "rates": {
                 "input": "10.0",
                 "cache_read": "1.0",
+                "output": "50.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-fable-5-1": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-09-02",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "10.0",
+                "cache_read": "0.25",
                 "output": "50.0"
               },
               "utc_daily_overrides": []
