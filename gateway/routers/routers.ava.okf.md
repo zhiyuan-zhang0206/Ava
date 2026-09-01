@@ -26,7 +26,7 @@ Gateway's 38 route modules, split by business domain under `gateway/routers/<dom
 ### Cluster & configuration
 - **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, rollout/update/stop control (admin contracts: [[gateway/routers/ops-surfaces.ava.okf.md]])
 - **bootstrap** (`/api/bootstrap`) — agent-runner registration handshake (returns cluster config)
-- **config** (`/api/config`) — runtime configuration read/write (PUT is merge-patch reducer, not full-replace)
+- **config** (`/api/config`) — runtime configuration read/write (PUT is merge-patch reducer, not full-replace); validates the full affected Settings candidate before persisting (400 invalid / 409 concurrent-write retry)
 - **settings** (`/api/settings`) — frontend user preference KV store (`user_settings` table)
 - **frontend_telemetry** (`POST /api/frontend-telemetry`) — user-modeling telemetry ingest: validates a batch of tracked frontend interactions (page/element/session_id/key/value, no free text) and emits one `frontend_interaction` event per accepted interaction into the unified stream (per-session rate-limit backstop)
 - **inventory** (`/api/inventory`) — cross-machine plugin + MCP enable/disable panel
