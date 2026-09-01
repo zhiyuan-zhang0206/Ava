@@ -28,18 +28,22 @@ with scram; unix-socket local trust (OS user is the trust root).
 
 ## Open debt
 
-1. **POST /api/auth/login has no rate limit** — user-classified as a bug, wants
-   it fixed. No owner yet.
-2. **`ava.ui` page servers bind `("", port)` (0.0.0.0) unauthenticated** —
+1. **`ava.ui` page servers bind `("", port)` (0.0.0.0) unauthenticated** —
    pure static content, no auth, reachable from LAN/private network (ALF has a
    rule for it). Fix direction pending user decision: bind loopback / route via
    the gateway reverse proxy / private-network-only.
-3. **World-readable `~/.ava` files** — `logs/`, `workspaces/` (710 dirs),
+2. **World-readable `~/.ava` files** — `logs/`, `workspaces/` (710 dirs),
    `memory/` are 755/644, containing health/financial data; `.env` (600) and
    `secrets/` (700) are correct.
 
 ## Resolved since the assessment
 
+- Login rate limiting resolved (2026-09-01): `POST /api/auth/login` uses the
+  per-IP `LoginRateLimiter` in [`shared/rate_limit.py`](../../shared/rate_limit.py);
+  [`gateway/routers/auth.py`](../../gateway/routers/auth.py) returns 429 with
+  `Retry-After` during lockout, and
+  [`tests/gateway/test_login_endpoint.py`](../../tests/gateway/test_login_endpoint.py)
+  pins the threshold, reset, expiry, and IP-isolation contract.
 - macOS ALF manifest drift is reconciled by `ava converge`: manifest globs cover
   the current inbound binaries, direct `socketfilterfw` mutation was empirically
   verified on the macmini running macOS 15.3.1, and elevation on other platforms
