@@ -916,6 +916,11 @@ EVENTS: dict[str, EventSpec] = {
         "while down are lost; the delivery watchdog re-publish covers them)",
         tier="noise",
     ),
+    "host_dispatcher_restart_required": _telemetry(
+        "host_dispatcher_restart_required",
+        "hosted dispatcher could not unwind a stale turn — exiting for supervisor recovery",
+        tier="anomaly",
+    ),
     "host_dispatcher_bad_channel": _telemetry(
         "host_dispatcher_bad_channel",
         "hosted dispatcher ignored a wake whose channel name carried no agent id",

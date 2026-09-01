@@ -121,7 +121,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # memory_search_stats (Task #2088's row-growth monitoring) raises it
     # back to 128; page_restore_notified (Task #2212 direction B — the
     # reconcile close path's re-serve notice) raises it to 129.
-    assert len(_TELEMETRY_KINDS) == 129
+    assert len(_TELEMETRY_KINDS) == 130
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

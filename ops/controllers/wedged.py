@@ -93,12 +93,13 @@ def _claim_wedged_candidates(
     so a concurrent pass cannot double-claim the same agent. Returns the claimed
     rows for the caller to re-check under lock and recover.
 
-    Selects ``running``/``idling`` rows on this host with a recorded pid, holding an
-    unconsumed ``pending`` inbound older than its status-specific threshold,
-    and either never checked or past the per-agent backoff. The idling branch
-    additionally requires the row to have remained idling for that short
-    threshold: a healthy long turn can leave an already-old inbound pending in
-    the small running→idling→first-claim window. The UPDATE's RETURNING is the atomic claim —
+    Selects ``running``/``idling`` rows on this host with a recorded pid. A
+    running row needs an unconsumed ``pending`` inbound older than the long
+    threshold. An idling row must have remained idling past the short threshold
+    and needs either a pending inbound past that threshold or a non-NULL stale
+    claim-loop marker. The idling-duration guard prevents an already-old inbound
+    from falsely reaping a healthy turn in its running→idling→first-claim window.
+    Both branches remain subject to the per-agent backoff. The UPDATE's RETURNING is the atomic claim —
     the caller processes every returned row through the OWNED/FOREIGN/GONE/
     UNREADABLE identity matrix under the agent row lock. Each wedged recovery
     inserts its own ``kind='resurrect'`` inbound, so the shared unconsumed-attempt
@@ -115,23 +116,37 @@ def _claim_wedged_candidates(
             "AND (SELECT count(*) FROM inbound_messages lc "
             "     WHERE lc.agent_id = agents_meta.id "
             "       AND lc.kind = 'resurrect' AND lc.status = 'pending') < %s "
-            "AND EXISTS ("
-            "  SELECT 1 FROM inbound_messages im "
-            "  WHERE im.agent_id = agents_meta.id "
-            "    AND im.status = 'pending' "
-            "    AND im.created_at < now() - make_interval(secs => CASE "
-            "        WHEN agents_meta.status = 'idling' THEN %s ELSE %s END)"
+            "AND ("
+            "  (agents_meta.status = 'running' AND EXISTS ("
+            "    SELECT 1 FROM inbound_messages im "
+            "    WHERE im.agent_id = agents_meta.id "
+            "      AND im.status = 'pending' "
+            "      AND im.created_at < now() - make_interval(secs => %s)"
+            "  )) "
+            "  OR (agents_meta.status = 'idling' "
+            "      AND agents_meta.status_changed_at "
+            "          < now() - make_interval(secs => %s) "
+            "      AND ("
+            "        EXISTS ("
+            "          SELECT 1 FROM inbound_messages im "
+            "          WHERE im.agent_id = agents_meta.id "
+            "            AND im.status = 'pending' "
+            "            AND im.created_at < now() - make_interval(secs => %s)"
+            "        ) "
+            "        OR (agents_meta.last_claim_loop_at IS NOT NULL "
+            "            AND agents_meta.last_claim_loop_at "
+            "                < now() - make_interval(secs => %s))"
+            "      )"
+            "  )"
             ") "
-            "AND (agents_meta.status = 'running' "
-            "     OR agents_meta.status_changed_at "
-            "        < now() - make_interval(secs => %s)) "
             "RETURNING id, pid, last_wedged_check_at",
             (
                 local_machine,
                 backoff_s,
                 settings.daemon.auto_resurrect_max_attempts,
-                idling_age_s,
                 running_age_s,
+                idling_age_s,
+                idling_age_s,
                 idling_age_s,
             ),
         )

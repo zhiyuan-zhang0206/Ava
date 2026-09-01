@@ -633,3 +633,152 @@ class TestDispatcherMessageHandling:
         disp, woken = self._dispatcher()
         disp._handle({"type": "pmessage", "channel": "ava:inbound:oops", "data": "x"})  # pyright: ignore[reportPrivateUsage]
         assert woken == []
+
+
+class _ScanScheduler:
+    """Small scheduler double for the dispatcher's recovery boundary."""
+
+    def __init__(self, active: set[int] | None = None, *, unwinds_on_cancel: bool = True) -> None:
+        self._active = active or set()
+        self._unwinds_on_cancel = unwinds_on_cancel
+        self.woken: list[int] = []
+        self.cancelled: list[int] = []
+
+    @property
+    def active_agents(self) -> frozenset[int]:
+        return frozenset(self._active)
+
+    def wake(self, agent_id: int) -> None:
+        self.woken.append(agent_id)
+
+    async def cancel_agent(self, agent_id: int) -> bool:
+        self.cancelled.append(agent_id)
+        if self._unwinds_on_cancel:
+            self._active.discard(agent_id)
+        return True
+
+
+class TestPendingScan:
+    async def test_scan_wakes_pending_inbound_even_when_pubsub_missed_it(self) -> None:
+        """The database scan is the hosted counterpart of process mode's
+        fallback SELECT: Redis notification loss may cost latency, never work."""
+        scheduler = _ScanScheduler()
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return [dispatcher.PendingInboundWake(agent_id=23, stale=False)]
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )  # pyright: ignore[reportArgumentType]
+
+        await disp.scan_once()
+
+        assert scheduler.woken == [23]
+        assert scheduler.cancelled == []
+
+    async def test_scan_cancels_a_stale_active_turn_before_rescheduling(self) -> None:
+        """A pending row old enough to prove no progress must not remain behind
+        a task that has silently stopped consuming scheduler wakes."""
+        scheduler = _ScanScheduler({23})
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )  # pyright: ignore[reportArgumentType]
+
+        await disp.scan_once()
+
+        assert scheduler.cancelled == [23]
+        assert scheduler.woken == [23]
+
+    async def test_scan_requires_a_host_restart_when_stale_turn_will_not_unwind(self) -> None:
+        """A task that survives bounded cancellation retains its one-turn slot.
+
+        Exiting is the only safe recovery: scheduling another task beside it
+        would let one agent claim and mutate its checkpoint concurrently.
+        """
+        scheduler = _ScanScheduler({23}, unwinds_on_cancel=False)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )  # pyright: ignore[reportArgumentType]
+
+        with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
+            await disp.scan_once()
+
+        assert scheduler.cancelled == [23]
+        assert scheduler.woken == []
+
+
+class TestSubscriptionRecovery:
+    async def test_half_open_subscription_read_is_bounded_and_reconnected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A peer may stay TCP-connected yet never answer a subscription read.
+
+        The dispatcher must close that connection and establish a fresh one,
+        rather than letting the hosted pending scan and all notifications stop
+        behind a hung `PSUBSCRIBE` read.
+        """
+
+        class _HalfOpenPubSub:
+            def __init__(self) -> None:
+                self.closed = False
+
+            async def psubscribe(self, _pattern: str) -> None:
+                return None
+
+            async def get_message(self, **_kwargs: object) -> None:
+                await asyncio.Event().wait()
+
+            async def aclose(self) -> None:
+                self.closed = True
+
+        class _Redis:
+            def __init__(self, pubsub: _HalfOpenPubSub) -> None:
+                self._pubsub = pubsub
+                self.closed = False
+
+            def pubsub(self, **_kwargs: object) -> _HalfOpenPubSub:
+                return self._pubsub
+
+            async def aclose(self) -> None:
+                self.closed = True
+
+        first_pubsub = _HalfOpenPubSub()
+        second_pubsub = _HalfOpenPubSub()
+        first = _Redis(first_pubsub)
+        second = _Redis(second_pubsub)
+        clients = iter([first, second])
+        second_opened = asyncio.Event()
+
+        def _open(_url: str) -> _Redis:
+            client = next(clients)
+            if client is second:
+                second_opened.set()
+            return client
+
+        from shared import redis_client
+
+        monkeypatch.setattr(redis_client, "open_async_redis", _open)
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            _ScanScheduler(),
+            subscription_read_timeout_s=0.01,
+            subscription_read_deadline_grace_s=0.01,
+            reconnect_delay_s=0.0,
+        )  # pyright: ignore[reportArgumentType]
+        task = asyncio.create_task(disp.run())
+        try:
+            await asyncio.wait_for(second_opened.wait(), timeout=1.0)
+            assert first_pubsub.closed, "the half-open pubsub handle must be discarded"
+            assert first.closed, "the paired Redis command client must be discarded"
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task

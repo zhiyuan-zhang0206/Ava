@@ -498,6 +498,23 @@ async def enter_idling_state(pool: AsyncConnectionPool, agent_id: int) -> None:
         )
 
 
+async def record_claim_loop_progress(pool: AsyncConnectionPool, agent_id: int) -> None:
+    """Stamp one process-mode idling claim-loop round.
+
+    The lease renewer is independent from the claim loop, so a live lease does
+    not prove the bounded Redis wait and its fallback SELECT are still making
+    progress. This marker is written immediately before every recheck round;
+    the wedged controller may then identify a silent idling loop even before an
+    inbound arrives. The status guard avoids reviving a marker after a
+    lifecycle operation has taken ownership of the row.
+    """
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE agents_meta SET last_claim_loop_at = now() WHERE id = %s AND status = 'idling'",
+            (agent_id,),
+        )
+
+
 async def wait_for_inbound(
     pool: AsyncConnectionPool,
     listener: RedisInboundListener,
@@ -533,6 +550,8 @@ async def wait_for_inbound(
     started = time.monotonic()
     rounds = 0
     while True:
+        if agent_id is not None:
+            await record_claim_loop_progress(pool, agent_id)
         if agent_id is not None and await _has_pending_inbound(pool, agent_id):
             if rounds:
                 # One line per actual wake-from-idle (the immediate-pending

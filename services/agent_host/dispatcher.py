@@ -49,7 +49,9 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol, cast
 
 from shared.log import logger
 from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
@@ -58,6 +60,18 @@ from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 # derived from `inbound_channel` (via the shared prefix) so the publish side
 # and this pattern cannot drift — the same reason `inbound_channel` exists.
 _INBOUND_PATTERN_SUFFIX = ":inbound:*"
+
+# The subscription supplies the fast path. This deadline supplies the recovery
+# boundary: a private-network connection can remain TCP-established while its
+# peer no longer answers reads, so an unbounded pub/sub iterator would silently
+# disable both delivery and the hosted pending scan forever. It intentionally
+# matches the process-mode fallback cadence.
+_DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S = 30.0
+# A per-call scheduler allowance, not a lifecycle grace with a cross-component
+# ordering. It gives `asyncio.wait_for` room to cancel a Redis read after the
+# client's own timeout before the connection is rebuilt.
+_DEFAULT_SUBSCRIPTION_READ_SLACK_S = 1.0
+_DEFAULT_RECONNECT_DELAY_S = 1.0
 
 # How long a cancelled turn gets to unwind before the host stops waiting and
 # reports it as uncancellable.
@@ -328,6 +342,42 @@ def agent_id_from_channel(channel: str) -> int | None:
     return int(tail)
 
 
+@dataclass(frozen=True)
+class PendingInboundWake:
+    """One local hosted agent with a pending inbound row.
+
+    ``stale`` means BOTH that one pending inbound has passed the running
+    turn grace and that the agent has made no completed-turn progress for
+    that grace (the same grace process mode's wedged controller applies to
+    running turns; an active turn may legitimately run up to the exec +
+    LLM-retry budget). A fresh pending row still receives the scan's normal
+    wake, but does not interrupt a legitimate turn that happens to be running.
+    """
+
+    agent_id: int
+    stale: bool
+
+
+class _WakeScheduler(Protocol):
+    """The dispatcher-facing subset of `TurnScheduler`."""
+
+    @property
+    def active_agents(self) -> frozenset[int]: ...
+
+    def wake(self, agent_id: int) -> None: ...
+
+    async def cancel_agent(self, agent_id: int) -> bool: ...
+
+
+class HostRestartRequiredError(RuntimeError):
+    """A hosted turn refused its bounded cancellation and owns the task slot.
+
+    Rescheduling beside it would violate one-turn-per-agent. Letting the daemon
+    exit hands recovery to its supervisor, which restarts from the durable
+    checkpoint instead.
+    """
+
+
 class InboundWakeDispatcher:
     """One `PSUBSCRIBE` over every local agent's inbound channel.
 
@@ -341,17 +391,33 @@ class InboundWakeDispatcher:
     coalesced one is correct.
     """
 
-    def __init__(self, redis_url: str, scheduler: TurnScheduler) -> None:
+    def __init__(
+        self,
+        redis_url: str,
+        scheduler: _WakeScheduler,
+        *,
+        pending_scan: Callable[[float], Awaitable[list[PendingInboundWake]]] | None = None,
+        stale_after_s: float | None = None,
+        scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
+        subscription_read_timeout_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
+        subscription_read_deadline_grace_s: float = _DEFAULT_SUBSCRIPTION_READ_SLACK_S,
+        reconnect_delay_s: float = _DEFAULT_RECONNECT_DELAY_S,
+    ) -> None:
         self._redis_url = redis_url
         self._scheduler = scheduler
+        self._pending_scan = pending_scan
+        self._stale_after_s = stale_after_s
+        self._scan_interval_s = scan_interval_s
+        self._subscription_read_timeout_s = subscription_read_timeout_s
+        self._subscription_read_deadline_grace_s = subscription_read_deadline_grace_s
+        self._reconnect_delay_s = reconnect_delay_s
 
     async def run(self) -> None:
         """Subscribe and feed wakes to the scheduler until cancelled.
 
-        Reconnects on failure with a short backoff: pub/sub is fire-and-forget,
-        so a wake published while this is down is lost — which is exactly what
-        the delivery watchdog's re-publish and the claim SELECT recheck already
-        cover for process mode, and they cover it here unchanged.
+        Reconnects on failure with a short backoff. The periodic database scan
+        catches a wake published while this is down; unlike process mode, a
+        hosted agent has no per-agent claim loop to provide that fallback.
         """
         from shared.cluster import redis_channel_prefix
         from shared.redis_client import open_async_redis, retry_auth_failures_async
@@ -359,27 +425,75 @@ class InboundWakeDispatcher:
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
         while True:
             redis = open_async_redis(self._redis_url)
+            pubsub = None
             try:
                 pubsub = redis.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
-                await retry_auth_failures_async(lambda pubsub=pubsub: pubsub.psubscribe(pattern))
+                await retry_auth_failures_async(
+                    lambda pubsub=pubsub: pubsub.psubscribe(pattern),
+                    attempt_timeout_s=self._subscription_read_timeout_s,
+                )
                 logger.info(
                     "hosted dispatcher subscribed to {pattern}",
                     event="host_dispatcher_subscribed",
                     pattern=pattern,
                 )
-                async for message in pubsub.listen():  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-                    self._handle(message)  # pyright: ignore[reportUnknownArgumentType]
+                next_scan_at = 0.0
+                while True:
+                    now = time.monotonic()
+                    if now >= next_scan_at:
+                        await self.scan_once()
+                        next_scan_at = time.monotonic() + self._scan_interval_s
+                    until_scan_s = max(0.001, next_scan_at - time.monotonic())
+                    read_timeout_s = min(self._subscription_read_timeout_s, until_scan_s)
+                    message = await asyncio.wait_for(
+                        cast(
+                            "Awaitable[dict[str, object] | None]",
+                            pubsub.get_message(timeout=read_timeout_s),  # pyright: ignore[reportUnknownMemberType]
+                        ),
+                        timeout=read_timeout_s + self._subscription_read_deadline_grace_s,
+                    )
+                    if message is not None:
+                        self._handle(message)  # pyright: ignore[reportUnknownArgumentType]
             except asyncio.CancelledError:
+                raise
+            except HostRestartRequiredError:
+                logger.error(
+                    "hosted stale turn would not cancel; exiting for supervisor recovery",
+                    event="host_dispatcher_restart_required",
+                )
                 raise
             except Exception:
                 logger.exception(
                     "hosted dispatcher subscription dropped — reconnecting",
                     event="host_dispatcher_reconnect",
                 )
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(self._reconnect_delay_s)
             finally:
+                if pubsub is not None:
+                    with contextlib.suppress(Exception):
+                        await pubsub.aclose()  # pyright: ignore[reportUnknownMemberType]
                 with contextlib.suppress(Exception):
                     await redis.aclose()
+
+    async def scan_once(self) -> None:
+        """Schedule every locally pending agent; cancel stale active turns first.
+
+        This is public only as the narrow test seam for the durable backstop.
+        Production calls it before each deadline-bounded subscription read.
+        """
+        if self._pending_scan is None:
+            return
+        if self._stale_after_s is None:
+            raise RuntimeError("hosted pending scan configured without stale_after_s")
+
+        for candidate in await self._pending_scan(self._stale_after_s):
+            if candidate.stale and candidate.agent_id in self._scheduler.active_agents:
+                await self._scheduler.cancel_agent(candidate.agent_id)
+                if candidate.agent_id in self._scheduler.active_agents:
+                    raise HostRestartRequiredError(
+                        f"hosted turn for agent {candidate.agent_id} did not unwind"
+                    )
+            self._scheduler.wake(candidate.agent_id)
 
     def _handle(self, message: dict[str, object]) -> None:
         """Turn one pub/sub message into a wake. Never raises: a bad frame must

@@ -271,7 +271,14 @@ async def run() -> None:
         )
         plugins_watch = asyncio.create_task(_watch_plugins_for_restart())
         try:
-            await InboundWakeDispatcher(settings.data_plane.redis_url, scheduler).run()
+            await InboundWakeDispatcher(
+                settings.data_plane.redis_url,
+                scheduler,
+                pending_scan=host.pending_inbound_wakes,
+                stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
+                scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
+                subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
+            ).run()
         finally:
             plugins_watch.cancel()
             with contextlib.suppress(asyncio.CancelledError):
