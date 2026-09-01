@@ -17,10 +17,12 @@ sink and the events table.
 
 import ast
 import logging
+import logging.config
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from uvicorn.config import LOGGING_CONFIG
 
 from shared.log import _install_stdlib_intercept
 
@@ -47,6 +49,24 @@ def test_uvicorn_error_traceback_reaches_loguru(loguru_records: list[dict]) -> N
         )
     assert any(
         r["level"].name == "ERROR" and "Exception in ASGI application" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+    )
+
+
+def test_intercept_restores_uvicorn_propagation_after_default_config(
+    loguru_records: list[dict],
+) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    """A prior default Uvicorn config must not bypass the root intercept.
+
+    Uvicorn's default ``LOGGING_CONFIG`` sets ``uvicorn.propagate = False``.
+    Its error child then emits only to Uvicorn's stderr handler unless the
+    intercept restores propagation after replacing the root handler.
+    """
+    logging.config.dictConfig(LOGGING_CONFIG)
+    _install_stdlib_intercept()
+    logging.getLogger("uvicorn.error").error("Uvicorn error after default config")
+    assert any(
+        r["level"].name == "ERROR" and "Uvicorn error after default config" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
     )
 
