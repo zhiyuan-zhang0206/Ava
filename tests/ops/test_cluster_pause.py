@@ -10,10 +10,13 @@ is about the posture pairing, not session management.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from ops import cluster_pause
 from ops.cluster_pause import unpause_local_cluster as _real_unpause_local_cluster
+from shared.host_deploy_state import HostDeployState
 
 
 @pytest.fixture
@@ -67,6 +70,45 @@ class _StubBackend:
         self, _name: str, graceful: bool = False, expected: bool = False
     ) -> tuple[bool, str]:
         return True, "stub"
+
+
+def _state(posture: str) -> HostDeployState:
+    now = datetime.now(UTC)
+    return HostDeployState(
+        machine="win",
+        posture=posture,
+        updated_at=now,
+        updater_lease_expires_at=None,
+    )
+
+
+def test_is_paused_judges_a_pre_read_state_without_another_db_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _unexpected_read() -> HostDeployState | None:
+        raise AssertionError("is_paused re-read host deploy state")
+
+    monkeypatch.setattr("shared.host_deploy_state.read", _unexpected_read)
+
+    assert cluster_pause.is_paused(_state("paused")) is True
+    assert cluster_pause.is_paused(_state("idle")) is False
+    assert cluster_pause.is_paused(None) is False
+
+
+def test_is_paused_without_an_argument_still_reads_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reads = 0
+
+    def _read() -> HostDeployState:
+        nonlocal reads
+        reads += 1
+        return _state("paused")
+
+    monkeypatch.setattr("shared.host_deploy_state.read", _read)
+
+    assert cluster_pause.is_paused() is True
+    assert reads == 1
 
 
 def test_pause_writes_paused_posture(posture: list[str]) -> None:

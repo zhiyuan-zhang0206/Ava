@@ -9,8 +9,11 @@ settle+* cases); this file locks the reading layer itself.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
+from ops import cluster_session
 from ops.controllers._deploy_state import (
     Defer,
     Guard,
@@ -23,6 +26,7 @@ from ops.controllers._deploy_state import (
     run_guards,
 )
 from shared.cluster_lock import DeployLease, settle_note
+from shared.host_deploy_state import HostDeployState
 
 _THIS_HOST = "laptop-host"
 
@@ -33,6 +37,16 @@ def _lease(*, note: str | None) -> DeployLease:
     executing under it."""
     return DeployLease(
         holder="gateway-host:pid65237", held_for_s=120.0, expires_in_s=900.0, note=note
+    )
+
+
+def _host_state(*, live: bool) -> HostDeployState:
+    now = datetime.now(UTC)
+    return HostDeployState(
+        machine=_THIS_HOST,
+        posture="converging",
+        updated_at=now,
+        updater_lease_expires_at=now + timedelta(minutes=5) if live else None,
     )
 
 
@@ -149,6 +163,41 @@ class TestReadOrchestration:
         monkeypatch.setattr("ops.cluster.current_orchestration", _boom)
         state = read_orchestration()
         assert state.kind == "unreadable" and state.name is None
+
+
+class TestCurrentOrchestrationPreRead:
+    """A status snapshot can reuse its two DB rows without changing the judgment."""
+
+    def test_executing_lease_answers_before_host_state(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _unexpected_read(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("current_orchestration performed another DB read")
+
+        monkeypatch.setattr("shared.cluster_lock.read_update_lease", _unexpected_read)
+        monkeypatch.setattr("shared.host_deploy_state.read", _unexpected_read)
+        lease = DeployLease(
+            holder="gateway:pid1",
+            held_for_s=10.0,
+            expires_in_s=100.0,
+            note=None,
+            kind="rollout",
+        )
+
+        assert cluster_session.current_orchestration(_host_state(live=True), lease) == "rollout"
+
+    def test_host_updater_is_the_fallback_when_the_lease_does_not_answer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _unexpected_read(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("current_orchestration performed another DB read")
+
+        monkeypatch.setattr("shared.cluster_lock.read_update_lease", _unexpected_read)
+        monkeypatch.setattr("shared.host_deploy_state.read", _unexpected_read)
+
+        assert cluster_session.current_orchestration(_host_state(live=True), None) == "update"
+        assert cluster_session.current_orchestration(_host_state(live=False), None) is None
+        assert cluster_session.current_orchestration(None, None) is None
 
 
 class TestGuardPipeline:

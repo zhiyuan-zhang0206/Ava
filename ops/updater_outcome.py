@@ -56,9 +56,11 @@ import re
 import time
 from itertools import pairwise
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, Field
 
+import shared.host_deploy_state
 import shared.paths
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S, STAGE_NO_PROGRESS_TIMEOUT_S
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
@@ -81,6 +83,7 @@ from shared.platform import IS_WINDOWS
 # The two cases are exhaustive at any value of this bound, which is why the marker
 # being missing is a sound reading rather than a fallback (`_anchor_to_this_run`).
 _TAIL_BYTES = 8192
+_UNSET = object()
 
 # The markers the updater already prints. Both travel on both platforms: the
 # decline sentence is echoed by the POSIX entry and by the cmd.exe ladder's rc=3
@@ -434,7 +437,9 @@ def _classify(tail: str, log: Path) -> UpdaterOutcome:
     )
 
 
-def last_updater_outcome() -> UpdaterOutcome | None:
+def last_updater_outcome(
+    state: shared.host_deploy_state.HostDeployState | None | object = _UNSET,
+) -> UpdaterOutcome | None:
     """This host's last updater outcome, or None when no log speaks for *this* update.
 
     None covers three readings that an operator must not be handed as an outcome: no
@@ -455,7 +460,6 @@ def last_updater_outcome() -> UpdaterOutcome | None:
     """
     from ops.cluster_session import _UPDATER_SERVICE
     from shared.cluster import session_name
-    from shared.host_deploy_state import POSTURE_IDLE, read
 
     try:
         # The pause anchor lives in the posture row (R1 old-signal sweep, PR5):
@@ -464,11 +468,14 @@ def last_updater_outcome() -> UpdaterOutcome | None:
         # in for the retired `cluster_paused` file's mtime. A host with no row
         # has never been paused; `paused_at` NULL means the window's anchor is
         # gone (idle, or an updater that ran without a pause).
-        state = read()
-        if state is None:
+        if state is _UNSET:
+            resolved_state = shared.host_deploy_state.read()
+        else:
+            resolved_state = cast(shared.host_deploy_state.HostDeployState | None, state)
+        if resolved_state is None:
             return None
-        if state.paused_at is not None:
-            paused_at = state.paused_at.timestamp()
+        if resolved_state.paused_at is not None:
+            paused_at = resolved_state.paused_at.timestamp()
         else:
             # Fresh-idle reading (Task #1820): a finished update clears the
             # pause anchor on resume, so an idle host has none — but the
@@ -479,7 +486,7 @@ def last_updater_outcome() -> UpdaterOutcome | None:
             # (shared/deploy_timing) is the longest an updater run can span, so
             # a log written within it belongs to THIS host's just-finished
             # update, and `_anchor_to_this_run` still slices it by run marker.
-            if state.posture != POSTURE_IDLE:
+            if resolved_state.posture != shared.host_deploy_state.POSTURE_IDLE:
                 return None
             paused_at = time.time() - NO_PROGRESS_TIMEOUT_S
         log = _newest_log(session_name(_UPDATER_SERVICE))

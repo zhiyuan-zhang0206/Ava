@@ -346,7 +346,7 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
                 transition.deploy_acquired_at,
             )
         case "status_probe":
-            return "completed", ops_cluster.cluster_status_op().model_dump(mode="json")
+            return "completed", ops_cluster.cluster_status_op(_db_pool).model_dump(mode="json")
         case "config_read":
             return "completed", ops_config.config_read_op().model_dump(mode="json")
         case "config_write":
