@@ -8,6 +8,7 @@ call `logger.info("[label] ...")` to log phase markers; the `[bracket]`
 prefix is kept as a convention for grep-friendliness.)
 """
 
+import time
 from datetime import datetime
 
 from langchain_core.messages import AIMessage
@@ -113,6 +114,23 @@ def log_llm_usage(
             model=model,
         )
         snapshot = {"unpriced": 1}
+    from shared.lm.billing import emit_billing_event, vendor_of_model
+
+    vendor = vendor_of_model(model)
+    if vendor is not None and "input_tokens" in um and "output_tokens" in um:
+        emit_billing_event(
+            vendor=vendor,
+            model=model,
+            tok_in=in_total,
+            tok_out=out_total,
+            tok_cached=cache_read,
+            cost_usd=priced.cost_usd if priced is not None else 0.0,
+            usage_kind="agent",
+            unpriced=priced is None,
+            start_time_ns=(time.time_ns() - int(latency_ms * 1_000_000))
+            if latency_ms is not None
+            else None,
+        )
     logger.info(
         "[llm usage] in={in_total} cached={cache_read}{cache_pct}  "
         "out={out_total} reason={reasoning}{reason_pct}",

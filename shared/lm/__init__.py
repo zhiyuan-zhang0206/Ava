@@ -14,6 +14,7 @@ plugins: `shared/lm/model-providers-as-plugins.md`.
 - `_plugin_providers` — the shared-layer loader importing every enabled
                 plugin's `provider.py` once per process.
 - `pricing`   — per-model rate table + `tally_tokens` / `cost_usd`.
+- `billing`   — one trace-safe `ava.billing.*` span per completed provider call.
 - `reasoning` — `to_canonical_reasoning`: fold each provider's reasoning block
                 (openai `reasoning`/summary, anthropic/gemini `thinking`) to the
                 one canonical `thinking` shape the renderers speak.

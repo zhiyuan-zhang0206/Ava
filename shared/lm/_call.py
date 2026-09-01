@@ -11,6 +11,7 @@ invoke) for the prompt-vs-material shape both entry points use.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -65,6 +66,7 @@ def invoke_text(
     retry_delay_seconds: float = 2.0,
     retry_max_delay_seconds: float = 30.0,
     provider: str | None = None,
+    model: str | None = None,
 ) -> str:
     """Invoke `llm` on a single HumanMessage of `content`, return flattened text.
 
@@ -105,16 +107,17 @@ def invoke_text(
     retry_attempts = max(0, retry_attempts)  # a negative budget must not empty the loop
     retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
     response: Any | None = None
+    start_time_ns: int | None = None
     for attempt in range(retry_attempts + 1):
         try:
             with _limiter_sync(provider):
+                started = time.monotonic()
                 response = llm.invoke([HumanMessage(content=content)])
+            start_time_ns = time.time_ns() - int((time.monotonic() - started) * 1_000_000_000)
             break
         except Exception as e:
             retryable = classify_error(e).error_class in (ErrorClass.TRANSIENT, ErrorClass.UNKNOWN)
             if attempt < retry_attempts and retryable:
-                import time
-
                 delay = min(retry_delay_seconds * (2**attempt), retry_max_delay_seconds)
                 retry_after = extract_retry_after(e)
                 if retry_after is not None:
@@ -132,6 +135,16 @@ def invoke_text(
     # path).
     if response is None:
         raise error_type(f"Model call ({desc}) failed: no attempt produced a response")
+    resolved_model = model or getattr(llm, "model_name", None)
+    if isinstance(resolved_model, str) and resolved_model:
+        from shared.lm.billing import emit_billing_from_message
+
+        emit_billing_from_message(
+            response,
+            model=resolved_model,
+            usage_kind="chat",
+            start_time_ns=start_time_ns,
+        )
     text = extract_text(response)
     if not text:
         raise error_type(
@@ -190,4 +203,5 @@ def answer_text(
         retry_delay_seconds=retry_delay_seconds,
         retry_max_delay_seconds=retry_max_delay_seconds,
         provider=provider_key_of_model(model),
+        model=model,
     )

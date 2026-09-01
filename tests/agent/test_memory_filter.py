@@ -86,6 +86,40 @@ async def test_keeps_only_what_the_model_picked(monkeypatch: pytest.MonkeyPatch)
     assert picked == ["b.md"]
 
 
+async def test_successful_filter_call_emits_chat_billing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A completed recall-filter judge call is routed to the shared ledger emitter.
+
+    The regression this catches is a successful background LLM call that is
+    invisible to the billing trace because only foreground paths emit usage.
+    """
+    from shared.config import settings
+
+    emitted: list[tuple[AIMessage, dict[str, object]]] = []
+    response = AIMessage(
+        content='["a.md"]',
+        usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+    )
+    model = MagicMock()
+    model.ainvoke = AsyncMock(return_value=response)
+
+    def _emit(message: AIMessage, **kwargs: object) -> None:
+        emitted.append((message, kwargs))
+
+    monkeypatch.setattr("shared.lm.factory.build_chat_model", lambda _name, **_kw: model)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.lm.billing.emit_billing_from_message", _emit)
+
+    assert await filter_candidates("q", _candidates("a.md")) == ["a.md"]
+    assert emitted == [
+        (
+            response,
+            {
+                "model": settings.agent.memory_recall_filter_model,
+                "usage_kind": "chat",
+            },
+        )
+    ]
+
+
 async def test_filter_model_is_built_with_reasoning_pinned_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

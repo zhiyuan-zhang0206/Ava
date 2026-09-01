@@ -44,7 +44,8 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 ### stop classification (`stop.py`)
 - `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; `_BY_PROVIDER` has four keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; unknown provider fail-fast.
 
-### billing (`pricing.py` + `pricing_catalog.json`) — [[pricing.ava.okf.md]]
+### billing (`billing.py` + `pricing.py` + `pricing_catalog.json`) — [[pricing.ava.okf.md]]
+- `billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema; core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites only provide the response and usage kind.
 - A reviewed, network-free JSON catalog with official-source provenance is the sole volatile price source; `quote()` returns the selected rates and the cost atomically. Selection rules, the CNY-conversion and tier-boundary traps, and region sensitivity live in the child node.
 
 ### context budget (`context_budget.py`)
