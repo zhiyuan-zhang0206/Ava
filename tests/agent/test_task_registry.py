@@ -808,10 +808,9 @@ def test_update_owner_notifies_new_owner_before_previous_owner_liveness_check(
         db_conn.commit()
         with (
             patch("ava.agents.send_system_note") as send_note,
-            patch(
-                "ava_builtins.plugins.ava_fleet.task_registry._is_terminated",
-                side_effect=RuntimeError,
-            ),
+            # Fleet-plugin tests can replace the sys.modules entry in this xdist
+            # worker. Patch the collection-time module that update() calls.
+            patch.object(task_registry, "_is_terminated", side_effect=RuntimeError),
             pytest.raises(RuntimeError),
         ):
             task_registry.update(task_id, owner=new_owner)  # pyright: ignore[reportUnknownArgumentType]
