@@ -26,6 +26,7 @@ tester.run("no-untranslated-ui-copy", rule, {
     { code: "<span>⚠</span>" },
     { code: '<Button aria-label={label} />' },
     { code: '<Button placeholder={`${agentId}`} />' },
+    { code: 'function Label({ title }) { return <span>{title.slice(0, 22) + "…"}</span>; }' },
     { code: 'import { useTranslations } from "next-intl"; const t = useTranslations("fleet"); const labels = [t("back")]; const button = <Button aria-label={labels[0]} />;' },
     { code: 'import { useTranslations } from "next-intl"; const t = useTranslations("fleet"); const props = { "aria-label": t("back") }; const button = <Button {...props} />;' },
     { code: 'import { useTranslations } from "next-intl"; const runTimelineT = useTranslations("runTimeline"); const button = <Button aria-label={runTimelineT("zoom")} />;' },
