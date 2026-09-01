@@ -73,16 +73,13 @@ from shared.db import InboundRow
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.redis_listener import RedisInboundListener
+from shared.timing import self_respawn_restarter_grace_s
 
 # wait_for_inbound default max block time — safety net for lost Redis pub/sub
 # wakes (connection jitter / Redis restart). On expiry, fallback SELECT once;
 # 30s is plenty for claim node.
 # env override: `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS`.
 DEFAULT_WAIT_TIMEOUT_S = settings.agent.db_notify_wait_timeout_seconds
-
-# The fallback gives the restarter three chances at its default one-second
-# cadence, while polling lets it yield as soon as the authoritative row moves.
-_SELF_RESPAWN_RESTARTER_GRACE_S = 3.0
 
 # A successful borrow that took at least this long still gets a WARNING — a
 # healthy pg hands a conn back in milliseconds, so seconds means it is under
@@ -628,7 +625,7 @@ async def renew_agent_lease(
 
 def _restarter_claimed_before_deadline(cur: psycopg.Cursor, agent_id: int) -> bool:
     """Poll the authoritative row until the restarter wins or its grace ends."""
-    deadline = time.monotonic() + _SELF_RESPAWN_RESTARTER_GRACE_S
+    deadline = time.monotonic() + self_respawn_restarter_grace_s()
     while True:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()

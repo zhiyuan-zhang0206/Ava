@@ -112,6 +112,34 @@ def test_reap_expired_web_sessions_removes_only_expired_rows(
         assert [row[0] for row in cur.fetchall()] == ["live-session"]
 
 
+def test_reap_expired_web_sessions_is_limited_to_one_pass_batch(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A large expired-session backlog is reclaimed across bounded transactions."""
+    monkeypatch.setattr(ttl_reaper, "_PASS_BATCH", 1)
+    with db_conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + %s::interval)",
+            [
+                ("older-expired-session", "-2 seconds"),
+                ("newer-expired-session", "-1 second"),
+                ("live-session", "1 hour"),
+            ],
+        )
+    db_conn.commit()
+
+    assert _reap_expired_web_sessions_blocking(reaper_pool) == 1
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM web_sessions WHERE id = ANY(%s) ORDER BY id",
+            (["older-expired-session", "newer-expired-session", "live-session"],),
+        )
+        assert [row[0] for row in cur.fetchall()] == ["live-session", "newer-expired-session"]
+
+
 def test_reap_expired_pages_terminalizes_only_past_deadlines(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool
 ) -> None:

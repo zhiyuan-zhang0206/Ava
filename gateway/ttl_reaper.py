@@ -171,7 +171,13 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
 def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
     """Delete browser sessions whose authoritative expiry has elapsed."""
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM web_sessions WHERE expires_at < now()")
+        cur.execute(
+            "WITH expired AS ("
+            "SELECT id FROM web_sessions WHERE expires_at < now() "
+            "ORDER BY expires_at, id LIMIT %s"
+            ") DELETE FROM web_sessions WHERE id IN (SELECT id FROM expired)",
+            (_PASS_BATCH,),
+        )
         return cur.rowcount
 
 

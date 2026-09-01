@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -53,7 +54,8 @@ def session_is_valid(
     if cached is not None:
         cache_deadline, expires_at = cached
         if checked_at < cache_deadline and checked_at < expires_at:
-            _session_cache.move_to_end(session_id)
+            with suppress(KeyError):
+                _session_cache.move_to_end(session_id)
             return True
         _session_cache.pop(session_id, None)
 
@@ -70,7 +72,8 @@ def session_is_valid(
         return False
 
     _session_cache[session_id] = (min(checked_at + _CACHE_TTL, expires_at), expires_at)
-    _session_cache.move_to_end(session_id)
+    with suppress(KeyError):
+        _session_cache.move_to_end(session_id)
     if len(_session_cache) > _SESSION_CACHE_MAX_ENTRIES:
         _session_cache.popitem(last=False)
     return True

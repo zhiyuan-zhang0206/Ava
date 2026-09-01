@@ -22,9 +22,9 @@ HTTP call.
   attaches an idempotency key to the envelope: the ops server dedupes by key
   and replays the first run's stored outcome instead of re-executing, so a
   lost response cannot duplicate the effect (see
-  `services/agent_ops/daemon.py:_dispatch_idempotent`). A payload business id
-  gives a target-scoped, canonical-payload key for cross-call dedup; an op
-  without one gets a fresh UUID unless its caller supplies a key.
+  `services/agent_ops/daemon.py:_dispatch_idempotent`). A spawn-launch payload
+  business id gives a target-scoped, canonical-payload key for cross-call
+  dedup; every other automatic key is fresh unless its caller supplies one.
 
 The agent-runner side that serves /ops lives in `services/agent_ops/daemon.py`.
 """
@@ -85,15 +85,13 @@ _RETRY_MAX_DELAY_S = 4.0
 # Op kinds whose effect is NOT repeatable — re-executing a lost op duplicates
 # the effect (a second launch for spawn-launch, a second ava-updater session for
 # cluster_update, a second terminate/restart inbound for lifecycle). These are
-# retried only under an idempotency key (auto-generated here unless the caller
-# supplies one); the ops server dedupes by key, so a retry replays the first
-# run's stored outcome instead of executing a second time.
+# retried only under an idempotency key generated once per dispatch call unless
+# the caller supplies one; retries replay the first stored outcome.
 _NON_IDEMPOTENT_KINDS = frozenset({"spawn-launch", "cluster_update", "lifecycle"})
-_BUSINESS_ID_KEYS = {
-    "spawn-launch": "agent_id",
-    "cluster_update": "target_sha",
-    "lifecycle": "trigger_inbound_id",
-}
+# A stable cross-dispatch key is only safe for an agent launch: a caller
+# repeating a lifecycle reconciliation or a failed update needs the runner to
+# execute again rather than replay a stale failed outcome.
+_BUSINESS_ID_KEYS = {"spawn-launch": "agent_id"}
 
 # Module-level alias so tests can pin the retry sleep without patching asyncio.
 _sleep = asyncio.sleep
