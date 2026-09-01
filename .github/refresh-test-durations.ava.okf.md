@@ -10,11 +10,13 @@ tags:
 
 # Nightly Test Duration Refresh
 
-`workflows/refresh-test-durations.yml` runs daily at 19:30 UTC and on manual
-dispatch. It re-measures the 12 backend and four e2e CI shard shapes on
-isolated runners. Each shard uses the matching CI pytest arguments, records a
-clean duration artifact, and retries independently when a timing-sensitive
-failure occurs.
+`workflows/refresh-test-durations.yml` runs daily at 19:30 UTC, with a 21:30
+UTC backstop, and on manual dispatch. A guard skips all measurements when any
+manual or scheduled refresh succeeded in the preceding five hours, so the
+backstop covers a missing or failed primary run without duplicate daily work.
+It re-measures the 12 backend and four e2e CI shard shapes on isolated runners.
+Each shard uses the matching CI pytest arguments, records a clean duration
+artifact, and retries independently when a timing-sensitive failure occurs.
 
 The merge job accepts only the complete 16-artifact set. It atomically updates
 `.test_durations` after dropping sub-0.2-second entries, so a failed or missing
