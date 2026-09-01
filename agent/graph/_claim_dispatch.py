@@ -300,6 +300,8 @@ async def _handle_heartbeat(
     shell sessions, which are outside rollout service teardown. Probing on
     each heartbeat (default 5 min) remains the catch-all for server death:
     dead serve_dir pages are re-served and dead no-dir pages are closed.
+    The periodic page_reconcile_loop (agent/startup.py) covers busy agents
+    whose heartbeats never arrive; this pass keeps the idle-agent cadence.
     Best-effort; reconcile never raises.
 
     With the heartbeat circuit breaker open (a permanent provider rejection

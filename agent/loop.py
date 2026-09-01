@@ -78,6 +78,7 @@ from .startup import (
     _repair_dangling_tool_use_at_startup,
     _wrap_saver_writes_with_loud_failure,
     _write_effective_config_to_restart_completed,
+    page_reconcile_loop,
     reconcile_open_pages,
 )
 
@@ -106,6 +107,7 @@ __all__ = [
     "_wrap_saver_writes_with_loud_failure",
     "_write_effective_config_to_restart_completed",
     "main",
+    "page_reconcile_loop",
     "run",
 ]
 
@@ -220,7 +222,8 @@ async def main(
             # Probe + restore open pages (re-serve dead serve_dir pages, close
             # dead no-dir pages) — see reconcile_open_pages. Best-effort,
             # before the graph goes live so links work the moment the agent
-            # wakes; heartbeat re-runs it while the agent lives.
+            # wakes; the heartbeat re-runs it and the periodic
+            # page_reconcile_loop below covers busy agents while it lives.
             await reconcile_open_pages(db_pool, agent_id, event_publisher=event_publisher)
             # R1 (Task #1021): rebuild watchers whose sessions a stop / rollout
             # reaped — the #1014 fix. A registry row with a missing session is
@@ -276,12 +279,24 @@ async def main(
             # included), cancelled in the finally below. The lease is what the
             # quiesce/reaper/frontend read as "this process is alive".
             lease_renewer = asyncio.create_task(_renew_agent_lease_loop(db_pool, agent_id))
+            # R1 (Task #2257): periodic page-liveness scan — the heartbeat
+            # check-in only reaches idle agents, so a busy agent's pages would
+            # otherwise go unreconciled for as long as its turn lasts (2026-09-01:
+            # a serve() page died at a platform update and stayed dead ~4h). This
+            # task scans every heartbeat interval (default 300 s) regardless of
+            # idle/busy; a pass is skipped when the heartbeat already scanned the
+            # same interval. Boot covered t=0; this covers everything after.
+            page_reconciler = asyncio.create_task(
+                page_reconcile_loop(db_pool, agent_id, event_publisher=event_publisher)
+            )
             try:
                 await _invoke_graph_with_lifecycle_logging(graph, agent_id, ctx)
             finally:
                 lease_renewer.cancel()
+                page_reconciler.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await lease_renewer
+                    await page_reconciler
     finally:
         # process_exit event emitted before closing DB handles — Postgres sink
         # uses its own pool (the event emitter's, shared.telemetry), independent of ours.

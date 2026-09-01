@@ -11,6 +11,8 @@ the probe itself against a real local HTTP server.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from langchain_core.messages import HumanMessage
 
@@ -94,6 +96,18 @@ def _fake_serve(served: list[tuple]) -> object:
         return object()
 
     return _f
+
+
+async def _run_loop_briefly(task: Any, seconds: float) -> None:
+    """Run the reconcile-loop task for `seconds`, then cancel it (the loop
+    never exits on its own) and swallow its CancelledError."""
+    import asyncio
+    import contextlib
+
+    await asyncio.sleep(seconds)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
 
 
 async def test_reserves_dead_server(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,3 +305,102 @@ async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) ->
     assert publisher is _Ctx.event_publisher
     # heartbeat system note still appended as usual (breaker closed)
     assert len(st.new_msgs) == 1
+
+
+async def test_page_reconcile_loop_runs_periodically(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task #2257: the heartbeat-independent periodic scan — a busy agent
+    (no heartbeats) still gets its pages reconciled on a fixed cadence."""
+    import asyncio
+
+    from agent.startup import page_reconcile_loop
+
+    calls: list[tuple[object, int, object | None]] = []
+
+    async def _fake_reconcile(pool, agent_id, *, event_publisher=None):
+        calls.append((pool, agent_id, event_publisher))  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr("agent.startup.reconcile_open_pages", _fake_reconcile)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.startup._last_reconcile_at", 0.0)  # pyright: ignore[reportUnknownArgumentType]
+
+    task = asyncio.create_task(
+        page_reconcile_loop(object(), 7, interval_s=0.01)  # type: ignore[arg-type]
+    )
+    await _run_loop_briefly(task, 0.06)
+
+    assert len(calls) >= 2
+    _pool, agent_id, publisher = calls[0]
+    assert agent_id == 7
+    assert publisher is None
+
+
+async def test_page_reconcile_loop_survives_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A raising pass must not kill the loop (N1, #1284 QA review) — like the
+    lease renewer, any failure is logged and the loop retries next interval
+    instead of silently losing the busy-agent backstop."""
+    import asyncio
+
+    from agent.startup import page_reconcile_loop
+
+    calls = 0
+
+    async def _boom(pool, agent_id, *, event_publisher=None):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("agent.startup.reconcile_open_pages", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.startup._last_reconcile_at", 0.0)  # pyright: ignore[reportUnknownArgumentType]
+
+    task = asyncio.create_task(
+        page_reconcile_loop(object(), 7, interval_s=0.01)  # type: ignore[arg-type]
+    )
+    # Cancels cleanly -> the task survived; had a pass killed it, the await
+    # would re-raise the exception instead.
+    await _run_loop_briefly(task, 0.05)
+    assert calls >= 2
+
+
+async def test_page_reconcile_loop_skips_recent_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pass another path (boot / heartbeat) already ran within the interval
+    suppresses the periodic pass — the combined cadence stays ~one scan per
+    interval, so an idle agent is not probed twice."""
+    import asyncio
+    import time
+
+    from agent.startup import page_reconcile_loop
+
+    monkeypatch.setattr(
+        "agent.startup.reconcile_open_pages",
+        lambda *a, **k: pytest.fail("periodic pass must be skipped"),  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
+    )
+    # A heartbeat pass just ran (monotonic now, plus margin so the sleep
+    # overshoot can never push the diff past the interval) — the loop must
+    # not scan.
+    monkeypatch.setattr("agent.startup._last_reconcile_at", time.monotonic() + 60)  # pyright: ignore[reportUnknownArgumentType]
+
+    task = asyncio.create_task(
+        page_reconcile_loop(object(), 7, interval_s=0.01)  # type: ignore[arg-type]
+    )
+    await _run_loop_briefly(task, 0.05)
+
+
+async def test_open_pages_query_filters_closed_and_expired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reconcile pass queries ONLY open rows — a closed/expired page can
+    never appear in a scan. Regression pin for the 2026-09-01 investigation:
+    the two page_restore_alive events for merge-orchestration-research were
+    logged while that row was still OPEN (closed_at set hours later) — the
+    fresh-rowset filter is what keeps closed rows out of every pass."""
+    served: list[tuple] = []
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool([_row("report", 18001, serve_dir="/data/report")])
+    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+
+    selects = [sql for sql, _p in pool.executed if sql.startswith("SELECT")]  # pyright: ignore[reportUnknownMemberType]
+    assert len(selects) == 1
+    assert "closed_at IS NULL" in selects[0]
+    assert "expired_at IS NULL" in selects[0]
+    assert served == []
