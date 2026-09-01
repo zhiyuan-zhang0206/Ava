@@ -940,6 +940,29 @@ def test_kill_graceful_then_force(sessions: Path) -> None:
     assert _wait(lambda: not _has(home, name))
 
 
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded.*:DeprecationWarning")
+def test_orphan_reaper_host_is_live_treats_zombie_as_dead() -> None:
+    """A reaped-but-unreaped (zombie) host must not count as a live survivor —
+    the force-reap flake: is_running() stays True for zombies, so the reaper
+    falsely reported "survived force-reap" after a kill (CI shard 4 flakes)."""
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(r)
+        os.write(w, b"x")
+        os._exit(0)
+    os.close(w)
+    try:
+        os.read(r, 1)  # child has started its exit; parent has not waited
+        proc = psutil.Process(pid)
+        assert _wait(lambda: proc.status() == psutil.STATUS_ZOMBIE)
+        assert proc.status() == psutil.STATUS_ZOMBIE
+        assert orphan_reaper._host_is_live(proc) is False
+    finally:
+        os.close(r)
+        os.waitpid(pid, 0)  # reap so the test never leaks a zombie
+
+
 def test_kill_is_idempotent_noop_on_absent(sessions: Path) -> None:
     home = sessions
     assert _kill(home, "ava-test-absent-1") == 0
