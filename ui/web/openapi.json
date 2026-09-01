@@ -7766,6 +7766,11 @@
             "type": "boolean",
             "title": "Force",
             "default": false
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
           }
         },
         "type": "object",

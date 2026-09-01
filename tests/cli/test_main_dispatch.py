@@ -101,6 +101,17 @@ def test_migrations_subcommand_removed() -> None:
         _main._build_parser().parse_args(["migrations", "apply"])
 
 
+def test_cluster_update_parser_rejects_dry_run_with_restart_only(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Prepare checks have no meaningful restart-only target, so reject the pair early."""
+    with pytest.raises(SystemExit) as exited:
+        _main._build_parser().parse_args(["cluster", "update", "--dry-run", "--restart-only"])
+
+    assert exited.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
 def test_logs_retention_parser_accepts_the_public_flags() -> None:
     """The local-log cleanup contract is reachable at `ava logs retention`."""
     args = _main._build_parser().parse_args(

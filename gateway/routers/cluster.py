@@ -276,9 +276,14 @@ async def post_cluster_rollout(
         )
     try:
         result = await asyncio.to_thread(
-            _ops.cluster_rollout_op, body.origin, mode=body.mode, force=body.force
+            _ops.cluster_rollout_op,
+            body.origin,
+            mode=body.mode,
+            force=body.force,
+            dry_run=body.dry_run,
         )
-        _publish_cluster_update_started("rollout", body.origin)
+        if not body.dry_run:
+            _publish_cluster_update_started("rollout", body.origin)
         return result
     except ClusterUpdateInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

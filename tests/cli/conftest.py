@@ -100,6 +100,28 @@ def local_unpauses(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
     return calls
 
 
+@pytest.fixture(autouse=True)
+def _prepare_checks_are_explicit_in_orchestration_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep legacy phase tests focused on their named commit-stage boundary.
+
+    Prepare has its own gate suite. Tests that exercise Phase A, the local leg,
+    readiness, or Phase B use synthetic commit IDs and therefore supply a local
+    prepared recovery tuple rather than constructing a real detached worktree.
+    A test of prepare itself overrides these seams explicitly.
+    """
+    from cli.commands import update as _up
+
+    monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 85.0)
+    monkeypatch.setattr(
+        _up,
+        "_snapshot_known_good",
+        lambda *, pull, target_sha: ("prepared-sha", set(), None) if pull else None,  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_up, "_finalize_commit_telemetry", lambda _telemetry: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_spawn_async_offsite_upload", lambda _repo, _dump: None)  # pyright: ignore[reportUnknownArgumentType]
+
+
 @pytest.fixture
 def _installed_machine_identity(unit_home: pathlib.Path) -> Iterator[None]:
     """Give this test's unit home a machine identity, as a real install has.

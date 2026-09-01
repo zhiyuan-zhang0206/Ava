@@ -42,7 +42,13 @@ def fanout(monkeypatch: pytest.MonkeyPatch):
         lambda name: cleared.append(name) or True,  # pyright: ignore[reportUnknownArgumentType]
     )  # type: ignore[func-returns-value]
 
-    def _drive(live: list, stopped: list, verdicts: dict[str, str]) -> tuple[list, list[str]]:
+    def _drive(
+        live: list,
+        stopped: list,
+        verdicts: dict[str, str],
+        *,
+        clear_stale_markers: bool = True,
+    ) -> tuple[list, list[str]]:
         monkeypatch.setattr(_ns, "_list_agent_runners", lambda: list(live))  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr("shared.machines.list_stopped_agent_runners", lambda: list(stopped))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -50,7 +56,7 @@ def fanout(monkeypatch: pytest.MonkeyPatch):
             return {name: verdicts[name] for name, _url in rows}
 
         monkeypatch.setattr(orch, "_probe_stopped_agent_runners", _fake_probe)  # pyright: ignore[reportUnknownArgumentType]
-        return orch._resolve_fanout_targets(), cleared
+        return orch._resolve_fanout_targets(clear_stale_markers=clear_stale_markers), cleared
 
     return _drive
 
@@ -74,6 +80,18 @@ def test_probe_live_host_is_pulled_back_into_the_rollout(fanout, capsys) -> None
     combined = out.out + out.err  # pyright: ignore[reportUnknownMemberType]
     assert "3 of 3 registered agent-runner(s)" in combined
     assert "laptop-host" in combined and "stale" in combined
+
+
+def test_prepare_reconciliation_does_not_clear_a_stale_marker(fanout) -> None:
+    """Prepare may protect the rollout set, but it cannot mutate cluster state."""
+    targets, cleared = fanout(
+        [],
+        [("laptop-host", "http://laptop-host:8600")],
+        {"laptop-host": "live"},
+        clear_stale_markers=False,
+    )
+    assert targets == [("laptop-host", "http://laptop-host:8600")]
+    assert cleared == []
 
 
 def test_genuinely_stopped_host_stays_out_but_is_named(fanout, capsys) -> None:

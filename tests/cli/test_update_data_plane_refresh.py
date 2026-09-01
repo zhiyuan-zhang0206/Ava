@@ -219,9 +219,6 @@ def test_interrupted_child_adopts_credentials_before_recovery(
 ) -> None:
     order: list[str] = []
 
-    def _snapshot(**_kwargs: object) -> tuple[str, set[str], Path | None]:
-        return "old-sha", set(), None
-
     def _checkout(*_args: object, **_kwargs: object) -> None:
         return None
 
@@ -231,7 +228,6 @@ def test_interrupted_child_adopts_credentials_before_recovery(
     def _stop(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(_local, "_snapshot_known_good", _snapshot)
     monkeypatch.setattr(_local, "_checkout_and_sync", _checkout)
     monkeypatch.setattr(_local, "_refresh_builtin_skills", _refresh)
     monkeypatch.setattr(_update, "_do_stop", _stop)
@@ -251,7 +247,12 @@ def test_interrupted_child_adopts_credentials_before_recovery(
     monkeypatch.setattr(_local, "_adopt_child_data_plane_credentials", _adopt)
     monkeypatch.setattr(_local, "_recover_rc", _recover)
 
-    assert _local._run_gateway_local_update(tmp_path, target_sha="new-sha", pull=True) == 1
+    assert (
+        _local._run_gateway_local_update(
+            tmp_path, target_sha="new-sha", pull_recover=("old-sha", set(), None), pull=True
+        )
+        == 1
+    )
     assert order == ["child", "adopt", "recover"]
 
 
@@ -261,10 +262,6 @@ def test_adoption_failure_attempts_recovery(
     """A replay failure is a rollout failure, not an escape around rollback."""
     order: list[str] = []
 
-    def _snapshot(**_kwargs: object) -> tuple[str, set[str], Path | None]:
-        return "old-sha", set(), None
-
-    monkeypatch.setattr(_local, "_snapshot_known_good", _snapshot)
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_refresh_builtin_skills", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_update, "_do_stop", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -281,7 +278,12 @@ def test_adoption_failure_attempts_recovery(
         lambda *_args, **_kwargs: order.append("recover") or 1,  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _local._run_gateway_local_update(tmp_path, target_sha="new-sha", pull=True) == 1
+    assert (
+        _local._run_gateway_local_update(
+            tmp_path, target_sha="new-sha", pull_recover=("old-sha", set(), None), pull=True
+        )
+        == 1
+    )
     assert order == ["child", "adopt", "recover"]
 
 
@@ -296,11 +298,6 @@ def test_postgres_password_mutation_cannot_block_adoption_failure_recovery(
     order: list[str] = []
     actual_pg_password = _OLD_PASSWORD
 
-    monkeypatch.setattr(
-        _local,
-        "_snapshot_known_good",
-        lambda **_kwargs: ("old-sha", set(), None),  # pyright: ignore[reportUnknownArgumentType]
-    )
     monkeypatch.setattr(
         _local,
         "_checkout_and_sync",
@@ -350,7 +347,12 @@ def test_postgres_password_mutation_cannot_block_adoption_failure_recovery(
     monkeypatch.setattr(_recover, "run_uv_sync", _sync)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_recover, "subprocess", _RecoverySubprocess)
 
-    assert _local._run_gateway_local_update(tmp_path, target_sha="new-sha", pull=True) == 1
+    assert (
+        _local._run_gateway_local_update(
+            tmp_path, target_sha="new-sha", pull_recover=("old-sha", set(), None), pull=True
+        )
+        == 1
+    )
     assert order == [
         "child:postgres-password-mutated",
         "adopt:redis-rewrite-failed",
@@ -444,7 +446,6 @@ def test_real_sigint_kills_child_and_replays_journal_before_recovery(tmp_path: P
             def execute_command(self, *_args): return None
         import redis
         redis.Redis = Redis
-        local._snapshot_known_good = lambda **_kwargs: ("old-sha", set(), None)
         local._checkout_and_sync = lambda *_args, **_kwargs: None
         local._refresh_builtin_skills = lambda _repo: None
         update._do_stop = lambda *_args, **_kwargs: None
@@ -457,7 +458,10 @@ def test_real_sigint_kills_child_and_replays_journal_before_recovery(tmp_path: P
             return 1
         local._recover_rc = recover
         rc = local._run_gateway_local_update(
-            Path({str(tmp_path)!r}), target_sha="new-sha", pull=True
+            Path({str(tmp_path)!r}),
+            target_sha="new-sha",
+            pull_recover=("old-sha", set(), None),
+            pull=True,
         )
         assert rc == 1
         """

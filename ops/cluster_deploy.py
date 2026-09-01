@@ -464,7 +464,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
 
 
 def spawn_rollout(
-    origin: str, *, force: bool = False, mode: str = "smooth"
+    origin: str, *, force: bool = False, mode: str = "smooth", dry_run: bool = False
 ) -> dict[str, str | bool]:
     """Trigger the whole-cluster rollout via a detached `ava-rollout` session.
 
@@ -555,7 +555,7 @@ def spawn_rollout(
         f"{{ echo {shlex.quote(f'[rollout] triggered by: {origin}')}; "
         f"cd {shlex.quote(str(repo))} && {venv_activation_prefix()}"
         f"ava cluster update --local --origin {shlex.quote(origin)} "
-        f"--mode {shlex.quote(mode)} "
+        f"--mode {shlex.quote(mode)}{' --dry-run' if dry_run else ''} "
         f"--rollout-log {shlex.quote(str(log_path))}; "
         f'echo "[session-exit] rc=$?"; }} '
         f"2>&1 | tee -a {shlex.quote(str(log_path))}"
@@ -565,6 +565,7 @@ def spawn_rollout(
     native_cmd = (
         f"echo [rollout] triggered by {_native_arg(origin)}"
         f" & ava cluster update --local --origin {_native_arg(origin)} --mode {_native_arg(mode)}"
+        f"{' --dry-run' if dry_run else ''}"
     )
     # Recovery holds the same short mutex from its no-owner proof through its
     # destructive clear/unpause. Recheck liveness inside it and keep it only
@@ -586,7 +587,8 @@ def spawn_rollout(
         raise ClusterUpdateInProgress(
             "another cluster lifecycle action is publishing or recovering an update; retry"
         ) from exc
-    _wait_for_ui_owner(session=rollout_sess, kind="rollout", origin=origin)
+    if not dry_run:
+        _wait_for_ui_owner(session=rollout_sess, kind="rollout", origin=origin)
     _log.info(
         "[cluster] spawned rollout session %s log=%s origin=%s",
         rollout_sess,

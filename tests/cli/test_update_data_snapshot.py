@@ -15,6 +15,7 @@ import pytest
 import shared.pg_tools
 from cli.commands import _cluster_rollback as _rollback
 from cli.commands import _update_git as _git
+from cli.commands import _update_local as _local
 from services import backup
 
 
@@ -71,6 +72,17 @@ def test_code_only_update_skips_pre_update_data_snapshot(
     assert _git.snapshot_pre_update_data("TARGETSHA") is None
 
 
+def test_gateway_local_update_requires_prepare_snapshot_for_pull() -> None:
+    """The stop/check-out leg cannot create a snapshot after maintenance begins."""
+    with pytest.raises(ValueError, match="pull_recover"):
+        _local._run_gateway_local_update(
+            Path("/unused"),
+            target_sha="TARGETSHA",
+            pull=True,
+            pull_recover=None,
+        )
+
+
 def test_migration_update_creates_and_verifies_pre_update_dump(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -86,9 +98,10 @@ def test_migration_update_creates_and_verifies_pre_update_dump(
     backup_calls: list[float] = []
     verified: list[Path] = []
 
-    def _run_backup(*, timeout_s: float, pre_update: bool) -> Path:
+    def _run_backup(*, timeout_s: float, pre_update: bool, publish: bool) -> Path:
         backup_calls.append(timeout_s)
         assert pre_update is True
+        assert publish is False
         return dump
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
@@ -219,9 +232,10 @@ def test_pre_update_data_snapshot_holds_backup_lock_through_verification(
         finally:
             events.append("lock-exit")
 
-    def _run_backup(*, timeout_s: float, pre_update: bool) -> Path:
+    def _run_backup(*, timeout_s: float, pre_update: bool, publish: bool) -> Path:
         assert timeout_s == _git._PRE_UPDATE_DUMP_TIMEOUT_S
         assert pre_update is True
+        assert publish is False
         events.append("dump")
         return dump
 

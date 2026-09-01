@@ -17,8 +17,8 @@ so the quiesce stage never overruns the budget (Task #2055).
 
 `_UPDATE_MODES` ('smooth' / 'force' / 'none') + the timeout derivation
 (`_quiesce_timeout_s`) live here with the loop they parameterize. The smooth
-window is the configured `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` (default 10s,
-user ruling 2026-08-26) — deliberately short, so a rollout unblocks the
+window is the configured `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` (default 5s,
+user ruling 2026-09-01) — deliberately short, so a rollout unblocks the
 cluster fast at the cost of cutting short any agent mid-execute_code; force
 is the same shape with an always-reap backstop.
 
@@ -34,10 +34,11 @@ import sys
 
 _QUIESCE_POLL_INTERVAL_S = 1.0
 # Smooth mode's window is the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS
-# (default 10s): agents idle or between turns exit at their turn boundary
+# (default 5s): agents idle or between turns exit at their turn boundary
 # inside it; anything still live at the deadline is force-reaped. The window
-# is deliberately short (user ruling 2026-08-26) — an agent mid-execute_code
-# is cut short and its work lost, accepted in exchange for a fast cluster
+# is deliberately short (user ruling 2026-09-01 freeze plan targets roughly
+# 8s for stop-the-world) — an agent mid-execute_code is cut short and its work
+# lost, accepted in exchange for the force-reap backstop and a fast cluster
 # unblock; there is no minimum. Force mode waits only long enough for idle
 # agents to drain (~10s) and reports whoever is still live — the caller's
 # force_reap stage then reaps them (force mode always reaps, matching the
@@ -54,7 +55,7 @@ _UPDATE_MODES = ("smooth", "force", "none")
 def _quiesce_timeout_s(mode: str) -> float:
     """Quiesce wait for an update mode (see _UPDATE_MODES).
 
-    'smooth' is the configured `update_quiesce_timeout_seconds` (default 10s,
+    'smooth' is the configured `update_quiesce_timeout_seconds` (default 5s,
     no minimum — any non-negative value is legal); 'force' is the fixed ~10s
     idle-drain window; 'none' waits 0 (no quiesce at all).
     """
