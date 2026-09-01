@@ -1,5 +1,5 @@
-// useTasks — the data source for the Task Graph.
-// Fetches the full /api/tasks (the agent_tasks table). Freshness is SSE-driven:
+// useTasks — the compact task-list data source for the Task Graph and inbox.
+// Fetches summary rows from /api/tasks. Freshness is SSE-driven:
 // task_created / task_updated events (published by the ava.tasks SDK write path)
 // are folded by the R4 fold owner (lib/fold/tasks — debounced invalidation),
 // with a slow 30s poll as the reconciliation fallback for changes that skip the
@@ -23,8 +23,7 @@ export interface TasksResult {
 }
 
 /** Last-activity window for the task list — the task graph's time filter.
- *  "all" (the default) keeps the unfiltered full registry; other consumers
- *  (the inbox queue) rely on that default. */
+ *  "all" (the default) keeps the unfiltered registry. */
 export type TaskWindow = "24h" | "7d" | "30d" | "all";
 
 export function useTasks(window: TaskWindow = "all"): TasksResult {
@@ -32,7 +31,7 @@ export function useTasks(window: TaskWindow = "all"): TasksResult {
     // The window joins the query key so switching it refetches; the SSE fold
     // owner invalidates ["tasks"] which prefix-matches every window.
     queryKey: ["tasks", window],
-    queryFn: () => api.getTasks({ window }),
+    queryFn: () => api.getTasks({ window, fields: "summary" }),
     retry: false,
     // Slow reconciliation poll beneath the SSE invalidation below — a CONSTANT
     // interval (not success-gated), so a failed poll keeps retrying and the board

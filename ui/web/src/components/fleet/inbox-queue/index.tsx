@@ -95,7 +95,7 @@ export const InboxQueue = memo(function InboxQueue({
   // Task-subtree grouping. `openItems` is the DISPLAY order (groups pull their
   // members together), so selection defaults, auto-advance and arrow cycling all
   // follow what the eye sees, not the raw sort.
-  const { tasks } = useTasks();
+  const { tasks } = useTasks("7d");
   const units = useMemo(
     () =>
       groupByTaskSubtree(

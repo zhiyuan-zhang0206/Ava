@@ -467,13 +467,12 @@ export const api = {
   },
 
   // --- tasks ---
-  // The task registry (GET /api/tasks) — the full agent_tasks table. Data
-  // source for the Task Graph (free force-directed view). `window`
-  // (7d | 30d | all) narrows the list by last activity on the backend;
-  // omitted = all (the gateway default).
-  getTasks: (opts?: { window?: string }): Promise<TaskListResponse> => {
+  // The task registry (GET /api/tasks). The UI requests the compact summary
+  // projection; `window` narrows the list by last activity on the backend.
+  getTasks: (opts?: { window?: string; fields?: "full" | "summary" }): Promise<TaskListResponse> => {
     const params = new URLSearchParams();
     if (opts?.window != null) params.set("window", opts.window);
+    if (opts?.fields != null) params.set("fields", opts.fields);
     const qs = params.toString();
     return f(`/api/tasks${qs ? `?${qs}` : ""}`).then(ok<TaskListResponse>);
   },

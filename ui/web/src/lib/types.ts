@@ -649,8 +649,9 @@ export interface TaskRow {
   readonly id: number;
   readonly parent_id: number | null;
   readonly title: string;
-  readonly description: string;
-  readonly results: string | null;
+  // GET /api/tasks summary projection — server-truncated to 300 characters.
+  readonly description_preview: string;
+  readonly results_preview: string | null;
   readonly status: TaskStatus;
   readonly priority: TaskPriority;
   readonly owner: number | null;

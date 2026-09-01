@@ -151,6 +151,7 @@ from gateway.schemas.status import (
 from gateway.schemas.tasks import (
     TaskListResponse,
     TaskRow,
+    TaskSummaryRow,
     TaskUpdateRequest,
 )
 from gateway.schemas.ui_contributions import (
@@ -287,6 +288,7 @@ __all__ = [
     "SystemStatus",
     "TaskListResponse",
     "TaskRow",
+    "TaskSummaryRow",
     "TaskUpdateRequest",
     "TokenUsageResponse",
     "TraceCheckpointMessagesResponse",

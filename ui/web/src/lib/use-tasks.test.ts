@@ -35,8 +35,8 @@ function task(id: number): TaskRow {
     id,
     parent_id: null,
     title: `Task ${id}`,
-    description: "",
-    results: null,
+    description_preview: "",
+    results_preview: null,
     status: "in_progress",
     priority: "P2",
     owner: null,
@@ -86,6 +86,15 @@ describe("useTasks", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.tasks).toEqual(RESPONSE.tasks);
     expect(result.current.error).toBe(false);
+  });
+
+  it("requests the compact task-list projection", async () => {
+    getTasks.mockResolvedValue(RESPONSE);
+
+    const { result } = renderHook(() => useTasks(), { wrapper: withClient(freshClient()) });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(getTasks).toHaveBeenCalledWith({ window: "all", fields: "summary" });
   });
 
   it("cold error: empty list, loading=false, error=true", async () => {

@@ -6012,7 +6012,7 @@
     "/api/tasks": {
       "get": {
         "summary": "Get Tasks",
-        "description": "Return the task registry, newest first.\n\n`window` (24h / 7d / 30d / all, default all) narrows the list by last activity\n(updated_at) on the backend, so the task graph's default 7-day view never\npulls the full registry. A windowed list still carries every kept task's\nout-of-window ancestors flagged ghost=True (see _windowed_tasks); without\na window the full table is returned unchanged.\n\nNo pagination — the task registry is bounded (tasks are created by agents;\nclosed tasks are kept). Order by created_at DESC so the newest tasks\nsurface first in the Task Graph view.",
+        "description": "Return the task registry, newest first.\n\n`fields=full` (the default) returns the compatibility projection. `fields=summary`\nreturns 300-character description/results previews without selecting the full\ntext columns. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity\n(updated_at) on the backend, so the task graph's default 24-hour view never\npulls the full registry. A windowed list still carries every kept task's\nout-of-window ancestors flagged ghost=True (see _windowed_tasks); without\na window the full table is returned unchanged.\n\nNo pagination — the task registry is bounded (tasks are created by agents;\nclosed tasks are kept). Order by created_at DESC so the newest tasks\nsurface first in the Task Graph view.",
         "operationId": "get_tasks_api_tasks_get",
         "parameters": [
           {
@@ -6024,6 +6024,20 @@
               "pattern": "^(24h|7d|30d|all)$",
               "default": "all",
               "title": "Window"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "full",
+                "summary"
+              ],
+              "type": "string",
+              "default": "full",
+              "title": "Fields"
             }
           }
         ],
@@ -13527,7 +13541,14 @@
         "properties": {
           "tasks": {
             "items": {
-              "$ref": "#/components/schemas/TaskRow"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TaskRow"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskSummaryRow"
+                }
+              ]
             },
             "type": "array",
             "title": "Tasks"
@@ -13538,7 +13559,7 @@
           "tasks"
         ],
         "title": "TaskListResponse",
-        "description": "GET /api/tasks response — the full task registry."
+        "description": "GET /api/tasks response — full rows or compact list summaries."
       },
       "TaskRow": {
         "properties": {
@@ -13665,7 +13686,134 @@
           "updated_at"
         ],
         "title": "TaskRow",
-        "description": "One row from the agent_tasks table."
+        "description": "One full task row for PATCH and GET /api/tasks?fields=full."
+      },
+      "TaskSummaryRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description_preview": {
+            "type": "string",
+            "title": "Description Preview"
+          },
+          "results_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results Preview"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "owner_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Label"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "remind_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remind Interval Seconds"
+          },
+          "last_reminded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reminded At"
+          },
+          "reminder_count": {
+            "type": "integer",
+            "title": "Reminder Count",
+            "default": 0
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "ghost": {
+            "type": "boolean",
+            "title": "Ghost",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "title",
+          "description_preview",
+          "results_preview",
+          "status",
+          "owner",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "priority"
+        ],
+        "title": "TaskSummaryRow",
+        "description": "One compact task-list row with text previews only."
       },
       "TaskUpdateRequest": {
         "properties": {

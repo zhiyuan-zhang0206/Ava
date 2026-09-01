@@ -68,7 +68,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 ## Three deeper topics
 
 - [[frontend-state.ava.okf.md|State management]] — three mechanisms division of labor + per-thread timeline cache + sticky controller
-- [[frontend-data-flow.ava.okf.md|Data flow]] — dual SSE Provider architecture + hook directory
+- [[ui/web/src/frontend-data-flow/frontend-data-flow.ava.okf.md|Data flow]] — dual SSE Provider architecture + hook directory
 - [[frontend-components.ava.okf.md|Components]] — chat view / Fleet view / settings page components
 
 ## Entry points

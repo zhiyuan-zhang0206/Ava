@@ -13,7 +13,7 @@ from shared.priority import Priority
 
 
 class TaskRow(BaseModel):
-    """One row from the agent_tasks table."""
+    """One full task row for PATCH and GET /api/tasks?fields=full."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -35,12 +35,35 @@ class TaskRow(BaseModel):
     ghost: bool = False  # out-of-window ancestor of a kept task (GET /api/tasks with a window) — delivered for tree connectivity and rendered dimmed by the graph
 
 
-class TaskListResponse(BaseModel):
-    """GET /api/tasks response — the full task registry."""
+class TaskSummaryRow(BaseModel):
+    """One compact task-list row with text previews only."""
 
     model_config = ConfigDict(frozen=True)
 
-    tasks: list[TaskRow]
+    id: int
+    parent_id: int | None
+    title: str
+    description_preview: str
+    results_preview: str | None
+    status: str
+    owner: int | None
+    owner_label: str | None = None
+    created_by: str
+    created_at: str  # ISO-8601
+    updated_at: str  # ISO-8601
+    remind_interval_seconds: int | None = None
+    last_reminded_at: str | None = None  # ISO-8601
+    reminder_count: int = 0
+    priority: Priority  # P0 (highest) .. P3 (lowest); the board's within-column sort key
+    ghost: bool = False  # out-of-window ancestor of a kept task (GET /api/tasks with a window) — delivered for tree connectivity and rendered dimmed by the graph
+
+
+class TaskListResponse(BaseModel):
+    """GET /api/tasks response — full rows or compact list summaries."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tasks: list[TaskRow | TaskSummaryRow]
 
 
 class TaskUpdateRequest(BaseModel):
