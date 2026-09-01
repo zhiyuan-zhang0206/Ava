@@ -24,7 +24,7 @@ from shared.rollout_telemetry import RolloutTelemetry, record_bytes, stage
 
 _BASELINE_FILE = "update-baseline.json"
 _BASELINE_WINDOW = 10
-_CONSERVATIVE_FIRST_ESTIMATE_S = 110.0
+_NO_BASELINE_MARGIN_S = 25.0
 _DRY_RUN_GIT_TIMEOUT_S = 30.0
 _DRY_RUN_IMPORT_TIMEOUT_S = 30.0
 _DRY_RUN_UV_SYNC_TIMEOUT_S = 180.0
@@ -113,7 +113,13 @@ def estimate_maintenance_window(*, persist_seed: bool = True) -> float:
     breakdown = {name: _p95([float(value) for value in stages[name]]) for name in _WINDOW_STAGES}
     estimate = sum(breakdown.values())
     n = cast(int, baseline["n"])
-    return _CONSERVATIVE_FIRST_ESTIMATE_S if n == 0 else estimate
+    return estimate + _NO_BASELINE_MARGIN_S if n == 0 else estimate
+
+
+def maintenance_window_estimate_note(*, persist_seed: bool = True) -> str | None:
+    """Explain the conservative margin when no completed commit has been observed yet."""
+    baseline = _load_maintenance_baseline(persist_seed=persist_seed)
+    return "no baseline — seeded + 25s margin" if cast(int, baseline["n"]) == 0 else None
 
 
 def append_maintenance_baseline(stages: Mapping[str, float]) -> None:
@@ -194,6 +200,17 @@ def _staging_worktree(
         raise RuntimeError(f"dry-run staging directory already exists: {staging_dir}")
     staging_dir.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
+        prune = run_bounded(
+            ["git", "worktree", "prune"],
+            cwd=repo,
+            env=git_env(),
+            capture_output=True,
+            text=True,
+            timeout=_DRY_RUN_GIT_TIMEOUT_S,
+        )
+        if prune.returncode != 0:
+            detail = (prune.stderr or "git worktree prune failed").strip()
+            raise RuntimeError(f"could not prune stale target staging worktrees: {detail}")
         result = run_bounded(
             ["git", "worktree", "add", "--detach", str(staging_dir), target_sha],
             cwd=repo,
@@ -297,7 +314,11 @@ print(json.dumps(modules))
 
 
 def _import_candidate_modules(staging: Path) -> list[str]:
-    """Import every target daemon module in its own bounded fresh interpreter."""
+    """Import every `-m` target daemon module in a bounded fresh interpreter.
+
+    Script-form daemon commands are deliberately not imported: their process
+    entrypoints are exercised by the target's real startup path instead.
+    """
     try:
         modules = _candidate_daemon_modules(staging)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:

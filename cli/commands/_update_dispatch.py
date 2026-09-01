@@ -216,6 +216,11 @@ def _post_cluster_rollout(*, origin: str | None, mode: str, force: bool, dry_run
         return 1
     body = resp.json()
     print(f"  ✓ dispatched: session={body.get('session')} log={body.get('log')}")
+    if dry_run:
+        print(
+            "  dry-run dispatched — PASS/FAIL see rollout log (`→ prepare dry-run: PASS|FAIL` line)."
+        )
+        return 0
     print("  poll `ava cluster status` for the cluster to return.")
     return 0
 

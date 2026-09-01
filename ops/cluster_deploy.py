@@ -587,7 +587,8 @@ def spawn_rollout(
         raise ClusterUpdateInProgress(
             "another cluster lifecycle action is publishing or recovering an update; retry"
         ) from exc
-    _wait_for_ui_owner(session=rollout_sess, kind="rollout", origin=origin)
+    if not dry_run:
+        _wait_for_ui_owner(session=rollout_sess, kind="rollout", origin=origin)
     _log.info(
         "[cluster] spawned rollout session %s log=%s origin=%s",
         rollout_sess,

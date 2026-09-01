@@ -7,7 +7,9 @@ stop-the-world commit window. Prepare resolves the pinned target, fetches
 eligible runners, captures the gateway recovery tuple and verified local dump,
 checks runner reachability, builds a detached target worktree, warms its uv
 environment, constructs target Settings from the current environment image,
-and imports the daemon entry modules selected by the target capability roster.
+and imports the `-m` daemon entry modules selected by the target capability
+roster. Script-form daemon commands are intentionally left to the target's
+real startup path rather than treated as import candidates.
 
 The local gateway leg receives the prepared recovery tuple and never recreates
 it after services are stopped. This keeps the recovery anchor available while
@@ -23,7 +25,9 @@ The maintenance estimate is the p95 of the ten most recent values for exactly
 `stop_the_world`, `local_leg`, `readiness`, and `phase_b`, stored in
 `$AVA_HOME/update-baseline.json`. A missing baseline records the planned stage
 targets but returns a conservative 110-second first estimate until a real
-rollout contributes measured data. Snapshot and remote publication remain
+rollout contributes measured data: the four seeded stage targets are summed and
+a 25-second margin is added, reported as `no baseline — seeded + 25s margin`.
+Snapshot and remote publication remain
 outside these commit-stage measurements.
 
 Pre-update database backups remain local and verified during prepare. Their
@@ -43,3 +47,13 @@ the outage risk.
 The 2026-09-01 user ruling sets smooth-mode quiesce to five seconds and keeps
 force mode at approximately ten seconds. With the other measured commit stages,
 the target stop-the-world interval is approximately eight seconds.
+
+## Recovery semantics and data-loss surface
+
+Rollback returns the gateway to the prepare snapshot point. Agent writes made
+after that snapshot and before stop-the-world — including writes during target
+checks and staging synchronization — are therefore not present after local
+artifact recovery. The deeper recovery path remains PITR WAL replay (the
+2026-08-27 drill was green) plus nightly backups. The verified local artifact
+can be re-published manually when the detached publication cannot finish:
+`python -m services.backup --publish-offsite <artifact>`.

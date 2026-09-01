@@ -31,6 +31,7 @@ from cli.commands._update_dryrun import (
     dry_run_checks,
     estimate_maintenance_window,
     maintenance_window_breakdown,
+    maintenance_window_estimate_note,
 )
 from cli.commands._update_dryrun import (
     finalize_commit_telemetry as _finalize_commit_telemetry,
@@ -67,6 +68,9 @@ from cli.commands._update_fanout import (
 )
 from cli.commands._update_fanout import (
     _print_fan_out_results as _print_fan_out_results,
+)
+from cli.commands._update_finalize import (
+    finalize_orchestration as _finalize_orchestration,
 )
 from cli.commands._update_git import (
     GitPullFailed as GitPullFailed,
@@ -121,6 +125,9 @@ from cli.commands._update_local import (
 )
 from cli.commands._update_orchestration import (
     _classify_rollout as _classify_rollout,
+)
+from cli.commands._update_orchestration import (
+    _clear_stale_stop_marker as _clear_stale_stop_marker,
 )
 from cli.commands._update_orchestration import (
     _persist_cluster_pin,
@@ -199,6 +206,15 @@ from cli.commands._update_preflight import (
 from cli.commands._update_preflight import (
     _rollout_preflight,
     _run_preflight_fetch,
+)
+from cli.commands._update_prepare import (
+    build_prepare_gate as _build_prepare_gate,
+)
+from cli.commands._update_prepare import (
+    print_dry_run_verdict as _print_dry_run_verdict,
+)
+from cli.commands._update_prepare import (
+    refuse_normal_prepare as _refuse_normal_prepare,
 )
 from cli.commands._update_quiesce import (
     _force_reap_local_agents as _force_reap_local_agents,
@@ -554,46 +570,54 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     runner_urls: dict[str, str | None] = dict(agent_runners)
     hosts_to_resume: list[tuple[str, str | None]] = list(agent_runners)
 
-    prepared = _prepare_commit(
-        repo,
-        target_sha,
-        pull=not restart_only and not dry_run,
-        snapshotter=_snapshot_known_good,
-        check_runner=dry_run_checks,
-        estimate_runner=(
-            (lambda: estimate_maintenance_window(persist_seed=False))
-            if dry_run
-            else estimate_maintenance_window
-        ),
-    )
-    breakdown = maintenance_window_breakdown(persist_seed=not dry_run)
-    breakdown_line = ", ".join(f"{name}={duration:.1f}s" for name, duration in breakdown.items())
     if dry_run:
-        verdict = "PASS" if not prepared.failures and prepared.estimate_s < 120.0 else "FAIL"
-        print(
-            f"\n→ prepare dry-run: {verdict} (estimate {prepared.estimate_s:.1f}s; {breakdown_line})"
+        gate = _build_prepare_gate(
+            _prepare_commit,
+            repo,
+            target_sha,
+            pull=False,
+            snapshotter=_snapshot_known_good,
+            check_runner=dry_run_checks,
+            estimate_runner=lambda: estimate_maintenance_window(persist_seed=False),
+            breakdown_runner=maintenance_window_breakdown,
+            note_runner=maintenance_window_estimate_note,
+            persist_seed=False,
         )
-        for failure in prepared.failures:
-            print(f"  ✗ {failure}")
+        rc = _print_dry_run_verdict(gate)
         telemetry.print_summary()
-        return 0 if verdict == "PASS" else 1
-    if prepared.failures:
-        print("\n✗ prepare checks failed; refusing maintenance:", file=sys.stderr)
-        for failure in prepared.failures:
-            print(f"  · {failure}", file=sys.stderr)
-        telemetry.print_summary()
-        return 1
-    if prepared.estimate_s >= 120.0:
-        print(
-            f"\n✗ estimated maintenance window {prepared.estimate_s:.1f}s is at least 120.0s; "
-            f"refusing commit before Phase A ({breakdown_line})",
-            file=sys.stderr,
-        )
-        telemetry.print_summary()
-        return 1
-    pull_recover = prepared.pull_recover
+        return rc
 
+    pull_recover: tuple[str, set[str], Path | None] | None = None
     try:
+        try:
+            gate = _build_prepare_gate(
+                _prepare_commit,
+                repo,
+                target_sha,
+                pull=not restart_only,
+                snapshotter=_snapshot_known_good,
+                check_runner=dry_run_checks,
+                estimate_runner=estimate_maintenance_window,
+                breakdown_runner=maintenance_window_breakdown,
+                note_runner=maintenance_window_estimate_note,
+                persist_seed=True,
+            )
+        except Exception as exc:
+            print(
+                f"\n✗ prepare failed before maintenance ({type(exc).__name__}): {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        if (refusal := _refuse_normal_prepare(gate)) is not None:
+            return refusal
+        pull_recover = gate.prepared.pull_recover
+
+        # The prepare reconciliation is deliberately read-only. Its vetted
+        # candidates become mutable only at this commit boundary, immediately
+        # before the stop-the-world operation consumes the same set.
+        for name, _url in agent_runners:
+            _clear_stale_stop_marker(name)
+
         # 1-1c) pause restarters (local + remote) + quiesce all agents. None = a
         #       Phase-A 5xx; abort with nothing migrated (the finally resumes).
         with _stage_telemetry("stop_the_world"):
@@ -737,64 +761,22 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             outcome, rc = RolloutOutcome.INCOMPLETE, 1
         return rc
     finally:
-        from ops.cluster import unpause_local_cluster
-
-        # The local leg ran (or failed) above and may have rotated data-plane
-        # credentials on disk; this process's in-memory Settings still holds
-        # the pre-leg values. Refresh before the compensating writes so the
-        # unpause and the update-lock release never die on SASL auth —
-        # 2026-08-25: both failed that way, leaving every host paused and the
-        # update lock held past the rollout.
-        refresh_data_plane_settings()
-
-        # Always unpause the local host — ava start clears the flag
-        # on the success path (idempotent no-op), but if the local update
-        # failed or an unexpected exception escaped, the finally ensures the
-        # flag is removed and the restarter is respawned.
-        unpause_local_cluster()
-        # Generation-scoped successful-finalize of the local pause-owner
-        # journal: on a co-located gateway,agent-runner box Phase A's own
-        # cluster/stop op journaled the exact generation, and the bare unpause
-        # above would leave it `paused` forever (2026-08-26 residue). Never
-        # raises — it runs in a `finally` that may already be unwinding.
-        from ops.cluster_pause import finalize_pause_owner_journal
-
-        finalize_pause_owner_journal()
-        # Best-effort resume of every still-paused remote, then — on an abnormal
-        # exit — a residual-state + manual-recovery summary. `finalize_rollout`
-        # never raises: it runs in a `finally` that may already be unwinding an
-        # exception, so a raise here would mask it (the 2026-07-20 incident, where
-        # the compensating resume's own Postgres read raised and buried the root
-        # cause under a second traceback).
-        finalize_rollout(
-            hosts_to_resume,
-            _ns._fan_out,
-            _PHASE_A_TIMEOUT_S,
+        _finalize_orchestration(
+            hosts_to_resume=hosts_to_resume,
+            fan_out=_ns._fan_out,
+            phase_a_timeout_s=_PHASE_A_TIMEOUT_S,
             outcome=outcome,
             deploy_capability=deploy_capability,
             pin_advanced=pin_advanced,
             failing_step=failing_step,
             recovered=recovered,
             local_launch_failures=local_launch_failures,
+            telemetry=telemetry,
+            refresh_settings=refresh_data_plane_settings,
+            finalize_rollout_runner=finalize_rollout,
+            finalize_commit_telemetry=_finalize_commit_telemetry,
+            spawn_offsite_upload=_spawn_async_offsite_upload,
+            repo=repo,
+            pull_recover=pull_recover,
+            skipped=skipped,
         )
-        _finalize_commit_telemetry(telemetry)
-        _spawn_async_offsite_upload(repo, pull_recover[2] if pull_recover is not None else None)
-        # The skipped hosts were never paused and never updated, so nothing above
-        # resumes them — their forward path is the watchdog's pin-drift self-heal
-        # once the host is back online. Naming them is the point: a rollout that
-        # finished CLEAN for every host it reached leaves them off-pin, and the
-        # operator reading the log gets the line that says who.
-        if skipped:
-            print(
-                f"\n⚠ {len(skipped)} agent-runner(s) unreachable and skipped: "
-                f"{', '.join(sorted(skipped))} — never paused or updated by this rollout; "
-                "they converge at the next rollout, or when `ava cluster update` runs on "
-                "that host (`ava cluster status` shows them off-pin until then).",
-                file=sys.stderr,
-            )
-        # One machine-readable line at the end of every rollout log: each phase's
-        # duration (Task #1820), the bytes moved (the pre-update snapshot), and
-        # per-host updater stages where the poll captured them. The per-stage
-        # lines above already make a killed rollout readable; this is the
-        # aggregate the 368s breakdown was reconstructed from by hand.
-        telemetry.print_summary()
