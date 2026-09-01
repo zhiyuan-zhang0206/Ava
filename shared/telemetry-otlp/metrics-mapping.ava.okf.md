@@ -38,6 +38,11 @@ you percentile). `_METRIC_DISPOSITION` overrides per (event, field):
 - `llm_usage.cost_usd` -> **float Counter** (`ava_llm_usage_cost_usd_total`).
   Money is summed, never percentiled; `increase(...)` over any window is the
   exact spend at usage-time rates.
+- `watchdog_tick.last_tick_timestamp_seconds` -> **ObservableGauge**
+  (`ava_watchdog_tick_last_tick_timestamp_seconds`). It holds the wall-clock
+  time of the most recently completed watchdog round, rather than accumulating
+  every round; the stale-tick alert retains its `machine` and `process`
+  attributes to distinguish the two capability watchdogs on one host.
 
 `llm_usage.calls` (constant 1) exists so the int rule mints
 `ava_llm_usage_calls_total` — the per-agent/per-model call counter (histogram

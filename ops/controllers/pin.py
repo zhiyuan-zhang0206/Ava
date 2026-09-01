@@ -467,6 +467,7 @@ class PinController:
     watchdog's ``--role`` capability: the agent-runner acts, the gateway warns."""
 
     name = "pin"
+    timeout_s: float | None = None
 
     def reconcile(self, role: MachineRole) -> ReconcileResult:
         if role == "agent-runner":

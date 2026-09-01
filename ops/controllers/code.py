@@ -292,6 +292,7 @@ class CodeController:
     self-restart, and says so through the pin controller's warn-only half."""
 
     name = "code"
+    timeout_s: float | None = None
 
     def reconcile(self, role: MachineRole) -> ReconcileResult:
         if role != "agent-runner":

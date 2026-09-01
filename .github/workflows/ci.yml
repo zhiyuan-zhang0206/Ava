@@ -155,7 +155,7 @@ jobs:
           path: ${{ runner.temp }}/grafana_13.1.3_31135815010_linux_amd64.tar.gz
           key: grafana-native-13.1.3-31135815010-linux-amd64
 
-      - name: Verify Grafana Trace navigation (native binary, no Docker)
+      - name: Validate native Grafana alert provisioning and Trace navigation (no Docker)
         shell: bash
         run: |
           archive="$RUNNER_TEMP/grafana_13.1.3_31135815010_linux_amd64.tar.gz"

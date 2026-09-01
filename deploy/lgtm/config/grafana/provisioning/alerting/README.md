@@ -4,9 +4,11 @@ Grafana Alerting rules for the Ava event system, provisioned as code. Since
 the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
 R1-R3, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
 line under `{service_name="unknown_service"}`, body = the full event JSON, so
-`| json` flattens each line to labels), while R4 and the gateway-metrics
-silence rule query **Prometheus** (the `ava_llm_usage_latency_milliseconds`
-histogram, `ava_gateway_latency_count_total` heartbeat, and R18 turn-duration
+`| json` flattens each line to labels), while R4, the gateway-metrics silence
+rule, and the watchdog-tick staleness rule query **Prometheus** (the
+`ava_llm_usage_latency_milliseconds` histogram,
+`ava_gateway_latency_count_total` heartbeat,
+`ava_watchdog_tick_last_tick_timestamp_seconds` gauge, and R18 turn-duration
 histogram). The retired Postgres events read path (#1197) is gone — nothing
 queries the `ops` datasource from these rules.
 
@@ -41,10 +43,11 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (22)
+## Rules (27)
 
-The rules are split between `ava-ops` (15 rules, evaluated every minute:
-R1-R6, the gateway-metrics silence rule, R8-R12, and R14-R16) and
+The rules are split between `ava-ops` (20 rules, evaluated every minute:
+R1-R6, the watchdog-tick and gateway-metrics silence rules, R8-R12, and
+R14-R16) and
 `ava-ops-slow` (seven rules, evaluated every five minutes: R7, R13, R17's two
 fast-route tiers, R18, and R19's two slow-route tiers). Each rule retains its
 own `for` window.
@@ -59,6 +62,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-llm-latency-p95` | `ava-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
 | `ava-ops-delivery-stalled-backlog` | `ava-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
 | `ava-ops-events-freshness` | `ava-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
+| `ava-ops-watchdog-tick-stale` | `ava-ops` | watchdog completed-tick timestamp | a recently seen machine+process timestamp is >3m old or absent for 3m (Prometheus) | 0m | error |
 | `ava-ops-gateway-metrics-silent` | `ava-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
 | `ava-ops-trace-disk-watermark` | `ava-ops-slow` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
 | `ava-ops-llm-billing-quota` | `ava-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |

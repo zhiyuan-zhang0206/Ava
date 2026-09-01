@@ -120,8 +120,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # agent_swapped_in (Task #1976 phase 2) drops it back to 127;
     # memory_search_stats (Task #2088's row-growth monitoring) raises it
     # back to 128; page_restore_notified (Task #2212 direction B — the
-    # reconcile close path's re-serve notice) raises it to 129.
-    assert len(_TELEMETRY_KINDS) == 130
+    # reconcile close path's re-serve notice) raises it to 129; watchdog_tick
+    # (P1-4's completed-round freshness gauge) raises it to 131.
+    assert len(_TELEMETRY_KINDS) == 131
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
@@ -182,6 +183,16 @@ def test_memory_search_stats_payload_and_metric_disposition() -> None:
     assert payload_keys("memory_search_stats") == ("rows", "last_save_seconds")
     assert _METRIC_DISPOSITION[("memory_search_stats", "rows")] == "gauge"
     assert _METRIC_DISPOSITION[("memory_search_stats", "last_save_seconds")] == "gauge"
+
+
+def test_watchdog_tick_payload_and_metric_disposition() -> None:
+    """A completed watchdog round publishes its wall-clock timestamp as a
+    gauge, so Prometheus exposes freshness rather than a meaningless sum."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("watchdog_tick") == ("last_tick_timestamp_seconds",)
+    assert _METRIC_DISPOSITION[("watchdog_tick", "last_tick_timestamp_seconds")] == "gauge"
 
 
 def test_category_for_kind() -> None:
