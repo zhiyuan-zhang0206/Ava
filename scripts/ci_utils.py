@@ -23,26 +23,30 @@ Usage as CLI:
     with the monitor contract — 0 green, 1 not green (or timed out), 3
     persistent gh/network errors, 4 enqueue failed or was rejected twice.
     `--merge` implies `--wait`
-    and enqueues the PR once green (Mergify merge queue — posts `@mergifyio
-    queue` on the PR, or `@mergifyio requeue` if the Mergify check shows the PR
-    was previously queued and dequeued, e.g. by a force-push). It waits at
-    least five minutes after a head update before queueing, and detects a
-    dropped/rejected command with one automatic retry. Mergify then rebases
-    onto latest main, re-runs CI, and rebase-merges once its conditions are
-    green. The all-green predicate excludes checks named "Mergify Merge Queue"
-    (queue state) and "qa-approved-gate" (QA gate; the queue itself enforces
-    the label at merge time). This is the canonical CI watcher: launch it with
-    ava.shell.run_background, and the completion notice delivers the exit
-    code + verdict to the agent automatically.
+    and enqueues the PR once green. `--queue` (or `CI_QUEUE`) selects Mergify
+    (the gray-phase default) or Trunk; `--priority` maps the Trunk submission
+    priority, which requires `TRUNK_API_TOKEN`. Mergify posts `@mergifyio
+    queue` (or `@mergifyio requeue` after a dequeue); Trunk submits the PR then
+    polls its queue state. Trunk refuses submission unless the PR has the
+    `qa-approved` label, and `.trunk/trunk.yaml` requires its
+    `qa-approved-gate` status. Both paths wait at least five minutes after a
+    head update before queueing. The all-green predicate excludes queue-state
+    checks named "Mergify Merge Queue" and "Trunk Merge Queue", plus
+    "qa-approved-gate". This is the canonical CI watcher: launch it with
+    ava.shell.run_background, and the completion notice delivers the exit code
+    + verdict to the agent automatically.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -116,6 +120,24 @@ MAX_CONSECUTIVE_ERRORS = 3
 QUEUE_COOLDOWN_SECONDS = 300
 RETRY_BACKOFF_SECONDS = 300
 _MERGIFY_BOT_LOGINS = frozenset({"mergify", "mergify[bot]"})
+_QUEUE_CHOICES = ("trunk", "mergify")
+_QUEUE_NAMES = frozenset(_QUEUE_CHOICES)
+_TRUNK_PRIORITIES = {"urgent": 0, "high": 10, "medium": 100, "low": 200}
+_TRUNK_API_BASE_URL = "https://api.trunk.io/v1"
+_TRUNK_REQUEST_TIMEOUT_SECONDS = 30
+
+
+def _resolve_queue(queue: str | None) -> str:
+    """Return the CLI-selected queue, then CI_QUEUE, then the gray default."""
+    resolved = queue or os.environ.get("CI_QUEUE") or "mergify"
+    if resolved not in _QUEUE_NAMES:
+        raise ValueError(f"unknown CI queue: {resolved}")
+    return resolved
+
+
+def _trunk_priority(priority: str) -> int:
+    """Map the user-facing Trunk priority to its REST API integer."""
+    return _TRUNK_PRIORITIES[priority]
 
 
 def _parse_ts(iso: str | None) -> float | None:
@@ -222,8 +244,11 @@ class CIResult:
     # that sits pending forever after a dequeue can never block the all-green
     # wait. Kept here so `--merge` can inspect queue state separately.
     mergify_checks: list[dict] = field(default_factory=list)
-    # The qa-approved label gate is enforced by the queue at merge time, not by
-    # the CI verdict. Kept separately so it cannot enter the verdict buckets.
+    # Trunk's queue-state check is likewise not a CI result and must not turn
+    # an otherwise green PR into a perpetual PENDING verdict.
+    trunk_checks: list[dict] = field(default_factory=list)
+    # The QA gate is required by Trunk and checked before its submission, not by
+    # this CI verdict. Keep it separate so it cannot enter the verdict buckets.
     gate_checks: list[dict] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
     head_sha: str = ""
@@ -266,8 +291,9 @@ def _repo_has_workflows() -> bool:
 
 
 MERGIFY_CHECK_PREFIX = "Mergify"
+TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
 # Must match the job name in .github/workflows/qa-approved-gate.yml — the check is
-# a QA label gate enforced by the queue at merge time, never part of the CI verdict.
+# required by Trunk and checked before submission, never part of the CI verdict.
 QA_APPROVED_GATE_CHECK_NAME = "qa-approved-gate"
 
 
@@ -279,8 +305,8 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     so is a COMPLETED one whose conclusion is unrecognized — guessing there is
     how a false "all green" gets reported.
 
-    Mergify checks report queue state rather than CI results, while
-    `qa-approved-gate` is a QA gate enforced by the queue at merge time. Both
+    Mergify and Trunk checks report queue state rather than CI results, while
+    `qa-approved-gate` is required by Trunk and checked before submission. All
     are routed to dedicated buckets so they never enter the verdict fields.
     """
     for c in checks:
@@ -290,6 +316,9 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
 
         if name.startswith(MERGIFY_CHECK_PREFIX):
             result.mergify_checks.append(c)
+            continue
+        if name.startswith(TRUNK_MERGE_QUEUE_CHECK_NAME):
+            result.trunk_checks.append(c)
             continue
         if name == QA_APPROVED_GATE_CHECK_NAME:
             result.gate_checks.append(c)
@@ -536,6 +565,7 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
                     "failed": result.failed,
                     "workflow_checks": result.workflow_checks,
                     "mergify_checks": result.mergify_checks,
+                    "trunk_checks": result.trunk_checks,
                     "gate_checks": result.gate_checks,
                     "error_detail": result.error_detail,
                     "terminal": result.verdict.is_terminal,
@@ -584,6 +614,203 @@ def _enqueue_pr(pr: str, repo: str, command: str = "@mergifyio queue") -> int:
         return 4
     print(f"PR #{pr} enqueued with Mergify ({command}): {r.stdout.strip()}")
     return 0
+
+
+def _trunk_pr_payload(pr: str, repo: str) -> dict[str, object]:
+    """Build the repository and PR identity required by Trunk's API."""
+    owner, name = repo.split("/", maxsplit=1)
+    return {
+        "repo": {"host": "github.com", "owner": owner, "name": name},
+        "pr": {"number": int(pr)},
+        "targetBranch": "main",
+    }
+
+
+def _trunk_qa_approved(pr: str, repo: str) -> tuple[bool, str | None]:
+    """Return whether a PR has the required QA label, or its read error."""
+    result = subprocess.run(  # noqa: S603
+        ["gh", "pr", "view", pr, "--repo", repo, "--json", "labels"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False, f"gh labels error: {result.stderr.strip()}"
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        return False, f"labels JSON error: {error}"
+    labels = data.get("labels") if isinstance(data, dict) else None
+    if not isinstance(labels, list):
+        return False, "labels response was not a list"
+    return any(
+        isinstance(label, dict) and label.get("name") == "qa-approved" for label in labels
+    ), None
+
+
+def _trunk_post(
+    endpoint: str, payload: dict[str, object], token: str
+) -> tuple[dict[str, object] | None, str | None]:
+    """POST one Trunk API request, returning its object response or an error."""
+    request = urllib.request.Request(  # noqa: S310 - fixed HTTPS Trunk API endpoint
+        f"{_TRUNK_API_BASE_URL}/{endpoint}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "x-api-token": token},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310 - request uses the fixed HTTPS endpoint above
+            request, timeout=_TRUNK_REQUEST_TIMEOUT_SECONDS
+        ) as response:
+            status = response.status
+            body = response.read()
+    except (urllib.error.URLError, OSError, TimeoutError) as error:
+        return None, str(error)
+    if status != 200:
+        return None, f"HTTP {status}"
+    if not body:
+        return {}, None
+    try:
+        data = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # submitPullRequest / cancelPullRequest answer 200 with a plain-text
+        # "OK" body (verified live 2026-09-01); a 200 is a success regardless
+        # of body shape, so a non-JSON body must not be read as an error.
+        return {}, None
+    if not isinstance(data, dict):
+        return None, "response was not a JSON object"
+    return data, None
+
+
+def _submit_trunk(pr: str, repo: str, priority: str, *, token: str) -> int:
+    """Submit a green PR to Trunk, retrying one failed submission."""
+    payload = _trunk_pr_payload(pr, repo)
+    payload.update({"priority": _trunk_priority(priority), "noBatch": False})
+    for attempt in range(2):
+        _, error = _trunk_post("submitPullRequest", payload, token)
+        if error is None:
+            print(f"PR #{pr} submitted to the Trunk merge queue", file=sys.stderr, flush=True)
+            return 0
+        if error == "HTTP 409":
+            print(
+                f"PR #{pr} already in the Trunk merge queue — resuming watch",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 0
+        print(
+            f"[ci] Trunk queue submit error ({attempt + 1}/2): {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        if attempt == 1:
+            print(f"PR #{pr} Trunk queue submission failed", file=sys.stderr, flush=True)
+            return 4
+        print(
+            f"retrying Trunk queue submission in {RETRY_BACKOFF_SECONDS}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(RETRY_BACKOFF_SECONDS)
+    return 4
+
+
+def _watch_trunk_enqueue(
+    pr: str,
+    repo: str,
+    *,
+    every: int,
+    deadline: float | None,
+    timeout: int,
+    token: str,
+) -> int:
+    """Poll Trunk's submitted-PR state until it merges, fails, or times out."""
+    payload = _trunk_pr_payload(pr, repo)
+    consecutive_errors = 0
+    while True:
+        data, error = _trunk_post("getSubmittedPullRequest", payload, token)
+        if error is not None:
+            consecutive_errors += 1
+            print(
+                f"[ci] Trunk queue poll error ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {error}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                print(
+                    f"PR #{pr} Trunk queue error after {MAX_CONSECUTIVE_ERRORS} attempts: {error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 3
+        else:
+            if data is None:
+                print("[ci] Trunk queue poll returned no data", file=sys.stderr, flush=True)
+                return 3
+            consecutive_errors = 0
+            state = data.get("state")
+            if state == "merged":
+                print(f"PR #{pr} merged by the Trunk merge queue")
+                return 0
+            if state in {"failed", "cancelled"}:
+                reason = data.get("reason") or state
+                print(f"PR #{pr} Trunk queue {state}: {reason}", file=sys.stderr, flush=True)
+                return 1
+            print(f"[ci] Trunk queue state: {state or 'unknown'}", file=sys.stderr, flush=True)
+        if _deadline_hit(deadline, pr, timeout, "still in the Trunk merge queue"):
+            return 1
+        time.sleep(every)
+
+
+def _trunk_merge_flow(
+    pr: str, repo: str, priority: str, *, every: int, timeout: int, token: str
+) -> int:
+    """Apply the standard cooldown/green recheck, then submit and watch Trunk."""
+    deadline = time.monotonic() + timeout if timeout else None
+    while (remaining := _queue_cooldown_seconds(pr, repo)) > 0:
+        if _deadline_hit(deadline, pr, timeout, "queue cooldown not finished"):
+            return 1
+        print(
+            f"PR #{pr} head updated {remaining}s ago — queue cooldown, waiting",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(min(remaining, every))
+
+    result = check_ci(pr, repo=repo)
+    if result.verdict is CIStatus.ERROR:
+        print(
+            f"PR #{pr} CI error before queueing: {result.error_detail}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 3
+    if result.verdict is not CIStatus.ALL_PASSED:
+        print(f"PR #{pr} CI no longer green: {result.summary()}", file=sys.stderr, flush=True)
+        return 1
+
+    qa_approved, label_error = _trunk_qa_approved(pr, repo)
+    if label_error is not None:
+        print(
+            f"PR #{pr} could not verify qa-approved label: {label_error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 3
+    if not qa_approved:
+        print(
+            f"PR #{pr} lacks the qa-approved label — not submitting to Trunk",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 1
+
+    rc = _submit_trunk(pr, repo, priority, token=token)
+    if rc != 0:
+        return rc
+    return _watch_trunk_enqueue(
+        pr, repo, every=every, deadline=deadline, timeout=timeout, token=token
+    )
 
 
 def _watch_enqueue(
@@ -676,7 +903,17 @@ def _merge_flow(pr: str, repo: str, every: int, timeout: int) -> int:
         retried = True
 
 
-def _wait_for_verdict(pr: str, repo: str, every: int, timeout: int, *, merge: bool) -> int:
+def _wait_for_verdict(
+    pr: str,
+    repo: str,
+    every: int,
+    timeout: int,
+    *,
+    merge: bool,
+    queue: str = "mergify",
+    priority: str = "medium",
+    trunk_token: str | None = None,
+) -> int:
     """Poll check_ci until the verdict settles, then report and exit.
 
     Never loops silently: a persistent gh/network failure exits 3 after
@@ -738,6 +975,12 @@ def _wait_for_verdict(pr: str, repo: str, every: int, timeout: int, *, merge: bo
         if verdict is CIStatus.ALL_PASSED:
             print(f"PR #{pr} CI green: {result.summary()}")
             if merge:
+                if queue == "trunk":
+                    if trunk_token is None:
+                        raise AssertionError("Trunk merge flow requires a token")
+                    return _trunk_merge_flow(
+                        pr, repo, priority, every=every, timeout=timeout, token=trunk_token
+                    )
                 return _merge_flow(pr, repo, every, timeout)
             return 0
 
@@ -784,9 +1027,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--merge",
         action="store_true",
-        help="with --wait: enqueue the PR once CI is green and wait for the "
-        "merge queue to land it, with head-update cooldown and one rejection "
-        "retry (implies --wait; default timeout 1800s)",
+        help="with --wait: enqueue the PR once CI is green and wait for the selected "
+        "merge queue to land it, with head-update cooldown (implies --wait; "
+        "default timeout 1800s)",
+    )
+    p.add_argument(
+        "--queue",
+        choices=_QUEUE_CHOICES,
+        default=None,
+        help="with --merge: merge queue (default: CI_QUEUE, else mergify)",
+    )
+    p.add_argument(
+        "--priority",
+        choices=tuple(_TRUNK_PRIORITIES),
+        default="medium",
+        help="with --queue trunk: queue priority (default: medium)",
     )
     p.add_argument(
         "--rerun-failed-jobs",
@@ -803,6 +1058,10 @@ def main(argv: list[str] | None = None) -> int:
         help="with --rerun-failed-jobs: list failed jobs without re-running them",
     )
     args = p.parse_args(argv)
+    try:
+        queue = _resolve_queue(args.queue)
+    except ValueError as error:
+        p.error(str(error))
     if args.every <= 0:
         p.error("--every must be positive")
     if args.timeout < 0:
@@ -816,6 +1075,15 @@ def main(argv: list[str] | None = None) -> int:
         # unless the caller explicitly passed --timeout.
         if args.timeout == 0:
             args.timeout = 1800
+
+    trunk_token = None
+    if args.merge and queue == "trunk":
+        trunk_token = os.environ.get("TRUNK_API_TOKEN")
+        if not trunk_token:
+            print(
+                "TRUNK_API_TOKEN is required for --queue trunk --merge", file=sys.stderr, flush=True
+            )
+            return 3
 
     if args.rerun_failed_jobs:
         if args.wait or args.merge or args.json:
@@ -836,7 +1104,16 @@ def main(argv: list[str] | None = None) -> int:
         return 3 if errors else 0
 
     if args.wait:
-        return _wait_for_verdict(args.pr, args.repo, args.every, args.timeout, merge=args.merge)
+        return _wait_for_verdict(
+            args.pr,
+            args.repo,
+            args.every,
+            args.timeout,
+            merge=args.merge,
+            queue=queue,
+            priority=args.priority,
+            trunk_token=trunk_token,
+        )
     return _query_once(args.pr, args.repo, as_json=args.json)
 
 
