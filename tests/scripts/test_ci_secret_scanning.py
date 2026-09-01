@@ -26,15 +26,17 @@ def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
     assert secret_scan.get("continue-on-error") is not True
     secret_steps = secret_scan["steps"]
     assert secret_steps[0]["with"]["fetch-depth"] == 0
-    assert "gitleaks/gitleaks/v8@v8.30.1" in secret_steps[1]["run"]
+    assert "github.com/zricethezav/gitleaks/v8@v8.30.1" in secret_steps[1]["run"]
     assert "gitleaks detect --source . --config .gitleaks.toml --redact" in secret_steps[2]["run"]
 
     dependency_audit = workflow["jobs"]["dependency-audit"]
-    assert dependency_audit["continue-on-error"] is True
+    assert dependency_audit.get("continue-on-error") is not True
     audit_steps = dependency_audit["steps"]
     assert audit_steps[2]["run"] == "uvx --from 'uv==0.11.16' uv audit --frozen"
+    assert audit_steps[2]["continue-on-error"] is True
     assert audit_steps[4]["working-directory"] == "ui/web"
     assert audit_steps[4]["run"] == "npm audit"
+    assert audit_steps[4]["continue-on-error"] is True
 
     pre_commit = _load_yaml(_PRE_COMMIT)
     hooks = [hook for repo in pre_commit["repos"] for hook in repo["hooks"]]
