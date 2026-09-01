@@ -150,7 +150,7 @@ def validate_env_patch_or_raise(updates: dict[str, object], removals: set[str]) 
 
 
 def _render_validation_errors(error: ValidationError, model: type[Any]) -> list[str]:
-    """Render Pydantic errors with `.env` aliases and never candidate values."""
+    """Render Pydantic errors with `.env` aliases and never secret values."""
     return [_render_validation_error(detail, model) for detail in error.errors()]
 
 

@@ -30,3 +30,10 @@ the process can produce its normal result envelope.
   patch repairs the violated invariant.
 - A concurrent write is rejected before persistence and must be retried against
   a fresh candidate.
+
+## Update
+
+PITR activation owns only the four enablement flags it provisions when none
+exist, so their absence is not a validation prerequisite. It is not exempt from
+full candidate validation: the existing key, replication, and store baseline
+must already make the resulting candidate valid.
