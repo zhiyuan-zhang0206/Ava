@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -34,8 +35,28 @@ def _all_green(_: str | int, *, repo: str | None = None) -> Any:
     return ci_utils.CIResult(verdict=ci_utils.CIStatus.ALL_PASSED)
 
 
+def _all_green_with_trunk_queue_check(_: str | int, *, repo: str | None = None) -> Any:
+    return ci_utils.CIResult(
+        verdict=ci_utils.CIStatus.ALL_PASSED,
+        trunk_checks=[{"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS"}],
+    )
+
+
 def _no_sleep(_: float) -> None:
     return None
+
+
+def _labels_runner(labels: list[str], calls: list[list[str]]):
+    def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps({"labels": [{"name": label} for label in labels]}),
+            stderr="",
+        )
+
+    return run
 
 
 @pytest.mark.parametrize(
@@ -91,9 +112,11 @@ def _urlopen_sequence(
 def test_trunk_queue_submits_and_reports_merged(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    label_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -267,17 +290,137 @@ def test_trunk_merge_requires_token_before_waiting(
     assert "TRUNK_API_TOKEN" in capsys.readouterr().err
 
 
-def test_trunk_queue_check_does_not_block_all_green_predicate() -> None:
+def test_real_trunk_queue_checks_do_not_block_all_green_predicate() -> None:
     result = ci_utils.CIResult(verdict=ci_utils.CIStatus.ALL_PASSED)
 
     ci_utils._partition_checks(
-        [{"name": "Trunk Merge Queue", "status": "IN_PROGRESS", "conclusion": ""}], result
+        [
+            {"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS", "conclusion": ""},
+            {
+                "name": "Trunk Merge Queue (main)",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+            },
+        ],
+        result,
     )
 
     assert result.pending == []
+    assert result.failed == []
     assert result.trunk_checks == [
-        {"name": "Trunk Merge Queue", "status": "IN_PROGRESS", "conclusion": ""}
+        {"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS", "conclusion": ""},
+        {
+            "name": "Trunk Merge Queue (main)",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+        },
     ]
+
+
+def test_json_query_includes_trunk_checks(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    queue_check = {"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS"}
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green_with_trunk_queue_check)
+
+    assert ci_utils._query_once("42", "zhiyuan-zhang0206/Ava", as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)["trunk_checks"] == [queue_check]
+
+
+def test_trunk_flow_refuses_to_submit_without_qa_approved_label(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    label_calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner([], label_calls))
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
+        ),
+    )
+
+    assert (
+        ci_utils._trunk_merge_flow(
+            "42",
+            "zhiyuan-zhang0206/Ava",
+            "medium",
+            every=1,
+            timeout=0,
+            token="trunk-token",  # noqa: S106 — test fixture
+        )
+        == 1
+    )
+    assert requests == []
+    assert "PR #42 lacks the qa-approved label — not submitting to Trunk" in capsys.readouterr().err
+
+
+def test_trunk_flow_submits_when_qa_approved_label_is_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    label_calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
+        ),
+    )
+
+    assert (
+        ci_utils._trunk_merge_flow(
+            "42",
+            "zhiyuan-zhang0206/Ava",
+            "medium",
+            every=1,
+            timeout=0,
+            token="trunk-token",  # noqa: S106 — test fixture
+        )
+        == 0
+    )
+    assert label_calls == [
+        ["gh", "pr", "view", "42", "--repo", "zhiyuan-zhang0206/Ava", "--json", "labels"]
+    ]
+    assert len(requests) == 2
+
+
+def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    label_calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [_TrunkResponse({}, status=409), _TrunkResponse({"state": "merged"})], requests
+        ),
+    )
+    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+
+    assert (
+        ci_utils._trunk_merge_flow(
+            "42",
+            "zhiyuan-zhang0206/Ava",
+            "medium",
+            every=1,
+            timeout=0,
+            token="trunk-token",  # noqa: S106 — test fixture
+        )
+        == 0
+    )
+    assert len(requests) == 2
+    assert "PR #42 already in the Trunk merge queue — resuming watch" in capsys.readouterr().err
 
 
 class _PlainTextResponse(_TrunkResponse):
@@ -293,9 +436,11 @@ def test_trunk_submit_accepts_plain_text_ok_body(
     """submitPullRequest answers 200 with a plain-text 'OK' body (verified live
     2026-09-01); a 200 must count as success regardless of body shape, or a
     successful submit would be misread as an error and retried into a 409."""
+    label_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",

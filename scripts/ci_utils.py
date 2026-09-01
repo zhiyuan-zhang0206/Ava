@@ -27,12 +27,14 @@ Usage as CLI:
     (the gray-phase default) or Trunk; `--priority` maps the Trunk submission
     priority, which requires `TRUNK_API_TOKEN`. Mergify posts `@mergifyio
     queue` (or `@mergifyio requeue` after a dequeue); Trunk submits the PR then
-    polls its queue state. Both wait at least five minutes after a head update
-    before queueing. The all-green predicate excludes queue-state checks named
-    "Mergify Merge Queue" and "Trunk Merge Queue", plus "qa-approved-gate"
-    (a QA gate the queue enforces at merge time). This is the canonical CI
-    watcher: launch it with ava.shell.run_background, and the completion notice
-    delivers the exit code + verdict to the agent automatically.
+    polls its queue state. Trunk refuses submission unless the PR has the
+    `qa-approved` label, and `.trunk/trunk.yaml` requires its
+    `qa-approved-gate` status. Both paths wait at least five minutes after a
+    head update before queueing. The all-green predicate excludes queue-state
+    checks named "Mergify Merge Queue" and "Trunk Merge Queue", plus
+    "qa-approved-gate". This is the canonical CI watcher: launch it with
+    ava.shell.run_background, and the completion notice delivers the exit code
+    + verdict to the agent automatically.
 """
 
 from __future__ import annotations
@@ -245,8 +247,8 @@ class CIResult:
     # Trunk's queue-state check is likewise not a CI result and must not turn
     # an otherwise green PR into a perpetual PENDING verdict.
     trunk_checks: list[dict] = field(default_factory=list)
-    # The qa-approved label gate is enforced by the queue at merge time, not by
-    # the CI verdict. Kept separately so it cannot enter the verdict buckets.
+    # The QA gate is required by Trunk and checked before its submission, not by
+    # this CI verdict. Keep it separate so it cannot enter the verdict buckets.
     gate_checks: list[dict] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
     head_sha: str = ""
@@ -291,7 +293,7 @@ def _repo_has_workflows() -> bool:
 MERGIFY_CHECK_PREFIX = "Mergify"
 TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
 # Must match the job name in .github/workflows/qa-approved-gate.yml — the check is
-# a QA label gate enforced by the queue at merge time, never part of the CI verdict.
+# required by Trunk and checked before submission, never part of the CI verdict.
 QA_APPROVED_GATE_CHECK_NAME = "qa-approved-gate"
 
 
@@ -304,7 +306,7 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     how a false "all green" gets reported.
 
     Mergify and Trunk checks report queue state rather than CI results, while
-    `qa-approved-gate` is a QA gate enforced by the queue at merge time. All
+    `qa-approved-gate` is required by Trunk and checked before submission. All
     are routed to dedicated buckets so they never enter the verdict fields.
     """
     for c in checks:
@@ -315,7 +317,7 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
         if name.startswith(MERGIFY_CHECK_PREFIX):
             result.mergify_checks.append(c)
             continue
-        if name == TRUNK_MERGE_QUEUE_CHECK_NAME:
+        if name.startswith(TRUNK_MERGE_QUEUE_CHECK_NAME):
             result.trunk_checks.append(c)
             continue
         if name == QA_APPROVED_GATE_CHECK_NAME:
@@ -563,6 +565,7 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
                     "failed": result.failed,
                     "workflow_checks": result.workflow_checks,
                     "mergify_checks": result.mergify_checks,
+                    "trunk_checks": result.trunk_checks,
                     "gate_checks": result.gate_checks,
                     "error_detail": result.error_detail,
                     "terminal": result.verdict.is_terminal,
@@ -623,6 +626,28 @@ def _trunk_pr_payload(pr: str, repo: str) -> dict[str, object]:
     }
 
 
+def _trunk_qa_approved(pr: str, repo: str) -> tuple[bool, str | None]:
+    """Return whether a PR has the required QA label, or its read error."""
+    result = subprocess.run(  # noqa: S603
+        ["gh", "pr", "view", pr, "--repo", repo, "--json", "labels"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False, f"gh labels error: {result.stderr.strip()}"
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        return False, f"labels JSON error: {error}"
+    labels = data.get("labels") if isinstance(data, dict) else None
+    if not isinstance(labels, list):
+        return False, "labels response was not a list"
+    return any(
+        isinstance(label, dict) and label.get("name") == "qa-approved" for label in labels
+    ), None
+
+
 def _trunk_post(
     endpoint: str, payload: dict[str, object], token: str
 ) -> tuple[dict[str, object] | None, str | None]:
@@ -665,6 +690,13 @@ def _submit_trunk(pr: str, repo: str, priority: str, *, token: str) -> int:
         _, error = _trunk_post("submitPullRequest", payload, token)
         if error is None:
             print(f"PR #{pr} submitted to the Trunk merge queue", file=sys.stderr, flush=True)
+            return 0
+        if error == "HTTP 409":
+            print(
+                f"PR #{pr} already in the Trunk merge queue — resuming watch",
+                file=sys.stderr,
+                flush=True,
+            )
             return 0
         print(
             f"[ci] Trunk queue submit error ({attempt + 1}/2): {error}",
@@ -755,6 +787,22 @@ def _trunk_merge_flow(
         return 3
     if result.verdict is not CIStatus.ALL_PASSED:
         print(f"PR #{pr} CI no longer green: {result.summary()}", file=sys.stderr, flush=True)
+        return 1
+
+    qa_approved, label_error = _trunk_qa_approved(pr, repo)
+    if label_error is not None:
+        print(
+            f"PR #{pr} could not verify qa-approved label: {label_error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 3
+    if not qa_approved:
+        print(
+            f"PR #{pr} lacks the qa-approved label — not submitting to Trunk",
+            file=sys.stderr,
+            flush=True,
+        )
         return 1
 
     rc = _submit_trunk(pr, repo, priority, token=token)
