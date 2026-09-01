@@ -451,6 +451,43 @@ def test_config_write_op_empty_overrides_applied_no_write(
     assert runtime_config.read_env_aliases() == {}
 
 
+def test_config_write_op_rejects_cross_field_invalid_candidate(
+    isolated_host_home: Path,
+) -> None:
+    """Removing the Baidu token cannot persist an enabled Baidu PITR candidate."""
+    backup_key = isolated_host_home / "backup.key"
+    backup_key.write_bytes(b"k" * 32)
+    backup_key.chmod(0o600)
+    baidu_credentials = isolated_host_home / "baidu-credentials.json"
+    baidu_credentials.write_text("{}")
+    baidu_credentials.chmod(0o600)
+    baidu_token = isolated_host_home / "baidu-token.json"
+    baidu_token.write_text("{}")
+    baidu_token.chmod(0o600)
+    runtime_config.write_fields(
+        {
+            "pitr_enabled": True,
+            "pitr_store_backend": "baidu",
+            "pitr_baidu_app_root": "/apps/test",
+            "pitr_baidu_credentials_file": baidu_credentials,
+            "pitr_baidu_token_file": baidu_token,
+            "pitr_backup_key_file": backup_key,
+            "pitr_backup_key_id": "test-key",
+        },
+        set(),
+    )
+    env_path = isolated_host_home / ".env"
+    before = env_path.read_bytes()
+
+    result = config_write_op({"pitr_baidu_token_file": None}, local=True)
+
+    assert result.applied is False
+    assert result.results["pitr_baidu_token_file"].ok is False
+    assert result.results["pitr_baidu_token_file"].reason is not None
+    assert "candidate rejected" in result.results["pitr_baidu_token_file"].reason
+    assert env_path.read_bytes() == before
+
+
 def test_config_write_op_machine_name_in_result(
     isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
