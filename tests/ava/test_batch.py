@@ -14,9 +14,14 @@ import time
 
 import pytest
 
-from ava._batch import run_batch, validate_max_concurrent
+from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 
 # ─── run_batch ────────────────────────────────────────────────────────────
+
+
+def test_default_batch_cap_is_a_safe_configurable_ceiling() -> None:
+    """SDK batch entry points default to a bounded, caller-overridable cap."""
+    assert 8 <= DEFAULT_BATCH_MAX_CONCURRENT <= 16
 
 
 def test_run_batch_preserves_input_order() -> None:

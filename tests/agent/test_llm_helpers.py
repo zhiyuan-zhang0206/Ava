@@ -15,6 +15,7 @@ Baseline source: mutmut llm baseline (PR #302).
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
@@ -25,7 +26,7 @@ from langchain_core.messages import (
     HumanMessage,
 )
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
+from langgraph.runtime import ExecutionInfo, Runtime
 from langgraph.types import Command
 
 from agent.graph import llm_node
@@ -143,7 +144,12 @@ def test_get_ava_overview_advertises_registered_plugin_namespace() -> None:
 # differentiate the two path invariants: "cancel first in done" vs "stream first in done".
 
 
-def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
+def _make_runtime(
+    *,
+    llm=None,
+    event_publisher=None,
+    execution_info: ExecutionInfo | None = None,
+) -> Runtime[AvaContext]:
     """test helper: assemble Runtime the same way as test_cancel.py.
 
     llm_node / exec_node don't directly touch ops_pool / inbound_listener, so use AsyncMock
@@ -159,7 +165,7 @@ def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
     )
-    return Runtime(context=ctx)
+    return Runtime(context=ctx, execution_info=execution_info)
 
 
 def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
@@ -273,9 +279,9 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises() -> None:
     and returns halted=False so the claim node loops straight back to the LLM
     (the ava_silent_idle plugin then injects a Continue nudge). No token-wasting
     blind re-stream."""
-    from agent.graph._llm import _consecutive_silent_idle
+    from agent.graph._llm import _silent_idle_output_tokens
 
-    _consecutive_silent_idle.pop("7", None)
+    _silent_idle_output_tokens.pop("7", None)
 
     async def _empty_complete() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -300,7 +306,7 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises() -> None:
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
-    _consecutive_silent_idle.pop("7", None)
+    _silent_idle_output_tokens.pop("7", None)
 
 
 async def test_truly_empty_no_reasoning_halts_with_warning(loguru_records) -> None:
@@ -426,9 +432,9 @@ async def test_silent_idle_with_thinking_blocks_continue_loops() -> None:
 
     Locks the silent_idle thinking-block condition so it is not coupled with the output_tokens > 0 condition.
     """
-    from agent.graph._llm import _consecutive_silent_idle
+    from agent.graph._llm import _silent_idle_output_tokens
 
-    _consecutive_silent_idle.pop("7", None)
+    _silent_idle_output_tokens.pop("7", None)
 
     async def _thinking_only_chunk() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -451,7 +457,7 @@ async def test_silent_idle_with_thinking_blocks_continue_loops() -> None:
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
-    _consecutive_silent_idle.pop("7", None)
+    _silent_idle_output_tokens.pop("7", None)
 
 
 def test_record_consecutive_error_tracks_and_clears() -> None:
@@ -538,9 +544,9 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops() -> N
     Construct: output_tokens=0, no text, no tool_call, no thinking blocks,
     but has `additional_kwargs.reasoning_content` → judged silent idle → continue-loop.
     """
-    from agent.graph._llm import _consecutive_silent_idle
+    from agent.graph._llm import _silent_idle_output_tokens
 
-    _consecutive_silent_idle.pop("7", None)
+    _silent_idle_output_tokens.pop("7", None)
 
     async def _ds_reasoning_only() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -564,7 +570,39 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops() -> N
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
-    _consecutive_silent_idle.pop("7", None)
+    _silent_idle_output_tokens.pop("7", None)
+
+
+async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reasoning-content-only turns cannot bypass the silent-idle cost guard."""
+    from agent.graph._llm import _silent_idle_output_tokens
+    from shared.config import settings
+
+    _silent_idle_output_tokens.pop("7", None)
+    monkeypatch.setattr(settings.lm, "llm_silent_idle_max_output_tokens", 3)
+
+    async def _reasoning_content_only() -> AsyncIterator[AIMessageChunk]:
+        yield AIMessageChunk(
+            content="",
+            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+            usage_metadata={"input_tokens": 5, "output_tokens": 0, "total_tokens": 5},
+            additional_kwargs={"reasoning_content": "I still need to think."},
+        )
+
+    for turn in range(1, 4):
+        fake_llm = MagicMock()
+        fake_llm.astream.return_value = _reasoning_content_only()
+        result = await llm_node(
+            AgentState(messages=[HumanMessage(content="hi")], halted=False),
+            _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
+            _CONFIG,
+        )
+        assert isinstance(result, Command)
+        assert result.update["halted"] is (turn == 3)
+
+    assert "7" not in _silent_idle_output_tokens
 
 
 # ─────────── provider-error taxonomy: fail-fast (permanent) vs retry (transient) ───────────
@@ -704,26 +742,23 @@ async def test_llm_node_configured_fatal_error_type_fails_fast() -> None:
         settings.lm.llm_fatal_provider_error_types = original
 
 
-async def test_silent_idle_guard_halts_after_consecutive_cap() -> None:
-    """A model that reasons-only every turn must not loop forever. After
-    `settings.lm.llm_silent_idle_max_consecutive` consecutive silent idles, the
-    node halts (halted=True) to idle instead of continue-looping. The first
-    cap-1 turns continue-loop (halted=False)."""
-    from agent.graph._llm import _consecutive_silent_idle
+async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(loguru_records) -> None:
+    """Silent-idle output consumes one token budget and reports its cost."""
+    from agent.graph._llm import _silent_idle_output_tokens
     from shared.config import settings
 
-    _consecutive_silent_idle.pop("7", None)
-    cap = settings.lm.llm_silent_idle_max_consecutive
-    assert cap > 0, "test assumes the guard is enabled (default 3)"
+    _silent_idle_output_tokens.pop("7", None)
+    cap = settings.lm.llm_silent_idle_max_output_tokens
+    assert cap == 2048
 
     async def _reasoning_only() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
             content="",
             response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            usage_metadata={"input_tokens": 1, "output_tokens": 1_100, "total_tokens": 1_101},
         )
 
-    for turn in range(1, cap + 1):
+    for turn in range(1, 3):
         fake_llm = MagicMock()
         fake_llm.astream.return_value = _reasoning_only()
         state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
@@ -732,21 +767,64 @@ async def test_silent_idle_guard_halts_after_consecutive_cap() -> None:
         )
         assert isinstance(result, Command)
         assert result.goto == "after_exec"
-        if turn < cap:
-            assert result.update["halted"] is False, f"turn {turn}/{cap} should continue-loop"
+        if turn == 1:
+            assert result.update["halted"] is False
         else:
-            assert result.update["halted"] is True, f"turn {cap}/{cap} should guard-halt to idle"
+            assert result.update["halted"] is True
 
-    # The streak is popped at the cap, so the next run starts a fresh budget.
-    assert "7" not in _consecutive_silent_idle
+    # The budget is popped at the cap, so the next run starts fresh.
+    assert "7" not in _silent_idle_output_tokens
+    silent_logs = [
+        r
+        for r in loguru_records
+        if r["extra"].get("event") == "silent_idle"  # pyright: ignore[reportUnknownMemberType]
+    ]
+    assert silent_logs[-1]["extra"]["cumulative_output_tokens"] == 2_200
+    assert silent_logs[-1]["extra"]["estimated_cost_usd"] > 0
+
+
+async def test_retried_llm_node_records_total_retry_duration(loguru_records) -> None:
+    """A success after retry exports the full sequence duration as telemetry."""
+
+    async def _text_turn() -> AsyncIterator[AIMessageChunk]:
+        yield AIMessageChunk(
+            content="done",
+            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        )
+
+    fake_llm = MagicMock()
+    fake_llm.astream.return_value = _text_turn()
+    runtime = _make_runtime(
+        llm=fake_llm,
+        event_publisher=MagicMock(),
+        execution_info=ExecutionInfo(
+            checkpoint_id="checkpoint",
+            checkpoint_ns="",
+            task_id="task",
+            node_attempt=2,
+            node_first_attempt_time=time.time() - 3.0,
+        ),
+    )
+
+    await llm_node(
+        AgentState(messages=[HumanMessage(content="hi")], halted=False), runtime, _CONFIG
+    )
+
+    retry_logs = [
+        record
+        for record in loguru_records
+        if record["extra"].get("event") == "llm_retry"  # pyright: ignore[reportUnknownMemberType]
+    ]
+    assert retry_logs[-1]["extra"]["outcome"] == "succeeded"
+    assert retry_logs[-1]["extra"]["duration_seconds"] >= 3.0
 
 
 async def test_silent_idle_streak_resets_after_normal_turn() -> None:
-    """A single real action (text or tool_call) clears the silent-idle streak,
-    so an isolated silent idle never accumulates toward the cap."""
-    from agent.graph._llm import _consecutive_silent_idle
+    """A real action clears the silent-idle output-token budget."""
+    from agent.graph._llm import _silent_idle_output_tokens
 
-    _consecutive_silent_idle.pop("7", None)
+    _silent_idle_output_tokens.pop("7", None)
 
     async def _reasoning_only() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -762,7 +840,7 @@ async def test_silent_idle_streak_resets_after_normal_turn() -> None:
             usage_metadata={"input_tokens": 1, "output_tokens": 4, "total_tokens": 5},
         )
 
-    # 1) silent idle → streak = 1, continue-loop
+    # 1) silent idle accumulates its output-token cost.
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _reasoning_only()
     await llm_node(
@@ -770,7 +848,7 @@ async def test_silent_idle_streak_resets_after_normal_turn() -> None:
         _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
         _CONFIG,
     )
-    assert _consecutive_silent_idle.get("7") == 1
+    assert _silent_idle_output_tokens.get("7") == 1
 
     # 2) a normal text turn resets the streak
     fake_llm = MagicMock()
@@ -781,9 +859,9 @@ async def test_silent_idle_streak_resets_after_normal_turn() -> None:
         _CONFIG,
     )
     assert result.update["halted"] is True  # text, no tool_call → halt
-    assert "7" not in _consecutive_silent_idle
+    assert "7" not in _silent_idle_output_tokens
 
-    # 3) a later silent idle starts back at 1, not 2
+    # 3) a later silent idle starts back at one output token, not two.
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _reasoning_only()
     result = await llm_node(
@@ -792,8 +870,8 @@ async def test_silent_idle_streak_resets_after_normal_turn() -> None:
         _CONFIG,
     )
     assert result.update["halted"] is False
-    assert _consecutive_silent_idle.get("7") == 1
-    _consecutive_silent_idle.pop("7", None)
+    assert _silent_idle_output_tokens.get("7") == 1
+    _silent_idle_output_tokens.pop("7", None)
 
 
 # ────────────────────────────────────────────────────────────

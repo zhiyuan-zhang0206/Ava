@@ -18,6 +18,7 @@ decides what is imported; not imported = not registered.
 
 import contextlib
 import sys
+import threading
 from pathlib import Path
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -70,11 +71,9 @@ from ._nodes import (
 #   backoff sequence: 30 → 60 → 120 → 240 → 480 (5th retry lands exactly, no cap collision).
 # - backoff_factor: default 2, set explicitly — base 2 validated by all incidents, not tuning.
 #
-# Worst-case sequence: stream fail 1 → 30+Δs → stream 2 → 60+2Δs → stream 3 →
-# 120+4Δs → stream 4 → 240+8Δs → stream 5 → 480s (capped) → stream 6 → process_exit,
-# where Δ = the per-agent phase offset in [0, 10s) (`_retry_phase_jitter`).
-# Stream itself ~3-5s, total ~950-1010s (~16-17 minutes) before die.
-# That's ~770s more wait than old 10s start, in exchange for larger rate-limit burst survival.
+# A configurable wall-clock budget limits the sequence across attempts and
+# waits. An attempt that is already in flight remains bounded by its existing
+# stream timeouts; the budget prevents another provider call once it expires.
 #
 # DeepSeek streaming drift reference: deepseek-ai/DeepSeek-V3#1244 (V4-Pro
 # tool_call intermittently stuffs wrong field, ~11% probability, mode-lock at
@@ -94,6 +93,19 @@ from ._nodes import (
 # LangGraph's own `jitter=True` adds only uniform(0, 1)s — a rounding error
 # at these scales — which is why the per-agent offset exists.
 _RETRY_JITTER_SPAN_S = 10.0
+_RETRY_REMAINING_ATTR = "_ava_retry_budget_remaining_seconds"
+_retry_budget_state = threading.local()
+
+
+def _retry_wait_ceiling() -> float | None:
+    """The current failed attempt's remaining retry budget, if the node supplied one.
+
+    LangGraph calls ``retry_on`` and then reads the policy fields synchronously
+    before awaiting its sleep. A thread-local handoff keeps a hosted runner's
+    concurrent turn tasks independent without adding a contextvar mechanism.
+    """
+    remaining = getattr(_retry_budget_state, "remaining_seconds", None)
+    return remaining if isinstance(remaining, float) else None
 
 
 def _retry_phase_jitter() -> float:
@@ -171,15 +183,33 @@ class _TurnScopedRetryPolicy(RetryPolicy):
     def initial_interval(self) -> float:  # pyright: ignore[reportIncompatibleVariableOverride]
         return settings.lm.llm_retry_initial_interval_seconds + _retry_phase_jitter()
 
+    @property
+    def max_interval(self) -> float:  # pyright: ignore[reportIncompatibleVariableOverride]
+        remaining = _retry_wait_ceiling()
+        if remaining is None:
+            return settings.lm.llm_retry_max_interval_seconds
+        # LangGraph adds up to one second of jitter after this cap. Reserve it
+        # so a retry sleep cannot drift beyond the total node budget.
+        reserved_jitter = 1.0 if remaining > 1.0 else 0.0
+        return min(settings.lm.llm_retry_max_interval_seconds, remaining - reserved_jitter)
+
+    @property
+    def jitter(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        remaining = _retry_wait_ceiling()
+        # LangGraph reads max_interval before jitter. Consume the synchronous
+        # handoff here so a later unrelated policy inspection cannot reuse an
+        # earlier attempt's budget.
+        _retry_budget_state.remaining_seconds = None
+        return remaining is None or remaining > 1.0
+
 
 def _build_llm_retry() -> RetryPolicy:
     """LLM node retry policy — reads params from settings, covers DeepSeek streaming drift.
 
-    Excludes FatalLLMStreamError + FatalProviderError from retry: the
-    consecutive-same-error cap firing, and a permanent provider rejection
-    (402/401/403), are both deterministic — they must propagate to the ERROR
-    event path immediately rather than waste remaining retries on a failure that
-    cannot flip.
+    Excludes fatal stream/provider errors from retry. The node attaches its
+    remaining wall-clock retry budget to retryable exceptions; when the budget
+    reaches zero, this predicate rejects the next retry before LangGraph sleeps
+    or invokes the provider again.
 
     Returns a `_TurnScopedRetryPolicy`: the two per-agent fields resolve per read
     so one shared graph still retries each hosted agent on its own schedule.
@@ -192,9 +222,20 @@ def _build_llm_retry() -> RetryPolicy:
     def _should_retry(exc: Exception) -> bool:
         # asyncio.CancelledError is a BaseException subclass (not Exception),
         # so it won't reach this callable. All other exceptions: retry.
-        return not isinstance(
+        if isinstance(
             exc, (FatalLLMStreamError, FatalProviderError, KeyboardInterrupt, SystemExit)
-        )
+        ):
+            _retry_budget_state.remaining_seconds = None
+            return False
+        remaining = getattr(exc, _RETRY_REMAINING_ATTR, None)
+        if isinstance(remaining, float):
+            if remaining <= 0.0:
+                _retry_budget_state.remaining_seconds = None
+                return False
+            _retry_budget_state.remaining_seconds = remaining
+        else:
+            _retry_budget_state.remaining_seconds = None
+        return True
 
     from shared.lm.registry import resolve_setting
 

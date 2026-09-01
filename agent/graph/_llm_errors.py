@@ -17,9 +17,7 @@ from typing import Any, cast
 
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.lm.errors import ErrorClass, classify_error
-from shared.lm.factory import provider_key_of_model
-from shared.log import logger
+from shared.lm.errors import ErrorClass, classify_error, emit_provider_error
 
 
 class LLMStreamError(Exception):
@@ -52,6 +50,14 @@ class FatalLLMStreamError(LLMStreamError):
     the agent loop emits one ERROR event and re-enters the graph with a fresh
     run: the turn is aborted, the agent stays alive idling for the next
     inbound so the user can see the error and decide the next action.
+    """
+
+
+class LLMRetryBudgetExceededError(FatalLLMStreamError):
+    """The LLM node's configurable retry wall-clock budget expired.
+
+    This is excluded from the retry policy, so it reaches the normal turn
+    failure path rather than beginning another provider invocation.
     """
 
 
@@ -167,20 +173,7 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     fatal = classification.error_class is ErrorClass.PERMANENT or fatal_type_hit
     context_overflow = classification.context_overflow
     model = turn_settings.lm.llm_model
-    logger.opt(exception=True).warning(
-        "[{label}] {error_class} provider={provider} status={status} fatal={fatal}",
-        event="llm_provider_error",
-        label="llm_provider_error",
-        error_class=classification.error_class.value,
-        provider=classification.provider,
-        status=classification.status,
-        error_type=classification.error_type,
-        fatal=fatal,
-        billing=classification.billing,
-        context_overflow=context_overflow,
-        vendor=provider_key_of_model(model),
-        model=model,
-    )
+    emit_provider_error(exc, model=model, fatal=fatal, classification=classification)
     if not fatal:
         return None
     if classification.billing:
@@ -231,9 +224,11 @@ class LLMStreamSilentIdleError(LLMStreamError):
     reasoning in context and returns ``halted=False`` so the claim node loops
     straight back to the LLM (no token-wasting blind re-stream), letting the
     ava_silent_idle plugin inject a Continue nudge before the next turn. A
-    per-process consecutive-count guard (``_consecutive_silent_idle``, capped by
-    ``settings.lm.llm_silent_idle_max_consecutive``) bounds a model that habitually
-    reasons without acting: at the cap the node halts to idle instead of looping.
+    per-process output-token budget (``_silent_idle_output_tokens``, capped by
+    ``settings.lm.llm_silent_idle_max_output_tokens``) bounds a model that
+    habitually reasons without acting. Each silent idle consumes at least one
+    budget token even when a provider reports zero output tokens; at the cap
+    the node halts to idle instead of looping.
     This class is retained as public API for external catch sites.
 
     The fallthrough case — no reasoning AND no text AND no tool_call — is NOT a

@@ -85,6 +85,6 @@ actions is not lost, because the row is dispatched by the next claim pass.
 ## Notes
 
 - No LangGraph conditional edges—all routing is explicit `Command(goto=...)`, so completeness is verifiable at compile time
-- The LLM node has a dedicated `RetryPolicy` (`agent/graph/_build.py:_build_llm_retry()`, parameters read from `settings.llm_retry_*`, defaults max_attempts=6 / initial=30s / max=480s / backoff=2): covers multi-provider network jitter + rate-limit bursts, and explicitly excludes `FatalLLMStreamError` / `FatalProviderError` (deterministic errors fail fast instead of exhausting retries)
+- The LLM node has a dedicated `RetryPolicy` (`agent/graph/_build.py:_build_llm_retry()`, parameters read from `settings.llm_retry_*`, defaults max_attempts=6 / initial=30s / max=480s / total=420s / backoff=2): covers multi-provider network jitter + rate-limit bursts, clips waits to the retry budget, records final retry duration, and excludes fatal stream/provider errors (deterministic errors fail fast instead of exhausting retries)
 - after_exec always returns to claim (not only when halted)—allows incoming user chats that arrive mid-multi-step to be claimed promptly
 - Dependency injection via `Runtime[AvaContext]` (`shared/context.py`), not hardcoded in `build_graph`

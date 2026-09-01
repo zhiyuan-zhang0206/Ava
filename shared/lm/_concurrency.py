@@ -1,13 +1,12 @@
-"""Per-provider outbound LLM concurrency caps — reserved injection point.
+"""Per-provider outbound LLM concurrency caps.
 
-Disabled by default: `AVA_LLM_MAX_CONCURRENT` unset (or empty) → every
-acquire is a no-op pass-through, zero behavior change. When configured
-(e.g. `deepseek:400,anthropic:200`), the cap applies per provider *around
-the whole SDK call* — SDK-internal retries included — so a burst of agents
-or a batch `ava.understand` / `ava.web.fetch` job cannot push a provider
-past its account concurrency ceiling. DeepSeek documents account-level
-concurrency limits (flash 2500 / pro 500, shared across every key on the
-account), which is exactly the 429 trigger this limiter prevents.
+The default `AVA_LLM_MAX_CONCURRENT=deepseek:31` reserves 31 calls for each
+of the default 16 active turns (496 of DeepSeek Pro's 500 account slots). The
+cap applies per provider *around the whole SDK call* — SDK-internal retries
+included — so a burst of agents or a batch `ava.understand` / `ava.web.fetch`
+job cannot push a provider past its account concurrency ceiling. An explicit
+empty value disables all caps; operators changing the active-turn budget must
+adjust the configured cap to preserve the account-wide allocation.
 
 Two acquire flavors, both pass-through when the provider is unconfigured:
 
@@ -30,12 +29,11 @@ for an account-level concurrency ceiling is client-side concurrency control
 (primary) + exponential-backoff retry (secondary) — the limiter is the
 primary layer; `invoke_text`'s backoff stays the secondary layer.
 
-Caveat for when this is ever enabled: a slot held by one LLM call is not
+Caveat: a slot held by one LLM call is not
 re-entrant — an agent streaming under a held slot whose `execute_code` then
 calls `ava.understand` on the same provider queues behind itself (deadlock
-at limit=1). Enabling the caps means the batch/understand paths must share
-the budget consciously (or run on a provider key with headroom). The
-default (disabled) has no such coupling.
+at limit=1). Batch and understand paths must share the budget consciously (or
+run on a provider key with headroom).
 """
 
 import asyncio
