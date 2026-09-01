@@ -276,6 +276,31 @@ def test_limit_accepts_10000_and_rejects_10001(
     assert rejected.status_code == 422
 
 
+def test_limit_zero_is_rejected_by_query_validation(test_client: TestClient) -> None:
+    """The public page-size range starts at one, before agent lookup runs."""
+    response = test_client.get("/api/agents/99999/messages?limit=0")
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "validation_error"
+    assert body["errors"][0]["loc"] == ["query", "limit"]
+
+
+def test_before_zero_returns_empty_window(
+    db_conn: psycopg.Connection, test_client: TestClient
+) -> None:
+    """The exclusive absolute cursor zero has no prefix to return."""
+    from langchain_core.messages import HumanMessage
+
+    tid = create_agent(db_conn)
+    _put_checkpoint(tid, [HumanMessage(content="m0")])
+
+    response = test_client.get(f"/api/agents/{tid}/messages?before=0")
+
+    assert response.status_code == 200
+    assert response.json() == {"messages": [], "msg_count": 1, "start_index": 0, "has_more": False}
+
+
 def test_checkpoint_read_failure_returns_503(
     db_conn: psycopg.Connection,
     test_client: TestClient,
