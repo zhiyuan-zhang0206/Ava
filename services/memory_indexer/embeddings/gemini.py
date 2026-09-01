@@ -128,7 +128,13 @@ def _vectors_from_body(body: dict[str, Any], texts: list[str]) -> np.ndarray:
 
 
 def _emit_billing(body: dict[str, Any]) -> None:
-    """Emit the completed Gemini embedding call without affecting it."""
+    """Emit the completed Gemini embedding call without affecting it.
+
+    Called before `_vectors_from_body` on purpose: the provider bills the
+    request whether or not our shape validation accepts the response, so a
+    malformed-but-billed response must still reach the ledger. Billing
+    failures are swallowed — they can never break the embed call.
+    """
     try:
         from shared.lm.billing import emit_billing_event, vendor_of_model
         from shared.lm.pricing import quote

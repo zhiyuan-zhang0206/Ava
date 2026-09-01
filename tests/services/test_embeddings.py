@@ -331,16 +331,37 @@ def test_embed_batch_empty_short_circuit(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_embed_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakePost(vectors=[[1.0] * DIM], raises_times=2)
     _patch_post(monkeypatch, fake)
+    tracer = _enable_tracing(monkeypatch)
     result = _provider().embed_batch(["hello"])
     assert result.shape == (1, DIM)
     assert fake.call_count == 3
+    assert len(tracer.spans) == 1  # one span per completed call, not per attempt
 
 
 def test_embed_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakePost(vectors=[[1.0] * DIM], raises_times=100)
     _patch_post(monkeypatch, fake)
+    tracer = _enable_tracing(monkeypatch)
     with pytest.raises(EmbeddingAPIError, match="failed after"):
         _provider().embed_batch(["hello"])
+    assert tracer.spans == []  # a failed call emits no billing span
+
+
+def test_embed_survives_billing_emit_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A billing-emit exception is swallowed — the embed call still completes
+    (module contract: billing can never affect the call it observes)."""
+    fake = _FakePost(vectors=[[1.0] * DIM], prompt_token_count=123)
+    _patch_post(monkeypatch, fake)
+    _enable_tracing(monkeypatch)
+
+    def _boom(**kwargs: object) -> None:
+        raise RuntimeError("billing exploded")
+
+    monkeypatch.setattr("shared.lm.billing.emit_billing_event", _boom)
+
+    result = _provider().embed_batch(["hello"])
+
+    assert result.shape == (1, DIM)
 
 
 def test_embed_http_error_status_retries_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
