@@ -28,6 +28,6 @@ Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` 
 - `lint_note_tags.py` — bidirectional NoteTag / timeline-marker contract: every backend tag has a frontend dispatch branch and every lifecycle, memory, or note dispatch member is a live backend tag
 - `lint_no_plugin_wrap.py` — plugins may not bare monkey-patch `ava.*` (must go through `ava.extend.wrap`); wired into pre-commit
 - `check_doc_references.py` — validates every CLI flag in the docs against the argparse tree and `scripts/*.sh` case branches, plus relative markdown links; runs on every pre-commit commit (`pass_filenames: false`) (`lint_skill_md_size.py`: hard cap of 300 lines / soft zone 250-300 for SKILL.md, pushing progressive disclosure — root SKILL.md as index, depth sinks into sub-skills)
-- `lint_migrations.py` — timestamp-id + applied-set scheme checks: filename format, unique names, up/down `.down.sql` pairing, and `db/schema.sql` baseline stamping; **no expand-contract check** (that's a documentation discipline, not lint)
+- `lint_migrations.py` — timestamp-id + applied-set scheme checks: filename format, unique names, up/down `.down.sql` pairing, `db/schema.sql` baseline/folded-migration stamping, and a later-drop plan for every `*_backfill_*` snapshot table; **no expand-contract check** (that's a documentation discipline, not lint)
 
 Parent: [[scripts/scripts.ava.okf.md|scripts]].

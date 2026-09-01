@@ -124,6 +124,61 @@ def test_down_guarded_do_block_drop_passes(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
+def test_backfill_snapshot_requires_later_drop_plan(monkeypatch, tmp_path):
+    """A backfill snapshot stays only until a later migration drops it."""
+    lint, d = _lint(monkeypatch, tmp_path)
+    snapshot = "agent_state_backfill_snapshot"
+    (d / f"{_TS}_record-backfill.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
+    (d / f"{_TS}_record-backfill.down.sql").write_text(f"DROP TABLE IF EXISTS {snapshot};")
+
+    assert lint.main() == 1
+
+    (d / f"{_TS2}_drop-backfill.sql").write_text(f"DROP TABLE IF EXISTS {snapshot};")
+    (d / f"{_TS2}_drop-backfill.down.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
+    assert lint.main() == 0
+
+
+def test_backfill_snapshot_drop_plan_ignores_comments_and_literals(monkeypatch, tmp_path):
+    """Only executable static SQL can retire a backfill snapshot."""
+    lint, d = _lint(monkeypatch, tmp_path)
+    snapshot = "agent_state_backfill_snapshot"
+    (d / f"{_TS}_record-backfill.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
+    (d / f"{_TS}_record-backfill.down.sql").write_text(f"DROP TABLE IF EXISTS {snapshot};")
+    fake_drop = d / f"{_TS2}_drop-backfill.sql"
+    fake_drop.write_text(
+        f"-- DROP TABLE IF EXISTS {snapshot};\nSELECT 'DROP TABLE IF EXISTS {snapshot}';\n"
+    )
+    (d / f"{_TS2}_drop-backfill.down.sql").write_text("SELECT 1;")
+
+    assert lint.main() == 1
+
+    fake_drop.write_text(f"DROP TABLE IF EXISTS {snapshot};\n")
+    assert lint.main() == 0
+
+
+def test_backfill_snapshot_check_ignores_comments_and_literals(monkeypatch, tmp_path):
+    """Commented or quoted CREATE TABLE text must not require a drop plan."""
+    lint, d = _lint(monkeypatch, tmp_path)
+    (d / f"{_TS}_commented.sql").write_text(
+        "-- CREATE TABLE comment_backfill_snapshot (id BIGINT);\n"
+        "SELECT 'CREATE TABLE quoted_backfill_snapshot (id BIGINT)';\n"
+    )
+    (d / f"{_TS}_commented.down.sql").write_text("SELECT 1;")
+
+    assert lint.main() == 0
+
+
+def test_backfill_snapshot_check_ignores_non_do_dollar_quoted_literal(monkeypatch, tmp_path):
+    """A dollar-quoted value is not a migration DDL statement."""
+    lint, d = _lint(monkeypatch, tmp_path)
+    (d / f"{_TS}_dollar-quoted.sql").write_text(
+        "SELECT $$CREATE TABLE dollar_quoted_backfill_snapshot (id BIGINT)$$;\n"
+    )
+    (d / f"{_TS}_dollar-quoted.down.sql").write_text("SELECT 1;")
+
+    assert lint.main() == 0
+
+
 def test_schema_generate_series_seed_fails(monkeypatch, tmp_path):
     """A schema.sql still carrying the pre-cutover generate_series seed is rejected."""
     lint, _ = _lint(
