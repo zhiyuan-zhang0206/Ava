@@ -2,9 +2,10 @@
 """Refresh .test_durations for pytest-split duration-balanced sharding.
 
 CI fans the backend pytest suite over 12 shards and tests/e2e over 4 shards;
-pytest-split balances them by per-test durations loaded from the repo-root
-`.test_durations`. That file goes stale as the suite grows (new tests are
-costed at the average), which is what produced the ~20% shard skew measured
+pytest-split uses its least_duration (LPT) algorithm to balance them by per-test
+durations loaded from the repo-root `.test_durations`. That file goes stale as
+the suite grows (new tests are costed at the average), which is what produced
+the ~20% shard skew measured
 in the 2026-08-30 CI investigation. This script re-measures BOTH suites the
 same way CI runs them and rewrites the file:
 
@@ -105,8 +106,9 @@ def _run_suite(
     """Run one suite with duration recording; return the pytest exit code.
 
     The suite is invoked exactly as CI runs it (same worker count, marker
-    filter, e2e exclusion and, for the backend suite, the same --cov module
-    list), so the measured durations match what shard jobs will experience.
+    filter, e2e exclusion, least_duration algorithm and, for the backend suite,
+    the same --cov module list), so the measured durations match what shard jobs
+    will experience.
     Durations go to `durations_path`, never the committed file;
     `--clean-durations` replaces that target with this run's tests only.
     """
@@ -152,6 +154,8 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
             str(groups),
             "--group",
             str(group),
+            "--splitting-algorithm",
+            "least_duration",
         ]
         coverage = True
     else:
