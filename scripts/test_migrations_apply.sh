@@ -44,7 +44,7 @@ echo "-> apply baseline db/schema.sql"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql
 echo "  ok"
 
-echo "-> trigger smoke: exercise cascade_close_agent_pages on agents_meta UPDATE"
+echo "-> trigger smoke: exercise agents_meta termination triggers"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO agents (label) VALUES ('smoke-agent');
 INSERT INTO agents_meta (id, status, machine)
@@ -68,6 +68,37 @@ BEGIN
     IF show_closed_count <> 1 OR serve_open_count <> 1 THEN
         RAISE EXCEPTION 'cascade_close_agent_pages wrong result — show_closed_count=%, serve_open_count=%',
             show_closed_count, serve_open_count;
+    END IF;
+END $$;
+
+-- A live child folds to its terminated parent's live parent. This exercises
+-- the PL/pgSQL body instead of only checking that CREATE FUNCTION succeeds.
+INSERT INTO agents (id, label) VALUES
+    (991001, 'spawner-smoke-grandparent'),
+    (991002, 'spawner-smoke-parent'),
+    (991003, 'spawner-smoke-child'),
+    (991004, 'spawner-smoke-terminated-child');
+INSERT INTO agents_meta (id, spawner, status) VALUES
+    (991001, 'user', 'running'),
+    (991002, 'agent:991001', 'running'),
+    (991003, 'agent:991002', 'running'),
+    (991004, 'agent:991002', 'terminated');
+UPDATE agents_meta SET status = 'terminated' WHERE id = 991002;
+UPDATE agents_meta SET status = 'idling' WHERE id = 991004;
+
+DO $$
+DECLARE child_spawner TEXT;
+DECLARE resurrected_spawner TEXT;
+BEGIN
+    SELECT spawner INTO child_spawner FROM agents_meta WHERE id = 991003;
+    IF child_spawner <> 'agent:991001' THEN
+        RAISE EXCEPTION 'fold_live_child_spawners_on_terminate wrong result — child_spawner=%',
+            child_spawner;
+    END IF;
+    SELECT spawner INTO resurrected_spawner FROM agents_meta WHERE id = 991004;
+    IF resurrected_spawner <> 'agent:991001' THEN
+        RAISE EXCEPTION 'fold_resurrected_agent_spawner wrong result — resurrected_spawner=%',
+            resurrected_spawner;
     END IF;
 END $$;
 SQL
