@@ -43,6 +43,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # Dynamic emit: positional-argument form, no `event=` literal.
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
         "task_escalation",  # task_maintenance/daemon.py:_run_escalate
+        "watchdog_tick",  # services/watchdog/daemon.py:_TickProgress.record_completed (positional emit)
         "heartbeat_paused",  # ava/self.py:258 telemetry.emit("telemetry", ...)
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
         "pgbouncer_repaired",  # services/healthchecks/pgbouncer.py:_emit_repaired
