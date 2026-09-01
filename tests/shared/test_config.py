@@ -1041,7 +1041,8 @@ def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
     """Runner profile: sandbox included (browser MCP daemon reads
-    settings.sandbox.mcp_connect_timeout_seconds); agent/web/alerts excluded."""
+    settings.sandbox.mcp_connect_timeout_seconds); agent is included because
+    the wedged-controller timing lattice reads the idle claim backstop."""
     from shared import config
 
     s = config.Settings(profile="runner")
@@ -1053,9 +1054,10 @@ def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
         "gateway",
         "lm",
         "sandbox",
+        "agent",
     ):
         assert s.has_domain(domain), domain
-    for domain in ("agent", "web", "alerts", "telegram", "feishu"):
+    for domain in ("web", "alerts", "telegram", "feishu"):
         assert not s.has_domain(domain), domain
         with pytest.raises(AttributeError):
             getattr(s, domain)
