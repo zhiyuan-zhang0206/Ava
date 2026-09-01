@@ -135,13 +135,28 @@ def test_invoke_text_empty_response_raises_error_type() -> None:
         invoke_text(llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError)
 
 
-def test_invoke_text_upstream_error_wrapped_in_error_type() -> None:
+def test_invoke_text_upstream_error_wrapped_in_error_type(loguru_records) -> None:
     class _Boom:
         def invoke(self, messages: list[Any]) -> Any:
-            raise RuntimeError("rate limit exceeded")
+            exc = RuntimeError("rate limit exceeded")
+            exc.status_code = 429  # type: ignore[attr-defined]
+            raise exc
 
     with pytest.raises(KeyError, match="rate limit"):
-        invoke_text(_Boom(), [{"type": "text", "text": "q"}], desc="d", error_type=KeyError)
+        invoke_text(
+            _Boom(),
+            [{"type": "text", "text": "q"}],
+            desc="d",
+            error_type=KeyError,
+            model="deepseek-v4-pro",
+        )
+    events = [
+        record
+        for record in loguru_records
+        if record["extra"].get("event") == "llm_provider_error"  # pyright: ignore[reportUnknownMemberType]
+    ]
+    assert events[-1]["extra"]["status"] == 429
+    assert events[-1]["extra"]["vendor"] == "deepseek"
 
 
 # ─── answer_text ──────────────────────────────────────────────────────────

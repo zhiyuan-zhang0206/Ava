@@ -44,6 +44,7 @@ _RULES = (
 _EXPECTED_UIDS = {
     # application layer — Loki event stream + the LLM latency histogram
     "ava-ops-warning-error-spike",
+    "ava-ops-llm-rate-limit",
     "ava-ops-sse-drop-backlog",
     "ava-ops-agent-restart-spike",
     "ava-ops-llm-latency-p95",
@@ -97,7 +98,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [20, 7]
+    assert [len(group["rules"]) for group in groups] == [20, 8]
     return groups
 
 
@@ -149,6 +150,7 @@ def test_low_cost_rules_use_the_slow_group() -> None:
     group_for_rule = {rule["uid"]: group["name"] for group in groups for rule in group["rules"]}
     for uid in (
         "ava-ops-trace-disk-watermark",
+        "ava-ops-llm-rate-limit",
         "ava-ops-llm-billing-quota",
         "ava-ops-gateway-latency-route-warning",
         "ava-ops-gateway-latency-route-error",
@@ -225,6 +227,7 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
         ("ava-ops-agent-restart-spike", 'event_name="agent_restarted"'),
         ("ava-ops-delivery-stalled-backlog", 'event_name="delivery_stalled"'),
         ("ava-ops-trace-disk-watermark", 'event_name="trace"'),
+        ("ava-ops-llm-rate-limit", 'event_name="llm_provider_error"'),
         ("ava-ops-llm-billing-quota", 'event_name="llm_provider_error"'),
     ],
 )
@@ -389,6 +392,21 @@ def test_billing_rule_fires_on_the_first_occurrence() -> None:
     assert rule["for"] == "0m"
     assert rule["labels"]["severity"] == "critical"
     assert any("[15m]" in e for e in _exprs(rule, "loki"))
+
+
+def test_rate_limit_rule_groups_http_429s_by_provider() -> None:
+    """The warning is a provider-level burst, not a page per affected model."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-llm-rate-limit"]
+    expr = _exprs(rule, "loki")[0]
+
+    assert "sum by (attributes_vendor)" in expr
+    assert 'attributes_status="429"' in expr
+    assert "[5m]" in expr
+    assert _threshold_params(rule) == [[5]]
+    assert rule["for"] == "0m"
+    assert rule["labels"]["severity"] == "warning"
+    assert "{{ $labels.attributes_vendor }}" in rule["annotations"]["summary"]
 
 
 def test_billing_rule_keys_on_the_billing_flag_not_a_status_list() -> None:

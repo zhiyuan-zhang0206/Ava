@@ -27,6 +27,7 @@ def _runtime_with_redis():
     """MagicMock runtime + functional ops_pool (node_lifecycle reads chat
     anchors on enter; subscribe_interrupt's watcher reads pending interrupts)."""
     runtime = MagicMock()
+    runtime.execution_info = None
     runtime.context.ops_pool = make_fake_ops_pool()
     return runtime
 

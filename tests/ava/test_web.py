@@ -9,9 +9,9 @@ monkeypatch `urllib.request.urlopen` and `ava.understand.understand`.
 Key contracts:
 - fetch() only accepts list[tuple[str, str]], raises TypeError otherwise
 - Batch fetch runs in parallel via asyncio, preserves input order
-- Concurrency is unbounded by default; an optional `max_concurrent` caps how
-  many items are in flight at once. A provider 429 propagates as
-  SearchError / FetchError rather than being throttled away
+- Concurrency defaults to the SDK's shared safe ceiling; `max_concurrent`
+  selects a different in-flight limit. A terminal provider failure propagates
+  as SearchError / FetchError
 - Individual fetch contracts (truncation, wall detection, error wrapping) still hold
 """
 
@@ -29,6 +29,7 @@ import pytest
 from pydantic import SecretStr
 
 import ava
+from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.web import FetchError, SearchError, WebError
 from shared.config import settings
 
@@ -381,14 +382,12 @@ def test_search_batch_runs_concurrently(
 
 
 def test_search_signature_includes_max_concurrent() -> None:
-    """`max_concurrent` is an optional ceiling on in-flight queries — None
-    (the default) keeps unbounded concurrency, and rate limiting stays with
-    the provider (a 429 surfaces as SearchError)."""
+    """The public default applies the shared safe batch ceiling."""
     import inspect
 
     sig = inspect.signature(ava.web.search)
     assert list(sig.parameters) == ["queries", "count", "max_concurrent"]
-    assert sig.parameters["max_concurrent"].default is None
+    assert sig.parameters["max_concurrent"].default == DEFAULT_BATCH_MAX_CONCURRENT
 
 
 def test_search_batch_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -868,16 +867,13 @@ def test_fetch_batch_runs_concurrently(
 
 
 def test_fetch_signature_includes_effort_and_max_concurrent() -> None:
-    """`effort` (None = keep settings.web.web_fetch_reasoning) plus an
-    optional `max_concurrent` ceiling on in-flight targets — None (the default)
-    keeps unbounded concurrency, and rate limiting stays with the provider
-    (a 429 surfaces as FetchError)."""
+    """Fetch keeps its reasoning default and applies the shared batch ceiling."""
     import inspect
 
     sig = inspect.signature(ava.web.fetch)
     assert list(sig.parameters) == ["targets", "max_chars", "effort", "max_concurrent"]
     assert sig.parameters["effort"].default is None
-    assert sig.parameters["max_concurrent"].default is None
+    assert sig.parameters["max_concurrent"].default == DEFAULT_BATCH_MAX_CONCURRENT
 
 
 def test_fetch_batch_empty_list(monkeypatch: pytest.MonkeyPatch, mock_llm: dict[str, Any]) -> None:
