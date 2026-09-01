@@ -21,7 +21,17 @@ events) stay in the `ava.*` SDK and the web UI.
 
 from __future__ import annotations
 
+from pydantic import BaseModel
+
 _TIMEOUT_S = 15.0
+
+
+class _AgentListItem(BaseModel):
+    """The small subset rendered by ``ava agents ls``."""
+
+    agent_id: int
+    status: str
+    label: str | None
 
 
 def cmd_agents_ls() -> int:
@@ -29,17 +39,13 @@ def cmd_agents_ls() -> int:
 
     Terminated agents are listed too (the gateway returns the full set); the
     status column is the live lifecycle state."""
-    from shared.agent_snapshot import AgentSnapshot
     from shared.http_dial import get as dial_get
     from shared.machine import gateway_api_base, gateway_auth_headers
 
-    # AgentSnapshot is the shared wire shape the gateway serializes as each
-    # /api/agents row (gateway.schemas.AgentRow subclasses it for the OpenAPI
-    # name); cli reads it from shared, never up across the cli/gateway layer.
-    url = f"{gateway_api_base()}/api/agents"
+    url = f"{gateway_api_base()}/api/agents?fields=compact"
     resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
     resp.raise_for_status()
-    rows = [AgentSnapshot.model_validate(r) for r in resp.json()]
+    rows = [_AgentListItem.model_validate(r) for r in resp.json()]
 
     if not rows:
         print("(no agents)")

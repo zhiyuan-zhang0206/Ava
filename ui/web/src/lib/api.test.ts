@@ -145,14 +145,14 @@ describe("lifecycle endpoints", () => {
     expect(calls).toHaveLength(1);
     // After happy-dom provides window, API_BASE is inferred as http://localhost:8000;
     // tests only anchor the endpoint path (gateway contract); host part is ignored.
-    expect(calls[0].url).toMatch(/\/api\/agents\?scope=live$/);
+    expect(calls[0].url).toMatch(/\/api\/agents\?scope=live&fields=summary$/);
     // GET goes through the f() wrapper by default (no method, no body).
     expect(calls[0].init?.method).toBeUndefined();
   });
 
   it("listAgents requests terminated history only when explicit", async () => {
     await api.listAgents("terminated");
-    expect(calls[0].url).toMatch(/\/api\/agents\?scope=terminated$/);
+    expect(calls[0].url).toMatch(/\/api\/agents\?scope=terminated&fields=summary$/);
   });
 
   it("listAgents projects every internal transition to the public three-state model", async () => {

@@ -308,7 +308,7 @@
     "/api/agents": {
       "get": {
         "summary": "Get Agents",
-        "description": "List agent snapshots for the requested roster scope.\n\n``all`` is the compatibility default for SDK / ops callers.\nFrontend fleet/sidebar readers request ``live`` so Postgres excludes\nterminated history before evaluating the per-agent snapshot lookups.\nThe sidebar's explicit history toggle requests ``terminated`` separately.\n\nAll scopes remain unpaginated for wire compatibility.  The default live\npath is bounded by the currently active roster; terminated history is only\npaid for when a caller asks for it explicitly.",
+        "description": "List agent snapshots for the requested roster scope.\n\n``all`` is the compatibility default for SDK / ops callers.\nFrontend fleet/sidebar readers request ``live`` so Postgres excludes\nterminated history before evaluating the per-agent snapshot lookups.\nThe sidebar's explicit history toggle requests ``terminated`` separately.\n\n``fields=full`` preserves the historical response. ``fields=summary`` is\nthe reduced SQL projection used by roster consumers; ``fields=compact``\nserves the CLI's three-column table. Detail and SSE keep the full snapshot.\nAll scopes remain unpaginated for wire compatibility.",
         "operationId": "get_agents_api_agents_get",
         "parameters": [
           {
@@ -325,6 +325,21 @@
               "default": "all",
               "title": "Scope"
             }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "full",
+                "summary",
+                "compact"
+              ],
+              "type": "string",
+              "default": "full",
+              "title": "Fields"
+            }
           }
         ],
         "responses": {
@@ -335,7 +350,17 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/AgentRow"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AgentRow"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AgentSummary"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AgentCompact"
+                      }
+                    ]
                   },
                   "title": "Response Get Agents Api Agents Get"
                 }
@@ -6350,6 +6375,36 @@
         "title": "AgentActivity",
         "description": "Active-rate: the share of an agent's alive wall-clock it spent actively\nworking versus idle-waiting for its next input. The complement\n(`1 - active_rate`) is how much of its life the agent sat blocked on a\nhuman/peer message — the metric's reason for being: surface how much an\nagent is gated on people. A project-lead agent that decides/approves every\nminute reads near 100%; one woken once a week reads near 0%; a worker that\nruns flat-out then terminates reads ~100%.\n\n`active_seconds` = Σ `duration_seconds` of every non-`claim` graph\n`node_exit` in the window — llm generation + execute_code + before/after\nhooks, i.e. all real processing. `llm_seconds` = Σ `duration_seconds` of\nevery `turn_end` event within the window — the model's generation wall-clock\n(reasoning + output). `exec_seconds` = Σ `duration_seconds` of every\n`node_exit` for the `exec` node — the code execution wall-clock. The `claim`\nnode is excluded because its wall-clock IS the idle-wait (it parks the agent\nin the inbound wait between turns), so it falls into the blocked remainder.\n`alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate\nintervals, open tail to now), clipped to the same window — the same lifecycle\nbasis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped\nat 1.0 (a node that began before the window's leading edge counts in full, so\nraw active can momentarily exceed windowed alive); 0.0 when alive is 0. All\nfields follow the request's `?hours=` / `?since_compact=` window."
       },
+      "AgentCompact": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "status",
+          "label"
+        ],
+        "title": "AgentCompact",
+        "description": "One row of ``GET /api/agents?fields=compact`` for the CLI."
+      },
       "AgentCost": {
         "properties": {
           "cost_usd": {
@@ -7185,6 +7240,142 @@
           "terminated"
         ],
         "title": "AgentStatus"
+      },
+      "AgentSummary": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "spawner": {
+            "type": "string",
+            "title": "Spawner"
+          },
+          "fork_source_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fork Source Agent Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          },
+          "pid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pid"
+          },
+          "spawned_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Spawned At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "last_active_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Active At"
+          },
+          "last_inbound_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Inbound At"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "supports_vision": {
+            "type": "boolean",
+            "title": "Supports Vision"
+          },
+          "liveness_state": {
+            "type": "string",
+            "enum": [
+              "online",
+              "offline",
+              "unknown"
+            ],
+            "title": "Liveness State"
+          },
+          "notices_awaiting_response": {
+            "items": {
+              "$ref": "#/components/schemas/OpenNotice"
+            },
+            "type": "array",
+            "title": "Notices Awaiting Response"
+          },
+          "unread_notice_count": {
+            "type": "integer",
+            "title": "Unread Notice Count"
+          },
+          "heartbeat_paused_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat Paused Until"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "spawner",
+          "fork_source_agent_id",
+          "status",
+          "pid",
+          "spawned_at",
+          "started_at",
+          "last_active_at",
+          "last_inbound_at",
+          "label",
+          "machine",
+          "supports_vision",
+          "liveness_state",
+          "notices_awaiting_response",
+          "unread_notice_count",
+          "heartbeat_paused_until"
+        ],
+        "title": "AgentSummary",
+        "description": "One row of ``GET /api/agents?fields=summary`` for roster consumers."
       },
       "AgentTps": {
         "properties": {

@@ -48,6 +48,9 @@ endpoint replaces over time.
   still requires an MCP client token; cluster cookies and secrets never count.
 - **Scope**: `read` clients may list/inspect agents, messages, and cluster
   status. `spawn_agent`, `send_message`, and `terminate_agent` require `write`.
+- **Roster reads**: `list_agents` starts from the same SQL-level agent summary
+  projection as the REST, SDK, and stdio MCP roster reads; `get_agent` remains
+  the full single-agent diagnostic view.
 - **Audit**: a `_AuditMiddleware` on the MCPServer records every `tools/call`
   as a `mcp_tool_call` event with client id/name and outcome. Each argument is
   represented only by its JSON type, character size, and SHA-256; raw values

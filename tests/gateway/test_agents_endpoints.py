@@ -846,6 +846,26 @@ class TestList:
         assert resp.status_code == 200
         rows = resp.json()
         assert len(rows) == 2
+        assert set(rows[0]) == {
+            "agent_id",
+            "spawner",
+            "fork_source_agent_id",
+            "fork_source_checkpoint_id",
+            "status",
+            "pid",
+            "spawned_at",
+            "started_at",
+            "last_active_at",
+            "last_inbound_at",
+            "label",
+            "machine",
+            "supports_vision",
+            "liveness_state",
+            "last_probe_at",
+            "notices_awaiting_response",
+            "unread_notice_count",
+            "heartbeat_paused_until",
+        }
         by_id = {r["agent_id"]: r for r in rows}
         assert by_id[a_id]["status"] == "idling"
         assert by_id[a_id]["spawner"] == "user"
@@ -881,6 +901,52 @@ class TestList:
     def test_get_agents_rejects_unknown_scope(self) -> None:
         with TestClient(app) as client:
             response = client.get("/api/agents", params={"scope": "future"})
+        assert response.status_code == 422
+
+    def test_get_agents_summary_omits_detail_only_fields(self, db_conn: psycopg.Connection) -> None:
+        """List consumers receive only the fields they actually render or parse."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            response = client.get("/api/agents", params={"fields": "summary"})
+            detail = client.get(f"/api/agents/{agent_id}")
+
+        assert response.status_code == 200
+        row = response.json()[0]
+        assert set(row) == {
+            "agent_id",
+            "spawner",
+            "fork_source_agent_id",
+            "status",
+            "pid",
+            "spawned_at",
+            "started_at",
+            "last_active_at",
+            "last_inbound_at",
+            "label",
+            "machine",
+            "supports_vision",
+            "liveness_state",
+            "notices_awaiting_response",
+            "unread_notice_count",
+            "heartbeat_paused_until",
+        }
+        assert detail.status_code == 200
+        assert "fork_source_checkpoint_id" in detail.json()
+        assert "last_probe_at" in detail.json()
+
+    def test_get_agents_compact_has_only_cli_columns(self, db_conn: psycopg.Connection) -> None:
+        """The CLI projection contains exactly the three columns it renders."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            client.patch(f"/api/agents/{agent_id}", json={"label": "alpha"})
+            response = client.get("/api/agents", params={"fields": "compact"})
+
+        assert response.status_code == 200
+        assert response.json() == [{"agent_id": agent_id, "status": "idling", "label": "alpha"}]
+
+    def test_get_agents_rejects_unknown_fields_projection(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/api/agents", params={"fields": "minimal"})
         assert response.status_code == 422
 
     def test_get_agents_joins_thread_label(

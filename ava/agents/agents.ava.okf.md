@@ -28,14 +28,14 @@ tags:
 - `get_last_message(agent_id) → str | None` — read the last AI message text from the agent (None if none).
 
 ### Discovery
-- `list_agents(filter_by_status=(RUNNING, IDLING)) → list[AgentRow]` — list agents filtered by status.
+- `list_agents(filter_by_status=(RUNNING, IDLING)) → list[AgentRow]` — list agents filtered by status through the summary roster projection; fetch one agent when full lifecycle details are needed.
 - `get_status(agent_id) → AgentStatus` — current status of a single agent (alternative to list_agents then manual filter).
 - `list_machines() → list[Machine]` — list all machines and their alive status.
 - `get_neighbors(agent_id, depth=1, limit=20) → list[Neighbor]` — related agents ranked by connection strength. Connections are established on spawn/fork/resurrect/send_message and decay over time.
 - `get_ancestors(agent_id) → list[Neighbor]` — the spawn/fork chain ABOVE an agent (who spawned whom), nearest ancestor first; `depth` = hops up. Message ties never form ancestors; a user-spawned agent returns [].
 
 ### Data Types
-- `AgentRow`: agent_id, label, status, spawner, machine, spawned_at, started_at, last_active_at, pid, heartbeat_paused_until
+- `AgentRow`: agent_id, label, status, spawner, fork_source_agent_id, machine, spawned_at, started_at, last_active_at, last_inbound_at, pid, supports_vision, liveness_state, notices_awaiting_response, unread_notice_count, heartbeat_paused_until
 - `AgentStatus`: RUNNING / IDLING / RESTARTING / TERMINATED — four states, no ops-only states to project away.
 - `Neighbor`: agent_id, label, status, depth (hops from the queried agent — out for neighbors, up for ancestors), score (connection strength)
 - `Machine`: name, description, live (detected at call time, not cached)

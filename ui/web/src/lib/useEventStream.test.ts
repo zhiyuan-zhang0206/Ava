@@ -26,7 +26,7 @@ import { AuthProvider, useAuth } from "./auth-context";
 import { RECONNECT_QUERY_KEYS } from "./fold";
 import { useFoldOwner } from "./fold/owner";
 import { AGENTS_QUERY_KEY } from "./fold/agents";
-import type { AgentRow } from "./types";
+import type { AgentRow, WireAgentRow } from "./types";
 import type { SystemEvent } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
 import {
@@ -162,7 +162,7 @@ function withProviderAndClient() {
 }
 
 // Minimal AgentRow for fold-cache assertions (shape mirrors fold/fold.test.ts).
-const baseAgent: AgentRow = {
+const baseAgent: WireAgentRow = {
   agent_id: 1,
   label: "a",
   status: "running",
