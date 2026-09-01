@@ -75,6 +75,8 @@ class _FakeGateway(BaseHTTPRequestHandler):
 
 class _FakeApp(BaseHTTPRequestHandler):
     not_found_paths: ClassVar[set[str]] = set()
+    forwarded_origin_headers: ClassVar[list[dict[str, str | None]]] = []
+    received_hosts: ClassVar[list[str | None]] = []
     requests = 0
 
     def log_message(self, format: str, *args: object) -> None:
@@ -82,6 +84,13 @@ class _FakeApp(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         _FakeApp.requests += 1
+        _FakeApp.received_hosts.append(self.headers.get("host"))
+        _FakeApp.forwarded_origin_headers.append(
+            {
+                "x-forwarded-host": self.headers.get("x-forwarded-host"),
+                "x-forwarded-proto": self.headers.get("x-forwarded-proto"),
+            }
+        )
         if self.path in _FakeApp.not_found_paths:
             body = f"NOT-FOUND {self.path}".encode()
             self.send_response(404)
@@ -93,6 +102,10 @@ class _FakeApp(BaseHTTPRequestHandler):
         body = f"APP-PAGE {self.path}".encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Security-Policy", "default-src 'self'")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -113,6 +126,8 @@ def servers(tmp_path: Path) -> Iterator[_Servers]:
     _FakeGateway.auth_status = None
     _FakeGateway.raw_body = None
     _FakeApp.requests = 0
+    _FakeApp.forwarded_origin_headers = []
+    _FakeApp.received_hosts = []
     gw = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGateway)
     app = ThreadingHTTPServer(("127.0.0.1", 0), _FakeApp)
     gate_server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -290,8 +305,15 @@ def _get(url: str) -> tuple[int, str]:
         return e.code, e.read().decode()
 
 
-def _request(url: str, *, method: str = "GET") -> tuple[int, str, dict[str, str]]:
-    request = urllib.request.Request(url, method=method)  # noqa: S310 — loopback fixture
+def _request(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+) -> tuple[int, str, dict[str, str]]:
+    request = urllib.request.Request(  # noqa: S310 — loopback fixture
+        url, headers=headers or {}, method=method
+    )
     try:
         with urllib.request.urlopen(request, timeout=5) as resp:  # noqa: S310 — loopback
             return resp.status, resp.read().decode(), dict(resp.headers.items())
@@ -328,6 +350,88 @@ def test_authenticated_proxies_app(servers) -> None:  # pyright: ignore[reportMi
     status, body = _get(servers["gate"] + "/fleet")  # pyright: ignore[reportUnknownArgumentType]
     assert status == 200
     assert body == "APP-PAGE /fleet"
+
+
+def test_app_proxy_forwards_browser_security_response_headers(servers: _Servers) -> None:
+    _FakeGateway.authenticated = True
+    _FakeGateway.down = False
+
+    status, body, headers = _request(servers["gate"] + "/fleet")
+
+    assert status == 200
+    assert body == "APP-PAGE /fleet"
+    assert headers["Content-Security-Policy"] == "default-src 'self'"
+    assert headers["X-Frame-Options"] == "DENY"
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+
+
+def test_app_proxy_preserves_browser_host_without_forwarded_origin_headers(
+    servers: _Servers,
+) -> None:
+    _FakeGateway.authenticated = True
+    _FakeGateway.down = False
+
+    status, body, _ = _request(servers["gate"] + "/fleet")
+
+    assert status == 200
+    assert body == "APP-PAGE /fleet"
+    assert _FakeApp.received_hosts == [servers["gate"].removeprefix("http://")]
+    assert _FakeApp.forwarded_origin_headers == [
+        {"x-forwarded-host": None, "x-forwarded-proto": None}
+    ]
+
+
+def test_app_proxy_forwards_browser_origin_headers_only_when_provided(servers: _Servers) -> None:
+    """The Next.js CSP proxy needs the original browser origin, while callers
+    without a TLS/proxy header retain the prior loopback behavior."""
+    _FakeGateway.authenticated = True
+    _FakeGateway.down = False
+
+    status, body, _ = _request(
+        servers["gate"] + "/fleet",
+        headers={
+            "X-Forwarded-Host": "console.example.test:3109",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+
+    assert status == 200
+    assert body == "APP-PAGE /fleet"
+    assert _FakeApp.forwarded_origin_headers == [
+        {
+            "x-forwarded-host": "console.example.test:3109",
+            "x-forwarded-proto": "https",
+        }
+    ]
+
+    status, body, _ = _request(servers["gate"] + "/fleet")
+
+    assert status == 200
+    assert body == "APP-PAGE /fleet"
+    assert _FakeApp.forwarded_origin_headers[-1] == {
+        "x-forwarded-host": None,
+        "x-forwarded-proto": None,
+    }
+
+
+def test_app_proxy_rejects_invalid_browser_origin_headers(servers: _Servers) -> None:
+    _FakeGateway.authenticated = True
+    _FakeGateway.down = False
+
+    status, body, _ = _request(
+        servers["gate"] + "/fleet",
+        headers={
+            "X-Forwarded-Host": "console.example.test/invalid",
+            "X-Forwarded-Proto": "ftp",
+        },
+    )
+
+    assert status == 200
+    assert body == "APP-PAGE /fleet"
+    assert _FakeApp.forwarded_origin_headers == [
+        {"x-forwarded-host": None, "x-forwarded-proto": None}
+    ]
 
 
 def test_app_404_passes_through_not_updating_page(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]

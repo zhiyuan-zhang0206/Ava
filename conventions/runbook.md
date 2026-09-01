@@ -585,6 +585,15 @@ supervisor socket for agent shells / watchers).
 | `computer-mcp` (agent-runner only, platform-gated: signed permissions helper enabled + capable, AF_UNIX transport, non-Windows host — Windows is the phase-3 pilot) | `.venv/bin/python -m services.computer.mcp_daemon` (computer-use executor: every desktop action through the signed permissions helper — serialized machine-wide, screen-coordinated (lease + FIFO queue + `release_control`), Vision OCR on snapshots, audited as `computer_action` + `computer_session_start/end` events, served over `~/.ava/run/computer-mcp.sock`) | `services.healthchecks.computer_mcp` (Unix-socket lock-free `ping` probe) |
 | `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava._mcps_daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
 
+The gate preserves the browser `Host` while proxying to the loopback frontend,
+so the frontend CSP derives the same host that its API client uses. A TLS or
+reverse proxy before the gate must overwrite `X-Forwarded-Host` and
+`X-Forwarded-Proto` with the public browser origin; the gate relays those
+headers only when present. Use lowercase `http` or `https` for
+`X-Forwarded-Proto`; the frontend normalizes other casing before deriving its
+CSP origin. The gate also relays the frontend CSP and static browser-security
+headers to the public response.
+
 The base-candidate gate additionally requires `AVA_PITR_REPLICATION_DB_URL`, a
 local URL for a dedicated `LOGIN REPLICATION NOSUPERUSER` role. The role must be
 accepted by the cluster's private loopback `pg_hba.conf`; its password must not
