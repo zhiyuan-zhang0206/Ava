@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Node 22 — the version the frontend (Next.js) build + agent tooling target. One
-# source for install.sh / Dockerfile / CI. Linux: nodesource (Ubuntu 24.04 ships
-# 18); macOS: Homebrew. Idempotent.
+# Node for the frontend (Next.js) build + agent tooling — one source for
+# install.sh / Dockerfile / CI. Linux: nodesource 22 (Ubuntu 24.04 ships 18).
+# macOS: the linked `node` formula (npx must land on PATH for ava-browser);
+# the keg-only `node@22` is the force-linked fallback. Idempotent.
 #
 # WSL without sudo: a host that already runs node >= 20.9 (the frontend's floor)
 # skips apt entirely — the nodesource setup + apt install need root. An apt

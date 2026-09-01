@@ -74,7 +74,10 @@ def browser_deps_warning(reason: str) -> str:
             f"|   {node_install_command()}\n"
         )
     elif reason.startswith("no Chrome"):
-        repair = "| Install Google Chrome or set AVA_CHROME_BINARY.                |\n"
+        repair = (
+            "| Install Google Chrome (after enroll, AVA_CHROME_BINARY         |\n"
+            "| can point at an existing binary).                              |\n"
+        )
     else:
         repair = (
             "| A headed browser cannot run without a display; nothing to      |\n"
