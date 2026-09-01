@@ -104,7 +104,7 @@ def _patch_wrapper_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep wrapper tests hermetic while preserving their control-flow shape."""
     from shared import host_deploy_state, ui_update_state, updater_handoff
 
-    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(host_deploy_state, "release_updater_lock", lambda: None)
     monkeypatch.setattr(host_deploy_state, "touch_updater_lease", lambda: None)
     monkeypatch.setattr(host_deploy_state, "clear_updater_lease", lambda: None)
@@ -213,7 +213,7 @@ def test_post_checkout_leg_runs_validate_to_start(
     monkeypatch.setattr(
         host_deploy_state,
         "try_acquire_updater_lock",
-        lambda: (_ for _ in ()).throw(AssertionError("post-checkout must not reacquire the lock")),
+        lambda: False,  # POSIX guard: the inherited flock still held -> continuation proceeds
     )
     monkeypatch.setattr(
         updater_handoff,
@@ -263,6 +263,29 @@ def test_post_checkout_leg_runs_validate_to_start(
     assert steps == ["validate", "preflight", "launcher", "skills", "quiesce", "stop", "start"]
 
 
+def test_post_checkout_fails_fast_when_the_flock_did_not_survive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A POSIX post-checkout image that ACQUIRES the lock has lost the exec'd
+    flock — the stop/start leg must not run unlocked (task #1181's race)."""
+    from shared import host_deploy_state, updater_handoff
+
+    monkeypatch.setattr(host_deploy_state, "touch_updater_lease", lambda: None)
+    monkeypatch.setattr(host_deploy_state, "clear_updater_lease", lambda: None)
+    monkeypatch.setattr(host_deploy_state, "release_updater_lock", lambda: None)
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    with pytest.raises(RuntimeError, match="flock did not survive"):
+        _runner._run_agent_runner_self_update(
+            tmp_path,
+            target_sha="newsha1111",
+            from_sha="oldsha0000",
+            post_checkout=True,
+            mode="none",
+        )
+
+
 def test_post_checkout_flag_parses(monkeypatch: pytest.MonkeyPatch) -> None:
     """The internal continuation cannot run without the prior checkout revision."""
     calls: list[dict[str, object]] = []
@@ -297,5 +320,11 @@ def test_post_checkout_flag_parses(monkeypatch: pytest.MonkeyPatch) -> None:
             "from_sha": "oldsha0000",
         }
     ]
-    with pytest.raises(SystemExit):
-        _runner.main(["--post-checkout"])
+    for bad in (
+        ["--post-checkout"],  # neither sha
+        ["--post-checkout", "--from-sha", "oldsha0000"],  # missing target
+        ["--post-checkout", "--target-sha", "newsha1111"],  # missing from
+        ["--post-checkout", "--restart-only"],  # contradictory mode
+    ):
+        with pytest.raises(SystemExit):
+            _runner.main(bad)
