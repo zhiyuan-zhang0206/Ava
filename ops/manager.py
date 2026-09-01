@@ -149,6 +149,8 @@ class ControllerManager:
                     async with asyncio.timeout(timeout_s):
                         result = await asyncio.to_thread(controller.reconcile, role)
             except TimeoutError:
+                if timeout_s is None:
+                    raise
                 result = ReconcileResult(
                     dimension=controller.name,
                     blocks=BlockScope.ALL,

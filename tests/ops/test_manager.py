@@ -150,6 +150,21 @@ async def test_controller_timeout_skips_the_rest_of_the_round(
     assert any("slow reconcile exceeded 0.0s" in message for message in caplog.messages)
 
 
+async def test_unbounded_controller_timeout_does_not_use_the_deadline_format() -> None:
+    """A controller's own TimeoutError is not evidence that an unset deadline expired."""
+
+    class _SocketTimeoutController:
+        name = "socket"
+        timeout_s: float | None = None
+
+        def reconcile(self, role: str) -> ReconcileResult:
+            del role
+            raise TimeoutError("socket timed out")
+
+    with pytest.raises(TimeoutError, match="socket timed out"):
+        await ControllerManager([_SocketTimeoutController()]).reconcile("gateway")
+
+
 def test_default_controllers_in_reconcile_order() -> None:
     """`updater` is first, and that position is the whole point of it: a hung
     `ava-updater` leaves this host paused, so a reaper behind `pause` would be

@@ -130,6 +130,7 @@ class _TickProgress:
     """The wall-clock freshness fact shared by health and Prometheus."""
 
     last_completed_at: float | None = None
+    in_flight: asyncio.Task[None] | None = None
 
     def record_completed(self) -> None:
         """Record one fully completed round after all controller/check work returned."""
@@ -139,6 +140,18 @@ class _TickProgress:
             "watchdog_tick",
             attributes={"last_tick_timestamp_seconds": self.last_completed_at},
         )
+
+
+def _consume_tick_exception(task: asyncio.Task[None]) -> None:
+    """Retrieve an exception from a deadline-detached tick.
+
+    A deadline stops awaiting the task but deliberately does not cancel it: a
+    synchronous worker thread continues until its I/O returns. Reading a late
+    exception prevents asyncio from reporting an unobserved task failure while
+    the next cadence waits for that tick to leave the in-flight guard.
+    """
+    if not task.cancelled():
+        task.exception()
 
 
 # Each capability's watchdog uses its own pidfile so the two daemons on a
@@ -493,14 +506,29 @@ async def _tick(role: MachineRole) -> None:
 async def _run_tick_with_deadline(role: MachineRole, progress: _TickProgress) -> bool:
     """Run one watchdog round within its hard deadline.
 
-    ``asyncio.timeout`` cancels the coroutine waiting on a stalled worker and
-    lets the next interval begin. A thread already inside synchronous controller
-    or healthcheck work cannot be killed safely, so the timeout deliberately
-    skips this round rather than recording a false completion timestamp.
+    ``asyncio.timeout`` stops awaiting a stalled round, but its synchronous
+    controller/check worker cannot be killed safely. The in-flight task stays
+    shielded from that cancellation; later cadences skip the whole round until
+    it finishes, so no controller or healthcheck has concurrent copies racing
+    each other. A deadline deliberately leaves freshness stale rather than
+    recording a false completion timestamp.
     """
+    previous = progress.in_flight
+    if previous is not None:
+        if not previous.done():
+            _log.error(
+                "[watchdog] %s prior tick is still running; skipping this round",
+                role,
+            )
+            return False
+        progress.in_flight = None
+
+    tick = asyncio.create_task(_tick(role), name=f"watchdog-{role}-tick")
+    tick.add_done_callback(_consume_tick_exception)
+    progress.in_flight = tick
     try:
         async with asyncio.timeout(_TICK_DEADLINE_S):
-            await _tick(role)
+            await asyncio.shield(tick)
     except TimeoutError:
         _log.error(
             "[watchdog] %s tick exceeded %.1fs; skipping the rest of the round",
@@ -508,6 +536,9 @@ async def _run_tick_with_deadline(role: MachineRole, progress: _TickProgress) ->
             _TICK_DEADLINE_S,
         )
         return False
+    finally:
+        if tick.done():
+            progress.in_flight = None
     progress.record_completed()
     return True
 

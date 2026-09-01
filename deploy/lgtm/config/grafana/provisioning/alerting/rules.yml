@@ -1322,7 +1322,9 @@ groups:
         condition: D
         # The 3m freshness/absence windows are the debounce. A second `for`
         # delay would add another round after a watchdog has already failed its
-        # 90s deadline and missed its 60s cadence.
+        # 90s deadline and missed its 60s cadence. The remaining 30s is an
+        # intentional alert margin; re-derive this window if that deadline or
+        # cadence changes.
         for: 0m
         noDataState: OK
         execErrState: OK
@@ -1339,7 +1341,9 @@ groups:
             has emitted no tick sample for three minutes. The watchdog process
             can still be alive while a controller or healthcheck is wedged.
             Check its role-specific healthz endpoint and log, then inspect the
-            controller or healthcheck named before the timeout.
+            controller or healthcheck named before the timeout. If the sibling
+            ava-ops-gateway-metrics-silent alert also fires, triage the OTLP or
+            Prometheus metrics pipeline before treating this as a watchdog wedge.
         data:
           - refId: A
             datasourceUid: prometheus

@@ -31,7 +31,9 @@ A gate blocks by **scope**: how wide its finding is, matched against each servic
   `last_tick_at`, while the `watchdog_tick` ObservableGauge provides the same
   completed-round timestamp to Prometheus. A 90-second round deadline logs an
   error and leaves both signals stale rather than claiming that a wedged
-  controller or healthcheck made progress.
+  controller or healthcheck made progress. A deadline-detached round remains
+  the sole in-flight round; later cadences skip it until its synchronous work
+  returns, preventing concurrent reconciles or healthchecks from racing.
 
 ## Healthcheck checklist
 The derived roster, hand-added pseudo-checks, capability gates, and exact
