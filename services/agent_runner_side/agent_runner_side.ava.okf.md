@@ -19,13 +19,13 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 |------|------|------|
 | restarter | agent restart scheduling + orphan reaper | [[restarter.ava.okf.md]] |
 | agent-ops | agent-runner inbound HTTP ops (authenticated) | [[agent_ops.ava.okf.md]] |
-| browser | headed Chrome reuse + shared MCP upstream | [[browser.ava.okf.md]] |
+| browser | headed Chrome reuse + shared MCP upstream | [[browser/browser.ava.okf.md]] |
 | permissions-helper | macOS/Windows desktop automation (launchd / logon task, not a session) | [[permissions-helper.ava.okf.md]] |
 | computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.ava.okf.md]] |
 | agent-host | hosted runner: every local agent's turns as asyncio tasks in one daemon. Gated off unless `AVA_RUNNER_MODE=hosted`, so it is absent from every cluster's start roster by default | `services/agent_host/` |
 
 ## Also Under agent-runner Capability
-- **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[browser.ava.okf.md]]
+- **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[browser/browser.ava.okf.md]]
 - **computer-mcp** — computer-use executor. Capability = permissions-helper + AF_UNIX; no code gate (governance removed 2026-08-10, peer trust model); see [[computer-mcp.ava.okf.md]]
 - **agent-runner-watchdog** — watchdog instance for agent-runner capability (`--role agent-runner`; see [[watchdog.ava.okf.md]], one on each side)
 

@@ -34,24 +34,11 @@ _WINDOWS_CHROME_PATHS = (
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
     str(Path(os.environ.get("LOCALAPPDATA", "")) / "Google\\Chrome\\Application\\chrome.exe"),
 )
+NPX_INCAPABILITY_REASON = "no npx (install Node.js for chrome-devtools-mcp)"
 
 
-def resolve_chrome_binary() -> str | None:
-    """Resolve a Chrome binary path for this host, or None if none is found.
-
-    Resolution order:
-    - explicit ``settings.services.chrome_binary`` override -> returned **as-is** (no
-      existence check; a caller that execs it fails loudly at exec time if the
-      path is wrong, which is the intended fail-fast for the browser daemon).
-    - macOS -> the platform-default app path, only if it exists.
-    - Linux -> the first of ``google-chrome`` / ``google-chrome-stable`` found
-      on PATH.
-    - any other platform -> None (unsupported).
-    """
-    from shared.config import settings
-
-    if settings.services.chrome_binary:
-        return settings.services.chrome_binary
+def _platform_chrome_binary() -> str | None:
+    """Resolve a platform-default Chrome binary without reading Settings."""
     if sys.platform == "darwin":
         return _MACOS_CHROME if Path(_MACOS_CHROME).exists() else None
     if sys.platform.startswith("linux"):
@@ -71,6 +58,22 @@ def resolve_chrome_binary() -> str | None:
                 return found
         return None
     return None  # other: unsupported
+
+
+def resolve_chrome_binary() -> str | None:
+    """Resolve a Chrome binary path for this host, or None if none is found.
+
+    Resolution order:
+    - explicit ``settings.services.chrome_binary`` override -> returned **as-is** (no
+      existence check; a caller that execs it fails loudly at exec time if the
+      path is wrong, which is the intended fail-fast for the browser daemon).
+    - platform-default Chrome binary -> resolved by ``_platform_chrome_binary()``.
+    """
+    from shared.config import settings
+
+    if settings.services.chrome_binary:
+        return settings.services.chrome_binary
+    return _platform_chrome_binary()
 
 
 def default_chrome_user_data_dir() -> Path | None:
@@ -138,7 +141,24 @@ def browser_incapability() -> str | None:
     if resolve_chrome_binary() is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
     if shutil.which("npx") is None:
-        return "no npx (install Node.js for chrome-devtools-mcp)"
+        return NPX_INCAPABILITY_REASON
+    return None
+
+
+def browser_deps_incapability() -> str | None:
+    """Settings-free capability check for install/enroll-time use.
+
+    Same three prongs, same order, same reason strings as
+    ``browser_incapability()``, minus the AVA_CHROME_BINARY override — enroll
+    runs on a fresh host before Settings can be built, so it cannot read the
+    override. Callers that have Settings use ``browser_incapability()``.
+    """
+    if not display_available():
+        return "no display (WSL without WSLg / headless server)"
+    if _platform_chrome_binary() is None:
+        return "no Chrome (install it or set AVA_CHROME_BINARY)"
+    if shutil.which("npx") is None:
+        return NPX_INCAPABILITY_REASON
     return None
 
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Node 22 — the version the frontend (Next.js) build + agent tooling target. One
-# source for install.sh / Dockerfile / CI. Linux: nodesource (Ubuntu 24.04 ships
-# 18); macOS: Homebrew. Idempotent.
+# Node for the frontend (Next.js) build + agent tooling — one source for
+# install.sh / Dockerfile / CI. Linux: nodesource 22 (Ubuntu 24.04 ships 18).
+# macOS: the linked `node` formula (npx must land on PATH for ava-browser);
+# the keg-only `node@22` is the force-linked fallback. Idempotent.
 #
 # WSL without sudo: a host that already runs node >= 20.9 (the frontend's floor)
 # skips apt entirely — the nodesource setup + apt install need root. An apt
@@ -24,7 +25,12 @@ case "$OS" in
     fi
     ;;
   macos)
-    brew install node@22 2>/dev/null || brew install node
+    # The unversioned `node` formula is linked into /opt/homebrew, so npx lands
+    # on PATH; `node@22` is keg-only (never symlinked) and would leave npx
+    # unreachable for the ava-browser daemon. Prefer the linked formula, and
+    # force-link the keg on the fallback path (QA review 2026-09-01, PR #1286 P1).
+    brew install node 2>/dev/null \
+        || { brew install node@22 2>/dev/null && brew link --force node@22; }
     ;;
 esac
 prov_log "node $(node --version 2>/dev/null || echo '(not on PATH)')"
