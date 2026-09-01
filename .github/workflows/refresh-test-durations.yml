@@ -40,12 +40,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           CUTOFF="$(date --utc --date='5 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
-          RECENT_SUCCESS_COUNT="$(
+          if ! RECENT_SUCCESS_COUNT="$(
             gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/refresh-test-durations.yml/runs" \
               -f 'status=success' \
               -f "created=>=$CUTOFF" \
               --jq '.total_count'
-          )"
+          )"; then
+            echo 'Unable to query successful duration refreshes; proceeding with measurements.'
+            echo 'should-refresh=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$RECENT_SUCCESS_COUNT" -gt 0 ]; then
             echo "Skipping duration refresh: $RECENT_SUCCESS_COUNT successful run(s) created since $CUTOFF."
             echo 'should-refresh=false' >> "$GITHUB_OUTPUT"
