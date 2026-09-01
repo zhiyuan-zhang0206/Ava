@@ -242,7 +242,7 @@ def build_server() -> MCPServer:
         """
         if status is not None:
             _validate_status(status)
-        rows = await _request("GET", "/api/agents")
+        rows = await _request("GET", "/api/agents", params={"fields": "summary"})
         if status is not None:
             rows = [r for r in rows if r["status"] == status]
         return [_compact_agent(r) for r in rows]

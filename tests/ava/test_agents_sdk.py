@@ -667,6 +667,35 @@ class TestGetAncestors:
 
 
 class TestListAgents:
+    def test_gateway_client_requests_summary_projection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The SDK preserves its row shape without requesting the full snapshot."""
+        import ava._gateway_client as gateway_client
+
+        seen: dict[str, object] = {}
+
+        class _Response:
+            def json(self) -> list[dict[str, object]]:
+                return []
+
+        def fake_get(path: str, *, params: dict[str, object]) -> _Response:
+            seen["path"] = path
+            seen["params"] = params
+            return _Response()
+
+        def fake_raise(_response: object) -> None:
+            return None
+
+        monkeypatch.setattr(gateway_client, "_get", fake_get)
+        monkeypatch.setattr(gateway_client, "_raise_from_response", fake_raise)
+
+        assert gateway_client.list_agents((AgentStatus.RUNNING, AgentStatus.IDLING)) == []
+        assert seen == {
+            "path": "/api/agents",
+            "params": {"scope": "live", "fields": "summary"},
+        }
+
     def test_default_filter_returns_running_and_idling(self, db_conn: psycopg.Connection) -> None:
         """Default filter=(RUNNING, IDLING), only returns these two status agents."""
         ava._boot._agent_id = _spawn_agent()

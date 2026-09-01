@@ -30,27 +30,11 @@ class _FakeResp:
 
 
 def _agent_row(agent_id: int, status: str, label: str | None) -> dict[str, object]:
-    """A full /api/agents row (AgentRow wire shape); `cmd_agents_ls` model_validates
-    it, so every required field must be present — the render-irrelevant ones defaulted."""
+    """A summary /api/agents row; `cmd_agents_ls` needs only three fields."""
     return {
         "agent_id": agent_id,
-        "spawner": "user",
-        "fork_source_agent_id": None,
-        "fork_source_checkpoint_id": None,
         "status": status,
-        "pid": None,
-        "spawned_at": "2026-06-01T00:00:00Z",
-        "started_at": None,
-        "last_active_at": "2026-06-01T00:00:00Z",
-        "last_inbound_at": "2026-06-01T00:00:00Z",
         "label": label,
-        "machine": "test-host",
-        "supports_vision": True,
-        "notices_awaiting_response": [],
-        "unread_notice_count": 0,
-        "heartbeat_paused_until": None,
-        "liveness_state": "online",
-        "last_probe_at": None,
     }
 
 
@@ -88,7 +72,7 @@ def test_agents_ls_renders_rows(
 
     monkeypatch.setattr(httpx, "get", fake_get)
     assert _agents.cmd_agents_ls() == 0
-    assert seen["url"] == "http://gw:8000/api/agents"
+    assert seen["url"] == "http://gw:8000/api/agents?fields=summary"
     out = capsys.readouterr().out
     assert "idling" in out and "alpha" in out
     assert "22" in out and "terminated" in out

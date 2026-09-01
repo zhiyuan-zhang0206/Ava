@@ -59,7 +59,7 @@ from __future__ import annotations
 import json as _json
 import time as _time
 import uuid as _uuid
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import ava
 import ava._boot
@@ -623,7 +623,7 @@ def get_ancestors(agent_id: int) -> list[dict]:
     return resp.json()["ancestors"]
 
 
-def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list[dict]:
+def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list[dict[str, Any]]:
     """GET /api/agents → agent list (optional status filter).
 
     Returns list[dict], each dict is the JSON representation of an AgentRow.
@@ -643,9 +643,9 @@ def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list
             scope = "terminated"
         elif AgentStatus.TERMINATED not in requested:
             scope = "live"
-    resp = _get("/api/agents", params={"scope": scope})
+    resp = _get("/api/agents", params={"scope": scope, "fields": "summary"})
     _raise_from_response(resp)
-    rows: list[dict] = resp.json()
+    rows: list[dict[str, Any]] = resp.json()
     if filter_by_status:
         rows = [r for r in rows if r["status"] in filter_by_status]
     return rows

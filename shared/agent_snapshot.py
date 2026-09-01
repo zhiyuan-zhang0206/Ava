@@ -10,7 +10,7 @@ producers (gateway list endpoints + lifecycle publish helpers) compute
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, LiteralString
+from typing import Any, Literal, LiteralString, cast
 
 import psycopg
 from pydantic import BaseModel, Field
@@ -37,7 +37,7 @@ from shared.priority import Priority
 # (its own paginated feed, since a backlog could be large), only the badge count
 # rides here. Both subqueries and the lateral lookups are per-agent (indexed),
 # so the whole snapshot is O(agents), not O(agents x inbound rows).
-_COLS = (
+_FULL_COLS = (
     "a.id, a.spawner, a.fork_source_agent_id, "
     "a.fork_source_checkpoint_id, a.status, a.pid, "
     "a.spawned_at, a.started_at, "
@@ -64,6 +64,28 @@ _COLS = (
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay"
 )
+# The list summary deliberately has its own SELECT, rather than serializing a
+# full snapshot and dropping keys afterwards. `effective_model` is the one
+# scalar needed to preserve `supports_vision`; the raw JSONB config overlay
+# never leaves Postgres on this path.
+_SUMMARY_COLS = (
+    "a.id, a.spawner, a.fork_source_agent_id, a.status, a.pid, "
+    "a.spawned_at, a.started_at, "
+    "COALESCE(a.last_active_at, a.started_at, a.spawned_at) AS last_active_at, "
+    "COALESCE(im.last_inbound_at, a.started_at, a.spawned_at) AS last_inbound_at, "
+    "t.label, a.machine, a.heartbeat_paused_until, a.liveness_state, "
+    "COALESCE("
+    "(SELECT json_agg(json_build_object("
+    "'id', n.id, 'title', n.title, 'content', n.content, 'priority', n.priority, "
+    "'blocking', n.blocking, 'created_at', n.created_at, 'task_id', n.task_id) ORDER BY n.created_at) "
+    "FROM agent_notices n "
+    "WHERE n.agent_id = a.id AND n.require_response AND n.resolved_at IS NULL), "
+    "'[]'::json) AS notices_awaiting_response, "
+    "(SELECT count(*) FROM agent_notices n "
+    "WHERE n.agent_id = a.id AND NOT n.require_response AND n.resolved_at IS NULL "
+    "AND n.created_at > now() - interval '30 days') AS unread_notice_count, "
+    "a.config_overlay ->> 'llm_model' AS effective_model"
+)
 _FROM = (
     "FROM agents_meta a "
     "JOIN agents t ON t.id = a.id "
@@ -82,15 +104,31 @@ _FROM = (
 _GROUP = ""
 
 AgentListScope = Literal["all", "live", "terminated"]
+AgentListFields = Literal["full", "summary"]
+
 
 # Scope is part of the query text, not a post-fetch Python filter.  The three
 # statements are fixed literals selected from the validated vocabulary, so a
 # live roster never evaluates the per-agent LATERAL / notice subqueries for
 # historical terminated rows.
-_SELECT_ALL_SQL: dict[AgentListScope, LiteralString] = {
-    "all": f"SELECT {_COLS} {_FROM} {_GROUP} ORDER BY a.id",
-    "live": (f"SELECT {_COLS} {_FROM} WHERE a.status <> 'terminated' {_GROUP} ORDER BY a.id"),
-    "terminated": (f"SELECT {_COLS} {_FROM} WHERE a.status = 'terminated' {_GROUP} ORDER BY a.id"),
+def _select_all_sql(columns: str) -> dict[AgentListScope, LiteralString]:
+    """Build the three fixed list statements for one trusted column projection."""
+    return {
+        "all": cast(LiteralString, f"SELECT {columns} {_FROM} {_GROUP} ORDER BY a.id"),
+        "live": cast(
+            LiteralString,
+            f"SELECT {columns} {_FROM} WHERE a.status <> 'terminated' {_GROUP} ORDER BY a.id",
+        ),
+        "terminated": cast(
+            LiteralString,
+            f"SELECT {columns} {_FROM} WHERE a.status = 'terminated' {_GROUP} ORDER BY a.id",
+        ),
+    }
+
+
+_SELECT_ALL_SQL: dict[AgentListFields, dict[AgentListScope, LiteralString]] = {
+    "full": _select_all_sql(_FULL_COLS),
+    "summary": _select_all_sql(_SUMMARY_COLS),
 }
 
 
@@ -120,6 +158,27 @@ class OpenNotice(BaseModel):
     # The task this notice belongs to, or None — the human queue groups notices
     # by it (falling back to the owner agent's task when absent).
     task_id: int | None = None
+
+
+class AgentListSummary(BaseModel):
+    """Roster fields used by list consumers; full details stay on demand."""
+
+    agent_id: int
+    spawner: str
+    fork_source_agent_id: int | None
+    status: AgentStatus
+    pid: int | None
+    spawned_at: datetime
+    started_at: datetime | None
+    last_active_at: datetime
+    last_inbound_at: datetime
+    label: str | None
+    machine: str
+    supports_vision: bool
+    liveness_state: Literal["online", "offline", "unknown"]
+    notices_awaiting_response: list[OpenNotice]
+    unread_notice_count: int
+    heartbeat_paused_until: datetime | None
 
 
 class AgentSnapshot(BaseModel):
@@ -209,11 +268,35 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
     )
 
 
+def _row_to_summary(row: tuple[Any, ...]) -> AgentListSummary:
+    effective_model = row[15] or settings.lm.llm_model
+    return AgentListSummary.model_validate(
+        {
+            "agent_id": row[0],
+            "spawner": row[1],
+            "fork_source_agent_id": row[2],
+            "status": AgentStatus(row[3]),
+            "pid": row[4],
+            "spawned_at": row[5],
+            "started_at": row[6],
+            "last_active_at": row[7],
+            "last_inbound_at": row[8],
+            "label": row[9],
+            "machine": row[10],
+            "heartbeat_paused_until": row[11],
+            "liveness_state": row[12],
+            "notices_awaiting_response": row[13],
+            "unread_notice_count": row[14],
+            "supports_vision": model_supports_vision(effective_model),
+        }
+    )
+
+
 def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_COLS} {_FROM} WHERE a.id = %s {_GROUP}",
+            f"SELECT {_FULL_COLS} {_FROM} WHERE a.id = %s {_GROUP}",
             (agent_id,),
         )
         row = cur.fetchone()
@@ -226,7 +309,7 @@ async def select_one_async(
     """`select_one` twin for async contexts (agent graph nodes)."""
     async with conn.cursor() as cur:
         await cur.execute(
-            f"SELECT {_COLS} {_FROM} WHERE a.id = %s {_GROUP}",
+            f"SELECT {_FULL_COLS} {_FROM} WHERE a.id = %s {_GROUP}",
             (agent_id,),
         )
         row = await cur.fetchone()
@@ -237,17 +320,20 @@ def select_all(
     conn: psycopg.Connection,
     *,
     scope: AgentListScope = "all",
-) -> list[AgentSnapshot]:
-    """List agent snapshots for ``scope``, ordered by id ascending.
+    fields: AgentListFields = "full",
+) -> list[AgentSnapshot] | list[AgentListSummary]:
+    """List full snapshots or list-consumer summaries for ``scope``.
 
     ``all`` preserves the historical SDK / ops contract.  Frontend roster
     readers request ``live`` so terminated history is excluded by Postgres
     before the snapshot's per-agent lookups run.  ``terminated`` is the
-    explicit history surface.
+    explicit history surface. ``summary`` does not select full-only values.
     """
     with conn.cursor() as cur:
-        cur.execute(_SELECT_ALL_SQL[scope])
+        cur.execute(_SELECT_ALL_SQL[fields][scope])
         rows = cur.fetchall()
+    if fields == "summary":
+        return [_row_to_summary(r) for r in rows]
     return [_row_to_snapshot(r) for r in rows]
 
 

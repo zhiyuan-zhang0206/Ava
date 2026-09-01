@@ -49,7 +49,7 @@ from gateway.error_envelope import error_response
 from gateway.routers import agents as _agents_router
 from gateway.routers._delivery import deliver_chat_inbound
 from gateway.routers.agents_lifecycle import post_agent_terminate
-from gateway.schemas import AgentRow
+from gateway.schemas import AgentRow, AgentSummary
 from ops.agents import get_agent_status
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 from shared import agent_snapshot
@@ -87,14 +87,14 @@ Every tool here acts on one cluster — the one this gateway belongs to.
 There is no cluster argument."""
 
 
-def _compact_agent(row: AgentRow) -> dict[str, Any]:
-    """The fields an external agent steers by, out of a full agent record.
+def _compact_agent(row: AgentSummary) -> dict[str, Any]:
+    """The fields an external agent steers by, out of a roster summary.
 
-    The full row carries the whole lifecycle snapshot (pids, activity
-    timestamps, notice counters); handing all of it to a model on every list
-    call costs context without changing any decision. `get_agent` returns the
-    full record for the cases that need it. Timestamps serialize to ISO
-    strings so the tool result stays JSON-safe.
+    The gateway summary excludes full-only lifecycle fields before they leave
+    Postgres; this compact tool result trims the remaining roster state for a
+    model's context. `get_agent` returns the full record for the cases that
+    need it. Timestamps serialize to ISO strings so the tool result stays
+    JSON-safe.
     """
     return {
         "agent_id": row.agent_id,
@@ -240,7 +240,7 @@ def _select_all_blocking(pool: Any) -> list[Any]:
     """Sync snapshot SELECT for list_agents — via to_thread (async handlers
     must not block the event loop)."""
     with pool.connection() as conn:
-        return agent_snapshot.select_all(conn)
+        return agent_snapshot.select_all(conn, fields="summary")
 
 
 def _select_one_blocking(pool: Any, agent_id: int) -> Any:
@@ -274,7 +274,7 @@ def _register_read_tools(server: MCPServer, pool: Any) -> None:
         if status is not None:
             _validate_status(status)
         snapshots = await asyncio.to_thread(_select_all_blocking, pool)
-        rows = [AgentRow.model_validate(s.model_dump()) for s in snapshots]
+        rows = [AgentSummary.model_validate(s.model_dump()) for s in snapshots]
         if status is not None:
             rows = [r for r in rows if r.status == status]
         return [_compact_agent(r) for r in rows]

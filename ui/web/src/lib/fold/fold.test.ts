@@ -22,7 +22,6 @@ const baseAgent: AgentRow = {
   last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z",
   spawner: "user",
   fork_source_agent_id: null,
-  fork_source_checkpoint_id: null,
   pid: 100,
   spawned_at: "2026-05-10T00:00:00Z",
   started_at: "2026-05-10T00:00:01Z",
@@ -32,7 +31,6 @@ const baseAgent: AgentRow = {
   unread_notice_count: 0,
   heartbeat_paused_until: null,
   liveness_state: "online",
-  last_probe_at: null,
 };
 
 function pageOpened(over: Partial<SystemEvent> & { name: string }): SystemEvent {
@@ -124,8 +122,8 @@ describe("foldAgents", () => {
     expect(next?.[0]).toMatchObject({
       status: "idling",
       liveness_state: "offline",
-      last_probe_at: "2026-05-10T03:00:00Z",
     });
+    expect(next?.[0]).not.toHaveProperty("last_probe_at");
     expect(next).not.toBe(previous);
   });
 

@@ -12,7 +12,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "./timeline-store";
-import type { AgentRow, BackendTimelineItem, SystemEvent } from "./types";
+import type { BackendTimelineItem, SystemEvent, WireAgentRow } from "./types";
 
 // -- helpers ───────────────────────────────────────────────────────────────
 
@@ -1900,8 +1900,8 @@ describe("spawn scenario: first snapshot carries 0.0 (#615)", () => {
 });
 
 describe("processSseEventBatch — frame-level folding", () => {
-  /** Minimal AgentRow for sidebar-owned roles the batch must skip. */
-  function agentRow(id: number): AgentRow {
+  /** Minimal full wire row for sidebar-owned roles the batch must skip. */
+  function agentRow(id: number): WireAgentRow {
     return {
       agent_id: id,
       label: null,

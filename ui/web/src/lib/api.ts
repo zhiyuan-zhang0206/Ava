@@ -16,7 +16,7 @@ import type { NoticesFeed,
   AgentMachineRow,
   AgentMessageEnqueued,
   AgentRow,
-  WireAgentRow,
+  WireAgentSummary,
   ContextBreakdownResponse,
   DefaultModelView,
   AlertsResponse,
@@ -376,8 +376,8 @@ export const api = {
   // spawn / terminate all operate by agent_id.
 
   listAgents: (scope: "live" | "terminated" | "all" = "live"): Promise<AgentRow[]> => {
-    return f(`/api/agents?scope=${scope}`)
-      .then(ok<WireAgentRow[]>)
+    return f(`/api/agents?scope=${scope}&fields=summary`)
+      .then(ok<WireAgentSummary[]>)
       .then((rows) => rows.map(projectAgentStatus));
   },
 
