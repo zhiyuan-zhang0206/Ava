@@ -420,6 +420,26 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
+    prompt_capabilities_match_first_enabled: bool | None = Field(
+        default=None,
+        alias="AVA_SYSTEM_PROMPT_CAPABILITIES_MATCH_FIRST",
+        validation_alias=AliasChoices(
+            "AVA_SYSTEM_PROMPT_CAPABILITIES_MATCH_FIRST", "AVA_PROMPT_CAPABILITIES_MATCH_FIRST"
+        ),
+        description=(
+            "Inject a 'match the capabilities index first' instruction into the # Capabilities "
+            "section: before starting any task, name the skill(s) you plan to use and why, and "
+            "write that reasoning into your final output. Unset resolves the per-model default "
+            "(shared floor: on)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     prompt_cross_machine_delegation_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION",
