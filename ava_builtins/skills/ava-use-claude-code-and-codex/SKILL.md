@@ -65,10 +65,11 @@ nudge.
 
 ### Bootstrap the session
 
-Use the spawn script — it pre-trusts the directory, creates the two files if
-absent, launches the tool in a persistent shell session via
-`ava.shell.sessions.new("claude-<dirname>", ttl=...)` or `codex-<dirname>`
-(TTL is mandatory; the script passes a generous one) and sends the contract message. Run it from the skill's reference directory:
+Use the spawn script — it creates the two files if absent, launches the tool in
+a persistent shell session with a task-adapted TTL, and sends the contract
+message. Before launching Codex, read its
+[`canonical-owner reference`](reference/canonical_codex_owner.md). Run from the
+skill's directory:
 
 ```bash
 # Claude Code
@@ -89,16 +90,14 @@ tasks_file=<absolute path>
 work_file=<absolute path>
 ```
 
+Codex's additional owner and state fields are defined in its reference.
+
 **Take `work_file` from that output when you set up the watcher** — do not
 rebuild the path from the default filename, or a relocated work file silently
 leaves the watcher polling a file nobody writes. Interact via
 `ava.shell.sessions.send` / `ava.shell.sessions.send_keys` / `ava.shell.sessions.capture` / `ava.shell.sessions.kill`.
 
-If you need to do the steps by hand (unusual), the scripts are the reference:
-they set `hasTrustDialogAccepted` in `~/.claude.json` (claude) or append a
-`[projects."<abs>"]` table with `trust_level = "trusted"` to
-`~/.codex/config.toml` (codex), then launch with the flags listed in the
-per-tool sections below.
+For unusual manual setup, follow the scripts and the canonical-owner reference.
 
 The contract (`reference/collaboration_protocol.md`) is addressed to the coding
 agent and self-contained: the two files, the `STATUS:` values, the log
@@ -106,7 +105,7 @@ discipline, and the CHECKPOINT → handoff procedure. It refers to the two files
 by role, not by name — the spawn script's launch message supplies their real
 absolute paths.
 
-### Startup check → launch watcher (mandatory)
+### Startup check and supervision (mandatory)
 
 The spawn script handles startup waiting and contract delivery automatically:
 after launching the tool it polls ``ava.shell.sessions.capture`` until the
@@ -114,13 +113,12 @@ tool has rendered its UI, then sends the collaboration-contract message.
 (``ava.shell.sessions.send`` splits text and Enter into separate calls
 internally, avoiding the Enter-before-text race.)
 
-**After the spawn script returns**, ``capture`` the screen to confirm the
+**After either spawn script returns**, ``capture`` the screen to confirm the
 agent received the contract message and is responsive.
 
-**If the agent is alive: you MUST immediately launch the watcher before doing
-anything else — skipping the watcher is a bug.** Without a watcher the coding
-agent runs unsupervised: you are never woken when it finishes, needs input, or
-stalls. See the next section for the watcher code and setup.
+For Claude, if the agent is alive, you MUST immediately launch the watcher
+before doing anything else. Codex starts its canonical supervisor before its
+PTY, so do not launch a second watcher for it.
 
 If the agent is stuck on a permissions prompt or an error, handle it now —
 otherwise the watcher will not see the blocker because it reads the work file,
@@ -132,9 +130,10 @@ beginning to plan or work.
 
 ### Supervise without watching the screen
 
-**You must launch a watcher for every persistent coding session.** Use the reference watcher (`reference/watch_work.py`) that polls the work file's `STATUS:`
-line and only wakes you when there is something to do — so you don't burn turns
-polling.
+**Every persistent coding session must have supervision.** Codex gets it
+automatically from `spawn_codex.py`. For Claude, launch the reference watcher
+(`reference/watch_work.py`) that polls the work file's `STATUS:` line and only
+wakes you when there is something to do.
 
 > **Use the reference watcher, don't write your own STATUS parser.** The
 > reference (`reference/watch_work.py`) uses a regex (`^STATUS:\s*(\w+)`) to
@@ -145,9 +144,9 @@ polling.
 > use bare `except: pass` — print errors to stderr so they appear in session
 > capture when debugging.
 
-- `DONE` → read the log, judge it, append the next task to the task file, nudge.
+- `DONE` → the Codex supervisor closes that generation; read the log and judge it.
 - `NEED_INPUT` → read the question, write the answer to the task file, nudge.
-- `HANDOFF` → see *handoff* below.
+- `HANDOFF` → the Codex supervisor closes the old generation; see *handoff* below.
 - `WORKING` (or missing `STATUS:` line) — the agent is still going. The watcher
   has two safeguards so you are not left waiting indefinitely:
 
@@ -220,9 +219,7 @@ Two levers:
   does nothing sent to a headless `-p` run.)
 - **Full handoff** (clean context) — append a `CHECKPOINT` line to the task file. The
   agent writes its `## Handoff` and sets `STATUS: HANDOFF`; you then `kill` the
-  session and start a fresh one with the same bootstrap pointed at the **same
-  folder**. The file is the memory, so the new session continues without losing
-  the thread.
+  Claude session yourself. For Codex, follow the canonical-owner reference.
 
 ## Claude Code (`claude`)
 
