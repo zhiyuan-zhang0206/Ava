@@ -68,12 +68,7 @@ runs:
         pkgs=(postgresql-17 redis-server postgresql-17-pgvector)
 
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-        # Fatal with no weaker tier: without the key every pgdg index is
-        # unverifiable, so there is nothing to degrade to.
-        if ! retry "pgdg signing key" timeout 60 sh -c 'curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg'; then
-          echo "::error::could not fetch or dearmor the pgdg signing key after 3 attempts" >&2
-          exit 1
-        fi
+        sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg "${{ github.action_path }}/ACCC4CF8.asc"
 
         # Index phase. Each tier is weaker than the last; only a total failure
         # is carried forward, and even then as a warning, because the archive
