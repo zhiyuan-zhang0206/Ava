@@ -31,6 +31,7 @@ import pytest
 from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.pty_sessions import cli as pty_cli
 from shared.pty_sessions import host as pty_host
+from shared.pty_sessions import orphan_reaper
 from shared.pty_sessions._paths import host_identity, record_path, socket_path
 from shared.pty_sessions.cli import write_env_file
 from shared.pty_sessions.host import PtySession, _parse_request
@@ -148,6 +149,31 @@ def _kill(home: Path, name: str, *, graceful: bool = False) -> int:
     result = _run_cli(home, name, *args)
     assert result.returncode == 0, f"kill failed: {result.stderr}"
     return result.returncode
+
+
+def _kill_until_no_orphans(home: Path, name: str) -> None:
+    """Kill a session, allowing its detached host time to finish reaping.
+
+    A loaded runner can report the CLI's post-kill orphan sweep before init has
+    reaped the SIGKILLed detached host. The kill contract is eventual cleanup,
+    so wait for the production detector's empty set, then retry the idempotent
+    command only when that transient result occurred.
+    """
+    args = ["kill"]
+    result = _run_cli(home, name, *args)
+
+    def _orphaned_pids() -> list[int]:
+        return [
+            host.pid
+            for host in orphan_reaper._orphaned_host_processes(name, force_unresponsive=True)
+        ]
+
+    assert _wait(lambda: not _orphaned_pids(), timeout=5.0, interval=0.1), (
+        f"orphaned pty hosts survived kill: {_orphaned_pids()}\n{result.stderr}"
+    )
+    if result.returncode != 0:
+        result = _run_cli(home, name, *args)
+    assert result.returncode == 0, f"kill failed: {result.stderr}"
 
 
 def _record(home: Path, name: str) -> SessionRecord | None:
@@ -885,7 +911,7 @@ def test_kill_reaps_process_tree_no_orphans(sessions: Path) -> None:
     assert _wait(shell.children), "sleep never appeared as a child"
     sleeper = shell.children()[0].pid
 
-    _kill(home, name)
+    _kill_until_no_orphans(home, name)
     assert _wait(lambda: not psutil.pid_exists(rec.pid)), "shell survived the kill"
     assert _wait(lambda: not psutil.pid_exists(sleeper)), "sleep orphaned by the kill"
     assert not _has(home, name)
@@ -901,7 +927,7 @@ def test_kill_ends_the_host_process(sessions: Path) -> None:
     identity = host_identity(record_path(name))
     assert identity is not None
     host_pid, _ = identity
-    _kill(home, name)
+    _kill_until_no_orphans(home, name)
     assert _wait(lambda: not psutil.pid_exists(host_pid)), "host must exit with its session"
     assert not socket_path(name).exists(), "socket must be unlinked on session end"
 
