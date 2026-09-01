@@ -4,9 +4,10 @@ The session test DB (conftest's `ava_test_<...>`) is bootstrapped from
 `db/schema.sql`, which since the 2026-07-19 re-baseline creates a
 `schema_migrations(name, applied_at)` table and stamps the baseline sentinel
 plus migration names already folded into that current schema (see the bottom of
-db/schema.sql). The autouse fixture instead seeds only the baseline sentinel,
-so each migration-runner test can model its own post-baseline applied set
-without production seed markers leaking into synthetic migration layouts.
+db/schema.sql). The autouse fixture starts each migration-runner test with only
+the baseline sentinel, so it can model its own post-baseline applied set without
+production seed markers leaking into synthetic migration layouts; teardown
+restores the full schema.sql seed for tests outside this module.
 
 Coverage of the three cutover paths the design requires:
 - legacy `version INT` at exactly {1..81} -> converted to the baseline
@@ -145,13 +146,13 @@ def _reset_schema_migrations_state() -> Iterator[None]:
     pre-cutover suite used.
     """
 
-    def _reseed() -> None:
+    def _reseed(names: list[str]) -> None:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
-            _set_table_to(conn, "set", [_BASELINE_NAME])
+            _set_table_to(conn, "set", names)
 
-    _reseed()
+    _reseed([_BASELINE_NAME])
     yield
-    _reseed()
+    _reseed([_BASELINE_NAME, _LAST_CLAIM_LOOP_MIGRATION_NAME])
 
 
 # ─── required / applied set ───────────────────────────────────────────────────
