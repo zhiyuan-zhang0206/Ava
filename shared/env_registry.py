@@ -197,6 +197,8 @@ _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "im_bridge",
     "page_server",
     "agent_host",
+    "gateway_watchdog",
+    "agent_runner_watchdog",
 )
 
 
