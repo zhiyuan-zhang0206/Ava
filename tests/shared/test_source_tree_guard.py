@@ -43,13 +43,19 @@ def _commit(source: Path, content: str, msg: str) -> str:
 # --- detector ---
 
 
-def test_clean_checkout_reports_no_violations(tmp_path: Path) -> None:
+def test_clean_checkout_reports_no_violations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
 
     assert stg.source_tree_violations(repo) == ()
 
 
-def test_untracked_file_outside_whitelist_is_a_violation(tmp_path: Path) -> None:
+def test_untracked_file_outside_whitelist_is_a_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "junk.txt").write_text("j")
 
@@ -58,7 +64,10 @@ def test_untracked_file_outside_whitelist_is_a_violation(tmp_path: Path) -> None
     assert any("junk.txt" in v for v in violations)
 
 
-def test_untracked_dir_outside_whitelist_is_a_violation(tmp_path: Path) -> None:
+def test_untracked_dir_outside_whitelist_is_a_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "junkdir").mkdir()
     (repo / "junkdir" / "inner.txt").write_text("i")
@@ -68,8 +77,11 @@ def test_untracked_dir_outside_whitelist_is_a_violation(tmp_path: Path) -> None:
     assert any("junkdir" in v for v in violations)
 
 
-def test_whitelisted_runtime_artifacts_are_not_violations(tmp_path: Path) -> None:
+def test_whitelisted_runtime_artifacts_are_not_violations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The built frontend bundle (frontend/) is the one legal untracked tree."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "frontend" / ".next").mkdir(parents=True)
     (repo / "frontend" / ".next" / "build.txt").write_text("b")
@@ -78,7 +90,10 @@ def test_whitelisted_runtime_artifacts_are_not_violations(tmp_path: Path) -> Non
     assert stg.source_tree_violations(repo) == ()
 
 
-def test_tracked_modification_is_a_violation(tmp_path: Path) -> None:
+def test_tracked_modification_is_a_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "tracked.txt").write_text("changed")
 
@@ -92,6 +107,7 @@ def test_head_moved_off_installed_commit_is_a_violation(
 ) -> None:
     """A clean-looking checkout (git status empty) is still tampered when HEAD
     no longer matches the last fully installed commit."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     first = _git(repo, "rev-parse", "HEAD")
     _commit(repo, "y", "c2")
@@ -102,9 +118,12 @@ def test_head_moved_off_installed_commit_is_a_violation(
     assert any("installed commit" in v for v in violations)
 
 
-def test_non_git_checkout_signals_guard_skipped(tmp_path: Path) -> None:
+def test_non_git_checkout_signals_guard_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A checkout that is not a git repo must not look clean: the guard
     cannot see anything, so it reports itself as skipped (not tampered)."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = tmp_path / "plain"
     repo.mkdir()
 
@@ -121,6 +140,7 @@ def test_git_unavailable_signals_guard_skipped(
 ) -> None:
     """A broken git (binary missing / command error / timeout) makes the
     detector blind — the probe must alert on the blind guard, never pass it."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     monkeypatch.setattr(stg, "_git", _no_git)
 
@@ -131,6 +151,7 @@ def test_git_command_failure_signals_guard_skipped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A git command that runs but exits non-zero is a blind guard too."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     failed = subprocess.CompletedProcess([], returncode=1, stdout="", stderr="boom")
 
@@ -150,6 +171,7 @@ def test_git_failure_keeps_partial_findings(
     """Blindness is marked on top of whatever the guard did manage to see:
     tracked tamper found by `status` is never dropped because `rev-parse`
     failed."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "tracked.txt").write_text("TAMPERED")
     status_ok = subprocess.CompletedProcess([], returncode=0, stdout=" M tracked.txt\n", stderr="")
