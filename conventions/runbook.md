@@ -913,6 +913,15 @@ ava cluster down --path PATH   # stop the cluster at a home path (its gateway + 
 ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its registry slot (port block) + deregister its OS-scheduled jobs (health probe, both watchdog probes, autostart); --drop-db also removes its pg/redis data dirs; refused for the default home ~/.ava
 ```
 
+`ava cluster update --dry-run` resolves and validates the target, runs the
+non-disruptive runner fetch and prepare checks, and reports the predicted
+maintenance window. It creates no recovery snapshot, pause/stop state, pin,
+or checkout; it is the operator check before a real rollout. The estimate uses
+the p95 of the ten most recent commit windows for stop-the-world, local leg,
+readiness, and Phase B. Offsite publication of a real rollout's verified local
+snapshot runs detached only after recovery/finalization, so it is outside the
+maintenance window and cannot delay resumption.
+
 Down-failure drill: see [down-failure-drill.md](down-failure-drill.md).
 
 **Rollback health guard and observation window.** `ava cluster health-probe` retries

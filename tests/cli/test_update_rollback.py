@@ -38,6 +38,11 @@ from shared.migrations import MigrationFailed, RollbackBelowFloor
 _SNAP = {"00000000T000000_baseline"}
 
 
+def _prepared_recover(dump: Path | None = None) -> tuple[str, set[str], Path | None]:
+    """Recovery evidence supplied by orchestration before the local leg starts."""
+    return "FROMSHA", _SNAP, dump
+
+
 @pytest.fixture(autouse=True)
 def _stub_update_lock(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_identity: None) -> None:
     """The orchestration wrapper takes the cluster update lock; stub it so the
@@ -399,35 +404,18 @@ def _patch_local_update(
     start_rc=0,
     recover_rc=0,
     start_interrupts=False,
-    data_snapshot: Path | None = None,
-    snapshot_raises: Exception | None = None,
 ):
     """Wire `_run_gateway_local_update`'s seams; return (order, recover_calls).
 
     `recover_calls` records each `_recover_gateway_local` invocation as
-    (from_sha, schema_snapshot, preserve_sessions, data_snapshot). `order` records the snapshot vs
-    checkout sequence so a test can assert the snapshot is taken BEFORE the
-    force-checkout. `recover_rc` is what the stubbed recovery returns (0 = recovered
+    (from_sha, schema_snapshot, preserve_sessions, data_snapshot). `order` records
+    the checkout sequence. `recover_rc` is what the stubbed recovery returns (0 = recovered
     to last-known-good, non-zero = gateway still DOWN).
     """
     order: list[str] = []
     recover_calls: list[tuple[str, set[str], frozenset[str], Path | None]] = []
 
     monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_up, "git_head_sha", lambda: order.append("snapshot:sha") or "FROMSHA")
-    monkeypatch.setattr(
-        _up, "current_schema_state", lambda: order.append("snapshot:schema") or _SNAP
-    )
-
-    def _snapshot_pre_update_data(target_sha: str) -> Path | None:
-        order.append(f"snapshot:data:{target_sha}")
-        if snapshot_raises is not None:
-            raise snapshot_raises
-        return data_snapshot
-
-    monkeypatch.setattr(
-        _git_mod, "snapshot_pre_update_data", _snapshot_pre_update_data, raising=False
-    )
 
     def _checkout(sha):  # type: ignore[no-untyped-def]
         order.append(f"checkout:{sha}")
@@ -471,11 +459,12 @@ def _patch_local_update(
 def test_local_update_checkout_failure_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
     """git checkout fails -> recovery invoked with the pre-checkout snapshot; recovered -> rc 1."""
     order, recover_calls = _patch_local_update(monkeypatch, checkout_raises=True)
-    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    rc = _up._run_gateway_local_update(
+        Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
+    )
     assert rc == 1  # recovered to last-known-good (recover returned 0)
     assert recover_calls == [("FROMSHA", _SNAP, frozenset(), None)]
-    # snapshot captured before the checkout (from_sha's schema, before start migrates)
-    assert order.index("snapshot:schema") < order.index("checkout:TARGETSHA")
+    assert order == ["checkout:TARGETSHA"]
 
 
 def test_an_interrupt_mid_start_recovers_like_any_other_failure(
@@ -494,7 +483,9 @@ def test_an_interrupt_mid_start_recovers_like_any_other_failure(
     """
     _order, recover_calls = _patch_local_update(monkeypatch, start_interrupts=True)
 
-    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    rc = _up._run_gateway_local_update(
+        Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
+    )
 
     assert rc == 1  # recovered to last-known-good, exactly as a non-zero start reports
     assert recover_calls == [("FROMSHA", _SNAP, frozenset(), None)]
@@ -515,38 +506,28 @@ def test_an_interrupt_with_nothing_to_roll_back_to_still_propagates(
     assert recover_calls == []
 
 
-def test_local_update_snapshots_before_stopping_data_plane(
+def test_local_update_stops_after_orchestration_prepared_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The last-known-good snapshot (HEAD + applied-migration set) must be read
-    BEFORE the graceful stop, not after it. Reading it after a data-plane teardown
-    was the 2026-07-20 incident: the stop meant to keep pg/redis actually took them
-    down, so the snapshot's connect hit connection-refused and crashed the rollout.
-    Locks the order structurally: both snapshot reads precede `_do_stop`, and
-    `_do_stop` precedes the force-checkout."""
+    """The local leg consumes prebuilt recovery evidence after its stop begins."""
     order, _recover_calls = _patch_local_update(monkeypatch)
-    # `_patch_local_update` stubs `_do_stop` to a silent no-op; re-stub it to record
-    # its position so we can assert the snapshot precedes the stop.
     monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop"))  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    rc = _up._run_gateway_local_update(
+        Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
+    )
     assert rc == 0
-    assert order.index("snapshot:sha") < order.index("stop")
-    assert order.index("snapshot:schema") < order.index("stop")
-    assert order.index("snapshot:data:TARGETSHA") < order.index("stop")
-    assert order.index("stop") < order.index("checkout:TARGETSHA")
+    assert order == ["stop", "checkout:TARGETSHA"]
 
 
-def test_local_update_data_snapshot_failure_aborts_before_stopping(
+def test_local_update_requires_prepared_recovery_before_stopping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No stop or recovery is safe when a migration-bearing rollout lacks a dump."""
-    order, recover_calls = _patch_local_update(
-        monkeypatch, snapshot_raises=RuntimeError("pre-update dump failed")
-    )
+    """Pull mode refuses before stop when orchestration did not provide recovery evidence."""
+    order, recover_calls = _patch_local_update(monkeypatch)
     monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop"))  # pyright: ignore[reportUnknownArgumentType]
 
-    with pytest.raises(RuntimeError, match="pre-update dump failed"):
+    with pytest.raises(ValueError, match="requires pull_recover"):
         _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
 
     assert "stop" not in order
@@ -556,7 +537,9 @@ def test_local_update_data_snapshot_failure_aborts_before_stopping(
 def test_local_update_uv_sync_failure_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
     """uv sync fails after a good checkout -> recovery; recovered ok -> rc 1."""
     _order, recover_calls = _patch_local_update(monkeypatch, sync_rc=1)
-    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    rc = _up._run_gateway_local_update(
+        Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
+    )
     assert rc == 1
     assert recover_calls == [("FROMSHA", _SNAP, frozenset(), None)]
 
@@ -564,8 +547,10 @@ def test_local_update_uv_sync_failure_recovers(monkeypatch: pytest.MonkeyPatch) 
 def test_local_update_start_failure_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
     """`ava start` fails (a migration may have applied) -> recovery; recovered ok -> rc 1."""
     dump = Path("/x/pre-update.dump")
-    _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1, data_snapshot=dump)
-    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1)
+    rc = _up._run_gateway_local_update(
+        Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(dump), pull=True
+    )
     assert rc == 1
     assert recover_calls == [("FROMSHA", _SNAP, frozenset(), dump)]
 
@@ -575,7 +560,9 @@ def test_local_update_recovery_failure_returns_down_rc(monkeypatch: pytest.Monke
     returns non-zero) -> rc 2, the orchestration's 'DOWN, needs a human' signal
     (distinct from rc 1 = recovered, the whole point of propagating the recover rc)."""
     _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1, recover_rc=1)
-    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    rc = _up._run_gateway_local_update(
+        Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
+    )
     assert rc == 2
     assert recover_calls == [("FROMSHA", _SNAP, frozenset(), None)]
 
@@ -583,7 +570,9 @@ def test_local_update_recovery_failure_returns_down_rc(monkeypatch: pytest.Monke
 def test_local_update_success_does_not_recover(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clean update -> rc 0, recovery never called (must not re-start on success)."""
     _order, recover_calls = _patch_local_update(monkeypatch)
-    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    rc = _up._run_gateway_local_update(
+        Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
+    )
     assert rc == 0
     assert recover_calls == []
 
@@ -600,7 +589,11 @@ def test_backend_only_recovery_skips_frontend(monkeypatch: pytest.MonkeyPatch) -
     skip (recovery must not rebuild a UI that was never stopped)."""
     _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1)
     rc = _up._run_gateway_local_update(
-        Path("/repo"), target_sha="TARGETSHA", restart_frontend=False, pull=True
+        Path("/repo"),
+        target_sha="TARGETSHA",
+        pull_recover=_prepared_recover(),
+        restart_frontend=False,
+        pull=True,
     )
     assert rc == 1
     assert recover_calls == [("FROMSHA", _SNAP, frozenset({"frontend"}), None)]
@@ -633,7 +626,14 @@ def test_orchestration_resolves_and_threads_target_sha(monkeypatch: pytest.Monke
     monkeypatch.setattr(_cli, "_fan_out", lambda *_a, **_k: [("a", "ok", "")])  # pyright: ignore[reportUnknownArgumentType]
 
     def _local(  # type: ignore[no-untyped-def]
-        _repo, *, target_sha, restart_frontend, pull=True, force_reap_agents=False, origin=""
+        _repo,
+        *,
+        target_sha,
+        pull_recover,
+        restart_frontend,
+        pull=True,
+        force_reap_agents=False,
+        origin="",
     ):
         captured["local_target"] = target_sha
         return 0

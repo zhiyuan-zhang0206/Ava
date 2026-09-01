@@ -61,6 +61,7 @@ Restore procedure: `.agents/skills/operating-ava-cluster/references/db-restore.m
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import logging
 import os
@@ -466,6 +467,7 @@ def run_backup(
     timeout_s: float = _DUMP_TIMEOUT_S,
     pre_update: bool = False,
     pitr_activation: str | None = None,
+    publish: bool = True,
 ) -> Path:
     """Dump the cluster DB into backup_dir() and prune; return the dump path.
 
@@ -477,6 +479,8 @@ def run_backup(
     tighter ceiling than the daily backup default. `pre_update` names the
     artifact `<db>-<ts>.pre-update.dump.enc` so prune keeps it in its own
     retention slot (newest one) instead of consuming a daily-dump slot.
+    `publish=False` keeps the completed artifact local; the rollout prepare
+    phase uses it so off-site network latency cannot extend maintenance.
     """
     with backup_lock():
         return _run_backup(
@@ -485,6 +489,7 @@ def run_backup(
             timeout_s=timeout_s,
             pre_update=pre_update,
             pitr_activation=pitr_activation,
+            publish=publish,
         )
 
 
@@ -539,6 +544,7 @@ def _run_backup(
     timeout_s: float = _DUMP_TIMEOUT_S,
     pre_update: bool = False,
     pitr_activation: str | None = None,
+    publish: bool = True,
 ) -> Path:
     """Write one managed dump while `backup_lock` is held.
 
@@ -639,7 +645,8 @@ def _run_backup(
         for partial in (dump_partial, encrypted_partial):
             with suppress(OSError):
                 partial.unlink(missing_ok=True)
-    _publish_offsite(target)
+    if publish:
+        _publish_offsite(target)
     removed = _prune(directory)
     _log.info(
         "[backup] wrote %s (%.1f MiB), pruned %d",
@@ -648,3 +655,21 @@ def _run_backup(
         len(removed),
     )
     return target
+
+
+def _main(argv: list[str] | None = None) -> int:
+    """Run the detached, best-effort off-site backup publisher."""
+    parser = argparse.ArgumentParser(prog="python -m services.backup")
+    parser.add_argument("--publish-offsite", type=Path, metavar="ARTIFACT")
+    args = parser.parse_args(argv)
+    if args.publish_offsite is None:
+        parser.error("--publish-offsite is required")
+    artifact = args.publish_offsite
+    if not artifact.is_absolute():
+        parser.error("--publish-offsite ARTIFACT must be an absolute path")
+    _publish_offsite(artifact)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
