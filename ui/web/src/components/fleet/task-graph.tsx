@@ -157,25 +157,24 @@ function TaskHoverCard({
         </p>
       ) : null}
 
-      {/* Long text — clamped so the card stays a hover preview; the full text
-          lives in the task registry. */}
-      {task.description ? (
+      {/* Text arrives as server-clamped previews so list polling stays bounded. */}
+      {task.description_preview ? (
         <div className="mt-2 border-t border-border pt-2">
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             Description
           </p>
           <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
-            {task.description}
+            {task.description_preview}
           </p>
         </div>
       ) : null}
-      {task.results ? (
+      {task.results_preview ? (
         <div className="mt-2 border-t border-border pt-2">
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             Result
           </p>
           <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
-            {task.results}
+            {task.results_preview}
           </p>
         </div>
       ) : null}

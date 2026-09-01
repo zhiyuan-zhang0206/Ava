@@ -33,8 +33,8 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
     id,
     parent_id: null,
     title: `Task ${id}`,
-    description: `Description for task ${id}`,
-    results: null,
+    description_preview: `Description for task ${id}`,
+    results_preview: null,
     status: "in_progress",
     priority: "P2",
     owner: null,
@@ -135,6 +135,7 @@ describe("TaskGraph (graph mode)", () => {
     // Done and Canceled columns are hidden when empty (by default Done/Canceled
     // tasks are toggled off so those lanes have zero cards).
     await waitFor(() => expect(screen.getAllByText("In progress").length).toBeGreaterThanOrEqual(1));
+    expect(screen.getByText("Description for task 2")).toBeTruthy();
     // Done and Canceled lane headers do not render when empty.
   });
 
@@ -356,12 +357,10 @@ describe("TaskGraph hover detail card", () => {
   // appearance the browser deferred — the perceived hover lag): it must show
   // the task's registry fields the moment the cursor enters the node.
   it("shows the detail card instantly on hover, with the registry fields", async () => {
-    const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
-      task(2, {
+    const summaryTask = task(2, {
         title: "Build the widget",
-        description: "A longer description\nspanning two lines",
-        results: "Shipped in #1",
+        description_preview: "A longer description\nspanning two lines",
+        results_preview: "Shipped in #1",
         status: "in_progress",
         priority: "P1",
         parent_id: 1,
@@ -373,7 +372,10 @@ describe("TaskGraph hover detail card", () => {
         remind_interval_seconds: 7200,
         last_reminded_at: "2026-01-02T00:00:00Z",
         reminder_count: 3,
-      }),
+      });
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "ongoing" }),
+      summaryTask,
     ];
     useTasks.mockReturnValue(ok(tasks));
     const { container } = render(

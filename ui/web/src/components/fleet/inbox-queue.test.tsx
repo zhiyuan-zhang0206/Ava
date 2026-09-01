@@ -33,10 +33,10 @@ vi.mock("@/lib/use-notices", () => ({
 
 // The queue joins entries to the task registry client-side (grouping); feed it a
 // controlled task list. Default: none — every entry stays a flat row.
-const useTasksMock = vi.fn<() => { tasks: TaskRow[]; loading: boolean; error: boolean }>(
+const useTasksMock = vi.fn<(window?: string) => { tasks: TaskRow[]; loading: boolean; error: boolean }>(
   () => ({ tasks: [], loading: false, error: false }),
 );
-vi.mock("@/lib/use-tasks", () => ({ useTasks: () => useTasksMock() }));
+vi.mock("@/lib/use-tasks", () => ({ useTasks: (window?: string) => useTasksMock(window) }));
 
 // The fleet-wide open-pages feed drives the "agent's live page" affordances.
 // Stub the hook (default: no pages).
@@ -405,8 +405,8 @@ function tk(id: number, over: Partial<TaskRow> = {}): TaskRow {
     id,
     parent_id: null,
     title: `Task ${id}`,
-    description: "",
-    results: null,
+    description_preview: "",
+    results_preview: null,
     status: "in_progress",
     priority: "P2",
     owner: null,
@@ -432,6 +432,12 @@ describe("InboxQueue — task grouping", () => {
       error: false,
     });
   }
+
+  it("bounds task grouping to the seven-day registry window", () => {
+    withRegistry();
+    renderQueue([]);
+    expect(useTasksMock).toHaveBeenCalledWith("7d");
+  });
 
   it("groups entries under the top-level task subtree with a count", () => {
     withRegistry();
