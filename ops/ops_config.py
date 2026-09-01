@@ -21,7 +21,8 @@ from ops.rpc_schemas import (
     HostConfigField,
 )
 from shared import host_config_validators, runtime_config
-from shared.config import env_override_values, get_config_metadata
+from shared.config import env_override_values, field_domain, get_config_metadata
+from shared.config.candidate import validate_env_patch_for_write
 from shared.config.editing import field_editable, split_reducer_patch
 from shared.machine import machine_name
 
@@ -123,11 +124,44 @@ def config_write_op(overrides: dict[str, Any], *, local: bool = False) -> Config
     restart_required: list[str] = []
     if applied:
         writes, removals = split_reducer_patch(overrides, metas)
-        if writes or removals:
-            runtime_config.write_fields(writes, removals)
-        restart_required = sorted(
-            {metas[f].restart_required for f in set(writes) | removals if metas[f].restart_required}
-        )
+        candidate = validate_env_patch_for_write(writes, removals)
+        errors_by_domain = candidate.errors_by_domain
+        if errors_by_domain:
+            applied = False
+            patched_fields = set(writes) | removals
+            rejected_fields = {
+                field for field in patched_fields if field_domain(field) in errors_by_domain
+            }
+            if not rejected_fields:
+                rejected_fields = {next(iter(sorted(patched_fields)))}
+            for field in rejected_fields:
+                errors = errors_by_domain.get(field_domain(field))
+                reason = "candidate rejected: " + "; ".join(errors or [])
+                results[field] = FieldWriteResult(ok=False, reason=reason)
+        else:
+            if writes or removals:
+                try:
+                    runtime_config.write_fields(
+                        writes,
+                        removals,
+                        expected_digest=candidate.expected_digest,
+                    )
+                except RuntimeError as exc:
+                    if str(exc) != ".env changed before owned runtime-config write":
+                        raise
+                    applied = False
+                    for field in set(writes) | removals:
+                        results[field] = FieldWriteResult(
+                            ok=False,
+                            reason="config changed concurrently; retry the request",
+                        )
+            restart_required = sorted(
+                {
+                    metas[f].restart_required
+                    for f in set(writes) | removals
+                    if applied and metas[f].restart_required
+                }
+            )
 
     return ConfigWriteOpResult(
         machine=machine_name(),
