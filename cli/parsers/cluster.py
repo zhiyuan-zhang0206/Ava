@@ -293,7 +293,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "pull/sync/migrate/restart -> fan out agent-runner self-updates); a pure "
         "agent-runner is updated by that fan-out, not by this verb.",
     )
-    cluster_update_p.add_argument(
+    update_kind = cluster_update_p.add_mutually_exclusive_group()
+    update_kind.add_argument(
         "--restart-only",
         action="store_true",
         help="bounce every service on the current code (no git pull / uv sync / migration) "
@@ -331,7 +332,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "`ava cluster recover`, which clears the stranded hold. Reach for --force only "
         "when the reported deploy is real but you intend to start anyway.",
     )
-    cluster_update_p.add_argument(
+    update_kind.add_argument(
         "--dry-run",
         action="store_true",
         help="run prepare checks and the maintenance-window gate without snapshotting, "

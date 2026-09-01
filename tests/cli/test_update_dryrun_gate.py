@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -54,7 +55,9 @@ def test_estimate_seeds_missing_baseline_with_conservative_first_gate(
     """An unseen cluster persists design targets but cannot claim an observed fast window."""
     monkeypatch.setattr(_dryrun, "ava_home", lambda: tmp_path)
 
-    assert _dryrun.estimate_maintenance_window() == pytest.approx(110.0)  # pyright: ignore[reportUnknownMemberType]
+    breakdown = _dryrun.maintenance_window_breakdown()
+    assert _dryrun.estimate_maintenance_window() == pytest.approx(sum(breakdown.values()) + 25.0)  # pyright: ignore[reportUnknownMemberType]
+    assert _dryrun.maintenance_window_estimate_note() == "no baseline — seeded + 25s margin"
 
     baseline = json.loads((tmp_path / "update-baseline.json").read_text())
     assert baseline == {
@@ -76,6 +79,27 @@ def test_explicit_estimate_does_not_seed_baseline_file(
 
     assert _dryrun.estimate_maintenance_window(persist_seed=False) == pytest.approx(110.0)  # pyright: ignore[reportUnknownMemberType]
     assert not (tmp_path / "update-baseline.json").exists()
+
+
+def test_staging_worktree_prunes_stale_registration_before_add(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prior interrupted dry run must not make its staging path permanently unusable."""
+    commands: list[list[str]] = []
+
+    def _run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(_dryrun, "run_bounded", _run)
+
+    with _dryrun._staging_worktree(tmp_path, "target-sha", tmp_path / "stage"):
+        pass
+
+    assert commands[:2] == [
+        ["git", "worktree", "prune"],
+        ["git", "worktree", "add", "--detach", str(tmp_path / "stage"), "target-sha"],
+    ]
 
 
 def test_estimate_uses_stage_p95_and_baseline_writeback(
@@ -228,6 +252,162 @@ def test_dry_run_failure_refuses_before_stop(monkeypatch: pytest.MonkeyPatch) ->
     assert stopped == []
 
 
+@pytest.mark.parametrize("failure_site", ["snapshot", "checks", "estimate"])
+def test_normal_prepare_error_finalizes_an_aborted_record_without_traceback(
+    failure_site: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A prepare exception closes the record just like an aborted commit path."""
+    _stub_prepare(monkeypatch)
+    finalized: list[object] = []
+    monkeypatch.setattr(
+        _up,
+        "_snapshot_known_good",
+        lambda **_kwargs: (
+            (_ for _ in ()).throw(RuntimeError("snapshot unavailable"))
+            if failure_site == "snapshot"
+            else ("old", set[str](), None)
+        ),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _up,
+        "dry_run_checks",
+        lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(RuntimeError("checks unavailable"))
+            if failure_site == "checks"
+            else []
+        ),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _up,
+        "estimate_maintenance_window",
+        lambda: (
+            (_ for _ in ()).throw(RuntimeError("estimate unavailable"))
+            if failure_site == "estimate"
+            else 80.0
+        ),
+    )
+    monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
+    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
+    monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
+    monkeypatch.setattr(
+        _up,
+        "finalize_rollout",
+        lambda *_args, **kwargs: finalized.append(kwargs["outcome"]),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    assert _run_inner() == 1
+    captured = capsys.readouterr()
+    assert "prepare failed" in captured.err
+    assert "Traceback" not in captured.err
+    assert finalized == [_up.RolloutOutcome.ABORTED]
+
+
+def test_failed_or_incomplete_commit_does_not_record_a_clean_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a fully clean commit contributes an observed maintenance baseline."""
+    _stub_prepare(monkeypatch)
+    baseline_calls: list[object] = []
+    monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kwargs: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 80.0)
+    monkeypatch.setattr(
+        _up,
+        "_snapshot_known_good",
+        lambda **_kwargs: ("old", set[str](), None),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kwargs: 2)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
+    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
+    monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
+    monkeypatch.setattr(_up, "finalize_rollout", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _up,
+        "_finalize_commit_telemetry",
+        baseline_calls.append,  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    assert _run_inner() == 2
+    assert baseline_calls == []
+
+
+def test_incomplete_commit_does_not_record_a_clean_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful gateway leg without readiness is still not observed clean telemetry."""
+    _stub_prepare(monkeypatch)
+    baseline_calls: list[object] = []
+    monkeypatch.setattr(
+        _cli,
+        "_resolve_fanout_targets",
+        lambda **_kwargs: [("runner-a", "http://runner-a")],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kwargs: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 80.0)
+    monkeypatch.setattr(
+        _up,
+        "_snapshot_known_good",
+        lambda **_kwargs: ("old", set[str](), None),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _up,
+        "_stop_the_world",
+        lambda *_args, **_kwargs: (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
+    monkeypatch.setattr(_up, "_persist_cluster_pin", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_gateway_ready_or_incomplete", lambda *_args, **_kwargs: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
+    monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
+    monkeypatch.setattr(_up, "finalize_rollout", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _up,
+        "_finalize_commit_telemetry",
+        baseline_calls.append,  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    assert _run_inner() == 1
+    assert baseline_calls == []
+
+
+def test_commit_clears_reconciled_markers_only_after_prepare_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reconciliation is read-only until its candidate set has passed the prepare gate."""
+    _stub_prepare(monkeypatch)
+    order: list[str] = []
+    monkeypatch.setattr(
+        _cli,
+        "_resolve_fanout_targets",
+        lambda **_kwargs: [("runner-a", "http://runner-a")],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kwargs: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 80.0)
+    monkeypatch.setattr(
+        _up,
+        "_snapshot_known_good",
+        lambda **_kwargs: ("old", set[str](), None),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _up,
+        "_clear_stale_stop_marker",
+        lambda name: order.append(f"clear:{name}"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _up,
+        "_stop_the_world",
+        lambda *_args, **_kwargs: order.append("stop") or (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kwargs: 2)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
+    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
+    monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
+    monkeypatch.setattr(_up, "finalize_rollout", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _run_inner() == 2
+    assert order == ["clear:runner-a", "stop"]
+
+
 def test_normal_prepare_snapshots_before_maintenance_and_threads_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -322,6 +502,11 @@ def test_explicit_dry_run_never_snapshots_or_enters_maintenance(
     monkeypatch.setattr(_up, "estimate_maintenance_window", lambda **_kw: 80.0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _up,
+        "maintenance_window_estimate_note",
+        lambda **_kw: "no baseline — seeded + 25s margin",  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _up,
         "_snapshot_known_good",
         lambda **_kw: pytest.fail("dry-run must not create a snapshot"),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -333,10 +518,14 @@ def test_explicit_dry_run_never_snapshots_or_enters_maintenance(
 
     assert _run_inner(dry_run=True) == 0
     assert preflight_options["prepare_only"] is True
-    assert "PASS" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "PASS" in output
+    assert "no baseline — seeded + 25s margin" in output
 
 
-def test_cmd_update_posts_the_dry_run_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_update_posts_the_dry_run_flag(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The gateway receives dry-run intent instead of a client-side maintenance action."""
     from cli.commands import _update_dispatch as _dispatch
 
@@ -364,3 +553,4 @@ def test_cmd_update_posts_the_dry_run_flag(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert _dispatch.cmd_update(dry_run=True) == 0
     assert request["dry_run"] is True
+    assert "dry-run dispatched — PASS/FAIL see rollout log" in capsys.readouterr().out
