@@ -160,7 +160,10 @@ async def _claim_node_impl(
     routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Dispatch: run every item through its handler ──
-    st = _BatchState(update_initiated=state.update_initiated)
+    st = _BatchState(
+        update_initiated=state.update_initiated,
+        active_task_id=state.active_task_id,
+    )
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Display: tell the frontend which chat inbounds were committed ──
@@ -192,6 +195,7 @@ async def _claim_node_impl(
     # branch, which never flips the row).
     update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
     update["restart_requested"] = st.restart_requested
+    update["active_task_id"] = st.active_task_id
     return Command[ClaimGoto](update=update, goto=outcome.command.goto)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType]
 
 

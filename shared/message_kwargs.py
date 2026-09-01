@@ -111,6 +111,7 @@ class AvaMessageKwargs(TypedDict, total=False):
     ava_created_at: str
     ava_image_urls: list[str]
     ava_note_tag: str
+    ava_task_id: int
     ava_exit_code: int
     ava_cancelled: bool
     ava_timed_out: bool

@@ -32,8 +32,11 @@ a background path, where taking the whole turn down is the worse outcome.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
+import secrets
 from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
@@ -42,6 +45,8 @@ from shared.config.turn_view import turn_settings
 from shared.log import logger
 
 _LABEL = "recall-filter"
+_PICKED_PATH_SAMPLE_LIMIT = 10
+_RECALL_LOG_HMAC_KEY = secrets.token_bytes(32)
 
 # The judging-call bound is configurable (AVA_MEMORY_RECALL_FILTER_TIMEOUT_SECONDS,
 # task #698 G8). It sits in front of the agent's turn, so a slow filter is a slow
@@ -128,13 +133,36 @@ def _parse(reply: str, allowed: set[str]) -> list[str] | None:
             logger.debug(
                 "[{label}] {body}",
                 label=_LABEL,
-                body=f"model returned unknown path {item!r}",
+                body="model returned an unknown path",
                 event="recall_filter",
             )
             continue
         if item not in picked:
             picked.append(item)
     return picked
+
+
+def _log_filter_decision(query: str, candidates: list[Candidate], picked: list[str]) -> None:
+    """Emit one privacy-preserving, bounded record of a recall verdict.
+
+    The process-keyed query HMAC lets an operator join repeated filter decisions
+    without making low-entropy conversation text dictionary-reversible from
+    telemetry. Paths are reduced to basenames so the sample records what was
+    surfaced without disclosing project-directory structure.
+    """
+    logger.info(
+        "[{label}] {body}",
+        label=_LABEL,
+        body=f"{len(candidates)} candidate(s) -> {len(picked)} kept",
+        event="recall_filter",
+        query_hmac_sha256=hmac.new(
+            _RECALL_LOG_HMAC_KEY, query.encode(), hashlib.sha256
+        ).hexdigest(),
+        picked_paths=[
+            path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+            for path in picked[:_PICKED_PATH_SAMPLE_LIMIT]
+        ],
+    )
 
 
 async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str]:
@@ -166,7 +194,7 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
         turn_settings.agent.memory_recall_filter_model, reasoning_effort=ReasoningEffort.NONE
     )
     last_failure: str | None = None
-    for attempt in range(1, turn_settings.agent.memory_recall_filter_max_retries + 1):
+    for _attempt in range(1, turn_settings.agent.memory_recall_filter_max_retries + 1):
         try:
             # The filter is a latency-critical background path judging names
             # and one-line descriptions only, so its model is built with
@@ -199,23 +227,12 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
                 text = str(reply.content)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             picked = _parse(text, {c.path for c in candidates})
             if picked is not None:
-                if attempt > 1:
-                    logger.info(
-                        "[{label}] {body}",
-                        label=_LABEL,
-                        body=f"judged on attempt {attempt}",
-                        event="recall_filter",
-                    )
-                logger.info(
-                    "[{label}] {body}",
-                    label=_LABEL,
-                    body=f"{len(candidates)} candidate(s) -> {len(picked)} kept",
-                    event="recall_filter",
-                )
-                return picked[:inject_k]
-            last_failure = f"unparseable reply {text[:200]!r}"
-        except Exception as exc:
-            last_failure = f"filter call failed ({exc!r})"
+                kept = picked[:inject_k]
+                _log_filter_decision(query, candidates, kept)
+                return kept
+            last_failure = "unparseable reply"
+        except Exception:
+            last_failure = "filter call failed"
     logger.warning(
         "[{label}] {body}",
         label=_LABEL,

@@ -13,7 +13,7 @@ sees relevant durable notes surface on their own, without having to call
 `ava.memory.search`.
 
 A removable layer: gated by `turn_settings.agent.passive_memory_recall_enabled` (default
-off), and a no-op whenever the search does not come back with results -- index
+on), and a no-op whenever the search does not come back with results -- index
 down, gateway erroring, feature off -- so the call site degrades to nothing
 rather than failing the turn. It runs before the LLM on every inbound turn, so a
 search failure that escaped would kill the agent process, not just the recall.

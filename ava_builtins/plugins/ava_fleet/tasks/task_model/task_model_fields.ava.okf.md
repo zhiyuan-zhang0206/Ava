@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Task Model — Field Details
-description: "Field-by-field reference for the Task data class: id, parent_id, title, description, results, status, owner, created_by, timestamps, priority"
+description: "Field-by-field reference for the Task data class: id, parent_id, title, description, results, status, owner, created_by, timestamps, priority, and task-scoped LLM budgets"
 tags:
 - fleet
 - tasks
@@ -54,3 +54,12 @@ Timestamps auto-managed by the database. `updated_at` is refreshed on every `upd
 ## `priority`
 
 One of `"P0"` (highest) through `"P3"` (lowest), default `"P2"` (`CHECK` constraint, same four levels as notice). `create()`/`update()` validate and raise `ValueError` for illegal values; `update(priority=None)` means "no change". The task board sorts by priority within the same status column (display only, the frontend doesn't write it). When a task escalates to the human queue due to being overdue, the `agent_notices` entry inherits the task's `priority` (see [[task_model_reminders.ava.okf.md|Reminders]]).
+
+## `token_budget` / `usd_budget` and usage
+
+`create()` optionally accepts a positive `token_budget` and a positive finite
+`usd_budget`. `token_used` and `usd_used` accumulate only LLM calls whose turn
+was explicitly attributed by a task system note; ownership, chat, and other
+untagged work never count. The task row lock makes increments and first-breach
+markers atomic. Crossing either ceiling sends the current owner one system
+note and does not stop the in-flight call or terminate the agent.

@@ -6,6 +6,9 @@ filter's ability to return *nothing*, and about it never taking a turn down when
 the small model misbehaves.
 """
 
+import hashlib
+import hmac
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -84,6 +87,102 @@ async def test_keeps_only_what_the_model_picked(monkeypatch: pytest.MonkeyPatch)
     picked = await filter_candidates("q", _candidates("a.md", "b.md", "c.md"))
 
     assert picked == ["b.md"]
+
+
+async def test_records_hmac_query_and_basename_path_sample(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A verdict keeps a keyed query digest and path basenames, never private text."""
+    import agent.graph._memory_filter as memory_filter
+
+    query = "deploy the gateway without revealing this text"
+    hmac_key = b"test-recall-telemetry-key"
+    full_path = "projects/acme/private/b.md"
+    monkeypatch.setattr(memory_filter, "_RECALL_LOG_HMAC_KEY", hmac_key, raising=False)
+    _patch_model(monkeypatch, f'["{full_path}"]')
+
+    assert await filter_candidates(query, _candidates("a.md", full_path)) == [full_path]
+
+    verdict = next(
+        record for record in loguru_records if record["extra"].get("event") == "recall_filter"
+    )
+    assert "query_hmac_sha256" in verdict["extra"]
+    assert (
+        verdict["extra"]["query_hmac_sha256"]
+        == hmac.new(hmac_key, query.encode(), hashlib.sha256).hexdigest()
+    )
+    assert verdict["extra"]["picked_paths"] == ["b.md"]
+    assert query not in verdict["message"]
+    assert full_path not in str(verdict["extra"])
+
+
+async def test_does_not_log_an_unrecognised_model_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Untrusted filter output must not expose conversation text in telemetry."""
+    import agent.graph._memory_filter as memory_filter
+
+    query = "do not persist this conversation text"
+    logged: list[str] = []
+
+    def capture(_template: str, **kw: object) -> None:
+        logged.append(str(kw["body"]))
+
+    monkeypatch.setattr(
+        memory_filter.logger,
+        "debug",
+        capture,
+    )
+    _patch_model(monkeypatch, f'["{query}"]')
+
+    assert await filter_candidates(query, _candidates("a.md")) == []
+    assert query not in "\n".join(logged)
+
+
+async def test_does_not_log_an_unparseable_model_echo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed filter response can echo the prompt, so logs keep no reply text."""
+    import agent.graph._memory_filter as memory_filter
+
+    query = "do not persist this malformed-response echo"
+    logged: list[str] = []
+
+    def capture(_template: str, **kw: object) -> None:
+        logged.append(str(kw["body"]))
+
+    monkeypatch.setattr(
+        memory_filter.logger,
+        "warning",
+        capture,
+    )
+    _patch_model(monkeypatch, f"not JSON: {query}")
+
+    assert await filter_candidates(query, _candidates("a.md")) == []
+    assert query not in "\n".join(logged)
+
+
+async def test_does_not_log_a_filter_exception_echo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider errors can include prompt text, so their details stay out of logs."""
+    import agent.graph._memory_filter as memory_filter
+
+    query = "do not persist this provider-error echo"
+    logged: list[str] = []
+
+    def capture(_template: str, **kw: object) -> None:
+        logged.append(str(kw["body"]))
+
+    monkeypatch.setattr(
+        memory_filter.logger,
+        "warning",
+        capture,
+    )
+    _patch_model(monkeypatch, RuntimeError(query))
+
+    assert await filter_candidates(query, _candidates("a.md")) == []
+    assert query not in "\n".join(logged)
 
 
 async def test_successful_filter_call_emits_chat_billing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,7 +355,7 @@ async def test_model_failure_injects_nothing(
 
 
 async def test_disabled_filter_passes_the_top_through_untouched(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
     from shared.config import settings
 
@@ -268,6 +367,9 @@ async def test_disabled_filter_passes_the_top_through_untouched(
     monkeypatch.setattr("shared.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
     assert await filter_candidates("q", _candidates("a.md", "b.md")) == ["a.md", "b.md"]
+    assert not [
+        record for record in loguru_records if record["extra"].get("event") == "recall_filter"
+    ]
 
 
 async def test_no_candidates_needs_no_model(monkeypatch: pytest.MonkeyPatch) -> None:

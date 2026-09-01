@@ -483,6 +483,30 @@ class TestSendSystemNote:
         assert "assigned to you" in content
         assert payload == {"note_tag": "task"}
 
+    def test_send_system_note_preserves_explicit_task_id(self, db_conn: psycopg.Connection) -> None:
+        ava._boot._agent_id = _spawn_agent()
+        peer_id = ava.agents.spawn()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agent_tasks (title, description, created_by, owner) "
+                "VALUES ('task note target', 'd', 'user', %s) RETURNING id",
+                (peer_id,),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        task_id = row[0]
+        db_conn.commit()
+
+        ava.agents.send_system_note(
+            peer_id, 'Task #42 "t" is now assigned to you.', task_id=task_id
+        )
+
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT payload FROM inbound_messages WHERE agent_id = %s", (peer_id,))
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] == {"note_tag": "task", "task_id": task_id}
+
     def test_send_system_note_to_terminated_is_fine(self, db_conn: psycopg.Connection) -> None:
         """A note with resurrect=True (task assignment) reaches a terminated
         agent — auto-resurrect is the gateway delivery detail, the SDK just

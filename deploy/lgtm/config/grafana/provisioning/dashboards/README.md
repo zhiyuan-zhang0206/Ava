@@ -57,7 +57,7 @@ row header. All sections are **expanded by default** (`collapsed: false`,
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
 the dashboard time picker; there are no per-panel `timeFrom` overrides.
 
-The dashboard now has 80 panel entries (73 panels + 7 row headers): core
+The dashboard now has 82 panel entries (75 panels + 7 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
 >= 1000, host/data-plane panels are 2101–2112, the cost-analysis panels are
 38, 39, 41–43, the event panels are 2201–2203 (business/anomaly logs,
@@ -179,7 +179,7 @@ of mass-editing targets.
 Shipped examples: `ava_builtins/plugins/ava_code/metrics.py` (syntax_fix
 trend/stat), `ava_builtins/plugins/ava_fleet/metrics.py` (task completion
 rate), `ava_builtins/plugins/ava_memory/metrics.py` (recall-filter runs /
-empty ratio / error ratio).
+empty ratio / error ratio plus passive-recall search and filter latency).
 
 ## Layout
 

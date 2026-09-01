@@ -69,6 +69,14 @@ def _persisted_priority(db: psycopg.Connection, task_id: int) -> str:
     return row[0]
 
 
+def _persisted_budgets(db: psycopg.Connection, task_id: int) -> tuple[int | None, float | None]:
+    with db.cursor() as cur:
+        cur.execute("SELECT token_budget, usd_budget FROM agent_tasks WHERE id = %s", (task_id,))
+        row = cur.fetchone()
+    assert row is not None
+    return row
+
+
 def test_default_remind_interval_is_none_sentinel() -> None:
     """Not-passed and None mean the same thing: resolve against priority, so
     the per-priority default applies at create time."""
@@ -90,6 +98,8 @@ def test_create_parent_is_required() -> None:
         "remind_interval_seconds",
         "owner",
         "priority",
+        "token_budget",
+        "usd_budget",
         "brief",
     ]
     assert params["parent"].default is inspect.Parameter.empty
@@ -126,6 +136,79 @@ def test_create_default_priority_is_p2_with_2h_interval(
         task = task_registry.create("title", "detail", parent=root_task_id)
         assert task.remind_interval_seconds == 7200
         assert _persisted_remind_interval_seconds(db_conn, task.id) == 7200
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_create_persists_token_and_usd_budgets(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """Task creation records both optional ceilings for task-tagged LLM usage."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create(
+            "bounded task",
+            "detail",
+            parent=root_task_id,
+            token_budget=12_000,
+            usd_budget=1.25,
+        )
+        assert (task.token_budget, task.usd_budget) == (12_000, 1.25)
+        assert _persisted_budgets(db_conn, task.id) == (12_000, 1.25)
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_create_rejects_boolean_budget_values(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """Booleans are not numeric task ceilings despite Python's int subclassing."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        with pytest.raises(TypeError, match="token_budget must be"):
+            task_registry.create(
+                "boolean token budget", "detail", parent=root_task_id, token_budget=True
+            )
+        with pytest.raises(TypeError, match="usd_budget must be"):
+            task_registry.create(
+                "boolean USD budget", "detail", parent=root_task_id, usd_budget=True
+            )
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_record_task_usage_notifies_once_for_each_budget_breach(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    """Task-tagged usage is summed atomically and each ceiling alerts once."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create(
+            "bounded task",
+            "detail",
+            parent=root_task_id,
+            token_budget=100,
+            usd_budget=1.0,
+        )
+        with patch("ava.agents.send_system_note") as notify:
+            task_registry.record_task_usage(task.id, token_count=100, cost_usd=0.25)
+            task_registry.record_task_usage(task.id, token_count=1, cost_usd=0.75)
+            task_registry.record_task_usage(task.id, token_count=1, cost_usd=0.25)
+
+        assert _persisted_budgets(db_conn, task.id) == (100, 1.0)
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT token_used, usd_used FROM agent_tasks WHERE id = %s", (task.id,))
+            row = cur.fetchone()
+        assert row == (102, 1.25)
+        assert [call.kwargs["task_id"] for call in notify.call_args_list] == [task.id, task.id]
+        assert ["token" in call.args[1] for call in notify.call_args_list] == [True, False]
+        assert ["USD" in call.args[1] for call in notify.call_args_list] == [False, True]
     finally:
         ava._boot._agent_id = original
 
@@ -631,6 +714,7 @@ def test_create_with_owner_notifies_target(db_conn: psycopg.Connection, root_tas
             assert "assigned to you" in msg
             # An assignment is a delegator direction: the new owner is
             # auto-resurrected so the task never strands on a dead agent.
+            assert call_args.kwargs["task_id"] == task.id
             assert call_args.kwargs["resurrect"] is True
     finally:
         ava._boot._agent_id = original
@@ -685,6 +769,7 @@ def test_update_owner_reassign_notifies(db_conn: psycopg.Connection, root_task_i
             call_args = mock_send.call_args
             assert call_args[0][0] == other_id
             assert "now assigned" in call_args[0][1]
+            assert call_args.kwargs["task_id"] == task.id
             assert call_args.kwargs["resurrect"] is True
     finally:
         ava._boot._agent_id = original
@@ -1124,6 +1209,8 @@ def test_create_and_assign_signature() -> None:
         "parent",
         "remind_interval_seconds",
         "priority",
+        "token_budget",
+        "usd_budget",
     ]
     assert params["preset"].default == "coder"
     assert params["label"].default is None
@@ -1132,6 +1219,8 @@ def test_create_and_assign_signature() -> None:
     assert params["parent"].default is inspect.Parameter.empty  # required, no default
     assert params["remind_interval_seconds"].default is None
     assert params["priority"].default == "P2"
+    assert params["token_budget"].default is None
+    assert params["usd_budget"].default is None
 
 
 def test_create_and_assign_returns_task_and_agent_id(
@@ -1312,6 +1401,30 @@ def test_create_and_assign_honours_priority(db_conn: psycopg.Connection, root_ta
             )
         assert task.priority == "P0"
         assert _persisted_priority(db_conn, task.id) == "P0"
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_create_and_assign_persists_budgets(db_conn: psycopg.Connection, root_task_id: int) -> None:
+    """create_and_assign validates and forwards both task budget ceilings."""
+    agent_id = _seed_agent(db_conn)
+    spawned_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        with (
+            patch("ava.agents.spawn", return_value=spawned_id),
+            patch("ava.agents.send_system_note"),
+        ):
+            task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
+                "bounded title",
+                "detail",
+                parent=root_task_id,
+                token_budget=5_000,
+                usd_budget=0.75,
+            )
+        assert (task.token_budget, task.usd_budget) == (5_000, 0.75)
+        assert _persisted_budgets(db_conn, task.id) == (5_000, 0.75)
     finally:
         ava._boot._agent_id = original
 
