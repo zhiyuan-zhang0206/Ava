@@ -49,19 +49,22 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     models = _pricing_catalog_models(raw)
 
     assert raw["schema_version"] == 2
-    assert len(models) == 31
     assert all(
-        isinstance(entry.get("vendor"), str) and entry["vendor"] for entry in models.values()
+        isinstance(entry.get("vendor"), str) and entry["vendor"].strip()
+        for entry in models.values()
     )
-    assert {entry["vendor"] for entry in models.values()} == {
+    # Vocabulary lock: every vendor must come from the billing-event schema's
+    # registered set (CTO ruling 2026-09-01); additions require registration
+    # first, but a new model reusing a registered vendor needs no test edit.
+    assert {entry["vendor"] for entry in models.values()} <= {
         "anthropic",
         "deepseek",
-        "gemini",
-        "glm",
-        "kimi",
-        "mimo",
+        "google",
         "openai",
-        "qwen",
+        "xiaomi",
+        "moonshot",
+        "zhipu",
+        "alibaba",
     }
     assert {
         "deepseek-v4-pro": models["deepseek-v4-pro"]["vendor"],
@@ -75,22 +78,22 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     } == {
         "deepseek-v4-pro": "deepseek",
         "claude-opus-4-8": "anthropic",
-        "gemini-3.7-flash": "gemini",
+        "gemini-3.7-flash": "google",
         "gpt-5.6-sol": "openai",
-        "mimo-v2.5-pro": "mimo",
-        "kimi-k3": "kimi",
-        "glm-5.3": "glm",
-        "qwen3.8-max": "qwen",
+        "mimo-v2.5-pro": "xiaomi",
+        "kimi-k3": "moonshot",
+        "glm-5.3": "zhipu",
+        "qwen3.8-max": "alibaba",
     }
 
 
 def test_model_vendor_returns_catalog_vendor_or_none() -> None:
     assert model_vendor("deepseek-v4-pro") == "deepseek"
-    assert model_vendor("qwen3.8-flash") == "qwen"
+    assert model_vendor("qwen3.8-flash") == "alibaba"
     assert model_vendor("no-such-model") is None
 
 
-@pytest.mark.parametrize("vendor", [None, ""])
+@pytest.mark.parametrize("vendor", [None, "", "   "])
 def test_parse_catalog_v2_rejects_missing_or_empty_vendor(vendor: str | None) -> None:
     raw = copy.deepcopy(_pricing_catalog_raw())
     raw["schema_version"] = 2
@@ -115,6 +118,15 @@ def test_parse_catalog_v1_allows_missing_vendor() -> None:
     catalog = _parse_catalog(raw)
 
     assert catalog["deepseek-v4-pro"].vendor is None
+
+
+def test_parse_catalog_rejects_empty_models_mapping() -> None:
+    raw = copy.deepcopy(_pricing_catalog_raw())
+    raw["schema_version"] = 2
+    raw["models"] = {}
+
+    with pytest.raises(RuntimeError, match="models must be a non-empty mapping"):
+        _parse_catalog(raw)
 
 
 def test_parse_catalog_rejects_unknown_schema_version() -> None:

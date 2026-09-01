@@ -280,10 +280,13 @@ def _parse_catalog(raw: dict[str, Any]) -> dict[str, _ModelPrice]:
         raise RuntimeError("unsupported pricing catalog schema, currency, or token unit")
     if not isinstance(raw["catalog_version"], str) or not raw["catalog_version"]:
         raise RuntimeError("pricing catalog version must be a non-empty string")
+    raw_models = raw.get("models")
+    if not isinstance(raw_models, dict) or not raw_models:
+        raise RuntimeError("pricing catalog models must be a non-empty mapping")
     catalog: dict[str, _ModelPrice] = {}
     for model, entry_raw in cast(dict[str, dict[str, Any]], raw["models"]).items():
         vendor = entry_raw.get("vendor")
-        if schema_version == 2 and (not isinstance(vendor, str) or not vendor):
+        if schema_version == 2 and (not isinstance(vendor, str) or not vendor.strip()):
             raise RuntimeError(f"pricing catalog vendor must be a non-empty string for {model!r}")
         source_url = entry_raw["source_url"]
         if not isinstance(source_url, str) or not source_url.startswith("https://"):

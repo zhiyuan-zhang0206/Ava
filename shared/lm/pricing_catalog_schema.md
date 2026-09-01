@@ -28,7 +28,7 @@ implementation for this cross-line schema.
 
 | Field | Type | Contract |
 |---|---|---|
-| `vendor` | string | Required from catalog schema v2. Registered open-enum examples: `openai`, `deepseek`, `gemini`, `anthropic`, `mimo`, `kimi`, `glm`, `qwen`, and additional registered providers. |
+| `vendor` | string | Required from catalog schema v2. Lowercase company name from the registered vocabulary shared with the billing-event schema: `openai`, `deepseek`, `google`, `anthropic`, `xiaomi`, `moonshot`, `zhipu`, `alibaba`. A new vendor registers in the billing-event schema before appearing here. |
 | `source_url` | string | HTTPS official pricing source. |
 | `source_checked_at` | ISO date | Date the source was checked. |
 | `effective_time_note` | optional string | Legacy note when a provider does not publish an exact effective time. |
@@ -42,7 +42,8 @@ implementation for this cross-line schema.
 The `models` object key is the bare model name. Vendor identity must never be
 baked into a new key shape or recovered by parsing the key: `vendor` is the
 authoritative, separately stored provider identity. Existing model keys remain
-unchanged for compatibility.
+unchanged for compatibility. Vendor values name the company (`google` for
+`gemini-*`), so the vendor can never be derived from a model-key prefix.
 
 ## Evolution rules
 
