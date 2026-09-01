@@ -26,7 +26,7 @@ from services.pitr.base_candidate import BaseCandidateError
 from services.pitr.checksums import ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.uploader import ack_manifest_from_raw
-from shared.config import settings
+from shared.config import FIELD_INFOS, field_alias, field_domain, settings
 from tests._pitr_fixtures import baidu_credential_evidence
 
 
@@ -665,9 +665,57 @@ def test_pitr_env_absent_detects_all_four_missing() -> None:
     assert not pitr_env_absent(b"AVA_PITR_ENABLED=true\n")
 
 
+def _service_account(email: str, key_id: str) -> str:
+    return json.dumps(
+        {
+            "type": "service_account",
+            "client_email": email,
+            "project_id": "test-project",
+            "private_key_id": key_id,
+        }
+    )
+
+
+def _valid_pitr_baseline(tmp_path: Path) -> str:
+    """Return file-backed GCS prerequisites for the real activation write path."""
+    key = tmp_path / "backup.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    uploader = tmp_path / "gcs-uploader.json"
+    uploader.write_text(_service_account("uploader@example.com", "uploader-key"))
+    uploader.chmod(0o600)
+    viewer = tmp_path / "gcs-viewer.json"
+    viewer.write_text(_service_account("viewer@example.com", "viewer-key"))
+    viewer.chmod(0o600)
+    return (
+        "AVA_PITR_STORE_BACKEND=gcs\n"
+        f"AVA_PITR_BACKUP_KEY_FILE={key}\n"
+        "AVA_PITR_BACKUP_KEY_ID=test\n"
+        "AVA_PITR_REPLICATION_DB_URL=postgresql://repl@127.0.0.1:1/x\n"
+        "AVA_PITR_GCS_PROJECT=test-project\n"
+        "AVA_PITR_GCS_BUCKET=test-bucket\n"
+        f"AVA_PITR_GCS_CREDENTIALS_FILE={uploader}\n"
+        f"AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE={viewer}\n"
+    )
+
+
+def _clear_pitr_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the real candidate check independent of inherited PITR settings."""
+    for name in FIELD_INFOS:
+        if field_domain(name) == "physical_backup":
+            monkeypatch.delenv(field_alias(name), raising=False)
+
+
 def _env_apply_fixture(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env_text: str
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    env_text: str,
+    *,
+    valid_pitr_baseline: bool = False,
 ) -> ActivationRecord:
+    _clear_pitr_environment(monkeypatch)
+    if valid_pitr_baseline:
+        env_text += _valid_pitr_baseline(tmp_path)
     (tmp_path / "pg").mkdir()
     (tmp_path / "pg" / "postgresql.auto.conf").write_text("")
     (tmp_path / ".env").write_text(env_text)
@@ -800,7 +848,12 @@ def test_env_apply_provisioning_round_trips_real_env_bytes(
 ) -> None:
     """QA nit 3: the real write_fields path lands the four aliases in the
     env file and keeps the unrelated lines."""
-    record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
+    record = _env_apply_fixture(
+        monkeypatch,
+        tmp_path,
+        "OTHER=kept\n",
+        valid_pitr_baseline=True,
+    )
     monkeypatch.setattr("shared.runtime_config.env_file_path", lambda: tmp_path / ".env")
     replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
     assert replacement.phase == "wal_restart_pending"
