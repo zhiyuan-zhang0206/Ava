@@ -77,7 +77,27 @@ tester.run("no-untranslated-ui-copy", rule, {
       errors: [{ messageId: "untranslatedCopy" }],
     },
     {
-      code: 'const copy = "Decision"; const element = <span>{copy}</span>;',
+      code: 'const label = "Decision"; const element = <span>{label}</span>;',
+      errors: [{ messageId: "untranslatedCopy" }],
+    },
+    {
+      code: 'const L = { a: "Decision" }; const element = <span>{L.a}</span>;',
+      errors: [{ messageId: "untranslatedCopy" }],
+    },
+    {
+      code: 'const k = "a"; const L = { a: "Decision" }; const element = <span>{L[k]}</span>;',
+      errors: [{ messageId: "untranslatedCopy" }],
+    },
+    {
+      code: 'const element = <span>{"Back" + " to conversation"}</span>;',
+      errors: [{ messageId: "untranslatedCopy" }],
+    },
+    {
+      code: 'const element = <span>{String("Back")}</span>;',
+      errors: [{ messageId: "untranslatedCopy" }],
+    },
+    {
+      code: 'const element = <span>{["Back", " to conversation"].join("")}</span>;',
       errors: [{ messageId: "untranslatedCopy" }],
     },
     {

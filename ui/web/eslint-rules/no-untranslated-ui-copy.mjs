@@ -176,9 +176,7 @@ const rule = {
 
     function memberPropertyName(node) {
       if (!node.computed && node.property.type === "Identifier") return node.property.name;
-      if (node.computed && node.property.type === "Literal" && typeof node.property.value === "string") {
-        return node.property.value;
-      }
+      if (node.computed) return staticStringValue(node.property);
       return null;
     }
 
@@ -188,6 +186,18 @@ const rule = {
         return node.key.value;
       }
       return null;
+    }
+
+    function staticStringValue(node) {
+      if (node.type === "Literal" && typeof node.value === "string") return node.value;
+      if (node.type !== "Identifier") return null;
+
+      const initializer = localVariable(node)?.defs.find(
+        (definition) => definition.type === "Variable",
+      )?.node.init;
+      return initializer?.type === "Literal" && typeof initializer.value === "string"
+        ? initializer.value
+        : null;
     }
 
     function isAllowedMemberExpression(node) {
@@ -229,6 +239,28 @@ const rule = {
       return null;
     }
 
+    function staticArrayExpression(node) {
+      if (node.type === "ArrayExpression") return node;
+      if (node.type === "Identifier") {
+        const initializer = localVariable(node)?.defs.find(
+          (definition) => definition.type === "Variable",
+        )?.node.init;
+        return initializer?.type === "ArrayExpression" ? initializer : null;
+      }
+      if (node.type === "MemberExpression") {
+        const value = staticMemberValue(node);
+        return value?.type === "ArrayExpression" ? value : null;
+      }
+      return null;
+    }
+
+    function staticJoinElements(node) {
+      if (node.callee.type !== "MemberExpression" || memberPropertyName(node.callee) !== "join") {
+        return null;
+      }
+      return staticArrayExpression(node.callee.object)?.elements ?? null;
+    }
+
     function isAllowedChildExpression(node) {
       switch (node.type) {
         case "Identifier": {
@@ -241,14 +273,33 @@ const rule = {
           const value = staticMemberValue(node);
           return value == null || isAllowedChildExpression(value);
         }
-        case "CallExpression":
+        case "ArrayExpression":
+          return node.elements.every((element) =>
+            element == null || (element.type !== "SpreadElement" && isAllowedChildExpression(element)),
+          );
+        case "BinaryExpression":
+          return node.operator !== "+"
+            || (isAllowedChildExpression(node.left) && isAllowedChildExpression(node.right));
+        case "CallExpression": {
+          if (isKnownTranslationCall(node)) return true;
+          if (node.callee.type === "Identifier" && node.callee.name === "String") {
+            return node.arguments.every((argument) =>
+              argument.type !== "SpreadElement" && isAllowedChildExpression(argument),
+            );
+          }
+          const joinedElements = staticJoinElements(node);
+          if (joinedElements != null) {
+            return joinedElements.every((element) =>
+              element == null || (element.type !== "SpreadElement" && isAllowedChildExpression(element)),
+            );
+          }
           // Dynamic calls can produce values such as formatted timestamps.
           // Calls to a local binding could be a hidden static copy helper, so
           // only a verified next-intl translation is permitted there.
-          return isKnownTranslationCall(node)
-            || !(node.callee.type === "Identifier" && localVariable(node.callee)?.defs.some(
+          return !(node.callee.type === "Identifier" && localVariable(node.callee)?.defs.some(
               (definition) => definition.type !== "ImportBinding",
             ));
+        }
         case "Literal":
           return typeof node.value !== "string" || isNonCopyText(node.value, allow);
         case "TemplateLiteral":
