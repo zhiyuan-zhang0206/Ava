@@ -23,8 +23,7 @@ A shared headed Chrome management service on agent-runner — a three-component 
 - **Strongly-typed line protocol**: `protocol.py` defines `Request`/`Response` (`OkResponse | ErrResponse`, discriminated by `ok`) TypedDict — three processes, daemon (server), wrapper (client), `healthchecks/browser_mcp.py` (probe), share the same wire types, no longer hand-writing dict shapes individually.
 
 ## Gating
-- **browser** — `AVA_BROWSER_ENABLED` + `browser_incapability()` (display + Chrome + npx). Runs on Windows.
-- **browser-mcp** — the same prongs PLUS AF_UNIX (`browser_mcp_incapability()`), because the wrapper→daemon leg is a Unix socket. **POSIX-only**: a Windows agent-runner gets a headed Chrome over CDP and no MCP front end, and the `chrome` MCP entry is gated off with it (`requires: {display, unix_socket}`). Porting the transport: `future/infra/windows-browser-mcp.md`.
+See [[services/agent_runner_side/browser/browser/gating.ava.okf.md]].
 
 ## Key Dependencies
 - [[ava/mcps.ava.okf.md]] — `chrome-devtools-mcp` is the upstream

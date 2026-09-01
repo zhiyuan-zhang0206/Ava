@@ -24,7 +24,12 @@ case "$OS" in
     fi
     ;;
   macos)
-    brew install node@22 2>/dev/null || brew install node
+    # The unversioned `node` formula is linked into /opt/homebrew, so npx lands
+    # on PATH; `node@22` is keg-only (never symlinked) and would leave npx
+    # unreachable for the ava-browser daemon. Prefer the linked formula, and
+    # force-link the keg on the fallback path (QA review 2026-09-01, PR #1286 P1).
+    brew install node 2>/dev/null \
+        || { brew install node@22 2>/dev/null && brew link --force node@22; }
     ;;
 esac
 prov_log "node $(node --version 2>/dev/null || echo '(not on PATH)')"

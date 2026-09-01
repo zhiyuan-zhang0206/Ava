@@ -41,7 +41,7 @@ from cli.commands._lgtm_native import ensure_lgtm_native_step
 from cli.commands._otel_collector import ensure_otel_collector_step
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
-from shared.browser_deps import browser_deps_warning
+from shared.browser_deps import browser_deps_notice, browser_deps_warning
 from shared.cluster import is_default_home
 from shared.config import settings
 from shared.machine import MachineRoles
@@ -256,6 +256,9 @@ def _ensure_browser(ctx: ConvergeCtx) -> None:
         return
     reason = browser_incapability()
     if reason is not None:
+        if reason.startswith("no display"):
+            print(f"  i browser: {browser_deps_notice(reason)}", file=sys.stderr)
+            return
         print(f"  ! browser: {reason}", file=sys.stderr)
         print(browser_deps_warning(reason), file=sys.stderr)
         print("    (ava-browser will not start on this host)", file=sys.stderr)

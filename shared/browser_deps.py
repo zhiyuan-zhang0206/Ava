@@ -14,15 +14,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared.platform_probes import browser_deps_incapability
-
-_NPX_INCAPABILITY = "no npx (install Node.js for chrome-devtools-mcp)"
+from shared.platform_probes import NPX_INCAPABILITY_REASON, browser_deps_incapability
 
 
 def node_install_command() -> str:
     """Copy-pasteable per-platform command that installs Node.js (npx)."""
     if sys.platform == "darwin":
-        return "brew install node@22  (or: brew install node)"
+        return "brew install node  (or: brew install node@22 && brew link --force node@22)"
     if sys.platform.startswith("linux"):
         return "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs"
     if sys.platform == "win32":
@@ -54,14 +52,34 @@ def install_nodejs() -> bool:
 def ensure_browser_deps() -> str | None:
     """Detect and repair browser dependencies, returning a remaining reason if any."""
     reason = browser_deps_incapability()
-    if reason is None or reason != _NPX_INCAPABILITY:
+    if reason is None or reason != NPX_INCAPABILITY_REASON:
         return reason
     install_nodejs()
     return browser_deps_incapability()
 
 
+def browser_deps_notice(reason: str) -> str:
+    """Return the informational display-less-host outcome for operator output."""
+    return (
+        f"ava-browser is not applicable on this host: {reason} — a headed browser cannot run "
+        "here; nothing to install. The service stays skipped by design."
+    )
+
+
 def browser_deps_warning(reason: str) -> str:
-    """Return a prominent, actionable warning for an incapable browser host."""
+    """Return a prominent repair warning for a browser dependency gap."""
+    if reason == NPX_INCAPABILITY_REASON:
+        repair = (
+            "| Install Node.js (npx):                                         |\n"
+            f"|   {node_install_command()}\n"
+        )
+    elif reason.startswith("no Chrome"):
+        repair = "| Install Google Chrome or set AVA_CHROME_BINARY.                |\n"
+    else:
+        repair = (
+            "| A headed browser cannot run without a display; nothing to      |\n"
+            "| install for ava-browser on this host.                          |\n"
+        )
     return (
         "+----------------------------------------------------------------+\n"
         "| WARNING: ava-browser dependencies are incomplete               |\n"
@@ -69,9 +87,8 @@ def browser_deps_warning(reason: str) -> str:
         f"| Reason: {reason}\n"
         "| ava-browser will not run on this host until this is fixed.     |\n"
         "+----------------------------------------------------------------+\n"
-        "| Install Node.js (npx):                                         |\n"
-        f"|   {node_install_command()}\n"
-        "| Display and Chrome are also required; the first missing        |\n"
+        f"{repair}"
+        "| Display, Chrome, and npx are all required; the first missing  |\n"
         "| requirement is shown above (checked in that order).            |\n"
         "+----------------------------------------------------------------+"
     )

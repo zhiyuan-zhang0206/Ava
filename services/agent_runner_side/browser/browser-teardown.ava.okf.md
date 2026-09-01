@@ -35,5 +35,5 @@ Only the paths that explicitly ask for the browser down: `ava stop --stop-browse
 Runs after every session kill: the watchdog is already dead by then, so nothing relaunches Chrome onto the just-cleared port, and no launch is in flight for the port guard to fight. A silent no-op with nothing to reap (one process-table pass, no output), idempotent (a second sweep finds nothing; `kill_process_tree` is a no-op on a gone pid), and it never fails the teardown around it. **Platform-neutral and unbranched** — a `SingletonLock` handoff is Chrome's behaviour, not Windows'. POSIX makes it rare (the daemon `os.execvp`s, so the pane's process *is* Chrome and no launcher is left to hand off from), but a Chrome that detaches from that exec'd process leaves the identical orphan on the identical CDP port, and `psutil` supplies argv on both.
 
 ## Key Dependencies
-- [[services/agent_runner_side/browser/browser.ava.okf.md]] — the parent service
+- [[services/agent_runner_side/browser/browser/browser.ava.okf.md]] — the parent service
 - `shared/proc.py` — `kill_process_tree` does the killing once the root is correctly named

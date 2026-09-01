@@ -20,7 +20,7 @@ A controller states only the **blast radius of its own finding** and never names
 The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgbouncer`, `lgtm`, and `brew-pin` are DB-free (`False`). `pg-backup` is a regular DB-dependent `ServiceSpec` service.
 
 ## Why (the defect it replaced)
-`blocks_tick: bool` conflated "my own reconcile failed" with "nothing else should run either", which forced one controller's local failure to be a global verdict. The schema controller's DB-unreachable arm skipped the WHOLE agent-runner roster, so `browser` / `browser-mcp` — no DB at boot, none at runtime ([[services/agent_runner_side/browser/browser.ava.okf.md]]) — went unrevived for the entire duration of a database outage. A DB outage took out the recovery path for an unrelated Chrome crash, and it did so through a controller deciding on behalf of services it knows nothing about.
+`blocks_tick: bool` conflated "my own reconcile failed" with "nothing else should run either", which forced one controller's local failure to be a global verdict. The schema controller's DB-unreachable arm skipped the WHOLE agent-runner roster, so `browser` / `browser-mcp` — no DB at boot, none at runtime ([[services/agent_runner_side/browser/browser/browser.ava.okf.md]]) — went unrevived for the entire duration of a database outage. A DB outage took out the recovery path for an unrelated Chrome crash, and it did so through a controller deciding on behalf of services it knows nothing about.
 
 ## Scope per gate
 | Gate | Scope | Why |

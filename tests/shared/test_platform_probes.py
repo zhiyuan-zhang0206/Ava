@@ -168,6 +168,13 @@ def test_incapability_checks_display_first(monkeypatch: pytest.MonkeyPatch) -> N
 # ─── browser_deps_incapability ───────────────────────────────────────────
 
 
+def test_npx_incapability_reason_is_exported_once_for_both_probe_variants() -> None:
+    """Changing the npx operator guidance must not split runtime and enroll probes."""
+    assert getattr(pp, "NPX_INCAPABILITY_REASON", None) == (
+        "no npx (install Node.js for chrome-devtools-mcp)"
+    )
+
+
 def _all_platform_browser_deps_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the settings-free browser dependency prongs pass."""
     monkeypatch.setattr(pp, "display_available", lambda: True)
