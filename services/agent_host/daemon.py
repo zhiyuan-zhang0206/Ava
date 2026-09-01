@@ -275,7 +275,7 @@ async def run() -> None:
                 settings.data_plane.redis_url,
                 scheduler,
                 pending_scan=host.pending_inbound_wakes,
-                stale_after_s=float(settings.daemon.wedged_idling_agent_inbound_age_seconds),
+                stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
                 scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
                 subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
             ).run()
