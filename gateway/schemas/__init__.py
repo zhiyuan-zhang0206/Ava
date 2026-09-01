@@ -13,6 +13,7 @@ their unchanged OpenAPI names, so `cli` validates them without importing up into
 
 from gateway.schemas.agents import (
     AgentRow,
+    AgentSummary,
 )
 from gateway.schemas.cluster import (
     ClusterOpRequest,
@@ -192,6 +193,7 @@ __all__ = [
     "AgentMetricsReport",
     "AgentRow",
     "AgentStats",
+    "AgentSummary",
     "AgentTps",
     "CancelRequest",
     "ClusterOpRequest",

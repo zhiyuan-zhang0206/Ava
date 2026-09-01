@@ -133,7 +133,6 @@ function agent(over: {
     agent_id: over.agent_id,
     spawner: "user",
     fork_source_agent_id: null,
-    fork_source_checkpoint_id: null,
     status: over.status ?? "idling",
     pid: null,
     spawned_at: "2026-06-14T00:00:00Z",
@@ -146,7 +145,6 @@ function agent(over: {
     unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
-    last_probe_at: null,
   };
 }
 

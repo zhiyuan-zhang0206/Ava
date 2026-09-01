@@ -21,7 +21,6 @@ function ag(
     agent_id,
     spawner,
     fork_source_agent_id: null,
-    fork_source_checkpoint_id: null,
     status,
     pid: null,
     spawned_at: ts,
@@ -34,7 +33,6 @@ function ag(
     notices_awaiting_response: [], unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
-    last_probe_at: null,
   };
 }
 

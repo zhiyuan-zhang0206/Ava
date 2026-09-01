@@ -25,6 +25,7 @@ export type CancelRequested = Schemas["CancelRequested"];
  *  control-plane states, not the status vocabulary the console presents. */
 export type WireAgentStatus = Schemas["AgentStatus"];
 export type WireAgentRow = Schemas["AgentRow"];
+export type WireAgentSummary = Schemas["AgentSummary"];
 
 /** The console's complete, user-facing agent status model. Liveness remains a
  *  separate `AgentRow.liveness_state` axis, so an internally restarting agent
@@ -34,7 +35,7 @@ export type PublicAgentStatus = Extract<
   WireAgentStatus,
   "running" | "idling" | "terminated"
 >;
-export type AgentRow = Omit<WireAgentRow, "status"> & {
+export type AgentRow = Omit<WireAgentSummary, "status"> & {
   readonly status: PublicAgentStatus;
 };
 
@@ -59,9 +60,33 @@ export function projectAgentStatusValue(status: WireAgentStatus): PublicAgentSta
 }
 
 /** Project one raw gateway/SSE row before it enters any frontend cache. */
-export function projectAgentStatus(row: WireAgentRow): AgentRow {
+export function projectAgentStatus(row: WireAgentSummary): AgentRow {
   const status = projectAgentStatusValue(row.status);
-  return status === row.status ? (row as AgentRow) : { ...row, status };
+  if (
+    status === row.status &&
+    !("fork_source_checkpoint_id" in row) &&
+    !("last_probe_at" in row)
+  ) {
+    return row as AgentRow;
+  }
+  return {
+    agent_id: row.agent_id,
+    spawner: row.spawner,
+    fork_source_agent_id: row.fork_source_agent_id,
+    status,
+    pid: row.pid,
+    spawned_at: row.spawned_at,
+    started_at: row.started_at,
+    last_active_at: row.last_active_at,
+    last_inbound_at: row.last_inbound_at,
+    label: row.label,
+    machine: row.machine,
+    supports_vision: row.supports_vision,
+    liveness_state: row.liveness_state,
+    notices_awaiting_response: row.notices_awaiting_response,
+    unread_notice_count: row.unread_notice_count,
+    heartbeat_paused_until: row.heartbeat_paused_until,
+  };
 }
 // OpenNotice rides the agent snapshot (notices_awaiting_response — the open
 // require_response worklist). NoticeItem is the standalone feed element (the FYI

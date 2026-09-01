@@ -101,8 +101,8 @@ beforeAll(() => {
 });
 
 const MOCK_AGENTS: AgentRow[] = [
-  { agent_id: 1, label: "Test #1", status: "running", last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z", spawner: "user", fork_source_agent_id: null, fork_source_checkpoint_id: null, pid: 100, spawned_at: "2026-05-10T00:00:00Z", started_at: "2026-05-10T00:00:01Z", machine: "test-host", supports_vision: true, notices_awaiting_response: [], unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online", last_probe_at: null,},
-  { agent_id: 2, label: "Test #2", status: "idling", last_active_at: "2026-05-10T01:00:00Z", last_inbound_at: "2026-05-10T01:00:00Z", spawner: "user", fork_source_agent_id: null, fork_source_checkpoint_id: null, pid: 101, spawned_at: "2026-05-10T01:00:00Z", started_at: "2026-05-10T01:00:01Z", machine: "wsl", supports_vision: true, notices_awaiting_response: [], unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online", last_probe_at: null,},
+  { agent_id: 1, label: "Test #1", status: "running", last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z", spawner: "user", fork_source_agent_id: null, pid: 100, spawned_at: "2026-05-10T00:00:00Z", started_at: "2026-05-10T00:00:01Z", machine: "test-host", supports_vision: true, notices_awaiting_response: [], unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online" },
+  { agent_id: 2, label: "Test #2", status: "idling", last_active_at: "2026-05-10T01:00:00Z", last_inbound_at: "2026-05-10T01:00:00Z", spawner: "user", fork_source_agent_id: null, pid: 101, spawned_at: "2026-05-10T01:00:00Z", started_at: "2026-05-10T01:00:01Z", machine: "wsl", supports_vision: true, notices_awaiting_response: [], unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online" },
 ];
 
 let _qc: QueryClient;
@@ -665,7 +665,6 @@ describe("useAgents.spawn", () => {
           agent_id: 7,
           spawner: "user",
           fork_source_agent_id: null,
-          fork_source_checkpoint_id: null,
           status: "idling" as const,
           pid: null,
           spawned_at: "2026-05-25T00:00:00Z",
@@ -677,7 +676,6 @@ describe("useAgents.spawn", () => {
           notices_awaiting_response: [], unread_notice_count: 0,
           heartbeat_paused_until: null,
           liveness_state: "online",
-          last_probe_at: null,
         },
       ]);
     });
@@ -1212,10 +1210,8 @@ describe("useAgents SSE merge (regression)", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.agents.find((a) => a.agent_id === 42)).toEqual({
-        ...newSnapshot,
-        status: "idling",
-      });
+      const { fork_source_checkpoint_id: _, last_probe_at: __, ...summary } = newSnapshot;
+      expect(result.current.agents.find((a) => a.agent_id === 42)).toEqual(summary);
     });
     // No extra listAgents fetch — SSE was the only source of the new row.
     expect(vi.mocked(api.listAgents).mock.calls.length).toBe(fetchesBefore);

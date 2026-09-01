@@ -4,7 +4,11 @@ Split out of the former monolithic ops/schemas.py; FastAPI registers these
 unchanged, so the OpenAPI codegen is byte-identical to the wire before.
 """
 
-from shared.agent_snapshot import AgentSnapshot
+from shared.agent_snapshot import AgentListSummary, AgentSnapshot
+
+
+class AgentSummary(AgentListSummary):
+    """One row of ``GET /api/agents?fields=summary`` for roster consumers."""
 
 
 class AgentRow(AgentSnapshot):

@@ -30,7 +30,7 @@ enough that an external model can hold the whole surface.
 |---|---|---|
 | `spawn_agent` | `POST /api/agents` | start an agent on a goal; returns its id at once |
 | `send_message` | `POST /api/agents/{id}/messages` | queue an instruction / answer for a running agent |
-| `list_agents` | `GET /api/agents` | every agent, compacted to the fields a caller steers by |
+| `list_agents` | `GET /api/agents?fields=summary` | every agent, compacted to the fields a caller steers by |
 | `get_agent` | `GET /api/agents/{id}` | one agent's full state, incl. blocking questions |
 | `get_messages` | `GET /api/agents/{id}/messages` | transcript as role + text + the code it ran |
 | `terminate_agent` | `POST /api/agents/{id}/terminate` | destructive: end the agent (`force` kills mid-step) |

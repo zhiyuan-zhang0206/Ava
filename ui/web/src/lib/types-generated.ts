@@ -251,9 +251,9 @@ export interface paths {
          *     terminated history before evaluating the per-agent snapshot lookups.
          *     The sidebar's explicit history toggle requests ``terminated`` separately.
          *
-         *     All scopes remain unpaginated for wire compatibility.  The default live
-         *     path is bounded by the currently active roster; terminated history is only
-         *     paid for when a caller asks for it explicitly.
+         *     ``fields=full`` preserves the historical response. ``fields=summary`` is
+         *     the reduced SQL projection used by roster consumers; detail and SSE keep
+         *     the full snapshot. All scopes remain unpaginated for wire compatibility.
          */
         get: operations["get_agents_api_agents_get"];
         put?: never;
@@ -4044,6 +4044,55 @@ export interface components {
          * @enum {string}
          */
         AgentStatus: "running" | "idling" | "restarting" | "terminated";
+        /**
+         * AgentSummary
+         * @description One row of ``GET /api/agents?fields=summary`` for roster consumers.
+         */
+        AgentSummary: {
+            /** Agent Id */
+            agent_id: number;
+            /** Spawner */
+            spawner: string;
+            /** Fork Source Agent Id */
+            fork_source_agent_id: number | null;
+            status: components["schemas"]["AgentStatus"];
+            /** Pid */
+            pid: number | null;
+            /**
+             * Spawned At
+             * Format: date-time
+             */
+            spawned_at: string;
+            /** Started At */
+            started_at: string | null;
+            /**
+             * Last Active At
+             * Format: date-time
+             */
+            last_active_at: string;
+            /**
+             * Last Inbound At
+             * Format: date-time
+             */
+            last_inbound_at: string;
+            /** Label */
+            label: string | null;
+            /** Machine */
+            machine: string;
+            /** Supports Vision */
+            supports_vision: boolean;
+            /**
+             * Liveness State
+             * @enum {string}
+             */
+            liveness_state: "online" | "offline" | "unknown";
+            /** Notices Awaiting Response */
+            notices_awaiting_response: components["schemas"]["OpenNotice"][];
+            /** Unread Notice Count */
+            unread_notice_count: number;
+            /** Heartbeat Paused Until */
+            heartbeat_paused_until: string | null;
+        };
         /**
          * AgentTps
          * @description Token-per-second metrics for one agent — two views of throughput.
@@ -7855,6 +7904,7 @@ export interface operations {
         parameters: {
             query?: {
                 scope?: "all" | "live" | "terminated";
+                fields?: "full" | "summary";
             };
             header?: never;
             path?: never;
@@ -7868,7 +7918,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentRow"][];
+                    "application/json": (components["schemas"]["AgentRow"] | components["schemas"]["AgentSummary"])[];
                 };
             };
             /** @description Validation Error */
