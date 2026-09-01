@@ -16,6 +16,7 @@ import logging
 from typing import Any, NamedTuple
 
 from shared.config.turn_view import turn_settings
+from shared.lm.registry import resolve_setting
 from shared.skill_names import match_key
 
 # A description is free-form text from a SKILL.md frontmatter block — including
@@ -330,6 +331,11 @@ _MATCH_EVERY_TASK = (
     "...) that already exists here."
 )
 
+_MATCH_FIRST = (
+    "Before starting any task, first match it against this index: name the skill(s) "
+    "you plan to use and why, and write that reasoning into your final output."
+)
+
 
 def capability_index_is_empty() -> bool:
     """True when `capabilities_section()` would render nothing — no skill lines
@@ -376,6 +382,8 @@ def capabilities_section() -> str:
         intro.append(_MCP_HOWTO)
 
     parts = ["# Capabilities\n\n" + " ".join(intro) + "\n\n" + _MATCH_EVERY_TASK]
+    if resolve_setting("prompt_capabilities_match_first_enabled", model=turn_settings.lm.llm_model):
+        parts.append(_MATCH_FIRST)
     if skill_lines:
         parts.append("**Skills** — reusable playbooks:\n" + "\n".join(skill_lines))
     if mcp_lines:
