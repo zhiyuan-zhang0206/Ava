@@ -8,6 +8,7 @@
 
 import * as Popover from "@radix-ui/react-popover";
 import { Settings2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { memo, useCallback, useMemo } from "react";
 
 import { useDebouncedSetting } from "@/lib/use-user-settings";
@@ -66,15 +67,34 @@ export function useForceParams(
 // key; changes apply live (the running simulation is re-heated) and persist to
 // the DB (debounced). A view may pass its own `groups` (e.g. relabeled sliders) —
 // FORCE_GROUPS is the default set the Graph View uses.
+type ForceLabelKey =
+  | "node"
+  | "edge"
+  | "layout"
+  | "zoom"
+  | "minSize"
+  | "maxSize"
+  | "distance"
+  | "strength"
+  | "repulsion"
+  | "centerPull"
+  | "nodeSpacing"
+  | "xGravity"
+  | "yGravity"
+  | "coolSpeed"
+  | "fillRatio"
+  | "padding"
+  | "size";
+
 export interface ForceSliderDef {
   key: keyof ForceParams;
-  label: string;
+  label: ForceLabelKey;
   min: number;
   max: number;
   step: number;
 }
 export interface ForceGroup {
-  label: string;
+  label: ForceLabelKey;
   sliders: ForceSliderDef[];
 }
 
@@ -103,35 +123,35 @@ export const FORCE_DEFAULTS: ForceParams = {
 
 export const FORCE_GROUPS: ForceGroup[] = [
   {
-    label: "Node",
+    label: "node",
     sliders: [
-      { key: "nodeSizeMin", label: "Min size", min: 4, max: 30, step: 1 },
-      { key: "nodeSizeMax", label: "Max size", min: 8, max: 60, step: 1 },
+      { key: "nodeSizeMin", label: "minSize", min: 4, max: 30, step: 1 },
+      { key: "nodeSizeMax", label: "maxSize", min: 8, max: 60, step: 1 },
     ],
   },
   {
-    label: "Edge",
+    label: "edge",
     sliders: [
-      { key: "linkDistance", label: "Distance", min: 20, max: 400, step: 5 },
-      { key: "linkStrength", label: "Strength", min: 0, max: 1, step: 0.02 },
+      { key: "linkDistance", label: "distance", min: 20, max: 400, step: 5 },
+      { key: "linkStrength", label: "strength", min: 0, max: 1, step: 0.02 },
     ],
   },
   {
-    label: "Layout",
+    label: "layout",
     sliders: [
-      { key: "repulsion", label: "Repulsion", min: 0, max: 10000, step: 20 },
-      { key: "centerStrength", label: "Center pull", min: 0, max: 5, step: 0.1 },
-      { key: "collidePadding", label: "Node spacing", min: 0, max: 40, step: 1 },
-      { key: "centerForceX", label: "X gravity", min: 0, max: 1, step: 0.02 },
-      { key: "centerForceY", label: "Y gravity", min: 0, max: 1, step: 0.02 },
-      { key: "alphaDecay", label: "Cool speed", min: 0.001, max: 0.2, step: 0.001 },
+      { key: "repulsion", label: "repulsion", min: 0, max: 10000, step: 20 },
+      { key: "centerStrength", label: "centerPull", min: 0, max: 5, step: 0.1 },
+      { key: "collidePadding", label: "nodeSpacing", min: 0, max: 40, step: 1 },
+      { key: "centerForceX", label: "xGravity", min: 0, max: 1, step: 0.02 },
+      { key: "centerForceY", label: "yGravity", min: 0, max: 1, step: 0.02 },
+      { key: "alphaDecay", label: "coolSpeed", min: 0.001, max: 0.2, step: 0.001 },
     ],
   },
   {
-    label: "Zoom",
+    label: "zoom",
     sliders: [
-      { key: "zoomFitRatio", label: "Fill ratio", min: 0.1, max: 1, step: 0.05 },
-      { key: "zoomPadding", label: "Padding", min: 0, max: 120, step: 4 },
+      { key: "zoomFitRatio", label: "fillRatio", min: 0.1, max: 1, step: 0.05 },
+      { key: "zoomPadding", label: "padding", min: 0, max: 120, step: 4 },
     ],
   },
 ];
@@ -143,8 +163,8 @@ export const FORCE_GROUPS: ForceGroup[] = [
 // the other groups stay identical to the Agent Graph's.
 export const TASK_FORCE_GROUPS: ForceGroup[] = [
   {
-    label: "Node",
-    sliders: [{ key: "nodeSizeMin", label: "Size", min: 6, max: 48, step: 1 }],
+    label: "node",
+    sliders: [{ key: "nodeSizeMin", label: "size", min: 6, max: 48, step: 1 }],
   },
   ...FORCE_GROUPS.slice(1),
 ];
@@ -160,11 +180,12 @@ export const ForceControls = memo(function ForceControls({
   reset: () => void;
   groups?: ForceGroup[];
 }) {
+  const t = useTranslations("fleet.force");
   return (
     <Popover.Root>
       <Popover.Trigger
         className={cn("items-center justify-center rounded border border-border bg-background/80 p-1 text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring", FLEX)}
-        aria-label="Graph layout settings"
+        aria-label={t("settings")}
       >
         <Settings2 className="size-3.5" aria-hidden />
       </Popover.Trigger>
@@ -175,26 +196,26 @@ export const ForceControls = memo(function ForceControls({
           className="z-50 w-64 rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md outline-none"
         >
           <div className={cn("mb-2 items-center justify-between", FLEX)}>
-            <span className="text-xs font-medium">Layout</span>
+            <span className="text-xs font-medium">{t("layout")}</span>
             <button
               type="button"
               onClick={reset}
               className="text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
             >
-              Reset all
+              {t("resetAll")}
             </button>
           </div>
           <div className={cn("gap-3", FLEX, FLEX_COL)}>
             {groups.map((group) => (
               <div key={group.label}>
                 <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                  {group.label}
+                  {t(group.label)}
                 </div>
                 <div className={cn("gap-2", FLEX, FLEX_COL)}>
                   {group.sliders.map((s) => (
                     <label key={s.key} className={cn("gap-0.5", FLEX, FLEX_COL)}>
                       <span className={cn("items-center justify-between text-[10px] text-muted-foreground", FLEX)}>
-                        <span>{s.label}</span>
+                        <span>{t(s.label)}</span>
                         <span className="tabular-nums text-foreground">
                           {params[s.key] < 0.01 && params[s.key] > 0
                             ? params[s.key].toFixed(4)
@@ -209,7 +230,7 @@ export const ForceControls = memo(function ForceControls({
                         value={params[s.key]}
                         onChange={(e) => setParams({ ...params, [s.key]: Number(e.target.value) })}
                         className="w-full accent-sky-500"
-                        aria-label={`${group.label} ${s.label}`}
+                        aria-label={t("slider", { group: t(group.label), label: t(s.label) })}
                       />
                     </label>
                   ))}

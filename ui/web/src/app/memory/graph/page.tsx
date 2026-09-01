@@ -11,6 +11,7 @@ import {
 } from "d3-zoom";
 import { Loader2, MessageSquare, RefreshCw } from "lucide-react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,7 @@ const MEMORY_GRAPH_QUERY_KEY = ["memory-graph"] as const;
 const HOVER_DIM_OPACITY = 0.5;
 
 export default function MemoryGraphPage() {
+  const t = useTranslations("memoryGraph");
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: MEMORY_GRAPH_QUERY_KEY,
     queryFn: () => api.getMemoryGraph(),
@@ -100,12 +102,12 @@ export default function MemoryGraphPage() {
         <Link
           href="/"
           className={cn("size-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground", FLEX)}
-          aria-label="Back to conversation"
+          aria-label={t("backToConversation")}
         >
           <MessageSquare className="size-4" />
         </Link>
         <div className={cn(MIN_W_0, FLEX_1)}>
-          <h1 className="truncate text-sm font-semibold">Memory graph</h1>
+          <h1 className="truncate text-sm font-semibold">{t("title")}</h1>
         </div>
         <Button
           type="button"
@@ -113,7 +115,7 @@ export default function MemoryGraphPage() {
           size="icon"
           onClick={() => void refetch()}
           disabled={isFetching}
-          aria-label="Refresh memory graph"
+          aria-label={t("refresh")}
         >
           <RefreshCw
             className={`size-4 ${isFetching ? "animate-spin" : ""}`}
@@ -127,11 +129,11 @@ export default function MemoryGraphPage() {
         </div>
       ) : error || !data ? (
         <div className={cn("items-center justify-center px-6 text-sm text-muted-foreground", FLEX, FLEX_1)}>
-          Couldn&apos;t load memory graph.
+          {t("loadFailed")}
         </div>
       ) : data.nodes.length === 0 ? (
         <div className={cn("items-center justify-center text-sm text-muted-foreground", FLEX, FLEX_1)}>
-          No memory notes to graph.
+          {t("empty")}
         </div>
       ) : (
         <MemoryGraphShell
@@ -153,6 +155,7 @@ function MemoryGraphShell({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const t = useTranslations("memoryGraph");
   const selected = useMemo(() => {
     if (selectedId == null) return null;
     return graph.nodes.find((node) => node.id === selectedId) ?? null;
@@ -213,7 +216,7 @@ function MemoryGraphShell({
             />
           ) : (
             <p className="text-xs text-muted-foreground">
-              Click a node to view its content.
+              {t("selectNode")}
             </p>
           )}
         </aside>
@@ -257,6 +260,7 @@ function MemorySidePanel({
   graph: MemoryGraphResponse;
   onSelect: (id: string | null) => void;
 }) {
+  const t = useTranslations("memoryGraph");
   if (node.kind === "folder") {
     const children = folderChildren(graph, node.id);
     return (
@@ -269,10 +273,10 @@ function MemorySidePanel({
         </div>
         <section className="space-y-1">
           <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Notes in this folder
+            {t("folderNotes")}
           </h2>
           {children.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No notes here.</p>
+            <p className="text-xs text-muted-foreground">{t("folderEmpty")}</p>
           ) : (
             children.map((child) => (
               <button
@@ -297,6 +301,7 @@ function MemorySidePanel({
 }
 
 function MemoryNotePanel({ node }: { node: MemoryGraphNode }) {
+  const t = useTranslations("memoryGraph");
   const { data, isLoading, error } = useQuery<MemoryNoteResponse>({
     queryKey: ["memory-note", node.id],
     queryFn: () => api.getMemoryNote(node.path),
@@ -328,7 +333,7 @@ function MemoryNotePanel({ node }: { node: MemoryGraphNode }) {
         </div>
       ) : error || !data ? (
         <p className="text-xs text-muted-foreground">
-          Couldn&apos;t load this note.
+          {t("noteLoadFailed")}
         </p>
       ) : (
         <div className="text-sm leading-relaxed">
@@ -350,6 +355,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const t = useTranslations("memoryGraph");
   const { params, setParams, reset } = useForceParams(
     MEMORY_FORCE_KEY,
     MEMORY_FORCE_DEFAULTS,
@@ -543,7 +549,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
   if (!layout) {
     return (
       <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
-        Loading…
+        {t("loading")}
       </div>
     );
   }
@@ -558,7 +564,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
         viewBox={`${minX} ${minY} ${w} ${h}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="Memory note graph"
+        aria-label={t("ariaLabel")}
         onClick={(ev) => {
           if (ev.target === ev.currentTarget) onSelect(null);
         }}
@@ -728,24 +734,24 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           groups={FORCE_GROUPS}
         />
         <span className="rounded border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur tabular-nums">
-          <span className="tabular-nums">{noteCount} notes</span>
+          <span className="tabular-nums">{t("noteCount", { count: noteCount })}</span>
           {" · "}
-          <span className="tabular-nums">{folderCount} folder{folderCount === 1 ? '' : 's'}</span>
+          <span className="tabular-nums">{t("folderCount", { count: folderCount })}</span>
           {" · "}
-          <span className="tabular-nums">{graph.edges.length} edge{graph.edges.length === 1 ? '' : 's'}</span>
+          <span className="tabular-nums">{t("edgeCount", { count: graph.edges.length })}</span>
         </span>
         <span className="ml-2 hidden items-center gap-3 rounded border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur md:flex">
           <span className={cn("items-center gap-1", FLEX)}>
             <svg width="18" height="4" aria-hidden="true">
               <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1" />
             </svg>
-            folder
+            {t("folder")}
           </span>
           <span className={cn("items-center gap-1", FLEX)}>
             <svg width="18" height="4" aria-hidden="true">
               <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeOpacity="0.28" strokeWidth="0.75" strokeDasharray="2 4" />
             </svg>
-            reference
+            {t("reference")}
           </span>
         </span>
       </div>
@@ -755,8 +761,8 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
         <button
           type="button"
           className={cn("size-6 items-center justify-center rounded border border-border bg-background/80 text-[10px] text-muted-foreground backdrop-blur hover:bg-sidebar-accent hover:text-foreground", FLEX)}
-          aria-label="Reset zoom"
-          title="Reset zoom"
+          aria-label={t("resetZoom")}
+          title={t("resetZoom")}
           onClick={resetZoom}
           disabled={
             transform.k === 1 &&

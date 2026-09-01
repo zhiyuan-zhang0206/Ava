@@ -1,6 +1,7 @@
 "use client";
 
 import { AppWindow } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { STATUS_DOT } from "@/components/agent-row";
 import { PRIORITY_BG } from "@/lib/notices";
@@ -46,13 +47,14 @@ export function AgentPageLink({
   showLabel?: boolean;
   className?: string;
 }) {
+  const t = useTranslations("fleet.inboxPanel");
   return (
     <a
       href={page.url}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
-      aria-label={`Open live page: ${page.title ?? page.name}`}
+      aria-label={t("openLivePage", { title: page.title ?? page.name })}
       className={cn(
         "inline-flex items-center gap-1 text-muted-foreground hover:text-primary",
         className,
@@ -94,6 +96,7 @@ export function NoticeListRow({
   onSelect: () => void;
   onSelectAgent?: (agentId: number | null) => void;
 }) {
+  const t = useTranslations("fleet.inboxPanel");
   return (
     <li
       data-testid="inbox-row"
@@ -119,7 +122,7 @@ export function NoticeListRow({
         <PriorityBadge priority={priority} muted={muted} />
         {blocking && (
           <span className="shrink-0 rounded bg-destructive/10 px-1 text-[9px] font-medium uppercase text-destructive">
-            Blocking
+            {t("blocking")}
           </span>
         )}
         <span className={cn("truncate text-xs", MIN_W_0, FLEX_1)}>{title}</span>

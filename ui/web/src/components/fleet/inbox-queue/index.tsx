@@ -24,6 +24,7 @@
 // its reply box focused -- so a stack clears with Enter, Enter, Enter. The
 // resolved history (both kinds, newest first) sits behind a collapsed disclosure
 // so it never occupies the main stream.
+import { useTranslations } from "next-intl";
 import { memo, useEffect, useMemo, useState } from "react";
 
 import { PRIORITY_RANK } from "@/lib/notices";
@@ -76,6 +77,7 @@ export const InboxQueue = memo(function InboxQueue({
   compact?: boolean;
   onCollapse?: () => void;
 }) {
+  const t = useTranslations("fleet");
   const {
     open: openFyi,
     awaiting,
@@ -208,7 +210,7 @@ export const InboxQueue = memo(function InboxQueue({
             )}
           </div>
         ) : openSel ? (
-          <CompactDetail label="Inbox" onBack={() => setSelectedKey(null)}>
+          <CompactDetail label={t("inbox")} onBack={() => setSelectedKey(null)}>
             <OpenDetail
               key={openKey(openSel.notice.id)}
               item={openSel}
@@ -220,7 +222,7 @@ export const InboxQueue = memo(function InboxQueue({
             />
           </CompactDetail>
         ) : selectedResolved ? (
-          <CompactDetail label="Inbox" onBack={() => setSelectedKey(null)}>
+          <CompactDetail label={t("inbox")} onBack={() => setSelectedKey(null)}>
             <ResolvedDetail
               key={resolvedKey(selectedResolved.id)}
               notice={selectedResolved}
@@ -229,7 +231,7 @@ export const InboxQueue = memo(function InboxQueue({
           </CompactDetail>
         ) : (
           <div className={cn("h-full items-center justify-center px-4 text-center text-xs text-muted-foreground", FLEX)}>
-            Select a notice.
+            {t("inboxPanel.selectNotice")}
           </div>
         )}
       </div>
@@ -269,7 +271,7 @@ export const InboxQueue = memo(function InboxQueue({
           />
         ) : (
           <div className={cn("h-full items-center justify-center px-4 text-center text-xs text-muted-foreground", FLEX)}>
-            Select a notice.
+            {t("inboxPanel.selectNotice")}
           </div>
         )}
       </div>
