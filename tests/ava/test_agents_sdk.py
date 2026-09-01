@@ -840,6 +840,7 @@ class TestListAgents:
         """All AgentRow fields are programmatically accessible, not trimmed like str() of None."""
         ava._boot._agent_id = _spawn_agent()
         a_id = ava.agents.spawn()
+        assert _agent_spawner(db_conn, a_id) == f"agent:{ava.self.AGENT_ID}"
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (ava.self.AGENT_ID,)
@@ -852,7 +853,8 @@ class TestListAgents:
         r = rows[0]
         assert r.agent_id == a_id
         assert r.status == ava.agents.AgentStatus.IDLING
-        assert r.spawner == f"agent:{ava.self.AGENT_ID}"
+        # Live children fold to their nearest living ancestor when a parent terminates.
+        assert r.spawner == "user"
         assert r.label is None  # no label set on this test agent
         assert r.pid is None
         assert r.spawned_at is not None
