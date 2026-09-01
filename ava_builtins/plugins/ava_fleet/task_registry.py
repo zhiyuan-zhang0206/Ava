@@ -32,15 +32,11 @@ from shared.task_timestamps import render_task_timestamps
 # spelled `builtins.list[...]`.
 __all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", "update"]
 
-# The three statuses an agent can assign to a task. 'ongoing' is deliberately NOT
-# here: it is the system root task's permanent state (schema CHECK + DB constraint
-# agent_tasks_root_status_ongoing), set only by the schema seed / migration, never
-# by create()/update() -- the root itself is immutable (see _write_task_update),
-# and a non-root task must never be 'ongoing'. list(status=...) additionally
-# accepts 'ongoing' (a read filter, so the root is addressable by status there).
-# A task is born 'in_progress' (the DB default; user ruling 2026-08-29 -- the
-# 'open' status was meaningless, creation starts the work immediately).
-_STATUSES = frozenset({"in_progress", "done", "cancelled"})
+# The statuses update() may assign to a regular task. 'ongoing' marks
+# long-running active work, so it is exempt from reminder scans that only read
+# in_progress rows. The root remains permanently ongoing and immutable (see
+# _write_task_update); create() still begins every regular task in_progress.
+_STATUSES = frozenset({"in_progress", "ongoing", "done", "cancelled"})
 
 # The stakes axis of a task (P0 highest .. P3 lowest) — same four rungs as a
 # notice, both validated against the shared Priority enum. Orders the board
@@ -439,11 +435,6 @@ def _resolve_update_args(
     """Validate the status rung and resolve the deprecated content alias;
     returns (status, results)."""
     if status is not None and status not in _STATUSES:
-        if status == "ongoing":
-            raise ValueError(
-                "'ongoing' is the system root task's permanent state and cannot be "
-                "assigned via update() -- the root task itself is immutable"
-            )
         raise ValueError(f"status must be one of {sorted(_STATUSES)}, got {status!r}")
     if content is not None:
         if results is not None:
@@ -615,7 +606,7 @@ def _write_task_update(
     if status in ("done", "cancelled"):
         cur.execute(
             "SELECT id, count(*) OVER () FROM agent_tasks "
-            "WHERE parent_id = %s AND status = 'in_progress' "
+            "WHERE parent_id = %s AND status IN ('in_progress', 'ongoing') "
             "ORDER BY id LIMIT 1",
             (task_id,),
         )
@@ -623,7 +614,7 @@ def _write_task_update(
         if active_child is not None:
             child_id, child_count = active_child
             raise ValueError(
-                f"task {task_id} has {child_count} in_progress child tasks "
+                f"task {task_id} has {child_count} active child tasks "
                 f"(e.g. #{child_id}) — close or cancel them first"
             )
     # A rename must keep create()'s invariant: no two in_progress
@@ -719,8 +710,9 @@ def update(
     a notification.
 
     Args:
-        status: one of "in_progress", "done", "cancelled". Closing a
-            task is rejected while any direct child is in progress.
+        status: one of "in_progress", "ongoing", "done", "cancelled".
+            ongoing marks long-running active work. Closing a task is rejected
+            while any direct child is in progress or ongoing.
         results: replaces the whole field; use note to append instead.
         owner: agent id to reassign to. None means no change — a task always
             has an owner.

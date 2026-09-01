@@ -802,12 +802,11 @@ CREATE TABLE agent_tasks (
 -- The system root task is permanently 'ongoing': it is the tree anchor and can
 -- never be completed, cancelled, or reopened (update()/PATCH reject it, and this
 -- CHECK makes the state itself self-verifying against direct DB writes too).
--- Bidirectional: the root must be 'ongoing' AND no other task may be — 'ongoing'
--- is the root's exclusive state (a direct UPDATE on a non-root row is rejected
--- by the DB, not just by the API guards).
+-- Root-pinning only: regular tasks may also use 'ongoing' for long-running
+-- active work, but the root itself must never leave its permanent state.
 ALTER TABLE agent_tasks
     ADD CONSTRAINT agent_tasks_root_status_ongoing
-    CHECK ((is_root AND status = 'ongoing') OR (NOT is_root AND status <> 'ongoing'));
+    CHECK (NOT is_root OR status = 'ongoing');
 
 CREATE INDEX idx_agent_tasks_owner_status   ON agent_tasks (owner, status);
 CREATE INDEX idx_agent_tasks_parent         ON agent_tasks (parent_id);

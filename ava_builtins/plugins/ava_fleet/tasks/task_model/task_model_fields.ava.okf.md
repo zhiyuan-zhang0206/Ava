@@ -35,7 +35,7 @@ Old field name `content` is a deprecated alias (Task attribute + `update` parame
 
 ## `status`
 
-One of three values an agent can assign (`CHECK` constraint): `"in_progress"`, `"done"`, `"cancelled"`. A task is born `"in_progress"` (DB default — the `"open"` state was dropped by user ruling 2026-08-29: creation starts the work immediately). The `CHECK` also admits `"ongoing"` — the system root task's permanent state, never assignable via `create()`/`update()`/PATCH and pinned by the `agent_tasks_root_status_ongoing` DB constraint. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
+One of four values a task may hold (`CHECK` constraint): `"in_progress"`, `"ongoing"`, `"done"`, `"cancelled"`. A task is born `"in_progress"` (DB default — the `"open"` state was dropped by user ruling 2026-08-29: creation starts the work immediately). `"ongoing"` marks long-running active work and is assignable to regular tasks through `update()`/PATCH; the system root is pinned to it by the `agent_tasks_root_status_ongoing` DB constraint. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
 
 ## `owner`
 
