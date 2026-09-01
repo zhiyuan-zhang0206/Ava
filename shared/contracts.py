@@ -386,7 +386,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/skills"): RouteContract(),
     ("PUT", "/api/skills"): RouteContract(note="full replace — PUT is idempotent"),
     # ── gateway/routers/state.py ───────────────────────────────────
-    ("GET", "/api/agents/{agent_id}/messages"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/messages"): RouteContract(
+        note="raw checkpoint history — implicit requests return newest 100; start_index pages backward"
+    ),
     ("GET", "/api/agents/{agent_id}/traces/{trace_id}/messages"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/last-message"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/pending"): RouteContract(),
