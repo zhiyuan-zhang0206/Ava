@@ -21,11 +21,15 @@ Checks:
    must be reversible.
 5. **schema.sql baseline seed** — `db/schema.sql` must stamp the baseline
    sentinel row and must NOT still carry the pre-cutover `generate_series(...)`
-   seed (the applied-set bootstrap replaced it).
+   seed. It may additionally stamp migration names whose non-idempotent changes
+   are already folded into the current schema.
 6. **down IF EXISTS symmetry** — every top-level DROP in a `.down.sql` must
    carry `IF EXISTS`, so a repeated or standalone rollback cannot blow up on a
    schema that already lacks the object (drops inside guarded DO blocks are
    exempt).
+7. **backfill snapshot retirement** — every `*_backfill_*` table created by an
+   up migration must have a later up migration that drops it. The table is a
+   finite rollback buffer, never durable application state.
 
 Deliberately **no** continuity / next-number / cross-branch-collision checks:
 timestamp names are collision-free by construction, which is the whole point of
@@ -46,6 +50,110 @@ MIGRATIONS_DIR = REPO_ROOT / "migrations"
 SCHEMA_SQL = REPO_ROOT / "db" / "schema.sql"
 
 _FORMAT_HINT = "expected YYYYMMDDTHHMMSS_<kebab-name>.sql"
+_CREATE_TABLE_RE = re.compile(
+    r"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<table>[a-z_][a-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+_DROP_TABLE_IF_EXISTS_RE = re.compile(
+    r"\bDROP\s+TABLE\s+IF\s+EXISTS\s+(?:[a-z_][a-z0-9_]*\.)?(?P<table>[a-z_][a-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+_DOLLAR_QUOTE_TAG_RE = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_]*)?$")
+_DO_PREFIX_RE = re.compile(r"\s*DO(?:\s+LANGUAGE\s+[A-Za-z_][A-Za-z0-9_]*)?\s*$", re.IGNORECASE)
+
+
+def _masked_text(fragment: str) -> str:
+    """Replace a non-static SQL fragment while preserving its line layout."""
+    return "".join("\n" if char == "\n" else " " for char in fragment)
+
+
+def _mask_single_quoted_literal(text: str, start: int) -> tuple[str, int]:
+    """Return a masked ordinary SQL literal and the position after it."""
+    position = start + 1
+    while position < len(text):
+        if text[position] == "\\" and position + 1 < len(text):
+            position += 2
+            continue
+        if text[position] == "'":
+            if text.startswith("''", position):
+                position += 2
+                continue
+            position += 1
+            break
+        position += 1
+    return _masked_text(text[start:position]), position
+
+
+def _dollar_quoted_body(text: str, start: int) -> tuple[str, str, int] | None:
+    """Return a dollar-quoted delimiter, body, and end position when present."""
+    delimiter_end = text.find("$", start + 1)
+    if delimiter_end == -1:
+        return None
+    delimiter = text[start : delimiter_end + 1]
+    if not _DOLLAR_QUOTE_TAG_RE.fullmatch(delimiter[1:-1]):
+        return None
+    body_start = delimiter_end + 1
+    body_end = text.find(delimiter, body_start)
+    if body_end == -1:
+        return None
+    return delimiter, text[body_start:body_end], body_end + len(delimiter)
+
+
+def _mask_nonstatic_sql(text: str) -> str:
+    """Mask comments and literals while retaining static DDL in anonymous DO blocks.
+
+    Other dollar-quoted strings, ordinary strings, and comments are masked to
+    prevent descriptive text or dynamic SQL from satisfying the snapshot-
+    retirement convention. This remains a narrow convention check, not a
+    general SQL parser.
+    """
+    masked: list[str] = []
+    position = 0
+
+    while position < len(text):
+        if text.startswith("--", position):
+            end = text.find("\n", position)
+            if end == -1:
+                masked.append(_masked_text(text[position:]))
+                break
+            masked.append(_masked_text(text[position:end]))
+            masked.append("\n")
+            position = end + 1
+            continue
+
+        if text.startswith("/*", position):
+            end = text.find("*/", position + 2)
+            if end == -1:
+                masked.append(_masked_text(text[position:]))
+                break
+            end += 2
+            masked.append(_masked_text(text[position:end]))
+            position = end
+            continue
+
+        if text[position] == "'":
+            literal, position = _mask_single_quoted_literal(text, position)
+            masked.append(literal)
+            continue
+
+        if text[position] == "$":
+            dollar_quote = _dollar_quoted_body(text, position)
+            if dollar_quote is not None:
+                delimiter, body, position = dollar_quote
+                prefix = "".join(masked).rsplit(";", 1)[-1]
+                masked.append(_masked_text(delimiter))
+                masked.append(
+                    _mask_nonstatic_sql(body)
+                    if _DO_PREFIX_RE.fullmatch(prefix)
+                    else _masked_text(body)
+                )
+                masked.append(_masked_text(delimiter))
+                continue
+
+        masked.append(text[position])
+        position += 1
+
+    return "".join(masked)
 
 
 def _timestamp_valid(stem: str) -> bool:
@@ -180,11 +288,47 @@ def _check_down_if_exists() -> list[str]:
     return errors
 
 
+def _check_backfill_snapshot_drop_plans() -> list[str]:
+    """Require every temporary `*_backfill_*` table to have a later drop migration.
+
+    The check intentionally reads only up migrations: a down migration removes a
+    snapshot when rolling a correction back, but is not the forward retirement
+    plan that reclaims it once recovery data is no longer needed. This is a
+    naming convention, not a SQL parser; migration table names are unquoted
+    lowercase identifiers by repository convention.
+    """
+    creations: list[tuple[str, str]] = []
+    drops: dict[str, list[str]] = {}
+
+    for entry in sorted(MIGRATIONS_DIR.iterdir()):
+        if not entry.name.endswith(".sql") or entry.name.endswith(".down.sql"):
+            continue
+        text = _mask_nonstatic_sql(entry.read_text(encoding="utf-8"))
+        for match in _CREATE_TABLE_RE.finditer(text):
+            table = match.group("table").lower()
+            if "_backfill_" in table:
+                creations.append((entry.name, table))
+        for match in _DROP_TABLE_IF_EXISTS_RE.finditer(text):
+            table = match.group("table").lower()
+            drops.setdefault(table, []).append(entry.name)
+
+    errors: list[str] = []
+    for created_by, table in creations:
+        if any(dropped_by > created_by for dropped_by in drops.get(table, [])):
+            continue
+        errors.append(
+            f"{created_by}: backfill snapshot table {table!r} has no later drop plan — "
+            "add a later up migration with DROP TABLE IF EXISTS after its recovery data is archived"
+        )
+    return errors
+
+
 def main() -> int:
     ups, downs, errors = _collect_migrations()
     errors.extend(_check_pairing(ups, downs))
     errors.extend(_check_schema_seed())
     errors.extend(_check_down_if_exists())
+    errors.extend(_check_backfill_snapshot_drop_plans())
 
     if errors:
         print("migration lint failed:", file=sys.stderr)
