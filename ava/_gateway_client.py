@@ -624,14 +624,17 @@ def get_ancestors(agent_id: int) -> list[dict]:
 
 
 def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list[dict[str, Any]]:
-    """GET /api/agents → agent list (optional status filter).
+    """GET /api/agents → AgentSummary roster rows (optional status filter).
 
-    Returns list[dict], each dict is the JSON representation of an AgentRow.
-    The gateway first applies the broadest safe SQL scope: filters that cannot
-    match terminated rows request ``scope=live``; a terminated-only filter
-    requests ``scope=terminated``; mixed / unfiltered calls preserve the full
-    historical ``scope=all`` contract.  The exact public-status filter remains
-    client-side.
+    The request sets ``fields=summary``. Each dict carries agent_id, spawner,
+    fork_source_agent_id, status, pid, spawned_at, started_at, last_active_at,
+    last_inbound_at, label, machine, supports_vision, liveness_state,
+    notices_awaiting_response, unread_notice_count, and
+    heartbeat_paused_until. The gateway first applies the broadest safe SQL
+    scope: filters that cannot match terminated rows request ``scope=live``; a
+    terminated-only filter requests ``scope=terminated``; mixed / unfiltered
+    calls preserve the full historical ``scope=all`` contract. The exact
+    public-status filter remains client-side.
 
     ``filter_by_status``: a non-empty tuple of AgentStatus values to keep;
     None or an empty tuple returns all agents unfiltered.

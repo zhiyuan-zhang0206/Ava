@@ -846,6 +846,26 @@ class TestList:
         assert resp.status_code == 200
         rows = resp.json()
         assert len(rows) == 2
+        assert set(rows[0]) == {
+            "agent_id",
+            "spawner",
+            "fork_source_agent_id",
+            "fork_source_checkpoint_id",
+            "status",
+            "pid",
+            "spawned_at",
+            "started_at",
+            "last_active_at",
+            "last_inbound_at",
+            "label",
+            "machine",
+            "supports_vision",
+            "liveness_state",
+            "last_probe_at",
+            "notices_awaiting_response",
+            "unread_notice_count",
+            "heartbeat_paused_until",
+        }
         by_id = {r["agent_id"]: r for r in rows}
         assert by_id[a_id]["status"] == "idling"
         assert by_id[a_id]["spawner"] == "user"
