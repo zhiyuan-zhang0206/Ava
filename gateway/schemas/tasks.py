@@ -74,7 +74,7 @@ class TaskUpdateRequest(BaseModel):
     parent_id is taken when present (model_fields_set): an explicit null moves
     the task under the system root, an int reparents it (the parent must exist
     and the move must not create a cycle). Owner changes through this endpoint
-    do not message the affected agents (the SDK update path does)."""
+    send the SDK-equivalent task system notes to affected agents."""
 
     status: str | None = None
     title: str | None = None

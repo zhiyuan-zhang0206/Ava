@@ -6,7 +6,7 @@ owned-task invariants at the HTTP boundary:
 - remind_interval_seconds: an explicit null is rejected (reminders cannot be disabled);
   a value must be positive and <= 24h.
 - owner: an explicit null is rejected (a task cannot be released). A non-null
-  owner reassigns with a plain column write (no message to the affected agents).
+  owner reassignment queues task system notes for the affected agents.
 - title: renames; a title colliding with another in_progress task's is
   rejected (mirrors the SDK duplicate-title invariant).
 - parent close: status done/cancelled is rejected while a direct child remains
@@ -18,7 +18,7 @@ owned-task invariants at the HTTP boundary:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 
 import httpx2
 import psycopg
@@ -27,7 +27,9 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from gateway.app import app
+from gateway.routers import agents_state as _agents_state
 from gateway.routers.tasks import get_tasks
+from shared.agents import AgentStatus
 
 
 def _make_agent(db: psycopg.Connection) -> int:
@@ -100,6 +102,16 @@ def _owner(db: psycopg.Connection, tid: int) -> int | None:
     return row[0]
 
 
+def _task_notes(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, dict[str, str]]]:
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT content, source, payload FROM inbound_messages "
+            "WHERE agent_id = %s AND kind = 'system_note' ORDER BY id",
+            (agent_id,),
+        )
+        return cur.fetchall()
+
+
 def _priority(db: psycopg.Connection, tid: int) -> str:
     with db.cursor() as cur:
         cur.execute("SELECT priority FROM agent_tasks WHERE id = %s", (tid,))
@@ -154,7 +166,9 @@ class TestOwner:
         assert "cannot be released" in resp.json()["detail"]
         assert _owner(db_conn, tid) == owner  # unchanged
 
-    def test_reassign_is_a_plain_write(self, db_conn: psycopg.Connection) -> None:
+    def test_reassign_notifies_the_new_and_previous_owner(
+        self, db_conn: psycopg.Connection
+    ) -> None:
         owner = _make_agent(db_conn)
         new_owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
@@ -163,6 +177,65 @@ class TestOwner:
         assert resp.status_code == 200
         assert resp.json()["owner"] == new_owner
         assert _owner(db_conn, tid) == new_owner
+        assert _task_notes(db_conn, new_owner) == [
+            (f'Task #{tid} "t" is now assigned to you.', "user", {"note_tag": "task"})
+        ]
+        assert _task_notes(db_conn, owner) == [
+            (
+                f'Task #{tid} "t" you owned is no longer assigned to you.',
+                "user",
+                {"note_tag": "task"},
+            )
+        ]
+
+    def test_unchanged_owner_sends_no_notification(self, db_conn: psycopg.Connection) -> None:
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner)
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"owner": owner})
+        assert resp.status_code == 200
+        assert _task_notes(db_conn, owner) == []
+
+    def test_reassign_to_terminated_owner_requests_resurrection(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        owner = _make_agent(db_conn)
+        new_owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (new_owner,))
+        db_conn.commit()
+        resurrection_calls: list[tuple[int, str]] = []
+
+        async def _record_resurrection(
+            agent_id: int,
+            *,
+            trigger_inbound_id: int,
+            trigger_inbound_kind: Literal["chat", "compact_request", "system_note"],
+        ) -> AgentStatus:
+            assert trigger_inbound_id > 0
+            resurrection_calls.append((agent_id, trigger_inbound_kind))
+            return cast("AgentStatus", "idling")
+
+        monkeypatch.setattr(_agents_state._ops, "resurrect_if_terminated", _record_resurrection)
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"owner": new_owner})
+        assert resp.status_code == 200
+        assert resurrection_calls == [(new_owner, "system_note")]
+        assert len(_task_notes(db_conn, new_owner)) == 1
+
+    def test_reassign_skips_terminated_previous_owner(self, db_conn: psycopg.Connection) -> None:
+        owner = _make_agent(db_conn)
+        new_owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (owner,))
+        db_conn.commit()
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"owner": new_owner})
+        assert resp.status_code == 200
+        assert len(_task_notes(db_conn, new_owner)) == 1
+        assert _task_notes(db_conn, owner) == []
 
 
 class TestPriority:

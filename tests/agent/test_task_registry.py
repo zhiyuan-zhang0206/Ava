@@ -788,6 +788,39 @@ def test_update_owner_old_terminated_leg_skipped(db_conn: psycopg.Connection) ->
         ava._boot._agent_id = original
 
 
+def test_update_owner_notifies_new_owner_before_previous_owner_liveness_check(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A failed old-owner status lookup cannot suppress the new assignment."""
+    actor_id = _seed_agent(db_conn)
+    old_owner = _seed_agent(db_conn)
+    new_owner = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = actor_id
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agent_tasks (title, description, created_by, owner, remind_interval_seconds) "
+                "VALUES ('t', 'd', %s, %s, 1800) RETURNING id",
+                (str(actor_id), old_owner),
+            )
+            task_id = cur.fetchone()[0]  # type: ignore[index]
+        db_conn.commit()
+        with (
+            patch("ava.agents.send_system_note") as send_note,
+            # Fleet-plugin tests can replace the sys.modules entry in this xdist
+            # worker. Patch the collection-time module that update() calls.
+            patch.object(task_registry, "_is_terminated", side_effect=RuntimeError),
+            pytest.raises(RuntimeError),
+        ):
+            task_registry.update(task_id, owner=new_owner)  # pyright: ignore[reportUnknownArgumentType]
+        assert send_note.call_count == 1
+        assert send_note.call_args.args[0] == new_owner
+        assert send_note.call_args.kwargs["resurrect"] is True
+    finally:
+        ava._boot._agent_id = original
+
+
 # ── update() — non-owner write notifies the owner ─────────────────────────
 
 

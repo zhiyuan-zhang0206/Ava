@@ -39,8 +39,7 @@ cluster secret existed but was only used for data-plane auth (pg/redis passwords
 
 ## Phase 1 — gateway auth middleware (landed)
 
-`Authorization: Bearer <secret>` (or the bare `X-Cluster-Secret` header, kept for
-simple consumers) on every `/api/*` route, constant-time compared
+`Authorization: Bearer <secret>` on every `/api/*` route, constant-time compared
 (`shared/cluster_auth.py`: `bearer_header()` / `verify_bearer()`, pure stdlib). The
 SDK (`ava/_gateway_client.py`) and `scripts/start_agent.py` inject the header
 automatically.
@@ -137,5 +136,3 @@ TLS is "add a cert + switch the scheme", not a re-architecture.
    deliberately still binds `0.0.0.0` (the gateway dials it across the private
    network and it authenticates), so this is specifically about the gateway's
    own listener.
-3. **`X-Cluster-Secret`** is kept as an alternative to `Authorization: Bearer` for
-   simple consumers — worth revisiting whether it still earns its place.
