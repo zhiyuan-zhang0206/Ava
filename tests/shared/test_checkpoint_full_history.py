@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 import psycopg
+import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -18,6 +19,52 @@ from shared.checkpoint import (
     load_checkpoint_messages_segment,
 )
 from shared.config import settings
+
+
+def test_compact_boundary_lookup_uses_a_closed_autocommit_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Checkpoint cold reads borrow an autocommit connection from shared.db.pool."""
+    from shared import checkpoint
+
+    class _Result:
+        def fetchall(self) -> list[tuple[str]]:
+            return [("boundary-1",)]
+
+    class _Connection:
+        def execute(self, _query: str, _params: tuple[object, ...]) -> _Result:
+            return _Result()
+
+        def __enter__(self) -> _Connection:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class _Pool:
+        closed = False
+
+        def __init__(self) -> None:
+            self.connection_value = _Connection()
+
+        def connection(self) -> _Connection:
+            return self.connection_value
+
+        def close(self) -> None:
+            self.closed = True
+
+    db_pool = _Pool()
+    pool_kwargs: dict[str, object] = {}
+
+    def _pool(**kwargs: object) -> _Pool:
+        pool_kwargs.update(kwargs)
+        return db_pool
+
+    monkeypatch.setattr(checkpoint, "pool", _pool, raising=False)
+
+    assert checkpoint.list_compact_boundary_checkpoint_ids(7) == ["boundary-1"]
+    assert pool_kwargs == {"autocommit": True, "row_factory": None}
+    assert db_pool.closed is True
 
 
 def _put_checkpoint(

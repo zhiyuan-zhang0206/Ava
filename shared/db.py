@@ -299,6 +299,8 @@ def pool(
     direct: bool = False,
     timeout: float = DEFAULT_POOL_TIMEOUT_S,
     check_connections: bool = False,
+    autocommit: bool = False,
+    row_factory: Any | None = None,
 ) -> ConnectionPool:
     """Open a ConnectionPool on the cluster Postgres (opened eagerly).
 
@@ -310,6 +312,10 @@ def pool(
     `min_size` / `max_size` default to the config fields (themselves the
     historical 1 / 2), so a remote/SaaS plane tunes its pool from config; an
     explicit caller value always wins.
+
+    `autocommit` and `row_factory` apply to every borrowed connection. They
+    exist for short-lived read pools whose callers must preserve a direct-read
+    contract while still inheriting the shared pool's transport settings.
 
     **This function is the only sanctioned way to build a sync pool**, because the
     two things a pool must carry are decided here rather than restated per site:
@@ -346,17 +352,22 @@ def pool(
         min_size, max_size, dp.db_pool_min_size, dp.db_pool_max_size
     )
     sslmode = sslmode_for_url(url, dp.db_sslmode)
+    connection_kwargs: dict[str, Any] = {
+        "prepare_threshold": None,
+        **({"sslmode": sslmode} if sslmode else {}),
+        **PG_STATEMENT_TIMEOUT_KWARGS,
+    }
+    if autocommit:
+        connection_kwargs["autocommit"] = True
+    if row_factory is not None:
+        connection_kwargs["row_factory"] = row_factory
     return ConnectionPool(
         _guard_db_url(url),
         min_size=min_size,
         max_size=max_size,
         open=True,
         timeout=timeout,
-        kwargs={
-            "prepare_threshold": None,
-            **({"sslmode": sslmode} if sslmode else {}),
-            **PG_STATEMENT_TIMEOUT_KWARGS,
-        },
+        kwargs=connection_kwargs,
         # Direct pools already carry the ceiling via `options` (parsed by
         # Postgres itself); pooled backends need the explicit SET, and the hook
         # must leave the connection idle (see _apply_statement_timeout).

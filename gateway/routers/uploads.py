@@ -26,6 +26,7 @@ import asyncio
 import logging
 import os
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
@@ -49,14 +50,13 @@ from shared.uploads import (
     upload_url,
 )
 
-router = APIRouter()
-
 _log = logging.getLogger(__name__)
 
-# Agent ids are bounded in practice by the agents this one gateway process has
-# served. Keep each lock for the process lifetime: evicting an unlocked entry
-# can split a waiting request from later requests for the same agent.
-_agent_locks: dict[int, asyncio.Lock] = {}
+# Cache idle locks only. A held lock or one with queued waiters remains until a
+# later lookup can evict it safely, so two uploads for one agent never split
+# across mutexes.
+_AGENT_LOCK_CACHE_MAX_ENTRIES = 4096
+_agent_locks: OrderedDict[int, asyncio.Lock] = OrderedDict()
 _locks_guard = asyncio.Lock()
 
 router = APIRouter()
@@ -69,8 +69,19 @@ async def _agent_lock(agent_id: int) -> asyncio.Lock:
     async with _locks_guard:
         lock = _agent_locks.get(agent_id)
         if lock is None:
+            while len(_agent_locks) >= _AGENT_LOCK_CACHE_MAX_ENTRIES:
+                for stale_agent_id, stale_lock in _agent_locks.items():
+                    waiters = stale_lock._waiters
+                    if stale_lock.locked() or waiters:
+                        continue
+                    del _agent_locks[stale_agent_id]
+                    break
+                else:
+                    break
             lock = asyncio.Lock()
             _agent_locks[agent_id] = lock
+        else:
+            _agent_locks.move_to_end(agent_id)
         return lock
 
 

@@ -38,17 +38,19 @@ Read contract:
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from psycopg import Connection, connect
+from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 
 from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from shared.config import settings
+from shared.db import pool
 
 _log = logging.getLogger(__name__)
 
@@ -59,6 +61,17 @@ class CheckpointReadError(RuntimeError):
     list) and from "checkpoint present but messages channel empty" (also an
     empty list) — this is an IO / deserialize failure the caller must decide
     how to tolerate."""
+
+
+@contextmanager
+def _checkpoint_read_connection(*, row_factory: Any | None = None) -> Generator[Connection[Any]]:
+    """Borrow one short-lived autocommit read connection through shared.db.pool."""
+    db_pool = pool(autocommit=True, row_factory=row_factory)
+    try:
+        with db_pool.connection() as conn:
+            yield conn
+    finally:
+        db_pool.close()
 
 
 def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
@@ -73,6 +86,7 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
             (DB disconnect, msgpack error). The caller decides tolerance
             (see module docstring).
     """
+
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     # Explicit serde allowlist — same types as the agent runner registers
     # (agent/state.py extends the static set with plugin classes). Without it
@@ -85,14 +99,7 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
         # Direct construction rather than `from_conn_string` — the classmethod
         # does not forward a `serde` argument, and the default permissive serde
         # is exactly what this module is avoiding.
-        with connect(
-            settings.data_plane.db_url,
-            autocommit=True,
-            prepare_threshold=None,
-            # psycopg's typing doesn't track row_factory — cast like the rest
-            # of the codebase's pool wiring (agent/db.py).
-            row_factory=cast(Any, dict_row),
-        ) as conn:
+        with _checkpoint_read_connection(row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
             ckpt = saver.get(config)
     except Exception as exc:
@@ -126,11 +133,7 @@ def list_compact_boundary_checkpoint_ids(agent_id: int, *, limit: int | None = N
         " ORDER BY checkpoint_id DESC"
     )
     try:
-        with connect(
-            settings.data_plane.db_url,
-            autocommit=True,
-            prepare_threshold=None,
-        ) as conn:
+        with _checkpoint_read_connection() as conn:
             rows = (
                 conn.execute(query, (str(agent_id),)).fetchall()
                 if limit is None
@@ -176,11 +179,7 @@ def load_checkpoint_message_count(agent_id: int) -> int:
             not the stable MessagePack array representation.
     """
     try:
-        with connect(
-            settings.data_plane.db_url,
-            autocommit=True,
-            prepare_threshold=None,
-        ) as conn:
+        with _checkpoint_read_connection() as conn:
             row = conn.execute(
                 "SELECT b.type, substring(b.blob FROM 1 FOR 5)"
                 " FROM checkpoints c"
@@ -218,12 +217,7 @@ def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
-        with connect(
-            settings.data_plane.db_url,
-            autocommit=True,
-            prepare_threshold=None,
-            row_factory=cast(Any, dict_row),
-        ) as conn:
+        with _checkpoint_read_connection(row_factory=dict_row) as conn:
             boundary = conn.execute(
                 "SELECT checkpoint_id FROM checkpoints"
                 " WHERE thread_id = %s AND checkpoint_id = %s"
@@ -271,12 +265,7 @@ def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
-        with connect(
-            settings.data_plane.db_url,
-            autocommit=True,
-            prepare_threshold=None,
-            row_factory=cast(Any, dict_row),
-        ) as conn:
+        with _checkpoint_read_connection(row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
             latest = saver.get(config)
             if not latest:
@@ -355,16 +344,10 @@ def load_checkpoint_messages_by_trace(
     # the permissive default warns on every read.
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
-        # The id lookup rides a plain connection (tuple rows); the blob
-        # deserialize goes through PostgresSaver.get_tuple with the resolved
-        # checkpoint_id (dict rows + msgpack decode). Same db_url the
-        # cold-load read path uses (AVA_DB_URL already carries the pooler port
-        # when pooling is on).
-        with connect(
-            settings.data_plane.db_url,
-            autocommit=True,
-            prepare_threshold=None,
-        ) as conn:
+        # The id lookup rides tuple rows; blob deserialization uses dict rows.
+        # Both paths borrow the data-plane pool URL, which already names
+        # PgBouncer when pooling is enabled.
+        with _checkpoint_read_connection() as conn:
             row = conn.execute(
                 "SELECT checkpoint_id FROM checkpoints"
                 " WHERE thread_id = %s AND metadata->>'trace_id' = %s"
@@ -374,12 +357,7 @@ def load_checkpoint_messages_by_trace(
         if row is None:
             return None, []
         checkpoint_id: str = row[0]
-        with connect(
-            settings.data_plane.db_url,
-            autocommit=True,
-            prepare_threshold=None,
-            row_factory=cast(Any, dict_row),
-        ) as conn:
+        with _checkpoint_read_connection(row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
             ckpt = saver.get_tuple(
                 {

@@ -22,9 +22,9 @@ HTTP call.
   attaches an idempotency key to the envelope: the ops server dedupes by key
   and replays the first run's stored outcome instead of re-executing, so a
   lost response cannot duplicate the effect (see
-  `services/agent_ops/daemon.py:_dispatch_idempotent`). The key is a fresh
-  UUID per dispatch unless the caller supplies one (`idempotency_key`) for
-  cross-call dedup.
+  `services/agent_ops/daemon.py:_dispatch_idempotent`). A payload business id
+  gives a target-scoped, canonical-payload key for cross-call dedup; an op
+  without one gets a fresh UUID unless its caller supplies a key.
 
 The agent-runner side that serves /ops lives in `services/agent_ops/daemon.py`.
 """
@@ -32,6 +32,8 @@ The agent-runner side that serves /ops lives in `services/agent_ops/daemon.py`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import random
 import time
@@ -87,6 +89,11 @@ _RETRY_MAX_DELAY_S = 4.0
 # supplies one); the ops server dedupes by key, so a retry replays the first
 # run's stored outcome instead of executing a second time.
 _NON_IDEMPOTENT_KINDS = frozenset({"spawn-launch", "cluster_update", "lifecycle"})
+_BUSINESS_ID_KEYS = {
+    "spawn-launch": "agent_id",
+    "cluster_update": "target_sha",
+    "lifecycle": "trigger_inbound_id",
+}
 
 # Module-level alias so tests can pin the retry sleep without patching asyncio.
 _sleep = asyncio.sleep
@@ -104,6 +111,17 @@ def _retry_delay_s(attempt: int) -> float:
     # S311: jitter needs spread, not secrecy — stdlib random is right (same
     # ruling as shared/lm/_call.py's retry jitter).
     return base * random.uniform(0.5, 1.5)  # noqa: S311
+
+
+def _default_idempotency_key(target_machine: str, kind: OpKind, payload: dict[str, Any]) -> str:
+    """Return a target-scoped stable key when the op names its business id."""
+    business_id_key = _BUSINESS_ID_KEYS.get(kind)
+    business_id = payload.get(business_id_key) if business_id_key is not None else None
+    if business_id is None:
+        return f"{kind}:{uuid.uuid4()}"
+    canonical_payload = json.dumps(payload, default=str, separators=(",", ":"), sort_keys=True)
+    fingerprint = hashlib.sha256(canonical_payload.encode()).hexdigest()[:16]
+    return f"{kind}:{target_machine}:{business_id}:{fingerprint}"
 
 
 class _RetryableFailure(Exception):  # noqa: N818 — internal retry signal, not a caller-facing error class
@@ -252,12 +270,11 @@ async def dispatch_to_machine(
     machines row never retry.
 
     Non-idempotent kinds (`spawn`, `cluster_update`, `lifecycle`) are retried
-    under an idempotency key: auto-generated per dispatch here (a fresh UUID)
-    unless the caller passes `idempotency_key` — the ops server dedupes by key,
-    so a retry after a lost response replays the first run's stored outcome
-    instead of re-executing and duplicating the effect. Callers that dispatch
-    the SAME logical op more than once (any future cross-call retry) must pass
-    the same explicit key across those calls.
+    under an idempotency key. A payload business id gets a target-scoped,
+    canonical-payload key, while an op without one gets a fresh UUID unless the
+    caller passes `idempotency_key`. The ops server dedupes by key, so a retry
+    after a lost response replays the first run's stored outcome instead of
+    re-executing and duplicating the effect.
 
     `timeout_s` defaults to `settings.gateway.cluster_rpc_timeout_seconds`
     (AVA_CLUSTER_RPC_TIMEOUT_SECONDS) when omitted. It bounds each attempt.
@@ -287,12 +304,12 @@ async def dispatch_to_machine(
                 f"cannot resolve an address for machine={target_machine!r}: {exc}"
             ) from exc
 
-    # Non-idempotent kinds retry only under an idempotency key (see the module
-    # docstring). Auto-generate one per dispatch — it is stable across the
-    # attempts of THIS retry loop, which is all the loop needs; a caller that
-    # re-dispatches the same logical op across calls passes its own key.
+    # A business id makes the key stable across separate dispatch calls too,
+    # scoped to its target and full effect payload: re-sending a launch for the
+    # same already-created agent must replay, not start a second child.
+    # Operations without one retain a fresh UUID.
     if kind in _NON_IDEMPOTENT_KINDS and idempotency_key is None:
-        idempotency_key = f"{kind}:{uuid.uuid4()}"
+        idempotency_key = _default_idempotency_key(target_machine, kind, payload)
     if retries is None:
         retries = settings.gateway.cluster_rpc_max_retries
     retries = max(retries, 0)  # a negative budget means "no attempts" — never
