@@ -918,6 +918,7 @@ def test_kill_reaps_process_tree_no_orphans(sessions: Path) -> None:
     assert _wait(lambda: _record(home, name) is None), "record must be unlinked on kill"
 
 
+@pytest.mark.flaky  # quarantine (flake governance C, #2245): host-exit race, 2026-09-01
 def test_kill_ends_the_host_process(sessions: Path) -> None:
     """The host exits when its session dies — no host may linger as an
     unmanaged orphan after the session it carried is gone."""
