@@ -37,9 +37,11 @@ Coverage is agent-authored code inside execute_code (the exec child) — the dom
 are wrapped by the walk; ``ava.mcps``'s module helpers (``servers`` / ``description`` /
 ``help``) are wrapped via the dir() fallback, and its dynamic tools are metered at their
 single call funnel (``_call_raw``, keyed by runtime server/tool). ``ava.skills`` is left
-to its own ``skill_invoked`` tracking. A bare ``python x.py`` launched child has no
-Postgres log sink, so its calls are silently un-metered — the side-channel swallow keeps
-that harmless.
+to its own ``skill_invoked`` tracking. A bare ``python x.py`` launched child does not
+inherit ``recording()`` or the agent process's event sink, so its SDK calls are an
+intentional unmetered blind spot. It also carries no task attribution and therefore
+cannot contribute to a task budget; use execute_code's normal child path when that
+accounting matters.
 """
 
 from __future__ import annotations

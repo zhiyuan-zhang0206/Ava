@@ -16,7 +16,7 @@ tags:
 Table name `agent_tasks`, column order corresponds one-to-one with `Task` fields, kept in sync via the `_COLS` constant:
 
 ```python
-_COLS = "id, parent_id, title, description, results, status, owner, created_by, created_at, updated_at, remind_interval_seconds, last_reminded_at, reminder_count, priority"
+_COLS = "id, parent_id, title, description, results, status, owner, created_by, created_at, updated_at, remind_interval_seconds, last_reminded_at, reminder_count, priority, token_budget, usd_budget, token_used, usd_used"
 ```
 
 `_row_to_task(row)` unpacks in this order into `Task(*row)`.

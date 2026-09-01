@@ -18,7 +18,7 @@ tags:
 ## API Overview
 
 ```python
-task = ava.tasks.create(title, description, parent=root_id, owner=None, priority="P2")  # Create; parent is required (root id 1 for top-level tasks)
+task = ava.tasks.create(title, description, parent=root_id, owner=None, priority="P2", token_budget=20_000, usd_budget=2.00)  # Create; parent is required (root id 1 for top-level tasks)
 task, aid = ava.tasks.create_and_assign(title, description, parent=root_id)   # Create + spawn agent to claim
 task = ava.tasks.get(task_id)                                 # Read by id
 tasks = ava.tasks.list(owner=..., status=...)                 # Filter list
@@ -39,13 +39,21 @@ agent_tasks (table)
 ├── created_by             — TEXT (creator agent id string; 'system' for root)
 ├── remind_interval_seconds        — Reminder interval in seconds (cannot be disabled, NULL only appears on root task)
 ├── last_reminded_at, reminder_count — Reminder state (cleared on any write)
+├── token_budget, usd_budget — Optional positive ceilings for explicitly task-tagged LLM usage
+├── token_used, usd_used — Cumulative explicitly task-tagged LLM usage
 └── created_at, updated_at
 ```
+
+Task attribution is explicit: an assignment or task-update system note carries its
+task id into the receiver's turn, while chat and unassociated system work clear it.
+Only those tagged LLM calls increment the totals; an agent merely owning a task does
+not. Each ceiling sends the owner one system-note notification on its first breach;
+it does not terminate the agent or block an in-flight call.
 
 The write paths of `create`/`update` publish `task_created`/`task_updated` (Redis events channel, visible from `GLOBAL_ROLES`) — the task board relies on these two events for SSE-driven invalidation refetch, plus a 30s fallback polling.
 
 ## Relationship with Other Subsystems
 
-- [[ava_builtins/plugins/ava_fleet/neighbors/neighbors.ava.okf.md|Neighbors]] — notifies old and new owners via `send_message` on owner change
+- [[ava_builtins/plugins/ava_fleet/neighbors/neighbors.ava.okf.md|Neighbors]] — notifies old and new owners through task-tagged system notes on owner change
 - [[ava_builtins/plugins/ava_fleet/notify.ava.okf.md|Notify]] — can notify user when a task completes
 - [[ava_builtins/plugins/ava_fleet/ava_fleet.ava.okf.md|ava_fleet Overview]] — parent fleet plugin index

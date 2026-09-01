@@ -225,6 +225,7 @@ def _finalize_turn_observability(
     agent_id: int,
     final_msg: AIMessage,
     handler: RedisStreamHandler,
+    task_id: int | None,
 ) -> None:
     """Post-stream metadata finalization for one completed AIMessage turn.
 
@@ -259,12 +260,24 @@ def _finalize_turn_observability(
         kw["ava_code_ms_by_block"] = {
             str(block_idx): ms for block_idx, ms in code_ms_by_block.items()
         }
-    log_llm_usage(
+    usage_tally = log_llm_usage(
         final_msg,
         model=turn_settings.lm.llm_model,
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
+        task_id=task_id,
     )
+    if task_id is not None and usage_tally is not None:
+        try:
+            from ava_builtins.plugins.ava_fleet.task_registry import record_task_usage
+
+            record_task_usage(task_id, token_count=usage_tally[0], cost_usd=usage_tally[1])
+        except Exception:
+            logger.warning(
+                "[{label}] {body}",
+                label="task-usage",
+                body=f"failed to record usage for task {task_id}",
+            )
     usage = final_msg.usage_metadata or {}
     from shared.lm.reasoning import extract_reasoning_tokens
 
@@ -527,7 +540,9 @@ async def _llm_node_impl(
     if text:
         logger.info("[{label}] {body}", label="text", body=text)
     await _persist_last_active(ctx, agent_id, text)
-    _finalize_turn_observability(ctx.event_publisher, agent_id, final_msg, handler)
+    _finalize_turn_observability(
+        ctx.event_publisher, agent_id, final_msg, handler, state.active_task_id
+    )
 
     silent_idle_cmd = _silent_idle_command(final_msg, agent_id)
     if silent_idle_cmd is not None:

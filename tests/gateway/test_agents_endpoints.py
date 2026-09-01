@@ -12,10 +12,13 @@ from __future__ import annotations
 import json
 import os
 import signal
+import threading
+from typing import cast
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 
 from gateway._cors import cors_allowed_origins
 from gateway.app import app
@@ -41,6 +44,13 @@ def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:  # pyrigh
             (agent_id,),
         )
         return cur.fetchone()
+
+
+def _returned_id(cur: psycopg.Cursor) -> int:  # pyright: ignore[reportMissingTypeArgument]
+    """Read an integer primary key from a RETURNING cursor."""
+    row = cur.fetchone()
+    assert row is not None
+    return cast(int, row[0])
 
 
 def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
@@ -787,6 +797,144 @@ class TestSystemNote:
                 json={"content": "x", "note_tag": "not_a_tag"},
             )
         assert resp.status_code == 422
+
+    def test_system_note_task_id_requires_task_tag(self, db_conn: psycopg.Connection) -> None:
+        """Task attribution cannot silently ride an unrelated system-note kind."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/system-note",
+                json={"content": "x", "note_tag": "heartbeat", "task_id": 42},
+            )
+        assert resp.status_code == 422
+        assert "task_id requires note_tag='task'" in str(resp.json())
+
+    def test_system_note_task_id_must_name_an_existing_task(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """A nonexistent task must not create an LLM usage event with no total."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/system-note",
+                json={"content": "x", "task_id": 999_999},
+            )
+        assert resp.status_code == 422
+        assert "task_id 999999 does not exist" in str(resp.json())
+
+    def test_system_note_task_id_must_belong_to_the_recipient(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """A task note cannot charge one agent's task for another agent's turn."""
+        with TestClient(app) as client:
+            owner_id = client.post("/api/agents", json={}).json()["id"]
+            recipient_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO agent_tasks (title, description, created_by, owner) "
+                    "VALUES ('owned task', 'd', 'user', %s) RETURNING id",
+                    (owner_id,),
+                )
+                row = cur.fetchone()
+            assert row is not None
+            db_conn.commit()
+            resp = client.post(
+                f"/api/agents/{recipient_id}/system-note",
+                json={"content": "x", "task_id": row[0]},
+            )
+        assert resp.status_code == 422
+        assert "is not owned by agent" in str(resp.json())
+
+    def test_system_note_task_ownership_stays_locked_through_enqueue(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A reassignment cannot land after validation but before task-note enqueueing."""
+        from gateway.routers import agents_state
+        from shared.db import connect, pool
+
+        enqueue_entered, release_enqueue, reassign_started, reassign_finished = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        errors: list[Exception] = []
+
+        def pause_enqueue(
+            db: psycopg.Connection,
+            agent_id: int,
+            content: str,
+            source: str,
+            kind: str = "chat",
+            payload: dict[str, object] | None = None,
+        ) -> int:
+            del db, agent_id, content, source, kind, payload
+            enqueue_entered.set()
+            assert release_enqueue.wait(timeout=2)
+            return 1
+
+        with db_conn.cursor() as cur:
+            cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
+            owner_id = _returned_id(cur)
+            cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
+            new_owner_id = _returned_id(cur)
+            cur.execute(
+                "INSERT INTO agent_tasks (title, description, created_by, owner) "
+                "VALUES ('locked task', 'd', 'user', %s) RETURNING id",
+                (owner_id,),
+            )
+            task_id = _returned_id(cur)
+        db_conn.commit()
+        monkeypatch.setattr(agents_state, "insert_inbound_message", pause_enqueue)
+
+        def enqueue(note_pool: ConnectionPool) -> None:
+            try:
+                agents_state._system_note_blocking(
+                    note_pool,
+                    owner_id,
+                    "x",
+                    "system",
+                    "task",
+                    task_id,
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        def reassign() -> None:
+            try:
+                with connect() as conn, conn.cursor() as cur:
+                    reassign_started.set()
+                    cur.execute(
+                        "UPDATE agent_tasks SET owner = %s WHERE id = %s",
+                        (new_owner_id, task_id),
+                    )
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                reassign_finished.set()
+
+        with pool(max_size=1) as note_pool:
+            enqueue_thread, reassign_thread = (
+                threading.Thread(target=enqueue, args=(note_pool,), daemon=True),
+                threading.Thread(target=reassign, daemon=True),
+            )
+            enqueue_thread.start()
+            try:
+                assert enqueue_entered.wait(timeout=2), errors
+                reassign_thread.start()
+                assert reassign_started.wait(timeout=2)
+                assert not reassign_finished.wait(timeout=0.2), (
+                    "task reassignment committed while the task note was being enqueued"
+                )
+            finally:
+                release_enqueue.set()
+                enqueue_thread.join(timeout=2)
+                if reassign_thread.ident is not None:
+                    reassign_thread.join(timeout=2)
+
+        assert not enqueue_thread.is_alive()
+        assert not reassign_thread.is_alive()
+        assert errors == []
 
     def test_system_note_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
         """source not in envelope allowlist → 422."""

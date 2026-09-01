@@ -235,6 +235,7 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
         "price_hit",
         "price_out",
         "unpriced",
+        "task_id",
     )
     assert payload_keys("sse_drop") == ("kind", "n")
     assert payload_keys("spawn") == ("machine", "fork_from", "fork_checkpoint")
@@ -245,7 +246,7 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("task_update") == ("status",)
     assert payload_keys("process_exit") == ("reason", "pid")
     assert payload_keys("agent_boot_failed") == ("model", "error_type", "error")
-    assert payload_keys("recall_filter") == ("body",)
+    assert payload_keys("recall_filter") == ("body", "query_hmac_sha256", "picked_paths")
     assert payload_keys("passive_recall") == ("search_ms", "filter_ms")
     assert payload_keys("hook_timing") == ("hook_ms",)
     assert payload_keys("heartbeat_nudged") == ("idle_minutes",)

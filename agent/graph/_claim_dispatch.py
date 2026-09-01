@@ -90,6 +90,8 @@ class _BatchState:
     restart_cas_applied: bool = False
     restart_requested: bool = False
     update_initiated: bool = False
+    active_task_id: int | None = None
+    task_ids: set[int] = field(default_factory=set)
     committed_chat_ids: list[int] = field(default_factory=list)
 
 
@@ -168,6 +170,7 @@ async def _handle_chat(
 ) -> None:
     """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
     st.new_msgs.append(build_chat_inbound(item))
+    st.active_task_id = None
     st.committed_chat_ids.append(item.id)
 
 
@@ -189,6 +192,18 @@ def _system_note_tag(payload: dict[str, object] | None) -> NoteTag:
         raise ValueError(f"system_note inbound 'note_tag' {raw!r} is not a NoteTag value") from exc
 
 
+def _task_id_from_system_note(payload: dict[str, object] | None, tag: NoteTag) -> int | None:
+    """Return the explicit task attribution from a task note, if present."""
+    if tag is not NoteTag.TASK or not payload or "task_id" not in payload:
+        return None
+    task_id = payload["task_id"]
+    if not isinstance(task_id, int) or isinstance(task_id, bool) or task_id <= 0:
+        raise ValueError(
+            f"system_note inbound 'task_id' must be a positive integer, got {task_id!r}"
+        )
+    return task_id
+
+
 async def _handle_system_note(
     item: ClaimedInbound,
     st: _BatchState,
@@ -202,10 +217,15 @@ async def _handle_system_note(
     content = item.content
     if settings.agent.security_scan_enabled:
         content = scan_content(content, source=f"inbound.system_note:{item.source}")
+    task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
+    st.active_task_id = task_id
+    if task_id is not None:
+        st.task_ids.add(task_id)
     st.new_msgs.append(
         system_note_message(
             content=f"{_ts_prefix()}{content}",
             tag=_system_note_tag(item.payload),
+            task_id=task_id,
             created_at=item.created_at,
         )
     )
@@ -604,6 +624,10 @@ async def dispatch_batch(
         kind = item.kind
         if kind in _ROUTING_KINDS and not routing.is_winner(item):
             continue
+        # A fresh non-task inbound starts unassociated work. A task system
+        # note below is the only writer that can establish attribution again.
+        if kind != InboundKind.SYSTEM_NOTE:
+            st.active_task_id = None
         if kind == InboundKind.CHAT:
             await _handle_chat(item, st)
         elif kind == InboundKind.SYSTEM_NOTE:
@@ -629,3 +653,7 @@ async def dispatch_batch(
             await _handle_fork(agent_id, item, st, state)
         else:
             raise ValueError(f"Unknown inbound kind: {kind!r} (id={item.id})")
+    if len(st.task_ids) > 1:
+        # Claim consumes the whole batch into one LLM turn. More than one task
+        # note therefore has no faithful task-level attribution.
+        st.active_task_id = None

@@ -804,7 +804,13 @@ CREATE TABLE agent_tasks (
     is_root          BOOLEAN NOT NULL DEFAULT FALSE,  -- the immortal system root task; all tasks descend from it
     remind_interval_seconds  INTEGER DEFAULT 1800,  -- seconds until an idle task reminds its owner; default 30 min, capped at 24h. Reminders cannot be disabled: NULL only on the never-reminded root task.
     last_reminded_at   TIMESTAMPTZ,            -- last time the daemon reminded the owner
-    reminder_count      INTEGER NOT NULL DEFAULT 0  -- reminders sent for the current overdue window
+    reminder_count      INTEGER NOT NULL DEFAULT 0,  -- reminders sent for the current overdue window
+    token_budget        BIGINT CHECK (token_budget IS NULL OR token_budget > 0),  -- optional ceiling for explicitly task-tagged LLM tokens
+    usd_budget          DOUBLE PRECISION CHECK (usd_budget IS NULL OR (usd_budget > 0 AND usd_budget < 'Infinity'::double precision)),  -- optional finite USD ceiling for explicitly task-tagged LLM cost
+    token_used          BIGINT NOT NULL DEFAULT 0 CHECK (token_used >= 0),
+    usd_used            DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (usd_used >= 0 AND usd_used < 'Infinity'::double precision),
+    token_budget_notified_at TIMESTAMPTZ,  -- first token-ceiling breach notification
+    usd_budget_notified_at   TIMESTAMPTZ   -- first USD-ceiling breach notification
 );
 
 -- The system root task is permanently 'ongoing': it is the tree anchor and can
