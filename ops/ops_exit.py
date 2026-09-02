@@ -21,6 +21,7 @@ from shared.agents import AgentNotFound, AgentStatus
 from shared.audit_events import insert_event_log
 from shared.cluster import session_name
 from shared.db import publish_inbound_wake
+from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.proc import force_kill
@@ -44,6 +45,7 @@ def _force_terminate_transaction(
     intent and session cleanup. The transaction commits on context exit.
     """
     with db_pool.connection() as conn, conn.cursor() as cur:
+        conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
             "SELECT status, pid FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
@@ -171,7 +173,7 @@ def _mark_exited_blocking(
     """Sync DB section of mark_agent_exited_op — via to_thread (the status flip,
     the exit event_log row, the AgentUpdated publish). Returns
     (rowcount, page_names, actual_status)."""
-    with db_pool.connection() as conn:
+    with write_transaction(db_pool) as conn:
         # SELECT cascade-closable show() pages before UPDATE; daemon-supervised
         # serve() pages stay open and must not emit PageClosed.
         page_names = list_open_page_names(conn, agent_id)

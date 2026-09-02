@@ -114,6 +114,7 @@ from shared.agents import AvaAgentError
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.machine import machine_name
 from shared.paths import legacy_pid_path
@@ -547,7 +548,7 @@ async def _dispatch_idempotent_pass(
 
     Returns the same (status, result) contract as `_dispatch`.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         # Opportunistic TTL prune: one indexed-range delete per new key keeps
         # the shared table bounded (ops are rare; rows are small).
         cur.execute(
@@ -567,10 +568,10 @@ async def _dispatch_idempotent_pass(
         except Exception:
             # No outcome was stored — a future same-key dispatch must be able to
             # re-execute rather than replay a half-done op or wait forever.
-            with pool.connection() as conn, conn.cursor() as cur:
+            with write_transaction(pool) as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM api_idempotency WHERE key = %s AND method = 'ops'", (key,))
             raise
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE api_idempotency SET op_status = %s, response_body = %s, "
                 "completed_at = now() WHERE key = %s AND method = 'ops'",

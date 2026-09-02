@@ -58,6 +58,7 @@ from shared.daemon_health import (
     stop_health_server,
 )
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import init_gateway_process
 from shared.paths import legacy_pid_path
@@ -78,7 +79,7 @@ def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
     resurrect a terminated agent; its inbound row remains inspectable while
     escalation directs the work onward (user ruling 2026-08-27 -- plain
     notifications never resurrect)."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
             "VALUES (%s, %s, 'system_note', 'system', %s::jsonb) RETURNING id",
@@ -136,6 +137,7 @@ def _advance_reminder_counters(pool: ConnectionPool, task_id: int) -> None:
     re-delivering the message (same-cause dedup). Raises on failure so the
     caller records the task in _pending_counter_writes."""
     with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+        conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
             "UPDATE agent_tasks SET last_reminded_at = now(), reminder_count = reminder_count + 1 "
             "WHERE id = %s",
@@ -291,6 +293,7 @@ def _escalate_to_user_queue(
     )
     with pool.connection() as conn:
         with conn.transaction(), conn.cursor() as cur:
+            conn.execute("SET TRANSACTION READ WRITE")
             cur.execute(
                 "SELECT 1 FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL LIMIT 1",
                 (owner,),

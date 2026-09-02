@@ -52,6 +52,7 @@ from psycopg_pool import ConnectionPool
 
 from shared.cluster import session_name
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.paths import ava_home, prod_service_checkout_error
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
@@ -287,7 +288,7 @@ class ScheduleManager:
         'interrupted' — the runner that opened them is gone. Best-effort (run
         history is severable observability) and idempotent (WHERE ok IS NULL):
         a row the runner closed itself, or one already swept, is untouched."""
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(self._pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE schedule_runs SET ok = false, note = 'interrupted' "
                 "WHERE schedule_id = %s AND ok IS NULL",
@@ -510,6 +511,6 @@ class ScheduleManager:
                 if only_if_not_error
                 else "UPDATE schedules SET status=%s, updated_at=now() WHERE id=%s"
             )
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(self._pool) as conn, conn.cursor() as cur:
             cur.execute(sql, params)  # pyright: ignore[reportArgumentType]
             return cur.rowcount > 0

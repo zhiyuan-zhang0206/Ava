@@ -56,6 +56,7 @@ from ops.controllers.respawn import _gateway_healthy
 from ops.pages import list_open_page_names
 from shared.agents import ResurrectAlreadyAlive, TerminationSource
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.live_announce import publish_page_closed_sync
 from shared.machine import MachineRole, machine_name
 from shared.proc import force_kill
@@ -105,7 +106,7 @@ def _claim_wedged_candidates(
     inserts its own ``kind='resurrect'`` inbound, so the shared unconsumed-attempt
     budget caps the kill + prompt + resurrect loop too.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_wedged_check_at = now() "
             "WHERE status IN ('running', 'idling') AND lease_expires_at > now() "
@@ -163,7 +164,7 @@ def _claim_terminated_lease_zombies(
     that contradictory state explicit. The claimed row is reaped only; unlike
     ordinary wedged recovery it must never resurrect the user-terminated agent.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_wedged_check_at = now() "
             "WHERE status = 'terminated' AND lease_expires_at > now() "
@@ -198,7 +199,7 @@ def _reap_terminated_lease_zombie(pool: ConnectionPool, agent_id: int, pid: int)
         return False
 
     try:
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT status, pid, lease_expires_at > now() "
                 "FROM agents_meta WHERE id = %s FOR UPDATE",
@@ -277,7 +278,7 @@ def _recover_wedged_candidate(
         transition_row = None
         page_names: list[str] = []
         pending_terminate = False
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT status, pid, lease_expires_at > now() "
                 "FROM agents_meta WHERE id = %s FOR UPDATE",

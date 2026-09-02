@@ -70,6 +70,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.db import InboundRow
+from shared.db_transaction import async_write_transaction
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.redis_listener import RedisInboundListener
@@ -192,7 +193,7 @@ async def claim_inbound_batch(
     configured `autocommit=True`, so the UPDATE commits as soon as
     RETURNING fetches; no explicit `commit()` needed.
     """
-    async with pool.connection() as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not
@@ -280,7 +281,7 @@ async def reconcile_claimed_inbounds(
         # No commits to confirm — every claimed row is an orphan, treat as
         # one reset path. (Common shape: brand-new process, no prior
         # in-flight work; the SELECT below will likely return 0 rows.)
-        async with pool.connection() as conn, conn.cursor() as cur:
+        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             await cur.execute(
                 "UPDATE inbound_messages SET status = 'done' "
                 "WHERE status = 'claimed' AND agent_id = %s "
@@ -301,6 +302,7 @@ async def reconcile_claimed_inbounds(
     # `done`, the rest still `claimed` waiting on a later boot). Pool conn
     # is autocommit=True; `conn.transaction()` opens an explicit BEGIN.
     async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+        await conn.execute("SET TRANSACTION READ WRITE")
         await cur.execute(
             "UPDATE inbound_messages SET status = 'done' "
             "WHERE status = 'claimed' AND agent_id = %s AND id = ANY(%s)",
@@ -350,7 +352,7 @@ async def finalize_claimed_inbounds(pool: AsyncConnectionPool | None, agent_id: 
     """
     if pool is None:
         return 0
-    async with pool.connection() as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE inbound_messages SET status = 'done' "
             "WHERE status = 'claimed' AND agent_id = %s",
@@ -432,7 +434,7 @@ async def mark_agent_status(
     think through the transition path, avoiding "blind overwrite" obscuring the
     state machine; the schema CHECK constraint additionally rejects illegal status values.
     """
-    async with pool.connection() as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE agents_meta SET status = %s WHERE id = %s AND status = %s",
             (status, agent_id, expected_from),
@@ -509,7 +511,7 @@ async def record_claim_loop_progress(pool: AsyncConnectionPool, agent_id: int) -
     inbound arrives. The status guard avoids reviving a marker after a
     lifecycle operation has taken ownership of the row.
     """
-    async with pool.connection() as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE agents_meta SET last_claim_loop_at = now() WHERE id = %s AND status = 'idling'",
             (agent_id,),
@@ -615,7 +617,7 @@ async def renew_agent_lease(
     from shared.db import ALIVE_STATUSES
     from shared.deploy_timing import AGENT_LEASE_TTL_S
 
-    async with pool.connection() as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE agents_meta SET lease_expires_at = now() + make_interval(secs => %s) "
             "WHERE id = %s AND status = ANY(%s)",
@@ -742,25 +744,22 @@ def schedule_self_respawn(agent_id: int) -> None:
                 with conn.cursor() as cur:
                     if _restarter_claimed_before_deadline(cur, agent_id):
                         return
-                    cur.execute(
-                        "UPDATE agents_meta SET status = 'idling', pid = NULL, "
-                        "started_at = NULL, lease_expires_at = NULL "
-                        "WHERE id = %s AND status = 'restarting'",
-                        (agent_id,),
-                    )
-                    if cur.rowcount == 0:
-                        logger.debug(
-                            "[self-respawn] agent %s: status no longer 'restarting' — "
-                            "restarter won the race, skipping self-respawn",
-                            agent_id,
+                    with conn.transaction():
+                        conn.execute("SET TRANSACTION READ WRITE")
+                        cur.execute(
+                            "UPDATE agents_meta SET status = 'idling', pid = NULL, "
+                            "started_at = NULL, lease_expires_at = NULL "
+                            "WHERE id = %s AND status = 'restarting'",
+                            (agent_id,),
                         )
-                        return
-                    # Commit is automatic (autocommit=True); the row is now
-                    # unclaimed 'idling' — the new process will claim it via the
-                    # normal claim_agent_row path. Read the
-                    # per-agent config off the same connection so the replacement
-                    # keeps this agent's overlay + birth stamp.
-                    env.update(_config_env_updates(cur))
+                        if cur.rowcount == 0:
+                            logger.debug(
+                                "[self-respawn] agent %s: status no longer 'restarting' — "
+                                "restarter won the race, skipping self-respawn",
+                                agent_id,
+                            )
+                            return
+                        env.update(_config_env_updates(cur))
             finally:
                 conn.close()
         except Exception:

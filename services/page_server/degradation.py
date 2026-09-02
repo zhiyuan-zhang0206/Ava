@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 
 from shared import telemetry
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.live_events import PageClosed
 from shared.redis_client import publish_best_effort
 
@@ -44,7 +45,7 @@ class _DegradedServeDir:
 
 def _close_row(pool: ConnectionPool, row_id: int) -> bool:
     """Close one still-open page row, returning whether this call changed it."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_pages SET closed_at = now() "
             "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL",
