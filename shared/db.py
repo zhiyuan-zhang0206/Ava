@@ -583,6 +583,8 @@ def insert_inbound_message(
     """
     if payload is not None and "lifecycle_result" in payload:
         raise ValueError("lifecycle_result is reserved for verified command settlement")
+    if payload is not None and "launch_attempts" in payload:
+        raise ValueError("launch_attempts is reserved for controller authorization")
     from shared.caller_identity import caller_payload
     from shared.envelope import reject_unnegotiated_caller
 

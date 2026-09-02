@@ -204,7 +204,7 @@ _CLUSTER_SESSION_PREFIX = f"{shared.cluster.session_name('')}"  # "ava-"
 # pid records, not sessions — `_collect_sessions` filters them out so the
 # session count / agent groups stay session-shaped (a P1 regression in #2330
 # put them back in and ghosted 26 of 38 agent_groups).
-_AGENT_PROCESS_RE = re.compile(r"^ava-(?:[a-z0-9]+-)*agent-\d+$")
+_AGENT_PROCESS_RE = re.compile(r"^ava-(?:[a-z0-9]+-)*(?:agent-\d+|boot-\d+-\d+-\d+)$")
 
 _AGENT_SESSION_RE = re.compile(r"-agent-(\d+)")
 # Parse one agent's persistent-shell session name: `…-agent-<id>-shell-<sid>[-<name>]`.
