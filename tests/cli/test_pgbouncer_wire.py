@@ -47,7 +47,9 @@ pytestmark = pytest.mark.skipif(
 
 
 @contextlib.contextmanager
-def _pgbouncer_in_front(pg_url: str, listen_addr: str = "127.0.0.1") -> Generator[str]:
+def _pgbouncer_in_front(
+    pg_url: str, listen_addr: str = "127.0.0.1", pool_size: int = 2
+) -> Generator[str]:
     """Start a transaction-pooling PgBouncer in front of the throwaway Postgres at
     `pg_url`; yield the pooled connection URL. Config mirrors cli/commands/_pgbouncer,
     but the server hop is TCP loopback (the throwaway's trust posture) rather than the
@@ -56,7 +58,11 @@ def _pgbouncer_in_front(pg_url: str, listen_addr: str = "127.0.0.1") -> Generato
     `listen_addr` lets a test bind the listener on a specific loopback address —
     e.g. 127.0.0.2 to prove the degraded-bind probe dials exactly the bound
     address (127.0.0.0/8 is local on Linux; macOS needs an lo0 alias, so the
-    caller guards on sys.platform)."""
+    caller guards on sys.platform).
+
+    `pool_size` sets `default_pool_size` — 2 (the default) makes concurrent
+    clients genuinely reuse backends; 1 forces every client onto the same
+    backend, which pollution tests need for determinism."""
     info = conninfo_to_dict(pg_url)
     pg_port = int(str(info["port"]))
     dbname = str(info["dbname"])
@@ -90,7 +96,7 @@ def _pgbouncer_in_front(pg_url: str, listen_addr: str = "127.0.0.1") -> Generato
                 f"auth_file = {userlist}",
                 "pool_mode = transaction",
                 "max_client_conn = 100",
-                "default_pool_size = 2",  # tiny, so transactions genuinely reuse backends
+                f"default_pool_size = {pool_size}",  # tiny, so transactions genuinely reuse backends
                 "ignore_startup_parameters = extra_float_digits,options",
                 f"admin_users = {role}",
                 f"logfile = {tmp / 'pgbouncer.log'}",
@@ -169,10 +175,21 @@ def test_finalize_writes_override_a_poisoned_pooled_backend(
     from shared import config, host_deploy_state
     from shared.cluster_lock import release_update_lock
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+    # pool_size=1: the poison and the compensating writes are forced onto the
+    # SAME backend — with the shared harness default of 2 the writes could land
+    # on the clean backend and pass without exercising the override (review
+    # follow-up from #5716 on #1428).
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as reader:
             reader.execute("SET default_transaction_read_only = on")
+        # Prove the backend is STILL poisoned when the writes run — the raw
+        # dial below does not go through shared.db's baseline restore, so it
+        # must observe the polluter's read_only (keeps this test's teeth even
+        # if a future pgbouncer scrubs on release).
+        with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as probe:
+            row = probe.execute("SHOW default_transaction_read_only").fetchone()
+            assert row is not None and str(row[0]) == "on"
         host_deploy_state.set_posture("idle")
         release_update_lock("pgbouncer-finalizer-test")
 
@@ -287,3 +304,111 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
         listen_port = int(str(conninfo_to_dict(pooled)["port"]))
         assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.2") is True
         assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.1") is False
+
+
+# ── 2026-09-02 P0: pooled session-GUC pollution (read-only backend) ──────────
+#
+# pgbouncer transaction pooling hands any backend to any client transaction and
+# does NOT reset backend session state on the ordinary release path (measured on
+# 1.25.2: server_reset_query_always=1 is inert there). A polluter's session-level
+# `SET default_transaction_read_only = on` therefore leaks onto shared backends
+# and the next borrower's writes fail with ReadOnlySqlTransaction — the
+# 2026-09-02 P0 that 500'd the agent message / schedule-stop APIs. The client
+# side must scrub the session back to baseline on every pooled use; these tests
+# pin that contract end to end.
+
+
+def _poison_backend(pooled: str) -> None:
+    """One client session-SETs read_only on a pooled connection and disconnects
+    cleanly — the exact pollution vector of the 2026-09-02 P0. With a
+    single-backend pooler the next borrower is forced onto the poisoned backend."""
+    with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as polluter:
+        polluter.execute("SET default_transaction_read_only = on")
+
+
+def test_pooled_borrow_scrubs_a_poisoned_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pool-level regression: a borrower must never inherit another client's
+    session-level SET. The pool's `check` hook (every borrow) restores the
+    baseline session, so a write after a poison succeeds — and the borrowed
+    session reads `default_transaction_read_only = off`."""
+    import shared.db as shared_db
+    from shared import config
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        pool = shared_db.pool(min_size=1, max_size=1)
+        try:
+            # Force the pool's physical backend into existence (creation runs the
+            # configure hook) BEFORE poisoning, so the borrow-time check hook —
+            # not backend birth — is what saves the borrower below.
+            with pool.connection() as conn:
+                conn.execute("SELECT 1")
+            _poison_backend(pooled)
+            with pool.connection() as conn, conn.cursor() as cur:
+                row = cur.execute("SHOW default_transaction_read_only").fetchone()
+                assert row is not None and str(row[0]) == "off"
+                cur.execute("CREATE TEMP TABLE pgb_poison_probe(i int)")
+                cur.execute("INSERT INTO pgb_poison_probe VALUES (1)")
+        finally:
+            pool.close()
+
+
+def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P0 batch-5 regression: the agent message INSERT and the schedule stop
+    UPDATE — the two API writes the user saw 500 — succeed when pgbouncer hands
+    their transaction a backend another client polluted read-only. Runs the real
+    write helpers through the sanctioned pool path against a poisoned
+    single-backend pooler."""
+    import shared.db as shared_db
+    from gateway.routers.schedules import _update_blocking
+    from shared import config
+    from shared.chat_delivery import insert_chat_inbound_once
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+
+        # The inbound wake publish needs Redis, which this harness does not run;
+        # the regression target is the durable DB write, so stub the wake out.
+        def _no_wake(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr("shared.chat_delivery.publish_inbound_wake", _no_wake)
+        with psycopg.connect(pg_url, autocommit=True) as admin:
+            row = admin.execute(
+                "INSERT INTO agents (label) VALUES ('poison-probe-agent') RETURNING id"
+            ).fetchone()
+            assert row is not None
+            agent_id: int = row[0]
+            row = admin.execute(
+                "INSERT INTO schedules (name, script, command, enabled) "
+                "VALUES ('poison-probe-schedule', 'print(1)', 'python schedule.py', true) "
+                "RETURNING id"
+            ).fetchone()
+            assert row is not None
+            schedule_id: int = row[0]
+        pool = shared_db.pool(min_size=1, max_size=1)
+        try:
+            with pool.connection() as conn:
+                conn.execute("SELECT 1")
+            _poison_backend(pooled)
+            # message INSERT (POST /api/agents/{id}/messages durable half)
+            with pool.connection() as conn:
+                receipt = insert_chat_inbound_once(
+                    conn,
+                    agent_id=agent_id,
+                    content="poison-probe",
+                    source="user",
+                    payload=None,
+                    client_message_id=None,
+                )
+                assert receipt.inserted
+            # schedule stop UPDATE (POST /api/schedules/{id}/stop durable half:
+            # SELECT ... FOR UPDATE then UPDATE ... RETURNING)
+            row, _enabled_changed = _update_blocking(pool, schedule_id, {"enabled": False})
+            assert row[4] is False
+        finally:
+            pool.close()

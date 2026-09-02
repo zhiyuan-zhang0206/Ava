@@ -125,9 +125,18 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
     # constant. `ava.DB` is dialled from inside the agent's exec sandbox, so
     # without the 5s cap a database that black-holes packets freezes the agent's
     # tool call on the OS TCP-retransmit timeout with no application-level bound.
-    return psycopg.connect(
+    #
+    # The URL is the pooled front door, and pgbouncer never resets backend
+    # session state between clients — scrub the session back to baseline on
+    # every (re)connect so another client's session-level SET (2026-09-02 P0
+    # read-only pollution) cannot break this connection's writes.
+    conn = psycopg.connect(
         settings.data_plane.db_url, autocommit=True, **PG_STATEMENT_TIMEOUT_KWARGS
     )
+    from shared.db import _restore_pooled_session
+
+    _restore_pooled_session(conn)
+    return conn
 
 
 def _connect_redis() -> "redis.Redis":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]

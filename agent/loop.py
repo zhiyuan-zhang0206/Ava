@@ -48,7 +48,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.db import PG_KEEPALIVE_KWARGS
+from shared.db import PG_KEEPALIVE_KWARGS, _restore_pooled_session_async
 from shared.log import logger
 
 from . import _boot_timing
@@ -186,9 +186,9 @@ async def main(
         # automatic health check + reconnect on idle eviction by remote PG /
         # PgBouncer — single AsyncConnection silently dies after server idle
         # timeout, dropping all subsequent SQL on the floor (agent 57 lost 5h
-        # of checkpoints from a 5h47m idle). The
-        # `check=AsyncConnectionPool.check_connection` callback SELECT 1's every
-        # borrowed conn so callers always get a live one.
+        # of checkpoints from a 5h47m idle). The per-borrow `check` callback
+        # restores the pooled session baseline (see the kwargs below), which
+        # both probes liveness and scrubs backends polluted by other clients.
         #
         # A single pool (max_size=2) carries BOTH consumers — langgraph
         # checkpoint SQL and kernel ad-hoc SQL (inbound queue, agents_meta CAS):
@@ -214,7 +214,14 @@ async def main(
             # so check_connection's SELECT 1 fails fast instead of on the OS TCP
             # timeout. autocommit/prepare_threshold serve the saver + ad-hoc ops.
             kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
-            check=AsyncConnectionPool.check_connection,
+            # The per-borrow check scrubs the session back to baseline (RESET
+            # ALL + statement ceiling) AND doubles as the dead-connection probe:
+            # pgbouncer never resets backend session state between clients
+            # (2026-09-02 P0), so a backend another client polluted read-only
+            # must not fail this agent's checkpoint/lease writes. A dead
+            # connection raises here and psycopg_pool discards + replaces it,
+            # exactly like the old SELECT-1 check did.
+            check=_restore_pooled_session_async,
             timeout=settings.agent.db_pool_acquire_timeout_seconds,
             open=False,
         ) as db_pool:
