@@ -3158,6 +3158,43 @@ def test_probe_verdict_names_the_progress_fact(monkeypatch: pytest.MonkeyPatch) 
     assert _v is not None and _v.status == _cli.POLL_OK and progressing is False
 
 
+def test_paused_without_lease_stalls_once_the_arm_grace_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-09-02 win: the updater's recovery `ava start` exited rc=1 under the
+    executing deploy lease, its lease clear ran, and the paused-no-lease reading
+    kept the poll "cannot tell" for the whole 900 s bound. Once THIS host's poll
+    has run past the lease-arm grace, a paused host with no live lease is
+    provably not running an updater — a stall candidate like any other provable
+    stop. The grace is measured from the poll's own clock, never `paused_at`:
+    the pause (Phase A) and the updater spawn (Phase B trigger) are minutes
+    apart by design."""
+    from datetime import UTC, datetime, timedelta
+
+    from cli.commands._update_phase_b import _probe_verdict
+    from shared.host_deploy_state import HostDeployState
+
+    def _read(machine=None, **_kw):
+        return HostDeployState(
+            machine=machine or "win",  # pyright: ignore[reportUnknownArgumentType]
+            posture="paused",
+            updated_at=datetime.now(UTC),
+            updater_lease_expires_at=None,
+            paused_at=datetime.now(UTC) - timedelta(minutes=10),
+        )
+
+    monkeypatch.setattr("cli.commands._update_phase_b.read", _read)  # pyright: ignore[reportUnknownArgumentType]
+    # Inside the arm grace: still "cannot tell"; neither counter advances.
+    verdict, stalls, no_progress, progressing = _probe_verdict({}, 0, "win", 0, poll_elapsed=10.0)
+    assert verdict is None and stalls == 0 and no_progress == 0
+    assert progressing is False
+    # Past the grace: the first stalled reading, then two confirmations end it.
+    verdict, stalls, no_progress, _ = _probe_verdict({}, 0, "win", 0, poll_elapsed=91.0)
+    assert verdict is None and stalls == 1
+    verdict, stalls, no_progress, _ = _probe_verdict({}, 1, "win", 0, poll_elapsed=93.0)
+    assert verdict is not None and verdict.status == _cli.POLL_STALLED
+
+
 def test_a_probe_from_an_older_commit_never_reads_as_no_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

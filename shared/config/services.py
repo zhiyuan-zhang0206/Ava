@@ -162,7 +162,13 @@ class ServiceSettings(EnvSettings):
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",
-            "writable": False,
+            # The one official repair surface for a hosted-runner port that
+            # collides on a mirrored localhost namespace: `.env` hand-edits were
+            # the only fix during the 2026-09-02 win/wsl 8114 incident (the
+            # field was reserved read-only before the service existed). Host
+            # scope stays host-writable; remote_writable=False keeps a remote
+            # `--machine` set out, like every other host-scope key.
+            "writable": True,
             "sensitive": False,
             "scope": "host",
             "remote_writable": False,
