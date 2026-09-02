@@ -1,0 +1,26 @@
+name: Release store contract
+on:
+  pull_request:
+    paths:
+      - 'shared/runtime_release.py'
+      - 'shared/platform.py'
+      - 'tests/runtime_release/**'
+      - '.github/workflows/release-store.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  filesystem-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          python-version: '3.12'
+      - name: Real filesystem transitions without a cluster or project environment
+        run: uv run --no-project --python 3.12 python -m unittest discover -s tests/runtime_release -v

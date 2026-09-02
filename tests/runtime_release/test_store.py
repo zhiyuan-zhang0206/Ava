@@ -1,0 +1,163 @@
+"""Filesystem contract tests, runnable in CI without pytest/cluster fixtures."""
+
+import hashlib
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from shared.runtime_release import (
+    ReleaseRejectedError,
+    activate_release,
+    current_pointer,
+    file_sha256,
+    verify_release,
+)
+
+
+class ReleaseStoreTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.store = Path(self.temporary.name)
+        self.schema = "e" * 64
+
+    def make_release(self, content: bytes) -> tuple[str, str]:
+        artifact = hashlib.sha256(content).hexdigest()
+        root = self.store / artifact
+        (root / "runtime").mkdir(parents=True)
+        (root / "runtime" / "python").write_bytes(content)
+        (root / "runtime" / "kernel.py").write_bytes(b"value = 1\n")
+        manifest = {
+            "version": 1,
+            "artifact_digest": artifact,
+            "platform": "test-platform",
+            "schema_digest": self.schema,
+            "interpreter": "runtime/python",
+            "cwd": "runtime",
+            "files": {
+                path.relative_to(root).as_posix(): file_sha256(path)
+                for path in (root / "runtime").iterdir()
+            },
+        }
+        (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return artifact, file_sha256(root / "manifest.json")
+
+    def activate(self, release: tuple[str, str], expected: tuple[str, str] | None = None) -> None:
+        activate_release(
+            self.store,
+            release[0],
+            manifest_digest=release[1],
+            expected_current=expected,
+            platform_tag="test-platform",
+            schema_digest=self.schema,
+        )
+
+    def test_switch_and_rollback_keep_old_absolute_paths(self) -> None:
+        first = self.make_release(b"first")
+        second = self.make_release(b"second")
+        self.activate(first)
+        old = verify_release(
+            self.store,
+            first[0],
+            manifest_digest=first[1],
+            platform_tag="test-platform",
+            schema_digest=self.schema,
+        )
+        self.activate(second, first)
+        self.assertEqual(current_pointer(self.store), second)
+        self.assertEqual(old.interpreter.read_bytes(), b"first")
+        self.activate(first, second)
+        self.assertEqual(current_pointer(self.store), first)
+
+    def test_stale_writer_does_not_replace_pointer(self) -> None:
+        first = self.make_release(b"first")
+        second = self.make_release(b"second")
+        self.activate(first)
+        with self.assertRaisesRegex(ReleaseRejectedError, "predecessor"):
+            self.activate(second)
+        self.assertEqual(current_pointer(self.store), first)
+
+    def test_corrupt_member_rejected_before_activation(self) -> None:
+        release = self.make_release(b"first")
+        (self.store / release[0] / "runtime" / "kernel.py").write_bytes(b"corrupt")
+        with self.assertRaisesRegex(ReleaseRejectedError, "hash mismatch"):
+            self.activate(release)
+        self.assertIsNone(current_pointer(self.store))
+
+    def test_unlisted_file_rejected(self) -> None:
+        release = self.make_release(b"first")
+        (self.store / release[0] / "runtime" / "injected.py").touch()
+        with self.assertRaisesRegex(ReleaseRejectedError, "inventory"):
+            self.activate(release)
+
+    def test_manifest_tampering_rejected(self) -> None:
+        release = self.make_release(b"first")
+        path = self.store / release[0] / "manifest.json"
+        path.write_text(path.read_text() + " ")
+        with self.assertRaisesRegex(ReleaseRejectedError, "manifest digest"):
+            self.activate(release)
+
+    def test_schema_and_platform_mismatch_rejected(self) -> None:
+        release = self.make_release(b"first")
+        for platform_tag, schema in (("other", self.schema), ("test-platform", "f" * 64)):
+            with (
+                self.subTest(platform=platform_tag, schema=schema),
+                self.assertRaisesRegex(ReleaseRejectedError, "incompatible"),
+            ):
+                verify_release(
+                    self.store,
+                    release[0],
+                    manifest_digest=release[1],
+                    platform_tag=platform_tag,
+                    schema_digest=schema,
+                )
+
+    def test_failed_replace_preserves_old_pointer(self) -> None:
+        first = self.make_release(b"first")
+        second = self.make_release(b"second")
+        self.activate(first)
+        with (
+            patch(
+                "shared.runtime_release.Path.replace",
+                side_effect=PermissionError("locked Windows pointer"),
+            ),
+            self.assertRaises(PermissionError),
+        ):
+            self.activate(second, first)
+        self.assertEqual(current_pointer(self.store), first)
+        self.assertEqual(list(self.store.glob(".current-release-*")), [])
+
+    def test_path_escape_is_rejected_even_with_matching_manifest_hash(self) -> None:
+        release = self.make_release(b"first")
+        path = self.store / release[0] / "manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["interpreter"] = "../outside"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ReleaseRejectedError, "unsafe release path"):
+            self.activate((release[0], file_sha256(path)))
+
+    def test_hardlinked_runtime_is_rejected(self) -> None:
+        release = self.make_release(b"first")
+        root = self.store / release[0]
+        os.link(root / "runtime" / "kernel.py", self.store / "external-cache")
+        with self.assertRaisesRegex(ReleaseRejectedError, "private regular file"):
+            self.activate(release)
+
+    def test_path_injection_rejected_even_when_inventoried(self) -> None:
+        release = self.make_release(b"first")
+        root = self.store / release[0]
+        path = root / "manifest.json"
+        manifest = json.loads(path.read_text())
+        injection = root / "runtime" / "editable.pth"
+        injection.write_text("/mutable/source\n")
+        manifest["files"]["runtime/editable.pth"] = file_sha256(injection)
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ReleaseRejectedError, "path injection"):
+            self.activate((release[0], file_sha256(path)))
+
+
+if __name__ == "__main__":
+    unittest.main()
