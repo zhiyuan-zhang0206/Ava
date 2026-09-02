@@ -66,8 +66,17 @@ def fault_worker(mode: str, request: Path) -> int:
                 else:
                     conn.execute("UPDATE deployment_state SET holder='another-operation'")
 
-        with patch.object(hop, "_wait_exited", side_effect=turnover):
-            return updater_main(["--bootstrap-hop", str(request)])
+        backend = get_backend()
+        with (
+            patch.object(hop, "_wait_exited", side_effect=turnover),
+            patch.object(backend, "new_session", wraps=backend.new_session) as starts,
+        ):
+            try:
+                return updater_main(["--bootstrap-hop", str(request)])
+            finally:
+                (request.parent / f"effect-count-{mode}.json").write_text(
+                    json.dumps({"native_session_starts": starts.call_count})
+                )
     if mode == "crash-after-stop":
         real_journal = hop._journal
 
@@ -359,6 +368,11 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     )
                     require(resumed.returncode == 1, "dead-owner resume did not restore A")
                 if mode in {"expire-after-stop", "holder-change-after-stop"}:
+                    effects = json.loads((home / f"run/effect-count-{mode}.json").read_text())
+                    require(
+                        effects["native_session_starts"] == 0,
+                        "stale operation attempted even an unrecorded native spawn",
+                    )
                     recorded = json.loads((sessions / "ava-ops.json").read_bytes())
                     require(
                         recorded["pid"] == expected.sessions[0].process.pid,
