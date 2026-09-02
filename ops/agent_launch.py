@@ -89,11 +89,11 @@ _LAUNCH_RETRY_BASE_BACKOFF_SEC = (
 )
 
 
-def _launched_process_alive(agent_id: int) -> bool:
+def _launched_process_alive(agent_id: int, attempt_session: str | None = None) -> bool:
     """True if the process this launch started is still running.
 
-    The session record the supervisor wrote at spawn (`$AVA_HOME/run/sessions/
-    ava-agent-<id>.json`) carries the child's pid + start time, so this answers
+    The exact attempt record returned at spawn carries the child's pid + start
+    time, so this answers
     "is the thing I launched still there" WITHOUT the DB — which is the whole
     point: during the pre-claim segment the row still says unclaimed 'idling' and carries
     no pid, so the DB cannot distinguish a slow boot from a dead one. Indirected
@@ -108,10 +108,17 @@ def _launched_process_alive(agent_id: int) -> bool:
     (`AVA_AGENT_BOOT_STALL_SECONDS=0`) and this call silently reverts to the
     proxy it used to be.
     """
-    return native_proc().has_session(session_name(f"agent-{agent_id}"))
+    # Compatibility callers lacking the exact attempt cannot establish early
+    # death. Retain the existing hard deadline instead of guessing canonical:
+    # canonical publication happens only after admission.
+    if attempt_session is None:
+        return True
+    if not attempt_session.startswith(session_name(f"boot-{agent_id}-")):
+        raise ValueError("launch confirmation attempt belongs to another agent")
+    return native_proc().has_session(attempt_session)
 
 
-def _wait_for_agent_claim(agent_id: int) -> None:
+def _wait_for_agent_claim(agent_id: int, attempt_session: str | None = None) -> None:
     """Wait for a non-NULL pid that proves the child won the row claim.
 
     A terminal row without a pid failed before claim and remains a launch
@@ -151,7 +158,12 @@ def _wait_for_agent_claim(agent_id: int) -> None:
                 return
         if time.monotonic() - probed_alive_at >= _LIVENESS_PROBE_INTERVAL_SEC:
             probed_alive_at = time.monotonic()
-            if not _launched_process_alive(agent_id):
+            alive = (
+                _launched_process_alive(agent_id, attempt_session)
+                if attempt_session is not None
+                else _launched_process_alive(agent_id)
+            )
+            if not alive:
                 # Collapse the deadline instead of raising here: the next
                 # iteration re-reads the row before the failure branch runs, so a
                 # child that claimed and exited between this loop's read and this
@@ -162,7 +174,12 @@ def _wait_for_agent_claim(agent_id: int) -> None:
             # One extension for a live child: `deadline` becomes the hard bound,
             # so this branch cannot be taken twice.
             hard_deadline = started + BOOT_REAP_GRACE_SEC
-            if deadline < hard_deadline and _launched_process_alive(agent_id):
+            alive = (
+                _launched_process_alive(agent_id, attempt_session)
+                if attempt_session is not None
+                else _launched_process_alive(agent_id)
+            )
+            if deadline < hard_deadline and alive:
                 logger.warning(
                     "agent {id} is still unclaimed after {dt:.1f}s but its process is alive — "
                     "extending the launch confirm to {max:.0f}s (slow pre-flip boot; "
@@ -266,7 +283,7 @@ def _launch_agent_process(
     birth_config: dict[str, object] | None = None,
     confirm: bool = True,
     restart_attempt: tuple[int, int, float] | None = None,
-) -> None:
+) -> str:
     """Spawn a new detached agent process via the native supervisor.
     Raises RuntimeError if the spawn itself fails; does **not** clean up DB on
     failure.
@@ -379,7 +396,8 @@ def _launch_agent_process(
     if not ok:
         raise RuntimeError(f"native supervisor failed to launch agent session {agent_session}")
     if confirm:
-        _wait_for_agent_claim(agent_id)
+        _wait_for_agent_claim(agent_id, agent_session)
+    return agent_session
 
 
 # ── Off-path launch confirm (spawn) ──────────────────────────────────────────
@@ -393,12 +411,15 @@ def _launch_agent_process(
 _pending_launch_confirms: set[asyncio.Task[bool]] = set()
 
 
-def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
+def _confirm_launch_or_force_terminated(agent_id: int, attempt_session: str | None = None) -> bool:
     """Confirm a spawned child claimed its row; if it never did, force the row
     'terminated'. Runs in a worker thread (synchronous poll + DB). Returns
     whether the launch confirmed."""
     try:
-        _wait_for_agent_claim(agent_id)
+        if attempt_session is None:
+            _wait_for_agent_claim(agent_id)
+        else:
+            _wait_for_agent_claim(agent_id, attempt_session)
         return True
     except Exception:
         logger.warning(
@@ -441,12 +462,14 @@ def _on_confirm_done(task: asyncio.Task[bool]) -> None:
         )
 
 
-def schedule_launch_confirm(agent_id: int) -> None:
+def schedule_launch_confirm(agent_id: int, attempt_session: str | None = None) -> None:
     """Run the launch-confirm off the spawn response path. Must be called from a
     running event loop (the ops dispatch loop): it schedules a background task
     that polls in a worker thread and forces 'terminated' if the child never
     claims."""
-    task = asyncio.create_task(asyncio.to_thread(_confirm_launch_or_force_terminated, agent_id))
+    task = asyncio.create_task(
+        asyncio.to_thread(_confirm_launch_or_force_terminated, agent_id, attempt_session)
+    )
     _pending_launch_confirms.add(task)
     task.add_done_callback(_on_confirm_done)
 
