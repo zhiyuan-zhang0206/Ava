@@ -212,7 +212,7 @@ def collect_inventory(
 
 def _write_prepared_inventory(home: Path, inventory: dict[str, object]) -> Path:
     """Seal expected facts outside the image; this is not post-stop collection."""
-    expected = ExpectedUnitWriters.model_validate(inventory["expected"])
+    expected = ExpectedUnitWriters.model_validate_json(_canonical(inventory["expected"]))
     if expected.home != str(home) or home.resolve(strict=True) != home:
         raise ReleaseRejectedError("prepared inventory belongs to a different unit")
     encoded = _canonical(inventory)
@@ -266,7 +266,7 @@ def revalidate_prepared_inventory(
     current = collect_inventory(conn, release, home, machine, schema_digest=schema_digest)
     if encoded != _canonical(current):
         raise ReleaseRejectedError("prepared unit inventory no longer matches actual facts")
-    return ExpectedUnitWriters.model_validate(current["expected"])
+    return ExpectedUnitWriters.model_validate_json(_canonical(current["expected"]))
 
 
 def assert_inventory_can_enter_maintenance(path: Path) -> None:
