@@ -48,13 +48,11 @@ def test_materialize_cluster_extensions_closes_pool_on_success(
     """Materialization closes its eagerly opened worker-owning pool after use."""
     spy = _install_pool_spy(monkeypatch)
     monkeypatch.setattr(paths, "skills_dir", lambda: tmp_path)
-    monkeypatch.setattr(
-        extension_materialize,
-        "materialize_skills",
-        lambda _conn, **_kwargs: SimpleNamespace(
-            landed=[], updated=[], kept_local_edits=[], missing_blob=[]
-        ),
-    )
+
+    def _noop_materialize(_conn: object, *, _dest_root: Path) -> SimpleNamespace:
+        return SimpleNamespace(landed=[], updated=[], kept_local_edits=[], missing_blob=[])
+
+    monkeypatch.setattr(extension_materialize, "materialize_skills", _noop_materialize)
 
     materialize_cluster_extensions()
 
@@ -84,11 +82,11 @@ def test_adopt_local_extensions_closes_pool_on_success(
     """Adoption closes its eagerly opened worker-owning pool after use."""
     spy = _install_pool_spy(monkeypatch)
     monkeypatch.setattr(paths, "skills_dir", lambda: tmp_path)
-    monkeypatch.setattr(
-        extension_adopt,
-        "adopt_local_installs",
-        lambda _pool, **_kwargs: SimpleNamespace(adopted=[], missing_tree=[], conflicts=[]),
-    )
+
+    def _noop_adopt(_pool: object, *, _skills_root: Path) -> SimpleNamespace:
+        return SimpleNamespace(adopted=[], missing_tree=[], conflicts=[])
+
+    monkeypatch.setattr(extension_adopt, "adopt_local_installs", _noop_adopt)
 
     adopt_local_extensions()
 
