@@ -7617,12 +7617,13 @@ export interface components {
          *     `RECOVERED` is the fourth terminal state, and it is a distinct one rather than a
          *     shade of `ABORTED` because it answers a different operator question: the attempt
          *     failed AND the cluster is already back on a commit that works, so there is
-         *     nothing to repair — only something to know. It is reached two ways, and both are
-         *     real recoveries: the orchestration's own gateway leg rolling back to
-         *     last-known-good (written by `finish_update`), and a *later* `ava cluster
-         *     rollback` cleaning up after an orchestration that died (derived by
-         *     `read_last_update` from the observation that rollback left behind). Collapsing
-         *     it into `ABORTED` was what made the 2026-07-30 recovery read as an open incident.
+         *     nothing to repair — only something to know. It is reached three ways, and all
+         *     are real recoveries: the orchestration's own gateway leg rolling back to
+         *     last-known-good (written by `finish_update`), a *later* `ava cluster rollback`
+         *     cleaning up after an orchestration that died (derived by `read_last_update` from
+         *     the observation that rollback left behind), and an incomplete rollout whose
+         *     target becomes last-known-good after the cluster self-heals. Collapsing it into
+         *     `ABORTED` was what made the 2026-07-30 recovery read as an open incident.
          *
          *     `RUNNING` and `ORPHANED` are the two readings of a row with no recorded end, and
          *     they are told apart by the deploy lease rather than by a timeout: a rollout runs
