@@ -7,6 +7,20 @@ import sys
 import psutil
 
 
+def detached_to_known_reaper(
+    child_pid: int,
+    caller_pid: int,
+    caller_sid: int,
+    ancestor_births: set[tuple[int, float]],
+) -> bool:
+    """Accept init or a pre-existing ancestor, never the caller or unknown PID."""
+    child = psutil.Process(child_pid)
+    parent = child.parent()
+    if parent is None or parent.pid == caller_pid or os.getsid(child_pid) == caller_sid:
+        return False
+    return parent.pid == 1 or (parent.pid, parent.create_time()) in ancestor_births
+
+
 def process_evidence(pid: int) -> dict[str, object]:
     result: dict[str, object] = {"pid": pid}
     try:
