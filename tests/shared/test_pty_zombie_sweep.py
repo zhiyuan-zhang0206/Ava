@@ -38,8 +38,15 @@ def test_lazy_sweep_requires_proven_shell_exit(
         proc.status.return_value = (
             psutil.STATUS_ZOMBIE if state == "zombie" else psutil.STATUS_RUNNING
         )
-    monkeypatch.setattr(cli.psutil, "Process", lambda _pid: proc)
-    monkeypatch.setattr(SessionRecord, "identifies", lambda _self, _pid: True)
+
+    def inspect_process(_pid: int) -> Mock:
+        return proc
+
+    def matching_identity(_self: SessionRecord, _pid: int) -> bool:
+        return True
+
+    monkeypatch.setattr(cli.psutil, "Process", inspect_process)
+    monkeypatch.setattr(SessionRecord, "identifies", matching_identity)
 
     listed = cli.live_sessions(prefix=name)
     assert bool(listed) is (state == "running")
