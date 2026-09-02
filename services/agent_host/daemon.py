@@ -51,6 +51,7 @@ import logging
 import os
 import signal
 import sys
+import time
 from typing import cast
 
 import psycopg
@@ -119,6 +120,96 @@ def _runner_mode() -> str:
         return str(settings.daemon.runner_mode)
     except Exception:  # see the docstring: unreadable means process, always
         return "process"
+
+
+# How long a roster-gated service gets to drain after our SIGTERM before the
+# host gives up and leaves the stop to the watchdog's own round.
+_STRAY_STOP_GRACE_S = 20.0
+
+
+def _daemon_module(cmd: str) -> str | None:
+    """The ``python -m`` module a service command runs, if it runs one."""
+    marker = "-m "
+    if marker not in cmd:
+        return None
+    return cmd.split(marker, 1)[1].split(maxsplit=1)[0]
+
+
+def _stop_stray_mode_gated_services() -> None:
+    """Hosted bring-up reconcile: stop roster-gated process services still running.
+
+    The ops roster is the primary control — on a hosted runner ``restarter`` is
+    disabled and the watchdog will not respawn it (``ops/spec.py:_gate_reason``).
+    But the roster only stops a service on the watchdog's own round, and two
+    2026-09-02 rollouts restarted the restarter on this hosted box anyway
+    (pids 10113 / 60380): for minutes each it reaped healthy hosted-agent rows
+    every 30s before the round caught up. An agent-host about to become the
+    box's only agent supervisor cannot share it with such a service, so the
+    host stops them itself, at bring-up, before it opens the pool or the
+    dispatcher.
+
+    The stop set is derived, never hard-coded: every service whose roster gate
+    reason is a runner-mode exclusion for the CURRENT mode (``hosted``) and
+    whose daemon is verifiably running (pidfile + argv identity) receives a
+    graceful SIGTERM. Today that set is exactly {``restarter``}; a future
+    process-form service with the same mode exclusion falls under the same
+    rule. Config-toggle gates ("AVA_*_ENABLED off") do not match the
+    mode-exclusion prefix and are left alone — those services are off for
+    operator reasons, not because the mode forbids them.
+
+    Never raises: an unreadable roster or pidfile must not block the host from
+    serving agents. If a stop has not landed within ``_STRAY_STOP_GRACE_S`` the
+    watchdog round remains the backstop — it re-checks the roster every round
+    and stops the stray itself.
+    """
+    try:
+        from ops.spec import _gate_reason, build_services
+    except Exception:
+        _log.exception("[agent-host] roster reconcile: cannot read ops roster, skipping")
+        return
+    mode = _runner_mode()
+    for spec in build_services():
+        if spec.pidfile is None:
+            continue
+        reason = _gate_reason(spec)
+        if not reason or not reason.startswith("disabled (AVA_RUNNER_MODE is"):
+            continue
+        if mode not in reason:
+            continue
+        module = _daemon_module(spec.cmd)
+        if module is None or not pidfile_holds_daemon(spec.pidfile, module):
+            continue
+        try:
+            pid = int(spec.pidfile.read_text().strip())
+        except (OSError, ValueError):
+            _log.warning(
+                "[agent-host] roster reconcile: %s looks running but its pidfile is unreadable",
+                spec.session,
+            )
+            continue
+        _log.warning(
+            "[agent-host] roster reconcile: %s is roster-disabled in %s mode but still running "
+            "(pid %s) — SIGTERM before serving agents",
+            spec.session,
+            mode,
+            pid,
+        )
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        deadline = time.monotonic() + _STRAY_STOP_GRACE_S
+        while time.monotonic() < deadline:
+            if not pidfile_holds_daemon(spec.pidfile, module):
+                return
+            time.sleep(0.5)
+        _log.warning(
+            "[agent-host] roster reconcile: %s (pid %s) still up after %ss grace — "
+            "leaving it to the watchdog round",
+            spec.session,
+            pid,
+            _STRAY_STOP_GRACE_S,
+        )
 
 
 # Plugin-discovery watchdog (issue #170): the host loads external plugins
@@ -293,6 +384,12 @@ async def run() -> None:
     if not acquire_pidfile(_PIDFILE, _MODULE):
         _log.info("[agent-host] could not acquire pidfile %s, exiting", _PIDFILE)
         sys.exit(1)
+
+    # Boot order step 2.5 (see the module docstring): the host is about to
+    # become this box's only agent supervisor — stop roster-gated process
+    # services (the restarter) before the pool or dispatcher exists, so no
+    # window opens for them to reap hosted rows during our bring-up.
+    _stop_stray_mode_gated_services()
 
     from agent._process_boot import (
         init_process_scope,
