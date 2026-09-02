@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands import _repo
+from shared.platform import IS_WINDOWS
 
 
 def _make_repo(tmp_path: Path, lock_body: str) -> Path:
@@ -34,11 +35,17 @@ def fake_npm_ci(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     calls: list[Path] = []
 
     def _run(
-        cmd, cwd, check, shell=False
+        cmd: list[str],
+        cwd: str,
+        check: bool,
+        shell: bool = False,
+        env: dict[str, str] | None = None,
     ):  # test stub mirrors subprocess.run signature (shell=IS_WINDOWS for npm.cmd)
+        del check, shell
         assert cmd == ["npm", "ci"]
-        (Path(cwd) / "node_modules").mkdir(exist_ok=True)  # pyright: ignore[reportUnknownArgumentType]
-        calls.append(Path(cwd))  # pyright: ignore[reportUnknownArgumentType]
+        assert env is not None
+        (Path(cwd) / "node_modules").mkdir(exist_ok=True)
+        calls.append(Path(cwd))
 
     monkeypatch.setattr(_repo.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
     return calls
@@ -50,6 +57,42 @@ def test_installs_when_node_modules_missing(tmp_path: Path, fake_npm_ci: list[Pa
     assert fake_npm_ci == [repo / "ui" / "web"]
     # stamp written so the next call is a noop
     assert (repo / "ui" / "web" / "node_modules" / ".ava-lock-hash").is_file()
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="POSIX toolchain paths are injected only on POSIX")
+def test_npm_ci_injects_toolchain_path_from_a_minimal_non_login_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ava start` must find npm without a shell profile adding Homebrew's bin."""
+    from shared import session_env
+
+    repo = _make_repo(tmp_path, '{"lock": 1}')
+    captured: dict[str, str] = {}
+
+    def _run(
+        cmd: list[str],
+        cwd: str,
+        check: bool,
+        shell: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        del check, shell
+        assert cmd == ["npm", "ci"]
+        assert env is not None
+        captured.update(env)
+        (Path(cwd) / "node_modules").mkdir(exist_ok=True)
+
+    monkeypatch.setattr(session_env.os, "environ", {"PATH": "/usr/bin:/bin"})
+    monkeypatch.setattr(_repo.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
+
+    _repo._ensure_frontend_deps(repo)
+
+    assert captured["PATH"].split(":")[:4] == [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ]
 
 
 def test_skips_when_stamp_matches_lockfile(tmp_path: Path, fake_npm_ci: list[Path]) -> None:
