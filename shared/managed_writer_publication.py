@@ -121,8 +121,14 @@ def begin_pending_publication(
     proposed = WriterPublication(current=state.current, pending=pending)
     if {(unit.machine, unit.home) for unit in pending.units} != registered:
         raise ManagedWriterBarrierError("prepared publication omits registered units")
-    if state.pending is not None and state.pending != pending:
-        raise ManagedWriterBarrierError("another pending publication requires explicit recovery")
+    if state.pending is not None:
+        if state.pending.model_copy(update={"collection": None}) != pending:
+            raise ManagedWriterBarrierError(
+                "another pending publication requires explicit recovery"
+            )
+        # A same-operation prepare retry must not erase evidence already adopted
+        # after stop. Continue from durable state, not from the caller's old copy.
+        return
     _store(conn, proposed)
 
 
