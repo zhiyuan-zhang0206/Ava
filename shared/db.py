@@ -580,7 +580,9 @@ def insert_inbound_message(
         real time (spec §5).
     """
     from shared.caller_identity import caller_payload
+    from shared.envelope import reject_unnegotiated_caller
 
+    reject_unnegotiated_caller(source)
     payload = caller_payload(source, payload)
     # Map inbound kind → lifecycle event_type. Only chat messages between
     # agents produce a 'send_message' event; user→agent chat is not an

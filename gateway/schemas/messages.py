@@ -18,7 +18,7 @@ from pydantic import (
 
 from ops.rpc_schemas import _UserContent
 from shared.agents import AgentStatus
-from shared.envelope import validate_source
+from shared.envelope import validate_writable_source
 from shared.message_kwargs import NoteTag
 from shared.priority import Priority
 
@@ -117,7 +117,7 @@ class SystemNoteIn(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_envelope_source(cls, v: str) -> str:
-        validate_source(v)
+        validate_writable_source(v)
         return v
 
     @model_validator(mode="after")

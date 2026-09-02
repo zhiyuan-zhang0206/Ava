@@ -90,6 +90,26 @@ def validate_source(source: str) -> None:
     )
 
 
+def validate_writable_source(source: str) -> None:
+    """Reject v1 writes until target runtime capability negotiation exists.
+
+    Reader support alone is not evidence that the target consumer understands
+    the format. This fence also covers manually supplied sources during a mixed
+    deployment. Do not replace it with a global flag or an installed commit.
+    """
+    validate_source(source)
+    reject_unnegotiated_caller(source)
+
+
+def reject_unnegotiated_caller(source: str) -> None:
+    """Fence the new protocol without redefining legacy internal source formats."""
+    if source.startswith(_CALLER_PREFIXES):
+        raise ValueError(
+            "caller identity v1 writes are not enabled: target runtime protocol "
+            "capability must be confirmed before delivery; do not substitute user/system/agent"
+        )
+
+
 def wrap_inbound(content: str, source: str, *, created_at: datetime | None = None) -> str:
     """Dispatch envelope wrap by source.
 

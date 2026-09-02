@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from shared.envelope import validate_source
+from shared.envelope import validate_writable_source
 
 _MAX_CONTENT_CHARS = 1_000_000
 """Prompt/reply content needs a memory-abuse guardrail, not a 64 KiB wire contract.
@@ -147,7 +147,7 @@ class SpawnAgentRequest(BaseModel):
         # Same legal set as the claim-side wrap — single-sourced via
         # shared.envelope.validate_source.
         if self.prompt_source is not None:
-            validate_source(self.prompt_source)
+            validate_writable_source(self.prompt_source)
         return self
 
 
@@ -169,6 +169,13 @@ class LaunchAgentRequest(BaseModel):
     prompt: str | None = None
     prompt_source: str | None = None
     label: str | None = None
+
+    @field_validator("prompt_source")
+    @classmethod
+    def _check_prompt_source(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_writable_source(value)
+        return value
 
 
 class SpawnedAgent(BaseModel):
@@ -217,7 +224,7 @@ class ResurrectAgentRequest(BaseModel):
     @field_validator("resurrected_by")
     @classmethod
     def _check_envelope_source(cls, v: str) -> str:
-        validate_source(v)
+        validate_writable_source(v)
         return v
 
 
@@ -246,7 +253,7 @@ class AgentMessageIn(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_envelope_source(cls, v: str) -> str:
-        validate_source(v)
+        validate_writable_source(v)
         return v
 
     @model_validator(mode="after")
@@ -281,6 +288,12 @@ class TerminateAgentRequest(BaseModel):
     force: bool = Field(default=False)
     source: str = Field(default="user", min_length=1, max_length=64)
 
+    @field_validator("source")
+    @classmethod
+    def _check_source(cls, value: str) -> str:
+        validate_writable_source(value)
+        return value
+
 
 class TerminateAgentResponse(BaseModel):
     """POST /api/agents/{id}/terminate response.
@@ -314,6 +327,12 @@ class RestartAgentRequest(BaseModel):
 
     source: str = Field(default="user", min_length=1, max_length=64)
     config_overlay: dict[str, object] | None = None
+
+    @field_validator("source")
+    @classmethod
+    def _check_source(cls, value: str) -> str:
+        validate_writable_source(value)
+        return value
 
     @model_validator(mode="after")
     def _validate_config_overlay(self) -> "RestartAgentRequest":

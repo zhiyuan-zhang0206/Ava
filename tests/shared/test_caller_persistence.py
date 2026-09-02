@@ -15,7 +15,11 @@ _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
 
 def test_chat_insert_and_reconcile_persist_same_structured_identity(
     db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Exercise future admitted-write storage separately from today's closed
+    # rollout fence; the tests below assert the real fence rejects every write.
+    monkeypatch.setattr("shared.chat_delivery.reject_unnegotiated_caller", lambda _source: None)
     agent_id = create_agent(db_conn)
     key = str(uuid4())
     receipt = insert_chat_inbound_once(
@@ -42,7 +46,11 @@ def test_chat_insert_and_reconcile_persist_same_structured_identity(
     assert not reconciled.inserted
 
 
-def test_lifecycle_insert_persists_structured_identity(db_conn: psycopg.Connection) -> None:
+def test_lifecycle_insert_persists_structured_identity(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("shared.envelope.reject_unnegotiated_caller", lambda _source: None)
     agent_id = create_agent(db_conn)
     inbound_id = insert_inbound_message(db_conn, agent_id, "", _SOURCE, kind="restart")
     with db_conn.cursor() as cur:
@@ -79,3 +87,23 @@ def test_single_and_batch_audit_carry_structured_identity(monkeypatch: pytest.Mo
     for call in emit.call_args_list:
         assert call.kwargs["attributes"]["caller_identity"] == _CALLER
         assert "auth_principal" not in call.kwargs["attributes"]
+
+
+def test_internal_chat_and_lifecycle_writes_cannot_bypass_rollout_fence(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = create_agent(db_conn)
+    with pytest.raises(ValueError, match="target runtime protocol"):
+        insert_chat_inbound_once(
+            db_conn,
+            agent_id=agent_id,
+            content="hello",
+            source=_SOURCE,
+            payload=None,
+            client_message_id=str(uuid4()),
+        )
+    with pytest.raises(ValueError, match="target runtime protocol"):
+        insert_inbound_message(db_conn, agent_id, "", _SOURCE, kind="restart")
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,))
+        assert cur.fetchone() == (0,)
