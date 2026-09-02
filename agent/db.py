@@ -155,11 +155,23 @@ async def claim_inbound_batch(
         await lock_inbound_owner(conn, agent_id)
         await cur.execute("SELECT runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
         runtime = await cur.fetchone()
-        process_owned = runtime == ("process",)
-        if process_owned:
-            from agent.lifecycle_intent import accept_lifecycle_intent
+        runtime_owned = runtime in (("process",), ("hosted",))
+        if runtime_owned:
+            from agent.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
+            from shared.runtime_incarnation import current_incarnation
 
             command = await accept_lifecycle_intent(conn, agent_id)
+            token = current_incarnation(agent_id)
+            if (
+                command is not None
+                and token is not None
+                and (command.generation != token.generation or command.owner != token.owner)
+            ):
+                if not await settle_superseded_intent(conn, command):
+                    raise RuntimeError(
+                        "replacement cannot execute or settle the prior lifecycle target"
+                    )
+                command = await accept_lifecycle_intent(conn, agent_id)
             if command is not None:
                 await cur.execute(
                     "SELECT id,agent_id,content,kind,source,payload,created_at,claimed_at "
@@ -186,7 +198,7 @@ async def claim_inbound_batch(
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"
             ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at",
-            (agent_id, process_owned),
+            (agent_id, runtime_owned),
         )
         rows = await cur.fetchall()
     rows.sort(key=lambda r: r[6])  # created_at FIFO (index follows SELECT column count)
