@@ -49,6 +49,9 @@ class SessionRecord:
     PTYs use their allocation, admitted agent records their runtime incarnation.
     It is a derived observation, not permission to claim work or signal a PID.
     Legacy and other service records leave it null.
+    On Windows a Python venv redirector can be the native session/group control
+    PID while agents_meta.pid remains the admitted interpreter child. Publication
+    must verify that direct wrapper ancestry and birth identity, never guess it.
     """
 
     pid: int

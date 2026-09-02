@@ -15,9 +15,29 @@ import psutil
 
 from shared.cluster import session_name
 from shared.paths import run_dir
-from shared.platform import file_lock
+from shared.platform import IS_WINDOWS, file_lock
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.session_record import SessionRecord, pid_starttime_ticks
+
+
+def _session_control_process(current: psutil.Process) -> psutil.Process:
+    """Windows venv redirectors own the native Ctrl-Break group, not their child.
+
+    The database still owns the actual admitted Python PID. Only the observation
+    used by the native session backend retains the verified redirector identity.
+    Unknown ancestry is a publication failure, never permission to guess a group.
+    """
+    if not IS_WINDOWS or Path(current.exe()).resolve() == Path(sys.executable).resolve():
+        return current
+    parent = current.parent()
+    if (
+        parent is None
+        or Path(parent.exe()).resolve() != Path(sys.executable).resolve()
+        or parent.cmdline()[1:] != sys.orig_argv[1:]
+        or current.ppid() != parent.pid
+    ):
+        raise RuntimeError("Windows Python redirector session identity is unproven")
+    return parent
 
 
 def _may_replace(record: SessionRecord, current: psutil.Process) -> bool:
@@ -50,7 +70,7 @@ def publish_admitted_session(incarnation: RuntimeIncarnation) -> None:
     it never waits for another process to exit.
     """
     path = run_dir() / "sessions" / f"{session_name(f'agent-{incarnation.agent_id}')}.json"
-    current = psutil.Process(os.getpid())
+    current = _session_control_process(psutil.Process(os.getpid()))
     with file_lock(path.with_suffix(".admission.lock"), timeout_s=1.0):
         previous = SessionRecord.read(path)
         if previous is None and path.exists():
