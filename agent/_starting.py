@@ -136,9 +136,12 @@ def claim_agent_row(agent_id: int, *, restart_command_id: int | None = None) -> 
             ),
         )
         if cur.rowcount != 1:
+            cur.execute("SELECT status,pid,runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
+            observed = cur.fetchone()
             raise RuntimeError(
                 f"agent --agent-id {agent_id}: agents row is no longer an unclaimed idling row "
-                f"(rowcount={cur.rowcount}); another process or lifecycle operation won the race."
+                f"(rowcount=0, observed={observed!r}); "
+                "another process or lifecycle operation won the race."
             )
         from agent.lifecycle_observe import observe_process_admission
         from agent.session_admission import publish_admitted_session
