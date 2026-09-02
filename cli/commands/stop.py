@@ -401,6 +401,12 @@ def _do_stop(
     if not _confirm_stop(require_confirmation=require_confirmation):
         return 0
 
+    # A deliberate stop must revoke the prior start's recovery authority before
+    # any daemon has a chance to observe its own shutdown or a dead peer.
+    from shared import start_serving
+
+    start_serving.clear_serving()
+
     if announce:
         _announce_stopping()
 

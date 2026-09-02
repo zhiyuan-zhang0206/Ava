@@ -154,6 +154,14 @@ def _fresh_controller(pool: ConnectionPool | MagicMock) -> wedged_mod.WedgedAgen
     return controller
 
 
+@pytest.fixture(autouse=True)
+def _host_is_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing controller cases model a host that passed its start gate."""
+    from shared import start_serving
+
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+
+
 class TestGuards:
     def test_role_gate_skips_non_agent_runner(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -199,6 +207,37 @@ class TestGuards:
         controller = _fresh_controller(MagicMock())
         result = controller.reconcile("agent-runner")
         assert not result.acted
+
+    def test_not_serving_defers_recovery_but_keeps_zombie_cleanup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed start may reap terminated zombies but cannot relaunch work."""
+        from shared import start_serving
+
+        monkeypatch.setattr(settings.daemon, "wedged_agent_enabled", True)
+        monkeypatch.setattr(start_serving, "is_serving", lambda: False)
+        monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
+        monkeypatch.setattr(
+            wedged_mod,
+            "_claim_wedged_candidates",
+            lambda *_args, **_kwargs: pytest.fail("must not claim a recovery before serving"),
+        )
+        monkeypatch.setattr(
+            wedged_mod,
+            "_claim_terminated_lease_zombies",
+            lambda *_args, **_kwargs: [(7, 1234)],
+        )
+        reaped: list[int] = []
+        monkeypatch.setattr(
+            wedged_mod,
+            "_reap_terminated_lease_zombie",
+            lambda _pool, agent_id, _pid: reaped.append(agent_id) or True,
+        )
+
+        result = _fresh_controller(MagicMock()).reconcile("agent-runner")
+
+        assert result.acted is True
+        assert reaped == [7]
 
 
 class TestRecovery:

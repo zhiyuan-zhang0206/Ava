@@ -895,6 +895,32 @@ def test_stop_proceeds_on_yes(
     assert len(infra_stops) == 1, "stop must stop this cluster's pg/redis once"
 
 
+def test_stop_revokes_serving_before_stopping_sessions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A deliberate stop removes recovery authority before daemons unwind."""
+    from cli.commands import stop as stop_mod
+    from shared import start_serving
+
+    path = tmp_path / "start-serving.json"
+    monkeypatch.setattr(start_serving, "state_path", lambda: path)
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
+    monkeypatch.setattr(stop_mod, "_compute_stop_scope", lambda **_kw: ([], False, True))
+    monkeypatch.setattr(stop_mod, "_print_stop_plan", lambda *_args, **_kw: None)
+    monkeypatch.setattr(stop_mod, "_stop_data_plane", lambda **_kw: None)
+    monkeypatch.setattr(stop_mod, "_reap_orphan_step", lambda *_args, **_kw: None)
+    observed: list[bool] = []
+    monkeypatch.setattr(
+        stop_mod,
+        "_stop_sessions",
+        lambda *_args, **_kw: observed.append(start_serving.is_serving()),
+    )
+
+    assert stop_mod._do_stop(tmp_path, graceful=False, require_confirmation=False) == 0
+    assert observed == [False]
+
+
 def test_do_stop_keep_infra_skips_infra_teardown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

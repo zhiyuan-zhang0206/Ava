@@ -730,6 +730,14 @@ def _confirm_launch(_agent_id: int) -> bool:
     return True
 
 
+@pytest.fixture(autouse=True)
+def _host_is_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Controller cases start from a host that already passed its start gate."""
+    from shared import start_serving
+
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+
+
 class TestControllerReconcile:
     @pytest.fixture(autouse=True)
     def _tune(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -939,6 +947,39 @@ class TestBootRevivePass:
         assert result.acted is True
         assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
         assert _last_resurrect_at(db_conn, aid) is not None
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def test_boot_pass_defers_until_the_host_is_serving(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A failed start leaves involuntary corpses available for its successor.
+
+        Removing the serving gate would relaunch the corpse in the first pass;
+        marking the boot pass done while deferred would strand it in the second.
+        """
+        from shared import start_serving
+
+        serving = False
+        monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
+        aid = _corpse(db_conn, source="reaper")
+        launched_agents.clear()
+        controller = cr.CrashResurrectController(sync_pool)
+
+        result = controller.reconcile("agent-runner")
+
+        assert result.acted is False
+        assert _row(db_conn, aid) == ("terminated", "reaper")
+        assert launched_agents == []
+
+        serving = True
+        result = controller.reconcile("agent-runner")
+
+        assert result.acted is True
+        assert _row(db_conn, aid) == ("idling", None)
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
     def test_boot_pass_excludes_explicit_termination(

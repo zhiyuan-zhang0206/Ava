@@ -191,6 +191,9 @@ class ScheduleManager:
             if schedule_id in known
         }
         now = time.monotonic()
+        from shared import start_serving
+
+        recovery_allowed = start_serving.is_serving()
 
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
@@ -217,6 +220,8 @@ class ScheduleManager:
         for sid in enabled - live:
             if status[sid] in ("completed", "error"):
                 self._backoff.pop(sid, None)  # terminal — clear any prior backoff
+                continue
+            if not recovery_allowed:
                 continue
             count, deadline = self._backoff.get(sid, (0, 0.0))
             if now < deadline:
