@@ -146,6 +146,13 @@ class WindowsJob:
     def closed(self) -> bool:
         return self._handle is None
 
+    @property
+    def handle(self) -> int:
+        """Borrow the non-inheritable handle for atomic process-creation attributes."""
+        if self._handle is None:
+            raise RuntimeError("cannot borrow a closed Job Object")
+        return self._handle
+
     def assign(self, proc: subprocess.Popen[bytes]) -> None:
         """Attach ``proc`` through Popen's already-open process handle."""
         handle = self._handle

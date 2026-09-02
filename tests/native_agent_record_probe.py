@@ -25,6 +25,40 @@ from shared.session_record import SessionRecord
 
 
 class NativeAgentRecordOrdering(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows atomic helper family containment")
+    def test_atomic_job_timeout_removes_redirector_and_actual_helper(self) -> None:
+        import subprocess
+
+        from shared.winjob_spawn import run_job_process
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            evidence, late = home / "family.json", home / "late"
+            script = (
+                "import json,os,time;import psutil;from pathlib import Path;"
+                "p=psutil.Process();"
+                f"Path({str(evidence)!r}).write_text(json.dumps("
+                "[(p.pid,p.create_time()),(p.ppid(),p.parent().create_time())]));"
+                f"time.sleep(4);Path({str(late)!r}).write_text('late action')"
+            )
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run_job_process([sys.executable, "-I", "-c", script], timeout=2)
+            self.assertTrue(evidence.exists(), "actual helper never started")
+            identities = json.loads(evidence.read_text())
+            self.assertNotEqual(identities[0][0], identities[1][0], "redirector path not exercised")
+            for pid, birth in identities:
+                try:
+                    process = psutil.Process(pid)
+                except psutil.NoSuchProcess:
+                    continue
+                if process.create_time() == birth:
+                    self.assert_process_exited(process)
+            time.sleep(2.2)
+            self.assertFalse(late.exists(), "timed-out family performed a late action")
+            sys.stdout.write(
+                json.dumps({"atomic_job_timeout_family": identities, "late": False}) + "\n"
+            )
+
     @unittest.skipUnless(os.name == "nt", "Windows bounded non-cooperative stop")
     def test_noncooperative_handler_requires_bounded_force_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -76,13 +110,15 @@ class NativeAgentRecordOrdering(unittest.TestCase):
             patch.object(winproc, "_record_path", return_value=Path("/unused/test.json")),
         ):
             with (
-                patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("helper", 5)),
+                patch.object(
+                    winproc, "run_job_process", side_effect=subprocess.TimeoutExpired("helper", 5)
+                ),
                 self.assertRaises(subprocess.TimeoutExpired),
             ):
                 winproc.graceful_signal("test")
             result = subprocess.CompletedProcess([], 1, "", "identity changed")
             with (
-                patch.object(subprocess, "run", return_value=result),
+                patch.object(winproc, "run_job_process", return_value=result),
                 self.assertRaisesRegex(RuntimeError, "identity changed"),
             ):
                 winproc.graceful_signal("test")
