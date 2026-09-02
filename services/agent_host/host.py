@@ -105,7 +105,8 @@ This module runs turns. The rest of the agent lifecycle is hosted-aware:
   in-flight turn on SIGTERM (`cli/commands/_update_quiesce.py`). The roster
   gates the process-mode restarter off while this host runs (`ops/spec.py`).
 
-The lease renewer and the lease-zombie reaper remain process-mode machinery
+The existing host health beat renews owner-bound leases for busy and idle
+hosted incarnations. The lease-zombie reaper remains process-mode machinery
 (gated off a hosted cluster with the restarter); the hibernation chain
 (controller, status, SIGUSR1 path, endpoint, config keys) was deleted
 (2026-08, Task #1976).
@@ -124,6 +125,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
+from uuid import uuid4
 
 import psycopg
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -134,7 +136,13 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent._process_boot import boot_agent_scope
 from agent._runloop import _graph_config
-from agent.db import LoggingConnectionPool, flip_hosted_status
+from agent.db import LoggingConnectionPool
+from agent.hosted_ownership import (
+    admit_hosted_runtime,
+    release_hosted_owner,
+    renew_hosted_owner,
+    settle_hosted_runtime,
+)
 from agent.lifecycle import _notify_exit
 from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
@@ -146,12 +154,14 @@ from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
 from shared.db import PG_KEEPALIVE_KWARGS
+from shared.db_transaction import async_write_transaction
 from shared.event_publisher import AgentEventPublisher
 from shared.lm.factory import validate_model_config
 from shared.log import logger
 from shared.machine import machine_name
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 from shared.redis_client import get_async_redis
+from shared.runtime_incarnation import current_incarnation
 from shared.trace import turn_span
 from shared.turn_identity import bind_turn_identity
 
@@ -249,23 +259,20 @@ class HostStats:
 async def settle_stale_running_rows(pool: AsyncConnectionPool, machine: str) -> list[int]:
     """Restore rows left running by a previous hosted-runner instance.
 
-    Hosted rows have no per-agent pid, so a running row without one at host boot
-    cannot own a live task. Soft-CAS each candidate because a concurrent
-    lifecycle operation may have claimed it while this scan was in progress.
+    A pidless row may belong to another live host instance. Only unknown or
+    expired hosted ownership licenses this atomic startup status settlement.
     """
-    async with pool.connection() as conn:
+    async with async_write_transaction(pool) as conn:
         rows = await (
             await conn.execute(
-                "SELECT id FROM agents_meta "
-                "WHERE status = 'running' AND pid IS NULL AND machine = %s",
+                "UPDATE agents_meta SET status = 'idling' "
+                "WHERE status = 'running' AND pid IS NULL AND machine = %s "
+                "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
+                "AND (lease_expires_at IS NULL OR lease_expires_at <= now()) RETURNING id",
                 (machine,),
             )
         ).fetchall()
-    settled: list[int] = []
-    for row in rows:
-        agent_id = row[0]
-        if await flip_hosted_status(pool, agent_id, "idling", expected_from="running"):
-            settled.append(agent_id)
+    settled = [row[0] for row in rows]
     logger.info(
         "hosted stale-running settle: settled {n} row(s)",
         event="host_stale_running_settled",
@@ -293,6 +300,7 @@ class AgentHost:
         self._checkpointer = checkpointer
         self._graph = graph
         self._machine = machine if machine is not None else machine_name()
+        self._owner = uuid4()
         self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
         self._rejected_configs: dict[int, str] = {}
         # Agents with a turn in flight right now. Eviction skips them: a running
@@ -350,10 +358,10 @@ class AgentHost:
                 return
             self._rejected_configs.pop(agent_id, None)
             self.stats.turns_started += 1
-            running = await flip_hosted_status(
-                self._pool, agent_id, "running", expected_from=stored.status
+            incarnation = await admit_hosted_runtime(
+                self._pool, agent_id, self._machine, self._owner, expected_from=stored.status
             )
-            if not running:
+            if incarnation is None:
                 logger.info(
                     "hosted turn for agent {agent_id} not started — row left {status} "
                     "(concurrent lifecycle op); skipping",
@@ -369,7 +377,7 @@ class AgentHost:
             # `turn_settings.lm.llm_model`, which is only this agent's model
             # while the config bind is in effect.
             with (
-                bind_turn_identity(agent_id),
+                bind_turn_identity(agent_id, incarnation=incarnation),
                 bind_agent_config(pins),
                 bind_agent_plugin_config(plugin_pins),
             ):
@@ -388,9 +396,7 @@ class AgentHost:
                 finally:
                     self._in_flight.discard(agent_id)
                     if not exited:
-                        await flip_hosted_status(
-                            self._pool, agent_id, "idling", expected_from="running"
-                        )
+                        await settle_hosted_runtime(self._pool, incarnation)
 
     # ── locality / runnability ───────────────────────────────────────────────
 
@@ -699,6 +705,10 @@ class AgentHost:
                     turns=turn,
                 )
                 self.drop_agent(agent_id)
+                incarnation = current_incarnation(agent_id)
+                if incarnation is None:
+                    raise RuntimeError("hosted restart has no admitted incarnation")
+                await settle_hosted_runtime(self._pool, incarnation, release=True)
                 return False
             if result["turn_idle"]:
                 return False
@@ -708,6 +718,11 @@ class AgentHost:
         """Drop every cached runtime. The pool, checkpointer and graph belong to
         the daemon that built them and are closed there."""
         self._runtimes.clear()
+        await release_hosted_owner(self._pool, self._machine, self._owner, self._in_flight)
+
+    async def renew_ownership(self) -> None:
+        """Existing daemon health beat also proves idle runtime responsibility."""
+        await renew_hosted_owner(self._pool, self._machine, self._owner)
 
 
 def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:

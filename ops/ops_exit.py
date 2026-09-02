@@ -203,7 +203,8 @@ def _mark_exited_blocking(
                 "WHERE id = %s AND status IN (%s, %s) "
                 "AND runtime_generation IS NOT DISTINCT FROM %s "
                 "AND runtime_owner IS NOT DISTINCT FROM %s "
-                "AND (runtime_kind IS NULL OR (runtime_kind = 'process' AND pid IS NOT NULL))",
+                "AND (runtime_kind IS NULL OR runtime_kind = 'hosted' "
+                "OR (runtime_kind = 'process' AND pid IS NOT NULL))",
                 (
                     AgentStatus.TERMINATED,
                     agent_id,

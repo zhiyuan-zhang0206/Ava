@@ -31,7 +31,9 @@ def bind_process_incarnation(incarnation: RuntimeIncarnation) -> None:
 
 
 def current_incarnation(agent_id: int) -> RuntimeIncarnation | None:
-    incarnation = _current
+    from shared.turn_identity import current_turn_incarnation
+
+    incarnation = current_turn_incarnation() or _current
     if incarnation is not None and incarnation.agent_id != agent_id:
         raise RuntimeError("runtime incarnation belongs to a different agent")
     return incarnation
