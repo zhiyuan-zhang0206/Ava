@@ -432,26 +432,53 @@ def test_guard_editable_install_leaves_healthy_records_byte_identical(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
-def test_editable_site_packages_write_window_opens_then_restores_directory(
+def test_editable_pth_write_window_allows_atomic_replacement_and_restores_modes(
     tmp_path: Path,
 ) -> None:
-    """Directory protection blocks uv's atomic replacement except in its narrow window."""
+    """Only the sanctioned window opens a protected uv replacement boundary."""
     source_root = tmp_path / "prod" / "source"
     pth = _write_pth(source_root, source_root)
     site_packages = pth.parent
     site_packages.chmod(0o555)
-    replacement = tmp_path / "replacement.pth"
-    replacement.write_text("replacement")
+    pth.chmod(0o444)
 
     with pytest.raises(PermissionError):
-        replacement.replace(pth)
+        pth.unlink()
 
-    with editable_install.editable_site_packages_write_window(source_root):
+    with editable_install.editable_pth_write_window(source_root):
         assert stat.S_IMODE(site_packages.stat().st_mode) == 0o755
+        assert stat.S_IMODE(pth.stat().st_mode) == 0o644
+        pth.unlink()
+        replacement = pth.with_name(f".{pth.name}.tmp")
+        replacement.write_text("replacement")
         replacement.replace(pth)
 
     assert pth.read_text() == "replacement"
     assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555
+    assert stat.S_IMODE(pth.stat().st_mode) == 0o444
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
+def test_editable_site_packages_dirs_finds_protected_directory_without_ava_records(
+    tmp_path: Path,
+) -> None:
+    """A partial sync cannot hide its protected directory by deleting records."""
+    source_root = tmp_path / "prod" / "source"
+    site_packages = source_root / ".venv" / "lib" / "python3.12" / "site-packages"
+    site_packages.mkdir(parents=True)
+    site_packages.chmod(0o555)
+
+    assert editable_install.editable_site_packages_dirs(source_root) == (site_packages,)
+
+
+def test_write_window_skips_path_that_disappears_before_entry(tmp_path: Path) -> None:
+    """A venv recreation race cannot abort the sync before it starts."""
+    vanished_path = tmp_path / "vanished.pth"
+    vanished_path.write_text("temporary")
+    vanished_path.unlink()
+
+    with editable_install._write_window((vanished_path,)):
+        pass
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
