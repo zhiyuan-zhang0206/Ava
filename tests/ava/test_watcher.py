@@ -776,13 +776,23 @@ def test_watcher_child_overrides_stale_session_identity(
 
 
 @pytest.fixture(autouse=True)
-def _clean_registry_rows(_isolated_agent: None) -> Iterator[None]:
+def _clean_registry_rows(
+    _isolated_agent: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
     """Drop this worker's watcher-registry rows after each test — the table is
     not in conftest's TRUNCATE list (it is a registry, not business data), and
     the reconcile tests leave marked rows behind by design."""
     import psycopg
 
+    from ava.shell import sessions as _sessions
     from shared.config import settings
+
+    # This module seeds many registry rows directly without creating their
+    # accompanying PTY record. Keep those unit cases in the legacy no-flip
+    # generation; focused tests override this seam to exercise the active
+    # generation boundary.
+    monkeypatch.setattr(_sessions, "_current_session_generation", lambda: None)
 
     yield
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
@@ -862,6 +872,156 @@ def test_reconcile_rebuilds_missing_cron(_agent_row: int, monkeypatch: pytest.Mo
     # old row marked rebuilt
     rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 424242]
     assert rows and rows[0]["status"] == "rebuilt"
+
+
+def test_reconcile_rebuilds_missing_current_generation_cron(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restart must restore declared cron state in the active generation (#2811)."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    register_watcher(
+        _agent_row,
+        424247,
+        kind="cron",
+        name="daily-current",
+        message="stand-up",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        generation="current-generation",
+    )
+
+    actions = watcher.reconcile()
+
+    assert any("rebuilt" in action for action in actions)
+    assert calls and calls[0][0][:2] == ("0 9 * * *", "stand-up")
+    rows = [row for row in _registry_rows(_agent_row) if row["session_id"] == 424247]
+    assert rows and rows[0]["status"] == "rebuilt"
+
+
+def test_reconcile_reaps_superseded_generation_without_rebuilding(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An old exact session is reaped history, never current desired state."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: {424248: "old-cron"})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
+    reaped: list[int] = []
+    monkeypatch.setattr(
+        _sessions,
+        "_reap",
+        lambda session_id: reaped.append(session_id) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    register_watcher(
+        _agent_row,
+        424248,
+        kind="cron",
+        name="daily-old",
+        message="stand-up",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        generation="previous-generation",
+    )
+
+    actions = watcher.reconcile()
+
+    assert reaped == [424248]
+    assert calls == []
+    assert any("superseded generation reaped" in action for action in actions)
+    rows = [row for row in _registry_rows(_agent_row) if row["session_id"] == 424248]
+    assert rows and rows[0]["status"] == "reaped"
+
+
+@pytest.mark.parametrize("kind", ["at", "launch"])
+def test_reconcile_notifies_when_a_superseded_one_shot_is_reaped(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """A generation flip may never silently discard a one-shot watcher."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher_registry import register_watcher
+
+    session_id = 424249 if kind == "at" else 424250
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: {session_id: f"old-{kind}"})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
+    monkeypatch.setattr(_sessions, "_reap", lambda _session_id: True)  # pyright: ignore[reportUnknownArgumentType]
+    sent: list[str] = []
+    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+    if kind == "at":
+        register_watcher(
+            _agent_row,
+            session_id,
+            kind=kind,
+            name="old-one-shot",
+            message="wake",
+            fires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1),
+            generation="previous-generation",
+        )
+    else:
+        register_watcher(
+            _agent_row,
+            session_id,
+            kind=kind,
+            name="old-one-shot",
+            timeout_secs=3600,
+            generation="previous-generation",
+        )
+
+    actions = watcher.reconcile()
+
+    assert any("superseded generation reaped" in action for action in actions)
+    rows = [row for row in _registry_rows(_agent_row) if row["session_id"] == session_id]
+    assert rows and rows[0]["status"] == "reaped"
+    assert sent and "marked missed" in sent[0]
+
+
+def test_spawn_binds_registry_generation_to_the_created_session_record(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The watcher row records the generation of its admitted PTY, not today's marker."""
+    from ava.shell import sessions as _sessions
+
+    class _Backend:
+        def __init__(self) -> None:
+            self.names: list[str] = []
+
+        def session_generation(self, name: str) -> str:
+            self.names.append(name)
+            return "record-generation"
+
+    backend = _Backend()
+
+    def _create_session(
+        _name: str | None = None,
+        *,
+        _cwd: str | None = None,
+        _ttl: float | None = None,
+    ) -> tuple[int, str]:
+        return 424271, "ava-agent-1-shell-424271-record-bound"
+
+    monkeypatch.setattr(
+        _sessions,
+        "_create_session",
+        _create_session,
+    )
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
+
+    watcher.launch("import ava\n", timeout=120, name="record-bound")
+
+    rows = [row for row in _registry_rows(_agent_row) if row["session_id"] == 424271]
+    assert rows and rows[0]["generation"] == "record-generation"
+    assert backend.names == ["ava-agent-1-shell-424271-record-bound"]
 
 
 def test_reconcile_drops_already_fired_one_shot_without_alert(

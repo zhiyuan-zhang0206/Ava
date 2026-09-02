@@ -45,7 +45,8 @@ class SessionRecord:
     `pid` + `starttime` are the liveness key on Linux; `create_time` is the
     compatibility fallback for legacy and Windows records. A matching process
     start-time defeats pid recycling. `cmd` / `cwd` / `started_at` are diagnostic
-    provenance.
+    provenance. `generation` binds a PTY record to the allocation generation
+    that admitted its exact session; non-PTY and legacy records leave it null.
     """
 
     pid: int
@@ -54,6 +55,7 @@ class SessionRecord:
     cwd: str
     started_at: float
     starttime: int | None = None
+    generation: str | None = None
 
     @classmethod
     def read(cls, path: Path) -> SessionRecord | None:
@@ -75,6 +77,11 @@ class SessionRecord:
             cwd=str(record.get("cwd", "")),
             started_at=float(record.get("started_at", 0.0)),
             starttime=(None if record.get("starttime") is None else int(record["starttime"])),
+            generation=(
+                record["generation"]
+                if isinstance(record.get("generation"), str) and record["generation"]
+                else None
+            ),
         )
 
     def identifies(self, pid: int) -> bool | None:

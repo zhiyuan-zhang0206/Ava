@@ -1,7 +1,7 @@
 """One detached PTY host per persistent agent shell.
 
 Usage: ``python -m shared.pty_sessions.host <name> <cwd> <envfile> <record>
-<socket> <transcript> [cmd_b64]``.
+<socket> <transcript> <generation> [cmd_b64]``.
 
 The spawner reparents this process through ``shared._reparent``. No service
 roster or infra teardown can reach it by process tree; only its ``kill`` op,
@@ -682,21 +682,22 @@ def _fork_shell(cwd: str, env: dict[str, str], cols: int, rows: int) -> tuple[in
 def main(argv: list[str] | None = None) -> int:
     """Bring up one session, serve it until it dies."""
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) not in (6, 7):
+    if len(args) not in (7, 8):
         sys.stderr.write(
-            "usage: pty_sessions.host <name> <cwd> <envfile> <record> <socket> <transcript> [cmd_b64]\n"
+            "usage: pty_sessions.host <name> <cwd> <envfile> <record> <socket> <transcript> "
+            "<generation> [cmd_b64]\n"
         )
         return 2
     name, cwd, envfile = args[0], args[1], args[2]
     rec_path, sock_file, transcript = Path(args[3]), Path(args[4]), Path(args[5])
-    cmd_b64 = args[6] if len(args) == 7 else ""
+    generation = args[6] or None
+    cmd_b64 = args[7] if len(args) == 8 else ""
 
     # A stray terminal hangup or a TERM aimed at the shell's tree must not
     # take the session down; ending a session is the kill op's job.
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-
     # stderr lands in $AVA_HOME/logs/<name>.host.log (the _reparent
     # redirect); no DB/file sinks — a session host must keep running when
     # the cluster's data plane is down, and never pays a settings build.
@@ -726,7 +727,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(envfile).unlink()
     cmd = base64.b64decode(cmd_b64.encode("ascii")).decode() if cmd_b64 else None
 
-    brought = _bring_up(name, cwd, env, cmd, rec_path, sock_file, transcript)
+    brought = _bring_up(name, cwd, env, cmd, rec_path, sock_file, transcript, generation)
     if isinstance(brought, int):
         return brought
     server, session = brought
@@ -746,13 +747,13 @@ def _bring_up(
     rec_path: Path,
     sock_file: Path,
     transcript: Path,
+    generation: str | None,
 ) -> tuple[socket.socket, PtySession] | int:
     """Bind the session socket, fork the shell, persist the record, start the
     reader. Returns (server, session), or an exit code on failure."""
     server = _bind_session_socket(sock_file, name)
     if server is None:
         return 1
-
     cols, rows = DEFAULT_COLS, DEFAULT_ROWS
     try:
         pid, master = _fork_shell(cwd, env, cols, rows)
@@ -769,7 +770,8 @@ def _bring_up(
     except psutil.NoSuchProcess:
         create_time = _DEAD_CHILD_SENTINEL
     starttime = None if create_time == _DEAD_CHILD_SENTINEL else pid_starttime_ticks(pid)
-    record = SessionRecord(pid, create_time, "/bin/bash -l -i", cwd, time.time(), starttime)
+    now = time.time()
+    record = SessionRecord(pid, create_time, "/bin/bash -l -i", cwd, now, starttime, generation)
     session = PtySession(name, pid, master, cols, rows, record, rec_path, transcript)
     write_record(
         rec_path,

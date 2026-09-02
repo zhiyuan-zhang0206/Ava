@@ -160,6 +160,10 @@ class SessionBackend(abc.ABC):
         probe timeout, misreporting a healthy host offline."""
         return {name: self.session_started_at(name) for name in names}
 
+    def session_generation(self, name: str) -> str | None:  # noqa: ARG002 — optional metadata
+        """The live session's persisted generation, when this backend has one."""
+        return None
+
     def session_log_path(self, name: str) -> Path | None:  # noqa: ARG002 — no log file for this backend
         """The file **this backend** redirects a session's output to, or None when it
         keeps no such file.
@@ -476,6 +480,12 @@ class PtySessionBackend(SessionBackend):
         except OSError:
             return super().session_started_ats(names)
         return {name: (live[name].started_at if name in live else None) for name in names}
+
+    def session_generation(self, name: str) -> str | None:
+        """The live PTY record's flip generation, or None for legacy records."""
+        from shared.pty_sessions.cli import session_generation
+
+        return session_generation(name)
 
     def session_log_path(self, name: str) -> Path | None:
         return logs_dir() / f"{name}.out.log"

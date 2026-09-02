@@ -231,6 +231,36 @@ def test_register_cron_atomic_ignores_dead_duplicate() -> None:
     assert rows == {2004, 2005}
 
 
+def test_register_cron_atomic_does_not_reuse_superseded_generation() -> None:
+    """A current cron must not adopt a live exact session from a prior flip."""
+    wr.register_watcher(
+        42,
+        20041,
+        kind="cron",
+        name="daily",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        generation="previous-generation",
+    )
+
+    reused = wr.register_cron_atomic(
+        42,
+        20042,
+        name="daily",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=None,
+        alive_provider=lambda: {20041},
+        generation="current-generation",
+    )
+
+    assert reused is None
+    rows = {row["session_id"]: row["generation"] for row in wr.watcher_rows(agent_id=42)}
+    assert rows == {20041: "previous-generation", 20042: "current-generation"}
+
+
 def test_register_cron_atomic_schedule_scoped() -> None:
     """The dedupe key is the full schedule: a different timezone or end time
     is a different watcher and does not block; a standing cron (NULL end) and
