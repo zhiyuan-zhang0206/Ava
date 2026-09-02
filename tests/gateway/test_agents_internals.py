@@ -2341,6 +2341,7 @@ class TestStderrLogsDir:
             lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         _fake_launch_supervisor(monkeypatch)
+        monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
         _launch_agent_process(0)  # does not raise
 
 
@@ -2693,6 +2694,7 @@ class TestEnvForward:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         captured = self._capture_launch_env(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
         # An agent-scope allowlist key rides through (the child needs it before
         # Settings); a non-modeled AVA_* knob does NOT (F-s3-4: the allowlist
         # is positive — AVA_AGENT_ID and friends never inherit). Replace
@@ -2702,7 +2704,12 @@ class TestEnvForward:
         monkeypatch.setattr(
             os,
             "environ",
-            {**os.environ, "AVA_LLM_OVERRIDE": "mod:factory", "AVA_FOO_E2E": "bar"},
+            {
+                **os.environ,
+                "AVA_DB_URL": "postgresql://ava_runner:bootstrap-password@localhost/ava",
+                "AVA_LLM_OVERRIDE": "mod:factory",
+                "AVA_FOO_E2E": "bar",
+            },
         )
 
         _spawn_agent()  # confirm=False — returns after the launch
