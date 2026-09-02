@@ -192,6 +192,52 @@ class NativeAgentRecordOrdering(unittest.TestCase):
             finally:
                 foreign.unlink()
 
+    def assert_no_late_signal(self, home: Path, marker: Path) -> None:
+        import subprocess
+
+        from shared import windows_console_signal
+        from shared.winjob_spawn import run_job_process
+
+        path = home / "run" / "sessions" / f"{session_name('agent-124')}.json"
+        record = SessionRecord.read(path)
+        if record is None:
+            self.fail("missing signal target")
+        expired = run_job_process(
+            [
+                sys.executable,
+                "-I",
+                str(Path(windows_console_signal.__file__).resolve()),
+                str(path),
+                str(record.pid),
+                str(record.create_time),
+                str(time.monotonic() - 1),
+            ],
+            timeout=3,
+        )
+        self.assertNotEqual(expired.returncode, 0)
+        self.assertIn("deadline expired", expired.stderr)
+        ready = home / "signal-helper-ready"
+        delayed_lookup = (
+            "def delayed_lookup(pid):\n"
+            f"    Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+            "    time.sleep(3)\n"
+            "    return original_lookup(pid)\n"
+        )
+        script = (
+            "import os,time;from pathlib import Path;"
+            "from shared import windows_console_signal as helper;"
+            "original_lookup=helper.psutil.Process;"
+            f"exec({delayed_lookup!r});helper.psutil.Process=delayed_lookup;"
+            f"helper.send_private_console_break(Path({str(path)!r}),{record.pid},"
+            f"{record.create_time!r},{time.monotonic() + 2!r})"
+        )
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run_job_process([sys.executable, "-I", "-c", script], timeout=1)
+        self.assertTrue(ready.exists(), "real signal module never loaded before timeout")
+        time.sleep(3.2)
+        self.assertFalse(marker.exists(), "timed-out or expired helper sent late SIGBREAK")
+        self.assertFalse(psutil.pid_exists(int(ready.read_text())))
+
     def assert_redirector_parent(self, child: psutil.Process, record: SessionRecord) -> None:
         self.assertEqual(os.name, "nt")
         parent = child.parent()
@@ -262,6 +308,7 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                     time.sleep(0.05)
                 self.assertTrue(ready.exists(), "signal handler readiness was never observed")
                 self.assert_control_refusals(home, int(ready.read_text()))
+                self.assert_no_late_signal(home, received)
                 reported = backend.graceful_signal(session_name("agent-124"))
                 deadline = time.monotonic() + 5
                 while not received.exists() and time.monotonic() < deadline:
