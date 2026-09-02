@@ -26,6 +26,10 @@ def main() -> None:
     prefix = Path(sys.prefix).resolve()
     alias = Path(sys.argv[2])
     require(alias.is_symlink() and alias.resolve() == prefix, "entry alias did not select A")
+    require(
+        Path(sys.prefix).absolute() == alias.absolute(),
+        "interpreter canonicalized the entry alias; this is not a moving-prefix proof",
+    )
     require(INSTALLED_RUNTIME, "proof did not load the installed wheel")
     require(runtime_venv().resolve() == prefix, "venv escaped current prefix")
     python = runtime_python()
@@ -92,7 +96,15 @@ def main() -> None:
         rejected.returncode != 0 and "explicit absolute AVA_HOME" in rejected.stderr,
         "missing wheel home was not rejected",
     )
-    print(json.dumps({"late_child_generation": str(prefix), "missing_home_rejected": True}))
+    print(
+        json.dumps(
+            {
+                "late_child_generation": str(prefix),
+                "entry_prefix_was_alias": True,
+                "missing_home_rejected": True,
+            }
+        )
+    )
 
 
 if __name__ == "__main__":
