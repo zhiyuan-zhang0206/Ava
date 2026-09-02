@@ -23,6 +23,16 @@ If you were spawned for a specific sub-task, skip the check and finish that sub-
 
 The task registry is the durable record of work; the spawn graph is the ephemeral web of who is talking to whom. When a task changes state, the fleet reacts — here are the rules that connect the two.
 
+### Future-signal tasks
+
+This is the task-domain application of the framework's Invest in the future rule. When a noticed signal needs work beyond this turn, create a concrete task directly; signals that can be resolved now or need only a decision take those actions instead. A task is a commitment, not a parking lot.
+
+- Put the task under the current responsibility chain with `parent` unless it is genuinely top-level, and give it an owner: yourself by default or a known agent when that agent should do the work.
+- Put the motivating evidence and what done looks like in the description, so the task carries the signal that created it.
+- Before creating, list the parent's active children. If an equivalent open task exists, append your evidence to it and notify its owner rather than creating a duplicate.
+
+The lifecycle rules below govern the resulting task, including the business delivery to its delegator when it is done.
+
 ### Task Created
 
 When `ava.tasks.create()` is called with a `parent`, the parent task's delegator (its owner) is implicitly overseeing the creator. No automatic message is sent — the parent-task owner discovers the new subtask by listing tasks with `parent=...`. When the task is created as part of a fleet delegation (an orchestrator spawns a worker and tells it to self-assign), the orchestrator should already be watching via the goal pattern.

@@ -161,6 +161,55 @@ def test_prompt_section_queue_delivery_mandate(
     assert "reduce-context-switch" not in section
 
 
+def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
+    """The fleet section turns a future signal into an owned, deduplicated
+    task without inventing registry routing behavior."""
+    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+
+    section = _fleet_self_section()
+    assert "## Fleet task interaction" in section
+    assert "create directly with `ava.tasks.create`" in section
+    assert "do not add an ask-someone-first round" in section
+    assert "parent's active children" in section
+    assert "one business delivery to the current delegator" in section
+    assert "`created_by` is an audit trail, not a routing field" in section
+    assert "no automatic notification to the creator" in section
+    assert "reserve `ava.tasks.create_and_assign` for when the owner must be spawned" in section
+
+
+def test_prompt_section_task_conversion_is_domain_instance_only(
+    _load_activity_plugin: None,
+):
+    """The fleet section names task mechanics without repeating the framework's
+    cross-domain future-signal rule or platform-specific policy."""
+    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+
+    section = _fleet_self_section()
+    for phrase in (
+        "when in doubt, record it",
+        "act on it this turn",
+        "Choose the smallest action",
+        "costs every later agent",
+    ):
+        assert phrase not in section
+    assert not any(character.isdigit() for character in section)
+    assert "CI" not in section
+    assert "flake" not in section
+
+
+def test_task_conversion_absent_when_plugin_disabled():
+    """Prompt copy and the task SDK reference disappear together with the
+    fleet plugin."""
+    clear_plugin_registrations()
+    ava.clear_registered_namespaces()
+
+    prompt = build_system_prompt()
+
+    assert "## Fleet task interaction" not in prompt
+    assert "create directly with `ava.tasks.create`" not in prompt
+    assert "ava.tasks.create" not in prompt
+
+
 def test_spawn_label_param_gated_on_plugin(_load_activity_plugin: None):
     # With the plugin enabled, spawn is wrapped and exposes the `label` arg. The
     # wrap fact lives in the introspectable stack (the chained callable mimics
