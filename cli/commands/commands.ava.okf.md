@@ -33,6 +33,7 @@ Two kinds of module live here, distinguished by filename:
   `_update_orchestration` / `_update_agent_runner` / `_update_uv_sync` /
   `_updater_lease` / `_updater_stage` (the cmd.exe ladder's per-step telemetry marker) / `_update_recover` /
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_warmup`,
+  `_ownership_preflight`,
   `_pkg_source`, `_pgbouncer`, `_lgtm`,
   `_claude_code_plugin`, `_cluster_health` /
   `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`.
@@ -76,6 +77,8 @@ schema change catches the DB up on its own.
   SDK that no other verb needs. See [[cli/commands/packages.ava.okf.md]].
 - [[pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
   verify → retire guard for finite migration rollback snapshots.
+- [[ownership_preflight.ava.okf.md]] names the warning-only ownership repair
+  guard that runs before converge writes later host state.
 
 ## Key Dependencies
 

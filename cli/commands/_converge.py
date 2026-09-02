@@ -39,6 +39,9 @@ from cli.commands._health_preflight import ensure_health_preflight as _ensure_he
 from cli.commands._lgtm import ensure_lgtm_stack_step
 from cli.commands._lgtm_native import ensure_lgtm_native_step
 from cli.commands._otel_collector import ensure_otel_collector_step
+from cli.commands._ownership_preflight import (
+    ensure_ownership_preflight as _ensure_ownership_preflight,
+)
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
 from shared.browser_deps import browser_deps_notice, browser_deps_warning
@@ -538,6 +541,10 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
+    # Warning-only ownership preflight: root-owned probe captures and other
+    # files under $AVA_HOME make later converge writes fail unclearly. Print
+    # the exact repair command now, but never turn the warning into a start block.
+    ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
     # Warning-only port preflight: bind-check the cluster's port block + this
     # unit's health ports before anything is launched; foreign occupants are
     # printed and logged, never blocking (the blocking health-port gate is
