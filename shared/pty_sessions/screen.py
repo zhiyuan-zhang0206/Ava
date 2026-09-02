@@ -114,11 +114,11 @@ class PtyScreen:
     def render(self, lines: int = 200, *, scrollback: bool = True) -> str:
         """Render captured text, classic ``capture-pane`` semantics.
 
-        ``scrollback=True`` returns the last ``lines`` rows of
-        history + visible screen (``-S -<lines>``); ``False`` returns the
-        visible screen only (``-p``). Rows are stripped of trailing
-        whitespace and joined with ``\n``, so a screen with empty rows
-        below the content ends in newlines, exactly like the classic screen.
+        ``scrollback=True`` strips trailing empty rows from history + visible
+        screen before returning the last ``lines`` rows (``-S -<lines>``).
+        ``False`` returns the visible screen only (``-p``), preserving its
+        trailing empty rows so it ends in newlines like the classic screen.
+        Rows are stripped of trailing whitespace and joined with ``\n``.
         """
         with self._lock:
             if scrollback:
@@ -127,6 +127,8 @@ class PtyScreen:
                     for ln in list(self._screen.history.top) + list(self._screen.history.bottom)
                 ]
                 rows += [row.rstrip() for row in self._screen.display]
+                while rows and rows[-1] == "":
+                    rows.pop()
                 return "\n".join(rows[-lines:])
             return "\n".join(row.rstrip() for row in self._screen.display)
 
