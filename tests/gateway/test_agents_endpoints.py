@@ -958,6 +958,74 @@ class TestRestart:
         assert resp.json() == {"status": "enqueued"}
         assert _inbound_rows(db_conn, agent_id) == [("", "restart", "user")]
 
+    def test_restart_merges_config_overlay_and_records_it_in_the_inbound(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """The persisted overlay and restart marker payload advance together."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
+                    (json.dumps({"reasoning_effort": "low"}), agent_id),
+                )
+            db_conn.commit()
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={"config_overlay": {"llm_model": "gpt-5.6-sol"}},
+            )
+
+        assert resp.status_code == 200
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
+            assert cur.fetchone() == ({"reasoning_effort": "low", "llm_model": "gpt-5.6-sol"},)
+            cur.execute(
+                "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'restart'",
+                (agent_id,),
+            )
+            assert cur.fetchone() == ({"config_overlay": {"llm_model": "gpt-5.6-sol"}},)
+
+    @pytest.mark.parametrize("config_overlay", [None, {}])
+    def test_restart_empty_config_overlay_keeps_legacy_restart_shape(
+        self, db_conn: psycopg.Connection, config_overlay: dict[str, object] | None
+    ) -> None:
+        """None and {} do not change persistent config or add a payload sidecar."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
+                    (json.dumps({"reasoning_effort": "low"}), agent_id),
+                )
+            db_conn.commit()
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={"config_overlay": config_overlay},
+            )
+
+        assert resp.status_code == 200
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
+            assert cur.fetchone() == ({"reasoning_effort": "low"},)
+            cur.execute(
+                "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'restart'",
+                (agent_id,),
+            )
+            assert cur.fetchone() == (None,)
+
+    def test_restart_invalid_config_overlay_is_rejected_before_enqueue(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={"config_overlay": {"definitely_not_a_config_field": "x"}},
+            )
+
+        assert resp.status_code == 422
+        assert _inbound_rows(db_conn, agent_id) == []
+
     def test_restart_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]

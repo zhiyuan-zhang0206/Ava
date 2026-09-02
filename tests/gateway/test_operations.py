@@ -54,6 +54,29 @@ class TestSpawnAgentRequestSourceValidation:
         assert body.prompt_source is None
 
 
+class TestRestartAgentRequestConfigOverlay:
+    """Restart overlays fail at both HTTP and runner schema boundaries."""
+
+    @pytest.mark.parametrize(
+        "config_overlay",
+        [
+            {"definitely_not_a_config_field": "x"},
+            {"heartbeat_pause_max_seconds": "not-a-number"},
+            {"reasoning_effort": "turbo"},
+        ],
+    )
+    def test_rejects_invalid_overlay(self, config_overlay: dict[str, object]) -> None:
+        with pytest.raises(ValidationError):
+            RestartAgentRequest(config_overlay=config_overlay)
+
+    @pytest.mark.parametrize("config_overlay", [None, {}])
+    def test_accepts_legacy_empty_overlay_forms(
+        self, config_overlay: dict[str, object] | None
+    ) -> None:
+        body = RestartAgentRequest(config_overlay=config_overlay)
+        assert body.config_overlay == config_overlay
+
+
 @pytest.fixture
 def stub_pool() -> object:
     """Sentinel pool — every op call below mocks the gateway/agents helpers so
@@ -235,6 +258,19 @@ async def test_restart_agent_op_terminated_short_circuits(
         stub_pool,  # type: ignore[arg-type]
     )
     assert resp.status == "already_terminated"
+
+
+@pytest.mark.asyncio
+async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
+    stub_pool: object,
+) -> None:
+    """The runner reparses forwarded restart bodies before any DB write."""
+    with pytest.raises(ValidationError):
+        await ops_lifecycle.lifecycle_op(
+            "/api/agents/9/restart",
+            {"config_overlay": {"definitely_not_a_config_field": "x"}},
+            stub_pool,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.asyncio
