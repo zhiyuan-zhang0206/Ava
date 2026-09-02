@@ -150,6 +150,9 @@ def test_unpause_leaves_durably_disabled_restarter_down(
     backend.has_answer = False
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
     monkeypatch.setattr("shared.disabled_services.read_skipped", lambda: {"restarter"})
+    # Process mode: the roster gate is None here, so the durable marker is the
+    # branch under test (hosted mode would already exit at the roster gate).
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
 
     cluster_pause.unpause_local_cluster()
 
@@ -168,8 +171,47 @@ def test_unpause_fails_closed_when_disabled_marker_is_unreadable(
         raise OSError("marker unavailable")
 
     monkeypatch.setattr("shared.disabled_services.read_skipped", _unreadable)
+    # Process mode so the failure under test is the marker read, not the
+    # roster gate (which in hosted mode exits before the marker is read).
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
 
     cluster_pause.unpause_local_cluster()
 
     assert posture == ["idle"]
     assert backend.spawned == []
+
+
+def test_unpause_respects_roster_gate_in_hosted_mode(
+    posture: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hosted mode gates the restarter OUT of the start roster; the unpause
+    finally must not resurrect it. 2026-09-02 incidents (18:56 / 22:20 / 22:28):
+    every rollout's pause/unpause boundary relaunched the restarter on the new
+    SHA while the ``ava start`` child had correctly skipped it — this is the
+    respawn path that undid the skip."""
+    backend = _StubBackend()
+    backend.has_answer = False
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "hosted")
+
+    cluster_pause.unpause_local_cluster()
+
+    assert posture == ["idle"]
+    assert backend.spawned == []
+
+
+def test_unpause_respawns_restarter_when_the_roster_enables_it(
+    posture: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Process mode (the legacy shape) keeps the unpause respawn: the roster
+    gate is None and the durable marker is clear, so the session comes back."""
+    backend = _StubBackend()
+    backend.has_answer = False
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
+    monkeypatch.setattr("shared.disabled_services.read_skipped", set)
+
+    cluster_pause.unpause_local_cluster()
+
+    assert posture == ["idle"]
+    assert backend.spawned == ["ava-restarter"]
