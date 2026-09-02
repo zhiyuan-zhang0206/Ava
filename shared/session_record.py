@@ -61,6 +61,7 @@ class SessionRecord:
     started_at: float
     starttime: int | None = None
     generation: str | None = None
+    control_mode: str | None = None
 
     @classmethod
     def read(cls, path: Path) -> SessionRecord | None:
@@ -87,6 +88,7 @@ class SessionRecord:
                 if isinstance(record.get("generation"), str) and record["generation"]
                 else None
             ),
+            control_mode=record.get("control_mode"),
         )
 
     def identifies(self, pid: int) -> bool | None:

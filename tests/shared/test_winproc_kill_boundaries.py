@@ -171,6 +171,9 @@ def fleet(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> _Fleet:
         return gone, alive  # pyright: ignore[reportUnknownVariableType]
 
     monkeypatch.setattr(psutil, "wait_procs", _wait_procs)  # pyright: ignore[reportUnknownArgumentType]
+    # Signal transport has its own native Windows test; this fixture isolates
+    # tree/spared-session waiting and force cleanup.
+    monkeypatch.setattr(winproc, "graceful_signal", lambda _name: True)
     return _Fleet(procs=procs, waited=waited)
 
 

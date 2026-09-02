@@ -71,6 +71,7 @@ def publish_admitted_session(incarnation: RuntimeIncarnation) -> None:
     """
     path = run_dir() / "sessions" / f"{session_name(f'agent-{incarnation.agent_id}')}.json"
     current = _session_control_process(psutil.Process(os.getpid()))
+    control_mode = _admitted_control_mode(path.parent, incarnation.agent_id, current)
     with file_lock(path.with_suffix(".admission.lock"), timeout_s=1.0):
         previous = SessionRecord.read(path)
         if previous is None and path.exists():
@@ -85,4 +86,30 @@ def publish_admitted_session(incarnation: RuntimeIncarnation) -> None:
             started_at=time.time(),
             starttime=pid_starttime_ticks(current.pid),
             generation=str(incarnation.generation),
+            control_mode=control_mode,
         ).write(path)
+
+
+def _admitted_control_mode(directory: Path, agent_id: int, current: psutil.Process) -> str | None:
+    """Only the actual launcher record proves private-console creation.
+
+    Child admission may precede the parent's post-Popen record publication.
+    Bound that local handoff; never infer console provenance from executable.
+    """
+    if not IS_WINDOWS:
+        return None
+    deadline = time.monotonic() + 2
+    while True:
+        for path in directory.glob(f"{session_name(f'boot-{agent_id}-')}*.json"):
+            record = SessionRecord.read(path)
+            if record is not None and (record.pid, record.create_time, record.control_mode) == (
+                current.pid,
+                current.create_time(),
+                "private-console-v1",
+            ):
+                return record.control_mode
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "admitted Windows runtime has no verified private-console launch record"
+            )
+        time.sleep(0.01)
