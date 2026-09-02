@@ -70,6 +70,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 import shared.db
+from shared.db_transaction import write_transaction
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.log import logger
 
@@ -362,7 +363,7 @@ def release_update_lock(holder: str) -> None:
     has since reclaimed it past a TTL expiry, so a slow release never clobbers a
     newer owner's lock.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "
             "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "

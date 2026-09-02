@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 import shared.db
+from shared.db_transaction import write_transaction
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.machine import machine_name
 from shared.paths import run_dir
@@ -254,7 +255,7 @@ def _upsert_posture_only(posture: str) -> None:
     stalled-updater controller's liveness judgment, owned exclusively by
     touch_updater_lease / clear_updater_lease (audit 2026-08-08 P2)."""
     machine = machine_name()
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO host_deploy_state (machine, posture, paused_at, updated_at) "
             "VALUES (%s, %s, "
