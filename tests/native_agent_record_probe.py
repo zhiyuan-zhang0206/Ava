@@ -25,6 +25,45 @@ from shared.session_record import SessionRecord
 
 
 class NativeAgentRecordOrdering(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows bounded non-cooperative stop")
+    def test_noncooperative_handler_requires_bounded_force_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            original_home = settings.general.ava_home
+            settings.general.ava_home = home
+            backend = native_proc()
+            name = session_name("noncooperative-control-probe")
+            ready, marker = home / "ready", home / "handled"
+            child = (
+                "import os,signal,time;from pathlib import Path;"
+                "signal.signal(signal.SIGBREAK,lambda *_: "
+                f"Path({str(marker)!r}).write_text('handled'));"
+                f"Path({str(ready)!r}).write_text(str(os.getpid()));time.sleep(30)"
+            )
+            try:
+                self.assertTrue(
+                    backend.new_session(
+                        name,
+                        [sys.executable, "-c", child],
+                        Path.cwd(),
+                        env=dict(os.environ),
+                    )
+                )
+                deadline = time.monotonic() + 15
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue(ready.exists())
+                actual = psutil.Process(int(ready.read_text()))
+                started = time.monotonic()
+                ok, mode = backend.kill_session(name, graceful=True, timeout=0.2)
+                self.assertEqual((ok, mode), (True, "forced"))
+                self.assertLess(time.monotonic() - started, 8)
+                self.assertFalse(marker.exists(), "blocked main thread unexpectedly ran handler")
+                self.assert_process_exited(actual)
+            finally:
+                backend.kill_session(name, graceful=False)
+                settings.general.ava_home = original_home
+
     def test_helper_failure_and_timeout_are_not_delivery_success(self) -> None:
         import subprocess
 
