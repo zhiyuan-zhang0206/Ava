@@ -1,12 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import fixture3187Json from "../../../fixtures/run-timeline-3187.json";
+import fixture405Json from "../../../fixtures/run-timeline-405.json";
 import type { RunTimelineResponse } from "@/lib/types";
 
 import { RunTimelineChart } from "./run-timeline-chart";
-import { tokenBarWidth } from "./scales";
-
-afterEach(cleanup);
 
 const timeline: RunTimelineResponse = {
   agent_id: 405,
@@ -46,7 +45,7 @@ const timeline: RunTimelineResponse = {
       },
       execs: [{ tool: "execute_code", dur_s: 0, ok: false }],
       anomalies: ["exec_failed"],
-      tags: ["compact@2026-08-29T08:00:06Z"],
+      tags: [],
     },
     {
       turn: 2,
@@ -86,154 +85,133 @@ const timeline: RunTimelineResponse = {
 
 const labels = {
   chart: "Timeline chart",
-  waterfall: "Timeline waterfall",
+  visualization: "Timeline visualization",
   time: "Time",
-  tokens: "Tokens",
   eventRail: "Event rail",
   input: "Input",
   output: "Output",
-  idle: "Idle",
   turn: "Turn",
   bucket: "Bucket",
   cost: "Cost",
   model: "Model",
   empty: "No activity in this window.",
-  noTokenData: "No token data is available for this window.",
   moreEvents: (count: number, summary: string) => `+${count} more (${summary})`,
+  turnDetails: "Turn details",
+  timeRange: "Time range",
+  activeSeconds: "Active seconds",
+  latency: "Latency",
+  executions: "Executions",
+  tool: "Tool",
+  duration: "Duration",
+  status: "Status",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  anomalies: "Anomalies",
+  none: "None",
+  noExecutions: "No executions",
+  closeDetails: "Close details",
 };
 
+afterEach(() => vi.restoreAllMocks());
+
 describe("RunTimelineChart", () => {
-  it("renders independent panels with dashed correspondence connectors and event rail", () => {
+  it("renders every turn as one clickable block on a single linear track", () => {
     const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
 
     expect(screen.getByLabelText("Timeline chart")).toBeTruthy();
-    expect(screen.getByLabelText("Timeline waterfall")).toBeTruthy();
-    expect(screen.getByLabelText("Time panel")).toBeTruthy();
-    expect(screen.getByLabelText("Tokens panel")).toBeTruthy();
-    expect(screen.getByLabelText("Event rail")).toBeTruthy();
-    expect(container.querySelectorAll('[data-testid="run-connector"]')).toHaveLength(2);
-    expect(container.querySelectorAll('[data-testid="run-connector"]')[0].getAttribute("stroke-dasharray")).toBe("4 4");
-    expect(screen.getByText("compact")).toBeTruthy();
+    expect(screen.getByLabelText("Timeline visualization")).toBeTruthy();
+    expect(container.querySelectorAll('[data-testid="turn-block"]')).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Turn 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Turn 2" })).toBeTruthy();
+    expect(screen.queryByLabelText("Tokens panel")).toBeNull();
   });
 
-  it("uses theme-aware SVG stroke classes for connectors and anomalous turn bars", () => {
+  it("keeps every glyph in a fixed sibling overlay outside transformable geometry", () => {
     const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    const geometry = screen.getByTestId("run-timeline-geometry");
+    const fixedText = container.querySelectorAll('[data-testid="fixed-timeline-text"]');
 
-    const connector = container.querySelector('[data-testid="run-connector"]');
-    const firstTimeBar = container.querySelector('[aria-label="Time panel"] rect');
-
-    expect(connector?.getAttribute("stroke")).toBeNull();
-    expect(connector?.getAttribute("class")).toContain("stroke-muted-foreground");
-    expect(firstTimeBar?.getAttribute("stroke")).toBeNull();
-    expect(firstTimeBar?.getAttribute("class")).toContain("stroke-destructive");
+    expect(geometry.querySelector("text")).toBeNull();
+    expect(geometry.querySelector("[transform]")).toBeNull();
+    expect(fixedText.length).toBeGreaterThan(0);
+    for (const glyph of fixedText) {
+      expect(geometry.contains(glyph)).toBe(false);
+      expect(glyph.getAttribute("style")).toMatch(/(?:left|right): \d+px/);
+      expect(glyph.getAttribute("style")).not.toContain("transform");
+    }
   });
 
-  it("skips idle labels that would collide with the next turn label", () => {
-    const crowdedTimeline: RunTimelineResponse = {
-      ...timeline,
-      rows: [
-        { ...timeline.rows[0], tags: ["idle_before_61s"] },
-        {
-          ...timeline.rows[1],
-          turn: 2,
-          start: "2026-08-29T08:01:00Z",
-          end: "2026-08-29T08:01:04Z",
-          tags: ["idle_before_121s"],
-        },
-        {
-          ...timeline.rows[1],
-          turn: 3,
-          start: "2026-08-29T08:02:00Z",
-          end: "2026-08-29T08:02:04Z",
-          tags: ["idle_before_181s"],
-        },
-      ],
-    };
+  it("anchors connector paths to the exact source and destination node coordinates", () => {
+    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    const connector = container.querySelector('[data-testid="event-connector"][data-event-index="0"]');
+    const source = container.querySelector('[data-testid="event-source-node"][data-event-index="0"]');
+    const destination = container.querySelector('[data-testid="event-destination-node"][data-event-index="0"]');
+    const sourcePoint = `${source?.getAttribute("cx")} ${source?.getAttribute("cy")}`;
+    const destinationPoint = `${destination?.getAttribute("cx")} ${destination?.getAttribute("cy")}`;
 
-    render(<RunTimelineChart timeline={crowdedTimeline} labels={labels} />);
-
-    expect(screen.queryByText("Idle 1m")).toBeNull();
-    expect(screen.queryByText("Idle 2m")).toBeNull();
-    expect(screen.getByText("Idle 3m")).toBeTruthy();
+    expect(connector).toBeTruthy();
+    expect(connector?.getAttribute("d")).toMatch(new RegExp(`^M ${sourcePoint} C `));
+    expect(connector?.getAttribute("d")).toMatch(new RegExp(` ${destinationPoint}$`));
+    expect(connector?.getAttribute("data-source-x")).toBe(source?.getAttribute("cx"));
+    expect(connector?.getAttribute("data-source-y")).toBe(source?.getAttribute("cy"));
+    expect(connector?.getAttribute("data-destination-x")).toBe(destination?.getAttribute("cx"));
+    expect(connector?.getAttribute("data-destination-y")).toBe(destination?.getAttribute("cy"));
   });
 
+  it("opens a turn detail panel containing every supported row field", () => {
+    render(<RunTimelineChart timeline={timeline} labels={labels} />);
 
-  it("suppresses idle labels entirely in dense views", () => {
-    const denseRows: RunTimelineResponse["rows"] = Array.from({ length: 41 }, (_, index) => ({
-      ...timeline.rows[0],
-      turn: index + 1,
-      start: `2026-08-29T08:00:${String(index).padStart(2, "0")}Z`,
-      end: `2026-08-29T08:00:${String(index).padStart(2, "0")}Z`,
-      tags: ["idle_before_121s"],
-    }));
-    render(<RunTimelineChart timeline={{ ...timeline, rows: denseRows }} labels={labels} />);
+    fireEvent.click(screen.getByRole("button", { name: "Turn 1" }));
+    const panel = screen.getByRole("region", { name: "Turn details" });
 
-    expect(screen.queryByText("Idle 2m")).toBeNull();
-    expect(screen.queryByText(/^Idle/)).toBeNull();
-  });
-  it("still renders an idle label for a sparse pair wider than the 55px minimum", () => {
-    // Discrimination guard for the dense-view rule above: the label gate is the
-    // pair width (nextX - x >= IDLE_LABEL_MIN_WIDTH) — a wide inter-row gap in
-    // a sparse view keeps its label, while a tight sibling pair in the same
-    // view is suppressed. Also pins the dark-theme halo stroke (stroke-card,
-    // matching the card surface behind the text).
-    const sparseTimeline: RunTimelineResponse = {
-      ...timeline,
-      rows: [
-        {
-          ...timeline.rows[0],
-          turn: 1,
-          start: "2026-08-29T08:00:00Z",
-          end: "2026-08-29T08:00:04Z",
-          tags: ["idle_before_1796s"],
-        },
-        {
-          ...timeline.rows[1],
-          turn: 2,
-          start: "2026-08-29T08:30:00Z",
-          end: "2026-08-29T08:30:04Z",
-          tags: ["idle_before_121s"],
-        },
-        {
-          ...timeline.rows[1],
-          turn: 3,
-          start: "2026-08-29T08:31:00Z",
-          end: "2026-08-29T08:31:04Z",
-          tags: [],
-        },
-      ],
-    };
-    render(<RunTimelineChart timeline={sparseTimeline} labels={labels} />);
-
-    // 30min gap = 465px >= 55px → label renders; halo stroke matches the card.
-    const label = screen.getByText("Idle 30m");
-    expect(label.getAttribute("class")).toContain("stroke-card");
-    // 1min gap = 15px < 55px → same sparse view suppresses the tight pair.
-    expect(screen.queryByText("Idle 2m")).toBeNull();
+    expect(within(panel).getByText("2026-08-29 08:00:00 – 08:00:04")).toBeTruthy();
+    expect(within(panel).getByText("2.0s")).toBeTruthy();
+    expect(within(panel).getByText("120")).toBeTruthy();
+    expect(within(panel).getByText("12")).toBeTruthy();
+    expect(within(panel).getByText("$0.02")).toBeTruthy();
+    expect(within(panel).getByText("deepseek-v4-flash")).toBeTruthy();
+    expect(within(panel).getByText("1.50s")).toBeTruthy();
+    expect(within(panel).getByText("execute_code")).toBeTruthy();
+    expect(within(panel).getByText("0.00s")).toBeTruthy();
+    expect(within(panel).getAllByText("Failed")).toHaveLength(2);
+    expect(within(panel).getByText("exec_failed")).toBeTruthy();
   });
 
-  it("caps the event rail at 120 colored chips", () => {
-    const events: RunTimelineResponse["events"] = [
-      { ts: "2026-08-29T08:00:00Z", kind: "compact", trace_id: null, label: "compact" },
-      { ts: "2026-08-29T08:00:01Z", kind: "restart_completed", trace_id: null, label: "restart" },
-      { ts: "2026-08-29T08:00:02Z", kind: "exec_failed", trace_id: null, label: "failed" },
-      ...Array.from({ length: 119 }, (_, index) => ({
-        ts: `2026-08-29T08:${String(index).padStart(2, "0")}:00Z`,
-        kind: "exec",
-        trace_id: null,
-        label: null,
-      })),
-    ];
-    const { container } = render(<RunTimelineChart timeline={{ ...timeline, events }} labels={labels} />);
+  it("reprojects the last tick and turn inside the visible chart when details open", async () => {
+    const visibleWidth = 600;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const width = this.getAttribute("data-testid") === "run-timeline-scroll" ? visibleWidth : 0;
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        right: width,
+        bottom: 600,
+        left: 0,
+        width,
+        height: 600,
+        toJSON: () => ({}),
+      };
+    });
+    const fixture = fixture3187Json as RunTimelineResponse;
+    const { container } = render(<RunTimelineChart timeline={fixture} labels={labels} />);
 
-    expect(container.querySelectorAll('[data-testid="event-chip"]')).toHaveLength(120);
-    expect(screen.getByText("+2 more (exec×2)")).toBeTruthy();
-    expect(screen.getByText("compact").getAttribute("class")).toContain("border-violet-500/50");
-    expect(screen.getByText("restart_completed").getAttribute("class")).toContain("border-blue-500/50");
-    expect(screen.getByText("exec_failed").getAttribute("class")).toContain("border-destructive/50");
+    fireEvent.click(screen.getByRole("button", { name: "Turn 1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("group", { name: "Timeline visualization" }).getAttribute("style")).toContain(
+        `width: ${visibleWidth}px`,
+      );
+    });
+
+    const lastTick = container.querySelectorAll<HTMLElement>("[data-timeline-tick]").item(4);
+    const lastTurn = container.querySelectorAll<SVGRectElement>('[data-testid="turn-block"]').item(fixture.rows.length - 1);
+    expect(Number.parseFloat(lastTick.style.left) + 72).toBeLessThanOrEqual(visibleWidth);
+    expect(Number(lastTurn.getAttribute("x")) + Number(lastTurn.getAttribute("width"))).toBeLessThanOrEqual(
+      visibleWidth,
+    );
   });
 
-  it("prioritizes rare rail events before ordinary exec chips and summarizes skipped kinds", () => {
+  it("keeps priority events when the rail reaches its 120-chip bound", () => {
     const events: RunTimelineResponse["events"] = [
       ...Array.from({ length: 121 }, (_, index) => ({
         ts: `2026-08-29T08:${String(index % 60).padStart(2, "0")}:00Z`,
@@ -250,65 +228,19 @@ describe("RunTimelineChart", () => {
     expect(screen.getByText("+2 more (exec×2)")).toBeTruthy();
   });
 
-  it("keeps a dense token panel within a readable capped height", () => {
-    const denseTimeline: RunTimelineResponse = {
-      ...timeline,
-      rows: Array.from({ length: 157 }, (_, index) => ({
-        ...timeline.rows[0],
-        turn: index + 1,
-        start: `2026-08-29T08:${String(index % 60).padStart(2, "0")}:00Z`,
-        end: `2026-08-29T08:${String(index % 60).padStart(2, "0")}:01Z`,
-      })),
-    };
-    const { container } = render(<RunTimelineChart timeline={denseTimeline} labels={labels} />);
-    const svg = container.querySelector("svg");
+  it.each([
+    ["3187", fixture3187Json as RunTimelineResponse],
+    ["405", fixture405Json as RunTimelineResponse],
+  ])("renders all real turn rows from fixture %s", (_agentId, fixture) => {
+    const { container } = render(<RunTimelineChart timeline={fixture} labels={labels} />);
 
-    expect(Number(svg?.getAttribute("viewBox")?.split(" ").at(-1))).toBeGreaterThan(286);
+    expect(container.querySelectorAll('[data-testid="turn-block"]')).toHaveLength(fixture.rows.length);
+    expect(container.querySelectorAll('[data-testid="event-chip"]')).toHaveLength(fixture.events.length);
   });
 
-  it("scrolls the wide SVG inside the chart instead of overflowing the page", () => {
-    render(<RunTimelineChart timeline={timeline} labels={labels} />);
-
-    expect(screen.getByTestId("run-timeline-scroll").className).toContain("overflow-x-auto");
-  });
-
-  it("replaces empty axes with an activity hint", () => {
+  it("replaces an empty track with an activity hint", () => {
     render(<RunTimelineChart timeline={{ ...timeline, rows: [] }} labels={labels} />);
 
     expect(screen.getByText("No activity in this window.")).toBeTruthy();
-  });
-
-  it("explains when every displayed turn lacks token data", () => {
-    render(
-      <RunTimelineChart
-        timeline={{
-          ...timeline,
-          meta: { ...timeline.meta, n_turns: 2, tokens_in: 0, tokens_out: 0, unmatched_turns: 2 },
-          rows: timeline.rows.map((row) => ({
-            ...row,
-            llm: { ...row.llm, calls: 0, in_total: 0, out_total: 0 },
-          })),
-        }}
-        labels={labels}
-      />,
-    );
-
-    expect(screen.getByText("No token data is available for this window.")).toBeTruthy();
-  });
-
-  it("shows the absolute token and cost detail on hover", () => {
-    render(<RunTimelineChart timeline={timeline} labels={labels} />);
-
-    fireEvent.mouseEnter(screen.getByLabelText("Turn 1 token bar"));
-
-    expect(screen.getByRole("tooltip").textContent).toContain("120");
-    expect(screen.getByRole("tooltip").textContent).toContain("deepseek-v4-flash");
-  });
-});
-
-describe("tokenBarWidth", () => {
-  it("maps raw absolute token counts onto only the token panel scale", () => {
-    expect(tokenBarWidth(120, 240, 300)).toBe(150);
-    expect(tokenBarWidth(0, 240, 300)).toBe(0);
   });
 });

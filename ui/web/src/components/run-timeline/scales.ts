@@ -1,9 +1,4 @@
-/** Small, dependency-free scales for the two independently measured panels. */
-
-export function tokenBarWidth(tokens: number, maximumTokens: number, plotWidth: number): number {
-  if (tokens <= 0 || maximumTokens <= 0 || plotWidth <= 0) return 0;
-  return Math.min(plotWidth, (tokens / maximumTokens) * plotWidth);
-}
+/** Small, dependency-free scale for the linear timeline axis. */
 
 export function timeCoordinate(
   timestamp: string,

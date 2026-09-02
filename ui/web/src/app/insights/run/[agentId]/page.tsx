@@ -24,20 +24,31 @@ function dateTimeInputValue(iso: string): string {
 function chartLabels(t: ReturnType<typeof useTranslations<"runTimeline">>): RunTimelineChartLabels {
   return {
     chart: t("chartAriaLabel"),
-    waterfall: t("waterfallAriaLabel"),
+    visualization: t("visualizationAriaLabel"),
     time: t("time"),
-    tokens: t("tokens"),
     eventRail: t("eventRail"),
     input: t("input"),
     output: t("output"),
-    idle: t("idle"),
     turn: t("turn"),
     bucket: t("bucket"),
     cost: t("cost"),
     model: t("model"),
     empty: t("empty"),
-    noTokenData: t("noTokenData"),
     moreEvents: (count, summary) => t("moreEvents", { count, summary }),
+    turnDetails: t("turnDetails"),
+    timeRange: t("timeRange"),
+    activeSeconds: t("activeSeconds"),
+    latency: t("latency"),
+    executions: t("executions"),
+    tool: t("tool"),
+    duration: t("duration"),
+    status: t("status"),
+    succeeded: t("succeeded"),
+    failed: t("failed"),
+    anomalies: t("anomalies"),
+    none: t("none"),
+    noExecutions: t("noExecutions"),
+    closeDetails: t("closeDetails"),
   };
 }
 
@@ -153,49 +164,56 @@ export default function RunTimelinePage({
 
       <div className="overflow-y-auto">
         <div className="mx-auto max-w-6xl space-y-5 p-6">
-          <section className="space-y-3 rounded border border-border bg-card p-4">
-            <div className={cn(FLEX, "flex-wrap items-center justify-between gap-3")}>
-              <div>
-                <h2 className="text-sm font-semibold">{t("session")}</h2>
-                <p className="text-xs text-muted-foreground">
-                  {session === "compact" ? t("compactDescription") : t("currentDescription")}
-                </p>
-                <div className={cn(FLEX, "mt-2 gap-1")} role="group" aria-label={t("session")}>
-                  <button
-                    type="button"
-                    aria-pressed={session === "compact"}
-                    onClick={() => selectSession("compact")}
-                    className={cn(
-                      "rounded border px-2 py-1 font-mono text-xs",
-                      session === "compact" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
-                    )}
-                  >
-                    {t("compactSession")}
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={session === "current"}
-                    onClick={() => selectSession("current")}
-                    className={cn(
-                      "rounded border px-2 py-1 font-mono text-xs",
-                      session === "current" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
-                    )}
-                  >
-                    {t("currentSession")}
-                  </button>
-                </div>
-              </div>
-              <div className={cn(FLEX, "flex-wrap gap-1")} aria-label={t("zoom")}>
-                {ZOOM_WINDOWS.map((hours) => (
-                  <button
-                    key={hours}
-                    type="button"
-                    onClick={() => setZoomWindow(hours)}
-                    className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
-                  >
-                    {hours >= 1 ? `${hours}h` : "30m"}
-                  </button>
-                ))}
+          <div className={cn(FLEX, "pointer-events-none sticky top-0 z-10 -mb-[34px] h-[34px] justify-end px-4")}>
+            <div
+              className={cn(FLEX, "pointer-events-auto relative top-4 w-fit flex-wrap gap-1 rounded bg-card py-1")}
+              aria-label={t("zoom")}
+            >
+              {ZOOM_WINDOWS.map((hours) => (
+                <button
+                  key={hours}
+                  type="button"
+                  onClick={() => setZoomWindow(hours)}
+                  className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+                >
+                  {hours >= 1 ? `${hours}h` : "30m"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <section
+            className="space-y-3 rounded border border-border bg-card p-4"
+            style={{ marginTop: 0 }}
+          >
+            <div className="pt-10 sm:pr-56 sm:pt-0">
+              <h2 className="text-sm font-semibold">{t("session")}</h2>
+              <p className="text-xs text-muted-foreground">
+                {session === "compact" ? t("compactDescription") : t("currentDescription")}
+              </p>
+              <div className={cn(FLEX, "mt-2 gap-1")} role="group" aria-label={t("session")}>
+                <button
+                  type="button"
+                  aria-pressed={session === "compact"}
+                  onClick={() => selectSession("compact")}
+                  className={cn(
+                    "rounded border px-2 py-1 font-mono text-xs",
+                    session === "compact" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                  )}
+                >
+                  {t("compactSession")}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={session === "current"}
+                  onClick={() => selectSession("current")}
+                  className={cn(
+                    "rounded border px-2 py-1 font-mono text-xs",
+                    session === "current" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                  )}
+                >
+                  {t("currentSession")}
+                </button>
               </div>
             </div>
             <form
