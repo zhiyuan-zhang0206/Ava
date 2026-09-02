@@ -14,7 +14,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
-      AVA_HOME: ${{ runner.temp }}/ava-native-record-probe
       AVA_HOME_OVERRIDE: '1'
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -28,6 +27,8 @@ jobs:
           version: 0.10.2
       - run: uv sync --frozen
       - run: uv run python -m unittest tests.native_agent_record_probe -v
+        env:
+          AVA_HOME: ${{ runner.temp }}/ava-native-record-probe
   owner-and-launch:
     if: github.head_ref == 'ava-stability-no-replacement-launch'
     runs-on: ubuntu-24.04
