@@ -16,7 +16,11 @@ or inherited Ava agent identity. The environment value is not a credential.
 
 Example profile: `{"kind":"external_agent","subject":"codex","instance":"run-42"}`.
 Claude Code uses subject `claude_code`. Set the profile once in the external
-tool's launch environment, not separately for every generated command. Do not
+tool's launch environment, not separately for every generated command. Instance
+IDs are short stable opaque identifiers of 1 to 20 ASCII letters, digits, dots,
+underscores or hyphens (first character alphanumeric), for example `run-42`.
+A raw 36-character UUID is not supported: choose a distinct short identifier;
+the implementation never truncates and pretends it is the original session ID. Do not
 place secrets, user names, paths, or prompts in the bounded instance field.
 
 CLI send can use that profile without repeating `--source`; an explicitly
