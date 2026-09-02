@@ -208,12 +208,13 @@ class ReleaseStoreTests(unittest.TestCase):
         with zipfile.ZipFile(root / "wheel-evidence/setuptools.whl", "w") as archive:
             archive.writestr(helper.name, helper.read_bytes())
             archive.writestr("_distutils_hack/__init__.py", module.read_bytes())
-        self.activate(self.refresh_manifest(release))
+        original = self.refresh_manifest(release)
+        self.activate(original)
         helper.write_bytes(b"/mutable/source\n")
         # Even a new self-reported installed inventory cannot authorize bytes
         # that differ from the retained original wheel.
         with self.assertRaisesRegex(ReleaseRejectedError, "path injection"):
-            self.activate(self.refresh_manifest(release))
+            self.activate(self.refresh_manifest(release), expected=original)
 
 
 if __name__ == "__main__":
