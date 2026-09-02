@@ -5,7 +5,8 @@ import psycopg
 from shared.runtime_incarnation import RuntimeIncarnation
 
 _OBSERVE_RESTART = (
-    "UPDATE inbound_messages i SET observed_at=clock_timestamp(),status='done' "
+    "UPDATE inbound_messages i SET observed_at=clock_timestamp(),status='done', "
+    "payload=i.payload-'lifecycle_result' "
     "FROM agents_meta m WHERE m.id=%s AND m.runtime_generation=%s AND m.runtime_owner=%s "
     "AND m.lifecycle_command_id=i.id AND i.agent_id=m.id AND i.kind='restart' "
     "AND i.status='claimed' AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
@@ -23,6 +24,12 @@ def observe_process_admission(conn: psycopg.Connection, incarnation: RuntimeInca
         _OBSERVE_RESTART, (incarnation.agent_id, incarnation.generation, incarnation.owner)
     ).fetchone()
     if observed is not None:
+        conn.execute(
+            "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+            "SELECT agent_id,content,'restart_completed',source, "
+            "payload-'launch_attempts'-'lifecycle_result' FROM inbound_messages WHERE id=%s",
+            (observed[0],),
+        )
         conn.execute(_CLEAR_POINTER, (incarnation.agent_id, observed[0]))
 
 

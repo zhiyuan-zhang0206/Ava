@@ -106,7 +106,8 @@ def _select_local_restarting_ids(pool: ConnectionPool, local_machine: str) -> li
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id FROM agents_meta WHERE status = 'restarting' AND machine = %s",
+            "SELECT id FROM agents_meta WHERE machine = %s AND "
+            "(status = 'restarting' OR (runtime_kind='process' AND lifecycle_command_id IS NOT NULL))",
             (local_machine,),
         )
         return [r[0] for r in cur.fetchall()]
@@ -397,12 +398,17 @@ class RespawnController:
                 try:
                     started = respawn_agent(tid)
                     if started:
-                        _log.info("[ops.respawn] respawned agent %s (new PID)", tid)
+                        _log.info(
+                            "[ops.respawn] dispatched recovery for agent %s (not admission proof)",
+                            tid,
+                        )
                     else:
                         # The CAS inside respawn_agent lost — another dispatcher / a
                         # concurrent lifecycle op won. Log it so an agent that stays
                         # 'restarting' shows a respawn attempt with an outcome.
-                        _log.info("[ops.respawn] respawn agent %s: no-op, lost the claim race", tid)
+                        _log.info(
+                            "[ops.respawn] recovery agent %s: deferred, settled, or superseded", tid
+                        )
                 except Exception as exc:
                     _log.error("[ops.respawn] respawn agent %s failed: %r", tid, exc)
         return attempted

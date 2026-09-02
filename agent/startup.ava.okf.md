@@ -48,8 +48,17 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
   record before admission commits. The record is a repairable observation, not a
   second ownership authority. Publication failure rolls the DB transaction back;
   live or unreadable previous identities refuse replacement without signalling.
-  Cross-resource crash recovery and attempt-specific launcher wiring remain a
-  deployment gate for the durable restart series, not an atomic filesystem/DB claim.
+  The controller launches under `ava-boot-<agent>-<command>-<attempt>`; only the
+  admitted child publishes the canonical agent record. These attempt records do
+  not count as admitted agents or interactive shells. Filesystem/DB publication
+  is not atomic; real subprocess crash coverage remains a deployment gate.
+- The existing restarter controller allocates `payload.launch_attempts` in a
+  short metadata-then-inbound transaction before spawning. A crash after that
+  commit consumes an attempt, including when no OS process was started. Both
+  the retry ceiling and original command deadline apply. Exhaustion records an
+  explicit unobserved result without pretending `observed_at` or a new PID exists.
+  Safe terminal failure and queued-follow-up recovery remain required before
+  activation; a retained pointer is visible blocked recovery, not completion.
 
 ### Stage 3: Boot Stage
 - This stage is between '_starting' and run loop

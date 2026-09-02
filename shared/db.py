@@ -581,6 +581,8 @@ def insert_inbound_message(
     """
     if payload is not None and "lifecycle_result" in payload:
         raise ValueError("lifecycle_result is reserved for verified command settlement")
+    if payload is not None and "launch_attempts" in payload:
+        raise ValueError("launch_attempts is reserved for controller authorization")
     # Map inbound kind → lifecycle event_type. Only chat messages between
     # agents produce a 'send_message' event; user→agent chat is not an
     # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /

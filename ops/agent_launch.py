@@ -261,6 +261,7 @@ def _launch_agent_process(
     *,
     birth_config: dict[str, object] | None = None,
     confirm: bool = True,
+    restart_attempt: tuple[int, int, float] | None = None,
 ) -> None:
     """Spawn a new detached agent process via the native supervisor.
     Raises RuntimeError if the spawn itself fails; does **not** clean up DB on
@@ -299,7 +300,15 @@ def _launch_agent_process(
     agent_session = session_name(f"agent-{agent_id}")
     # Kill any stale same-named session before relaunch (resurrect/respawn race).
     # Spawn's agent_id is a fresh autoincrement, so this is a noop there.
-    supervisor.kill_session(agent_session, graceful=False)
+    if restart_attempt is None:
+        supervisor.kill_session(agent_session, graceful=False)
+    else:
+        command_id, attempt_number, remaining_budget = restart_attempt
+        if command_id <= 0 or attempt_number <= 0 or remaining_budget <= 0 or confirm:
+            raise ValueError("invalid command-bound asynchronous restart attempt")
+        # Parent publication can only touch this exact attempt, never the
+        # canonical record published by the child that wins admission.
+        agent_session = session_name(f"boot-{agent_id}-{command_id}-{attempt_number}")
 
     agent_python, venv_dir, venv_bin = _agent_interpreter()
     # The two boot windows ride argv rather than the env dict below, unlike every
@@ -323,6 +332,9 @@ def _launch_agent_process(
         "--boot-budget-seconds",
         str(BOOT_BUDGET_SEC),
     ]
+    if restart_attempt is not None:
+        argv[-1] = str(min(BOOT_BUDGET_SEC, restart_attempt[2]))
+        argv.extend(["--restart-command-id", str(restart_attempt[0])])
 
     env = agent_spawn_env_dict()
     env["PYTHONMALLOC"] = "malloc"
