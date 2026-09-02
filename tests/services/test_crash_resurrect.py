@@ -890,7 +890,7 @@ class TestControllerReconcile:
         controller._boot_pass_done = True
         original = controller._resurrect_crashed
 
-        def close_before_claim(local_machine: str) -> bool:
+        def close_before_claim(local_machine: str) -> tuple[bool, bool]:
             start_serving.begin_start()
             return original(local_machine)
 

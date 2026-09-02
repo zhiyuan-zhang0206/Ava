@@ -144,11 +144,17 @@ def test_restart_respawn_waits_until_the_host_is_serving(
 
     respawned: list[int] = []
     start_serving.clear_serving()
-    monkeypatch.setattr(respawn_mod, "_select_local_restarting_ids", lambda *_args: [11])
+
+    def _select_restarting(_pool: ConnectionPool, _local_machine: str) -> list[int]:
+        return [11]
+
+    def _respawn(agent_id: int) -> bool:
+        respawned.append(agent_id)
+        return True
+
+    monkeypatch.setattr(respawn_mod, "_select_local_restarting_ids", _select_restarting)
     monkeypatch.setattr(respawn_mod, "_gateway_healthy", lambda: True)
-    monkeypatch.setattr(
-        respawn_mod, "respawn_agent", lambda agent_id: respawned.append(agent_id) or True
-    )
+    monkeypatch.setattr(respawn_mod, "respawn_agent", _respawn)
     controller = respawn_mod.RespawnController(cast(ConnectionPool, object()))
 
     assert controller._dispatch_respawns("test-machine") is False
@@ -263,21 +269,37 @@ def test_reap_corpses_defers_revival_until_the_host_is_serving(
     cleanup: list[str] = []
     revived: list[int] = []
     start_serving.clear_serving()
+
+    def _reap_unclaimed(_pool: ConnectionPool, _local_machine: str, _grace_s: float) -> list[int]:
+        cleanup.append("unclaimed")
+        return []
+
+    def _reap_boot_phase(_pool: ConnectionPool, _local_machine: str) -> list[int]:
+        cleanup.append("boot-phase")
+        return []
+
+    def _collect_zombies(_pool: ConnectionPool, _local_machine: str) -> list[int]:
+        return []
+
+    def _revive(_pool: ConnectionPool, _local_machine: str, _max_revive: int) -> list[int]:
+        revived.append(42)
+        return [42]
+
     monkeypatch.setattr(
         respawn_mod,
         "_reap_local_unclaimed_idling",
-        lambda *_args: cleanup.append("unclaimed") or [],
+        _reap_unclaimed,
     )
     monkeypatch.setattr(
         respawn_mod,
         "_reap_local_dead_boot_phase_agents",
-        lambda *_args: cleanup.append("boot-phase") or [],
+        _reap_boot_phase,
     )
-    monkeypatch.setattr(respawn_mod, "_collect_local_lease_zombies", lambda *_args: [])
+    monkeypatch.setattr(respawn_mod, "_collect_local_lease_zombies", _collect_zombies)
     monkeypatch.setattr(
         respawn_mod,
         "_revive_local_dead_running_idling",
-        lambda *_args: revived.append(42) or [42],
+        _revive,
     )
     controller = respawn_mod.RespawnController(cast(ConnectionPool, object()))
 

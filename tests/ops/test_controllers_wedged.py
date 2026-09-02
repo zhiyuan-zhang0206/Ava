@@ -219,23 +219,30 @@ class TestGuards:
 
         monkeypatch.setattr(settings.daemon, "wedged_agent_enabled", True)
         start_serving.clear_serving()
-        monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
-        monkeypatch.setattr(
-            wedged_mod,
-            "_claim_wedged_candidates",
-            lambda *_args, **_kwargs: pytest.fail("must not claim a recovery before serving"),
-        )
-        monkeypatch.setattr(
-            wedged_mod,
-            "_claim_terminated_lease_zombies",
-            lambda *_args, **_kwargs: [(7, 1234)],
-        )
         reaped: list[int] = []
-        monkeypatch.setattr(
-            wedged_mod,
-            "_reap_terminated_lease_zombie",
-            lambda _pool, agent_id, _pid: reaped.append(agent_id) or True,
-        )
+
+        def _must_not_claim(
+            _pool: ConnectionPool,
+            _local_machine: str,
+            _running_age_s: float,
+            _idling_age_s: float,
+            _backoff_s: float,
+        ) -> list[tuple[int, int, datetime]]:
+            pytest.fail("must not claim a recovery before serving")
+
+        def _terminated_zombies(
+            _pool: ConnectionPool, _local_machine: str, _backoff_s: float
+        ) -> list[tuple[int, int]]:
+            return [(7, 1234)]
+
+        def _reap_terminated_zombie(_pool: ConnectionPool, agent_id: int, _pid: int) -> bool:
+            reaped.append(agent_id)
+            return True
+
+        monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
+        monkeypatch.setattr(wedged_mod, "_claim_wedged_candidates", _must_not_claim)
+        monkeypatch.setattr(wedged_mod, "_claim_terminated_lease_zombies", _terminated_zombies)
+        monkeypatch.setattr(wedged_mod, "_reap_terminated_lease_zombie", _reap_terminated_zombie)
 
         result = _fresh_controller(MagicMock()).reconcile("agent-runner")
 
