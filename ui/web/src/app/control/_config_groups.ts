@@ -67,6 +67,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION",
     "AVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK",
     "AVA_SYSTEM_PROMPT_TEMPORAL",
+    "AVA_SYSTEM_PROMPT_INVEST_FUTURE",
   ],
   "config-exec": [
     "AVA_EXEC_TIMEOUT_SECONDS",
@@ -95,7 +96,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_SKILLS_TO_EXPAND_AT_START",
     "AVA_WORKSPACE_IN_SYSTEM_PROMPT",
     "AVA_COMMANDS_ENABLED",
-    "AVA_AGENT_REFLECTION",
   ],
   "config-agent-infra": [
     "AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS",

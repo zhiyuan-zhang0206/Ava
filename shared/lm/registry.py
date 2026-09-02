@@ -96,8 +96,8 @@ class ModelTuning:
     prompt_cross_machine_delegation_enabled: bool | None = None
     prompt_file_driven_work_enabled: bool | None = None
     prompt_temporal_awareness_enabled: bool | None = None
+    prompt_invest_future_enabled: bool | None = None
     prompt_memory_behavior_enabled: bool | None = None
-    agent_reflection_enabled: bool | None = None
 
 
 # The shared-default floor: the values every model gets when neither the model
@@ -145,8 +145,8 @@ DEFAULT_TUNING = ModelTuning(
     prompt_cross_machine_delegation_enabled=True,
     prompt_file_driven_work_enabled=True,
     prompt_temporal_awareness_enabled=True,
+    prompt_invest_future_enabled=True,
     prompt_memory_behavior_enabled=True,
-    agent_reflection_enabled=True,
 )
 
 

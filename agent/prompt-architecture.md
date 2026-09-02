@@ -117,7 +117,7 @@ Capabilities rather than standing as its own section.
   `concise` speaks at milestones only, `silent` works quietly and reports once at the
   end, `off` omits the section from the system prompt entirely. General-agent behavior
   (see the section below for the deliberate restraint vs Codex).
-- **Core memory behavior** — `ava_builtins/plugins/ava_memory/plugin.py:memory_discipline_section()`
+- **`ava_memory` behavior** — `ava_builtins/plugins/ava_memory/plugin.py:memory_discipline_section()`
   (registered via `@register_system_prompt_section`; the old `agent/graph/_system_prompt.py:_memory_behavior_section`
   moved out of core with the plugin split),
   on by default via `settings.agent.prompt_memory_behavior_enabled` (env
@@ -139,6 +139,11 @@ Capabilities rather than standing as its own section.
   API list (signatures drift; the SDK overview / expanded reference carry the
   concrete entry points). Complements output shape (how the *text* is written)
   with *where the deliverable lands*.
+- **Core future signals** — `agent/graph/_system_prompt.py:_invest_in_the_future_section`,
+  on by default via `settings.agent.prompt_invest_future_enabled` (env
+  `AVA_SYSTEM_PROMPT_INVEST_FUTURE`): the framework's one cross-domain
+  future-signal rule. It requires the smallest closing action for a signal that
+  could improve later work and preserves worthwhile follow-ups at task close.
 - **Core reporting honesty** — `agent/graph/_system_prompt.py:_outcome_reporting_section`,
   on by default via `settings.prompt_outcome_reporting_enabled` (env
   `AVA_SYSTEM_PROMPT_REPORTING`): state outcomes as they are, don't round a partial
@@ -219,6 +224,26 @@ mechanics (commit-yourself, header-stamp, search→read, pull-rebase on miss), a
 `memory_discipline_section` carries only the when/what. The prompt section
 deliberately does not restate the mechanics, and defers to `ava.memory` for
 them.
+
+## Section ownership: framework vs plugin
+
+Could an agent without this plugin execute this rule? Yes → framework; no →
+plugin. The framework owns unconditional behavioral constraints and must not
+assume a task, memory, or fleet capability exists. A plugin owns how to act
+using that plugin's store, task surface, or hook.
+
+| section | owner | toggle | unique content |
+|---|---|---|---|
+| `# Invest in the future` | framework | `AVA_SYSTEM_PROMPT_INVEST_FUTURE` (default on) | The ONE cross-domain future-signal rule: trigger, three closing actions, over-capture bias, and closing presentation. |
+| `# Remembering across sessions` | `ava_memory` plugin | `AVA_SYSTEM_PROMPT_MEMORY` | Durable-knowledge domain instance: dual stores, fix stale, format, and verification; no generic rule restatement. |
+| Fleet task-interaction instance (PR2) | `ava_fleet` plugin | plugin enabled | Lands separately with task-specific interaction guidance. |
+
+Review every section with these questions:
+
+- Is this a cross-capability principle (framework) or operational instructions
+  for an already-loaded capability (plugin)?
+- Would the rule still hold with every plugin disabled?
+- Is the same rule restated generically anywhere else? (exactly-one-owner check)
 
 ## Communication style (implemented, config-selected)
 
@@ -301,8 +326,11 @@ Landed so far:
   toggle into a four-way communication style (`AVA_AGENT_COMMUNICATION_STYLE`:
   `off` (default) / `oriented` / `concise` / `silent`, with `off` omitting the section
   entirely).
-- The core memory-behavior section (`AVA_SYSTEM_PROMPT_MEMORY`, default on) — the
-  general-agent "when / what to remember" layer.
+- The `ava_memory` behavior section (`AVA_SYSTEM_PROMPT_MEMORY`, default on) —
+  the durable-knowledge "when / what to remember" layer.
+- The merged `# Invest in the future` section
+  (`AVA_SYSTEM_PROMPT_INVEST_FUTURE`, default on), replacing the independent
+  Beyond section; `agent_reflection_enabled` is retired.
 - The core output-shape section (`AVA_SYSTEM_PROMPT_CONCISENESS`, default on).
 - A verify-before-done convention in the `ava_code` `_coding_tools_section`
   preamble. (Editing-discipline guidance was considered and dropped — the model

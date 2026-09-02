@@ -1,17 +1,24 @@
 """Gating logic for framework-owned system-prompt sections.
 
-`_beyond_task_section` is gated solely by `agent_reflection_enabled`
-(AVA_AGENT_REFLECTION). The section renders when it is on and is
-suppressed when it is off — reflection and memory are separate concerns.
+`_invest_in_the_future_section` is gated by `prompt_invest_future_enabled`
+(AVA_SYSTEM_PROMPT_INVEST_FUTURE). The section renders when it is on, is
+suppressed when it is off, and defaults on through the per-model floor.
 
 `_communication_style_section` is the odd one out: it is selected, not gated —
 'oriented' / 'concise' / 'silent' always render something — except for the
 fourth member, 'off', which is a gate like any other and renders nothing.
 """
 
+import re
+
 import pytest
 
-from agent.graph._system_prompt import _beyond_task_section, _communication_style_section
+from agent.graph._system_prompt import (
+    _INVEST_IN_THE_FUTURE_SECTION,
+    _communication_style_section,
+    _invest_in_the_future_section,
+    build_system_prompt,
+)
 from shared.config import settings
 
 
@@ -22,29 +29,89 @@ from shared.config import settings
         (False, False),
     ],
 )
-def test_beyond_task_section_reflection_gating(
+def test_invest_in_the_future_section_gating(
     monkeypatch: pytest.MonkeyPatch, enabled, expect_section
 ):
-    monkeypatch.setattr(settings.agent, "agent_reflection_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
 
-    rendered = _beyond_task_section()
+    rendered = _invest_in_the_future_section()
 
     if expect_section:
-        assert "Beyond the task at hand" in rendered
+        assert "# Invest in the future" in rendered
     else:
         assert rendered == ""
 
 
-def test_beyond_task_section_mines_intent_into_tasks(monkeypatch: pytest.MonkeyPatch):
-    """When it renders, the section directs fleet-context agents to persist
-    worthwhile follow-ups as open tasks (with provenance), not just offer them —
-    the intent-mining convention. Standalone agents keep the user-only path."""
-    monkeypatch.setattr(settings.agent, "agent_reflection_enabled", True)
+def test_invest_in_the_future_section_is_verbatim(monkeypatch: pytest.MonkeyPatch):
+    """The user-approved future-signal guidance is intentionally byte-exact."""
+    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
 
-    rendered = _beyond_task_section()
+    rendered = _invest_in_the_future_section()
 
-    assert "open tasks in the registry" in rendered
-    assert "standalone agent" in rendered.lower()
+    assert rendered == _INVEST_IN_THE_FUTURE_SECTION
+
+
+def test_invest_in_the_future_section_defaults_to_on(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", None)
+
+    rendered = _invest_in_the_future_section()
+
+    assert rendered == _INVEST_IN_THE_FUTURE_SECTION
+
+
+def test_invest_in_the_future_section_has_no_platform_words_or_numeric_thresholds(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
+
+    rendered = _invest_in_the_future_section()
+
+    assert re.search(r"\d", rendered) is None
+    assert all(
+        word not in rendered
+        for word in ["CI", "flake", "AVA_", "Mergify", "GitHub", "task_registry"]
+    )
+    assert "Beyond the task at hand" not in rendered
+
+
+def test_invest_in_the_future_section_never_filters_out_a_signal(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
+
+    rendered = _invest_in_the_future_section()
+
+    assert all(
+        sentence not in rendered
+        for sentence in [
+            "take no action",
+            "do not manufacture future work",
+            "when there is no meaningful signal",
+        ]
+    )
+
+
+def test_invest_in_the_future_section_in_full_prompt_when_on(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
+
+    prompt = build_system_prompt()
+
+    assert "# Invest in the future" in prompt
+    assert "Beyond the task at hand" not in prompt
+    assert prompt.count("Choose the smallest action that closes the signal") == 1
+
+
+def test_invest_in_the_future_section_absent_from_full_prompt_when_off(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", False)
+
+    prompt = build_system_prompt()
+
+    assert "# Invest in the future" not in prompt
+    assert "Beyond the task at hand" not in prompt
 
 
 @pytest.mark.parametrize(

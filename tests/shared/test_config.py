@@ -967,7 +967,7 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(
 
     # The excluded domains' fields are genuinely served (not accidentally
     # absent from both sides): spot-check one field per excluded domain.
-    for name in ("exec_timeout_seconds", "agent_reflection_enabled", "web_fetch_model"):
+    for name in ("exec_timeout_seconds", "prompt_invest_future_enabled", "web_fetch_model"):
         assert name in values, name
         assert name in flat, name
     assert "AVA_EXEC_TIMEOUT_SECONDS" in served

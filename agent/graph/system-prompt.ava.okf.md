@@ -39,8 +39,8 @@ The system prompt carried in every LLM call, built **once per context window** �
 - `_delegation_check_section` — The 30-second check before taking on work; the prompt's only mandatory-flagged process. The skill-index step (match the task against `# Capabilities`, load the covering skill) sits here rather than in the index itself, because an agent that never reads the index cannot know it is rebuilding one of its own skills. It is dropped and the remaining steps renumbered when this agent renders no Capabilities section at all (`capability_index_is_empty`). The other four steps are the delegation half
 - `_file_driven_work_section` — File-driven workflow
 - `_temporal_awareness_section` — Time awareness, including the `ai-capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
-- `_memory_behavior_section` — Cross-session memory
-- `_beyond_task_section` — Candidate next steps after task completion; with fleet context, worthwhile follow-ups are also created as open tasks via `ava.tasks.create()` (with description carrying provenance evidence pointers), while standalone stays as offers to the user
+- `ava_memory.memory_discipline_section` — Cross-session durable-knowledge behavior
+- `_invest_in_the_future_section` — Framework's one cross-domain future-signal rule; `AVA_SYSTEM_PROMPT_INVEST_FUTURE` defaults on and selects the smallest closing action for a signal that could improve later work
 - `_workspace_section` — Workspace description
 
 **Capabilities group** (lives in `_capabilities.py`, registered by `_system_prompt` so the render order stays the reading order):
