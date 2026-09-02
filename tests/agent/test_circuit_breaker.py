@@ -300,6 +300,7 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     self-initiated continue-loop (the next graph invocation after the turn
     boundary) must not re-fire the doomed call. Hosted mode surfaces the park
     as END+turn_idle without blocking on the inbound wait."""
+    tid = spawn_agent()
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
@@ -308,7 +309,7 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     cmd = await claim_node(
         state,
         _make_runtime(ops_pool=aops_pool, hosted=True),
-        _config(1),
+        _config(tid),
     )
 
     assert cmd.goto == "__end__"
@@ -320,6 +321,7 @@ async def test_claim_does_not_park_while_breaker_closed(
 ) -> None:
     """Control: with the breaker closed the same no-batch state routes to the
     LLM as before (the continue-working path)."""
+    tid = spawn_agent()
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
@@ -327,7 +329,7 @@ async def test_claim_does_not_park_while_breaker_closed(
     cmd = await claim_node(
         state,
         _make_runtime(ops_pool=aops_pool, hosted=True),
-        _config(1),
+        _config(tid),
     )
 
     assert cmd.goto == "before_llm"
