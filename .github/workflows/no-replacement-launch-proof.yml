@@ -51,9 +51,20 @@ jobs:
           mkdir -p "$RUNNER_TEMP/poison/shared"
           printf 'raise RuntimeError("PYTHONPATH poison imported")\n' > "$RUNNER_TEMP/poison/shared/__init__.py"
           cd "$RUNNER_TEMP"
-          mv "$GITHUB_WORKSPACE" "${GITHUB_WORKSPACE}-hidden"
-          trap 'mv "${GITHUB_WORKSPACE}-hidden" "$GITHUB_WORKSPACE"' EXIT
-          PYTHONPATH="$RUNNER_TEMP/poison" "$task_python" -I "$RUNNER_TEMP/native_agent_record_probe.py" -v 2>&1 | tee "${GITHUB_WORKSPACE}-hidden/proof/wheel-native.log"
+          # The Actions runner holds the checkout root open on Windows. Hide
+          # every runtime package instead; exact original source paths vanish.
+          restore_source() {
+            for package in ava cli agent gateway services shared ops ava_builtins; do
+              if test -d "$GITHUB_WORKSPACE/$package-hidden"; then
+                mv "$GITHUB_WORKSPACE/$package-hidden" "$GITHUB_WORKSPACE/$package"
+              fi
+            done
+          }
+          trap restore_source EXIT
+          for package in ava cli agent gateway services shared ops ava_builtins; do
+            mv "$GITHUB_WORKSPACE/$package" "$GITHUB_WORKSPACE/$package-hidden"
+          done
+          PYTHONPATH="$RUNNER_TEMP/poison" "$task_python" -I "$RUNNER_TEMP/native_agent_record_probe.py" -v 2>&1 | tee "$GITHUB_WORKSPACE/proof/wheel-native.log"
       - name: Require original detached transport to fail the cooperative handler probe
         if: runner.os == 'Windows'
         shell: bash
