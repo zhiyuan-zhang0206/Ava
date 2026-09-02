@@ -121,6 +121,19 @@ def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None
     monkeypatch.setattr(settings.general, "ava_home", Path(_pty_home))
 
 
+@pytest.fixture(autouse=True)
+def _host_is_serving(_point_backend_home: None) -> Iterator[None]:
+    """PTY schedule cases model a gateway that completed its start gate."""
+    from shared import start_serving
+
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
+    try:
+        yield
+    finally:
+        start_serving.clear_serving()
+
+
 def _dump_logs(home: Path) -> str:
     """Diagnosis aid for CI-only failures: every session transcript + host log."""
     diag: list[str] = []

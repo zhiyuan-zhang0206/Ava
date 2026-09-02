@@ -15,6 +15,7 @@ prod rows stranded indefinitely (issue #1123).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -41,6 +42,16 @@ def sync_pool():
         yield pool
     finally:
         pool.close()
+
+
+@pytest.fixture(autouse=True)
+def _host_is_serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Reaper cases model a host that already passed its start gate."""
+    from shared import start_serving
+
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
 
 
 def _make_dead_boot_phase_agent(db_conn: psycopg.Connection) -> int:
