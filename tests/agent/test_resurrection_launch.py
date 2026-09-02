@@ -67,13 +67,13 @@ def test_prepared_crash_resumes_same_allocation_before_os_launch(
     assert not _pending_allocation_can_resume(agent_id, None)
     from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-    with ConnectionPool(
+    with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
         assert (agent_id, wake) in select_terminated_owners_with_pending(pool)
     prepared = agent_wake._resume_pending_allocation(agent_id, wake)
     assert prepared is not None and prepared.command_id == command
-    calls: list[object] = []
+    calls: list[int] = []
 
     def failed_launch(*args: object, **kwargs: object) -> str:
         # Separate connection sees authorization before a real launcher could
@@ -86,7 +86,8 @@ def test_prepared_crash_resumes_same_allocation_before_os_launch(
         assert count == (1,)
         attempt = kwargs["resurrect_attempt"]
         assert isinstance(attempt, tuple)
-        calls.append(attempt)
+        assert attempt[:2] == (command, 1)
+        calls.append(1)
         raise RuntimeError("injected failure after committed authorization")
 
     monkeypatch.setattr(agent_launch, "_launch_agent_process", failed_launch)
