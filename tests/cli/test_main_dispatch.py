@@ -104,12 +104,15 @@ def test_restart_handler_forwards_the_parsed_config_overlay(
     from cli.commands import agents as agents_commands
 
     calls: list[tuple[int, str | None, str | None]] = []
+
+    def restart(agent_id: int, config_json: str | None = None, source: str | None = None) -> int:
+        calls.append((agent_id, config_json, source))
+        return 0
+
     monkeypatch.setattr(
         agents_commands,
         "cmd_agents_restart",
-        lambda agent_id, config_json=None, source=None: (
-            calls.append((agent_id, config_json, source)) or 0
-        ),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        restart,
     )
 
     assert _main.main(["agents", "restart", "8", "--config", '{"llm_model":"gpt-5.6-sol"}']) == 0
