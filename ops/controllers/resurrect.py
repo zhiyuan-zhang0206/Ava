@@ -113,6 +113,7 @@ from ops.controllers.base import BlockScope, ReconcileResult
 from ops.controllers.respawn import _gateway_healthy
 from shared.agents import ResurrectAlreadyAlive, TerminationSource
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.machine import MachineRole, machine_name
 from shared.timing import CONTROLLER_SCAN_INTERVAL_S
 
@@ -160,7 +161,7 @@ def _claim_crash_resurrect_candidates(
     rows for it). Machine-scoped — a resurrect launches a local process, so a foreign
     row is never touched. A corpse at ``auto_resurrect_max_attempts`` unconsumed
     ``kind='resurrect'`` lifecycle inbounds is outside the claim budget."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_resurrect_at = now() "
             "WHERE status = 'terminated' "
@@ -224,7 +225,7 @@ def _claim_boot_revive_candidates(
     of launching the fleet in one tick. The cap rides `id IN (SELECT ... ORDER
     BY id LIMIT %s)`, so the claim stays a single atomic statement.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_resurrect_at = now() "
             "WHERE status = 'terminated' "

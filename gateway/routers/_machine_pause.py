@@ -26,6 +26,7 @@ from gateway.schemas import (
 )
 from ops.ops_lifecycle import _force_mark_terminated
 from shared import machines
+from shared.db_transaction import write_transaction
 from shared.machine import machine_name
 from shared.task_notes import task_note_line
 
@@ -63,7 +64,7 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
     pause own nothing that this pause needs to rescue (their tasks are another
     cleanup's business).
     """
-    with pool.connection() as conn:
+    with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT t.id, a.id FROM agent_tasks t "

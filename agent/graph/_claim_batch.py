@@ -33,6 +33,7 @@ from agent.db import (
 )
 from agent.graph._context import AvaContext
 from shared.agents import AgentStatus
+from shared.db_transaction import async_write_transaction
 from shared.log import logger
 from shared.trace import claim_idle_wait_span
 
@@ -143,7 +144,7 @@ async def _defer_chats_to_pending(
     """
     if pool is None or not chat_ids:
         return
-    async with pool.connection() as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE inbound_messages SET status = 'pending', claimed_at = NULL "
             "WHERE id = ANY(%s) AND agent_id = %s",

@@ -39,6 +39,7 @@ from shared.cluster import session_name
 from shared.config import settings
 from shared.daemon_health import Liveness, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.machine import machine_name, reachable_host
 from shared.paths import legacy_pid_path
@@ -152,7 +153,7 @@ def _page_session_name(agent_id: int, name: str, session_index: int) -> str:
 
 def _allocate_session_index(pool: ConnectionPool, agent_id: int) -> int:
     """Atomically allocate one shell id from the owning agent's shared counter."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET session_index = session_index + 1 "
             "WHERE id = %s RETURNING session_index",
@@ -175,7 +176,7 @@ def _ensure_token(pool: ConnectionPool, row: _PageRow) -> str:
     if row.server_token is not None:
         return row.server_token
     minted = secrets.token_hex(16)
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_pages SET server_token = COALESCE(server_token, %s) "
             "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL "
@@ -206,7 +207,7 @@ def _create_page_session(
         env=env,
     ):
         raise RuntimeError(f"failed to create page session {page_session!r}")
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_pages SET session_name = %s "
             "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL "

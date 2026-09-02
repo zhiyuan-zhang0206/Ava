@@ -257,6 +257,7 @@ def create_agent_row(
     target_machine = machine
 
     with shared.db.connect() as conn, conn.cursor() as cur:
+        conn.execute("SET TRANSACTION READ WRITE")
         # label: when the spawner assigns one, store it sticky (label_user_set=TRUE)
         # so the labeler's CAS (WHERE label IS NULL AND NOT label_user_set) skips it.
         # Otherwise leave NULL — the labeler generates a short name via LLM CAS when

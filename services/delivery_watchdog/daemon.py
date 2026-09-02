@@ -70,6 +70,7 @@ from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.paths import legacy_pid_path
 
@@ -225,7 +226,7 @@ def dead_letter_stale_claimed(pool: ConnectionPool, threshold_s: float) -> int:
     evidence left. Live owners are never touched — a running/idling agent's
     claimed rows are mid-flight and finalize at its next boot.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE inbound_messages m SET status = 'done' "
             "FROM agents_meta am "
@@ -274,7 +275,7 @@ def persist_alerted(pool: ConnectionPool, inbound_ids: set[int]) -> None:
     pruned and re-alerted between two scans."""
     if not inbound_ids:
         return
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO delivery_watchdog_alerted (inbound_id) VALUES (%s) "
             "ON CONFLICT (inbound_id) DO NOTHING",
@@ -288,7 +289,7 @@ def prune_alerted(pool: ConnectionPool, inbound_ids: set[int]) -> None:
     (reconcile reset) flip re-alerts exactly as it did with memory alone."""
     if not inbound_ids:
         return
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "DELETE FROM delivery_watchdog_alerted WHERE inbound_id = ANY(%s)",
             (list(inbound_ids),),
@@ -299,7 +300,7 @@ def gc_alerted(pool: ConnectionPool, ttl_s: float) -> int:
     """TTL safety net: drop dedup rows older than `ttl_s` that the per-scan
     prune never saw (the inbound left `pending` while the daemon was down, or
     an alert predates the table). Returns the number of rows removed."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "DELETE FROM delivery_watchdog_alerted "
             "WHERE alerted_at < now() - make_interval(secs => %s)",

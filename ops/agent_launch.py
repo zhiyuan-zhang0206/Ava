@@ -42,6 +42,7 @@ from shared.boot_timing import (
     LAUNCH_CONFIRM_TIMEOUT_SEC,
 )
 from shared.cluster import session_name
+from shared.db_transaction import write_transaction
 from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
@@ -403,7 +404,7 @@ def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
             id=agent_id,
             event="launch_confirm_failed",
         )
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         # Capture cascade-closable show() page names BEFORE the status flip.
         # Daemon-supervised serve() pages stay open across termination.
         # An unclaimed 'idling' row can hold open pages (resurrect's cascade_open
@@ -506,7 +507,7 @@ def _launch_or_force_terminated(
                     exc=repr(exc),
                     event="launch_force_terminated",
                 )
-                with shared.db.connect() as conn, conn.cursor() as cur:
+                with write_transaction() as conn, conn.cursor() as cur:
                     # Capture cascade-closable show() page names BEFORE the
                     # status flip. Daemon-supervised serve() pages stay open;
                     # resurrect reopens only show() rows the cascade closed.

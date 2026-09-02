@@ -63,6 +63,7 @@ from agent.observe import log_llm_usage
 from agent.state_channels import CircuitState
 from shared.config import settings
 from shared.config.turn_view import turn_settings
+from shared.db_transaction import async_write_transaction
 from shared.event_publisher import AgentEventPublisher
 from shared.live_events import TokenUsage
 from shared.lm.content import content_blocks
@@ -536,7 +537,7 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
     if ctx.ops_pool is None:
         return
     try:
-        async with ctx.ops_pool.connection() as conn, conn.cursor() as cur:
+        async with async_write_transaction(ctx.ops_pool) as conn, conn.cursor() as cur:
             if text:
                 await cur.execute(
                     "UPDATE agents_meta SET last_active_at = now(), last_message_text = %s "

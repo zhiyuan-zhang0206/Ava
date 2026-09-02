@@ -42,6 +42,7 @@ from shared.checkpoint import (
 )
 from shared.config import settings
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
+from shared.db_transaction import write_transaction
 from shared.inbound import InboundKind
 from shared.lm.content import content_blocks
 from shared.lm.factory import model_supports_vision, vision_capable_provider_names
@@ -240,7 +241,7 @@ def _system_note_blocking(
     task_id: int | None,
 ) -> int:
     """Sync system-note INSERT — via to_thread (pool work off the event loop)."""
-    with pool.connection() as conn:
+    with write_transaction(pool) as conn:
         if task_id is not None:
             with conn.cursor() as cur:
                 # Keep ownership stable until insert_inbound_message() commits below:

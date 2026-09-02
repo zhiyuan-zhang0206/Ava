@@ -35,6 +35,7 @@ import psycopg
 
 import shared.db
 from shared.agents import MachineNotRegistered
+from shared.db_transaction import write_transaction
 from shared.machine import (
     MachineRoles,
     _resolve_gateway_url,
@@ -332,7 +333,7 @@ def register_self(url: str | None = None) -> None:
         serve_agent_runner=serve_agent_runner,
         serve_observability_station=serve_observability_station,
     )
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
             "(machine_name, home, serve_gateway, serve_agent_runner, "
@@ -377,7 +378,7 @@ def mark_stopping(name: str, home: str) -> None:
     unit row simply updates zero rows, and recompute leaves the composed machines
     row consistent.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machine_units SET stopped_at = NOW() WHERE machine_name = %s AND home = %s",
             (name, home),
@@ -624,7 +625,7 @@ def set_staging(name: str, *, is_staging: bool) -> bool:
             rollout fan-out);
             False restores it as a normal rollout target.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machines SET is_staging = %s WHERE name = %s",
             (is_staging, name),
@@ -649,7 +650,7 @@ def clear_stopped_marker(name: str) -> bool:
     an unrelated recompute (a peer unit stopping) may legitimately re-stamp the
     composed row.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machines SET stopped_at = NULL WHERE name = %s AND stopped_at IS NOT NULL",
             (name,),
@@ -687,7 +688,7 @@ def pause(name: str, reason: str | None = None) -> bool:
     Returns:
         True when a row matched and was updated; False when no such machine.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machines SET paused_at = NOW(), pause_reason = %s "
             "WHERE name = %s AND paused_at IS NULL",
@@ -716,7 +717,7 @@ def resume(name: str) -> bool:
     Args:
         name: the machines-table row to resume.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machines SET paused_at = NULL, pause_reason = NULL "
             "WHERE name = %s AND paused_at IS NOT NULL",
