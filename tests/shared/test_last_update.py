@@ -303,7 +303,43 @@ def test_lkg_promotion_officially_finalizes_its_incomplete_rollout(
     with db_conn.cursor() as cur:
         cur.execute("SELECT outcome FROM cluster_last_update WHERE id = 1")
         row = cur.fetchone()
+        cur.execute("SELECT outcome FROM deployment_state WHERE id = 1")
+        mirror = cur.fetchone()
     assert row is not None and row[0] == "recovered"
+    assert mirror is not None and mirror[0] == "recovered"
+
+
+def test_lkg_promotion_keeps_its_anchor_when_the_last_update_mirror_disagrees(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A stale write-only mirror leaves the record incomplete, not the rollback anchor stuck."""
+    from shared.cluster_pin import (
+        get_last_known_good_sha,
+        promote_pending_known_good_if_ready,
+        set_target_with_pending_known_good,
+    )
+
+    target = "8bdd366"
+    begin_update(target_sha=target, origin="cli:mini", holder="mini:pid1")
+    finish_update(UpdateOutcome.INCOMPLETE, pin_advanced=True)
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE deployment_state SET outcome = NULL WHERE id = 1")
+    db_conn.commit()
+    set_target_with_pending_known_good(target)
+
+    assert promote_pending_known_good_if_ready(min_age_s=0.0) is True
+    assert get_last_known_good_sha() == target
+
+    record = read_last_update()
+    assert record is not None
+    assert record.outcome is UpdateOutcome.INCOMPLETE
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT outcome FROM cluster_last_update WHERE id = 1")
+        row = cur.fetchone()
+        cur.execute("SELECT outcome FROM deployment_state WHERE id = 1")
+        mirror = cur.fetchone()
+    assert row is not None and row[0] == "incomplete"
+    assert mirror is not None and mirror[0] is None
 
 
 def test_lkg_promotion_never_finalizes_an_unrelated_incomplete_rollout() -> None:
