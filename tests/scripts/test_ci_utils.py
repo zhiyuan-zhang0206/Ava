@@ -67,7 +67,7 @@ def test_trunk_priority_maps_cli_names_to_submit_values(priority: str, expected:
     assert ci_utils._trunk_priority(priority) == expected
 
 
-def test_queue_resolution_prefers_flag_then_environment_then_mergify(
+def test_queue_resolution_prefers_flag_then_environment_then_trunk_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CI_QUEUE", "trunk")
@@ -75,7 +75,7 @@ def test_queue_resolution_prefers_flag_then_environment_then_mergify(
     assert ci_utils._resolve_queue(None) == "trunk"
 
     monkeypatch.delenv("CI_QUEUE")
-    assert ci_utils._resolve_queue(None) == "mergify"
+    assert ci_utils._resolve_queue(None) == "trunk"
 
 
 class _TrunkResponse:
