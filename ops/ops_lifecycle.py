@@ -392,6 +392,13 @@ def _restart_blocking(
     with db_pool.connection() as conn:
         payload: dict[str, object] | None = None
         if body.config_overlay:
+            # This overlay write must not depend on borrowed-backend session
+            # state: PgBouncer can hand us a backend whose session a previous
+            # client left with default_transaction_read_only=on, and this
+            # emergency channel (provider-outage model switch) is exactly when
+            # the pool is most likely poisoned. Declare the transaction
+            # writable before the DML (same posture as #1428/#1436).
+            conn.execute("SET TRANSACTION READ WRITE")
             conn.execute(
                 "UPDATE agents_meta "
                 "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
