@@ -33,6 +33,7 @@ jobs:
           git rev-parse HEAD > proof/head-sha.txt
           printf '%s\n' "$BASELINE_SHA" > proof/baseline-sha.txt
           timeout 180 uv run pytest tests/agent/test_runtime_incarnation.py -q --junitxml=proof/head.xml
+          timeout 180 uv run pytest tests/agent/test_runtime_incarnation_migration.py -q --junitxml=proof/migration.xml
           git show "$BASELINE_SHA:ops/ops_exit.py" > ops/ops_exit.py
           git show "$BASELINE_SHA:agent/db.py" > agent/db.py
           set +e
