@@ -14,6 +14,12 @@ changing facts refuse before writing a receipt.
 Session/definition reads are bounded and verify the opened inode against the
 path observation; replacement or growth during a read refuses the inventory.
 
+Native reads reuse `shared.native_job_observation`: launchd enumeration requires
+the current user's proven Aqua domain and two identical label snapshots. Raw
+plist bytes must match the label-addressed native reader before hashing. Cron
+uses the same bounded reader as observation. An unavailable domain is an error,
+never an empty inventory or positive shutdown result.
+
 The existing `ExpectedUnitWriters` model carries exact process/session/job
 identities. The full secret-free prepare receipt also carries the complete
 service roster and its gates. Its filename is the canonical payload SHA-256;

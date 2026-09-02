@@ -27,8 +27,9 @@ from shared.managed_writer_observation import (
     ObservationChallenge,
     UnitObserver,
 )
+from shared.native_job_observation import NativeReadUnavailableError
 from shared.runtime_prepare import tree_inventory
-from shared.runtime_release import ReleaseRejectedError, verify_release
+from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 
@@ -119,6 +120,25 @@ def check_bounded_read(home: Path) -> None:
     path.unlink()
 
 
+def check_unknown_scheduler(
+    conn: psycopg.Connection, release: VerifiedRelease, home: Path, receipt: Path, schema: str
+) -> None:
+    # Unknown native state must not become an empty, apparently complete unit.
+    with patch.object(
+        inventory,
+        "read_crontab",
+        side_effect=NativeReadUnavailableError("unavailable scheduler domain"),
+    ):
+        try:
+            inventory.revalidate_prepared_inventory(
+                conn, release, home, "runtime-proof", receipt, schema_digest=schema
+            )
+        except NativeReadUnavailableError:
+            pass
+        else:
+            raise AssertionError("unknown native scheduler accepted")
+
+
 def main() -> None:
     if os.environ["GITHUB_ACTIONS"] != "true":
         raise RuntimeError("CI-only inventory proof")
@@ -152,16 +172,10 @@ def main() -> None:
     original_job = job.read_bytes()
     cron = f"@reboot AVA_HOME={home} /obsolete/ava start # ava-runtime-proof\n"
 
-    def scheduler_read(argv: list[str]) -> str:
-        if argv == ["/bin/launchctl", "list"]:
-            return f"-\t0\t{label}\n"
-        if argv == ["/usr/bin/crontab", "-l"]:
-            return cron
-        raise AssertionError("unexpected scheduler read")
-
     with (
         psycopg.connect(os.environ["AVA_DB_URL"]) as conn,
-        patch.object(inventory, "_read_command", side_effect=scheduler_read),
+        patch.object(inventory, "read_crontab", side_effect=lambda _: cron.encode()),
+        patch.object(inventory, "read_launchd_labels", return_value=frozenset({label})),
     ):
         conn.execute("CREATE TEMP TABLE machine_units(machine_name text,home text)")
         conn.execute("INSERT INTO machine_units VALUES (%s,%s)", ("runtime-proof", str(home)))
@@ -181,6 +195,7 @@ def main() -> None:
             schema_digest=schema,
         )
         check_observer(expected, receipt)
+        check_unknown_scheduler(conn, release, home, receipt, schema)
         # Omission of a residual old session, service-only roster drift, and
         # unit relocation must all invalidate the full prepared receipt.
         original_roster = inventory._service_roster
@@ -219,6 +234,7 @@ def main() -> None:
                 "pluginServiceIncluded": True,
                 "changedFactsRefused": True,
                 "unknownCoverageBlocksMaintenance": True,
+                "unknownNativeReaderRefused": True,
                 "sealedImageUnchanged": True,
                 "schedulerSource": "controlled read-only fixture",
             }

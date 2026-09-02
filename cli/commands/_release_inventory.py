@@ -13,8 +13,8 @@ import os
 import platform
 import plistlib
 import stat
-import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -24,6 +24,11 @@ from shared.managed_writer_observation import (
     ExpectedProcess,
     ExpectedSession,
     ExpectedUnitWriters,
+)
+from shared.native_job_observation import (
+    read_crontab,
+    read_launchd_definition,
+    read_launchd_labels,
 )
 from shared.private_storage import write_private_bytes
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
@@ -82,13 +87,6 @@ def _sessions(home: Path) -> tuple[ExpectedSession, ...]:
     return tuple(result)
 
 
-def _read_command(argv: list[str]) -> str:
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)
-    if result.returncode:
-        raise ReleaseRejectedError("OS registration inventory is unavailable")
-    return result.stdout
-
-
 def _launchd(home: Path) -> tuple[ExpectedLauncher, ...]:
     directory = Path.home() / "Library/LaunchAgents"
     if directory.resolve(strict=True) != directory:
@@ -102,6 +100,8 @@ def _launchd(home: Path) -> tuple[ExpectedLauncher, ...]:
             raise ReleaseRejectedError("invalid launchd label")
         if not label.startswith("com.ava."):
             continue
+        if path.name != f"{label}.plist" or read_launchd_definition(label) != encoded:
+            raise ReleaseRejectedError("launchd definition identity changed")
         environment = raw.get("EnvironmentVariables", {})
         # Legacy labels with no explicit home cannot be silently classified as
         # another unit. Their ownership requires an explicit migration first.
@@ -112,11 +112,12 @@ def _launchd(home: Path) -> tuple[ExpectedLauncher, ...]:
                 kind="launchd", name=label, definition_digest=hashlib.sha256(encoded).hexdigest()
             )
         )
-    loaded = {
-        line.split()[-1]
-        for line in _read_command(["/bin/launchctl", "list"]).splitlines()
-        if line.split() and line.split()[-1].startswith("com.ava.")
-    }
+    deadline = datetime.now(UTC) + timedelta(seconds=10)
+    before = read_launchd_labels(deadline)
+    after = read_launchd_labels(deadline)
+    if before != after:
+        raise ReleaseRejectedError("loaded launcher inventory changed")
+    loaded = {label for label in after if label.startswith("com.ava.")}
     if not loaded <= {item.name for item in result}:
         raise ReleaseRejectedError("loaded Ava job has no inventoried definition")
     return tuple(result)
@@ -127,7 +128,7 @@ def _launchers(home: Path) -> tuple[ExpectedLauncher, ...]:
         return _launchd(home)
     if sys.platform != "linux":
         raise ReleaseRejectedError("unit launcher inventory platform is unsupported")
-    body = _read_command(["/usr/bin/crontab", "-l"])
+    body = read_crontab(datetime.now(UTC) + timedelta(seconds=10)).decode("utf-8")
     result: list[ExpectedLauncher] = []
     for line in body.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
