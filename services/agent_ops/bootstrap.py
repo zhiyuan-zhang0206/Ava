@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 import psycopg
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 
 from shared.daemon_http import start_daemon_http
 from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity, lock_rollout
@@ -38,9 +38,16 @@ class PreparedObservation(EvidenceModel):
 class ObserverProjection(EvidenceModel):
     """One already-resolved child cohort; never reads .env or fetches gateway."""
 
-    db_url: SecretStr
+    db_url: SecretStr = Field(min_length=1)
     cluster_secret: SecretStr
     ops_port: int = Field(gt=0, le=65535)
+
+    @field_validator("db_url")
+    @classmethod
+    def explicit_db_url(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value().strip():
+            raise ValueError("bootstrap requires an explicit database projection")
+        return value
 
     @classmethod
     def from_environment(cls) -> ObserverProjection:

@@ -12,7 +12,9 @@ from uuid import uuid4
 
 import psutil
 import pytest
+from pydantic import SecretStr, ValidationError
 
+from services.agent_ops.bootstrap import ObserverProjection
 from shared.daemon_http import start_daemon_http
 from shared.managed_writer_observation import (
     ExpectedProcess,
@@ -24,6 +26,12 @@ from shared.managed_writer_observation import (
     observe_session,
 )
 from shared.session_record import pid_starttime_ticks
+
+
+@pytest.mark.parametrize("url", ["", "  "])
+def test_empty_projected_db_url_cannot_use_ambient_postgres_defaults(url: str) -> None:
+    with pytest.raises(ValidationError):
+        ObserverProjection(db_url=SecretStr(url), cluster_secret=SecretStr(""), ops_port=8106)
 
 
 def test_exact_live_exited_and_reused_identity() -> None:

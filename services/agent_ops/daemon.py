@@ -29,23 +29,9 @@ Endpoint:
         -> 200 {"status": "completed"|"failed", "result": {...}}
     GET  /healthz  (watchdog liveness; served on the same port)
 
-Work kinds (kind -> operations.py function):
-    `spawn-launch`    -> launch_agent_op (the row is pre-created by the gateway)
-    `lifecycle`       -> lifecycle_op (parses path -> terminate / resurrect / restart)
-    `cluster_stop`    -> cluster_stop_op
-    `cluster_update`  -> cluster_update_op
-    `cluster_fetch`   -> cluster_fetch_op (git fetch origin — non-disruptive pre-flight)
-    `cluster_resume`  -> cluster_resume_op
-    `status_probe`    -> cluster_status_op
-    `config_read`     -> config_read_op
-    `config_write`    -> config_write_op
-    `inventory_read`  -> inventory_read_op
-    `inventory_write` -> inventory_write_op
-    `shell_probe`     -> shell_probe_op
-    `shell_kill`      -> shell_kill_op
-    `agent_skill_view` -> agent_skill_view_op (runner-discovered command catalog)
-    `shell_capture`   -> shell_capture_op
-    `upload_receive`  -> upload_receive_op (pull an upload onto this host)
+Normal work kinds and payloads are declared by `ops.rpc_schemas.OpEnvelope`;
+the dispatch functions below route them to the corresponding `ops_*` operation.
+The explicit prepared bootstrap entry bypasses this normal dispatcher entirely.
 
 Idempotency keys: a request whose envelope carries `idempotency_key` is
 deduplicated — the first dispatch with a key runs the op and stores its
