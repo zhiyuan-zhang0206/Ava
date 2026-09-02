@@ -120,8 +120,10 @@ def unpause_local_cluster() -> None:
 
     1. write `host_deploy_state.posture = idle` (with `paused_at` = NULL) ->
        the middleware stops returning 503
-    2. respawn the `ava-restarter` session **only if not already alive** -> the
-       restarter resumes claiming agents
+    2. respawn the `ava-restarter` session **only if not already alive and the
+       roster still enables it** (hosted mode gates the restarter off; a pause
+       must not resurrect a service ``ava start`` would skip) -> the restarter
+       resumes claiming agents
 
     Idempotent: already idle / restarter already alive -> harmless no-op. The
     gateway's compensating unpause may be delivered after a host already
@@ -157,9 +159,34 @@ def unpause_local_cluster() -> None:
     # recovery may override.  The watchdog already honors the same marker; the
     # direct unpause path must do so as well because it is the rollout's final
     # resume boundary and otherwise bypasses the watchdog entirely.
+    from ops.spec import gate_reason_for_session
     from shared.disabled_services import is_skipped, read_skipped
     from shared.session_backend import get_backend
     from shared.session_env import forward_env_dict
+
+    # The ROSTER gate outranks the durable marker: a service the roster
+    # disables for THIS host (hosted mode's restarter — per-agent process
+    # supervision retired) must not be resurrected by an orchestration
+    # finally, or every pause/unpause boundary (a rollout's resume) relaunches
+    # it on the new SHA — the 18:56 / 22:20 / 22:28 restarter incidents of
+    # 2026-09-02, where ``ava start`` skipped the service correctly and this
+    # respawn undid the skip. Asked through ops.spec's gate so the decision
+    # cannot drift from the start roster; a lookup surprise leaves it down
+    # (same fail-closed direction as an unreadable marker below).
+    try:
+        gate_reason = gate_reason_for_session(_RESTARTER_SERVICE)
+    except Exception:
+        _log.error(
+            "[cluster] roster gate lookup failed; leaving restarter down",
+            exc_info=True,
+        )
+        return
+    if gate_reason is not None:
+        _log.info(
+            "[cluster] restarter is roster-disabled on this host (%s); leaving it down",
+            gate_reason,
+        )
+        return
 
     try:
         restarter_disabled = is_skipped(_RESTARTER_SERVICE, read_skipped())
