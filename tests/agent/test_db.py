@@ -258,6 +258,87 @@ class TestWaitForInbound:
         with pytest.raises(RuntimeError, match="actual status now 'idling'"):
             await mark_agent_status(aops_pool, tid, "idling", expected_from="running")
 
+    async def test_flip_hosted_status_commits_and_softens_a_cas_miss(
+        self,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+    ) -> None:
+        """Hosted turn boundaries write their transition, while a lifecycle
+        winner merely rejects the stale compare-and-swap."""
+        from agent.db import flip_hosted_status
+
+        tid = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, status) VALUES (%s, 'idling') "
+                "ON CONFLICT (id) DO UPDATE SET status = 'idling'",
+                (tid,),
+            )
+        db_conn.commit()
+
+        assert await flip_hosted_status(aops_pool, tid, "running", expected_from="idling")
+        async with aops_pool.connection() as conn:
+            row = await (
+                await conn.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
+            ).fetchone()
+        assert row == ("running",)
+
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (tid,))
+        db_conn.commit()
+
+        assert not await flip_hosted_status(aops_pool, tid, "idling", expected_from="running")
+        async with aops_pool.connection() as conn:
+            row = await (
+                await conn.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
+            ).fetchone()
+        assert row == ("terminated",)
+
+    async def test_settle_stale_running_rows_only_settles_local_pidless_rows(
+        self,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+    ) -> None:
+        """A hosted boot settles only its prior pidless running rows."""
+        from services.agent_host.host import settle_stale_running_rows
+
+        local_stale = create_agent(db_conn)
+        local_pid = create_agent(db_conn)
+        foreign_stale = create_agent(db_conn)
+        terminated = create_agent(db_conn)
+        restarting = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO agents_meta (status, pid, machine, id) VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET "
+                "status = EXCLUDED.status, pid = EXCLUDED.pid, machine = EXCLUDED.machine",
+                [
+                    ("running", None, "this-box", local_stale),
+                    ("running", 321, "this-box", local_pid),
+                    ("running", None, "other-box", foreign_stale),
+                    ("terminated", None, "this-box", terminated),
+                    ("restarting", None, "this-box", restarting),
+                ],
+            )
+        db_conn.commit()
+
+        assert await settle_stale_running_rows(aops_pool, "this-box") == [local_stale]
+        async with aops_pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT id, status FROM agents_meta WHERE id = ANY(%s) ORDER BY id",
+                    ([local_stale, local_pid, foreign_stale, terminated, restarting],),
+                )
+            ).fetchall()
+        statuses = dict(rows)
+        assert statuses == {
+            local_stale: "idling",
+            local_pid: "running",
+            foreign_stale: "running",
+            terminated: "terminated",
+            restarting: "restarting",
+        }
+
     async def test_enter_idling_state_cas_loss_degrades_not_crash(
         self,
         db_conn: psycopg.Connection,

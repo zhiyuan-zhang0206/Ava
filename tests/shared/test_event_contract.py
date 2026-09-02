@@ -128,8 +128,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # and compaction_completed (Task #5643) bring the current total to 135;
     # remote PITR inventory and scheduled recovery-proof failures raise it to
     # 137; restart_handoff_host_unhealthy (Task #2338's hosted restart
-    # handoff failure marker) raises it to 138.
-    assert len(_TELEMETRY_KINDS) == 138
+    # handoff failure marker) raises it to 138; host_stale_running_settled
+    # (the hosted boot settle of rows a dead host left running) raises it to 139.
+    assert len(_TELEMETRY_KINDS) == 139
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
