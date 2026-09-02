@@ -45,8 +45,10 @@ class SessionRecord:
     `pid` + `starttime` are the liveness key on Linux; `create_time` is the
     compatibility fallback for legacy and Windows records. A matching process
     start-time defeats pid recycling. `cmd` / `cwd` / `started_at` are diagnostic
-    provenance. `generation` binds a PTY record to the allocation generation
-    that admitted its exact session; non-PTY and legacy records leave it null.
+    provenance. `generation` is the admitting allocation/runtime generation:
+    PTYs use their allocation, admitted agent records their runtime incarnation.
+    It is a derived observation, not permission to claim work or signal a PID.
+    Legacy and other service records leave it null.
     """
 
     pid: int

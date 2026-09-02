@@ -40,6 +40,16 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
 - Record pid, publish `agent_updated` event
 - **Write the liveness lease** (`lease_expires_at = now() + TTL`) in the same UPDATE — the claim is the lease's birth; the run loop renews it ([[lease.ava.okf.md|Agent Liveness Lease]])
 - **Do not import any langgraph/langchain** — minimize delay to claim the row
+- An applied durable restart requires its exact `--restart-command-id` at early
+  admission. Under the metadata row lock, `agent/restart_admission.py` checks
+  the retained target incarnation, pending pointer and original application-time
+  boot deadline. Missing, delayed or superseded attempts cannot use legacy admission.
+- `agent/session_admission.py` publishes the winning process's canonical session
+  record before admission commits. The record is a repairable observation, not a
+  second ownership authority. Publication failure rolls the DB transaction back;
+  live or unreadable previous identities refuse replacement without signalling.
+  Cross-resource crash recovery and attempt-specific launcher wiring remain a
+  deployment gate for the durable restart series, not an atomic filesystem/DB claim.
 
 ### Stage 3: Boot Stage
 - This stage is between '_starting' and run loop
