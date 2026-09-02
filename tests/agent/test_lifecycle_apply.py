@@ -16,6 +16,8 @@ from agent.graph._claim_routing import resolve_routing
 from agent.graph._nodes import END
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.lifecycle_apply import apply_process_lifecycle
+from ops.resurrection_retry import authorize_pending_retry, validate_pending_retry
+from shared.agents import ResurrectError
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
 from shared.db_transaction import async_write_transaction
@@ -34,6 +36,48 @@ def test_payload_cannot_mint_accepted_dispatch_receipt() -> None:
         (1, 2, "", "terminate", "user", {"durable_lifecycle": True}, None, None)
     )
     assert not item.durable_lifecycle
+
+
+async def test_pending_resurrection_budget_survives_redispatch_without_ack(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id = _row(db_conn)
+    claim_agent_row(agent_id)
+    command_id = _command(db_conn, agent_id, "terminate")
+    await claim_inbound_batch(aops_pool, agent_id)
+    async with async_write_transaction(aops_pool) as conn:
+        assert await apply_process_lifecycle(conn, agent_id, command_id)
+    with pytest.raises(ValueError, match="reserved"):
+        insert_inbound_message(
+            db_conn, agent_id, "wake", "user", payload={"resurrection_retry": {}}
+        )
+    wake = insert_inbound_message(db_conn, agent_id, "wake", "user")
+    db_conn.commit()
+    authorize_pending_retry(agent_id, wake, "chat", 2)
+    authorize_pending_retry(agent_id, wake, "chat", 2)
+    with pytest.raises(ResurrectError, match="budget exhausted"):
+        authorize_pending_retry(agent_id, wake, "chat", 2)
+    before = db_conn.execute(
+        "SELECT payload,status,created_at FROM inbound_messages WHERE id=%s", (wake,)
+    ).fetchone()
+    assert before is not None and before[:2] == (
+        {"resurrection_retry": {"blocked_by": command_id, "attempts": 2}},
+        "pending",
+    )
+    db_conn.execute("UPDATE agents_meta SET runtime_owner=%s WHERE id=%s", (uuid4(), agent_id))
+    with pytest.raises(ResurrectError, match="changed target"):
+        validate_pending_retry(db_conn, agent_id, wake)
+    assert (
+        db_conn.execute(
+            "SELECT payload,status,created_at FROM inbound_messages WHERE id=%s", (wake,)
+        ).fetchone()
+        == before
+    )
+    assert db_conn.execute(
+        "SELECT observed_at FROM inbound_messages WHERE id=%s", (command_id,)
+    ).fetchone() == (None,)
+    db_conn.commit()
 
 
 async def test_process_identity_is_reserved_fixed_and_not_an_exit_receipt(

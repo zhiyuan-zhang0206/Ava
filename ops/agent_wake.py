@@ -62,6 +62,11 @@ from ops import agent_launch, runner_mode
 # split: `revive_agent` now lives in `ops/agent_revive.py`.
 from ops.agent_revive import revive_agent as revive_agent
 from ops.pages import list_open_page_names
+from ops.resurrection_retry import (
+    ResurrectExitDeferredError,
+    authorize_pending_retry,
+    validate_pending_retry,
+)
 from shared.agents import (
     AgentNotFound,
     AgentStatus,
@@ -262,7 +267,7 @@ def _prepare_resurrect_attempt(
     """Transition, persist lifecycle rows, and create the session under one row lock."""
     with write_transaction() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
@@ -271,8 +276,12 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
+        if trigger_inbound_id is not None:
+            validate_pending_retry(conn, agent_id, trigger_inbound_id)
         if not observe_applied_termination(conn, agent_id, machine_name()):
-            raise ResurrectError("outstanding lifecycle target has not been observed ended")
+            raise ResurrectExitDeferredError(
+                "outstanding lifecycle target has not been observed ended"
+            )
         allocation_epoch = _transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,
@@ -514,6 +523,15 @@ def resurrect_agent(
     prepared: _PreparedResurrect | None = None
     first_attempt = 0
     for first_attempt in range(agent_launch._LAUNCH_MAX_RETRIES + 1):
+        if trigger_inbound_id is not None:
+            if trigger_inbound_kind is None:
+                raise ValueError("pending resurrection trigger kind is required")
+            authorize_pending_retry(
+                agent_id,
+                trigger_inbound_id,
+                trigger_inbound_kind,
+                agent_launch._LAUNCH_MAX_RETRIES + 1,
+            )
         try:
             prepared = _prepare_resurrect_attempt(
                 agent_id,
@@ -524,7 +542,7 @@ def resurrect_agent(
                 auto_claim=auto_claim,
             )
             break
-        except _ResurrectSessionStartError:
+        except (_ResurrectSessionStartError, ResurrectExitDeferredError):
             if first_attempt >= agent_launch._LAUNCH_MAX_RETRIES:
                 raise
             backoff = agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC * 2**first_attempt
