@@ -55,7 +55,7 @@ def test_blocks_interleave_each_caption_line_with_its_media(tmp_path: Path) -> N
     unknown.write_text("not media")
 
     pack = pack_attachments(
-        "gemini-3.7-flash", [_entry(image_path, "shot"), _entry(unknown, "notes")]
+        "gemini-3.8-flash", [_entry(image_path, "shot"), _entry(unknown, "notes")]
     )
 
     assert pack is not None
@@ -76,7 +76,7 @@ def test_gemini_video_uses_the_media_block_shape(tmp_path: Path) -> None:
     video_bytes = b"minimal-mp4"
     video_path.write_bytes(video_bytes)
 
-    pack = pack_attachments("gemini-3.7-flash", [_entry(video_path)])
+    pack = pack_attachments("gemini-3.8-flash", [_entry(video_path)])
 
     assert pack is not None
     assert pack.blocks[2] == {"type": "media", "mime_type": "video/mp4", "data": video_bytes}
@@ -108,7 +108,7 @@ def test_bad_files_are_skipped_without_aborting_the_pack(tmp_path: Path) -> None
     unknown.write_text("not media")
 
     pack = pack_attachments(
-        "gemini-3.7-flash", [_entry(missing), _entry(directory), _entry(unknown)]
+        "gemini-3.8-flash", [_entry(missing), _entry(directory), _entry(unknown)]
     )
 
     assert pack is not None
@@ -128,7 +128,7 @@ def test_uniform_and_provider_specific_size_caps_are_rechecked(tmp_path: Path) -
     claude_image = tmp_path / "claude.png"
     claude_image.write_bytes(b"x" * (10 * 1024 * 1024 + 1))
 
-    gemini_pack = pack_attachments("gemini-3.7-flash", [_entry(uniform)])
+    gemini_pack = pack_attachments("gemini-3.8-flash", [_entry(uniform)])
     claude_pack = pack_attachments("claude-sonnet-5", [_entry(claude_image)])
 
     assert gemini_pack is not None
@@ -144,7 +144,7 @@ def test_per_turn_file_count_and_total_byte_caps_keep_first_entries(tmp_path: Pa
         path.write_bytes(b"x")
         count_entries.append(_entry(path))
 
-    count_pack = pack_attachments("gemini-3.7-flash", count_entries)
+    count_pack = pack_attachments("gemini-3.8-flash", count_entries)
 
     assert count_pack is not None
     assert len(count_pack.delivered) == ATTACH_MAX_FILES_PER_TURN
@@ -157,7 +157,7 @@ def test_per_turn_file_count_and_total_byte_caps_keep_first_entries(tmp_path: Pa
         path.write_bytes(b"x" * file_size)
         size_entries.append(_entry(path))
 
-    size_pack = pack_attachments("gemini-3.7-flash", size_entries)
+    size_pack = pack_attachments("gemini-3.8-flash", size_entries)
 
     assert size_pack is not None
     assert len(size_pack.delivered) == 2
@@ -194,7 +194,7 @@ def test_caption_numbers_entries_and_sanitizes_labels(tmp_path: Path) -> None:
     unknown.write_text("not media")
 
     pack = pack_attachments(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         [_entry(image_path, " screenshot\nfor\x00 review "), _entry(unknown, "notes")],
     )
 
@@ -211,7 +211,7 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(tmp_path: Path) 
     image_path = tmp_path / "example.png"
     _png(image_path)
 
-    assert pack_attachments("gemini-3.7-flash", []) is None
+    assert pack_attachments("gemini-3.8-flash", []) is None
 
     pack = pack_attachments("deepseek-v4-pro", [_entry(image_path)])
 
@@ -235,7 +235,7 @@ def test_media_types_use_registry_plugin_then_vision_prefix_fallback(
     )
     monkeypatch.setattr(provider_api.REGISTRY, "bindings", {binding.prefix: binding})
 
-    assert media_types_for_model("gemini-3.7-flash") == frozenset(
+    assert media_types_for_model("gemini-3.8-flash") == frozenset(
         {"image", "pdf", "audio", "video"}
     )
     assert media_types_for_model("attachment-plugin-unregistered") == frozenset({"image"})

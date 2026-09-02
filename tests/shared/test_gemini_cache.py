@@ -158,7 +158,7 @@ class _NonGeminiChatModel(BaseChatModel):
 def _gemini_llm(caches: _FakeCaches) -> Any:
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    llm = ChatGoogleGenerativeAI(model="gemini-3.7-flash", google_api_key="fake-key")
+    llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", google_api_key="fake-key")
     object.__setattr__(llm, "client", _FakeClient(caches))
     return llm
 

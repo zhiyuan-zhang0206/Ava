@@ -293,10 +293,10 @@
         }
       ]
     },
-    "gemini-3.7-flash": {
+    "gemini-3.8-flash": {
       "vendor": "google",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "source_checked_at": "2026-08-18",
+      "source_checked_at": "2026-09-03",
       "effective_time_note": "Google publishes a calendar date without a timezone; Ava activates the increase at the earliest global occurrence of 2027-01-01 (UTC+14) to avoid underestimating cost.",
       "periods": [
         {
