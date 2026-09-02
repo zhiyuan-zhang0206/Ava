@@ -319,10 +319,12 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
 
     monkeypatch.setattr(host_mod, "release_hosted_owner", _noop_reconcile)
 
-    def _swallow_notify(_agent_id: int) -> None:
-        """Overridden per-test where the notify itself is the contract."""
+    async def _apply_lifecycle(_pool: object, _incarnation: object) -> str:
+        """Host orchestration fake; real durable effects use the PG contract tests."""
+        return "terminate"
 
-    monkeypatch.setattr(host_mod, "_notify_exit", _swallow_notify)
+    monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", _apply_lifecycle)
+    monkeypatch.setattr(host_mod, "observe_hosted_termination", _noop_reconcile)
 
     def _build(
         rows: dict[int, _Row], results: dict[int, list[dict[str, Any]]] | None = None
@@ -619,16 +621,20 @@ class TestTurnLoop:
         await asyncio.wait_for(host.run_turn(1), 2)
         assert len(graph.observations) == 3
 
-    async def test_exit_requested_is_terminal_and_notifies(
+    async def test_exit_requested_applies_to_admitted_incarnation(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A terminate/restart winner ends the task AND tells the gateway, which
-        is what a process did on its way out. Without the notify the row would
-        sit `running` forever with nothing running."""
+        """Hosted exit uses the admitted owner's durable apply, not process exit RPC."""
         import services.agent_host.host as host_mod
+        from shared.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
-        monkeypatch.setattr(host_mod, "_notify_exit", notified.append)
+
+        async def apply(_pool: object, incarnation: RuntimeIncarnation) -> str:
+            notified.append(incarnation.agent_id)
+            return "terminate"
+
+        monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
         host, graph, _ = wired(
             {1: _Row()},
             {1: [{"exit_requested": True, "turn_idle": False, "restart_requested": False}]},
@@ -646,23 +652,28 @@ class TestTurnLoop:
         await asyncio.wait_for(host.run_turn(1), 2)
         assert 1 not in host._runtimes
 
-    async def test_restart_requested_drops_runtime_without_notify(
+    async def test_restart_requested_applies_before_dropping_runtime(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The hosted restart answer: end the task, drop the cached runtime (the
-        fresh-process half), and do NOT tell the gateway — there is no process
-        exiting and the row must stay runnable for the next wake."""
+        """Restart applies through the same owner-fenced path before cache removal."""
         import services.agent_host.host as host_mod
+        from shared.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
-        monkeypatch.setattr(host_mod, "_notify_exit", notified.append)
+
+        async def apply(_pool: object, incarnation: RuntimeIncarnation) -> str:
+            assert incarnation.agent_id in host._runtimes
+            notified.append(incarnation.agent_id)
+            return "restart"
+
+        monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
         host, graph, _ = wired(
             {1: _Row()},
             {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
         )
         await asyncio.wait_for(host.run_turn(1), 2)
         assert len(graph.observations) == 1
-        assert notified == []
+        assert notified == [1]
         assert 1 not in host._runtimes
 
     async def test_a_crashing_turn_drops_the_runtime(self, wired: _Build) -> None:
