@@ -291,8 +291,10 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     str(image.interpreter),
                     "-I",
                     "-B",
-                    "-m",
-                    "cli.commands._update_agent_runner",
+                    "-c",
+                    "import faulthandler,runpy; "
+                    "faulthandler.dump_traceback_later(20,repeat=True); "
+                    "runpy.run_module('cli.commands._update_agent_runner',run_name='__main__')",
                     "--bootstrap-hop",
                     str(request_path),
                 ]
@@ -321,14 +323,22 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         str(request_path),
                     ]
                 )
-                result = subprocess.run(  # noqa: S603 — verified updater or copied CI-only fault worker.
-                    argv,
-                    cwd=home,
-                    env=env,
-                    capture_output=True,
-                    timeout=60,
-                    check=False,
-                )
+                try:
+                    result = subprocess.run(  # noqa: S603 — verified updater or copied CI-only fault worker.
+                        argv,
+                        cwd=home,
+                        env=env,
+                        capture_output=True,
+                        timeout=60,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raw = json.loads(updater_handoff.state_path().read_bytes())
+                    stage = raw.get("bootstrap_hop", {}).get("stage", "before-bootstrap-journal")
+                    stderr = exc.stderr or b""
+                    raise AssertionError(
+                        f"{mode} timed out at {stage}: " + stderr.decode(errors="replace")[-12000:]
+                    ) from exc
                 if result.returncode not in {
                     3 if mode == "success" else 77 if mode == "crash-after-stop" else 1
                 }:
