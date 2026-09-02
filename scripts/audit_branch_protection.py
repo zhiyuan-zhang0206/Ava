@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Compare GitHub's live branch protections with Ava's Mergify declaration.
+"""Compare GitHub's live branch protections with Ava's Trunk merge-queue declaration.
 
-The repository declares its merge gate in ``.mergify.yml``, but GitHub stores
-required checks and workflow activation outside git. This read-only audit makes
-that external state observable and distinguishes drift from an API/tool failure.
+The repository declares its merge gate in ``.trunk/trunk.yaml`` (queue testing
+gate) plus the admission gate ruled in P2 (three suite aggregators +
+``qa-approved-gate``); GitHub stores required checks and workflow activation
+outside git. This read-only audit makes that external state observable and
+distinguishes drift from an API/tool failure.
 """
 
 from __future__ import annotations
@@ -20,8 +22,20 @@ from urllib.parse import quote
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_MERGIFY_FILE = _REPO_ROOT / ".mergify.yml"
-_CHECK_CONDITION = re.compile(r"check-(?:success|skipped)=(.+)")
+_TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
+# P2 ruling (2026-09-02): the branch-protection admission gate is the three
+# suite aggregators (the names Mergify also keyed on) plus the qa-approved
+# label gate. The queue TESTING gate lives in trunk.yaml (13 statuses) and is
+# audited separately by trunk_gate_findings().
+_ADMISSION_CHECKS = frozenset(
+    {
+        "backend (pytest + pyright)",
+        "frontend (eslint + tsc + vitest)",
+        "e2e (Playwright happy path)",
+        "qa-approved-gate",
+    }
+)
+_MATRIX_TEMPLATE = re.compile(r"\$\{\{ matrix")
 _GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _REMOTE_REPO = re.compile(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$")
 _REQUIRED_WORKFLOWS = (
@@ -45,82 +59,43 @@ def _list(value: object, location: str) -> list[object]:
     return cast(list[object], value)
 
 
-def _condition_strings(value: object, location: str) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        items = cast(list[object], value)
-        conditions: list[str] = []
-        for index, item in enumerate(items):
-            conditions.extend(_condition_strings(item, f"{location}[{index}]"))
-        return conditions
-    if isinstance(value, dict):
-        condition_group = _mapping(cast(object, value), location)
-        if set(condition_group) != {"or"}:
-            raise ValueError(f"{location} must contain exactly one 'or' group")
-        return _condition_strings(condition_group["or"], f"{location}.or")
-    raise ValueError(f"{location} must be a condition string, list, or 'or' group")
+def expected_checks() -> frozenset[str]:
+    """Return the branch-protection admission gate (P2 ruling)."""
+    return _ADMISSION_CHECKS
 
 
-def _checks_in_conditions(value: object, location: str) -> frozenset[str]:
-    checks: set[str] = set()
-    for condition in _condition_strings(value, location):
-        match = _CHECK_CONDITION.fullmatch(condition)
-        if match is not None:
-            checks.add(match.group(1))
-        elif condition.startswith("check-"):
-            raise ValueError(f"unsupported check condition in {location}: {condition}")
-    return frozenset(checks)
+def trunk_gate_findings(text: str) -> list[str]:
+    """Audit the queue TESTING gate declared in .trunk/trunk.yaml.
 
-
-def _declared_checks(text: str) -> tuple[frozenset[str], frozenset[str]]:
+    Invariants: required_statuses must be present and non-empty, carry the
+    qa-approved-gate and the three suite aggregators, and must not contain raw
+    matrix template names (a fully-skipped matrix reports only the template
+    name, so such an entry could stall the queue forever on docs-only PRs).
+    """
     document: object = yaml.safe_load(text)
-    root = _mapping(document, ".mergify.yml")
-    if "queue_rules" not in root:
-        raise ValueError(".mergify.yml is missing queue_rules")
-    rules = _list(root["queue_rules"], "queue_rules")
-    if not rules:
-        raise ValueError("queue_rules must not be empty")
+    root = _mapping(document, ".trunk/trunk.yaml")
+    if "merge" not in root:
+        return ["trunk.yaml is missing merge.required_statuses"]
+    merge = _mapping(root["merge"], "merge")
+    if "required_statuses" not in merge:
+        return ["trunk.yaml is missing merge.required_statuses"]
+    statuses = _string_set(merge["required_statuses"], "merge.required_statuses")
+    if not statuses:
+        return ["trunk.yaml merge.required_statuses must not be empty"]
 
-    queue_checks: set[str] = set()
-    merge_checks: set[str] = set()
-    for index, value in enumerate(rules):
-        rule = _mapping(value, f"queue_rules[{index}]")
-        for key, destination in (
-            ("queue_conditions", queue_checks),
-            ("merge_conditions", merge_checks),
-        ):
-            if key not in rule:
-                raise ValueError(f"queue_rules[{index}] is missing {key}")
-            destination.update(_checks_in_conditions(rule[key], f"queue_rules[{index}].{key}"))
-
-    if not queue_checks and not merge_checks:
-        raise ValueError("queue_rules declare no required checks")
-    return frozenset(queue_checks), frozenset(merge_checks)
-
-
-def expected_checks(text: str) -> frozenset[str]:
-    """Return the union of checks declared for queueing and merging."""
-    queue_checks, merge_checks = _declared_checks(text)
-    return queue_checks | merge_checks
-
-
-def declaration_drift(text: str) -> list[str]:
-    """Report any mismatch between queue-time and merge-time check names."""
-    queue_checks, merge_checks = _declared_checks(text)
     findings: list[str] = []
-    queue_only = queue_checks - merge_checks
-    merge_only = merge_checks - queue_checks
-    if queue_only:
-        findings.append(
-            "queue_conditions has checks absent from merge_conditions: "
-            + ", ".join(sorted(queue_only))
-        )
-    if merge_only:
-        findings.append(
-            "merge_conditions has checks absent from queue_conditions: "
-            + ", ".join(sorted(merge_only))
-        )
+    if "qa-approved-gate" not in statuses:
+        findings.append("trunk.yaml required_statuses missing qa-approved-gate")
+    for aggregator in (
+        "backend (pytest + pyright)",
+        "frontend (eslint + tsc + vitest)",
+        "e2e (Playwright happy path)",
+    ):
+        if aggregator not in statuses:
+            findings.append(f"trunk.yaml required_statuses missing {aggregator}")
+    for name in sorted(statuses):
+        if _MATRIX_TEMPLATE.search(name):
+            findings.append(f"trunk.yaml required_statuses contains a matrix template name: {name}")
     return findings
 
 
@@ -228,11 +203,11 @@ def _audit(repo: str, branch: str) -> list[str]:
     if not branch:
         raise ValueError("--branch must not be empty")
 
-    declaration = _MERGIFY_FILE.read_text()
-    expected = expected_checks(declaration)
-    declaration_findings = declaration_drift(declaration)
+    trunk_text = _TRUNK_FILE.read_text()
+    declaration_findings = trunk_gate_findings(trunk_text)
     if declaration_findings:
         return declaration_findings
+    expected = expected_checks()
     protection = _json_mapping(
         run_gh(
             [
