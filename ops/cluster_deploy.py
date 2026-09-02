@@ -112,7 +112,7 @@ from shared.session_env import venv_activation_prefix
 
 
 class NothingToUpdate(RuntimeError):  # noqa: N818 — state description, same style as ClusterUpdateInProgress
-    """The cluster is already on the latest code — `update_check()` reports behind==0.
+    """The cluster is already on the latest code — `update_check()` reports a clean zero.
 
     Raised at the rollout chokepoint (`spawn_rollout`) before any agent is
     paused or restarted. A rollout with nothing to pull would still bounce
@@ -494,8 +494,9 @@ def spawn_rollout(
     update is already in flight.
 
     Returns {"session": "ava-rollout", "log": <path>,
-    "backend_changed": <bool>}. `backend_changed` comes from the same
-    `update_check()` preflight that gates the no-op case: it tells the caller
+    "backend_changed": <bool>, "needs_replay": <bool>}. The update-check
+    values come from the same preflight that gates the no-op case:
+    `backend_changed` tells the caller
     whether this rollout will restart agent processes at all — the frontend
     "Update" button uses it to say agents will be restarted (the one-time SDK
     initiator `ava.self.update()`, which waited for the rollout's restart
@@ -515,7 +516,7 @@ def spawn_rollout(
             already in flight. Wait for it to finish — a hung session is
             force-reaped automatically.
         NothingToUpdate: the cluster is already on the latest code
-            (`update_check()` reports behind==0). Fail fast before pausing or
+            (`update_check()` reports behind==0 without a required replay). Fail fast before pausing or
             restarting any agent — a rollout with nothing to pull would bounce
             the whole fleet for zero code change. Use `spawn_restart` if the
             intent is to bounce on the current code.
@@ -524,15 +525,11 @@ def spawn_rollout(
     """
     _assert_no_orchestration_in_flight(force=force)
 
-    # Fail fast on a no-op rollout: behind==0 means origin/main has nothing the
-    # running commit lacks, so a rollout would restart every agent and discard
-    # their warm in-flight state for zero code change. update_check() is the
-    # truth source (it fetches origin/main, then rev-lists against the running
-    # commit). The extra fetch here is acceptable — it is the same preflight the
-    # UI polls. A restart (spawn_restart) pulls nothing and is intentionally not
-    # gated on behind.
+    # Fail fast on a clean no-op rollout. A mismatched installed/running pair is
+    # a half-deployed state, not a no-op: the full rollout replays its checkout,
+    # sync, and fresh start to reconcile those bookmarks.
     check = update_check()
-    if check.behind == 0:
+    if check.behind == 0 and not check.needs_replay:
         raise NothingToUpdate("cluster is already up to date — nothing to roll out")
 
     rollout_sess = shared.cluster.session_name(_ROLLOUT_SERVICE)
@@ -599,6 +596,7 @@ def spawn_rollout(
         "session": rollout_sess,
         "log": str(log_path),
         "backend_changed": check.backend_changed,
+        "needs_replay": check.needs_replay,
     }
 
 

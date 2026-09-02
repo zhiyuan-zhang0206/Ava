@@ -2858,7 +2858,7 @@
     "/api/cluster/rollout": {
       "post": {
         "summary": "Post Cluster Rollout",
-        "description": "Launch the whole-cluster `ava cluster update` rollout, detached.\n\nGateway only. Spawns a detached session running the full\norchestration — Phase A pauses every agent-runner, the gateway stops /\npulls / syncs / migrates, Phase B fans out the agent-runner self-updates,\nthen polls each host back to healthy. Returns 202 immediately; clients\npoll `GET /api/cluster/status` per host to observe progress.\n\nBody is fully optional; `origin` (default \"user\") names the trigger and\nheads the rollout log + the cluster pin's `updated_by`.\n\nReturns the orchestration session name + tee'd log path, plus `backend_changed` —\nwhether this rollout restarts agent processes (the frontend \"Update\"\nbutton uses it to say agents will be restarted; the SDK initiator that\nonce waited on it, `ava.self.update()`, was removed 2026-08).\n\nErrors:\n- 400 if called on an agent-runner (rollout is a gateway operation).\n- 409 if a rollout / update is already in flight.\n- 422 if the cluster is already up to date (behind==0) — nothing to roll\n  out, so the fleet is not bounced. Use /api/cluster/restart to bounce on\n  the current code.\n- 503 if the session backend could not start the orchestration session.",
+        "description": "Launch the whole-cluster `ava cluster update` rollout, detached.\n\nGateway only. Spawns a detached session running the full\norchestration — Phase A pauses every agent-runner, the gateway stops /\npulls / syncs / migrates, Phase B fans out the agent-runner self-updates,\nthen polls each host back to healthy. Returns 202 immediately; clients\npoll `GET /api/cluster/status` per host to observe progress.\n\nBody is fully optional; `origin` (default \"user\") names the trigger and\nheads the rollout log + the cluster pin's `updated_by`.\n\nReturns the orchestration session name + tee'd log path, plus\n`backend_changed` (whether this rollout restarts agent processes) and\n`needs_replay` (whether the installed commit is ahead of the running\nbookmark). The frontend uses the first to describe agent restarts; the CLI\nuses the second to identify a half-deployed state. The SDK initiator that\nonce waited on the restart signal, `ava.self.update()`, was removed 2026-08.\n\nErrors:\n- 400 if called on an agent-runner (rollout is a gateway operation).\n- 409 if a rollout / update is already in flight.\n- 422 if the cluster is already up to date (behind==0 and no replay is\n  needed) — nothing to roll out, so the fleet is not bounced. Use\n  /api/cluster/restart to bounce on the current code.\n- 503 if the session backend could not start the orchestration session.",
         "operationId": "post_cluster_rollout_api_cluster_rollout_post",
         "requestBody": {
           "content": {
@@ -2949,7 +2949,7 @@
     "/api/cluster/update-check": {
       "get": {
         "summary": "Get Cluster Update Check",
-        "description": "Read-only preflight for the Update button — how far behind origin/main and\nwhat a rollout would restart.\n\nGateway only (it inspects the gateway checkout). Does a\n`git fetch` but never pulls or mutates the tree, so the UI can poll it.\n`behind == 0` → the UI shows \"no updates\" and does not launch a rollout.",
+        "description": "Read-only preflight for the Update button — how far behind origin/main and\nwhat a rollout would restart, or whether an interrupted rollout needs replay.\n\nGateway only (it inspects the gateway checkout). Does a\n`git fetch` but never pulls or mutates the tree, so the UI can poll it.\nA clean `behind == 0` → the UI shows \"no updates\" and does not launch a\nrollout. An installed commit ahead of the running bookmark is instead\nreturned as `needs_replay`.",
         "operationId": "get_cluster_update_check_api_cluster_update_check_get",
         "responses": {
           "200": {
@@ -14421,16 +14421,21 @@
           "backend_changed": {
             "type": "boolean",
             "title": "Backend Changed"
+          },
+          "needs_replay": {
+            "type": "boolean",
+            "title": "Needs Replay"
           }
         },
         "type": "object",
         "required": [
           "behind",
           "frontend_changed",
-          "backend_changed"
+          "backend_changed",
+          "needs_replay"
         ],
         "title": "UpdateCheck",
-        "description": "`GET /api/cluster/update-check` response — how far the gateway's\ncheckout is behind its track target, and which side a pull would restart.\n\n`behind` is the commit count HEAD..target (0 = already up to date, so the\nUI shows \"no updates\" and skips launching a rollout). `frontend_changed` /\n`backend_changed` mirror `ava cluster update`'s own classification so the UI can\ntell the user what a rollout would actually restart (docs-only diffs count\nas neither — a pull with nothing to restart)."
+        "description": "`GET /api/cluster/update-check` response — how far the gateway's\ncheckout is behind its track target, and which side a pull would restart.\n\n`behind` is the commit count from the last fully installed commit to the\ntrack target. `needs_replay` names the exceptional state where the fully\ninstalled commit is ahead of the running-commit bookmark: a rollout was\ninterrupted between them, so zero commits behind is not an up-to-date\nverdict. A running commit ahead of installation is the normal fast-path\nstate and does not need replay.\n\n`frontend_changed` / `backend_changed` mirror `ava cluster update`'s own\nclassification so the UI can tell the user what a rollout would actually\nrestart (docs-only diffs count as neither — a pull with nothing to restart)."
       },
       "UpdateOutcome": {
         "type": "string",

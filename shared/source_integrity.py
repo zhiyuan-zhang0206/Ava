@@ -14,6 +14,8 @@ The integrity guard at `ava start` compares HEAD against this bookmark:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from shared.paths import installed_sha_path
 
 
@@ -34,6 +36,24 @@ def set_installed(sha: str) -> None:
     path = installed_sha_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(sha.strip() + "\n")
+
+
+def installed_sha_needs_replay(
+    installed_sha: str | None, running_sha: str | None, *, repo: Path
+) -> bool:
+    """Whether installation completed after the commit now running.
+
+    A full rollout records ``installed_sha`` after checkout and sync, then
+    advances ``running_sha`` when the fresh services start. If it stops between
+    those steps, the installed commit is ahead and replaying the rollout is
+    required. The reverse direction is normal after a docs-only or frontend-only
+    fast-path pull, which advances the running bookmark without an install.
+    """
+    if installed_sha is None or running_sha is None or installed_sha == running_sha:
+        return False
+    from shared.cluster_drift import prod_source_pin_relation
+
+    return prod_source_pin_relation(running_sha, installed_sha, repo=repo) == "ahead"
 
 
 def clear() -> None:

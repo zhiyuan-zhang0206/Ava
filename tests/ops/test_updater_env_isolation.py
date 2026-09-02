@@ -158,7 +158,9 @@ def _stub_all_deploy_write_seams(
     )
     monkeypatch.setattr(  # type: ignore[func-returns-value]
         "ops.cluster_deploy.update_check",
-        lambda: UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+        lambda: UpdateCheck(
+            behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
+        ),
     )
     monkeypatch.setattr(
         "ops.cluster_session._has_orchestration_session",

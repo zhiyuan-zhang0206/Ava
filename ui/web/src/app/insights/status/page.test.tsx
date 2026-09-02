@@ -148,6 +148,7 @@ beforeEach(() => {
     behind: 0,
     frontend_changed: false,
     backend_changed: false,
+    needs_replay: false,
   });
 });
 
@@ -580,6 +581,7 @@ describe("StatusPage Services and Gateway sections", () => {
       behind: 0,
       frontend_changed: false,
       backend_changed: false,
+      needs_replay: false,
     });
     wrap(<StatusPage />);
     await waitFor(() => screen.getByText("Services"));
@@ -593,6 +595,7 @@ describe("StatusPage Services and Gateway sections", () => {
       behind: 3,
       frontend_changed: false,
       backend_changed: true,
+      needs_replay: false,
     });
     wrap(<StatusPage />);
     await waitFor(() => screen.getByText("Services"));
@@ -601,11 +604,33 @@ describe("StatusPage Services and Gateway sections", () => {
     expect(screen.getByText(/3 commits behind — Update restarts backend/)).toBeTruthy();
   });
 
+  it("interrupted rollout → Replay update stays enabled at zero commits", async () => {
+    vi.spyOn(api, "checkClusterUpdate").mockResolvedValue({
+      behind: 0,
+      frontend_changed: false,
+      backend_changed: false,
+      needs_replay: true,
+    });
+    const confirmSpy = vi.fn((_message?: string) => false);
+    window.confirm = confirmSpy;
+    wrap(<StatusPage />);
+    await waitFor(() => screen.getByText("Services"));
+    const updateBtn = await screen.findByRole("button", { name: "Replay update" });
+    expect((updateBtn as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText(/half-deployed state — needs replay/)).toBeTruthy();
+    fireEvent.click(updateBtn);
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Replays the interrupted rollout and restarts all services."),
+    );
+    expect(confirmSpy.mock.calls[0]?.[0]).not.toContain("nothing");
+  });
+
   it("Restart button triggers triggerClusterRestart (on confirm)", async () => {
     vi.spyOn(api, "checkClusterUpdate").mockResolvedValue({
       behind: 0,
       frontend_changed: false,
       backend_changed: false,
+      needs_replay: false,
     });
     const restartSpy = vi
       .spyOn(api, "triggerClusterRestart")
@@ -626,6 +651,7 @@ describe("StatusPage Services and Gateway sections", () => {
       behind: 2,
       frontend_changed: true,
       backend_changed: false,
+      needs_replay: false,
     });
     wrap(<StatusPage />);
     const restartBtn = await screen.findByRole("button", { name: /Restart/i });
@@ -641,6 +667,7 @@ describe("StatusPage Services and Gateway sections", () => {
       behind: 0,
       frontend_changed: false,
       backend_changed: false,
+      needs_replay: false,
     });
     wrap(<StatusPage />);
     await waitFor(() => screen.getByText("Services"));
@@ -664,6 +691,7 @@ describe("StatusPage Services and Gateway sections", () => {
       behind: 2,
       frontend_changed: true,
       backend_changed: false,
+      needs_replay: false,
     });
     wrap(<StatusPage />);
     const updateBtn = await screen.findByRole("button", { name: /Updating/i });
