@@ -15,6 +15,7 @@ import psycopg
 
 from cli.commands._release_candidate import load_candidate, record_candidate
 from cli.commands._update_git import apply_pending_migrations
+from cli.commands.start import cmd_start
 from shared.config import settings
 from shared.machine import machine_name
 from shared.migrations import (
@@ -38,6 +39,15 @@ def rejected(action: Callable[[], object]) -> None:
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 — proof predicate.
     if not condition:
         raise AssertionError(message)
+
+
+def prove_start_barrier(receipt: Path) -> None:
+    try:
+        cmd_start(release_receipt=receipt)
+    except ReleaseRejectedError as exc:
+        require("service closure" in str(exc), "start did not reach its release closure gate")
+    else:
+        raise AssertionError("a migration receipt incorrectly authorized service cutover")
 
 
 def main() -> None:
@@ -112,6 +122,7 @@ def main() -> None:
             sql.write_bytes(original)
             sql.chmod(mode)
         require(load_candidate(conn, receipt).release.digest == artifact, "restored image rejected")
+        prove_start_barrier(receipt)
         rows = conn.execute("SELECT name FROM schema_migrations").fetchall()
         require({row[0] for row in rows} == required, "negative admission changed schema history")
         print(
@@ -121,6 +132,7 @@ def main() -> None:
                     "readonly_schema_check": True,
                     "wrong_home_unit_lease_target_sql_rejected": True,
                     "existing_schema_apply_was_noop": True,
+                    "actual_start_preserves_cutover_barrier": True,
                     "receipt_sha256": file_sha256(receipt),
                 }
             )

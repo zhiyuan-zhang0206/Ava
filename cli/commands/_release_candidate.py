@@ -115,3 +115,14 @@ def load_candidate(conn: psycopg.Connection, path: Path) -> ReleaseMigrationCont
     context.validate(MIGRATIONS_DIR)
     _assert_migration_authority(conn, context)
     return context
+
+
+def admit_start_candidate(path: Path) -> ReleaseMigrationContext:
+    """Validate before start writes; a migration receipt is not a cutover permit."""
+    from shared.db import connect
+
+    with connect(direct=True) as connection:
+        load_candidate(connection, path)
+    raise ReleaseRejectedError(
+        "release start requires prepared service closure, bootable LKG, and all-writer barrier"
+    )
