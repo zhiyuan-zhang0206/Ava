@@ -142,12 +142,11 @@ dev = [
 # `services` is deliberately NOT a layer: the package straddles levels —
 # `services.memory_indexer` is imported by gateway (so it sits below gateway),
 # while `services.labeler` / `services.runner` / `services.restarter` etc. are
-# daemons that import gateway (so they sit above it). That submodule-level
-# split would need its own contracts; out of scope here, so the layers
-# contract covers only the clean spine and a separate forbidden contract locks
-# the one reverse edge the sinks removed (services -> agent). `plugins` is left
-# ungoverned (the built-in ava_compact is intentionally coupled to the agent
-# kernel, so agent <-> plugins is cyclic by design).
+# daemons that import gateway (so they sit above it). The clean spine stays in
+# its own layers contract; `services.agent_host` has a separate submodule
+# contract because it is the one daemon intentionally above the agent kernel.
+# `plugins` is left ungoverned (the built-in ava_compact is intentionally
+# coupled to the agent kernel, so agent <-> plugins is cyclic by design).
 [tool.importlinter]
 root_packages = ["shared", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
 
@@ -157,6 +156,19 @@ type = "layers"
 layers = [
     "cli",
     "gateway",
+    "agent",
+    "ava",
+    "shared",
+]
+
+# The hosted runner is a supervised service that intentionally runs agent turns
+# in-process. State that exceptional direction explicitly, rather than letting
+# its narrow whitelist below make the broader services package look unlayered.
+[[tool.importlinter.contracts]]
+name = "Hosted agent runner (shared < ava < agent < services.agent_host)"
+type = "layers"
+layers = [
+    "services.agent_host",
     "agent",
     "ava",
     "shared",

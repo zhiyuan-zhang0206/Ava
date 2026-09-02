@@ -19,7 +19,11 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from gateway import ttl_reaper
-from gateway.ttl_reaper import _reap_expired_pages_blocking, _reap_expired_shells
+from gateway.ttl_reaper import (
+    _reap_expired_pages_blocking,
+    _reap_expired_shells,
+    _reap_expired_web_sessions_blocking,
+)
 from ops.rpc_schemas import ShellKillResult
 from shared.db import create_agent
 
@@ -84,6 +88,56 @@ def _system_inbounds(conn: psycopg.Connection, agent_id: int) -> list[str]:
             (agent_id,),
         )
         return [r[0] for r in cur.fetchall()]
+
+
+def test_reap_expired_web_sessions_removes_only_expired_rows(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    """The periodic gateway pass, not login traffic, reclaims expired browser sessions."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() - interval '1 second')",
+            ("expired-session",),
+        )
+        cur.execute(
+            "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
+            ("live-session",),
+        )
+    db_conn.commit()
+
+    assert _reap_expired_web_sessions_blocking(reaper_pool) == 1
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT id FROM web_sessions ORDER BY id")
+        assert [row[0] for row in cur.fetchall()] == ["live-session"]
+
+
+def test_reap_expired_web_sessions_is_limited_to_one_pass_batch(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A large expired-session backlog is reclaimed across bounded transactions."""
+    monkeypatch.setattr(ttl_reaper, "_PASS_BATCH", 1)
+    with db_conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + %s::interval)",
+            [
+                ("older-expired-session", "-2 seconds"),
+                ("newer-expired-session", "-1 second"),
+                ("live-session", "1 hour"),
+            ],
+        )
+    db_conn.commit()
+
+    assert _reap_expired_web_sessions_blocking(reaper_pool) == 1
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM web_sessions WHERE id = ANY(%s) ORDER BY id",
+            (["older-expired-session", "newer-expired-session", "live-session"],),
+        )
+        assert [row[0] for row in cur.fetchall()] == ["live-session", "newer-expired-session"]
 
 
 def test_reap_expired_pages_terminalizes_only_past_deadlines(

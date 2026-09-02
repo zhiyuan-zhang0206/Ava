@@ -2598,7 +2598,7 @@
     "/api/agents/{agent_id}/notices/current/dismiss": {
       "post": {
         "summary": "Post Notice Dismiss",
-        "description": "Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice\ncontract): resolution 'withdrawn' + resolve event. No open notice ->\nidempotent 204.",
+        "description": "Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice\ncontract): resolution 'withdrawn' + resolve event, plus an inspector\nsnapshot refresh when the withdrawn row required a response. No open notice\n-> idempotent 204.",
         "operationId": "post_notice_dismiss_api_agents__agent_id__notices_current_dismiss_post",
         "parameters": [
           {
@@ -2858,7 +2858,7 @@
     "/api/cluster/rollout": {
       "post": {
         "summary": "Post Cluster Rollout",
-        "description": "Launch the whole-cluster `ava cluster update` rollout, detached.\n\nGateway only. Spawns a detached session running the full\norchestration — Phase A pauses every agent-runner, the gateway stops /\npulls / syncs / migrates, Phase B fans out the agent-runner self-updates,\nthen polls each host back to healthy. Returns 202 immediately; clients\npoll `GET /api/cluster/status` per host to observe progress.\n\nBody is fully optional; `origin` (default \"user\") names the trigger and\nheads the rollout log + the cluster pin's `updated_by`.\n\nReturns the orchestration session name + tee'd log path, plus `backend_changed` —\nwhether this rollout restarts agent processes (the frontend \"Update\"\nbutton uses it to say agents will be restarted; the SDK initiator that\nonce waited on it, `ava.self.update()`, was removed 2026-08).\n\nErrors:\n- 400 if called on an agent-runner (rollout is a gateway operation).\n- 409 if a rollout / update is already in flight.\n- 422 if the cluster is already up to date (behind==0) — nothing to roll\n  out, so the fleet is not bounced. Use /api/cluster/restart to bounce on\n  the current code.\n- 503 if the session backend could not start the orchestration session.",
+        "description": "Launch the whole-cluster `ava cluster update` rollout, detached.\n\nGateway only. Spawns a detached session running the full\norchestration — Phase A pauses every agent-runner, the gateway stops /\npulls / syncs / migrates, Phase B fans out the agent-runner self-updates,\nthen polls each host back to healthy. Returns 202 immediately; clients\npoll `GET /api/cluster/status` per host to observe progress.\n\nBody is fully optional; `origin` (default \"user\") names the trigger and\nheads the rollout log + the cluster pin's `updated_by`.\n\nReturns the orchestration session name + tee'd log path, plus\n`backend_changed` (whether this rollout restarts agent processes) and\n`needs_replay` (whether the installed commit is ahead of the running\nbookmark). The frontend uses the first to describe agent restarts; the CLI\nuses the second to identify a half-deployed state. The SDK initiator that\nonce waited on the restart signal, `ava.self.update()`, was removed 2026-08.\n\nErrors:\n- 400 if called on an agent-runner (rollout is a gateway operation).\n- 409 if a rollout / update is already in flight.\n- 422 if the cluster is already up to date (behind==0 and no replay is\n  needed) — nothing to roll out, so the fleet is not bounced. Use\n  /api/cluster/restart to bounce on the current code.\n- 503 if the session backend could not start the orchestration session.",
         "operationId": "post_cluster_rollout_api_cluster_rollout_post",
         "requestBody": {
           "content": {
@@ -2949,7 +2949,7 @@
     "/api/cluster/update-check": {
       "get": {
         "summary": "Get Cluster Update Check",
-        "description": "Read-only preflight for the Update button — how far behind origin/main and\nwhat a rollout would restart.\n\nGateway only (it inspects the gateway checkout). Does a\n`git fetch` but never pulls or mutates the tree, so the UI can poll it.\n`behind == 0` → the UI shows \"no updates\" and does not launch a rollout.",
+        "description": "Read-only preflight for the Update button — how far behind origin/main and\nwhat a rollout would restart, or whether an interrupted rollout needs replay.\n\nGateway only (it inspects the gateway checkout). Does a\n`git fetch` but never pulls or mutates the tree, so the UI can poll it.\nA clean `behind == 0` → the UI shows \"no updates\" and does not launch a\nrollout. An installed commit ahead of the running bookmark is instead\nreturned as `needs_replay`.",
         "operationId": "get_cluster_update_check_api_cluster_update_check_get",
         "responses": {
           "200": {
@@ -6068,7 +6068,7 @@
     "/api/tasks/{task_id}": {
       "patch": {
         "summary": "Patch Task",
-        "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(priority must be one of P0..P3; 'ongoing' is rejected as a status — it is\nthe system root's permanent state, never assignable; a title colliding with\nanother in_progress task's is rejected). owner reassigns to another\nagent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. Unlike the SDK, an owner change here\ndoes NOT message the affected agents — this endpoint is a plain column write.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains in progress. Close or cancel those children first.",
+        "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(priority must be one of P0..P3; ongoing marks long-running active work; a\ntitle colliding with another in_progress task's is rejected). owner reassigns to another\nagent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes after the database write commits.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains active (in progress or ongoing). Close or cancel those children first.",
         "operationId": "patch_task_api_tasks__task_id__patch",
         "parameters": [
           {
@@ -13517,6 +13517,18 @@
             "title": "Note Tag",
             "default": "task"
           },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
           "resurrect": {
             "type": "boolean",
             "title": "Resurrect",
@@ -13528,7 +13540,7 @@
           "content"
         ],
         "title": "SystemNoteIn",
-        "description": "POST /api/agents/{id}/system-note request body — a framework system\nnotification delivered to the agent as a system note (system_marker in\nthe timeline), never a peer chat message.\n\n`content` is the note text. `source` follows the same envelope whitelist\nas chat messages (system / agent:N / user / ...), defaulting to 'system';\nit is recorded for audit but the note itself renders without a sender\nprefix. `note_tag` picks the timeline chip — must be a NoteTag value\n(closed set); `task` is the task-notification family. `resurrect`\ncontrols whether a terminated target is woken to receive the note: task\nassignment (a delegator direction) resurrects, plain update notices do\nnot (user ruling 2026-08-27 — notifications never resurrect an owner)."
+        "description": "POST /api/agents/{id}/system-note request body — a framework system\nnotification delivered to the agent as a system note (system_marker in\nthe timeline), never a peer chat message.\n\n`content` is the note text. `source` follows the same envelope whitelist\nas chat messages (system / agent:N / user / ...), defaulting to 'system';\nit is recorded for audit but the note itself renders without a sender\nprefix. `note_tag` picks the timeline chip — must be a NoteTag value\n(closed set); `task` is the task-notification family. `resurrect`\ncontrols whether a terminated target is woken to receive the note: task\nassignment (a delegator direction) resurrects, plain update notices do\nnot (user ruling 2026-08-27 — notifications never resurrect an owner).\n`task_id` is optional but requires `note_tag='task'`; it is the explicit\nLLM-usage attribution for the turn this note drives."
       },
       "SystemStatus": {
         "properties": {
@@ -13675,6 +13687,38 @@
             "title": "Reminder Count",
             "default": 0
           },
+          "token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Budget"
+          },
+          "usd_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd Budget"
+          },
+          "token_used": {
+            "type": "integer",
+            "title": "Token Used",
+            "default": 0
+          },
+          "usd_used": {
+            "type": "number",
+            "title": "Usd Used",
+            "default": 0.0
+          },
           "ghost": {
             "type": "boolean",
             "title": "Ghost",
@@ -13786,6 +13830,38 @@
           },
           "priority": {
             "$ref": "#/components/schemas/Priority"
+          },
+          "token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Budget"
+          },
+          "usd_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd Budget"
+          },
+          "token_used": {
+            "type": "integer",
+            "title": "Token Used",
+            "default": 0
+          },
+          "usd_used": {
+            "type": "number",
+            "title": "Usd Used",
+            "default": 0.0
           },
           "ghost": {
             "type": "boolean",
@@ -13900,7 +13976,7 @@
         },
         "type": "object",
         "title": "TaskUpdateRequest",
-        "description": "PATCH /api/tasks/{id} — partial update; omitted fields stay unchanged.\n\nstatus, title, description, and results are taken when non-null. owner and\nremind_interval_seconds are taken when present (model_fields_set), but an explicit\nnull is rejected for both: a task cannot be released (every non-root task\nhas an owner) and reminders cannot be disabled (interval capped at 24h).\nparent_id is taken when present (model_fields_set): an explicit null moves\nthe task under the system root, an int reparents it (the parent must exist\nand the move must not create a cycle). Owner changes through this endpoint\ndo not message the affected agents (the SDK update path does)."
+        "description": "PATCH /api/tasks/{id} — partial update; omitted fields stay unchanged.\n\nstatus, title, description, and results are taken when non-null. owner and\nremind_interval_seconds are taken when present (model_fields_set), but an explicit\nnull is rejected for both: a task cannot be released (every non-root task\nhas an owner) and reminders cannot be disabled (interval capped at 24h).\nparent_id is taken when present (model_fields_set): an explicit null moves\nthe task under the system root, an int reparents it (the parent must exist\nand the move must not create a cycle). Owner changes through this endpoint\nsend the SDK-equivalent task system notes to affected agents."
       },
       "TerminateAgentRequest": {
         "properties": {
@@ -14345,16 +14421,21 @@
           "backend_changed": {
             "type": "boolean",
             "title": "Backend Changed"
+          },
+          "needs_replay": {
+            "type": "boolean",
+            "title": "Needs Replay"
           }
         },
         "type": "object",
         "required": [
           "behind",
           "frontend_changed",
-          "backend_changed"
+          "backend_changed",
+          "needs_replay"
         ],
         "title": "UpdateCheck",
-        "description": "`GET /api/cluster/update-check` response — how far the gateway's\ncheckout is behind its track target, and which side a pull would restart.\n\n`behind` is the commit count HEAD..target (0 = already up to date, so the\nUI shows \"no updates\" and skips launching a rollout). `frontend_changed` /\n`backend_changed` mirror `ava cluster update`'s own classification so the UI can\ntell the user what a rollout would actually restart (docs-only diffs count\nas neither — a pull with nothing to restart)."
+        "description": "`GET /api/cluster/update-check` response — how far the gateway's\ncheckout is behind its track target, and which side a pull would restart.\n\n`behind` is the commit count from the last fully installed commit to the\ntrack target. `needs_replay` names the exceptional state where the fully\ninstalled commit is ahead of the running-commit bookmark: a rollout was\ninterrupted between them, so zero commits behind is not an up-to-date\nverdict. A running commit ahead of installation is the normal fast-path\nstate and does not need replay.\n\n`frontend_changed` / `backend_changed` mirror `ava cluster update`'s own\nclassification so the UI can tell the user what a rollout would actually\nrestart (docs-only diffs count as neither — a pull with nothing to restart)."
       },
       "UpdateOutcome": {
         "type": "string",

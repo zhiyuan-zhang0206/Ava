@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Browser healthcheck's two questions
-description: A CDP 200 answers neither identity nor supervision — the probe asks argv ownership + socket holder, and browser.py maps each verdict combination to respawn / report / sweep actions.
+description: A CDP 200 answers neither identity nor supervision — the probe asks argv ownership + socket holder, and browser.py maps each verdict combination, including an intentional macOS readiness wait, to the safe action.
 tags:
 - ops
 ---
@@ -13,6 +13,7 @@ A CDP 200 answers neither of the questions that matter. It cannot tell the super
 So `services/browser/probe.py` asks identity a different way — a Chrome whose argv carries this cluster's `--user-data-dir` (the positive token `services/browser/orphan.py` established) **and** which holds the LISTEN socket on the CDP port — and `browser.py` asks supervision separately:
 
 - verdict `PORT_TAKEN` (someone else's Chrome, or ownership unconfirmable) → report at ERROR, exit `EXIT_PORT_TAKEN`, **never respawn**. Asked first: our own session being alive does not make a respawn able to bind a port another netns won.
-- session-dead + ours-alive → report at ERROR, do not respawn. An unsupervised Chrome of our own; `ava stop --stop-browser` sweeps it by profile.
+- session-dead + ours-alive → sweep the identity-verified orphan and rebuild the session.
 - session-dead + CDP-dead → respawn.
-- session-alive + CDP-dead → respawn (`respawn_service` kills the stale session first).
+- session-alive + CDP-dead + current macOS readiness marker → report **DEGRADED** and preserve the waiting session; the daemon is deliberately waiting for a GUI session and usable login Keychain, not crashed.
+- session-alive + CDP-dead without that marker → respawn (`respawn_service` kills the stale session first).

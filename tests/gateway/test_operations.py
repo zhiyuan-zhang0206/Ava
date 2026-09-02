@@ -887,7 +887,7 @@ def test_cluster_restart_op_returns_session_metadata(monkeypatch: pytest.MonkeyP
 def test_cluster_update_check_op_returns_check(monkeypatch: pytest.MonkeyPatch) -> None:
     from ops.cluster import UpdateCheck
 
-    chk = UpdateCheck(behind=2, frontend_changed=True, backend_changed=False)
+    chk = UpdateCheck(behind=2, frontend_changed=True, backend_changed=False, needs_replay=False)
     monkeypatch.setattr(ops_cluster, "update_check", lambda: chk)
     assert ops_cluster.cluster_update_check_op() is chk
 

@@ -2,6 +2,7 @@
 
 import { Fragment } from "react";
 import { ChevronRight, PanelRightClose } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
 import type { QueueUnit } from "@/lib/task-notify";
@@ -22,9 +23,10 @@ export function QueueHeader({
   onCollapse?: () => void;
   stale: boolean;
 }) {
+  const t = useTranslations("fleet.inboxPanel");
   return (
     <header className={cn("shrink-0 items-center gap-2 border-b border-border px-4", BAR_HEIGHT_CLASS, FLEX)}>
-      <h2 className="text-sm font-semibold">Inbox</h2>
+      <h2 className="text-sm font-semibold">{t("title")}</h2>
       {total > 0 && (
         <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
           {total}
@@ -37,17 +39,17 @@ export function QueueHeader({
       {stale && (
         <span
           className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400"
-          title="Inbox refresh failed — entries may be incomplete"
+          title={t("refreshFailed")}
         >
           <span className="size-1.5 rounded-full bg-amber-500" />
-          Stale
+          {t("stale")}
         </span>
       )}
       {onCollapse && (
         <button
           type="button"
           onClick={onCollapse}
-          aria-label="Collapse queue"
+          aria-label={t("collapseQueue")}
           className="ml-auto p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
         >
           <PanelRightClose className="size-3.5" aria-hidden />
@@ -59,23 +61,24 @@ export function QueueHeader({
 
 
 export function EmptyState({ failed, loading }: { failed: boolean; loading: boolean }) {
+  const t = useTranslations("fleet.inboxPanel");
   if (failed) {
     return (
       <p className="px-4 py-8 text-center text-xs text-destructive">
-        Failed to load inbox.
+        {t("loadFailed")}
       </p>
     );
   }
   if (loading) {
     return (
       <p className="px-4 py-8 text-center text-xs text-muted-foreground">
-        Loading…
+        {t("loading")}
       </p>
     );
   }
   return (
     <p className="px-4 py-8 text-center text-xs text-muted-foreground">
-      Nothing needs your attention right now.
+      {t("empty")}
     </p>
   );
 }
@@ -115,8 +118,9 @@ export function QueueList({
   openFailed: boolean;
   historyFailed: boolean;
 }) {
+  const t = useTranslations("fleet.inboxPanel");
   return (
-    <ul className={cn("overflow-y-auto", FLEX_1, MIN_W_0)} aria-label="Inbox queue">
+    <ul className={cn("overflow-y-auto", FLEX_1, MIN_W_0)} aria-label={t("queue")}>
       <OpenUnits
         units={units}
         agentStatus={agentStatus}
@@ -127,12 +131,12 @@ export function QueueList({
       />
       {units.length === 0 && (
         <li className="px-4 py-6 text-center text-xs text-muted-foreground">
-          {openFailed ? "Failed to load open notices." : "Nothing open — inbox clear."}
+          {openFailed ? t("openLoadFailed") : t("openEmpty")}
         </li>
       )}
       {historyFailed && (
         <li className="px-4 py-3 text-center text-[10px] text-muted-foreground">
-          Resolved history unavailable.
+          {t("historyUnavailable")}
         </li>
       )}
       {resolved.length > 0 && (
@@ -145,7 +149,7 @@ export function QueueList({
           >
             <ChevronRight className={cn("size-3 transition-transform", resolvedOpen && "rotate-90")} aria-hidden />
             {/* No count badge — user ruling 2026-08-09 #1096: the word alone. */}
-            Resolved
+            {t("resolved")}
           </button>
         </li>
       )}
@@ -174,7 +178,7 @@ export function QueueList({
             disabled={isFetchingNextPage}
             className="w-full px-4 py-2 text-center text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
-            {isFetchingNextPage ? "Loading…" : "Show more"}
+            {isFetchingNextPage ? t("loading") : t("showMore")}
           </button>
         </li>
       )}
@@ -200,6 +204,7 @@ export function OpenUnits({
   onSelect: (key: string) => void;
   onSelectAgent?: (agentId: number | null) => void;
 }) {
+  const t = useTranslations("fleet.inboxPanel");
   return (
     <>
       {units.map((u) => {
@@ -227,7 +232,7 @@ export function OpenUnits({
           <Fragment key={`task-${u.root.id}`}>
             <li
               className={cn("items-center gap-2 px-4 pt-3 pb-1", FLEX)}
-              aria-label={`Task #${u.root.id}: ${u.root.title}`}
+              aria-label={t("task", { id: u.root.id, title: u.root.title })}
             >
               <span className={cn("truncate text-[10px] font-medium text-muted-foreground", MIN_W_0)}>
                 #{u.root.id} {u.root.title}

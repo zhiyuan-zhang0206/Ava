@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 23 | events table |
-| telemetry (category=telemetry) | `events` | 130 | events table |
+| telemetry (category=telemetry) | `events` | 137 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -90,7 +90,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 130)
+## 3. Telemetry events (category=telemetry, 137)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -103,7 +103,7 @@ consumers: see the comments at each emit point.
 |------|------|------|-----------------|----|------|
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | events |
 | `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | events |
-| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced | — | events |
+| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced, task_id | — | events |
 | `turn_end` | one turn finished | observation | ok, duration_seconds | — | events |
 | `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events |
 | `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events |
@@ -117,6 +117,8 @@ consumers: see the comments at each emit point.
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events |
 | `plugin_load_failed` | enabled plugin skipped because it failed to load (fail-soft) | anomaly | plugin, error | — | events |
 | `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events |
+| `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events |
+| `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, compactions, history_chars, summary_chars, summary_history_ratio | — | events |
 | `exec_cancelled` | execute_code cancelled | anomaly | — | — | events |
 | `exec(timeout)` | historical parenthesized name (migration target) | anomaly | — | — | events |
 | `exec(failed)` | historical parenthesized name (migration target) | anomaly | — | — | events |
@@ -188,6 +190,7 @@ consumers: see the comments at each emit point.
 | `pgbouncer_repaired` | pgbouncer watchdog repair | anomaly | — | — | events |
 | `editable_pth_repaired` | poisoned editable-install pointer repaired to the prod source root | anomaly | — | — | events |
 | `editable_direct_url_repaired` | poisoned editable-install direct_url repaired to the prod source root | anomaly | — | — | events |
+| `exec_editable_install_poisoned` | poisoned editable install repaired before an exec child spawn | anomaly | — | — | events |
 | `source_tree_reset` | prod source checkout reset to the installed commit / cleaned of untracked files | anomaly | — | — | events |
 | `label_generated` | label auto-generated | noise | — | — | events |
 | `label_generate_failed` | label generation failed | anomaly | — | — | events |
@@ -208,15 +211,19 @@ consumers: see the comments at each emit point.
 | `respawn_breaker_open` | watchdog respawn circuit breaker opened — repeated failed respawns held until a probe-alive round | anomaly | — | — | events |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events |
 | `checkpoint_trim` | checkpoint trimmed | noise | — | — | events |
-| `recall_filter` | memory recall filter | noise | body | — | events |
+| `recall_filter` | memory recall filter | noise | body, query_hmac_sha256, picked_paths | — | events |
 | `passive_recall` | passive memory recall | noise | search_ms, filter_ms | — | events |
 | `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events |
-| `silent_idle` | silent idle verdict | noise | — | — | events |
+| `silent_idle` | silent idle cost-boundary verdict | noise | output_tokens, cumulative_output_tokens, estimated_cost_usd, halted | — | events |
+| `llm_retry` | LLM retry sequence completion | observation | outcome, duration_seconds | — | events |
 | `last_msg` | last-message check | noise | — | — | events |
 | `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | events |
 | `auth401_rejected` | gateway auth-401 rejections in the 60s window (aggregate count) | noise | count | — | events |
 | `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events |
 | `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events |
+| `watchdog_tick` | watchdog completed one full healthcheck and reconcile round | noise | last_tick_timestamp_seconds | — | events |
+| `pitr_remote_inventory` | PITR remote object inventory (backend-scoped absolute object and byte state) | noise | backend, object_count, bytes | — | events |
+| `recovery_drill_failed` | scheduled logical dump or PITR recovery proof failed | anomaly | drill, detail | — | events |
 | `telemetry_read_stale` | read-side telemetry staleness detected — heartbeat older than threshold | anomaly | source, signal, threshold_s, age_s, action, reason | — | events |
 | `telemetry_read_recovered` | read-side telemetry heartbeat recovered | observation | source, signal, stale_duration_s | — | events |
 | `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | events |

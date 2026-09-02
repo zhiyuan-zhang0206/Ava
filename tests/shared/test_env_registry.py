@@ -213,6 +213,8 @@ class TestConsumptionMatrixDeclarations:
             "agent_host",
             "pitr_uploader",
             "pitr_base_backup",
+            "gateway_watchdog",
+            "agent_runner_watchdog",
         }
         meta = _fields()  # pyright: ignore[reportUnknownVariableType]
         for svc, alias in aliases.items():

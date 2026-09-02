@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import withBundleAnalyzer from "@next/bundle-analyzer";
 
 // No rewrites proxy for /api — the Turbopack dev proxy buffers SSE, so the
 // frontend connects directly to FastAPI. Same-origin reverse proxy in prod
@@ -11,28 +12,6 @@ import type { NextConfig } from "next";
 // (comma-separated MagicDNS hostnames / IPs) to allowlist them. Only `next dev`
 // reads this; the prod `next start` the ava stack runs ignores it, so it is
 // empty by default.
-
-const CSP_DIRECTIVES = [
-  "default-src 'self'",
-  // script: Next.js inline script + own bundle
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  // style: Tailwind + shadcn use inline style
-  "style-src 'self' 'unsafe-inline'",
-  // img: data: for favicon / inline image, https: for external images
-  "img-src 'self' data: http: https:",
-  // font: Google Fonts (Geist)
-  "font-src 'self' data:",
-  // connect: API_BASE (gateway) + SSE EventSource
-  "connect-src 'self' http: https: ws: wss:",
-  // frame-src: the /insights#ops Grafana embed — the gateway's /grafana
-  // reverse proxy on API_BASE. In dev that is a different port than the
-  // frontend (cross-origin), so 'self' alone would block it; mirror
-  // connect-src's permissiveness.
-  "frame-src 'self' http: https:",
-  // frame-ancestors: prevent frontend from being embedded externally (X-Frame-Options duplicates this)
-  "frame-ancestors 'none'",
-  // everything else stays default
-].join("; ");
 
 const nextConfig: NextConfig = {
   // -- Security hardening --
@@ -84,16 +63,18 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           // control Referer disclosure granularity
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          // Content-Security-Policy: defense-in-depth against XSS.
-          // 'unsafe-inline' in script-src is currently unavoidable in Next.js
-          // (inline script for hydration); style-src 'unsafe-inline' because
-          // Tailwind/shadcn use inline style heavily. Consider nonce-based
-          // tightening later.
-          { key: "Content-Security-Policy", value: CSP_DIRECTIVES },
+          // CSP needs a unique nonce for every response, which `headers()`
+          // cannot provide. src/proxy.ts emits it after deriving the gateway origin
+          // from the same NEXT_PUBLIC_* deployment settings as the API client.
         ],
       },
     ];
   },
 };
 
-export default nextConfig;
+export default withBundleAnalyzer({
+  // Webpack reports are generated only for the opt-in `npm run build:analyze`.
+  enabled: process.env.ANALYZE === "true",
+  analyzerMode: "static",
+  openAnalyzer: false,
+})(nextConfig);

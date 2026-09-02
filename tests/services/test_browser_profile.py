@@ -106,15 +106,18 @@ def test_copy_default_profile_excludes_and_copies(tmp_path: Path) -> None:
     assert not (dst / "SingletonLock").exists()
 
 
-def test_copy_default_profile_overwrites_empty_dst(tmp_path: Path) -> None:
+def test_copy_default_profile_refuses_existing_dst_without_touching_it(tmp_path: Path) -> None:
     src = _make_profile(tmp_path / "chrome")
     dst = tmp_path / "agent-profile"
-    dst.mkdir()  # pre-existing empty dir (a prior daemon mkdir) must not block the copy
-    bp._copy_default_profile(src, dst)
-    assert (dst / "Default" / "Cookies").exists()
+    dst.mkdir()
+    cookies = dst / "Cookies"
+    cookies.write_bytes(b"existing-login")
+    with pytest.raises(FileExistsError):
+        bp._copy_default_profile(src, dst)
+    assert cookies.read_bytes() == b"existing-login"
 
 
-def test_copy_default_profile_cleans_up_on_failure(
+def test_copy_default_profile_preserves_partial_dst_on_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src = _make_profile(tmp_path / "chrome")
@@ -127,7 +130,39 @@ def test_copy_default_profile_cleans_up_on_failure(
     monkeypatch.setattr(bp.shutil, "copytree", _explode)
     with pytest.raises(OSError, match="disk full"):
         bp._copy_default_profile(src, dst)
-    assert not dst.exists()  # no half-copied profile left behind
+    assert dst.exists()  # preserve every existing directory; never clear a profile automatically
+
+
+def test_validate_local_state_warns_without_mutating_profile(tmp_path: Path) -> None:
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    before = sorted(profile.iterdir())
+    warning = bp.validate_local_state(profile)
+    assert warning is not None
+    assert "missing" in warning
+    assert sorted(profile.iterdir()) == before
+
+
+def test_validate_local_state_accepts_readable_regular_file(tmp_path: Path) -> None:
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    state = profile / "Local State"
+    state.write_text("{}")
+    assert bp.validate_local_state(profile) is None
+
+
+def test_validate_local_state_warns_when_mtime_is_unexpectedly_future_dated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    state = profile / "Local State"
+    state.write_text("{}")
+    monkeypatch.setattr(bp.time, "time", lambda: 0.0)
+    os.utime(state, (301, 301))
+    warning = bp.validate_local_state(profile)
+    assert warning is not None
+    assert "mtime" in warning
 
 
 def test_human_size() -> None:
@@ -138,11 +173,12 @@ def test_human_size() -> None:
 # --- ensure_browser_profile orchestration ----------------------------------
 
 
-def test_skips_when_profile_populated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    populated = tmp_path / "prof"
-    populated.mkdir()
-    (populated / "Cookies").write_text("x")
-    monkeypatch.setattr(bp, "profile_dir", lambda: populated)
+def test_skips_when_profile_path_already_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing = tmp_path / "prof"
+    existing.mkdir()  # An empty profile from a prior launch is also immutable.
+    monkeypatch.setattr(bp, "profile_dir", lambda: existing)
     monkeypatch.setattr("builtins.input", _boom_input)
     bp.ensure_browser_profile(interactive=True)  # returns without prompting
 

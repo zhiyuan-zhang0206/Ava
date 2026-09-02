@@ -22,6 +22,7 @@ import {
   type ZoomBehavior,
   type ZoomTransform,
 } from "d3-zoom";
+import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useForceLayout, type Pos, type SimLink, type SimNode } from "@/lib/use-force-layout";
@@ -202,7 +203,7 @@ export const ForceGraph = memo(function ForceGraph({
   legend,
   overlayLeft,
   hoverCard,
-  ariaLabel = "Fleet graph",
+  ariaLabel,
 }: {
   nodes: readonly ForceGraphNode[];
   edges: readonly ForceGraphEdge[];
@@ -227,6 +228,8 @@ export const ForceGraph = memo(function ForceGraph({
   hoverCard?: HoverCard;
   ariaLabel?: string;
 }) {
+  const t = useTranslations("fleet.forceGraph");
+  const graphAriaLabel = ariaLabel ?? t("defaultAriaLabel");
   // Max score across the graph — the radius normalizer. Must match the value
   // used for the sim collide radii so the rendered node matches its collision
   // circle. floor 1 avoids div-by-zero when every score is 0.
@@ -565,7 +568,7 @@ export const ForceGraph = memo(function ForceGraph({
         viewBox={`${minX} ${minY} ${w} ${h}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label={ariaLabel}
+        aria-label={graphAriaLabel}
         onClick={(ev) => {
           // Clicking the SVG background (not a node) deselects.
           if (ev.target === ev.currentTarget) onSelect(null);
@@ -796,7 +799,7 @@ export const ForceGraph = memo(function ForceGraph({
       </svg>
       ) : nodes.length > 0 ? (
         <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
-          Loading...
+          {t("loading")}
         </div>
       ) : null}
 
@@ -856,7 +859,7 @@ export const ForceGraph = memo(function ForceGraph({
         <button
           type="button"
           className={cn("size-6 items-center justify-center rounded border border-border bg-background/80 text-[10px] text-muted-foreground backdrop-blur hover:bg-sidebar-accent hover:text-foreground", FLEX)}
-          aria-label="Reset zoom"
+          aria-label={t("resetZoom")}
           onClick={resetZoom}
           disabled={transform.k === 1 && transform.x === 0 && transform.y === 0}
         >

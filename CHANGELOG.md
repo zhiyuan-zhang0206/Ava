@@ -7,6 +7,15 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 
 ## [Unreleased]
 
+### Changed
+- PR merge automation moved from Mergify to Trunk Merge Queue: queued PRs are tested
+  together in batches (target 4, max wait 5 min) via draft-PR runs on `trunk-merge/*`
+  branches; the merge gate is the full CI job set (12 required statuses: the three
+  suite aggregators, the non-matrix jobs, and the `qa-approved-gate` check); the
+  `qa-approved` label remains the hard pre-merge gate (branch protection + queue
+  admission). Mergify queue usage is discontinued; the app stays installed as a
+  rollback path through the transition window.
+
 ### Fixed
 - Plugin loading is fail-soft: a plugin whose `plugin.py` raises at import (or
   a config entry whose plugin directory is gone) is skipped with a loud

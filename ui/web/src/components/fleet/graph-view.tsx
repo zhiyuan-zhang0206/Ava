@@ -16,6 +16,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { WindowSelect } from "@/components/window-select";
@@ -53,15 +54,6 @@ const STATUS_PULSE: Record<PublicAgentStatus, boolean> = {
   idling: false,
   terminated: false,
 };
-// Hover card status wording (the color map above stays the single source for
-// the swatch; this map only spells the status out for the card's text row).
-const STATUS_LABEL: Record<GraphDisplayStatus, string> = {
-  running: "Running",
-  idling: "Idling",
-  terminated: "Terminated",
-  offline: "Offline",
-};
-
 // Per-day decay constant for the edge weight (see the backend formula). Held as a
 // constant for now; an advanced settings panel to tune it is deferred.
 const DECAY_LAMBDA = 0.5;
@@ -70,17 +62,23 @@ const DECAY_LAMBDA = 0.5;
 // keeps its own key so the two graphs' tunings stay independent.
 const FORCE_PARAMS_KEY = "display.graph_force_params";
 
-function formatSnapshotAge(snapshotAt: string): string | null {
+type SnapshotAge =
+  | { unit: "now" }
+  | { unit: "minutes"; count: number }
+  | { unit: "hours"; count: number }
+  | { unit: "days"; count: number };
+
+function formatSnapshotAge(snapshotAt: string): SnapshotAge | null {
   const snapshotMs = Date.parse(snapshotAt);
   if (Number.isNaN(snapshotMs)) return null;
 
   const minutes = Math.max(0, Math.floor((Date.now() - snapshotMs) / 60_000));
-  if (minutes < 1) return "less than a minute ago";
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return { unit: "now" };
+  if (minutes < 60) return { unit: "minutes", count: minutes };
 
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return { unit: "hours", count: hours };
+  return { unit: "days", count: Math.floor(hours / 24) };
 }
 
 export function GraphView({
@@ -90,6 +88,7 @@ export function GraphView({
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
 }) {
+  const t = useTranslations("fleet.graph");
   const router = useRouter();
   // Time window for node score + edge events (default 24h). Local to the graph
   // view — independent of the sidebar's persisted stats window.
@@ -111,6 +110,25 @@ export function GraphView({
     decayLambda: DECAY_LAMBDA,
   });
   const snapshotAge = graph.snapshot_at ? formatSnapshotAge(graph.snapshot_at) : null;
+  const snapshotAgeLabel =
+    snapshotAge?.unit === "now"
+      ? t("snapshotNow")
+      : snapshotAge?.unit === "minutes"
+        ? t("snapshotMinutes", { count: snapshotAge.count })
+        : snapshotAge?.unit === "hours"
+          ? t("snapshotHours", { count: snapshotAge.count })
+          : snapshotAge?.unit === "days"
+            ? t("snapshotDays", { count: snapshotAge.count })
+            : null;
+  const statusLabels = useMemo<Record<GraphDisplayStatus, string>>(
+    () => ({
+      running: t("running"),
+      idling: t("idling"),
+      terminated: t("terminated"),
+      offline: t("offline"),
+    }),
+    [t],
+  );
 
   // A selected agent that was in the graph and then disappeared (transitioned to
   // terminated) — clear the stale selection so the canvas and selection stay in sync.
@@ -164,25 +182,25 @@ export function GraphView({
     (node: ForceGraphNode) => (
       <div className="w-52 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
         <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
-          {node.label ?? "Unlabeled agent"}
+          {node.label ?? t("unlabeledAgent")}
         </p>
         <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
-          Agent #{node.id}
+          {t("agent", { id: node.id })}
         </p>
         <div className="mt-2 space-y-1 text-[11px]">
           <p className={cn("items-center gap-1.5", FLEX)}>
             <span
               className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as GraphDisplayStatus])}
             />
-            {STATUS_LABEL[node.status as GraphDisplayStatus]}
+            {statusLabels[node.status as GraphDisplayStatus]}
           </p>
           <p className="text-muted-foreground">
-            Activity score: {Math.round(node.score).toLocaleString()}
+            {t("activityScore", { score: Math.round(node.score).toLocaleString() })}
           </p>
         </div>
       </div>
     ),
-    [],
+    [statusLabels, t],
   );
   // The backend returns one edge per event kind (spawn / fork / resurrect /
   // message), and every non-message kind collapses to "lineage" here — so a
@@ -239,32 +257,32 @@ export function GraphView({
         setParams={setForceParams}
         resetParams={resetForceParams}
         hoverCard={agentHoverCard}
-        statsText={`${nodes.length} nodes · ${edges.length} edges`}
+        statsText={t("stats", { nodes: nodes.length, edges: edges.length })}
         legend={
-          <div aria-label="Agent graph legend" className="space-y-1">
+          <div aria-label={t("legend")} className="space-y-1">
             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
               {([
-                ["running", "Running"],
-                ["idling", "Idling"],
-                ["terminated", "Terminated"],
-                ["offline", "Offline"],
-              ] as const).map(([status, label]) => (
+                "running",
+                "idling",
+                "terminated",
+                "offline",
+              ] as const).map((status) => (
                 <span key={status} className={cn("items-center gap-1.5", FLEX)}>
                   <span className={cn("size-2 rounded-full bg-current", STATUS_TEXT[status])} />
-                  {label}
+                  {statusLabels[status]}
                 </span>
               ))}
             </div>
-            <p>size = activity score (24h window)</p>
+            <p>{t("sizeActivity", { window: "24h" })}</p>
           </div>
         }
-        ariaLabel="Fleet relationship graph"
+        ariaLabel={t("ariaLabel")}
         overlayLeft={
           <WindowSelect
             value={String(windowHours)}
             options={STATS_WINDOWS.map((h) => ({ value: String(h), label: STATS_WINDOW_LABELS[h] }))}
             onChange={(v) => setWindowHours(Number(v) as StatsWindowHours)}
-            ariaLabel="Graph window"
+            ariaLabel={t("window")}
             className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         }
@@ -276,8 +294,8 @@ export function GraphView({
         >
           <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
           {snapshotAge
-            ? `Stale — snapshot from ${snapshotAge}`
-            : "Stale — last known graph"}
+            ? t("staleSnapshot", { age: snapshotAgeLabel ?? "" })
+            : t("staleLastKnown")}
         </p>
       ) : graph.telemetry_stale ? (
         <p
@@ -285,7 +303,7 @@ export function GraphView({
           className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-border bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground" />
-          Telemetry degraded — updates may lag
+          {t("telemetryDegraded")}
         </p>
       ) : null}
       {graph.truncated ? (
@@ -294,12 +312,12 @@ export function GraphView({
           className="pointer-events-none absolute right-3 top-10 inline-flex items-center gap-1 rounded border border-orange-500/30 bg-background/80 px-2 py-1 text-[10px] text-orange-600 backdrop-blur dark:text-orange-400"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
-          Truncated — edge limit reached
+          {t("truncated")}
         </p>
       ) : null}
       {nodes.length === 0 ? (
         <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
-          {loading ? "Loading..." : error ? "Graph unavailable." : "No agents to graph."}
+          {loading ? t("loading") : error ? t("unavailable") : t("empty")}
         </p>
       ) : null}
     </div>

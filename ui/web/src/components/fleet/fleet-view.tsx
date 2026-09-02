@@ -18,6 +18,7 @@
 
 import { MessageSquare, PanelRightOpen } from "lucide-react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { GraphView } from "@/components/fleet/graph-view";
@@ -149,6 +150,7 @@ const DesktopLayout = memo(function DesktopLayout({
   selectedTaskId: number | null;
   setSelectedTaskId: (id: number | null) => void;
 }) {
+  const t = useTranslations("fleet");
   // Queue panel collapse (RCS): collapsed leaves only a STATIC handle — no
   // badge, no count, nothing that pulses in the periphery. Expanding is the
   // user's pull. DB-backed (display.fleet_queue_collapsed) so the choice follows
@@ -160,9 +162,9 @@ const DesktopLayout = memo(function DesktopLayout({
   return (
     <>
       <header className={cn("shrink-0 items-center gap-3 border-b border-border px-6 py-3", FLEX)}>
-        <h1 className="text-sm font-semibold">Fleet</h1>
+        <h1 className="text-sm font-semibold">{t("title")}</h1>
         <span className="text-xs text-muted-foreground tabular-nums">
-          {aliveCount} active · {agents.length} total
+          {t("activeTotal", { active: aliveCount, total: agents.length })}
         </span>
         {/* Plugin-contributed toolbar entries (contributions.ui.nav, location
             "fleet-toolbar"); renders nothing when none are declared. */}
@@ -172,7 +174,7 @@ const DesktopLayout = memo(function DesktopLayout({
         <Link
           href="/"
           className="p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-          aria-label="Back to conversation"
+          aria-label={t("backToConversation")}
         >
           <MessageSquare className="size-5" aria-hidden />
         </Link>
@@ -192,12 +194,12 @@ const DesktopLayout = memo(function DesktopLayout({
           <button
             type="button"
             onClick={() => setQueueCollapsed(false)}
-            aria-label="Expand queue"
+            aria-label={t("expandQueue")}
             className={cn("shrink-0 w-7 items-center gap-2 border-l border-border pt-3 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground", FLEX, FLEX_COL)}
           >
             <PanelRightOpen className="size-4" aria-hidden />
             <span className="text-[10px] font-medium tracking-wide [writing-mode:vertical-rl]">
-              Queue
+              {t("queue")}
             </span>
           </button>
         </div>
@@ -258,18 +260,19 @@ const MobileLayout = memo(function MobileLayout({
   setMobileTab: (t: MobileTab) => void;
   inboxCount: number;
 }) {
+  const t = useTranslations("fleet");
   return (
     <>
       {/* Mobile header (compact) */}
       <header className={cn("shrink-0 items-center gap-2 border-b border-border px-4 py-2", FLEX)}>
-        <h1 className="text-sm font-semibold">Fleet</h1>
+        <h1 className="text-sm font-semibold">{t("title")}</h1>
         <span className="text-[11px] text-muted-foreground tabular-nums">
-          {aliveCount} active · {agents.length} total
+          {t("activeTotal", { active: aliveCount, total: agents.length })}
         </span>
         <Link
           href="/"
           className="ml-auto p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-          aria-label="Back to conversation"
+          aria-label={t("backToConversation")}
         >
           <MessageSquare className="size-4" aria-hidden />
         </Link>
@@ -307,30 +310,30 @@ const MobileLayout = memo(function MobileLayout({
       </div>
 
       {/* Tab bar — fixed at the bottom */}
-      <nav
+      <div
         className={cn("shrink-0 items-center border-t border-border bg-background", FLEX)}
         role="tablist"
-        aria-label="Fleet sections"
+        aria-label={t("sections")}
       >
         <MobileTabButton
-          label="Agents"
+          label={t("agents")}
           count={aliveCount}
           active={mobileTab === "agents"}
           onClick={() => setMobileTab("agents")}
         />
         <MobileTabButton
-          label="Tasks"
+          label={t("tasks")}
           count={0}
           active={mobileTab === "tasks"}
           onClick={() => setMobileTab("tasks")}
         />
         <MobileTabButton
-          label="Inbox"
+          label={t("inbox")}
           count={inboxCount}
           active={mobileTab === "inbox"}
           onClick={() => setMobileTab("inbox")}
         />
-      </nav>
+      </div>
     </>
   );
 });
@@ -351,6 +354,7 @@ const LeftGraphPanel = memo(function LeftGraphPanel({
   selectedTaskId: number | null;
   setSelectedTaskId: (id: number | null) => void;
 }) {
+  const t = useTranslations("fleet");
   const { settings, setSetting } = useUserSettings();
   const view: LeftView = settings["display.fleet_left_view"] === "tasks" ? "tasks" : "graph";
   const setView = (v: LeftView) => setSetting("display.fleet_left_view", v);
@@ -362,9 +366,9 @@ const LeftGraphPanel = memo(function LeftGraphPanel({
           exactly. Padding alone cannot: the two bars hold different content
           heights. */}
       <div className={cn("shrink-0 items-center gap-1 border-b border-border px-2", BAR_HEIGHT_CLASS, FLEX)}>
-        <TabButton label="Agents" count={0} active={view === "graph"} onClick={() => setView("graph")} />
+        <TabButton label={t("agents")} count={0} active={view === "graph"} onClick={() => setView("graph")} />
         <TabButton
-          label="Tasks"
+          label={t("tasks")}
           count={0}
           active={view === "tasks"}
           onClick={() => setView("tasks")}

@@ -18,6 +18,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, RotateCcw, Server } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { type ComponentType, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ import { FLEX } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
 export default function StatusPage() {
+  const t = useTranslations("insights.status");
   const visible = useSectionVisible();
   // Shares SYSTEM_STATUS_QUERY_KEY with the other /api/status observers (the
   // sidebar SpawnButton, machine badges, Config) — one key, one poll loop per
@@ -68,14 +70,14 @@ export default function StatusPage() {
     // error, Task #1051) instead of swapping the panel for an error page.
     return (
       <div className="p-8 text-center text-sm text-muted-foreground">
-        Couldn't reach the gateway — retrying…
+        {t("couldNotReach")}
       </div>
     );
   }
   if (!data) {
     return (
       <div className="p-8 text-center text-sm text-muted-foreground">
-        No status data yet
+        {t("noData")}
       </div>
     );
   }
@@ -86,16 +88,6 @@ export default function StatusPage() {
       <GatewaySection data={data} />
     </div>
   );
-}
-
-function restartSidesLabel(check: ClusterUpdateCheck): string {
-  // Which services a rollout would restart — mirrors `ava cluster update`'s own
-  // selective-restart classification (backend-only leaves the UI serving).
-  const sides = [
-    check.frontend_changed ? "frontend" : null,
-    check.backend_changed ? "backend" : null,
-  ].filter(Boolean);
-  return sides.length > 0 ? sides.join(" + ") : "nothing";
 }
 
 // ── shared status verdicts ──
@@ -120,22 +112,25 @@ const TONE_DOT: Record<StatusTone, string> = {
   muted: "bg-muted-foreground",
 };
 
-function machineVerdict(m: MachineStatus, runningLabel: string): { label: string; tone: StatusTone } {
+type MachineVerdictLabel = "identityMismatch" | "statusUnknown" | "paused" | "running" | "stopped" | "offline";
+
+function machineVerdict(m: MachineStatus): { label: MachineVerdictLabel; tone: StatusTone } {
   // identity_mismatch is a loud state: the probe reached an ops server that
   // answered under the WRONG machine_name, so this row's gateway_url points at
   // the wrong host. It outranks online/offline — never green.
-  if (m.identity_mismatch) return { label: "identity mismatch", tone: "error" };
-  if (m.online && m.paused === null) return { label: "status unknown", tone: "warn" };
+  if (m.identity_mismatch) return { label: "identityMismatch", tone: "error" };
+  if (m.online && m.paused === null) return { label: "statusUnknown", tone: "warn" };
   if (m.online && m.paused === true) return { label: "paused", tone: "warn" };
-  if (m.online && m.paused === false) return { label: runningLabel, tone: "ok" };
+  if (m.online && m.paused === false) return { label: "running", tone: "ok" };
   // stopped_at, set by `ava stop` and cleared by `ava start`, separates a
   // deliberate stop from a crash — the live probe alone can't.
   if (m.stopped_at != null) return { label: "stopped", tone: "muted" };
   return { label: "offline", tone: "error" };
 }
 
-function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: string }) {
-  const v = machineVerdict(m, runningLabel);
+function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: "running" | "online" }) {
+  const t = useTranslations("insights.status");
+  const v = machineVerdict(m);
   // running_sha is the code the live process loaded; head_sha is its checkout.
   // A drift means the checkout advanced (pull / rollout) but the process was
   // not restarted — a node can read pin ✓ yet still run stale code.
@@ -144,11 +139,11 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: strin
   return (
     <span className={`inline-flex items-center gap-1.5 ${TONE_TEXT[v.tone]}`}>
       <span className={`size-1.5 rounded-full ${TONE_DOT[v.tone]}`} />
-      {v.label}
+      {v.label === "running" ? t(runningLabel) : t(v.label)}
       {codeDrift && (
         <span
           className="text-amber-600 dark:text-amber-400"
-          title={`Code drift: running ${m.running_sha?.slice(0, 7)} ≠ head ${m.head_sha?.slice(0, 7)} — restart needed to pick up the latest checkout`}
+          title={t("codeDrift", { running: m.running_sha?.slice(0, 7) ?? "?", head: m.head_sha?.slice(0, 7) ?? "?" })}
         >
           ⚠{m.running_sha?.slice(0, 7)}
         </span>
@@ -156,9 +151,9 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: strin
       {!codeDrift && m.on_pin === false && (
         <span
           className="text-amber-600 dark:text-amber-400"
-          title={`Off the cluster pin (head ${m.head_sha?.slice(0, 7) ?? "?"}) — this node missed a rollout`}
+          title={t("offPin", { head: m.head_sha?.slice(0, 7) ?? "?" })}
         >
-          off-pin
+          {t("offPinBadge")}
         </span>
       )}
       {/* The live settle hold names this host. Recorded by the lease when the
@@ -168,9 +163,9 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: strin
       {m.settle_waited_on && (
         <span
           className="text-amber-600 dark:text-amber-400"
-          title="A deploy's settle hold is still waiting on this host: it acked its self-update and had not converged when the rollout exited. Recorded by the lease, not a live check — the off-pin / code badges are the live verdicts. While the hold stands, deploys are refused and auto-rollback is suppressed."
+          title={t("settleHold")}
         >
-          settle-hold
+          {t("settleHoldBadge")}
         </span>
       )}
     </span>
@@ -179,14 +174,13 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: strin
 
 // Daemon liveness → one health verdict for the gateway card. Both pidfile
 // probes alive = healthy; any dead = degraded; unknown probes = "—".
-function healthVerdict(m: MachineStatus): { label: string; tone: StatusTone; title: string } {
-  const title = `restarter ${daemonMark(m.restarter_online)} · watchdog ${daemonMark(m.watchdog_online)}`;
-  if (!m.online) return { label: "—", tone: "muted", title };
+function healthVerdict(m: MachineStatus): { label: "none" | "degraded" | "healthy"; tone: StatusTone } {
+  if (!m.online) return { label: "none", tone: "muted" };
   if (m.restarter_online === false || m.watchdog_online === false)
-    return { label: "degraded", tone: "warn", title };
+    return { label: "degraded", tone: "warn" };
   if (m.restarter_online === true && m.watchdog_online === true)
-    return { label: "healthy", tone: "ok", title };
-  return { label: "—", tone: "muted", title };
+    return { label: "healthy", tone: "ok" };
+  return { label: "none", tone: "muted" };
 }
 
 function daemonMark(ok: boolean | null | undefined): string {
@@ -196,15 +190,10 @@ function daemonMark(ok: boolean | null | undefined): string {
 // "Up since" for a live host — a boot/announce stamp, not a heartbeat, so it is
 // only ever rendered, never freshness-tested (see MachineStatus.up_since_at). An
 // offline host's row states the stop instead, which IS a "last seen".
-function upSinceLabel(m: MachineStatus): string {
-  if (m.online) return formatRelative(m.up_since_at);
-  if (m.stopped_at != null) return `stopped ${formatRelative(m.stopped_at)}`;
-  return "—";
-}
-
 // ── Services: agent-runner table + cluster-wide actions ──
 
 function ServicesPanel({ data }: { data: ClusterPanel }) {
+  const t = useTranslations("insights.status");
   const visible = useSectionVisible();
   const showToast = useStore((s) => s.showToast);
   const queryClient = useQueryClient();
@@ -224,7 +213,15 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
     enabled: isGateway && visible,
   });
   const behind = check.data?.behind;
-  const noUpdates = behind === 0;
+  const needsReplay = check.data?.needs_replay === true;
+  const noUpdates = behind === 0 && !needsReplay;
+  const restartSides = (details: ClusterUpdateCheck) => {
+    const sides = [
+      details.frontend_changed ? t("frontend") : null,
+      details.backend_changed ? t("backend") : null,
+    ].filter((side): side is string => side != null);
+    return sides.length > 0 ? sides.join(" + ") : t("nothing");
+  };
 
   const inFlightMsg = (msg: string) =>
     msg.includes("409") ||
@@ -250,15 +247,15 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
     onSuccess: (result) => {
       refreshClusterState();
       showToast(
-        `Cluster rollout started — agents will restart on new code; watch per-host status below. (session ${result.session}, log: ${result.log})`,
+        t("rolloutStarted", { session: result.session, log: result.log }),
       );
     },
     onError: (err: unknown) => {
       const msg = errMsg(err);
       showToast(
         inFlightMsg(msg)
-          ? "A rollout is already in flight — wait for it to finish, then retry."
-          : `Rollout failed: ${msg}`,
+          ? t("rolloutInFlight")
+          : t("rolloutFailed", { message: msg }),
       );
     },
   });
@@ -268,15 +265,15 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
     onSuccess: (result) => {
       refreshClusterState();
       showToast(
-        `Cluster restart started — services bounce on the current code (no pull); agents finish their turn then restart. (session ${result.session}, log: ${result.log})`,
+        t("restartStarted", { session: result.session, log: result.log }),
       );
     },
     onError: (err: unknown) => {
       const msg = errMsg(err);
       showToast(
         inFlightMsg(msg)
-          ? "A restart/rollout is already in flight — wait for it to finish, then retry."
-          : `Restart failed: ${msg}`,
+          ? t("restartInFlight")
+          : t("restartFailed", { message: msg }),
       );
     },
   });
@@ -297,21 +294,22 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
     // Native confirm — cluster-wide restart is irreversible-in-progress; one
     // misclick stops every agent. Native dialog is mobile-friendly, blocks
     // the event loop until decided, and adds no headless-component baggage.
-    const sides = check.data ? ` Restarts: ${restartSidesLabel(check.data)}.` : "";
-    const n = typeof behind === "number" ? `${behind} ${behind === 1 ? "commit" : "commits"} behind.` : "";
-    const ok = window.confirm(
-      `Roll the whole cluster forward?\n\n${n}${sides}\n\n` +
-        "All agents across every host finish their current turn, then restart on new code.",
-    );
+    const sides = check.data
+      ? needsReplay
+        ? t("replaySides")
+        : t("restartSides", { sides: restartSides(check.data) })
+      : "";
+    const n = needsReplay
+      ? t("replayRequired")
+      : typeof behind === "number"
+        ? t("commitsBehind", { count: behind })
+        : "";
+    const ok = window.confirm(t("rolloutConfirm", { behind: n, sides }));
     if (ok) update.mutate();
   };
 
   const onRestart = () => {
-    const ok = window.confirm(
-      "Restart the whole cluster on the current code?\n\n" +
-        "No git pull — every service bounces to apply config changes. " +
-        "Agents finish their current turn, then restart.",
-    );
+    const ok = window.confirm(t("restartConfirm"));
     if (ok) restart.mutate();
   };
 
@@ -320,7 +318,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
   return (
     <div id="status-services" className="scroll-mt-4">
       <div className={cn("mb-2 items-center justify-between", FLEX)}>
-        <h3 className="text-sm font-semibold">Services</h3>
+        <h3 className="text-sm font-semibold">{t("services")}</h3>
         <div className={cn("items-center gap-2", FLEX)}>
           <Button
             type="button"
@@ -334,7 +332,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
             ) : (
               <RotateCcw className="size-3.5" />
             )}
-            <span className="ml-1.5">{restarting ? "Restarting…" : "Restart"}</span>
+            <span className="ml-1.5">{restarting ? t("restarting") : t("restart")}</span>
           </Button>
           <Button
             type="button"
@@ -349,27 +347,34 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
               <RefreshCw className="size-3.5" />
             )}
             <span className="ml-1.5">
-              {updating ? "Updating…" : noUpdates ? "Up to date" : behind ? `Update (${behind})` : "Update"}
+              {updating
+                ? t("updating")
+                : needsReplay
+                  ? t("replayUpdate")
+                  : noUpdates
+                    ? t("upToDate")
+                    : behind
+                      ? t("updateWithCount", { count: behind })
+                      : t("update")}
             </span>
           </Button>
         </div>
       </div>
 
       <div className="mb-3 text-xs text-muted-foreground">
-        this host: {data.current_machine} (
-        {[
-          data.current_serve_gateway && "gateway",
-          data.current_serve_agent_runner && "agent-runner",
-          data.current_serve_observability_station && "observability-station",
-        ]
-          .filter(Boolean)
-          .join(" + ") || "no capability"}
-        )
+        {t("thisHost", {
+          host: data.current_machine,
+          capabilities: [
+            data.current_serve_gateway ? t("gateway") : null,
+            data.current_serve_agent_runner ? t("agentRunner") : null,
+            data.current_serve_observability_station ? t("observabilityStation") : null,
+          ].filter(Boolean).join(" + ") || t("noCapability"),
+        })}
         {data.current_paused && (
-          <span className="ml-1 text-amber-600 dark:text-amber-400">· paused</span>
+          <span className="ml-1 text-amber-600 dark:text-amber-400">{t("pausedDetail")}</span>
         )}
         {data.cluster_target_sha && (
-          <span className="ml-1">· pinned to {data.cluster_target_sha.slice(0, 7)}</span>
+          <span className="ml-1">{t("pinnedTo", { sha: data.cluster_target_sha.slice(0, 7) })}</span>
         )}
         {/* Recorded since the pin existed and shown nowhere until now — without it a
             rollback presents as the pin simply moving to an older commit, with
@@ -377,9 +382,9 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
         {data.cluster_last_known_good_sha && (
           <span
             className="ml-1"
-            title="The cluster's rollback anchor — `ava cluster rollback` with no target falls back to this commit."
+            title={t("rollbackAnchor")}
           >
-            · last known good {data.cluster_last_known_good_sha.slice(0, 7)}
+            {t("lastKnownGood", { sha: data.cluster_last_known_good_sha.slice(0, 7) })}
           </span>
         )}
         {isGateway && (
@@ -388,19 +393,20 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
               <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
                 <Loader2 className="size-3 animate-spin" />
                 {orchestration === "restart"
-                  ? "cluster restart in progress — services bounce, agents finish their turn then restart"
-                  : "cluster rollout in progress — every host finishes its turn then restarts on new code"}
+                  ? t("restartInProgress")
+                  : t("rolloutInProgress")}
               </span>
             ) : check.isLoading ? (
-              <span>checking for updates…</span>
+              <span>{t("checkingUpdates")}</span>
             ) : check.error ? (
-              <span>update check unavailable</span>
+              <span>{t("checkUnavailable")}</span>
+            ) : needsReplay ? (
+              <span className="text-amber-600 dark:text-amber-400">{t("replayRequired")}</span>
             ) : noUpdates ? (
-              <span className="text-green-600 dark:text-green-400">✓ up to date with origin/main</span>
+              <span className="text-green-600 dark:text-green-400">{t("upToDateOrigin")}</span>
             ) : check.data ? (
               <span className="text-amber-600 dark:text-amber-400">
-                ↑ {check.data.behind} {check.data.behind === 1 ? "commit" : "commits"} behind — Update restarts{" "}
-                {restartSidesLabel(check.data)}
+                {t("updateRestarts", { count: check.data.behind, sides: restartSides(check.data) })}
               </span>
             ) : null}
             {/* Explicit re-check — the update check has no poll interval
@@ -411,8 +417,8 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
                 type="button"
                 onClick={() => void check.refetch()}
                 disabled={check.isFetching}
-                aria-label="Check for updates"
-                title="Check for updates now"
+                aria-label={t("checkUpdates")}
+                title={t("checkUpdatesNow")}
                 className="ml-1 inline-flex rounded p-0.5 align-middle text-muted-foreground hover:text-foreground disabled:opacity-50"
               >
                 <RefreshCw className={cn("size-3", check.isFetching && "animate-spin")} />
@@ -426,7 +432,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
 
       {data.machines.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          (no host has run `ava start` yet)
+          {t("noHostStarted")}
         </p>
       ) : (
         runners.length > 0 && <AgentRunnersCard runners={runners} />
@@ -445,8 +451,9 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
 // "last update: ok" line is one people stop reading, and this is the line that has
 // to be read the one time it appears.
 function LastUpdateBanner({ record }: { record: ClusterPanel["last_update"] }) {
+  const t = useTranslations("insights.status");
   if (!record?.failed) return null;
-  const target = record.target_sha ? ` to ${record.target_sha.slice(0, 7)}` : "";
+  const target = record.target_sha ? t("target", { sha: record.target_sha.slice(0, 7) }) : "";
   const when = record.started_at ? new Date(record.started_at).toLocaleString() : null;
   // How stale the failure is changes what to do with it: minutes old is a live
   // incident, days old is a cluster nobody has updated since.
@@ -467,74 +474,79 @@ function LastUpdateBanner({ record }: { record: ClusterPanel["last_update"] }) {
       }
     >
       <p className={recovered ? "font-semibold text-amber-600" : "font-semibold text-destructive"}>
-        Last update{target} failed
-        {recovered ? " — the cluster recovered" : ""}
-        {when ? ` (started ${when}${age ? `, ${age}` : ""})` : ""}
+        {t("lastUpdateFailed", { target })}
+        {recovered ? t("clusterRecovered") : ""}
+        {when ? t("started", { when, age: age ? t("ageSuffix", { age }) : "" }) : ""}
       </p>
       <p className="mt-1 text-muted-foreground">
         {record.outcome === "orphaned"
-          ? "Its orchestration died without reporting an outcome — the deploy lease it held is gone."
+          ? t("orchestrationDied")
           : record.failing_step
-            ? `It stopped at ${record.failing_step}.`
-            : `It ended ${record.outcome}.`}{" "}
+            ? t("stoppedAtStep", { step: record.failing_step })
+            : t("endedOutcome", { outcome: record.outcome })}{" "}
         {recovered
-          ? "The cluster is running on a commit that works, so there is nothing to repair here — but the code it is running is not the one that was being rolled out."
+          ? t("recoveredDetail")
           : record.pin_advanced
-            ? "The gateway reached the target and the cluster pin advanced, so hosts still off it converge via their watchdog."
-            : "The cluster pin was left where it was, so nothing is converging toward the failed target — a node showing a sha mismatch here is a consequence of this failure, not a separate problem."}
+            ? t("pinAdvancedDetail")
+            : t("pinUnchangedDetail")}
       </p>
       {record.observed_by && (
         <p className="mt-1 text-muted-foreground">
-          Since then: {record.observed_by}. A rollback is the cluster falling back to its
-          last-known-good anchor, not drift.
+          {t("sinceThen", { host: record.observed_by })}
         </p>
       )}
       <p className="mt-1 text-muted-foreground">
-        The rollout&apos;s own log is on the gateway under{" "}
-        <code>{record.log_path ?? "$AVA_HOME/logs/rollout-<epoch>.log"}</code>. The next
-        successful update replaces this record.
+        {t("rolloutLogBefore")} {" "}
+        <code>{record.log_path ?? "$AVA_HOME/logs/rollout-<epoch>.log"}</code>
+        {t("rolloutLogAfter")}
       </p>
     </div>
   );
 }
 
 function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: string }) {
+  const t = useTranslations("insights.status");
   const health = healthVerdict(m);
+  const upSince = m.online
+    ? formatRelative(m.up_since_at)
+    : m.stopped_at != null
+      ? t("stoppedAt", { time: formatRelative(m.stopped_at) })
+      : "—";
   return (
     <div className="rounded-md border border-border" data-testid={`gateway-card-${m.name}`}>
       <div className="border-b border-border px-3 py-2">
-        <h4 className="text-sm font-semibold">Gateway</h4>
+        <h4 className="text-sm font-semibold">{t("gatewayTitle")}</h4>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-2.5 sm:grid-cols-4">
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Host</div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("host")}</div>
           <div className="mt-0.5 text-sm font-medium">
             {m.name}
             {m.is_staging && (
-              <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title="Staging host — visible here but excluded from cluster rollouts">
-                staging
+              <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title={t("stagingTitle")}>
+                {t("staging")}
               </span>
             )}
             {m.name === currentMachine && (
-              <span className="font-normal text-muted-foreground"> (this host)</span>
+              <span className="font-normal text-muted-foreground">{t("currentHost")}</span>
             )}
           </div>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("status")}</div>
           <div className="mt-0.5 text-sm font-medium">
             <StatusText m={m} runningLabel="running" />
           </div>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Health</div>
-          <div className={`mt-0.5 text-sm font-medium ${TONE_TEXT[health.tone]}`} title={health.title}>
-            {health.label}
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("health")}</div>
+          <div className={`mt-0.5 text-sm font-medium ${TONE_TEXT[health.tone]}`} title={t("daemonHealth", { restarter: daemonMark(m.restarter_online), watchdog: daemonMark(m.watchdog_online) })}>
+            {health.label === "none" ? "—" : t(health.label)}
           </div>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Up since</div>
-          <div className="mt-0.5 text-sm font-medium">{upSinceLabel(m)}</div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("upSince")}</div>
+          <div className="mt-0.5 text-sm font-medium">{upSince}</div>
         </div>
       </div>
     </div>
@@ -543,18 +555,19 @@ function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: 
 
 // Every agent-runner service as one table: host / status / agents / up since.
 function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
+  const t = useTranslations("insights.status");
   return (
     <div className="rounded-md border border-border" data-testid="agent-runners-card">
       <div className="border-b border-border px-3 py-2">
-        <h4 className="text-sm font-semibold">Agent runners</h4>
+        <h4 className="text-sm font-semibold">{t("agentRunners")}</h4>
       </div>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Host</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Agents</TableHead>
-            <TableHead>Up since</TableHead>
+            <TableHead>{t("host")}</TableHead>
+            <TableHead>{t("status")}</TableHead>
+            <TableHead>{t("agents")}</TableHead>
+            <TableHead>{t("upSince")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -563,8 +576,8 @@ function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
               <TableCell className="font-medium">
                 {m.name}
                 {m.is_staging && (
-                  <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title="Staging host — visible here but excluded from cluster rollouts">
-                    staging
+                  <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title={t("stagingTitle")}>
+                    {t("staging")}
                   </span>
                 )}
               </TableCell>
@@ -572,7 +585,13 @@ function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
                 <StatusText m={m} runningLabel="online" />
               </TableCell>
               <TableCell className="tabular-nums">{m.agent_count}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">{upSinceLabel(m)}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {m.online
+                  ? formatRelative(m.up_since_at)
+                  : m.stopped_at != null
+                    ? t("stoppedAt", { time: formatRelative(m.stopped_at) })
+                    : "—"}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -585,17 +604,18 @@ function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
 // Per-host daemons (restarter, watchdog) ride each machine's probe and feed
 // the Gateway card's health verdict instead.
 function GatewaySection({ data }: { data: SystemStatus }) {
+  const t = useTranslations("insights.status");
   const gateways = data.cluster.machines.filter((m) => m.serve_gateway);
   const services = data.services.items;
   const cur = data.cluster.current_machine;
   return (
-    <StatusSection id="status-gateway" icon={Server} title="Gateway" subtitle={`(${cur})`}>
+    <StatusSection id="status-gateway" icon={Server} title={t("gatewayTitle")} subtitle={`(${cur})`}>
       <div className="space-y-3">
         {gateways.map((m) => (
           <GatewayCard key={m.name} m={m} currentMachine={cur} />
         ))}
         {services.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No service data</p>
+          <p className="text-xs text-muted-foreground">{t("noServiceData")}</p>
         ) : (
           <div className="border border-border rounded-md overflow-x-auto">
             <Table className="[&_th]:border-r [&_th]:border-border [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-border [&_td:last-child]:border-r-0">
@@ -617,7 +637,7 @@ function GatewaySection({ data }: { data: SystemStatus }) {
                       </span>
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground font-mono">
-                      {svc.detail ?? (svc.pid != null ? `PID ${svc.pid}` : "—")}
+                      {svc.detail ?? (svc.pid != null ? t("pid", { pid: svc.pid }) : "—")}
                     </TableCell>
                   </TableRow>
                 ))}

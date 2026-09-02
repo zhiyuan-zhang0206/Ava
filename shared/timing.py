@@ -81,6 +81,20 @@ from shared.host_deploy_state import UPDATER_LEASE_TTL_S
 # against the 600 s TTL.
 CONTROLLER_SCAN_INTERVAL_S = 30.0
 
+# The atexit fallback must give the restarter enough opportunities to claim a
+# self-initiated restart before its own CAS launches a replacement. It shares
+# the restarter's poll cadence rather than being an unrelated arbitrary sleep.
+SELF_RESPAWN_RESTARTER_SCHEDULING_MARGIN_S = 0.1
+
+
+def self_respawn_restarter_grace_s() -> float:
+    """Give the restarter three configured poll intervals before fallback CAS."""
+    return (
+        3 * settings.daemon.restarter_poll_interval_seconds
+        + SELF_RESPAWN_RESTARTER_SCHEDULING_MARGIN_S
+    )
+
+
 # --- wedged family: the derivation's components ------------------------------
 # The wedged threshold is derived, not arbitrary: an agent holding an unconsumed
 # pending inbound for this long is presumed wedged because a healthy agent's
@@ -243,6 +257,21 @@ CLOCKS: dict[str, Clock] = {
         "restarter",
         CONTROLLER_SCAN_INTERVAL_S,
         "restarter controllers' agent-scan cadence",
+    ),
+    "RESTARTER_POLL_INTERVAL_S": Clock(
+        "restarter",
+        lambda: settings.daemon.restarter_poll_interval_seconds,
+        "how often the restarter checks restarting-agent rows",
+    ),
+    "SELF_RESPAWN_RESTARTER_GRACE_S": Clock(
+        "restarter",
+        self_respawn_restarter_grace_s,
+        "self-respawn fallback window that gives the restarter first claim",
+    ),
+    "SELF_RESPAWN_RESTARTER_SCHEDULING_MARGIN_S": Clock(
+        "restarter",
+        SELF_RESPAWN_RESTARTER_SCHEDULING_MARGIN_S,
+        "time after the third restarter poll before the self-respawn fallback can CAS",
     ),
     # --- updater family ---
     "UPDATER_LEASE_TTL_S": Clock(
@@ -436,6 +465,20 @@ CONSTRAINTS: list[Constraint] = [
         "AGENT_LEASE_RENEW_INTERVAL_S",
         "the reaper scans between renewals (30 s < 60 s): a healthy agent renews "
         "before the next scan can ever see a stale lease",
+    ),
+    Constraint(
+        "==",
+        "SELF_RESPAWN_RESTARTER_GRACE_S",
+        "3 * RESTARTER_POLL_INTERVAL_S + SELF_RESPAWN_RESTARTER_SCHEDULING_MARGIN_S",
+        "the self-respawn fallback gives the restarter three poll intervals plus "
+        "a scheduling margin before its own CAS can launch a replacement",
+    ),
+    Constraint(
+        "<",
+        "3 * RESTARTER_POLL_INTERVAL_S",
+        "SELF_RESPAWN_RESTARTER_GRACE_S",
+        "the fallback deadline stays strictly after the third restarter poll, so "
+        "their final claim attempts cannot race at one exact deadline",
     ),
     Constraint(
         "<",

@@ -22,6 +22,7 @@ import psycopg
 
 from services import backup
 from shared import checkpoint as checkpoint_reader
+from shared.config import settings
 from shared.pg_tools import pg_tool, throwaway_postgres
 
 
@@ -112,12 +113,12 @@ def verify_restored_database(db_url: str) -> RestoreReport:
         raise RuntimeError("restored checkpoints contain no readable agent conversation")
 
     sample_agent_id = int(sample[0])
-    original_url = checkpoint_reader.settings.data_plane.db_url
-    checkpoint_reader.settings.data_plane.db_url = db_url
+    original_url = settings.data_plane.db_url
+    settings.data_plane.db_url = db_url
     try:
         messages = checkpoint_reader.load_checkpoint_messages_full(sample_agent_id)
     finally:
-        checkpoint_reader.settings.data_plane.db_url = original_url
+        settings.data_plane.db_url = original_url
     if not messages:
         raise RuntimeError("restored checkpoint conversation has no messages")
 

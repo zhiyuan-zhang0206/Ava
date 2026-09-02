@@ -107,7 +107,12 @@ from cli.parsers.mcp import (
     _h_memory_init,
     _h_memory_refresh,
 )
-from cli.parsers.pitr import _h_pitr_retention_inspect
+from cli.parsers.pitr import (
+    _h_pitr_retention_inspect,
+    _h_pitr_snapshot_archive,
+    _h_pitr_snapshot_retire,
+    _h_pitr_snapshot_verify,
+)
 from cli.parsers.plugins import (
     _h_plugins_disable,
     _h_plugins_enable,
@@ -126,6 +131,7 @@ from cli.parsers.plugins import (
     _h_skill_update,
     _h_skill_upgrade,
 )
+from cli.parsers.pty import _h_pty_freeze, _h_pty_resume, _h_pty_status
 
 __all__ = [
     "_h_agents_cancel",
@@ -179,6 +185,9 @@ __all__ = [
     "_h_notices_list",
     "_h_notices_resolve",
     "_h_pitr_retention_inspect",
+    "_h_pitr_snapshot_archive",
+    "_h_pitr_snapshot_retire",
+    "_h_pitr_snapshot_verify",
     "_h_plugins_disable",
     "_h_plugins_enable",
     "_h_plugins_inspect",
@@ -192,6 +201,9 @@ __all__ = [
     "_h_presets_get",
     "_h_presets_ls",
     "_h_presets_update",
+    "_h_pty_freeze",
+    "_h_pty_resume",
+    "_h_pty_status",
     "_h_restart",
     "_h_schedules_create",
     "_h_schedules_delete",
@@ -266,6 +278,7 @@ _LITE_VERBS = frozenset(
         # the fetch with the actionable BootstrapFetchError — `stop` stays lite
         # and remains the recovery verb.
         "status",
+        "pty",
         "cluster",
         "agents",
         "config",

@@ -162,7 +162,7 @@ export default function ShellMonitorPage({
   const terminalMuted = isDark ? "text-muted-foreground" : "text-gray-500";
 
   return (
-    <main className={cn("h-full bg-background text-foreground", FLEX, MIN_H_0, FLEX_COL)}>
+    <main id="main-content" className={cn("h-full bg-background text-foreground", FLEX, MIN_H_0, FLEX_COL)}>
       <header className={cn("items-center gap-3 border-b border-border px-3 py-2 sm:px-4", FLEX)}>
         <Link
           href="/"

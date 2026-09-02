@@ -140,6 +140,12 @@ class BaseAgentState(BaseModel):
     the idle-restart gate — a stale True is cleared by the system:update
     restart_completed marker (2026-08-08 audit, P3-6: comment said the field
     was dead, it is not)."""
+    active_task_id: int | None = None
+    """Explicit task driving the current turn's LLM usage, if any.
+
+    Claim sets this only from a task-associated system note and clears it for
+    chat or unassociated inbound work, so ownership never implies attribution.
+    """
 
     compact: CompactState = Field(default_factory=CompactState)
     """Compaction bookkeeping — nested last-value channel (see CompactState)."""

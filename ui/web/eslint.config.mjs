@@ -2,9 +2,12 @@ import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import nextPlugin from "@next/eslint-plugin-next";
 import reactHooks from "eslint-plugin-react-hooks";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 
 import sentenceCase from "./eslint-rules/sentence-case.mjs";
 import layoutPrimitive from "./eslint-rules/layout-primitive.mjs";
+import noUntranslatedUiCopy from "./eslint-rules/no-untranslated-ui-copy.mjs";
+import sourceLines from "./eslint-rules/source-lines.mjs";
 
 // Proper nouns / acronyms / brands allowed inside a Title-Case run (local/
 // sentence-case). A run is permitted only when EVERY word is listed, so
@@ -110,6 +113,17 @@ export default tseslint.config(
     },
   },
 
+  // Build-budget scripts run under Node rather than the browser app runtime.
+  {
+    files: ["scripts/**/*.{js,mjs,cjs,ts}"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+  },
+
   // ── Next.js ──
   {
     plugins: { "@next/next": nextPlugin },
@@ -118,6 +132,67 @@ export default tseslint.config(
       ...nextPlugin.configs["core-web-vitals"].rules,
       // App Router projects have no pages/ directory
       "@next/next/no-html-link-for-pages": "off",
+    },
+  },
+
+  // ── JSX accessibility ──
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ...jsxA11y.flatConfigs.recommended,
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+      // React uses onChange for native-select selection changes. Deferring these
+      // immediate preference/configuration updates to blur would alter behavior.
+      "jsx-a11y/no-onchange": "off",
+    },
+  },
+
+  // ── Contextual editing focus ──
+  // These inputs mount only after a user explicitly opens an editing, prompt,
+  // inbox-detail, rename, or search flow. Login remains covered, so page-load
+  // autofocus cannot regress.
+  {
+    files: [
+      "src/app/control/config/page.tsx",
+      "src/components/agent-prompt-dialog.tsx",
+      "src/components/agent-row.tsx",
+      "src/components/agent-sidebar/search-overlay.tsx",
+      "src/components/fleet/inbox-queue/detail.tsx",
+    ],
+    rules: {
+      "jsx-a11y/no-autofocus": "off",
+    },
+  },
+
+  // ── JSX accessibility static-analysis boundaries ──
+  {
+    // Shadcn's Input renders a native input, but the rule cannot follow the
+    // custom component through the wrapping label in these existing editors.
+    files: [
+      "src/app/control/presets/page.tsx",
+      "src/app/control/schedules/page.tsx",
+    ],
+    rules: {
+      "jsx-a11y/label-has-associated-control": "off",
+    },
+  },
+  {
+    // react-markdown provides anchor children through the spread props; the
+    // static rule cannot see that each rendered anchor has content.
+    files: ["src/components/markdown.tsx"],
+    rules: {
+      "jsx-a11y/anchor-has-content": "off",
+    },
+  },
+  {
+    // The focus-managed lightbox closes on the global Escape handler and its
+    // backdrop click. Those handlers are covered by timeline tests, but are
+    // intentionally not co-located where the static rules can inspect them.
+    files: ["src/components/timeline/item.tsx"],
+    rules: {
+      "jsx-a11y/click-events-have-key-events": "off",
+      "jsx-a11y/no-noninteractive-element-interactions": "off",
+      "jsx-a11y/no-static-element-interactions": "off",
     },
   },
 
@@ -253,6 +328,26 @@ export default tseslint.config(
     },
   },
 
+  // ── next-intl migration gate ──
+  // These surfaces have completed their translation sweep. Keep the gate
+  // deliberately scoped until the remaining routes migrate; applying it to all
+  // src/ now would turn this focused change into an unrelated UI-copy rewrite.
+  {
+    files: [
+      "src/components/fleet/**/*.{ts,tsx}",
+      "src/app/insights/**/*.{ts,tsx}",
+      "src/app/memory/graph/**/*.{ts,tsx}",
+      "src/components/spawn-button.tsx",
+    ],
+    ignores: ["**/*.test.{ts,tsx}"],
+    rules: {
+      "local/no-untranslated-ui-copy": [
+        "error",
+        { allow: ["$AVA_HOME/logs/rollout-<epoch>.log"] },
+      ],
+    },
+  },
+
   // Custom local rule (eslint-rules/layout-primitive.mjs): the six layout-contract
   // classes (flex/flex-1/flex-col/min-w-0/min-h-0/overflow-hidden) must come from
   // @/lib/layout as constants — the jsdom class-contract layer of invariants I1–I6
@@ -266,21 +361,44 @@ export default tseslint.config(
   {
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["**/*.test.{ts,tsx}"],
-    plugins: { local: { rules: { "sentence-case": sentenceCase, "layout-primitive": layoutPrimitive } } },
+    plugins: {
+      local: {
+        rules: {
+          "sentence-case": sentenceCase,
+          "layout-primitive": layoutPrimitive,
+          "no-untranslated-ui-copy": noUntranslatedUiCopy,
+          "source-lines": sourceLines,
+        },
+      },
+    },
     rules: {
       "local/sentence-case": ["error", { allow: SENTENCE_CASE_ALLOW }],
       "local/layout-primitive": "error",
     },
   },
 
+  // ── Per-file 500-line soft budget ──
+  // This measures physical lines so the warning reflects the total file a
+  // maintainer must navigate. It deliberately remains a warning: the existing
+  // outliers stay visible without turning an unrelated edit into a component
+  // split. The lint warning baseline preserves existing identities while
+  // rejecting new or duplicate diagnostics, without coupling the gate to a
+  // merge-reference-wide warning count.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.{ts,tsx}", "src/lib/types-generated.ts"],
+    rules: {
+      "local/source-lines": ["warn", { max: 500 }],
+    },
+  },
+
   // ── Per-file line budget (outlier cleanup, user ruling 2026-08-07) ──
-  // Mirror of the Python 500-soft / 800-hard discipline (AGENTS.md). ESLint's
-  // max-lines takes a single threshold and `lint` runs with --max-warnings 0,
-  // so a 500 warning tier would fail CI on files outside this sweep's scope —
-  // only the 800 hard line is enforced here; the 500 soft target is tracked
-  // per-file (R4 frontend design budget). Blank/comment lines are skipped so a
-  // comment-dense file isn't penalized. Test files are exempt (fixtures carry
-  // volume; a 1200 cap lands with the test-outlier sweep).
+  // Mirror of the Python 500-soft / 800-hard discipline (AGENTS.md). The local
+  // source-lines rule above makes the 500 tier visible as a warning; this core
+  // rule retains the 800-line hard ceiling. Blank/comment lines are skipped at
+  // the hard tier so a comment-dense file is not penalized. Test files are
+  // exempt (fixtures carry volume; a 1200 cap lands with the test-outlier
+  // sweep).
   {
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["**/*.test.{ts,tsx}", "src/lib/types-generated.ts"],

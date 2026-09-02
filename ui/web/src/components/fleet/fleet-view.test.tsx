@@ -243,6 +243,8 @@ describe("FleetView (mobile)", () => {
   it("renders the Agents / Tasks / Inbox mobile tabs; Agents shows the graph", () => {
     agentsMock.mockReturnValue([makeAgent({ agent_id: 1, label: "lead", status: "running" })]);
     wrap(<FleetView />);
+    const tablist = screen.getByRole("tablist", { name: "Fleet sections" });
+    expect(tablist.tagName).toBe("DIV");
     expect(screen.getByRole("tab", { name: /Agents/ })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /Tasks/ })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /Inbox/ })).toBeTruthy();

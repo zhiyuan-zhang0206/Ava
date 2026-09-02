@@ -5,8 +5,8 @@ LGTM read side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as
 OTLP logs under {service_name="unknown_service"} with event_name/agent_id
 promoted to stream labels since the 2026-08-23 cutover (Task #1467); event
 filters live in the stream selector, `| json` flattens each line for the
-level/category/attributes filters), R4 queries Prometheus (the
-ava_llm_usage_latency_milliseconds histogram).
+level/category/attributes filters). R4, the gateway-metrics silence rule, and
+the watchdog-tick staleness rule query Prometheus.
 Keeps the rules in sync with the emitter's LogQL/OTLP contract.
 
 R8-R12 (issue #46) are the infrastructure layer and query a DIFFERENT
@@ -44,12 +44,14 @@ _RULES = (
 _EXPECTED_UIDS = {
     # application layer — Loki event stream + the LLM latency histogram
     "ava-ops-warning-error-spike",
+    "ava-ops-llm-rate-limit",
     "ava-ops-sse-drop-backlog",
     "ava-ops-agent-restart-spike",
     "ava-ops-llm-latency-p95",
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
     "ava-ops-gateway-metrics-silent",
+    "ava-ops-watchdog-tick-stale",
     "ava-ops-checkpoint-blobs-warning",
     "ava-ops-checkpoint-blobs-error",
     "ava-ops-trace-disk-watermark",
@@ -73,6 +75,9 @@ _EXPECTED_UIDS = {
     # memory-search growth layer (task #2088/#2090) — OTLP gauge mirror
     "ava-ops-memory-search-rows-warning",
     "ava-ops-memory-search-rows-critical",
+    # recovery posture — scheduled-proof failure and remote retention growth
+    "ava-ops-recovery-drill-failed",
+    "ava-ops-pitr-storage-growth",
 }
 
 # The infra rules and the metric each one is built on. A rename on the
@@ -96,7 +101,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [19, 7]
+    assert [len(group["rules"]) for group in groups] == [21, 9]
     return groups
 
 
@@ -148,6 +153,7 @@ def test_low_cost_rules_use_the_slow_group() -> None:
     group_for_rule = {rule["uid"]: group["name"] for group in groups for rule in group["rules"]}
     for uid in (
         "ava-ops-trace-disk-watermark",
+        "ava-ops-llm-rate-limit",
         "ava-ops-llm-billing-quota",
         "ava-ops-gateway-latency-route-warning",
         "ava-ops-gateway-latency-route-error",
@@ -224,6 +230,7 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
         ("ava-ops-agent-restart-spike", 'event_name="agent_restarted"'),
         ("ava-ops-delivery-stalled-backlog", 'event_name="delivery_stalled"'),
         ("ava-ops-trace-disk-watermark", 'event_name="trace"'),
+        ("ava-ops-llm-rate-limit", 'event_name="llm_provider_error"'),
         ("ava-ops-llm-billing-quota", 'event_name="llm_provider_error"'),
     ],
 )
@@ -286,6 +293,28 @@ def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
     assert _exprs(rule, "prometheus") == ["absent_over_time(ava_gateway_latency_count_total[5m])"]
     assert _threshold_params(rule) == [[0]]
     assert rule["for"] == "5m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+
+
+def test_watchdog_tick_staleness_tracks_each_recent_capability() -> None:
+    """A live process is insufficient when its watchdog round is wedged.
+
+    Keep the capability's ``machine`` / ``process`` dimensions through the
+    historical/current set subtraction so one silent gateway or runner is
+    named, while a retired capability naturally leaves the 24-hour set.
+    """
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-watchdog-tick-stale"]
+    expr = _exprs(rule, "prometheus")[0]
+    assert "ava_watchdog_tick_last_tick_timestamp_seconds" in expr
+    assert "max_over_time" in expr
+    assert "[24h]" in expr
+    assert "[3m]" in expr
+    assert "unless on(machine, process)" in expr
+    assert "max by (machine, process)" in expr
+    assert _threshold_params(rule) == [[0]]
+    assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
 
@@ -366,6 +395,21 @@ def test_billing_rule_fires_on_the_first_occurrence() -> None:
     assert rule["for"] == "0m"
     assert rule["labels"]["severity"] == "critical"
     assert any("[15m]" in e for e in _exprs(rule, "loki"))
+
+
+def test_rate_limit_rule_groups_http_429s_by_provider() -> None:
+    """The warning is a provider-level burst, not a page per affected model."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-llm-rate-limit"]
+    expr = _exprs(rule, "loki")[0]
+
+    assert "sum by (attributes_vendor)" in expr
+    assert 'attributes_status="429"' in expr
+    assert "[5m]" in expr
+    assert _threshold_params(rule) == [[5]]
+    assert rule["for"] == "0m"
+    assert rule["labels"]["severity"] == "warning"
+    assert "{{ $labels.attributes_vendor }}" in rule["annotations"]["summary"]
 
 
 def test_billing_rule_keys_on_the_billing_flag_not_a_status_list() -> None:
@@ -617,3 +661,48 @@ def test_memory_search_rows_rules() -> None:
         assert "100k" in description
         if uid == "ava-ops-memory-search-rows-warning":
             assert "50k" in description
+
+
+def test_recovery_drill_failure_rule_is_immediate_and_names_the_drill() -> None:
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-recovery-drill-failed"]
+
+    assert _exprs(rule, "loki") == [
+        'sum by (attributes_drill) (count_over_time({service_name="unknown_service", '
+        'event_name="recovery_drill_failed"} | json | cluster=".ava" | '
+        'category="telemetry" | level="error" [1h]))'
+    ]
+    assert rule["for"] == "0m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert _threshold_params(rule) == [[0]]
+    assert rule["labels"] == {
+        "severity": "error",
+        "ruleUID": "ava-ops-recovery-drill-failed",
+        "metric": "recovery_drill_failure",
+        "team": "ava-ops",
+    }
+    assert "attributes_drill" in rule["annotations"]["summary"]
+
+
+def test_pitr_storage_growth_rule_compares_remote_bytes_week_over_week() -> None:
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-pitr-storage-growth"]
+
+    assert _exprs(rule, "prometheus") == [
+        "max by (machine, backend) (ava_pitr_remote_inventory_bytes_ratio) / "
+        "clamp_min(max by (machine, backend) "
+        "(ava_pitr_remote_inventory_bytes_ratio offset 7d), 1)"
+    ]
+    assert _exprs(rule, "loki") == []
+    assert rule["for"] == "1h"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert _threshold_params(rule) == [[1.25]]
+    assert rule["labels"] == {
+        "severity": "warning",
+        "ruleUID": "ava-ops-pitr-storage-growth",
+        "metric": "pitr_remote_storage_growth",
+        "team": "ava-ops",
+        "notify_im": "false",
+    }

@@ -15,6 +15,7 @@ import importlib
 import importlib.util
 import json
 import os
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -26,7 +27,7 @@ import httpx
 import pytest
 import yaml
 
-from gateway import loki_events, loki_events_cache, loki_query_budget
+from gateway import _loki_logql, loki_events, loki_events_cache, loki_query_budget
 from shared.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LOKI_MAX_QUERY_SERIES,
@@ -746,6 +747,34 @@ class TestLiveArchiveExclusion:
 
 
 class TestBuildLogql:
+    def test_seeded_filter_values_preserve_quoting_and_pipeline_order(self) -> None:
+        """Random filter text must stay inside its quoted LogQL stages.
+
+        This catches a broken escape or a reordered `| json` stage, either of
+        which changes the query language rather than merely its formatting.
+        """
+        rng = random.Random(20260901)  # noqa: S311 — deterministic property inputs
+        alphabet = 'abC19 \\"\n\r|=()[]{}'
+        for _ in range(100):
+            value = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 24)))
+            escaped = (
+                value.replace("\\", "\\\\")
+                .replace('"', '\\"')
+                .replace("\n", " ")
+                .replace("\r", " ")
+            )
+            query = _loki_logql._build_logql(
+                grep=value,
+                cluster=value,
+                attribute_filters={"attribute": value},
+            )
+
+            assert loki_events._build_logql is _loki_logql._build_logql
+            assert query.index(f'|= "{escaped}"') < query.index("| json")
+            assert f'| cluster="{escaped}" or cluster=""' in query
+            assert '| json attribute="attributes.attribute"' in query
+            assert f'| attribute="{escaped}"' in query
+
     def test_default_is_selector_plus_json(self) -> None:
         assert (
             loki_events._build_logql()

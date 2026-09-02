@@ -307,11 +307,17 @@ def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPat
     class _FakeCursor:
         rowcount = 1
 
-        def execute(self, *_a: Any, **_kw: Any) -> None:
-            pass
+        def __init__(self) -> None:
+            self._row: tuple[object, ...] | None = None
 
-        def fetchone(self) -> tuple[object, object]:
-            return (None, None)
+        def execute(self, query: str, *_a: Any, **_kw: Any) -> None:
+            if "SELECT status" in query:
+                self._row = ("restarting",)
+            elif "SELECT config_overlay" in query:
+                self._row = (None, None)
+
+        def fetchone(self) -> tuple[object, ...] | None:
+            return self._row
 
         def __enter__(self) -> _FakeCursor:
             return self
@@ -328,8 +334,14 @@ def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPat
 
     registered: list[Any] = []
     launched: list[list[str]] = []
+    clock = {"now": 0.0}
+
+    def _sleep(seconds: float) -> None:
+        clock["now"] += seconds
+
     monkeypatch.setattr(atexit, "register", registered.append)
-    monkeypatch.setattr(time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(time, "sleep", _sleep)
     monkeypatch.setattr(psycopg, "connect", lambda *_a, **_kw: _FakeConn())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         subprocess,
@@ -351,6 +363,74 @@ def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPat
     ):
         assert flag in argv, f"a self-respawned agent boots without {flag}, and nothing reports it"
         assert float(argv[argv.index(flag) + 1]) == expected
+
+
+def test_self_respawn_gives_the_restarter_priority_until_its_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restarter claim seen during the bounded fallback window prevents a second child."""
+    import atexit
+    import subprocess
+    from typing import Any
+
+    import psycopg
+
+    from agent import db as agent_db
+
+    class _Cursor:
+        rowcount = 1
+
+        def __init__(self) -> None:
+            self._row: tuple[object, ...] | None = None
+            self._status_reads = 0
+
+        def execute(self, query: str, *_args: Any, **_kwargs: Any) -> None:
+            if "SELECT status" in query:
+                self._status_reads += 1
+                self._row = ("restarting" if self._status_reads == 1 else "idling",)
+            elif "SELECT config_overlay" in query:
+                self._row = (None, None)
+
+        def fetchone(self) -> tuple[object, ...] | None:
+            return self._row
+
+        def __enter__(self) -> _Cursor:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.cursor_value = _Cursor()
+
+        def cursor(self) -> _Cursor:
+            return self.cursor_value
+
+        def close(self) -> None:
+            return None
+
+    registered: list[Any] = []
+    launched: list[list[str]] = []
+    clock = iter((0.0, 0.0, 0.1, 0.1))
+
+    def _sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(atexit, "register", registered.append)
+    monkeypatch.setattr(agent_db.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(agent_db.time, "sleep", _sleep)
+    monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: _Connection())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda argv, **_kwargs: launched.append([str(arg) for arg in argv]),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    agent_db.schedule_self_respawn(11)
+    registered[0]()
+
+    assert launched == []
 
 
 def test_progress_reports_the_count_and_the_last_phase() -> None:

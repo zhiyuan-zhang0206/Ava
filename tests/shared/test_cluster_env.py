@@ -31,6 +31,8 @@ def _rec(tmp_path: Path):
             "pg_backup": 18021,
             "pitr_uploader": 18022,
             "pitr_base_backup": 18023,
+            "gateway_watchdog": 18025,
+            "agent_runner_watchdog": 18026,
         },
         gateway_home=str(tmp_path / ".ava-t1"),
         created_at="x",
@@ -49,6 +51,8 @@ def _old_rec(tmp_path: Path):
     del ports["pg_backup"]
     del ports["pitr_uploader"]
     del ports["pitr_base_backup"]
+    del ports["gateway_watchdog"]
+    del ports["agent_runner_watchdog"]
     return cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports),
         gateway_home=str(tmp_path / ".ava-t1"),
@@ -381,8 +385,18 @@ def test_record_health_port_late_slot_legacy_for_old_record(tmp_path: Path):
     assert (
         cluster.record_health_port(_old_rec(tmp_path), "pg_backup") == LEGACY_AVA_PORTS["pg_backup"]
     )
+    assert (
+        cluster.record_health_port(_old_rec(tmp_path), "gateway_watchdog")
+        == LEGACY_AVA_PORTS["gateway_watchdog"]
+    )
+    assert (
+        cluster.record_health_port(_old_rec(tmp_path), "agent_runner_watchdog")
+        == LEGACY_AVA_PORTS["agent_runner_watchdog"]
+    )
     assert cluster.record_health_port(_rec(tmp_path), "im_bridge") == 18017
     assert cluster.record_health_port(_rec(tmp_path), "pg_backup") == 18021
+    assert cluster.record_health_port(_rec(tmp_path), "gateway_watchdog") == 18025
+    assert cluster.record_health_port(_rec(tmp_path), "agent_runner_watchdog") == 18026
     # pre-existing slots keep the base+offset derive for old records
     assert cluster.record_health_port(_old_rec(tmp_path), "heartbeat") == 18002
 
@@ -429,10 +443,10 @@ def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    # Existing record at 18016 occupies 18016..18031. At BLOCK_SIZE 25,
-    # candidates 18000 and 18025 overlap it; the first legal base is 18050.
+    # Existing record at 18016 occupies 18016..18031. At BLOCK_SIZE 27,
+    # candidates 18000 and 18027 overlap it; the first legal base is 18054.
     ports = cl.allocate_ports({18016})
-    assert ports["gateway"] == 18050
+    assert ports["gateway"] == 18054
     assert set(ports) == set(cl.PORT_OFFSETS)
     # without any existing record, the allocator starts at BLOCK_START
     assert cl.allocate_ports(set())["gateway"] == BLOCK_START

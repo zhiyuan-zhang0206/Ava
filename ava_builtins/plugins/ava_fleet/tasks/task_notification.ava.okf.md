@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Task Notification — Task Notification Mechanism
-description: Automatic notification on owner change — what messages new and old owners receive, new owner always notified (auto-revive if terminated), old owner is the only leg that may be skipped due to terminated status, integration with send_message
+description: Automatic notification on owner change — what messages new and old owners receive, new owner always notified (auto-revive if terminated), old owner is the only leg that may be skipped due to terminated status, integration with task-tagged system notes
 tags:
 - fleet
 - tasks
@@ -68,7 +68,7 @@ def _notify_owner_change(task_id, title, old_owner, new_owner, actor, descriptio
         new_msg = f'Task #{task_id} "{title}" is now assigned to you (by agent #{actor}).'
         if description:                   # Only passed from the create assignment path
             new_msg += f"\n\n{description}"
-        ava.agents.send_system_note(new_owner, new_msg, resurrect=True)
+        ava.agents.send_system_note(new_owner, new_msg, task_id=task_id, resurrect=True)
     # Old owner leg: the only leg that may be skipped due to terminated status;
     # resurrect=False — a notification must never revive an owner
     if old_owner is not None and old_owner != actor and not _is_terminated(old_owner):
@@ -99,7 +99,7 @@ if owner_changing and old_owner != new_owner:
 ```
 
 This design has two reasons:
-1. `send_message` may auto-revive a terminated agent — this is a side-effect operation that should not be performed while holding locks.
+1. `send_system_note` may auto-revive a terminated agent — this is a side-effect operation that should not be performed while holding locks.
 2. If notification fails, the task state is already persisted — we don't want to roll back business data due to a notification failure.
 
 ## Relationship with Other Notifications

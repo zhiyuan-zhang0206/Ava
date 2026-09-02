@@ -200,7 +200,9 @@ def _drive_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         cluster_deploy,
         "update_check",
-        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+        lambda: cluster_mod.UpdateCheck(
+            behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
+        ),
     )
     cluster_mod.spawn_rollout("test-origin")
 
@@ -213,7 +215,9 @@ def test_dry_run_rollout_does_not_wait_for_a_ui_owner(
     monkeypatch.setattr(
         cluster_deploy,
         "update_check",
-        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+        lambda: cluster_mod.UpdateCheck(
+            behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
+        ),
     )
     waited: list[dict[str, str]] = []
     monkeypatch.setattr(
@@ -236,7 +240,9 @@ def test_normal_rollout_waits_for_its_ui_owner(
     monkeypatch.setattr(
         cluster_deploy,
         "update_check",
-        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+        lambda: cluster_mod.UpdateCheck(
+            behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
+        ),
     )
     waited: list[dict[str, str]] = []
     monkeypatch.setattr(
@@ -341,7 +347,9 @@ def test_definitive_rollout_spawn_decline_never_creates_a_marker(
     monkeypatch.setattr(
         cluster_deploy,
         "update_check",
-        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+        lambda: cluster_mod.UpdateCheck(
+            behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
+        ),
     )
     posix_native_host.new_session = lambda *_a, **_kw: False  # type: ignore[method-assign]
 
@@ -390,7 +398,9 @@ def test_ambiguous_post_launch_failure_never_clears_child_owned_marker(
     monkeypatch.setattr(
         cluster_deploy,
         "update_check",
-        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+        lambda: cluster_mod.UpdateCheck(
+            behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
+        ),
     )
 
     def _child_started_then_record_failed(*_args: object, **_kwargs: object) -> None:

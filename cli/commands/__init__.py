@@ -127,7 +127,12 @@ from cli.commands.mcp import (
     cmd_mcp_upgrade,
 )
 from cli.commands.migrations import cmd_migrations_apply
-from cli.commands.pitr import cmd_pitr_retention_inspect
+from cli.commands.pitr import (
+    cmd_pitr_retention_inspect,
+    cmd_pitr_snapshot_archive,
+    cmd_pitr_snapshot_retire,
+    cmd_pitr_snapshot_verify,
+)
 from cli.commands.plugins import (
     cmd_plugins_disable,
     cmd_plugins_enable,
@@ -137,6 +142,7 @@ from cli.commands.plugins import (
     cmd_plugins_update,
     cmd_plugins_upgrade,
 )
+from cli.commands.pty import cmd_pty_freeze, cmd_pty_resume, cmd_pty_status
 from cli.commands.skill import (
     cmd_skill_disable,
     cmd_skill_enable,
@@ -320,6 +326,9 @@ __all__ = [
     "cmd_pitr_activate",
     "cmd_pitr_retention_inspect",
     "cmd_pitr_rollback",
+    "cmd_pitr_snapshot_archive",
+    "cmd_pitr_snapshot_retire",
+    "cmd_pitr_snapshot_verify",
     "cmd_pitr_status",
     "cmd_plugins_disable",
     "cmd_plugins_enable",
@@ -328,6 +337,9 @@ __all__ = [
     "cmd_plugins_uninstall",
     "cmd_plugins_update",
     "cmd_plugins_upgrade",
+    "cmd_pty_freeze",
+    "cmd_pty_resume",
+    "cmd_pty_status",
     "cmd_restart",
     "cmd_rollback",
     "cmd_skill_disable",

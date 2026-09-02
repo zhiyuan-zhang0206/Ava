@@ -63,6 +63,7 @@ def _probes(
 
     monkeypatch.setattr(hc, "_probe", lambda: probe)
     monkeypatch.setattr(hc, "_session_alive", lambda: session)
+    monkeypatch.setattr(hc.macos_readiness, "degraded_wait_reason", lambda: None)
     monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(hc, "_restart_daemon", _restart)
     monkeypatch.setattr(hc, "reap_cluster_chrome", _reap)
@@ -99,6 +100,23 @@ def test_restarts_when_session_up_but_cdp_down(
     )
     hc.main()
     assert restarts == ["restart"]
+
+
+def test_waiting_for_macos_keychain_is_degraded_not_restarted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    restarts, *_ = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("waiting for macOS readiness"), session=True
+    )
+    monkeypatch.setattr(
+        hc.macos_readiness,
+        "degraded_wait_reason",
+        lambda: "login Keychain is not ready",
+    )
+    with caplog.at_level(logging.WARNING, logger="services.healthchecks.browser"):
+        hc.main()
+    assert restarts == []
+    assert any("DEGRADED" in record.getMessage() for record in caplog.records)
 
 
 def test_orphan_of_our_own_is_swept_and_rebuilt(

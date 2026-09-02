@@ -31,6 +31,7 @@ import argparse
 import datetime as dt
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -44,10 +45,39 @@ from shared.ui_update_state import UiUpdateSnapshot
 
 _log = logging.getLogger("services.gate")
 
-# Headers forwarded to the app / gateway on proxied requests. Everything else
-# (Host, hop-by-hop, cookies beyond the session one) is dropped — the app and
-# the auth check do not need them.
-_FORWARD_HEADERS = ("accept", "accept-language", "cookie", "content-type")
+# Headers forwarded to the app / gateway on proxied requests. The app needs the
+# browser Host to derive the same gateway origin its client uses; everything
+# else (hop-by-hop headers and cookies beyond the session one) is dropped.
+_FORWARD_HEADERS = (
+    "accept",
+    "accept-language",
+    "cookie",
+    "content-type",
+    "host",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+)
+
+# Browser security headers originate at Next.js. They must cross the public
+# gate with the app response or the browser never enforces its CSP and related
+# hardening headers.
+_FORWARD_RESPONSE_HEADERS = (
+    "content-security-policy",
+    "referrer-policy",
+    "x-content-type-options",
+    "x-frame-options",
+)
+
+_FORWARDED_HOST_RE = re.compile(r"^[A-Za-z0-9.:-]+$")
+
+
+def _valid_forwarded_header(name: str, value: str) -> bool:
+    if name == "x-forwarded-host":
+        return _FORWARDED_HOST_RE.fullmatch(value) is not None
+    if name == "x-forwarded-proto":
+        return value.lower() in ("http", "https")
+    return True
+
 
 _PROBE_TIMEOUT_S = 3.0
 
@@ -191,7 +221,7 @@ class Gate:
             )
             for name in _FORWARD_HEADERS:
                 value = handler.headers.get(name)
-                if value:
+                if value and _valid_forwarded_header(name, value):
                     req.add_header(name, value)
             if handler.command in ("POST", "PUT", "PATCH"):
                 length = int(handler.headers.get("Content-Length") or 0)
@@ -203,7 +233,12 @@ class Gate:
                 status, headers, body = e.code, e.headers, e.read()
             handler.send_response(status)
             for name, value in headers.items():
-                if name.lower() in ("content-type", "cache-control", "etag"):
+                if name.lower() in (
+                    "content-type",
+                    "cache-control",
+                    "etag",
+                    *_FORWARD_RESPONSE_HEADERS,
+                ):
                     handler.send_header(name, value)
             handler.send_header("Content-Length", str(len(body)))
             handler.end_headers()

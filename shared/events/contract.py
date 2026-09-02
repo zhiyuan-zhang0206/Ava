@@ -69,7 +69,9 @@ class LlmUsage(TypedDict):
     ``ava_llm_usage_calls_total`` (per-agent/per-model call counts come from a
     Counter, not from a histogram's count, which drops the agent_id key).
     ``unpriced`` is 1 exactly when the price snapshot is absent (so unpriced
-    call volume is countable in Prometheus); it is omitted on priced calls."""
+    call volume is countable in Prometheus); it is omitted on priced calls.
+    ``task_id`` is present only when the turn was explicitly driven by a
+    task-associated system note; untagged calls do not belong to a task."""
 
     model: str
     calls: int
@@ -84,6 +86,7 @@ class LlmUsage(TypedDict):
     price_hit: float | None
     price_out: float | None
     unpriced: int | None
+    task_id: NotRequired[int]
 
 
 class TurnEnd(TypedDict):
@@ -93,8 +96,24 @@ class TurnEnd(TypedDict):
     duration_seconds: float
 
 
+class SilentIdle(TypedDict):
+    """`silent_idle` payload — output-token cost-boundary verdict."""
+
+    output_tokens: int
+    cumulative_output_tokens: int
+    estimated_cost_usd: float | None
+    halted: bool
+
+
+class LlmRetry(TypedDict):
+    """`llm_retry` payload — final duration of a retry sequence."""
+
+    outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"]
+    duration_seconds: float
+
+
 class LlmProviderError(TypedDict):
-    """`llm_provider_error` payload — agent/graph/_llm_errors.py.
+    """`llm_provider_error` payload — shared/lm/errors.py.
 
     One row per classified provider failure — every class, so a postmortem sees
     the retried transients too; ``fatal`` says whether this one aborted the turn.
@@ -154,6 +173,22 @@ class ExecEnvelope(TypedDict):
     op: Literal["read", "write"]
     size_bytes: int
     serialize_ms: float
+
+
+class ExecChildBoot(TypedDict):
+    """`exec_child_boot` payload — child bootstrap duration before agent code."""
+
+    duration_ms: float
+
+
+class CompactionCompleted(TypedDict):
+    """`compaction_completed` payload — one applied history replacement."""
+
+    compact_kind: str
+    compactions: int
+    history_chars: int
+    summary_chars: int
+    summary_history_ratio: float | None
 
 
 class ExecSubprocessKilled(TypedDict):
@@ -389,10 +424,17 @@ class AgentBootFailed(TypedDict):
     error: str
 
 
-class RecallFilter(TypedDict):
-    """`recall_filter` payload — _memory_filter.py; `body` = verdict text."""
+class RecallFilter(TypedDict, total=False):
+    """`recall_filter` payload — _memory_filter.py; `body` = verdict text.
+
+    Successful verdicts add a process-keyed ``query_hmac_sha256`` (never the
+    query text) and a bounded basename-only ``picked_paths`` sample. Failures
+    only have ``body`` because no verdict exists to retain.
+    """
 
     body: str
+    query_hmac_sha256: str
+    picked_paths: list[str]
 
 
 class PassiveRecall(TypedDict, total=False):
@@ -542,6 +584,41 @@ class MemorySearchStats(TypedDict):
 
     rows: int
     last_save_seconds: float
+
+
+class WatchdogTick(TypedDict):
+    """`watchdog_tick` payload — services/watchdog/daemon.py.
+
+    One fully completed watchdog round replaces the previous timestamp. The
+    OTLP metric is a gauge so Prometheus can calculate a role's tick age.
+    """
+
+    last_tick_timestamp_seconds: float
+
+
+class PitrRemoteInventory(TypedDict):
+    """`pitr_remote_inventory` payload — retention scheduler snapshot.
+
+    The viewer-only inventory refresh emits the backend-scoped object and byte
+    footprint as absolute gauges. A remote retention delete path does not
+    exist here; the planner remains dry-run-only.
+    """
+
+    backend: str
+    object_count: int
+    bytes: int
+
+
+class RecoveryDrillFailed(TypedDict):
+    """`recovery_drill_failed` payload — scheduled logical/PITR proofs.
+
+    ``drill`` identifies the recovery path that needs intervention. ``detail``
+    is the bounded failure diagnostic retained in the event stream; it is not a
+    Prometheus measurement or alert grouping key.
+    """
+
+    drill: str
+    detail: str
 
 
 class TelemetryReadStale(TypedDict):
@@ -882,6 +959,18 @@ EVENTS: dict[str, EventSpec] = {
         "exec envelope transfer cost (size + serialize time) — request snapshot / result delta",
         payload=ExecEnvelope,
     ),
+    "exec_child_boot": _telemetry(
+        "exec_child_boot",
+        "exec child bootstrap duration before agent-authored code",
+        payload=ExecChildBoot,
+        tier="noise",
+    ),
+    "compaction_completed": _telemetry(
+        "compaction_completed",
+        "applied context compaction size reduction and completed count",
+        payload=CompactionCompleted,
+        tier="noise",
+    ),
     "exec_cancelled": _telemetry("exec_cancelled", "execute_code cancelled", tier="anomaly"),
     "exec(timeout)": _telemetry(
         "exec(timeout)", "historical parenthesized name (migration target)", tier="anomaly"
@@ -1099,6 +1188,11 @@ EVENTS: dict[str, EventSpec] = {
         "poisoned editable-install direct_url repaired to the prod source root",
         tier="anomaly",
     ),
+    "exec_editable_install_poisoned": _telemetry(
+        "exec_editable_install_poisoned",
+        "poisoned editable install repaired before an exec child spawn",
+        tier="anomaly",
+    ),
     "source_tree_reset": _telemetry(
         "source_tree_reset",
         "prod source checkout reset to the installed commit / cleaned of untracked files",
@@ -1169,7 +1263,12 @@ EVENTS: dict[str, EventSpec] = {
         payload=HookTiming,
         tier="noise",
     ),
-    "silent_idle": _telemetry("silent_idle", "silent idle verdict", tier="noise"),
+    "silent_idle": _telemetry(
+        "silent_idle", "silent idle cost-boundary verdict", payload=SilentIdle, tier="noise"
+    ),
+    "llm_retry": _telemetry(
+        "llm_retry", "LLM retry sequence completion", payload=LlmRetry, tier="observation"
+    ),
     "last_msg": _telemetry("last_msg", "last-message check", tier="noise"),
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
     # by gateway/_latency.py — one event per (route, bucket), never per request
@@ -1204,6 +1303,24 @@ EVENTS: dict[str, EventSpec] = {
         "memory search store rows + last save duration (absolute state, 60s sample)",
         payload=MemorySearchStats,
         tier="noise",
+    ),
+    "watchdog_tick": _telemetry(
+        "watchdog_tick",
+        "watchdog completed one full healthcheck and reconcile round",
+        payload=WatchdogTick,
+        tier="noise",
+    ),
+    "pitr_remote_inventory": _telemetry(
+        "pitr_remote_inventory",
+        "PITR remote object inventory (backend-scoped absolute object and byte state)",
+        payload=PitrRemoteInventory,
+        tier="noise",
+    ),
+    "recovery_drill_failed": _telemetry(
+        "recovery_drill_failed",
+        "scheduled logical dump or PITR recovery proof failed",
+        payload=RecoveryDrillFailed,
+        tier="anomaly",
     ),
     "telemetry_read_stale": _telemetry(
         "telemetry_read_stale",
@@ -1428,6 +1545,7 @@ HEARTBEAT_PAUSED_KEYS = _sql_keys("heartbeat_paused")
 TASK_UPDATE_KEYS = _sql_keys("task_update")
 PROCESS_EXIT_KEYS = _sql_keys("process_exit")
 RECALL_FILTER_KEYS = _sql_keys("recall_filter")
+PASSIVE_RECALL_KEYS = _sql_keys("passive_recall")
 GATEWAY_LATENCY_KEYS = _sql_keys("gateway_latency")
 LOG_KEYS = _sql_keys("log")
 

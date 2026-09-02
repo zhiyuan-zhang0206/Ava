@@ -209,6 +209,7 @@ function CompactHistoryDivider({ rank }: { readonly rank: number }) {
     <div
       data-testid="compact-history-divider"
       data-segment-rank={rank}
+      aria-live="off"
       className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
     >
       <span aria-hidden="true" className={cn("h-px bg-border/60", FLEX_1)} />
@@ -232,6 +233,7 @@ export function TimelineView({
   loading = false,
   maxWidthCss,
 }: Props) {
+  const t = useTranslations("timeline");
   // Auto-scroll to bottom — sticky-bottom mode:
   // - default sticks to the bottom; while sticky, any content growth pulls
   //   the viewport down **in the same frame the growth lays out** (the
@@ -317,6 +319,15 @@ export function TimelineView({
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
   );
+
+  // Announce only changes to the turn boundary. Streaming chunks change
+  // `items`, never `turnActive`, so they do not generate screen-reader noise.
+  const [announcedTurnActive, setAnnouncedTurnActive] = useState(turnActive);
+  const [turnAnnouncement, setTurnAnnouncement] = useState<string | null>(null);
+  if (announcedTurnActive !== turnActive) {
+    setAnnouncedTurnActive(turnActive);
+    setTurnAnnouncement(turnActive ? t("agentResponding") : t("agentResponseComplete"));
+  }
 
   const measureAtBottom = useCallback(() => {
     const viewport = viewportRef.current;
@@ -910,10 +921,21 @@ export function TimelineView({
             ruling 2026-08-06 11:35) so only a small pb remains. */}
         <div
           ref={contentRef}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
           style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
           className={cn("mx-auto w-full px-4 pb-3 space-y-3", BAR_CLEAR_TOP_PADDING_CLASS)}
         >
+          {turnAnnouncement ? (
+            <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">
+              {turnAnnouncement}
+            </span>
+          ) : null}
           <ConnectionNotice />
+          {/* Rows and history dividers opt out individually so streaming and
+              prepends stay quiet without changing the direct-child timeline
+              structure used by scroll anchoring and compact-history dividers. */}
           {groups.map((entry) => {
             const group = entry.group;
             const groupKey =

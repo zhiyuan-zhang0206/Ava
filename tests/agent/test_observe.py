@@ -112,6 +112,20 @@ def test_decode_ms_rides_payload(loguru_records):
     assert loguru_records[0]["extra"]["decode_ms"] is None
 
 
+def test_task_id_is_logged_only_for_explicit_task_context(loguru_records) -> None:
+    """Untagged work must not silently inherit an owner's task budget."""
+    msg = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+    )
+    log_llm_usage(msg, model="deepseek-v4-pro", task_id=42)
+    assert loguru_records[0]["extra"]["task_id"] == 42
+    loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
+
+    log_llm_usage(msg, model="deepseek-v4-pro")
+    assert "task_id" not in loguru_records[0]["extra"]
+
+
 def test_no_usage_metadata_silent(loguru_records):
     msg = AIMessage(content="")
     log_llm_usage(msg, model="claude-opus-4-7")

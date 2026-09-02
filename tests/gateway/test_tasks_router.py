@@ -6,7 +6,7 @@ owned-task invariants at the HTTP boundary:
 - remind_interval_seconds: an explicit null is rejected (reminders cannot be disabled);
   a value must be positive and <= 24h.
 - owner: an explicit null is rejected (a task cannot be released). A non-null
-  owner reassigns with a plain column write (no message to the affected agents).
+  owner reassignment queues task system notes for the affected agents.
 - title: renames; a title colliding with another in_progress task's is
   rejected (mirrors the SDK duplicate-title invariant).
 - parent close: status done/cancelled is rejected while a direct child remains
@@ -18,7 +18,7 @@ owned-task invariants at the HTTP boundary:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 
 import httpx2
 import psycopg
@@ -27,7 +27,9 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from gateway.app import app
+from gateway.routers import agents_state as _agents_state
 from gateway.routers.tasks import get_tasks
+from shared.agents import AgentStatus
 
 
 def _make_agent(db: psycopg.Connection) -> int:
@@ -100,6 +102,16 @@ def _owner(db: psycopg.Connection, tid: int) -> int | None:
     return row[0]
 
 
+def _task_notes(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, dict[str, str]]]:
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT content, source, payload FROM inbound_messages "
+            "WHERE agent_id = %s AND kind = 'system_note' ORDER BY id",
+            (agent_id,),
+        )
+        return cur.fetchall()
+
+
 def _priority(db: psycopg.Connection, tid: int) -> str:
     with db.cursor() as cur:
         cur.execute("SELECT priority FROM agent_tasks WHERE id = %s", (tid,))
@@ -154,7 +166,9 @@ class TestOwner:
         assert "cannot be released" in resp.json()["detail"]
         assert _owner(db_conn, tid) == owner  # unchanged
 
-    def test_reassign_is_a_plain_write(self, db_conn: psycopg.Connection) -> None:
+    def test_reassign_notifies_the_new_and_previous_owner(
+        self, db_conn: psycopg.Connection
+    ) -> None:
         owner = _make_agent(db_conn)
         new_owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
@@ -163,6 +177,69 @@ class TestOwner:
         assert resp.status_code == 200
         assert resp.json()["owner"] == new_owner
         assert _owner(db_conn, tid) == new_owner
+        assert _task_notes(db_conn, new_owner) == [
+            (
+                f'Task #{tid} "t" is now assigned to you.',
+                "user",
+                {"note_tag": "task", "task_id": tid},
+            )
+        ]
+        assert _task_notes(db_conn, owner) == [
+            (
+                f'Task #{tid} "t" you owned is no longer assigned to you.',
+                "user",
+                {"note_tag": "task"},
+            )
+        ]
+
+    def test_unchanged_owner_sends_no_notification(self, db_conn: psycopg.Connection) -> None:
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner)
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"owner": owner})
+        assert resp.status_code == 200
+        assert _task_notes(db_conn, owner) == []
+
+    def test_reassign_to_terminated_owner_requests_resurrection(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        owner = _make_agent(db_conn)
+        new_owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (new_owner,))
+        db_conn.commit()
+        resurrection_calls: list[tuple[int, str]] = []
+
+        async def _record_resurrection(
+            agent_id: int,
+            *,
+            trigger_inbound_id: int,
+            trigger_inbound_kind: Literal["chat", "compact_request", "system_note"],
+        ) -> AgentStatus:
+            assert trigger_inbound_id > 0
+            resurrection_calls.append((agent_id, trigger_inbound_kind))
+            return cast("AgentStatus", "idling")
+
+        monkeypatch.setattr(_agents_state._ops, "resurrect_if_terminated", _record_resurrection)
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"owner": new_owner})
+        assert resp.status_code == 200
+        assert resurrection_calls == [(new_owner, "system_note")]
+        assert len(_task_notes(db_conn, new_owner)) == 1
+
+    def test_reassign_skips_terminated_previous_owner(self, db_conn: psycopg.Connection) -> None:
+        owner = _make_agent(db_conn)
+        new_owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (owner,))
+        db_conn.commit()
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{tid}", json={"owner": new_owner})
+        assert resp.status_code == 200
+        assert len(_task_notes(db_conn, new_owner)) == 1
+        assert _task_notes(db_conn, owner) == []
 
 
 class TestPriority:
@@ -239,16 +316,15 @@ class TestRootTaskImmutable:
             resp = client.patch("/api/tasks/999999", json={"status": "done"})
         assert resp.status_code == 404
 
-    def test_patch_ongoing_status_rejected(self, db_conn: psycopg.Connection) -> None:
-        """'ongoing' is the system root's permanent state — a regular task
-        cannot be patched into it."""
+    def test_patch_ongoing_status_succeeds(self, db_conn: psycopg.Connection) -> None:
+        """PATCH mirrors the SDK by allowing a regular task to become ongoing."""
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, title="regular")
         with TestClient(app) as client:
             resp = client.patch(f"/api/tasks/{tid}", json={"status": "ongoing"})
-        assert resp.status_code == 422
-        assert "permanent state" in resp.json()["detail"]
-        assert _status(db_conn, tid) == "in_progress"  # unchanged
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ongoing"
+        assert _status(db_conn, tid) == "ongoing"
 
     def test_patch_open_status_rejected(self, db_conn: psycopg.Connection) -> None:
         """The 'open' status is gone (user ruling 2026-08-29): PATCHing it
@@ -258,11 +334,31 @@ class TestRootTaskImmutable:
         with TestClient(app) as client:
             resp = client.patch(f"/api/tasks/{tid}", json={"status": "open"})
         assert resp.status_code == 422
-        assert "Must be one of: in_progress, done, cancelled" in resp.json()["detail"]
+        assert "Must be one of: in_progress, ongoing, done, cancelled" in resp.json()["detail"]
         assert _status(db_conn, tid) == "in_progress"  # unchanged
 
 
 class TestParentClose:
+    def test_done_with_ongoing_child_is_rejected_and_unchanged(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        owner = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=owner, title="parent-ongoing-child")
+        child = _make_task(
+            db_conn,
+            owner=owner,
+            title="ongoing-child",
+            status="in_progress",
+            parent_id=parent,
+        )
+        with TestClient(app) as client:
+            child_response = client.patch(f"/api/tasks/{child}", json={"status": "ongoing"})
+            parent_response = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
+        assert child_response.status_code == 200
+        assert parent_response.status_code == 422
+        assert f"#{child}" in parent_response.json()["detail"]
+        assert _status(db_conn, parent) == "in_progress"
+
     def test_done_with_in_progress_child_is_rejected_and_unchanged(
         self, db_conn: psycopg.Connection
     ) -> None:
@@ -279,8 +375,7 @@ class TestParentClose:
             resp = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
         assert resp.status_code == 422
         assert resp.json()["detail"] == (
-            f"task {parent} has 1 in_progress child tasks (e.g. #{child}) — "
-            "close or cancel them first"
+            f"task {parent} has 1 active child tasks (e.g. #{child}) — close or cancel them first"
         )
         assert _status(db_conn, parent) == "in_progress"
 
@@ -501,6 +596,10 @@ class TestGetTaskFields:
             "remind_interval_seconds",
             "last_reminded_at",
             "reminder_count",
+            "token_budget",
+            "usd_budget",
+            "token_used",
+            "usd_used",
             "ghost",
         }
         assert full_row["description"] == description
@@ -521,6 +620,10 @@ class TestGetTaskFields:
             "remind_interval_seconds",
             "last_reminded_at",
             "reminder_count",
+            "token_budget",
+            "usd_budget",
+            "token_used",
+            "usd_used",
             "ghost",
         }
         assert "description" not in summary_row
@@ -540,7 +643,8 @@ class TestGetTaskFields:
         ).partition(", a.label AS owner_label FROM agent_tasks t ")[0]
         assert selected_columns == (
             "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
-            "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+            "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+            "t.token_budget, t.usd_budget, t.token_used, t.usd_used"
         )
 
     def test_unknown_fields_value_is_rejected(self, db_conn: psycopg.Connection) -> None:

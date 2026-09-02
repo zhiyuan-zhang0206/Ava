@@ -267,8 +267,8 @@ class ScheduleManager:
         name = session_name(f"schedule-{schedule_id}")
         backend = get_shell_backend()
         # A gateway restart (rollout / crash) can leave the previous run's
-        # session behind — the old runner process keeps serving until the
-        # supervisor reaps it. The PTY backend's new_session is idempotent
+        # session behind — the old runner process keeps serving until its PTY
+        # host reaps it. The PTY backend's new_session is idempotent
         # (a live same-name session is left untouched), but a stale record or
         # a still-serving runner must not shadow the launch, so reap a
         # same-name survivor first (#1119, 2026-08-09 rollout). _launch is only
@@ -287,8 +287,8 @@ class ScheduleManager:
         self._close_null_runs(schedule_id)
         # The unit's config + this run's schedule id ride a 0600 env file the
         # session sources; the backend writes it from the env dict (never argv
-        # — issue #974). The backend hands the command to the PTY daemon, which
-        # submits it once the login shell is ready.
+        # — issue #974). The backend hands the command to the per-session host,
+        # which submits it once the login shell is ready.
         env = forward_env_dict()
         env["AVA_SCHEDULE_ID"] = str(schedule_id)
         # The runner's cron math is timezone-DEFINED: it must fire on the

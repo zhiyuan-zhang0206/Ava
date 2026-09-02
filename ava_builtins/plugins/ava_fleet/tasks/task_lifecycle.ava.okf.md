@@ -15,19 +15,20 @@ tags:
 ## State Transitions
 
 ```
-in_progress ──→ done
-     │
-     └──→ cancelled
+in_progress ←──→ ongoing
+     │              │
+     ├──→ done ←────┤
+     └──→ cancelled ←┘
 ```
 
 - **`in_progress`**: created and actively worked (a task is born `in_progress` — user ruling 2026-08-29 dropped the meaningless `open` state); **`done`**: completed (outcome in `results`); **`cancelled`**: from any state.
-- **`ongoing`**: the system root task's permanent state only — never assignable via `create()`/`update()`/PATCH, and never present on a regular task (user ruling 2026-08-27).
+- **`ongoing`**: long-running active work, assignable to regular tasks through `update()`/PATCH but never at `create()`; it is excluded from reminder scans. The system root remains permanently `ongoing` and immutable.
 
 `status` is enforced by a database `CHECK` constraint; passing an illegal value raises `ValueError`.
 
 ## API
 
-### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None) -> Task`
+### `create(title, description, *, parent, owner=None, priority="P2", token_budget=None, usd_budget=None, remind_interval_seconds=None) -> Task`
 
 Create a task and return the full `Task`. `title` is a single line (unique among `in_progress` tasks); `description` is the task description.
 
@@ -35,12 +36,13 @@ Create a task and return the full `Task`. `title` is a single line (unique among
 - **Creator defaults to owner** (`owner=None`); when explicitly passing another agent id, the task is directly assigned to that agent, and that agent receives a notification including title + description.
 - `priority`: `"P0"` (highest)..`"P3"` (lowest), default `"P2"`; illegal value raises `ValueError` (#663; board sorts within a status column by this).
 - `remind_interval_seconds`: no-update duration after which the owner is reminded. Default scales with priority — P0 30m / P1 1h / P2 2h / P3 4h. **Cannot be disabled**—`None` falls back to the priority default; an explicit value wins; cap 24h; out-of-range raises `ValueError`.
+- `token_budget` / `usd_budget`: optional positive token and finite USD ceilings. Only LLM calls explicitly tagged with this task count; every ceiling sends one owner notification when crossed, without terminating the agent.
 - **Rejects duplicate titles** among `in_progress` tasks (`ValueError`).
 - Triggers a `task_create` event log + publishes `task_created` (SSE, board invalidates and refetches).
 
-### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", remind_interval_seconds=None) -> (Task, int)`
+### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", token_budget=None, usd_budget=None, remind_interval_seconds=None) -> (Task, int)`
 
-Spawn an agent and create a task assigned to it in one call: spawns per `preset`/`config_overlay` (the agent must exist to be an owner), then `create(owner=that agent)`—the create notification already carries task id + title + description, no separate `send_message` needed. Returns `(task, agent_id)`.
+Spawn an agent and create a task assigned to it in one call: spawns per `preset`/`config_overlay` (the agent must exist to be an owner), then `create(owner=that agent)`—the task-tagged system note already carries task id + title + description. Returns `(task, agent_id)`.
 
 ### `get(task_id) -> Task`
 
@@ -63,7 +65,7 @@ Filter the task list, ordered by `created_at` ascending. All parameters are opti
 Modify task fields, **pass only what you want to change**—omitted fields remain unchanged. `results` is replaced wholesale; to append progress, use `note=` or `log()`.
 
 - `title`: rename; must be unique among `in_progress` tasks, conflict raises `ValueError` (same duplicate check as `create`, checked inside row lock).
-- `status`: changing to `done` or `cancelled` is rejected while any direct child remains `in_progress`; close or cancel those children first. Other status changes and non-status updates are unaffected.
+- `status`: changing to `done` or `cancelled` is rejected while any direct child remains `in_progress` or `ongoing`; close or cancel those children first. Other status changes and non-status updates are unaffected.
 - `owner`: pass an agent id to transfer/claim; **not passing or passing `None` both mean "unchanged"**—a task always has an owner, `owner=None` no longer releases a task.
 - `remind_interval_seconds`: **not passing or passing `None` both mean "unchanged"**—reminders cannot be disabled; only passing a positive integer (≤24h) changes it, exceeding raises `ValueError`.
 - `priority`: `None` (default) means "unchanged"; passing `"P0"`..`"P3"` writes it, illegal value raises `ValueError` (#663).
@@ -96,7 +98,7 @@ UPDATE agent_tasks SET owner = %s, updated_at = now() WHERE id = %s;
 COMMIT;
 ```
 
-Notifications (`send_message`) are executed **after** the transaction commits—avoiding waking other agents while holding the lock.
+Notifications (`send_system_note`) are executed **after** the transaction commits—avoiding waking other agents while holding the lock.
 
 ## Event Log
 

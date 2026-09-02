@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
+import stat
 from pathlib import Path
 from typing import cast
 
@@ -77,6 +79,41 @@ def test_ensure_ava_home_dirs(home, tmp_path: Path):
     assert (ava_home / "logs" / ".metadata_never_index").is_file()
 
 
+def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(home, tmp_path: Path):
+    ava_home = tmp_path / "avahome"
+    targets = (
+        ava_home / "logs" / "daemon" / "current.log",
+        ava_home / "workspaces" / "7" / "download.txt",
+        ava_home / "memory" / ".git" / "config",
+    )
+    for target in targets:
+        target.parent.mkdir(parents=True)
+        target.write_text("private")
+        target.chmod(0o644)
+        for parent in (target.parent, target.parent.parent):
+            parent.chmod(0o755)
+
+    _converge._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
+
+    for target in targets:
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+        assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(target.parent.parent.stat().st_mode) == 0o700
+
+
+def test_ensure_ava_home_dirs_rejects_logs_symlink_before_writing_marker(home, tmp_path: Path):
+    ava_home = tmp_path / "avahome"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    ava_home.mkdir()
+    (ava_home / "logs").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match=r"logs.*symlink"):
+        _converge._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
+
+    assert not (outside / ".metadata_never_index").exists()
+
+
 def test_converge_host_runs_universal_and_skips_unit_state_when_role_none(home, tmp_path: Path):
     calls: list[str] = []
     steps = (
@@ -139,6 +176,52 @@ def test_prod_editable_pth_guard_is_registered_as_host_global() -> None:
 
     assert step is not None
     assert step.host_global
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX site-packages protection")
+def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The prod converge boundary must harden site-packages after repairing records."""
+    source_root = tmp_path / "prod" / "source"
+    pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
+    pth.parent.mkdir(parents=True)
+    pth.write_text(str(source_root))
+    pth.parent.chmod(0o755)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: False)
+    step = next(
+        step
+        for step in _converge.CONVERGE_STEPS
+        if step.name == "prod editable site-packages protection"
+    )
+
+    step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert step.host_global
+    assert stat.S_IMODE(pth.parent.stat().st_mode) == 0o555
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX site-packages protection")
+def test_prod_editable_dir_protection_skips_while_update_in_flight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A live rollout owns writable site-packages until its syncs complete."""
+    source_root = tmp_path / "prod" / "source"
+    pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
+    pth.parent.mkdir(parents=True)
+    pth.parent.chmod(0o755)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: True)
+    step = next(
+        step
+        for step in _converge.CONVERGE_STEPS
+        if step.name == "prod editable site-packages protection"
+    )
+
+    step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert stat.S_IMODE(pth.parent.stat().st_mode) == 0o755
 
 
 def test_prod_editable_pth_converge_step_repairs_and_warns(

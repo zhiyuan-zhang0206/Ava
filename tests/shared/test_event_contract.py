@@ -92,8 +92,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     telemetry_read_recovered / otlp_backend_disabled / otlp_backend_recovered
     (runner-observability staleness and OTLP recovery state) + exec_envelope
     (2026-08-24 runner batch R-4 — exec envelope transfer size/time cost) +
-    editable_pth_repaired + editable_direct_url_repaired (Task #1572's prod
-    editable-install repair audit, extended to the direct_url record) +
+    editable_pth_repaired + editable_direct_url_repaired +
+    exec_editable_install_poisoned (editable-install repair audit, including
+    the pre-exec poisoned-install guard) +
     checkpoint_table_sizes (Task #1545a's post-vacuum absolute gauges) +
     agent_boot_failed (Task #1704's visible process-boot failure marker) +
     gate_auth_probe_failed (Task #1736's gate auth-probe failure
@@ -120,8 +121,14 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # agent_swapped_in (Task #1976 phase 2) drops it back to 127;
     # memory_search_stats (Task #2088's row-growth monitoring) raises it
     # back to 128; page_restore_notified (Task #2212 direction B — the
-    # reconcile close path's re-serve notice) raises it to 129.
-    assert len(_TELEMETRY_KINDS) == 130
+    # reconcile close path's re-serve notice) raises it to 129; watchdog_tick
+    # (P1-4's completed-round freshness gauge) raises it to 131; `llm_retry`
+    # records retry duration and exec_editable_install_poisoned (the pre-exec
+    # poisoned-install guard, Task #2285) bring it to 133; exec_child_boot
+    # and compaction_completed (Task #5643) bring the current total to 135;
+    # remote PITR inventory and scheduled recovery-proof failures raise it to
+    # 137.
+    assert len(_TELEMETRY_KINDS) == 137
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
@@ -159,6 +166,22 @@ def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
     }
 
 
+def test_exec_child_boot_payload_exposes_ready_duration() -> None:
+    """The exec-child readiness event owns the boot duration measurement."""
+    assert payload_keys("exec_child_boot") == ("duration_ms",)
+
+
+def test_compaction_completion_payload_exposes_ratio_and_frequency() -> None:
+    """Completed compactions report a character ratio and an event counter."""
+    assert payload_keys("compaction_completed") == (
+        "compact_kind",
+        "compactions",
+        "history_chars",
+        "summary_chars",
+        "summary_history_ratio",
+    )
+
+
 def test_agent_registry_payload_and_metric_disposition() -> None:
     """The 60s agent-registry max-id sample is absolute state, not a sum:
     declared as an int payload (the event contract), dispositioned as a
@@ -182,6 +205,33 @@ def test_memory_search_stats_payload_and_metric_disposition() -> None:
     assert payload_keys("memory_search_stats") == ("rows", "last_save_seconds")
     assert _METRIC_DISPOSITION[("memory_search_stats", "rows")] == "gauge"
     assert _METRIC_DISPOSITION[("memory_search_stats", "last_save_seconds")] == "gauge"
+
+
+def test_watchdog_tick_payload_and_metric_disposition() -> None:
+    """A completed watchdog round publishes its wall-clock timestamp as a
+    gauge, so Prometheus exposes freshness rather than a meaningless sum."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("watchdog_tick") == ("last_tick_timestamp_seconds",)
+    assert _METRIC_DISPOSITION[("watchdog_tick", "last_tick_timestamp_seconds")] == "gauge"
+
+
+def test_pitr_remote_inventory_payload_and_metric_disposition() -> None:
+    """A remote inventory sample is absolute backend-scoped state, never a sum."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("pitr_remote_inventory") == ("backend", "object_count", "bytes")
+    assert _METRIC_DISPOSITION[("pitr_remote_inventory", "object_count")] == "gauge"
+    assert _METRIC_DISPOSITION[("pitr_remote_inventory", "bytes")] == "gauge"
+
+
+def test_recovery_drill_failed_payload() -> None:
+    """A failed drill names its proof type without placing failure detail in labels."""
+    from shared.events.contract import payload_keys
+
+    assert payload_keys("recovery_drill_failed") == ("drill", "detail")
 
 
 def test_category_for_kind() -> None:
@@ -224,6 +274,7 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
         "price_hit",
         "price_out",
         "unpriced",
+        "task_id",
     )
     assert payload_keys("sse_drop") == ("kind", "n")
     assert payload_keys("spawn") == ("machine", "fork_from", "fork_checkpoint")
@@ -234,7 +285,7 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("task_update") == ("status",)
     assert payload_keys("process_exit") == ("reason", "pid")
     assert payload_keys("agent_boot_failed") == ("model", "error_type", "error")
-    assert payload_keys("recall_filter") == ("body",)
+    assert payload_keys("recall_filter") == ("body", "query_hmac_sha256", "picked_paths")
     assert payload_keys("passive_recall") == ("search_ms", "filter_ms")
     assert payload_keys("hook_timing") == ("hook_ms",)
     assert payload_keys("heartbeat_nudged") == ("idle_minutes",)

@@ -332,7 +332,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
                   onClick={() => selectPreset(undefined)}
                   className="w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent"
                 >
-                  No preset
+                  {t("noPreset")}
                 </button>
               </li>
               {presets.map((preset) => (

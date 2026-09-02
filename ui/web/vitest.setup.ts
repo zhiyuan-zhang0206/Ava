@@ -195,6 +195,13 @@ vi.mock("next-intl", async (importOriginal) => {
         const found = lookup(en, full);
         let s = typeof found === "string" ? found : key;
         if (values) {
+          s = s.replace(
+            /\{(\w+), plural, one \{([^{}]*)\} other \{([^{}]*)\}\}/g,
+            (_match, name: string, one: string, other: string) => {
+              const value = values[name];
+              return (Number(value) === 1 ? one : other).replaceAll("#", String(value));
+            },
+          );
           for (const [k, v] of Object.entries(values)) {
             s = s.replaceAll(`{${k}}`, String(v));
           }

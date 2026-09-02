@@ -48,6 +48,30 @@ def test_scrollback_render_returns_history_tail() -> None:
     assert capped.split("\n")[0] == "row-4"
 
 
+def test_scrollback_tail_ignores_empty_screen_padding() -> None:
+    s = PtyScreen(cols=20, rows=DEFAULT_ROWS)
+    _feed(s, "older row\nnewest row")
+
+    captured = s.render(lines=25, scrollback=True)
+
+    assert "older row" in captured
+    assert "newest row" in captured
+    assert s.render(lines=1, scrollback=True) == "newest row"
+
+
+def test_scrollback_render_empty_screen_is_empty() -> None:
+    assert PtyScreen(cols=20, rows=5).render(lines=25, scrollback=True) == ""
+
+
+def test_scrollback_render_keeps_history_before_visible_content() -> None:
+    s = PtyScreen(cols=20, rows=3, scrollback=10)
+    _feed(s, "row-0\nrow-1\nrow-2\nrow-3")
+    _feed(s, "\x1b[2J\x1b[Htop")
+
+    assert s.render(lines=2, scrollback=True).split("\n") == ["row-0", "top"]
+    assert s.render(lines=1, scrollback=True) == "top"
+
+
 def test_incremental_utf8_split_across_reads() -> None:
     s = PtyScreen(cols=20, rows=5)
     # '\u4f60' is 3 UTF-8 bytes; split across two feeds must not render U+FFFD.

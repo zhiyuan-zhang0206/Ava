@@ -861,7 +861,10 @@ def _patch_update_check_behind(monkeypatch: pytest.MonkeyPatch, behind: int) -> 
         cluster_deploy,
         "update_check",
         lambda: cluster_mod.UpdateCheck(
-            behind=behind, frontend_changed=False, backend_changed=behind > 0
+            behind=behind,
+            frontend_changed=False,
+            backend_changed=behind > 0,
+            needs_replay=False,
         ),
     )
 
@@ -889,6 +892,7 @@ class TestSpawnRollout:
         # whether to say agents will be restarted (backend change) or not
         # (UI/docs-only).
         assert result["backend_changed"] is True
+        assert result["needs_replay"] is False
         name, cmd, cwd = spawn_backend.spawn_calls[0]
         assert name == "ava-test-rollout"
         assert cwd == cluster_mod._REPO_ROOT
@@ -983,6 +987,24 @@ class TestSpawnRollout:
         with pytest.raises(cluster_mod.NothingToUpdate, match="already up to date"):
             cluster_mod.spawn_rollout("test-origin")
         assert spawn_backend.spawn_calls == [], "behind==0 must not spawn a rollout session"
+
+    def test_spawn_rollout_replays_bookmark_disagreement(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend
+    ) -> None:
+        """A zero-distance half-deployment must reach the recovery rollout, not 422."""
+        monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+        monkeypatch.setattr(
+            cluster_deploy,
+            "update_check",
+            lambda: cluster_mod.UpdateCheck(
+                behind=0, frontend_changed=False, backend_changed=False, needs_replay=True
+            ),
+        )
+
+        result = cluster_mod.spawn_rollout("test-origin")
+
+        assert result["session"] == "ava-test-rollout"
+        assert spawn_backend.spawn_calls, "a replay-required state must launch the rollout"
 
     def test_spawn_restart_does_not_check_behind(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend
@@ -1175,11 +1197,15 @@ class TestSpawnSessionsResolveAvaFromVenv:
         cmd = self._cmd(monkeypatch, spawn_backend, spawn)
 
         venv_bin = repo_root() / ".venv" / "bin"
-        export = f'export PATH={venv_bin}:"$PATH"'
-        assert export in cmd, f"{label} session does not put the venv on PATH: {cmd}"
+        cmd_export = next(
+            (part for part in cmd.split(" && ") if part.startswith("export PATH=")), ""
+        )
+        assert cmd_export.startswith(f"export PATH={venv_bin}:"), (
+            f"{label} session does not put the venv first on PATH: {cmd}"
+        )
         # `ava start` in spawn_update's else-branch is reached only after the
         # export, so checking the FIRST call is enough to cover both branches.
-        assert cmd.index(export) < cmd.index(first_ava_call), (
+        assert cmd.index(cmd_export) < cmd.index(first_ava_call), (
             f"{label} session invokes `{first_ava_call}` before exporting the venv PATH"
         )
 
@@ -1320,10 +1346,13 @@ class TestUpdateCheck:
             return ""
 
         monkeypatch.setattr(update_check_mod, "_git_ro", _git_ro)
+        monkeypatch.setattr(update_check_mod, "_get_installed_sha", lambda: "installed-sha")
+        monkeypatch.setattr(update_check_mod, "_get_running_sha", lambda: "installed-sha")
         out = cluster_mod.update_check()
         assert out.behind == 0
         assert out.frontend_changed is False
         assert out.backend_changed is False
+        assert out.needs_replay is False
         # No diff when already up to date (behind 0 short-circuits).
         assert not any(a[0] == "diff" for a in calls)
 
@@ -1336,6 +1365,8 @@ class TestUpdateCheck:
             return ""
 
         monkeypatch.setattr(update_check_mod, "_git_ro", _git_ro)
+        monkeypatch.setattr(update_check_mod, "_get_installed_sha", lambda: "installed-sha")
+        monkeypatch.setattr(update_check_mod, "_get_running_sha", lambda: "installed-sha")
         out = cluster_mod.update_check()
         assert out.behind == 3
         assert out.backend_changed is True
@@ -1350,10 +1381,55 @@ class TestUpdateCheck:
             return ""
 
         monkeypatch.setattr(update_check_mod, "_git_ro", _git_ro)
+        monkeypatch.setattr(update_check_mod, "_get_installed_sha", lambda: "installed-sha")
+        monkeypatch.setattr(update_check_mod, "_get_running_sha", lambda: "installed-sha")
         out = cluster_mod.update_check()
         assert out.behind == 1
         assert out.frontend_changed is True
         assert out.backend_changed is False
+
+    @pytest.mark.parametrize(
+        ("installed_sha", "running_sha", "relation", "needs_replay"),
+        [
+            ("installed-old", "running-new", "behind", False),
+            ("installed-new", "running-old", "ahead", True),
+        ],
+    )
+    def test_bookmark_direction_determines_replay(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        installed_sha: str,
+        running_sha: str,
+        relation: Literal["ahead", "behind"],
+        needs_replay: bool,
+    ) -> None:
+        """Only installation ahead of running code names an interrupted rollout."""
+        rev_list: list[tuple[str, ...]] = []
+        relation_args: list[tuple[str, str, Path | None]] = []
+
+        def _relation(
+            pin: str, head: str, *, repo: Path | None = None
+        ) -> Literal["ahead", "behind"]:
+            relation_args.append((pin, head, repo))
+            return relation
+
+        def _git_ro(*args: str) -> str:
+            if args[:2] == ("rev-list", "--count"):
+                rev_list.append(args)
+                return "0"
+            return ""
+
+        monkeypatch.setattr(update_check_mod, "_git_ro", _git_ro)
+        monkeypatch.setattr(update_check_mod, "_get_installed_sha", lambda: installed_sha)
+        monkeypatch.setattr(update_check_mod, "_get_running_sha", lambda: running_sha)
+        monkeypatch.setattr("shared.cluster_drift.prod_source_pin_relation", _relation)
+
+        out = cluster_mod.update_check()
+
+        assert out.behind == 0
+        assert out.needs_replay is needs_replay
+        assert relation_args == [(running_sha, installed_sha, update_check_mod._REPO_ROOT)]
+        assert rev_list == [("rev-list", "--count", f"{installed_sha}..origin/main")]
 
 
 class TestLockHolderLiveness:
@@ -1728,13 +1804,20 @@ class TestClusterUpdateCheckEndpoint:
         monkeypatch.setattr(
             ops_mod,
             "update_check",
-            lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+            lambda: cluster_mod.UpdateCheck(
+                behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
+            ),
         )
         with TestClient(app) as client:
             r = client.get("/api/cluster/update-check")
         assert r.status_code == 200
         body = r.json()
-        assert body == {"behind": 2, "frontend_changed": False, "backend_changed": True}
+        assert body == {
+            "behind": 2,
+            "frontend_changed": False,
+            "backend_changed": True,
+            "needs_replay": False,
+        }
 
     def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         set_machine_identity(role="agent-runner")

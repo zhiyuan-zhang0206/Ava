@@ -3,18 +3,28 @@
 GET /api/tasks — the task list (optionally narrowed by a last-activity window).
 PATCH /api/tasks/{id} — partial update (status / title / description /
 results / remind_interval_seconds / owner). Closing a parent is rejected while
-any child remains in progress.
+any child remains active.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, overload
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from psycopg_pool import ConnectionPool
 
 from gateway.routers._eval_guard import deny_isolated_result_read
-from gateway.schemas import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
+from gateway.routers.agents_state import post_agent_system_note
+from gateway.schemas import (
+    SystemNoteIn,
+    TaskListResponse,
+    TaskRow,
+    TaskSummaryRow,
+    TaskUpdateRequest,
+)
+from shared.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
 from shared.task_reparent import resolve_reparent
 
 router = APIRouter()
@@ -35,12 +45,14 @@ _TASK_WINDOWS = {
 _TASK_COLS = (
     "t.id, t.parent_id, t.title, t.description, t.results, t.status, t.owner, "
     "t.created_by, t.created_at, t.updated_at, "
-    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+    "t.token_budget, t.usd_budget, t.token_used, t.usd_used"
 )
 
 _TASK_SUMMARY_COLS = (
     "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
-    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+    "t.token_budget, t.usd_budget, t.token_used, t.usd_used"
 )
 
 
@@ -81,6 +93,10 @@ def _row_to_task(
             last_reminded_at=row[9].isoformat() if row[9] else None,
             reminder_count=row[10],
             priority=row[11],
+            token_budget=row[12],
+            usd_budget=row[13],
+            token_used=row[14],
+            usd_used=row[15],
         )
     return TaskRow(
         id=row[0],
@@ -98,6 +114,10 @@ def _row_to_task(
         last_reminded_at=row[11].isoformat() if row[11] else None,
         reminder_count=row[12],
         priority=row[13],
+        token_budget=row[14],
+        usd_budget=row[15],
+        token_used=row[16],
+        usd_used=row[17],
     )
 
 
@@ -183,16 +203,10 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     sets: list[str] = []
     params: list[object] = []
     if body.status is not None:
-        if body.status not in ("in_progress", "done", "cancelled"):
-            if body.status == "ongoing":
-                raise HTTPException(
-                    status_code=422,
-                    detail="'ongoing' is the system root task's permanent state and cannot be "
-                    "assigned via PATCH -- the root task itself is immutable.",
-                )
+        if body.status not in ("in_progress", "ongoing", "done", "cancelled"):
             raise HTTPException(
                 status_code=422,
-                detail=f"Invalid status: {body.status!r}. Must be one of: in_progress, done, cancelled.",
+                detail=f"Invalid status: {body.status!r}. Must be one of: in_progress, ongoing, done, cancelled.",
             )
         sets.append("status = %s")
         params.append(body.status)
@@ -236,26 +250,13 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     return sets, params
 
 
-@router.patch("/api/tasks/{task_id}")
-def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskRow:
-    """Partially update a task; omitted fields stay unchanged.
+def _patch_task_blocking(
+    pool: ConnectionPool[Any], task_id: int, body: TaskUpdateRequest
+) -> tuple[TaskRow, list[TaskOwnerNotification]]:
+    """Run the task transaction and return committed owner-change notes.
 
-    status, priority, title, description, and results are taken when non-null
-    (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
-    the system root's permanent state, never assignable; a title colliding with
-    another in_progress task's is rejected). owner reassigns to another
-    agent (an explicit null is rejected — a task cannot be released).
-    remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
-    null is rejected — reminders cannot be disabled). Any write resets the
-    reminder counters, same as the SDK update path. Unlike the SDK, an owner change here
-    does NOT message the affected agents — this endpoint is a plain column write.
-
-    The system root task is immutable: any PATCH targeting it is rejected with
-    422 (mirrors the SDK update() guard), so the task-tree anchor can never be
-    reassigned, completed, cancelled, or otherwise edited.
-
-    A status change to done or cancelled is rejected with 422 while any direct
-    child remains in progress. Close or cancel those children first.
+    The route awaits task-note delivery after this function returns, so no
+    network or process wake can roll back the owner assignment.
     """
     sets, params = _collect_updates(body)
     if "parent_id" in body.model_fields_set:
@@ -274,15 +275,21 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor() as cur:
         # The system root task is immutable (the task-tree anchor / default
         # parent) — reject any edit before writing, same rule as the SDK
         # update() path. Check existence here too so a missing task still 404s.
-        cur.execute("SELECT is_root FROM agent_tasks WHERE id = %s FOR UPDATE", (task_id,))
+        cur.execute(
+            "SELECT t.owner, t.is_root, a.status "
+            "FROM agent_tasks t LEFT JOIN agents_meta a ON a.id = t.owner "
+            "WHERE t.id = %s FOR UPDATE OF t",
+            (task_id,),
+        )
         guard = cur.fetchone()
         if guard is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
-        if guard[0]:
+        previous_owner, is_root, previous_owner_status = guard
+        if is_root:
             raise HTTPException(
                 status_code=422,
                 detail=f"Task {task_id} is the system root task and is immutable.",
@@ -290,7 +297,7 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
         if body.status in ("done", "cancelled"):
             cur.execute(
                 "SELECT id, count(*) OVER () FROM agent_tasks "
-                "WHERE parent_id = %s AND status = 'in_progress' "
+                "WHERE parent_id = %s AND status IN ('in_progress', 'ongoing') "
                 "ORDER BY id LIMIT 1",
                 (task_id,),
             )
@@ -299,7 +306,7 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
                 child_id, child_count = active_child
                 raise HTTPException(
                     status_code=422,
-                    detail=f"task {task_id} has {child_count} in_progress child tasks "
+                    detail=f"task {task_id} has {child_count} active child tasks "
                     f"(e.g. #{child_id}) — close or cancel them first",
                 )
         # Reparenting mirrors the SDK update() checks (shared validation):
@@ -344,4 +351,54 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
         if row is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
 
-    return _row_to_task(row[:-1], "full", owner_label=row[-1])
+    task = _row_to_task(row[:-1], "full", owner_label=row[-1])
+    if "owner" not in body.model_fields_set or previous_owner == task.owner:
+        return task, []
+    return (
+        task,
+        owner_change_notifications(
+            task.id,
+            task.title,
+            previous_owner,
+            task.owner,
+            actor=None,
+            previous_owner_terminated=previous_owner_status in (None, "terminated"),
+        ),
+    )
+
+
+@router.patch("/api/tasks/{task_id}")
+async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskRow:
+    """Partially update a task; omitted fields stay unchanged.
+
+    status, priority, title, description, and results are taken when non-null
+    (priority must be one of P0..P3; ongoing marks long-running active work; a
+    title colliding with another in_progress task's is rejected). owner reassigns to another
+    agent (an explicit null is rejected — a task cannot be released).
+    remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
+    null is rejected — reminders cannot be disabled). Any write resets the
+    reminder counters, same as the SDK update path. An owner reassignment sends
+    the SDK-equivalent task system notes after the database write commits.
+
+    The system root task is immutable: any PATCH targeting it is rejected with
+    422 (mirrors the SDK update() guard), so the task-tree anchor can never be
+    reassigned, completed, cancelled, or otherwise edited.
+
+    A status change to done or cancelled is rejected with 422 while any direct
+    child remains active (in progress or ongoing). Close or cancel those children first.
+    """
+    task, notes = await asyncio.to_thread(
+        _patch_task_blocking, request.app.state.db_pool, task_id, body
+    )
+    for note in notes:
+        await post_agent_system_note(
+            note.agent_id,
+            SystemNoteIn(
+                content=note.content,
+                source="user",
+                task_id=task_id if note.resurrect else None,
+                resurrect=note.resurrect,
+            ),
+            request,
+        )
+    return task

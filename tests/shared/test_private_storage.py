@@ -6,6 +6,7 @@ import os
 import re
 import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -60,6 +61,59 @@ def test_private_file_repairs_mode_drift(tmp_path: Path) -> None:
 
     assert target.read_bytes() == b"secret"
     assert _mode(target) == 0o600
+
+
+def test_private_file_preserves_owner_execute_permission(tmp_path: Path) -> None:
+    """An executable file remains executable while its mode is tightened."""
+    target = tmp_path / "hook"
+    target.write_text("#!/bin/sh\nexit 0\n")
+    target.chmod(0o744)
+
+    private_storage.ensure_private_file(target)
+
+    assert _mode(target) == 0o700
+
+
+def test_private_tree_recursively_repairs_existing_mode_drift(tmp_path: Path) -> None:
+    """Converge makes every existing private-tree node owner-only."""
+    root = tmp_path / "private"
+    nested = root / "agent" / "artifacts"
+    nested.mkdir(parents=True)
+    payload = nested / "result.txt"
+    payload.write_text("secret")
+    for directory in (root, root / "agent", nested):
+        directory.chmod(0o755)
+    payload.chmod(0o644)
+
+    assert private_storage.converge_private_tree(root) == root
+
+    assert _mode(root) == 0o700
+    assert _mode(root / "agent") == 0o700
+    assert _mode(nested) == 0o700
+    assert _mode(payload) == 0o600
+
+
+def test_private_tree_skips_nested_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Converge leaves a link and its target untouched while repairing its tree."""
+    root = tmp_path / "private"
+    root.mkdir()
+    target = tmp_path / "outside"
+    target.mkdir()
+    target.chmod(0o755)
+    link = root / "link"
+    link.symlink_to(target, target_is_directory=True)
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    def _warning(message: str, **kwargs: object) -> None:
+        warnings.append((message, kwargs))
+
+    monkeypatch.setattr(private_storage, "logger", SimpleNamespace(warning=_warning), raising=False)
+
+    assert private_storage.converge_private_tree(root) == root
+
+    assert link.is_symlink()
+    assert _mode(target) == 0o755
+    assert warnings == [("private storage convergence skipped symlink {path}", {"path": link})]
 
 
 def test_private_write_replaces_existing_content_without_permissive_intermediate(

@@ -37,6 +37,7 @@ merge:
     - e2e hosted (agent-runner-as-server happy path)
     - frontend (eslint + tsc + vitest)
     - repo language (no raw CJK)
+    - secret scan (Gitleaks)
     - qa-approved-gate
 """
 
@@ -137,11 +138,11 @@ def test_trunk_gate_findings_accept_the_real_declaration() -> None:
 
 
 def test_real_trunk_yaml_declares_the_full_gate() -> None:
-    audit = _audit()
     text = (_REPO_ROOT / ".trunk" / "trunk.yaml").read_text()
     document = yaml.safe_load(text)  # type: ignore[name-defined]
     statuses = document["merge"]["required_statuses"]
-    assert len(statuses) == 12
+    assert len(statuses) == 13
+    assert "secret scan (Gitleaks)" in statuses
     assert "qa-approved-gate" in statuses
     assert "backend (pytest + pyright)" in statuses
     assert "frontend (eslint + tsc + vitest)" in statuses
@@ -150,7 +151,6 @@ def test_real_trunk_yaml_declares_the_full_gate() -> None:
 
 
 def test_mergify_stub_is_inert() -> None:
-    audit = _audit()
     text = (_REPO_ROOT / ".mergify.yml").read_text()
     document = yaml.safe_load(text)
     assert document is None or "queue_rules" not in document

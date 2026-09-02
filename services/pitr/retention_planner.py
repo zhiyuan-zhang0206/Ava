@@ -28,6 +28,8 @@ class DryRunResult:
     eligible_objects: int
     retained_bytes: int
     eligible_bytes: int
+    remote_object_count: int = 0
+    remote_bytes: int = 0
 
 
 def build_local_evidence(
@@ -124,10 +126,8 @@ def write_dry_run_plan(
     retain_chains: int = 2,
     inventory_reader: RetentionInventoryReader | None = None,
 ) -> DryRunResult:
-    plan = plan_retention(
-        build_local_evidence(root, inventory_reader=inventory_reader),
-        retain_chains=retain_chains,
-    )
+    evidence = build_local_evidence(root, inventory_reader=inventory_reader)
+    plan = plan_retention(evidence, retain_chains=retain_chains)
     destination = root / "retention-plans" / "latest.dry-run.json"
     _atomic_bytes(destination, plan.to_json().encode())
     return DryRunResult(
@@ -138,6 +138,8 @@ def write_dry_run_plan(
         len(plan.eligible),
         plan.retained_bytes,
         plan.eligible_bytes,
+        len(evidence.inventory),
+        sum(item.size for item in evidence.inventory),
     )
 
 

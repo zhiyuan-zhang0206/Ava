@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.activation_state import load_record as load_activation_record
@@ -62,6 +63,7 @@ from services.pitr.worker_process import raise_live_descendants as _raise_live_d
 from services.pitr.worker_process import reap_job_group as _reap_job_group
 from services.pitr.worker_process import validate_ready_message as _validate_ready_message
 from services.pitr.worker_process import worker_bootstrap as _worker_bootstrap
+from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -92,6 +94,8 @@ BASE_BACKUP_RETRY_INTERVAL_S = 1800
 BASE_BACKUP_STALE_AFTER_S = 8 * 24 * 3600
 _SLEEP_CHUNK_S = 30
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
+RESTORE_PROOF_MONTHLY_DAY = 1
+RESTORE_PROOF_HOUR = 6
 
 
 @dataclass
@@ -170,6 +174,21 @@ def _last_durable_protected(
         return None, None, error
     latest = max(manifests, key=lambda item: datetime.fromisoformat(item.proof.completed_at))
     return datetime.fromisoformat(latest.proof.completed_at).timestamp(), latest.chain_id, error
+
+
+def restore_proof_due(now: datetime, *, last_success: float | None) -> bool:
+    """Whether the current calendar month's PITR proof window lacks success."""
+    local_now = now.astimezone(ZoneInfo(settings.general.timezone))
+    scheduled = local_now.replace(
+        day=RESTORE_PROOF_MONTHLY_DAY,
+        hour=RESTORE_PROOF_HOUR,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if local_now < scheduled:
+        return False
+    return last_success is None or last_success < scheduled.timestamp()
 
 
 def _build_candidate(stop: StopSignal) -> CandidateManifest:
@@ -403,8 +422,10 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
                 _log.exception("PITR retention dry-run planning failed")
                 await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
                 continue
-        if config.pitr_restore_proof_enabled and _pending_restore_candidate(
-            ava_home() / "physical-backup"
+        if (
+            config.pitr_restore_proof_enabled
+            and restore_proof_due(datetime.now(UTC), last_success=state.last_protected)
+            and _pending_restore_candidate(ava_home() / "physical-backup")
         ):
             state.restore_running = True
             try:
@@ -418,6 +439,12 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
                 _record_protected(state, candidate)
             except Exception as exc:
                 state.restore_error = str(exc)
+                telemetry.emit(
+                    "telemetry",
+                    "recovery_drill_failed",
+                    level="error",
+                    attributes={"drill": "pitr", "detail": str(exc)},
+                )
                 _log.exception("restore proof failed; candidate remains unprotected")
             finally:
                 state.restore_running = False

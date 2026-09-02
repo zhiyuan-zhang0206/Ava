@@ -208,6 +208,20 @@ def test_cost_usd_unknown_model_is_none() -> None:
     assert cost_usd("no-such-model", 1000, 1000, 0) is None
 
 
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("claude-fable-5-1", Rates(10.0, 0.25, 50.0)),
+        ("claude-fable-5", Rates(10.0, 1.0, 50.0)),
+    ],
+)
+def test_claude_fable_versions_keep_their_published_cache_read_rates(
+    model: str, expected: Rates
+) -> None:
+    """Fable 5.1's cheaper cache reads must not rewrite the served legacy id."""
+    assert rates_at(model, datetime(2026, 9, 2, tzinfo=UTC), _M) == expected
+
+
 def test_cost_usd_none_tokens_is_none() -> None:
     assert cost_usd("gpt-5.6-sol", None, None, None) is None
 

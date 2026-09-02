@@ -10,7 +10,7 @@ platform.
   respawns, pause/unpause, and the orchestration sessions (updater / rollout /
   cluster-restart — S7 moved them onto this backend).
 - ``get_shell_backend()`` — agent interactive shells / watchers:
-  ``PtySessionBackend`` (the self-hosted PTY supervisor) on POSIX, the native
+  ``PtySessionBackend`` (one detached host per session) on POSIX, the native
   supervisor on Windows. Never addresses service or orchestration sessions.
 
 **Every import of a platform supervisor in this module is deliberately
@@ -154,8 +154,7 @@ class SessionBackend(abc.ABC):
         """Launch epochs for MANY sessions in one call.
 
         Default: the per-session loop (`session_started_at` per name). A
-        backend whose per-session read carries fixed overhead (the PTY
-        supervisor's CLI round-trip measured ~150 ms each, 2026-08-12) must
+        backend whose per-session read carries fixed overhead must
         override this with a batch call — a status snapshot fans out over
         every session serially, and 28 sessions blew past the roster's 3 s
         probe timeout, misreporting a healthy host offline."""
@@ -238,9 +237,9 @@ class PosixProcSessionBackend(SessionBackend):
     ``env`` dict is handed straight to the supervisor as the child's real
     environment — no 0600 handoff file, because nothing is ever on an argv.
 
-    PTY methods raise ``NotImplementedError`` — the supervisor allocates no
-    terminal; interactive shells (ava.shell.sessions, watchers) live on the
-    PTY supervisor via ``get_shell_backend()``.
+    PTY methods raise ``NotImplementedError`` — the native backend allocates no
+    terminal; interactive shells (ava.shell.sessions, watchers) live in
+    detached per-session hosts via ``get_shell_backend()``.
 
     Each method imports ``posixproc`` locally rather than at module scope, for
     the same self-update reason as ``WinprocSessionBackend`` — see the module
@@ -325,7 +324,7 @@ _ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # env keys a POSIX shell ca
 
 
 def _write_session_env_file(env: dict[str, str]) -> Path:
-    """Fresh 0600 env handoff file the supervisor sources (env_load_prefix format)."""
+    """Fresh 0600 env handoff file the per-session host sources."""
 
     directory = run_dir() / "session-env"
     directory.mkdir(parents=True, exist_ok=True)
@@ -384,11 +383,13 @@ class PtySessionBackend(SessionBackend):
             raise NotImplementedError(f"{type(self).__name__} only creates login shells")
         envfile = _write_session_env_file(env)
         args = [name, "new", str(cwd), str(envfile)]
-        if cmd:  # base64 cmd — never argv (#974); daemon submits when ready
+        if cmd:  # the per-session host submits the base64 command when ready
             args.append(base64.b64encode(cmd.encode()).decode("ascii"))
         result = self._cli(*args)
         if result.returncode != 0:
             envfile.unlink(missing_ok=True)
+            detail = result.stderr.strip() or f"exit {result.returncode} without a diagnostic"
+            _log.warning("pty session allocation failed for %s: %s", name, detail)
             return False
         return True
 
@@ -417,7 +418,7 @@ class PtySessionBackend(SessionBackend):
         timeout: float = 15.0,
         expected: bool = False,
     ) -> tuple[bool, str]:
-        del timeout, expected  # the supervisor owns the graceful timeout
+        del timeout, expected  # the PTY CLI owns the graceful timeout
         result = self._cli(name, "kill", "--graceful") if graceful else self._cli(name, "kill")
         return result.returncode == 0, "graceful" if graceful else "forced"
 
@@ -429,7 +430,7 @@ class PtySessionBackend(SessionBackend):
         timeout: float = 15.0,
         expected: bool = False,
     ) -> tuple[bool, str, bool]:
-        del timeout, expected  # the supervisor owns the graceful timeout
+        del timeout, expected  # the PTY CLI owns the graceful timeout
         result = self._cli(name, "kill", "--graceful") if graceful else self._cli(name, "kill")
         ok = result.returncode == 0
         mode = "graceful" if graceful else "forced"
@@ -598,7 +599,7 @@ _shell_backend: SessionBackend | None = None
 
 def get_shell_backend() -> SessionBackend:
     """Return the backend for AGENT interactive shells and watchers —
-    ``PtySessionBackend`` on POSIX (the self-hosted PTY supervisor), the
+    ``PtySessionBackend`` on POSIX (one detached host per session), the
     native supervisor on Windows; distinct from ``get_backend()``
     (service/daemon + orchestration sessions). ``ava.shell.sessions`` and
     watcher sessions use this PTY backend — never the service backend.

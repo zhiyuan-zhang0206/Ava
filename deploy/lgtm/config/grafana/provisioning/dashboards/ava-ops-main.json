@@ -4123,12 +4123,152 @@
    ]
   },
   {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "ms",
+     "custom": {
+      "lineInterpolation": "smooth",
+      "showPoints": "never",
+      "fillOpacity": 12,
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "spanNulls": true
+     }
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 196
+   },
+   "id": 1012,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Memory recall search latency",
+   "type": "timeseries",
+   "description": "Average successful passive-recall semantic-search duration in milliseconds (5-minute buckets; event_name='passive_recall', category='telemetry').",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_search_ms!=\"\" | unwrap attributes_search_ms [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_search_ms!=\"\" [5m]))",
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "avg search ms"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "ms",
+     "custom": {
+      "lineInterpolation": "smooth",
+      "showPoints": "never",
+      "fillOpacity": 12,
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "spanNulls": true
+     }
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 196
+   },
+   "id": 1013,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Memory recall filter latency",
+   "type": "timeseries",
+   "description": "Average successful passive-recall relevance-filter duration in milliseconds (5-minute buckets; event_name='passive_recall', category='telemetry').",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_filter_ms!=\"\" | unwrap attributes_filter_ms [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_filter_ms!=\"\" [5m]))",
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "avg filter ms"
+    }
+   ]
+  },
+  {
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 196
+    "y": 203
    },
    "id": 2006,
    "panels": [],
@@ -4148,7 +4288,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 197
+    "y": 204
    },
    "targets": [
     {
@@ -4195,7 +4335,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 197
+    "y": 204
    },
    "targets": [
     {
@@ -4242,7 +4382,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 205
+    "y": 212
    },
    "targets": [
     {
@@ -4297,7 +4437,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 205
+    "y": 212
    },
    "targets": [
     {
@@ -4344,7 +4484,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 213
+    "y": 220
    },
    "targets": [
     {
@@ -4389,7 +4529,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 213
+    "y": 220
    },
    "targets": [
     {
@@ -4434,7 +4574,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 221
+    "y": 228
    },
    "targets": [
     {
@@ -4485,7 +4625,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 221
+    "y": 228
    },
    "targets": [
     {
@@ -4535,7 +4675,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 229
+    "y": 236
    },
    "targets": [
     {
@@ -4580,7 +4720,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 229
+    "y": 236
    },
    "targets": [
     {
@@ -4630,7 +4770,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 237
+    "y": 244
    },
    "targets": [
     {
@@ -4681,7 +4821,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 237
+    "y": 244
    },
    "targets": [
     {
@@ -4759,7 +4899,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 245
+    "y": 252
    },
    "id": 2303,
    "options": {
@@ -4823,7 +4963,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 245
+    "y": 252
    },
    "id": 2304,
    "options": {
@@ -4859,7 +4999,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 252
+    "y": 259
    },
    "id": 2007,
    "panels": [],
@@ -4895,7 +5035,7 @@
     "h": 4,
     "w": 8,
     "x": 0,
-    "y": 253
+    "y": 260
    },
    "id": 38,
    "options": {
@@ -4957,7 +5097,7 @@
     "h": 4,
     "w": 16,
     "x": 8,
-    "y": 253
+    "y": 260
    },
    "id": 39,
    "options": {
@@ -5012,7 +5152,7 @@
     "h": 7,
     "w": 24,
     "x": 0,
-    "y": 257
+    "y": 264
    },
    "id": 41,
    "options": {
@@ -5068,7 +5208,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 264
+    "y": 271
    },
    "id": 42,
    "options": {
@@ -5117,7 +5257,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 264
+    "y": 271
    },
    "id": 43,
    "options": {
@@ -5144,6 +5284,120 @@
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "{{agent_id}}"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Mean percentage of discarded conversation characters retained in the replacement summary. The completed event is emitted where the history replacement is applied, not when a compact request or agent-authored summary is created; empty histories omit the ratio rather than manufacturing a zero denominator. event_name='compaction_completed', category='telemetry'.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "percent"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 278
+   },
+   "id": 50,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Compaction ratio (summary/history)",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "100 * avg_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | unwrap attributes_summary_history_ratio [$__interval])",
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "summary/history %"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Applied history replacements per minute (5-minute buckets / 5). Counts compaction_completed rather than compact requests, so the series represents replacements that actually occurred. event_name='compaction_completed', category='telemetry'.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 278
+   },
+   "id": 51,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Completed compactions",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" [5m])) / 5",
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "compactions/min"
     }
    ]
   }

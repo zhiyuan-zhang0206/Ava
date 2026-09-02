@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Task Model — Field Details
-description: "Field-by-field reference for the Task data class: id, parent_id, title, description, results, status, owner, created_by, timestamps, priority"
+description: "Field-by-field reference for the Task data class: id, parent_id, title, description, results, status, owner, created_by, timestamps, priority, and task-scoped LLM budgets"
 tags:
 - fleet
 - tasks
@@ -22,7 +22,7 @@ Constraint: a child is always created after its parent (`created_at` monotonical
 
 ## `title` / `description`
 
-- `title`: Short one-line name shown in `list` results and notifications. Renamable via `update(title=...)`; must be unique among `in_progress` tasks (same check as `create`).
+- `title`: Short one-line name shown in `list` results and notifications. Renamable via `update(title=...)`; must be unique among `in_progress` tasks only (same check as `create`), so `ongoing` tasks may share a title.
 - `description`: Full description — what and why, the first read for the assignee. Set at `create`, revisable via `update(description=...)`.
 
 Old field name `brief` is a deprecated alias (Task attribute + `create` parameter), to be removed.
@@ -35,7 +35,7 @@ Old field name `content` is a deprecated alias (Task attribute + `update` parame
 
 ## `status`
 
-One of three values an agent can assign (`CHECK` constraint): `"in_progress"`, `"done"`, `"cancelled"`. A task is born `"in_progress"` (DB default — the `"open"` state was dropped by user ruling 2026-08-29: creation starts the work immediately). The `CHECK` also admits `"ongoing"` — the system root task's permanent state, never assignable via `create()`/`update()`/PATCH and pinned by the `agent_tasks_root_status_ongoing` DB constraint. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
+One of four values a task may hold (`CHECK` constraint): `"in_progress"`, `"ongoing"`, `"done"`, `"cancelled"`. A task is born `"in_progress"` (DB default — the `"open"` state was dropped by user ruling 2026-08-29: creation starts the work immediately). `"ongoing"` marks long-running active work and is assignable to regular tasks through `update()`/PATCH; the system root is pinned to it by the `agent_tasks_root_status_ongoing` DB constraint. SDK callers changing a task to `"ongoing"` must be its owner or an owner-lineage delegator, while no-identity system tooling and the human-facing gateway PATCH remain ungated. See [[task_lifecycle.ava.okf.md|Task Lifecycle]].
 
 ## `owner`
 
@@ -54,3 +54,12 @@ Timestamps auto-managed by the database. `updated_at` is refreshed on every `upd
 ## `priority`
 
 One of `"P0"` (highest) through `"P3"` (lowest), default `"P2"` (`CHECK` constraint, same four levels as notice). `create()`/`update()` validate and raise `ValueError` for illegal values; `update(priority=None)` means "no change". The task board sorts by priority within the same status column (display only, the frontend doesn't write it). When a task escalates to the human queue due to being overdue, the `agent_notices` entry inherits the task's `priority` (see [[task_model_reminders.ava.okf.md|Reminders]]).
+
+## `token_budget` / `usd_budget` and usage
+
+`create()` optionally accepts a positive `token_budget` and a positive finite
+`usd_budget`. `token_used` and `usd_used` accumulate only LLM calls whose turn
+was explicitly attributed by a task system note; ownership, chat, and other
+untagged work never count. The task row lock makes increments and first-breach
+markers atomic. Crossing either ceiling sends the current owner one system
+note and does not stop the in-flight call or terminate the agent.

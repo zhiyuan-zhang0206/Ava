@@ -156,20 +156,25 @@ prod runtime and dev workspace are split at the filesystem level:
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through the CLI `ava cluster update` (`ava.self.update()` was removed 2026-08) |
 | `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool) | freely checkout any branch, decoupled from prod |
 
-### Worktree uv iron rule (Task #1572)
+### Worktree uv iron rule (Tasks #1572, #5638)
 
 An editable install is a pointer stored in the **active virtualenv**, not a fact
-derived from the shell's current directory. Inside a worktree, every `uv`
-command must therefore discard an inherited `VIRTUAL_ENV`:
+derived from the shell's current directory. A worktree's `.venv` must be a
+real directory inside that worktree, never a symlink. Before **every** worktree
+sync, run the dependency-free preflight; it refuses an external environment,
+a symlinked `.venv`, or editable records naming another checkout. Then discard
+an inherited `VIRTUAL_ENV` for the `uv` command:
 
 ```bash
+python scripts/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync
 env -u VIRTUAL_ENV uv pip install -e .
 ```
 
 On PowerShell, apply the same rule with `Remove-Item Env:VIRTUAL_ENV
 -ErrorAction SilentlyContinue` before `uv`. Never rely on `cd` alone to select
-the worktree's `.venv`.
+the worktree's `.venv`. `scripts/install.sh --worktree` and
+`scripts/setup-worktree.sh` invoke the same preflight before their own sync.
 
 Before deleting a worktree, inspect every long-lived Ava virtualenv on the host:
 
@@ -185,10 +190,13 @@ check applies to the editable URL uv records beside the pointer — in each venv
 checkout's `file://` URL. If either record is wrong, do **not** delete the
 worktree: run `env -u VIRTUAL_ENV uv sync` from the affected stable checkout
 and recheck. `ava converge` / `ava start` independently assert and auto-repair
-both prod records, with `editable_pth_repaired` / `editable_direct_url_repaired`
-warning events; the dev-clone pointer remains part of this mandatory deletion
-check. This is the operating half of the Task #1572 editable-`.pth` guard
-specification; the incident and escape analysis are in
+both prod records, then make their site-packages directories read-only outside
+the narrow update/repair write window. Every `execute_code` spawn also checks
+the current interpreter's records: the first poisoned call repairs the install
+and returns a retryable structured error, preventing a flood of failed child
+imports. The dev-clone pointer remains part of this mandatory deletion check.
+This is the operating half of the editable-install guard specification; the
+incident and escape analysis are in
 [`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
 
 A typical small deployment runs the **gateway as a single-box unit** on an
@@ -574,16 +582,25 @@ supervisor socket for agent shells / watchers).
 | `memory-indexer`         | `.venv/bin/python -m services.memory_indexer.daemon` (watchdog fs watch `~/.ava/memory/` + Gemini Embedding 2 → milvus collection) | `services.healthchecks.memory_indexer` (`/healthz` :8105) |
 | `memory-search`          | `.venv/bin/python -m services.memory_search.daemon` (uvicorn on 127.0.0.1:19531 serving the exact-search store — in-memory matrix + npz persistence; the gateway and the indexer call it over HTTP when `AVA_MEMORY_SEARCH_BACKEND=numpy`) | `services.healthchecks.memory_search` (real POST /search probe :19531) |
 | `frontend`               | `cd ui/web && NEXT_PUBLIC_GATEWAY_PORT=<AVA_GATEWAY_PORT> npm run build && npm run start -- -p <app_port>` (Next.js prod build, **loopback-only bind** (`next start -H 127.0.0.1`); off-box browsers reach it only through the fleet UI gate on the entry port `:3000` — see Private-network deployment. The build-time port is injected from `AVA_GATEWAY_PORT` so the browser dials the gateway on the right port even when it is not the default 8000) | `services.healthchecks.frontend` (curl) |
-| `pg-backup` (gateway only) | `.venv/bin/python -m services.backup_scheduler.daemon` (cluster-clock daily dump schedule with bounded retry; `/healthz` reports last-success age) | `services.healthchecks.pg_backup` (identity-verified `/healthz` :8116) |
+| `pg-backup` (gateway only) | `.venv/bin/python -m services.backup_scheduler.daemon` (cluster-clock daily dump schedule with bounded retry; after the Sunday 03:00 successful dump, runs one isolated logical restore drill; `/healthz` reports last-success age) | `services.healthchecks.pg_backup` (identity-verified `/healthz` :8116) |
 | `pitr-uploader` (gateway only, `AVA_PITR_ENABLED`) | `.venv/bin/python -m services.pitr.uploader_daemon` (single-worker immutable GCS upload; WAL-only ciphertext staging is capped at 64 MiB and reported alongside spool bytes; disabled by default) | `services.healthchecks.pitr_uploader` (identity-verified `/healthz` :8117) |
-| `pitr-base-candidate` (gateway only, `AVA_PITR_BASE_BACKUP_ENABLED`) | `.venv/bin/python -m services.pitr.base_scheduler_daemon` (weekly unprotected base candidate; when the additional `AVA_PITR_RESTORE_PROOF_ENABLED` gate is true, generation-pinned isolated proof runs before another candidate; both default off) | `services.healthchecks.pitr_base_backup` (identity-verified `/healthz` :8118; candidate and restore-proof states are separate non-readiness-gating components) |
-| `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering OR its reachable-address listener is missing — a silently degraded double bind, task #1288; when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/im-bridge/labeler/heartbeat/delivery-watchdog/events-maintenance/milvus/frontend/pg-backup/otel-collector/task-maintenance/memory-indexer — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
-| `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/restarter (+browser, browser-mcp) — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
+| `pitr-base-candidate` (gateway only, `AVA_PITR_BASE_BACKUP_ENABLED`) | `.venv/bin/python -m services.pitr.base_scheduler_daemon` (weekly unprotected base candidate; when the additional `AVA_PITR_RESTORE_PROOF_ENABLED` gate is true, runs one generation-pinned isolated proof in the first-day 06:00 cluster-time monthly window when a candidate is pending; both default off) | `services.healthchecks.pitr_base_backup` (identity-verified `/healthz` :8118; candidate and restore-proof states are separate non-readiness-gating components) |
+| `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering OR its reachable-address listener is missing — a silently degraded double bind, task #1288; when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/im-bridge/labeler/heartbeat/delivery-watchdog/events-maintenance/milvus/frontend/pg-backup/otel-collector/task-maintenance/memory-indexer — every 60s). Its distinct `/healthz` reports the last completed tick and becomes stale after a 90s unfinished round. | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
+| `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/restarter (+browser, browser-mcp) — every 60s). Its distinct `/healthz` reports the last completed tick and becomes stale after a 90s unfinished round. | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `browser` (agent-runner only, auto-detect display; opt-out `AVA_BROWSER_ENABLED=false`) | `.venv/bin/python -m services.browser.daemon` (headed real Chrome, dedicated profile `~/.ava/chrome-profile/`, CDP :9222) | `services.healthchecks.browser` (HTTP probe `/json/version` :9222) |
 | `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge on the `lgtm-host` gateway and pure runners; unmarked gateway homes skip it; the gateway fans out only its cluster's labeled resources, pure runners relay with bearer auth; traces mirror locally; trace/log queues are file-backed while metrics use bounded memory) | `services.healthchecks.otel_collector` (valid empty OTLP POST must return 2xx on :4318; both :4318 and :8888 holders must resolve to this collector binary and its live session record, otherwise only a verified stale same-binary holder is reclaimed) |
 | `browser-mcp` (agent-runner only, gated with `browser`) | `.venv/bin/python -m services.browser.mcp_daemon` (one shared `chrome-devtools-mcp` upstream attached to the headed Chrome, multiplexed over a Unix socket `~/.ava/chrome-mcp.<cdp_port>.sock` to every agent's chrome bridge — serial, with per-connection page affinity so one Chrome client is shared instead of one per browser-using agent) | `services.healthchecks.browser_mcp` (Unix-socket `list_tools` probe) |
 | `computer-mcp` (agent-runner only, platform-gated: signed permissions helper enabled + capable, AF_UNIX transport, non-Windows host — Windows is the phase-3 pilot) | `.venv/bin/python -m services.computer.mcp_daemon` (computer-use executor: every desktop action through the signed permissions helper — serialized machine-wide, screen-coordinated (lease + FIFO queue + `release_control`), Vision OCR on snapshots, audited as `computer_action` + `computer_session_start/end` events, served over `~/.ava/run/computer-mcp.sock`) | `services.healthchecks.computer_mcp` (Unix-socket lock-free `ping` probe) |
 | `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava._mcps_daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
+
+The gate preserves the browser `Host` while proxying to the loopback frontend,
+so the frontend CSP derives the same host that its API client uses. A TLS or
+reverse proxy before the gate must overwrite `X-Forwarded-Host` and
+`X-Forwarded-Proto` with the public browser origin; the gate relays those
+headers only when present. Use lowercase `http` or `https` for
+`X-Forwarded-Proto`; the frontend normalizes other casing before deriving its
+CSP origin. The gate also relays the frontend CSP and static browser-security
+headers to the public response.
 
 The base-candidate gate additionally requires `AVA_PITR_REPLICATION_DB_URL`, a
 local URL for a dedicated `LOGIN REPLICATION NOSUPERUSER` role. The role must be
@@ -694,6 +711,88 @@ every live session — services, orchestration (updater / rollout / cluster-rest
 agent processes and shells. Raw session stdout is queried in Loki (see
 Logging / diagnostics below).
 
+### Emergency PTY allocation freeze
+
+Freeze new PTY allocation before a host-wide inspection or bounded cleanup:
+
+```bash
+ava pty freeze --holder idle-fix-operator --reason "manifest and bounded cleanup"
+ava pty status
+```
+
+The command takes the host allocation lock and prints a random generation
+token. Its acknowledgement is the boundary: an allocation already in flight is
+ready and recorded before the command returns, while every later missing-name
+allocation is refused before a host is forked. All co-located `$AVA_HOME`
+values cross the same gate. Existing sessions remain usable, and a request for
+an already-live name remains an idempotent success. Refused requests remove
+their 0600 environment handoff files; they may leave harmless gaps in an
+agent's monotonic shell IDs, which are never rolled back or reused.
+
+Resume with the exact token printed by the freeze that this operator owns:
+
+```bash
+ava pty resume <generation-token>
+```
+
+A stale token cannot clear a newer freeze. `freeze`, `status`, and `resume` are
+local host operations and remain usable while the gateway, Postgres, or Redis
+is unavailable. A malformed marker fails closed; inspect the marker path shown
+by `ava pty status` and perform an audited manual repair rather than treating
+corruption as an implicit resume.
+
+For a bounded host cleanup, keep the order explicit:
+
+1. Freeze allocation and retain the returned generation token.
+2. Snapshot the official PTY inventory and the durable desired state that will
+   be rebuilt.
+3. Stop or fence every reconciler that can create replacement sessions.
+4. Terminate only the selected sessions through the identity-aware PTY API.
+5. Verify that no later session start crossed the freeze boundary.
+6. Rebuild the selected durable state.
+7. Resume with the exact freeze token, then restore controllers one at a time;
+   restore any capacity guard last.
+
+### Canonical Codex workspace sessions
+
+The Codex launcher in `ava-use-claude-code-and-codex` owns one canonical
+session per `(cluster, workspace, tool)`. Check it before starting work:
+
+```bash
+python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.py \
+  /absolute/workspace \
+  --tasks-file /absolute/workspace/tasks.md \
+  --work-file /absolute/workspace/work.md \
+  --status
+```
+
+A live record is adopted across agent changes instead of launching a duplicate.
+Each ownership generation has a private
+`$AVA_HOME/run/coding-tools/codex/<workspace-key>/<generation>/` state
+directory and a fresh numeric PTY identity. `CODEX_HOME` points there and is
+seeded only with the required authentication and configuration snapshot; no
+mutable Codex database, session log, or transcript is shared between
+generations. A rebuilt worker derives context from the workspace task file,
+work log, collaboration contract, and Git state.
+
+The launcher starts a quiet supervisor for the ownership generation. It closes
+the full Codex PTY and terminalizes the record when `work.md` reaches `DONE` or
+`HANDOFF`, the owner agent terminates, the Codex session crashes, the task
+expires, or an operator cancels that exact generation. The default task TTL is
+four hours and can be changed with `--ttl-seconds`; TTL is the fallback, not
+the normal lifecycle boundary. Cancel only the generation printed by the
+launcher or `--status`:
+
+```bash
+python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.py \
+  /absolute/workspace \
+  --tasks-file /absolute/workspace/tasks.md \
+  --work-file /absolute/workspace/work.md \
+  --cancel-generation <generation-token>
+```
+
+A stale generation token cannot terminate a replacement owner.
+
 ### Agent-stack warm-up at start
 
 After launching the service sessions, `ava start` fires a detached, best-effort
@@ -742,7 +841,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
 - **Profile source — fresh vs. seeded from your daily Chrome**: the dedicated
   profile is normally created empty, so the agent signs in to every site itself.
   On the **first** `ava start` on a browser-capable host, when the profile is
-  still absent/empty **and** a human is at the TTY, converge's `_ensure_browser`
+  still absent **and** a human is at the TTY, converge's `_ensure_browser`
   (`services/browser/profile.py:ensure_browser_profile`) offers to seed it by
   **copying your daily Chrome profile** (macOS `~/Library/Application Support/Google/Chrome`,
   Linux `~/.config/google-chrome`) into `~/.ava/chrome-profile/` instead. Copying
@@ -752,8 +851,9 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   fresh profile. The copy excludes lock/socket files (`Singleton*`) and
   regenerable caches, reports its size first, and refuses while Chrome is still
   running (copying live SQLite risks a corrupt import — quit Chrome and retry).
-  **Guardrails**: an already-populated profile is never touched (idempotent across
-  restarts; prod's multi-GB logged-in profile survives every start); non-interactive
+  **Guardrails**: any existing profile directory is never touched, including an
+  empty or partial first copy (idempotent across restarts; prod's multi-GB logged-in
+  profile survives every start); non-interactive
   paths (watchdog respawn, boot autostart, `ava cluster update` rollout) never prompt and
   always take the fresh default; a host with no daily Chrome degrades silently to
   fresh.
@@ -817,11 +917,19 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   next `ava start`. Chrome binds CDP to loopback:9222 only; the profile starts
   empty (no cookies). To prevent the window, set `AVA_BROWSER_ENABLED=false`
   before upgrading, or after the first start.
-- **macOS headless limitation**: `display_available()` always returns True on
-  macOS (no cheap way to distinguish a headless Mac from a headed one). A
-  headless Mac with Chrome installed will pass `browser_capable()`, but
-  Chrome may fail to open a window without a logged-in desktop — this is a
-  pre-existing probe blind spot, not introduced by the default change.
+- **macOS runtime readiness**: static capability detection still treats macOS
+  as display-capable, but the browser daemon does not launch Chrome until the
+  service account owns the active console GUI session, its `launchctl gui/<uid>`
+  namespace exists, and the login Keychain answers the read-only
+  `security show-keychain-info` query. An SSH- or boot-triggered session that
+  lacks any prerequisite stays alive and retries every five seconds instead of
+  starting Chrome without encryption material. The browser probe and healthcheck
+  expose that state as **DEGRADED** and preserve the waiting session rather than
+  respawning it. If the wait marker cannot be written, the probe and healthcheck
+  use the same bounded read-only readiness check instead. The gate never
+  unlocks a Keychain or changes Chrome data;
+  `Local State` receives existence, permission, and mtime checks only,
+  with warning-only results.
 - **First login is the user's job**: the headed window opens on the host's
   desktop; **you** sign into the target sites (e.g. Google / Xiaohongshu) once — the
   agent does not (and cannot) log in for you. The dedicated profile persists the

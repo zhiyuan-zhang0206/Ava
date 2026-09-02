@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,122 @@ async def test_tick_passes_capability_role_to_manager(
     monkeypatch.setattr(wd, "_manager", mgr)
     await wd._tick("agent-runner")
     assert mgr.seen_roles == ["agent-runner"]
+
+
+async def test_completed_round_records_freshness_and_emits_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a full round publishes the absolute timestamp consumed by health and OTLP."""
+    emitted: list[tuple[str, str, dict[str, float]]] = []
+
+    async def _completed_tick(_role: str) -> None:
+        return
+
+    def _emit(category: str, event_name: str, *, attributes: dict[str, float]) -> None:
+        emitted.append((category, event_name, attributes))
+
+    monkeypatch.setattr(wd, "_tick", _completed_tick)
+    monkeypatch.setattr(wd.time, "time", lambda: 1_725_000_000.0)
+    monkeypatch.setattr(wd.telemetry, "emit", _emit)
+    progress = wd._TickProgress()
+
+    assert await wd._run_tick_with_deadline("gateway", progress) is True
+    assert progress.last_completed_at == 1_725_000_000.0
+    assert emitted == [
+        (
+            "telemetry",
+            "watchdog_tick",
+            {"last_tick_timestamp_seconds": 1_725_000_000.0},
+        )
+    ]
+
+
+async def test_round_deadline_skips_an_overdue_tick_without_advancing_freshness(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A tick that stops awaiting must not keep the watchdog's own health fresh.
+
+    The regression is an indefinitely blocked controller/check preventing any
+    later round while the watchdog process remains alive and looks healthy.
+    """
+    tick_started = threading.Event()
+    release_tick = threading.Event()
+    calls: list[str] = []
+
+    async def _blocked_tick(_role: str) -> None:
+        def _block() -> None:
+            calls.append("tick")
+            tick_started.set()
+            assert release_tick.wait(timeout=1)
+
+        await asyncio.to_thread(_block)
+
+    monkeypatch.setattr(wd, "_tick", _blocked_tick)
+    monkeypatch.setattr(wd, "_TICK_DEADLINE_S", 0.01)
+    progress = wd._TickProgress()
+
+    in_flight: asyncio.Task[None] | None = None
+    try:
+        with caplog.at_level(logging.ERROR, logger="services.watchdog.daemon"):
+            assert await wd._run_tick_with_deadline("gateway", progress) is False
+            in_flight = progress.in_flight
+            assert await wd._run_tick_with_deadline("gateway", progress) is False
+    finally:
+        release_tick.set()
+        if in_flight is not None:
+            await in_flight
+
+    assert tick_started.is_set()
+    assert calls == ["tick"]
+    assert progress.last_completed_at is None
+    assert any("tick exceeded 0.0s" in message for message in caplog.messages)
+
+
+async def test_run_exposes_the_last_completed_tick_through_role_healthz(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The watchdog's HTTP health surface exposes the completed-round timestamp
+    and receives the same liveness clock the deadline advances."""
+    pid_path = tmp_path / "gateway-watchdog.pid"
+    monkeypatch.setattr(wd.settings.services, "gateway_watchdog_pidfile", pid_path)
+    monkeypatch.setattr(wd, "_is_running", lambda _pidfile: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    health_calls: list[tuple[str, object, object]] = []
+    stopped: list[object] = []
+
+    async def _start_health(name: str, *, liveness: object, extra: object) -> object:
+        health_calls.append((name, liveness, extra))
+        return object()
+
+    async def _stop_health(server: object) -> None:
+        stopped.append(server)
+
+    async def _completed_tick(_role: str, progress: wd._TickProgress) -> bool:
+        progress.last_completed_at = 123.0
+        return True
+
+    sleeps = 0
+
+    async def _sleep(_seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(wd, "start_health_server", _start_health)
+    monkeypatch.setattr(wd, "stop_health_server", _stop_health)
+    monkeypatch.setattr(wd, "_run_tick_with_deadline", _completed_tick)
+    monkeypatch.setattr(wd.asyncio, "sleep", _sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await wd.run("gateway")
+
+    assert len(health_calls) == 1
+    name, liveness, extra = health_calls[0]
+    assert name == "gateway_watchdog"
+    assert hasattr(liveness, "is_alive") and liveness.is_alive()  # type: ignore[union-attr]
+    assert callable(extra)
+    assert extra() == {"last_tick_at": 123.0}  # type: ignore[operator]
+    assert len(stopped) == 1
 
 
 # ─── one failing healthcheck must not take the watchdog down ─────────────────

@@ -5,6 +5,7 @@ a parent."""
 from __future__ import annotations
 
 import builtins
+import math
 from dataclasses import dataclass
 from typing import TypeGuard
 
@@ -18,6 +19,7 @@ from shared.audit_events import insert_event_log
 from shared.live_announce import publish_task_created_sync, publish_task_updated_sync
 from shared.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority, validate_priority
 from shared.task_notes import task_note_line
+from shared.task_owner_notifications import owner_change_notifications
 from shared.task_reparent import resolve_reparent
 from shared.task_timestamps import render_task_timestamps
 
@@ -30,15 +32,11 @@ from shared.task_timestamps import render_task_timestamps
 # spelled `builtins.list[...]`.
 __all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", "update"]
 
-# The three statuses an agent can assign to a task. 'ongoing' is deliberately NOT
-# here: it is the system root task's permanent state (schema CHECK + DB constraint
-# agent_tasks_root_status_ongoing), set only by the schema seed / migration, never
-# by create()/update() -- the root itself is immutable (see _write_task_update),
-# and a non-root task must never be 'ongoing'. list(status=...) additionally
-# accepts 'ongoing' (a read filter, so the root is addressable by status there).
-# A task is born 'in_progress' (the DB default; user ruling 2026-08-29 -- the
-# 'open' status was meaningless, creation starts the work immediately).
-_STATUSES = frozenset({"in_progress", "done", "cancelled"})
+# The statuses update() may assign to a regular task. 'ongoing' marks
+# long-running active work, so it is exempt from reminder scans that only read
+# in_progress rows. The root remains permanently ongoing and immutable (see
+# _write_task_update); create() still begins every regular task in_progress.
+_STATUSES = frozenset({"in_progress", "ongoing", "done", "cancelled"})
 
 # The stakes axis of a task (P0 highest .. P3 lowest) — same four rungs as a
 # notice, both validated against the shared Priority enum. Orders the board
@@ -73,7 +71,7 @@ def _validate_remind_interval_seconds(seconds: int) -> None:
 
 # Column order matches the Task field order and the Task(*row) unpacking in
 # _row_to_task; keep the three aligned.
-_COLS = "id, parent_id, title, description, results, status, owner, created_by, created_at, updated_at, remind_interval_seconds, last_reminded_at, reminder_count, priority"
+_COLS = "id, parent_id, title, description, results, status, owner, created_by, created_at, updated_at, remind_interval_seconds, last_reminded_at, reminder_count, priority, token_budget, usd_budget, token_used, usd_used"
 
 
 class _Unset:
@@ -111,6 +109,10 @@ class Task:
     last_reminded_at: str | None = None
     reminder_count: int = 0
     priority: str = _DEFAULT_PRIORITY
+    token_budget: int | None = None
+    usd_budget: float | None = None
+    token_used: int = 0
+    usd_used: float = 0.0
 
     @property
     def brief(self) -> str:
@@ -126,6 +128,18 @@ class Task:
         owner = f"owner=#{self.owner}" if self.owner is not None else "unowned"
         parent = f" parent=#{self.parent_id}" if self.parent_id is not None else ""
         return f"#{self.id} [{self.status}] {self.title}  {owner}{parent}"
+
+
+@dataclass(frozen=True)
+class TaskBudgetBreach:
+    """One task ceiling crossed for the first time by tagged LLM usage."""
+
+    task_id: int
+    title: str
+    owner: int | None
+    budget_kind: str
+    used: int | float
+    budget: int | float
 
 
 def _row_to_task(row: tuple) -> Task:
@@ -178,6 +192,8 @@ def _insert_task(
     effective_owner: int,
     remind_interval_seconds: int,
     priority: str,
+    token_budget: int | None,
+    usd_budget: float | None,
     actor: int,
 ) -> Task:
     """INSERT a task row + its create event log inside the caller's transaction.
@@ -194,7 +210,7 @@ def _insert_task(
             f"task with title {title!r} already exists (task #{existing[0]} is {existing[1]}) — "
             f"duplicate in_progress titles are not allowed"
         )
-    sql = f"INSERT INTO agent_tasks (parent_id, title, description, created_by, owner, remind_interval_seconds, priority) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {_COLS}"  # noqa: S608
+    sql = f"INSERT INTO agent_tasks (parent_id, title, description, created_by, owner, remind_interval_seconds, priority, token_budget, usd_budget) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {_COLS}"  # noqa: S608
     try:
         cur.execute(
             sql,
@@ -206,6 +222,8 @@ def _insert_task(
                 effective_owner,
                 remind_interval_seconds,
                 priority,
+                token_budget,
+                usd_budget,
             ),
         )
     except psycopg.errors.UniqueViolation as exc:
@@ -233,6 +251,8 @@ def _insert_task(
             "owner": effective_owner,
             "remind_interval_seconds": remind_interval_seconds,
             "priority": priority,
+            "token_budget": token_budget,
+            "usd_budget": usd_budget,
         },
     )
     return task
@@ -246,6 +266,8 @@ def create(
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
+    token_budget: int | None = None,
+    usd_budget: float | int | None = None,
     brief: str | None = None,
 ) -> Task:
     """
@@ -263,6 +285,9 @@ def create(
         owner: agent to assign to; None means you. An owner other than you is
             notified.
         priority: "P0" (highest) through "P3" (lowest).
+        token_budget: optional positive ceiling for task-tagged LLM tokens.
+        usd_budget: optional positive finite USD ceiling for task-tagged LLM cost.
+            Untagged LLM calls do not count toward either ceiling.
         brief: deprecated alias for description.
     """
     title = coerce_str(title, "title")
@@ -273,10 +298,13 @@ def create(
     )
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     priority = coerce_str(priority, "priority")
+    token_budget = coerce_typed(token_budget, "token_budget", int, allow_none=True)
+    usd_budget = coerce_typed(usd_budget, "usd_budget", (int, float), allow_none=True)
     brief = coerce_str(brief, "brief", allow_none=True)
     description, remind_interval_seconds, priority = _resolve_create_args(
         brief, description, remind_interval_seconds, priority
     )
+    token_budget, usd_budget = _validate_budgets(token_budget, usd_budget)
     actor = ava._boot.agent_id()
     effective_owner = owner if owner is not None else actor
     with ava.DB.transaction(), ava.DB.cursor() as cur:
@@ -293,6 +321,8 @@ def create(
             effective_owner,
             remind_interval_seconds,
             priority,
+            token_budget,
+            usd_budget,
             actor,
         )
 
@@ -320,6 +350,8 @@ def create_and_assign(
     parent: int,
     remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
+    token_budget: int | None = None,
+    usd_budget: float | int | None = None,
 ) -> tuple[Task, int]:
     """Spawn an agent and assign it a task in one call.
 
@@ -343,6 +375,9 @@ def create_and_assign(
         remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
     )
     priority = coerce_str(priority, "priority")
+    token_budget = coerce_typed(token_budget, "token_budget", int, allow_none=True)
+    usd_budget = coerce_typed(usd_budget, "usd_budget", (int, float), allow_none=True)
+    token_budget, usd_budget = _validate_budgets(token_budget, usd_budget)
     # 0. Validate the parent before spawning: create() would reject a bad
     # parent after the agent exists, leaving an orphaned agent behind.
     with ava.DB.transaction(), ava.DB.cursor() as cur:
@@ -365,6 +400,8 @@ def create_and_assign(
         remind_interval_seconds=remind_interval_seconds,
         owner=agent_id,
         priority=priority,
+        token_budget=token_budget,
+        usd_budget=usd_budget,
     )
 
     # 3. Return both so the caller can track the task and the agent.
@@ -398,11 +435,6 @@ def _resolve_update_args(
     """Validate the status rung and resolve the deprecated content alias;
     returns (status, results)."""
     if status is not None and status not in _STATUSES:
-        if status == "ongoing":
-            raise ValueError(
-                "'ongoing' is the system root task's permanent state and cannot be "
-                "assigned via update() -- the root task itself is immutable"
-            )
         raise ValueError(f"status must be one of {sorted(_STATUSES)}, got {status!r}")
     if content is not None:
         if results is not None:
@@ -449,6 +481,24 @@ def _resolve_create_args(
         remind_interval_seconds = DEFAULT_REMIND_INTERVAL_SECONDS[Priority(priority)]
     _validate_remind_interval_seconds(remind_interval_seconds)
     return description, remind_interval_seconds, priority
+
+
+def _validate_budgets(
+    token_budget: int | None, usd_budget: float | int | None
+) -> tuple[int | None, float | None]:
+    """Validate optional task ceilings and normalize the USD value to float."""
+    if isinstance(token_budget, bool):
+        raise TypeError("token_budget must be int or None, got bool")
+    if isinstance(usd_budget, bool):
+        raise TypeError("usd_budget must be int, float, or None, got bool")
+    if token_budget is not None and token_budget <= 0:
+        raise ValueError(f"token_budget must be a positive integer, got {token_budget!r}")
+    if usd_budget is None:
+        return token_budget, None
+    normalized_usd = float(usd_budget)
+    if not math.isfinite(normalized_usd) or normalized_usd <= 0:
+        raise ValueError(f"usd_budget must be a positive finite number, got {usd_budget!r}")
+    return token_budget, normalized_usd
 
 
 def _owner_is_changing(owner: int | None) -> bool:
@@ -526,24 +576,24 @@ def _write_task_update(
     note: str | None,
     owner: int | None,
     owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
-    actor: int,
+    actor: int | None,
 ) -> tuple[int | None, str, int | None]:
     """Apply an update() row write inside the caller's transaction.
 
-    Holds the row FOR UPDATE, enforces root immutability, parent-close, and
-    title-uniqueness rules, writes the row + optional note, and records the
-    event log. Returns (old_owner, current_title, new_owner) for the post-commit
-    notification."""
+    Holds the row FOR UPDATE, enforces root immutability, ongoing ownership,
+    parent-close, and title-uniqueness rules, writes the row + optional note,
+    and records the event log. Returns (old_owner, current_title, new_owner)
+    for the post-commit notification."""
     # FOR UPDATE holds the row across the read -> write so two concurrent
     # reassignments cannot both act on the same stale owner.
     cur.execute(
-        "SELECT owner, title, is_root FROM agent_tasks WHERE id = %s FOR UPDATE",
+        "SELECT owner, title, is_root, status FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),
     )
     row = cur.fetchone()
     if row is None:
         raise ValueError(f"task {task_id} does not exist")
-    old_owner, current_title, is_root = row
+    old_owner, current_title, is_root, current_status = row
     # The system root task is immutable: it is the anchor of the task tree
     # and the parent of the cluster's top-level tasks, so it can never be
     # reassigned, completed, cancelled, or otherwise edited. Fail fast rather
@@ -553,10 +603,30 @@ def _write_task_update(
             f"task {task_id} is the system root task and is immutable — "
             f"it cannot be reassigned, completed, cancelled, or otherwise edited"
         )
+    # A process identity is the same value agents read as ava.self.AGENT_ID.
+    # System tooling runs without one and deliberately remains outside this
+    # agent-to-agent ownership gate.
+    if (
+        status == "ongoing"
+        and status != current_status
+        and actor is not None
+        and actor != old_owner
+    ):
+        cur.execute(
+            "WITH RECURSIVE owner_lineage(id, spawner) AS ("
+            "SELECT id, spawner FROM agents_meta WHERE id = %s "
+            "UNION "
+            "SELECT parent.id, parent.spawner FROM agents_meta parent "
+            "JOIN owner_lineage child ON child.spawner = 'agent:' || parent.id::TEXT"
+            ") SELECT 1 FROM owner_lineage WHERE id = %s LIMIT 1",
+            (old_owner, actor),
+        )
+        if cur.fetchone() is None:
+            raise ValueError("only the owner or a delegator can set a task to ongoing")
     if status in ("done", "cancelled"):
         cur.execute(
             "SELECT id, count(*) OVER () FROM agent_tasks "
-            "WHERE parent_id = %s AND status = 'in_progress' "
+            "WHERE parent_id = %s AND status IN ('in_progress', 'ongoing') "
             "ORDER BY id LIMIT 1",
             (task_id,),
         )
@@ -564,7 +634,7 @@ def _write_task_update(
         if active_child is not None:
             child_id, child_count = active_child
             raise ValueError(
-                f"task {task_id} has {child_count} in_progress child tasks "
+                f"task {task_id} has {child_count} active child tasks "
                 f"(e.g. #{child_id}) — close or cancel them first"
             )
     # A rename must keep create()'s invariant: no two in_progress
@@ -622,7 +692,7 @@ def _owner_change_payload(
 
 
 def _log_task_update(
-    actor: int,
+    actor: int | None,
     payload: dict[str, object],
     owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
     new_owner: int | None,
@@ -660,8 +730,11 @@ def update(
     a notification.
 
     Args:
-        status: one of "in_progress", "done", "cancelled". Closing a
-            task is rejected while any direct child is in progress.
+        status: one of "in_progress", "ongoing", "done", "cancelled".
+            ongoing marks long-running active work. Closing a task is rejected
+            while any direct child is in progress or ongoing. Only the owner or
+            its delegator may change a task into ongoing; calls without an
+            agent identity remain allowed for system tooling.
         results: replaces the whole field; use note to append instead.
         owner: agent id to reassign to. None means no change — a task always
             has an owner.
@@ -729,25 +802,23 @@ def update(
         if parent_id is not _UNSET:
             changes.append("parent → root" if parent_id is None else f"parent → #{parent_id}")
 
-    # Side effects run after the row change commits: telling an agent auto-wakes
-    # it, so keep it out of the transaction. A reassignment carries the change
-    # summary to the new owner; any other non-owner write notifies the
-    # (unchanged) owner of what changed and by whom — so a task cancelled
-    # behind its owner's back never goes unnoticed.
-    _notify_after_update(
-        task_id,
-        title,
-        current_title,
-        old_owner,
-        new_owner,
-        owner_changing,
-        actor,
-        changes,
-        parent_only,
-    )
-
-    # Live-refresh every open task board (fleet-wide invalidate + refetch).
-    publish_task_updated_sync(actor, task_id)
+    # Agent-scoped side effects run after the row change commits: telling an
+    # agent auto-wakes it, so keep it out of the transaction. System tooling
+    # has no actor for a task note or TaskUpdated; like gateway PATCH, its
+    # committed write relies on the board's normal poll.
+    if actor is not None:  # pyright: ignore[reportUnnecessaryComparison] -- agent_id() is None before bootstrap.
+        _notify_after_update(
+            task_id,
+            title,
+            current_title,
+            old_owner,
+            new_owner,
+            owner_changing,
+            actor,
+            changes,
+            parent_only,
+        )
+        publish_task_updated_sync(actor, task_id)
 
 
 def _should_notify_previous_owner(old_owner: int | None, actor: int) -> TypeGuard[int]:
@@ -814,22 +885,32 @@ def _notify_owner_change(
     renders it as a system marker without an Agent prefix or peer timestamp
     (user ruling 2026-08-27).
     """
-    if new_owner is not None and new_owner != actor:
-        new_msg = f'Task #{task_id} "{title}" is now assigned to you (by agent #{actor}).'
-        if changes:
-            new_msg += "\n\n" + "\n".join(f"- {c}" for c in changes)
-        if description:
-            new_msg += f"\n\n{description}"
-        # A task assignment is a delegator direction: the new owner is always
-        # told, even when terminated — the system-note delivery auto-resurrects
-        # so an assigned task never strands on a dead agent.
-        ava.agents.send_system_note(new_owner, new_msg, resurrect=True)
-    if _should_notify_previous_owner(old_owner, actor):
+    for note in owner_change_notifications(
+        task_id,
+        title,
+        None,
+        new_owner,
+        actor=actor,
+        previous_owner_terminated=False,
+        description=description,
+        changes=changes,
+    ):
         ava.agents.send_system_note(
-            old_owner,
-            f'Task #{task_id} "{title}" you owned is no longer assigned to you.',
-            resurrect=False,
+            note.agent_id,
+            note.content,
+            task_id=task_id if note.resurrect else None,
+            resurrect=note.resurrect,
         )
+    if _should_notify_previous_owner(old_owner, actor):
+        for note in owner_change_notifications(
+            task_id,
+            title,
+            old_owner,
+            None,
+            actor=actor,
+            previous_owner_terminated=False,
+        ):
+            ava.agents.send_system_note(note.agent_id, note.content, resurrect=note.resurrect)
 
 
 def _notify_owner_updated(
@@ -859,6 +940,7 @@ def _notify_owner_updated(
     ava.agents.send_system_note(
         owner,
         f'Task #{task_id} "{title}" was updated by agent #{actor}:\n{detail}',
+        task_id=task_id,
         resurrect=False,
     )
 
@@ -872,6 +954,73 @@ def _is_terminated(agent_id: int) -> bool:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
         meta = cur.fetchone()
     return meta is None or meta[0] == "terminated"
+
+
+def record_task_usage(task_id: int, *, token_count: int, cost_usd: float) -> None:
+    """Add one explicitly task-tagged LLM call and notify on a first breach.
+
+    The row lock makes the cumulative totals and one-shot notification markers
+    atomic across concurrent task turns. Calls without an explicit task id do
+    not reach this function and are intentionally absent from every task total.
+    """
+    if token_count < 0:
+        raise ValueError(f"token_count must be non-negative, got {token_count!r}")
+    if not math.isfinite(cost_usd) or cost_usd < 0:
+        raise ValueError(f"cost_usd must be a finite non-negative number, got {cost_usd!r}")
+    with ava.DB.transaction(), ava.DB.cursor() as cur:
+        cur.execute(
+            "SELECT title, owner, token_budget, usd_budget, token_used, usd_used, "
+            "token_budget_notified_at, usd_budget_notified_at "
+            "FROM agent_tasks WHERE id = %s FOR UPDATE",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError(f"task {task_id} does not exist")
+        (
+            title,
+            owner,
+            token_budget,
+            usd_budget,
+            token_used,
+            usd_used,
+            token_notified,
+            usd_notified,
+        ) = row
+        new_token_used = token_used + token_count
+        new_usd_used = usd_used + cost_usd
+        token_breached = (
+            token_budget is not None and token_notified is None and new_token_used >= token_budget
+        )
+        usd_breached = (
+            usd_budget is not None and usd_notified is None and new_usd_used >= usd_budget
+        )
+        cur.execute(
+            "UPDATE agent_tasks SET token_used = %s, usd_used = %s, "
+            "token_budget_notified_at = CASE WHEN %s THEN now() ELSE token_budget_notified_at END, "
+            "usd_budget_notified_at = CASE WHEN %s THEN now() ELSE usd_budget_notified_at END "
+            "WHERE id = %s",
+            (new_token_used, new_usd_used, token_breached, usd_breached, task_id),
+        )
+
+    breaches: builtins.list[TaskBudgetBreach] = []
+    if token_breached and token_budget is not None:
+        breaches.append(
+            TaskBudgetBreach(task_id, title, owner, "token", new_token_used, token_budget)
+        )
+    if usd_breached and usd_budget is not None:
+        breaches.append(TaskBudgetBreach(task_id, title, owner, "USD", new_usd_used, usd_budget))
+    for breach in breaches:
+        if breach.owner is None:
+            continue
+        ava.agents.send_system_note(
+            breach.owner,
+            f'Task #{breach.task_id} "{breach.title}" exceeded its {breach.budget_kind} budget: '
+            f"{breach.used} used of {breach.budget}. Finish the in-flight unit, update the task, "
+            "and do not begin additional work without a new budget.",
+            task_id=breach.task_id,
+            resurrect=False,
+        )
 
 
 def log(task_id: int, message: str) -> None:

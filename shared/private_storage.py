@@ -7,6 +7,8 @@ import stat
 import uuid
 from pathlib import Path
 
+from shared.log import logger
+
 
 def _private_path_error(path: Path, reason: str) -> RuntimeError:
     return RuntimeError(f"private storage path {path} {reason}")
@@ -45,7 +47,31 @@ def ensure_private_file(path: Path) -> None:
         raise _private_path_error(path, "is a symlink")
     if not stat.S_ISREG(current.st_mode):
         raise _private_path_error(path, "is not a regular file")
-    path.chmod(0o600)
+    path.chmod(0o700 if current.st_mode & stat.S_IXUSR else 0o600)
+
+
+def converge_private_tree(path: Path) -> Path:
+    """Recursively converge a private directory tree to owner-only modes.
+
+    A unit's logs, workspaces, and memory checkout can predate the private
+    storage convention. Converge owns their durable permission repair, but it
+    must never follow a symlink out of the tree while doing so.
+    """
+    ensure_private_dir(path)
+    for child in path.iterdir():
+        current = child.lstat()
+        if stat.S_ISLNK(current.st_mode):
+            # Workspace trees can link tooling outside AVA_HOME; private-tree
+            # convergence must not recurse into or alter those targets.
+            logger.warning("private storage convergence skipped symlink {path}", path=child)
+            continue
+        if stat.S_ISDIR(current.st_mode):
+            converge_private_tree(child)
+            continue
+        if not stat.S_ISREG(current.st_mode):
+            raise _private_path_error(child, "is not a regular file or directory")
+        ensure_private_file(child)
+    return path
 
 
 def write_private_bytes(path: Path, data: bytes) -> None:

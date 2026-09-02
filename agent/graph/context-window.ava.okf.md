@@ -18,6 +18,7 @@ Agent context window management — how message history is compressed as it appr
 - Replaces the entire message history with a summary.
 - The summary must follow a standard format: Requests / Progress / In flight / Dead ends / Pitfalls / Verbatim tail.
 - Before compaction, flush persistent state to disk (workspace files, handoff docs)
+- Every applied replacement emits telemetry `compaction_completed`: `compactions=1` is the frequency counter, while `history_chars`, `summary_chars`, and `summary_history_ratio` show the size reduction. The history excludes the standing system prompt because it is re-established rather than discarded; an empty history omits the ratio
 
 ### Automatic Compact Thresholds (per-model, #617)
 - Hard = `min(auto_compact_fraction × MODEL_CONTEXT_WINDOW[model], auto_compact_ceiling_tokens)`; soft = `compact_reminder_fraction × window` (under the ceiling the same ratio compresses, preserving headroom). Per-model layering via `resolve_setting` (base 0.3/0.4, ceiling 0 = no cap), resolved by `shared/lm/context_budget.py:resolve_context_budget`, so a new registry model derives its thresholds automatically.

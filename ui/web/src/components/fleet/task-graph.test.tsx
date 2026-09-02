@@ -14,6 +14,7 @@ import type { TasksResult } from "@/lib/use-tasks";
 import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
 
 import { FORCE_DEFAULTS, FORCE_GROUPS, TASK_FORCE_GROUPS, type ForceGroup } from "./force-controls";
+import { STATUS_TO_LANE } from "./task-kanban";
 import { TASK_FORCE_KEY } from "./task-graph";
 import { TaskGraph } from "./task-graph";
 
@@ -69,6 +70,25 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+it("maps ongoing tasks into the In progress Kanban lane", () => {
+  expect(STATUS_TO_LANE.ongoing).toBe(0);
+});
+
+it("labels a regular ongoing Kanban card as Ongoing", async () => {
+  useTasks.mockReturnValue(
+    ok([
+      task(1, { title: "root", status: "ongoing" }),
+      task(2, { title: "long-running child", status: "ongoing", parent_id: 1 }),
+    ]),
+  );
+  render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+
+  await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
+  fireEvent.click(screen.getByText("Kanban"));
+
+  await waitFor(() => expect(screen.getByText("Ongoing")).toBeTruthy());
+});
+
 describe("TaskGraph (graph mode)", () => {
   it("uses full rows so graph and kanban retain task text", () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
@@ -82,7 +102,7 @@ describe("TaskGraph (graph mode)", () => {
     render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     const legend = screen.getByLabelText("Task graph legend");
-    for (const label of ["In progress", "Done", "Canceled", "Root"]) {
+    for (const label of ["In progress", "Done", "Canceled", "Ongoing"]) {
       expect(legend.textContent).toContain(label);
     }
     // The "Uniform node size" legend line was removed (user ruling 2026-08-29):
@@ -727,17 +747,17 @@ describe("TaskGraph layout controls", () => {
     groups.map((g) => ({ label: g.label, sliders: g.sliders.map((s) => `${s.key}:${s.label}`) }));
 
   it("Node group is a single Size slider — no min/max band (ruling 2026-08-10 #1127)", () => {
-    const nodeGroup = TASK_FORCE_GROUPS.find((g) => g.label === "Node")!;
-    expect(nodeGroup.sliders).toEqual([{ key: "nodeSizeMin", label: "Size", min: 6, max: 48, step: 1 }]);
+    const nodeGroup = TASK_FORCE_GROUPS.find((g) => g.label === "node")!;
+    expect(nodeGroup.sliders).toEqual([{ key: "nodeSizeMin", label: "size", min: 6, max: 48, step: 1 }]);
     // the other groups are identical to the Agent Graph's
     expect(surface(TASK_FORCE_GROUPS.slice(1))).toEqual(surface(FORCE_GROUPS.slice(1)));
-    expect(TASK_FORCE_GROUPS.map((g) => g.label)).toEqual(["Node", "Edge", "Layout", "Zoom"]);
+    expect(TASK_FORCE_GROUPS.map((g) => g.label)).toEqual(["node", "edge", "layout", "zoom"]);
   });
 
   it("repulsion max is at least 10000 on BOTH graphs (user ruling 2026-08-10 #1140)", () => {
     const repulsion = (groups: ForceGroup[]) =>
       groups
-        .find((g) => g.label === "Layout")!
+        .find((g) => g.label === "layout")!
         .sliders.find((s) => s.key === "repulsion")!;
     expect(repulsion(FORCE_GROUPS).max).toBeGreaterThanOrEqual(10000);
     expect(repulsion(TASK_FORCE_GROUPS).max).toBeGreaterThanOrEqual(10000);

@@ -19,6 +19,12 @@ from datetime import time as clock_time
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.backup import BACKUP_HOUR, _cluster_tz, is_due, run_backup
+from services.backup_scheduler.recovery_drill import (
+    load_local_dump_restore_success,
+    local_dump_restore_due,
+    record_local_dump_restore_success,
+)
+from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -138,6 +144,30 @@ async def _sleep_until_next_backup_hour(now: datetime) -> None:
     await _sleep((target.astimezone(UTC) - now).total_seconds())
 
 
+def run_local_dump_restore() -> None:
+    """Restore the newest local dump into an isolated Postgres instance."""
+    from scripts.restore_drill import run_drill
+
+    run_drill()
+
+
+async def _run_due_local_dump_restore(now: datetime) -> None:
+    """Run one weekly local restore proof without re-running the daily dump."""
+    try:
+        if not local_dump_restore_due(now, last_success=load_local_dump_restore_success()):
+            return
+        await asyncio.to_thread(run_local_dump_restore)
+        record_local_dump_restore_success(now)
+    except Exception as exc:
+        telemetry.emit(
+            "telemetry",
+            "recovery_drill_failed",
+            level="error",
+            attributes={"drill": "logical_dump", "detail": str(exc)},
+        )
+        _log.exception("[pg-backup] local restore drill failed")
+
+
 async def _backup_loop(state: _BackupState) -> None:
     """Run due dumps and retry a failed dump sooner than the next schedule."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
@@ -152,6 +182,7 @@ async def _backup_loop(state: _BackupState) -> None:
         try:
             await asyncio.to_thread(run_backup, now)
             state.record_success(now)
+            await _run_due_local_dump_restore(now)
         except Exception as exc:
             state.record_error(str(exc))
             _log.exception("[pg-backup] dump failed; retrying in %ss", BACKUP_RETRY_INTERVAL_S)

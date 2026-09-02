@@ -350,6 +350,7 @@ class StalledRolloutController:
     """
 
     name = "rollout"
+    timeout_s: float | None = None
 
     def reconcile(self, role: MachineRole) -> ReconcileResult:
         if role != "gateway":

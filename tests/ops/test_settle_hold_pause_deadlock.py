@@ -36,6 +36,8 @@ class _SpyController:
     """Stands in for the pin / code controllers — the ones that carry the settle-hold
     exception. It only records whether the round reached it."""
 
+    timeout_s: float | None = None
+
     def __init__(self, name: str, reached: list[str]) -> None:
         self.name = name
         self._reached = reached

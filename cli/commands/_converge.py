@@ -39,6 +39,9 @@ from cli.commands._health_preflight import ensure_health_preflight as _ensure_he
 from cli.commands._lgtm import ensure_lgtm_stack_step
 from cli.commands._lgtm_native import ensure_lgtm_native_step
 from cli.commands._otel_collector import ensure_otel_collector_step
+from cli.commands._ownership_preflight import (
+    ensure_ownership_preflight as _ensure_ownership_preflight,
+)
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
 from shared.browser_deps import browser_deps_notice, browser_deps_warning
@@ -47,6 +50,7 @@ from shared.config import settings
 from shared.machine import MachineRoles
 from shared.platform_backend import get_backend
 from shared.platform_probes import browser_incapability
+from shared.private_storage import converge_private_tree, ensure_private_file
 from shared.runtime_config import migrate_permissions_helper_env_keys
 from shared.screen_capture import clear_status, write_status
 
@@ -107,9 +111,13 @@ def _ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
-    for sub in ("logs", "configs", "secrets"):
+    for sub in ("configs", "secrets"):
         (ctx.ava_home / sub).mkdir(parents=True, exist_ok=True)
-    (ctx.ava_home / "logs" / ".metadata_never_index").touch(exist_ok=True)
+    for sub in ("logs", "workspaces", "memory"):
+        converge_private_tree(ctx.ava_home / sub)
+    marker = ctx.ava_home / "logs" / ".metadata_never_index"
+    marker.touch(exist_ok=True)
+    ensure_private_file(marker)
 
 
 def _ensure_prod_editable_pth(ctx: ConvergeCtx) -> None:  # noqa: ARG001
@@ -130,6 +138,28 @@ def _ensure_prod_editable_pth(ctx: ConvergeCtx) -> None:  # noqa: ARG001
             f"{repair.poisoned_target!r}; repaired to {repair.source_root}",
             file=sys.stderr,
         )
+
+
+def _ensure_prod_editable_dir_protection(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Block atomic editable-record replacement outside the sanctioned write window."""
+    if os.name == "nt":
+        return
+    import shared.cluster_drift
+    import shared.editable_install
+    from cli.commands.status import _update_in_flight
+
+    if _update_in_flight():
+        print(
+            "  · prod site-packages protection skipped: cluster update in flight", file=sys.stderr
+        )
+        return
+    source_root = shared.cluster_drift.prod_source_dir()
+    if source_root is None:
+        return
+    for directory in shared.editable_install.editable_site_packages_dirs(source_root):
+        if directory.stat().st_mode & 0o777 == 0o555:
+            continue
+        directory.chmod(0o555)
 
 
 def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
@@ -498,11 +528,19 @@ def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
+    # Warning-only ownership preflight must run before every write-capable step:
+    # root-owned paths otherwise fail before converge can print the exact repair.
+    ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
     # Reset the prod checkout before any other step reads the tree: a tampered
     # tree would make every later step misbehave, and resetting first means the
     # rest of converge runs against the installed commit.
     ConvergeStep("source tree reset + clean", ensure_source_tree_integrity, host_global=True),
     ConvergeStep("prod editable .pth target", _ensure_prod_editable_pth, host_global=True),
+    ConvergeStep(
+        "prod editable site-packages protection",
+        _ensure_prod_editable_dir_protection,
+        host_global=True,
+    ),
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),

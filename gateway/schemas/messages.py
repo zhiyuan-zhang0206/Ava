@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 from ops.rpc_schemas import _UserContent
@@ -94,11 +95,14 @@ class SystemNoteIn(BaseModel):
     controls whether a terminated target is woken to receive the note: task
     assignment (a delegator direction) resurrects, plain update notices do
     not (user ruling 2026-08-27 — notifications never resurrect an owner).
+    `task_id` is optional but requires `note_tag='task'`; it is the explicit
+    LLM-usage attribution for the turn this note drives.
     """
 
     content: str = Field(min_length=1)
     source: str = Field(default="system", min_length=1, max_length=64)
     note_tag: str = "task"
+    task_id: int | None = Field(default=None, gt=0)
     resurrect: bool = True
 
     @field_validator("note_tag")
@@ -115,6 +119,12 @@ class SystemNoteIn(BaseModel):
     def _check_envelope_source(cls, v: str) -> str:
         validate_source(v)
         return v
+
+    @model_validator(mode="after")
+    def _check_task_attribution(self) -> "SystemNoteIn":
+        if self.task_id is not None and self.note_tag != NoteTag.TASK.value:
+            raise ValueError("task_id requires note_tag='task'")
+        return self
 
 
 class ResolveNoticeIn(BaseModel):

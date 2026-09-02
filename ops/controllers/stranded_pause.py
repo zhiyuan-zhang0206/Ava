@@ -302,6 +302,7 @@ class PauseController:
     revived — unlike a schema/DB block, which is only about the DB's users."""
 
     name = "pause"
+    timeout_s: float | None = None
 
     def reconcile(self, role: MachineRole) -> ReconcileResult:  # noqa: ARG002 — host-level, uniform Controller signature
         if not is_paused():

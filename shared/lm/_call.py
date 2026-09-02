@@ -97,12 +97,12 @@ def invoke_text(
 
     `provider` is the `shared/lm/factory.py` provider key (`deepseek` /
     `claude` / …) for the outbound concurrency limiter
-    (`shared/lm/_concurrency.py`, disabled by default); `None` skips the
-    limiter entirely.
+    (`shared/lm/_concurrency.py`, DeepSeek capped by default); `None` skips
+    the limiter entirely.
     """
     from langchain_core.messages import HumanMessage
 
-    from shared.lm.errors import ErrorClass, classify_error
+    from shared.lm.errors import ErrorClass, emit_provider_error
 
     retry_attempts = max(0, retry_attempts)  # a negative budget must not empty the loop
     retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
@@ -116,7 +116,10 @@ def invoke_text(
             start_time_ns = time.time_ns() - int((time.monotonic() - started) * 1_000_000_000)
             break
         except Exception as e:
-            retryable = classify_error(e).error_class in (ErrorClass.TRANSIENT, ErrorClass.UNKNOWN)
+            resolved_model = model or getattr(llm, "model_name", None)
+            event_model = resolved_model if isinstance(resolved_model, str) else "unknown"
+            classification = emit_provider_error(e, model=event_model, fatal=False)
+            retryable = classification.error_class in (ErrorClass.TRANSIENT, ErrorClass.UNKNOWN)
             if attempt < retry_attempts and retryable:
                 delay = min(retry_delay_seconds * (2**attempt), retry_max_delay_seconds)
                 retry_after = extract_retry_after(e)

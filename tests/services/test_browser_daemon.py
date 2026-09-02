@@ -54,9 +54,26 @@ def test_main_asserts_capable_then_execvps_chrome(
     resolved Chrome with the configured port but no automatic page."""
     order: list[str] = []
     monkeypatch.setattr(bd, "assert_browser_capable", lambda: order.append("capable"))
-    monkeypatch.setattr(bd, "_cdp_reachable", lambda _p: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        bd,
+        "_cdp_reachable",
+        lambda _p: (order.append("port"), False)[1],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
     monkeypatch.setattr(bd, "resolve_chrome_binary", lambda: "/chrome")
-    monkeypatch.setattr(bd, "_profile_dir", lambda: tmp_path / "prof")
+
+    def _profile() -> Path:
+        order.append("profile")
+        return tmp_path / "prof"
+
+    monkeypatch.setattr(bd, "_profile_dir", _profile)
+    monkeypatch.setattr(
+        bd.macos_readiness, "wait_for_browser_startup_readiness", lambda: order.append("ready")
+    )
+    monkeypatch.setattr(
+        bd.browser_profile,
+        "validate_local_state",
+        lambda _profile: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
     monkeypatch.setattr(bd, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "app_port", 3001)
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://10.0.0.72:8000")
@@ -74,7 +91,7 @@ def test_main_asserts_capable_then_execvps_chrome(
 
     monkeypatch.setattr(bd.os, "execvp", _fake_execvp)
     bd.main()
-    assert order == ["capable", "exec"]  # capability checked BEFORE launch
+    assert order == ["capable", "port", "ready", "profile", "exec"]
     assert captured_file == "/chrome"
     # main() takes the port from settings, and a cluster gets one out of its own
     # port block — a literal here only holds on a default-home install.

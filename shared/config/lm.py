@@ -155,13 +155,15 @@ class LmSettings(EnvSettings):
     )
 
     llm_max_concurrent: str = Field(
-        default="",
+        default="deepseek:31",
         alias="AVA_LLM_MAX_CONCURRENT",
         description=(
             "Per-provider outbound LLM concurrency caps, format "
-            "'provider:limit,provider:limit' (e.g. 'deepseek:400,anthropic:200'; "
+            "'provider:limit,provider:limit' (e.g. 'deepseek:31,anthropic:200'; "
             "provider keys are the model prefixes: deepseek/claude/gpt/gemini/"
-            "mimo/kimi/glm/qwen). Empty = unlimited (default). The cap wraps "
+            "mimo/kimi/glm/qwen). Empty disables all caps. The default "
+            "deepseek:31 divides DeepSeek Pro's 500 account slots across the "
+            "host's default 16 active-agent budget (31 * 16 = 496). The cap wraps "
             "the whole SDK call (SDK-internal retries included) and queues "
             "excess calls instead of 429ing the provider. Reserved for when "
             "agent count or batch jobs approach a provider's account "
@@ -248,6 +250,24 @@ class LmSettings(EnvSettings):
         },
     )
 
+    llm_retry_max_total_seconds: float = Field(
+        default=420.0,
+        gt=0,
+        alias="AVA_LLM_RETRY_MAX_TOTAL_SECONDS",
+        description=(
+            "Hard wall-clock budget (seconds) across an LLM node's initial "
+            "attempt, retries, and retry waits. The retry policy clips its next "
+            "wait to the remaining budget and halts instead of invoking again "
+            "after it expires."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     llm_retry_initial_interval_seconds: float = Field(
         default=30.0,
         alias="AVA_LLM_RETRY_INITIAL_INTERVAL_SECONDS",
@@ -306,13 +326,15 @@ class LmSettings(EnvSettings):
         },
     )
 
-    llm_silent_idle_max_consecutive: int = Field(
-        default=3,
-        alias="AVA_LLM_SILENT_IDLE_MAX_CONSECUTIVE",
+    llm_silent_idle_max_output_tokens: int = Field(
+        default=2048,
+        alias="AVA_LLM_SILENT_IDLE_MAX_OUTPUT_TOKENS",
         description=(
-            "Max consecutive silent-idle turns (reasoning but no text and no "
-            "tool_call) before halting to idle. Caps a model that habitually reasons "
-            "without acting. 0 disables the cap (loop indefinitely)."
+            "Cumulative output-token budget ceiling for consecutive silent-idle "
+            "turns (reasoning but no text and no tool_call). A provider-reported "
+            "zero-output silent idle still consumes one budget token, so it cannot "
+            "loop indefinitely. The next silent idle that reaches the ceiling halts "
+            "instead of spending another model call. 0 disables the cost boundary."
         ),
         json_schema_extra={
             "restart_required": "agent",

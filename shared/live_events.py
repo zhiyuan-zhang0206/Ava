@@ -405,13 +405,11 @@ class LabelUpdated(_Base):
 
 
 class NoticePosted(_Base):
-    """Published when the agent posts (or edits) an FYI notice (require_response
-    False) via `ava.ui.notify` / `ava.ui.edit_notice`. Carries only the
-    lightweight header (not the body): the FYI feed is its own paginated feed
-    kept off the fleet-wide agent snapshot (an FYI backlog could be large), so
-    this lets the frontend upsert one row (by id) and bump the agent's unread
-    badge without a refetch. Notices that need a response ride the agent snapshot
-    instead, so they do not emit this."""
+    """Published when the agent posts or edits any open notice via
+    `ava.ui.notify` / `ava.ui.edit_notice`. Carries only the lightweight header
+    (not the body), so the unified Inbox refetches its queue. A notice that needs
+    a response also publishes AgentUpdated, whose snapshot carries its body and
+    response state for inspector consumers."""
 
     role: Literal["notice_posted"] = "notice_posted"
     notice_id: int
@@ -423,11 +421,10 @@ class NoticePosted(_Base):
 
 
 class NoticeResolved(_Base):
-    """Published when an FYI notice leaves the unread feed — the user reviewed it
-    (read) or the agent withdrew it. The frontend drops it from the unread feed
-    and decrements the agent's unread badge — the bookkeeping counterpart to
-    NoticePosted, since FYI notices live in their own feed rather than the agent
-    snapshot."""
+    """Published when an open notice leaves the queue. The frontend refetches the
+    open and resolved Inbox views. The resolution's write or delivery path also
+    publishes AgentUpdated when it removes a response-required notice, keeping
+    the inspector snapshot independent of this Inbox event."""
 
     role: Literal["notice_resolved"] = "notice_resolved"
     notice_id: int

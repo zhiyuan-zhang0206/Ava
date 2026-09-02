@@ -77,6 +77,7 @@ import psutil
 from shared.config import settings
 from shared.daemon_health import DaemonProbe
 
+from . import macos_readiness
 from .orphan import find_cluster_chrome, is_cluster_chrome
 from .profile import profile_dir
 
@@ -199,6 +200,11 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
 
     unreachable = _cdp_unreachable(port)
     if unreachable is not None:
+        wait_reason = macos_readiness.degraded_wait_reason()
+        if wait_reason is not None:
+            return DaemonProbe.down(
+                f"ava-browser waiting for macOS startup readiness: {wait_reason}; {unreachable}"
+            )
         return DaemonProbe.down(unreachable)
 
     found = find_cluster_chrome(profile)

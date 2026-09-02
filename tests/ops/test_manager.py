@@ -4,19 +4,21 @@ I/O never stalls the event loop."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 
 import pytest
 
 from ops import manager
-from ops.controllers.base import BlockScope, ReconcileResult
+from ops.controllers.base import BlockScope, Controller, ReconcileResult
 from ops.manager import ControllerManager, build_controllers
 
 
 class _FakeController:
     def __init__(self, name: str, blocks: BlockScope, record: list[str]) -> None:
         self.name = name
+        self.timeout_s: float | None = None
         self._blocks = blocks
         self._record = record
 
@@ -85,6 +87,7 @@ async def test_reconcile_offloads_to_worker_thread() -> None:
 
     class _ThreadProbe:
         name = "probe"
+        timeout_s: float | None = None
 
         def reconcile(self, role: str) -> ReconcileResult:
             seen["thread"] = threading.current_thread().name
@@ -92,6 +95,74 @@ async def test_reconcile_offloads_to_worker_thread() -> None:
 
     await ControllerManager([_ThreadProbe()]).reconcile("gateway")
     assert seen["thread"] != threading.main_thread().name
+
+
+async def test_controller_timeout_skips_the_rest_of_the_round(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A controller can declare a bounded reconcile: when its worker thread
+    exceeds that bound, the manager logs the incident and blocks the remaining
+    round.
+
+    The regression is a controller's blocking I/O pinning the entire watchdog
+    round forever, which leaves no completed tick to make the watchdog's own
+    health endpoint stale.
+    """
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[str] = []
+
+    class _TimedOutController:
+        name = "slow"
+        timeout_s: float | None = 0.01
+
+        def reconcile(self, role: str) -> ReconcileResult:
+            del role
+            started.set()
+            assert release.wait(timeout=1)
+            return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
+
+    class _FollowingController:
+        name = "following"
+        timeout_s: float | None = None
+
+        def reconcile(self, role: str) -> ReconcileResult:
+            del role
+            seen.append(self.name)
+            return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
+
+    try:
+        with caplog.at_level(logging.ERROR, logger="ops.manager"):
+            assert (
+                await asyncio.wait_for(
+                    ControllerManager([_TimedOutController(), _FollowingController()]).reconcile(
+                        "gateway"
+                    ),
+                    timeout=0.2,
+                )
+                is BlockScope.ALL
+            )
+    finally:
+        release.set()
+
+    assert started.is_set()
+    assert seen == []
+    assert any("slow reconcile exceeded 0.0s" in message for message in caplog.messages)
+
+
+async def test_unbounded_controller_timeout_does_not_use_the_deadline_format() -> None:
+    """A controller's own TimeoutError is not evidence that an unset deadline expired."""
+
+    class _SocketTimeoutController:
+        name = "socket"
+        timeout_s: float | None = None
+
+        def reconcile(self, role: str) -> ReconcileResult:
+            del role
+            raise TimeoutError("socket timed out")
+
+    with pytest.raises(TimeoutError, match="socket timed out"):
+        await ControllerManager([_SocketTimeoutController()]).reconcile("gateway")
 
 
 def test_default_controllers_in_reconcile_order() -> None:
@@ -120,6 +191,12 @@ def test_default_controllers_in_reconcile_order() -> None:
         "pin",
         "code",
     ]
+
+
+def test_default_controllers_declare_the_timeout_contract() -> None:
+    """Every built-in controller explicitly opts into the manager's optional
+    timeout surface, even when it has no narrower deadline than the round."""
+    assert all(isinstance(controller, Controller) for controller in build_controllers())
 
 
 # ─── a blocked round is never silent ──────────────────────────────────────────

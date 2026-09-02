@@ -43,11 +43,13 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # Dynamic emit: positional-argument form, no `event=` literal.
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
         "task_escalation",  # task_maintenance/daemon.py:_run_escalate
+        "watchdog_tick",  # services/watchdog/daemon.py:_TickProgress.record_completed (positional emit)
         "heartbeat_paused",  # ava/self.py:258 telemetry.emit("telemetry", ...)
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
         "pgbouncer_repaired",  # services/healthchecks/pgbouncer.py:_emit_repaired
         "editable_pth_repaired",  # shared/editable_install.py:repair_editable_ava_pth
         "editable_direct_url_repaired",  # shared/editable_install.py:repair_editable_direct_url
+        "exec_editable_install_poisoned",  # shared/editable_install.py:guard_editable_install
         "source_tree_reset",  # shared/source_tree_guard.py:repair_source_tree
         "agent_boot_failed",  # agent/loop.py:_emit_boot_failure
         "sdk_call",  # agent/sdk_metering.py recorder (via shared/sdk_telemetry)
@@ -58,6 +60,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "auth401_rejected",  # gateway/_auth401_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
         "agent_registry",  # gateway/_agent_max_id.py:emit_max_agent_id telemetry.emit("telemetry", ...)
         "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)
+        "pitr_remote_inventory",  # services/pitr/retention_scheduler.py:refresh (positional emit)
+        "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)
         "plugin_load_failed",  # agent/graph/_build.py:_report_plugin_load_failure telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit

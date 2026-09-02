@@ -67,6 +67,10 @@ class ClusterPorts(TypedDict):
     pg_backup: NotRequired[int]
     pitr_uploader: NotRequired[int]
     pitr_base_backup: NotRequired[int]
+    # Added after the prior block growth; old records' units bind the legacy
+    # fallback until their next birth, so the record derive must agree.
+    gateway_watchdog: NotRequired[int]
+    agent_runner_watchdog: NotRequired[int]
 
 
 def _port_free(port: int) -> bool:
@@ -204,6 +208,8 @@ _LATE_HEALTH_SLOTS = frozenset(
         "pg_backup",
         "pitr_uploader",
         "pitr_base_backup",
+        "gateway_watchdog",
+        "agent_runner_watchdog",
     }
 )
 
@@ -226,7 +232,7 @@ def record_health_port(rec: cluster.ClusterRecord, svc: str) -> int:
     One exception: slots that did not exist at ANY existing record's birth —
     the S4 isolation pass (`im_bridge` / `delivery_watchdog`), hosted
     agent-runner (`agent_host`), pg-backup scheduler (`pg_backup`), and PITR
-    uploader (`pitr_uploader`). Their
+    uploader (`pitr_uploader`), and capability watchdogs. Their
     missing-key derive is the legacy value, never a block offset — see
     `_LATE_HEALTH_SLOTS`."""
     port = rec.ports.get(svc)  # type: ignore[literal-required]

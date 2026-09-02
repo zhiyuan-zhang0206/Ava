@@ -145,6 +145,31 @@ function makeItem(overrides: Partial<BackendTimelineItem> & Pick<BackendTimeline
   };
 }
 
+describe("TimelineView accessibility", () => {
+  it("is a polite log and announces turn boundaries without streaming chunks", () => {
+    const { rerender } = render(<TimelineView items={[]} />);
+    const log = screen.getByRole("log");
+    expect(log.getAttribute("aria-live")).toBe("polite");
+    expect(log.getAttribute("aria-relevant")).toBe("additions");
+    expect(screen.queryByTestId("timeline-turn-announcement")).toBeNull();
+
+    rerender(<TimelineView items={[]} turnActive />);
+    expect(screen.getByTestId("timeline-turn-announcement").textContent).toBe("Agent is responding.");
+
+    rerender(
+      <TimelineView
+        turnActive
+        items={[makeItem({ item_id: "streaming", kind: "agent_chat", payload: "A streaming chunk" })]}
+      />,
+    );
+    expect(log.querySelector('[data-item-id="streaming"]')?.getAttribute("aria-live")).toBe("off");
+    expect(screen.getByTestId("timeline-turn-announcement").textContent).toBe("Agent is responding.");
+
+    rerender(<TimelineView items={[]} />);
+    expect(screen.getByTestId("timeline-turn-announcement").textContent).toBe("Agent response complete.");
+  });
+});
+
 describe("compact history segment dividers", () => {
   it("renders one localized divider between each compact summary and its raw history", () => {
     const items = [
@@ -174,6 +199,7 @@ describe("compact history segment dividers", () => {
     const dividers = screen.getAllByTestId("compact-history-divider");
     expect(dividers).toHaveLength(2);
     expect(dividers.map((divider) => divider.dataset.segmentRank)).toEqual(["2", "1"]);
+    expect(dividers.map((divider) => divider.getAttribute("aria-live"))).toEqual(["off", "off"]);
     expect(screen.getAllByText("Original history before compact")).toHaveLength(2);
 
     const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");

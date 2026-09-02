@@ -1599,8 +1599,9 @@ export interface paths {
         /**
          * Post Notice Dismiss
          * @description Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice
-         *     contract): resolution 'withdrawn' + resolve event. No open notice ->
-         *     idempotent 204.
+         *     contract): resolution 'withdrawn' + resolve event, plus an inspector
+         *     snapshot refresh when the withdrawn row required a response. No open notice
+         *     -> idempotent 204.
          */
         post: operations["post_notice_dismiss_api_agents__agent_id__notices_current_dismiss_post"];
         delete?: never;
@@ -1773,17 +1774,19 @@ export interface paths {
          *     Body is fully optional; `origin` (default "user") names the trigger and
          *     heads the rollout log + the cluster pin's `updated_by`.
          *
-         *     Returns the orchestration session name + tee'd log path, plus `backend_changed` —
-         *     whether this rollout restarts agent processes (the frontend "Update"
-         *     button uses it to say agents will be restarted; the SDK initiator that
-         *     once waited on it, `ava.self.update()`, was removed 2026-08).
+         *     Returns the orchestration session name + tee'd log path, plus
+         *     `backend_changed` (whether this rollout restarts agent processes) and
+         *     `needs_replay` (whether the installed commit is ahead of the running
+         *     bookmark). The frontend uses the first to describe agent restarts; the CLI
+         *     uses the second to identify a half-deployed state. The SDK initiator that
+         *     once waited on the restart signal, `ava.self.update()`, was removed 2026-08.
          *
          *     Errors:
          *     - 400 if called on an agent-runner (rollout is a gateway operation).
          *     - 409 if a rollout / update is already in flight.
-         *     - 422 if the cluster is already up to date (behind==0) — nothing to roll
-         *       out, so the fleet is not bounced. Use /api/cluster/restart to bounce on
-         *       the current code.
+         *     - 422 if the cluster is already up to date (behind==0 and no replay is
+         *       needed) — nothing to roll out, so the fleet is not bounced. Use
+         *       /api/cluster/restart to bounce on the current code.
          *     - 503 if the session backend could not start the orchestration session.
          */
         post: operations["post_cluster_rollout_api_cluster_rollout_post"];
@@ -1839,11 +1842,13 @@ export interface paths {
         /**
          * Get Cluster Update Check
          * @description Read-only preflight for the Update button — how far behind origin/main and
-         *     what a rollout would restart.
+         *     what a rollout would restart, or whether an interrupted rollout needs replay.
          *
          *     Gateway only (it inspects the gateway checkout). Does a
          *     `git fetch` but never pulls or mutates the tree, so the UI can poll it.
-         *     `behind == 0` → the UI shows "no updates" and does not launch a rollout.
+         *     A clean `behind == 0` → the UI shows "no updates" and does not launch a
+         *     rollout. An installed commit ahead of the running bookmark is instead
+         *     returned as `needs_replay`.
          */
         get: operations["get_cluster_update_check_api_cluster_update_check_get"];
         put?: never;
@@ -3445,21 +3450,20 @@ export interface paths {
          * @description Partially update a task; omitted fields stay unchanged.
          *
          *     status, priority, title, description, and results are taken when non-null
-         *     (priority must be one of P0..P3; 'ongoing' is rejected as a status — it is
-         *     the system root's permanent state, never assignable; a title colliding with
-         *     another in_progress task's is rejected). owner reassigns to another
+         *     (priority must be one of P0..P3; ongoing marks long-running active work; a
+         *     title colliding with another in_progress task's is rejected). owner reassigns to another
          *     agent (an explicit null is rejected — a task cannot be released).
          *     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
          *     null is rejected — reminders cannot be disabled). Any write resets the
-         *     reminder counters, same as the SDK update path. Unlike the SDK, an owner change here
-         *     does NOT message the affected agents — this endpoint is a plain column write.
+         *     reminder counters, same as the SDK update path. An owner reassignment sends
+         *     the SDK-equivalent task system notes after the database write commits.
          *
          *     The system root task is immutable: any PATCH targeting it is rejected with
          *     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
          *     reassigned, completed, cancelled, or otherwise edited.
          *
          *     A status change to done or cancelled is rejected with 422 while any direct
-         *     child remains in progress. Close or cancel those children first.
+         *     child remains active (in progress or ongoing). Close or cancel those children first.
          */
         patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;
@@ -7113,6 +7117,8 @@ export interface components {
          *     controls whether a terminated target is woken to receive the note: task
          *     assignment (a delegator direction) resurrects, plain update notices do
          *     not (user ruling 2026-08-27 — notifications never resurrect an owner).
+         *     `task_id` is optional but requires `note_tag='task'`; it is the explicit
+         *     LLM-usage attribution for the turn this note drives.
          */
         SystemNoteIn: {
             /** Content */
@@ -7127,6 +7133,8 @@ export interface components {
              * @default task
              */
             note_tag: string;
+            /** Task Id */
+            task_id?: number | null;
             /**
              * Resurrect
              * @default true
@@ -7186,6 +7194,20 @@ export interface components {
              * @default 0
              */
             reminder_count: number;
+            /** Token Budget */
+            token_budget?: number | null;
+            /** Usd Budget */
+            usd_budget?: number | null;
+            /**
+             * Token Used
+             * @default 0
+             */
+            token_used: number;
+            /**
+             * Usd Used
+             * @default 0
+             */
+            usd_used: number;
             /**
              * Ghost
              * @default false
@@ -7225,6 +7247,20 @@ export interface components {
              */
             reminder_count: number;
             priority: components["schemas"]["Priority"];
+            /** Token Budget */
+            token_budget?: number | null;
+            /** Usd Budget */
+            usd_budget?: number | null;
+            /**
+             * Token Used
+             * @default 0
+             */
+            token_used: number;
+            /**
+             * Usd Used
+             * @default 0
+             */
+            usd_used: number;
             /**
              * Ghost
              * @default false
@@ -7242,7 +7278,7 @@ export interface components {
          *     parent_id is taken when present (model_fields_set): an explicit null moves
          *     the task under the system root, an int reparents it (the parent must exist
          *     and the move must not create a cycle). Owner changes through this endpoint
-         *     do not message the affected agents (the SDK update path does).
+         *     send the SDK-equivalent task system notes to affected agents.
          */
         TaskUpdateRequest: {
             /** Status */
@@ -7548,11 +7584,16 @@ export interface components {
          * @description `GET /api/cluster/update-check` response — how far the gateway's
          *     checkout is behind its track target, and which side a pull would restart.
          *
-         *     `behind` is the commit count HEAD..target (0 = already up to date, so the
-         *     UI shows "no updates" and skips launching a rollout). `frontend_changed` /
-         *     `backend_changed` mirror `ava cluster update`'s own classification so the UI can
-         *     tell the user what a rollout would actually restart (docs-only diffs count
-         *     as neither — a pull with nothing to restart).
+         *     `behind` is the commit count from the last fully installed commit to the
+         *     track target. `needs_replay` names the exceptional state where the fully
+         *     installed commit is ahead of the running-commit bookmark: a rollout was
+         *     interrupted between them, so zero commits behind is not an up-to-date
+         *     verdict. A running commit ahead of installation is the normal fast-path
+         *     state and does not need replay.
+         *
+         *     `frontend_changed` / `backend_changed` mirror `ava cluster update`'s own
+         *     classification so the UI can tell the user what a rollout would actually
+         *     restart (docs-only diffs count as neither — a pull with nothing to restart).
          */
         UpdateCheck: {
             /** Behind */
@@ -7561,6 +7602,8 @@ export interface components {
             frontend_changed: boolean;
             /** Backend Changed */
             backend_changed: boolean;
+            /** Needs Replay */
+            needs_replay: boolean;
         };
         /**
          * UpdateOutcome
