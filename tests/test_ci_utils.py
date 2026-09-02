@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -43,6 +46,50 @@ def _check(name: str, conclusion: str, *, workflow: str = "CI", status: str = "C
 
 
 _APP_CHECK = _check("GitGuardian Security Checks", "SUCCESS", workflow="")
+
+
+class _TrunkResponse:
+    def __init__(self, payload: dict[str, object], *, status: int = 200) -> None:
+        self.payload = payload
+        self.status = status
+
+    def __enter__(self) -> _TrunkResponse:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode()
+
+
+def _urlopen_sequence(
+    responses: list[_TrunkResponse | urllib.error.URLError],
+    seen_requests: list[urllib.request.Request],
+):
+    response_iter = iter(responses)
+
+    def urlopen(request: urllib.request.Request, *, timeout: float) -> _TrunkResponse:
+        seen_requests.append(request)
+        response = next(response_iter)
+        if isinstance(response, urllib.error.URLError):
+            raise response
+        return response
+
+    return urlopen
+
+
+def _labels_runner(labels: list[str], calls: list[list[str]]):
+    def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps({"labels": [{"name": label} for label in labels]}),
+            stderr="",
+        )
+
+    return run
 
 
 @pytest.fixture
@@ -741,7 +788,69 @@ def test_wait_timeout_while_pending_exits_one(monkeypatch, poll, capsys) -> None
     assert "timed out" in capsys.readouterr().err
 
 
-def test_wait_merge_enqueues_when_green(no_sleep, poll, monkeypatch, capsys) -> None:
+def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypatch, capsys) -> None:
+    poll(CIStatus.ALL_PASSED)
+    label_calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [
+                _TrunkResponse({"accepted": True}),
+                _TrunkResponse({"state": "pending"}),
+                _TrunkResponse({"state": "merged"}),
+            ],
+            requests,
+        ),
+    )
+    # --merge implies --wait: with the Trunk default queue, submit the PR
+    # (qa-approved label verified first), then wait for the queue to land it.
+    assert ci_utils.main(["1243", "--merge"]) == 0
+    assert requests[0].full_url == "https://api.trunk.io/v1/submitPullRequest"
+    assert requests[0].get_header("X-api-token") == "test-token"
+    assert requests[0].data is not None
+    assert json.loads(cast(bytes, requests[0].data)) == {
+        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Ava"},
+        "pr": {"number": 1243},
+        "targetBranch": "main",
+        "priority": 100,
+        "noBatch": False,
+    }
+    assert requests[1].full_url == "https://api.trunk.io/v1/getSubmittedPullRequest"
+    assert "PR #1243 merged by the Trunk merge queue" in capsys.readouterr().out
+    assert label_calls[0][:4] == ["gh", "pr", "view", "1243"]
+
+
+def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch, capsys) -> None:
+    poll(CIStatus.ALL_PASSED)
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], []))
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [
+                urllib.error.URLError("network down"),
+                urllib.error.URLError("network down"),
+            ],
+            [],
+        ),
+    )
+    # Two failed submit attempts (retried once) -> exit 4.
+    assert ci_utils.main(["1243", "--merge"]) == 4
+    assert "Trunk queue submission failed" in capsys.readouterr().err
+
+
+def test_wait_merge_mergify_rollback_path_still_enqueues(
+    no_sleep, poll, monkeypatch, capsys
+) -> None:
+    """Explicit --queue mergify keeps the pre-Trunk comment flow working as
+    the rollback path (Mergify stays installed through P3)."""
     poll(CIStatus.ALL_PASSED)
     captured: dict = {}
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
@@ -771,31 +880,12 @@ def test_wait_merge_enqueues_when_green(no_sleep, poll, monkeypatch, capsys) -> 
         raise AssertionError(f"unexpected gh call: {cmd}")
 
     monkeypatch.setattr(ci_utils.subprocess, "run", fake_run)
-    # --merge implies --wait: enqueue with Mergify, then wait for the queue
-    # to land the PR.
-    assert ci_utils.main(["1243", "--merge"]) == 0
+    assert ci_utils.main(["1243", "--merge", "--queue", "mergify"]) == 0
     assert captured["cmd"][:4] == ["gh", "pr", "comment", "1243"]
     assert "--repo" in captured["cmd"]
     assert "--body" in captured["cmd"]
     assert captured["cmd"][captured["cmd"].index("--body") + 1] == "@mergifyio queue"
     assert "gh pr merge" not in " ".join(captured["cmd"])
-
-
-def test_wait_merge_failure_exits_four(no_sleep, poll, monkeypatch, capsys) -> None:
-    poll(CIStatus.ALL_PASSED)
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
-
-    def fake_run(cmd, **_kw):
-        class _R:
-            returncode = 1
-            stdout = ""
-            stderr = "branch not found"
-
-        return _R()
-
-    monkeypatch.setattr(ci_utils.subprocess, "run", fake_run)
-    assert ci_utils.main(["1243", "--merge"]) == 4
-    assert "enqueue failed" in capsys.readouterr().err
 
 
 def test_wait_usage_errors_exit_two() -> None:
