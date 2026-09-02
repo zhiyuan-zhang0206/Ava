@@ -387,9 +387,22 @@ def _restart_blocking(
 ) -> int | None:
     """Sync restart section — via to_thread. Returns the inbound id, or None
     when the agent is already terminated."""
-    if get_agent_status(agent_id) is AgentStatus.TERMINATED:
-        return None
-    with db_pool.connection() as conn:
+    from psycopg import sql
+
+    from shared.db_transaction import write_transaction
+    from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
+
+    with write_transaction(db_pool) as conn:
+        row = conn.execute(
+            sql.SQL("SELECT status,{} FROM agents_meta WHERE id=%s FOR UPDATE").format(
+                sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)
+            ),
+            (agent_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(f"agent {agent_id} does not exist")
+        if row[0] == "terminated" and row[1] is not True:
+            return None
         payload: dict[str, object] | None = None
         if body.config_overlay:
             # This overlay write must not depend on borrowed-backend session
@@ -398,7 +411,6 @@ def _restart_blocking(
             # emergency channel (provider-outage model switch) is exactly when
             # the pool is most likely poisoned. Declare the transaction
             # writable before the DML (same posture as #1428/#1436).
-            conn.execute("SET TRANSACTION READ WRITE")
             conn.execute(
                 "UPDATE agents_meta "
                 "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "

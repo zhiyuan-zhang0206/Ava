@@ -2,12 +2,20 @@
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
+from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from ops import agent_launch
 from ops.agent_identity import AgentProcessIdentity, probe_agent_process
+from ops.cold_lifecycle import (
+    accept_cold_command,
+    fail_expired_restart,
+    prepared_target_was_released,
+)
 from shared.boot_timing import BOOT_BUDGET_SEC
 from shared.cluster import session_name
 from shared.db_transaction import write_transaction
@@ -33,6 +41,27 @@ def _attempt_count(payload: dict[str, object]) -> int:
     return count
 
 
+def _accept_if_absent(conn: Connection, owner: dict[str, Any]) -> int | None:
+    pid = owner["pid"]
+    absent = (
+        probe_agent_process(pid, owner["id"])
+        in {AgentProcessIdentity.GONE, AgentProcessIdentity.FOREIGN}
+        if pid is not None
+        else prepared_target_was_released(conn, owner)
+    )
+    return accept_cold_command(conn, owner) if absent else None
+
+
+def _remaining_budget(conn: Connection, applied_at: datetime) -> float:
+    row = conn.execute(
+        "SELECT extract(epoch FROM (%s+make_interval(secs=>%s)-clock_timestamp()))",
+        (applied_at, BOOT_BUDGET_SEC),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("lifecycle deadline query returned no row")
+    return float(row[0])
+
+
 def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
     """None means genuinely legacy; False means owned but deferred/observed.
 
@@ -51,7 +80,13 @@ def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
             return False
         pointer = owner["lifecycle_command_id"]
         if pointer is None:
-            return False
+            pointer = _accept_if_absent(conn, owner)
+            if pointer is None:
+                return False
+            cur.execute("SELECT * FROM agents_meta WHERE id=%s", (agent_id,))
+            owner = cur.fetchone()
+            if owner is None:
+                raise RuntimeError("cold lifecycle metadata disappeared")
         cur.execute(
             "SELECT * FROM inbound_messages WHERE id=%s AND agent_id=%s FOR UPDATE",
             (pointer, agent_id),
@@ -76,7 +111,7 @@ def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
             identity = probe_agent_process(pid, agent_id)
             if identity not in {AgentProcessIdentity.GONE, AgentProcessIdentity.FOREIGN}:
                 return False
-        elif count == 0:
+        elif count == 0 and not prepared_target_was_released(conn, owner):
             # NULL is not exit evidence. Only our previous durable authorization
             # explains the prepared state after the original PID was observed gone.
             return False
@@ -95,16 +130,13 @@ def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
             return False
         if command["kind"] != "restart" or owner["status"] not in {"restarting", "idling"}:
             return False
-        cur.execute(
-            "SELECT extract(epoch FROM (%s+make_interval(secs=>%s)-clock_timestamp())) AS remaining",
-            (command["applied_at"], BOOT_BUDGET_SEC),
-        )
-        deadline = cur.fetchone()
-        if deadline is None:
-            raise RuntimeError("lifecycle deadline query returned no row")
-        remaining = float(deadline["remaining"])
-        if remaining <= 0 or count >= agent_launch._LAUNCH_MAX_RETRIES + 1:
-            reason = "deadline_expired" if remaining <= 0 else "launch_attempts_exhausted"
+        remaining = _remaining_budget(conn, command["applied_at"])
+        if remaining <= 0:
+            fail_expired_restart(conn, owner, command, payload)
+            _log.warning("agent %s command %s failed at its original deadline", agent_id, pointer)
+            return False
+        if count >= agent_launch._LAUNCH_MAX_RETRIES + 1:
+            reason = "launch_attempts_exhausted"
             result = {"outcome": "unobserved", "reason": reason}
             if payload.get("lifecycle_result") != result:
                 payload["lifecycle_result"] = result
