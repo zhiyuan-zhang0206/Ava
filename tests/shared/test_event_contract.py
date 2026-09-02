@@ -81,7 +81,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     claim_cas_lost_exit, idle_cas_lost + history_dump Task #1249 +
     plugin_activation issue #40 + the seven hosted-runner kinds
     (future/infra/agent-runner-as-server.md): host_dispatcher_subscribed,
-    host_dispatcher_reconnect, host_dispatcher_bad_channel, host_turn_crashed,
+    host_dispatcher_reconnect, host_dispatcher_scan_failed, host_dispatcher_bad_channel, host_turn_crashed,
     host_agent_prepared, host_started, host_turn_uncancellable) + the two
     labeler validity kinds from issue #178: label_generate_rejected,
     label_generate_retired + exec_subprocess_killed (issue #184, the
@@ -129,8 +129,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # remote PITR inventory and scheduled recovery-proof failures raise it to
     # 137; restart_handoff_host_unhealthy (Task #2338's hosted restart
     # handoff failure marker) raises it to 138; host_stale_running_settled
-    # (the hosted boot settle of rows a dead host left running) raises it to 139.
-    assert len(_TELEMETRY_KINDS) == 139
+    # (the hosted boot settle of rows a dead host left running) raises it to
+    # 139; host_dispatcher_scan_failed (Task #2255) raises it to 140.
+    assert len(_TELEMETRY_KINDS) == 140
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
