@@ -362,7 +362,7 @@ def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -
         row = cur.fetchone()
         if row == (AgentStatus.IDLING.value, prepared.allocation_epoch, None):
             page_names = list_open_page_names(conn, agent_id)
-            agent_launch._kill_stale_session(agent_id)
+            agent_launch._require_released_agent_session(agent_id)
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', "
                 "termination_source = 'launch-confirm' "
@@ -732,7 +732,7 @@ def respawn_agent(agent_id: int) -> bool:
             origin=original_source,
         )
         return True
-    agent_launch._kill_stale_session(agent_id)
+    agent_launch._require_released_agent_session(agent_id)
     logger.info(
         "agent {agent_id} respawn phase 2: launching new process",
         event="respawn_phase2_launch",

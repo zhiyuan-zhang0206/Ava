@@ -631,7 +631,7 @@ def native_proc() -> ModuleType:
 
     Both modules expose the same surface (`has_session` / `new_session` /
     `kill_session` / `list_sessions` / `session_log_path`), so `ops.agent_launch`
-    (spawn / kill-stale) and the reap / force-terminate / status consumers
+    (attempt launch) and the reap / force-terminate / status consumers
     dispatch to one of the two by platform. Agent processes always run here (a
     non-interactive agent needs no PTY, and the per-box PTY ceiling then stops
     bounding agent count); daemons and the agents' persistent shells use

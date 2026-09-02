@@ -14,7 +14,7 @@ it, so every existing `from ops.agents import ...` keeps working:
 
 Either way the *mechanics* of actually launching a detached native child
 process and confirming it came up live in `ops/agent_launch.py`
-(`_launch_agent_process` / `_launch_or_force_terminated` / `_kill_stale_session`).
+(`_launch_agent_process` / `_launch_or_force_terminated` / `_require_released_agent_session`).
 
 Agent process / agents row is 1:1 by `agent_id`.
 
