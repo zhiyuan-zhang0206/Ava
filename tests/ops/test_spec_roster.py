@@ -533,3 +533,21 @@ def test_restarter_runs_in_process_mode(monkeypatch: pytest.MonkeyPatch) -> None
     }
     assert annotated["restarter"] is None
     assert annotated["agent-host"] and "AVA_RUNNER_MODE" in annotated["agent-host"]
+
+
+def test_gate_reason_for_session_matches_the_start_roster_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-session gate helper single-service spawners use must agree with
+    the roster ``ava start`` launches. Hosted mode disables the restarter (and
+    enables agent-host); process mode is the reverse. A session the roster does
+    not know is never spawnable."""
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "hosted")
+    assert spec.gate_reason_for_session("restarter") is not None
+    assert spec.gate_reason_for_session("agent-host") is None
+
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
+    assert spec.gate_reason_for_session("restarter") is None
+    assert spec.gate_reason_for_session("agent-host") is not None
+
+    assert spec.gate_reason_for_session("no-such-service") is not None
