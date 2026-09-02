@@ -1,0 +1,142 @@
+"""CI-only real cold/offline preparation proof; never boots a cluster."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+# Script imports project code for orchestration only. Prepared application
+# subprocesses use -I and cannot see this checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from shared.runtime_prepare import (
+    PrepareInputs,
+    inventory_digest,
+    prepare_release,
+    verify_native_closure,
+)
+from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--python", type=Path, required=True)
+    parser.add_argument("--uv", type=Path, required=True)
+    args = parser.parse_args()
+    root = args.root.resolve()
+    source = Path(
+        subprocess.check_output(  # noqa: S603 — CI supplies a managed interpreter path.
+            [str(args.python), "-I", "-c", "import sys;print(sys.base_prefix)"], text=True
+        ).strip()
+    )
+    private_python = root / "python-input"
+    shutil.copytree(source, private_python, symlinks=True)
+    wheels = root / "wheels"
+    (application,) = wheels.glob("ava-*.whl")
+    requirements = root / "requirements.txt"
+    store = root / "store"
+    store.mkdir(mode=0o700)
+    # Sentinel is intentionally not a real active image: preparation must never
+    # read/replace it, even when it cannot understand the serving generation.
+    serving = store / "current-release"
+    serving.write_bytes(b"existing-serving-generation\n")
+    original = serving.read_bytes()
+    files = {
+        p.relative_to(private_python).as_posix(): file_sha256(p)
+        for p in sorted(private_python.rglob("*"))
+        if p.is_file()
+    }
+    wheel_files = {p.name: file_sha256(p) for p in wheels.iterdir()}
+    checkout = Path(__file__).resolve().parents[1]
+    inputs = PrepareInputs(
+        private_python,
+        inventory_digest(files),
+        wheels,
+        inventory_digest(wheel_files),
+        requirements,
+        file_sha256(requirements),
+        application.name,
+        file_sha256(checkout / "db/schema.sql"),
+        args.uv.resolve(),
+    )
+    release = prepare_release(store, inputs)
+    if serving.read_bytes() != original:
+        raise AssertionError("successful preparation changed serving pointer")
+    # Remove the input locations from their original names, proving that a
+    # prepared generation does not depend on input wheels or base Python paths.
+    private_python.rename(root / "retired-python-input")
+    wheels.rename(root / "retired-wheels")
+    subprocess.run(  # noqa: S603 — verified generation interpreter, no shell.
+        [
+            str(release.interpreter),
+            "-I",
+            "-B",
+            str(checkout / "scripts/verify_runtime_wheel.py"),
+            str(root / "retired-wheels" / application.name),
+            "--checkout",
+            str(checkout),
+        ],
+        cwd=root,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "AVA_CONFIG_FETCH": "skip",
+            "AVA_TIMEZONE": "UTC",
+            "AVA_HOME": str(root / "probe-home"),
+            "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
+            "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
+        },
+        check=True,
+        timeout=120,
+    )
+    verify_native_closure(release)
+    import platform
+
+    verify_release(
+        store,
+        release.digest,
+        manifest_digest=release.manifest_digest,
+        platform_tag=platform.platform(),
+        schema_digest=inputs.schema_digest,
+    )
+    # A fresh generation fails after allocation but before venv creation. No
+    # pointer change, cleanup of serving state, or fallback is permitted.
+    (root / "retired-python-input").rename(private_python)
+    (root / "retired-wheels").rename(wheels)
+    requirements.write_text(requirements.read_text() + "\n# failure-injection input\n")
+    from dataclasses import replace
+
+    failed_inputs = replace(inputs, requirements_digest=file_sha256(requirements))
+    with patch(
+        "shared.runtime_prepare._run",
+        side_effect=ReleaseRejectedError("injected preparation failure"),
+    ):
+        try:
+            prepare_release(store, failed_inputs)
+        except ReleaseRejectedError as exc:
+            if str(exc) != "injected preparation failure":
+                raise AssertionError("unexpected preparation failure") from exc
+        else:
+            raise AssertionError("failed preparation was accepted")
+    if serving.read_bytes() != original:
+        raise AssertionError("failed preparation changed serving pointer")
+    evidence = {
+        "cold_offline_prepare": True,
+        "input_paths_retired_imports": True,
+        "serving_pointer_unchanged_success_and_failure": True,
+        "artifact_digest": release.digest,
+        "manifest_digest": release.manifest_digest,
+        "platform": platform.platform(),
+        "file_count": len(json.loads((release.root / "manifest.json").read_text())["files"]),
+    }
+    (root / "proof.json").write_text(json.dumps(evidence, indent=2) + "\n")
+    print(json.dumps(evidence))
+
+
+if __name__ == "__main__":
+    main()

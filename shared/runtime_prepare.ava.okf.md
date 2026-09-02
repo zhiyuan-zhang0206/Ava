@@ -1,0 +1,33 @@
+# Inactive runtime preparation
+
+`runtime_prepare.py` prepares a Linux/macOS generation at its final, private,
+inactive path. No production caller uses it. It does not activate, migrate,
+stop services, download packages, update source, or fall back to editable code.
+
+Inputs are a managed CPython tree, complete wheelhouse, hashed lock export,
+application wheel name and schema digest. Their inventory determines the input
+identity; installed bytes have a separate manifest digest. A new generation
+retains a private interpreter/stdlib copy and a stdlib-created venv, installs
+only local wheels with hashes/copy semantics, proves real service imports with
+networking blocked, verifies schema/resource placement and seals an inventory.
+Python launches use isolated mode and disable bytecode writes. Failure preserves
+the serving pointer and retains the failed generation for operator inspection;
+it is never silently reused or deleted.
+
+Kernel and OS system libraries are explicit trusted platform prerequisites.
+Native application dependencies must resolve inside the generation; Homebrew or
+other mutable dependency paths are rejected. The receipt declares system-library
+paths without claiming to attest the host OS. Optional plugin/dlopen behavior,
+Windows preparation, Mach-O rpath contracts not yet understood, process privilege
+separation, frontend artifacts and plugin state compatibility are not covered.
+Same-UID chmod is accidental-write protection, not an adversarial security seal.
+
+CI builds real wheel inputs and exercises offline preparation on Linux and
+macOS arm64, retires the input interpreter/wheel paths, runs isolated imports,
+rechecks the installed inventory and injects a failed preparation. The serving
+pointer must remain byte-for-byte unchanged throughout. No cluster is booted.
+
+The existing updater is deliberately not wired yet: supported-host proof, disk
+budget/GC policy, recovery-point verification, migration compatibility, retained
+LKG, consumer cutover and an old-orchestrator/legacy-writer barrier must precede
+any runtime activation. This is a preparation primitive, not a second controller.
