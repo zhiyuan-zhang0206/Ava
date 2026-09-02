@@ -272,7 +272,7 @@ class TurnScheduler:
             last_active = clocks.get(agent_id)
             idle_s = None if last_active is None else round(_age_seconds(last_active), 1)
             logger.error(
-                "hosted turn for agent {agent_id} did not unwind {waited:.1f}s after cancel "
+                "hosted turn for agent {agent_id} did not unwind {waited_s:.1f}s after cancel "
                 "— it is blocked somewhere asyncio cannot interrupt (a C call); the host is "
                 "exiting anyway and this agent's turn resumes from its checkpoint on restart "
                 "(last completed LLM step: {idle_s}s ago)",
