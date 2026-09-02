@@ -56,6 +56,7 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
     collector = _copy_proof(root, checkout, "prove_runtime_otel.py")
     plugin_proof = _copy_proof(root, checkout, "prove_runtime_plugins.py")
     inventory_proof = _copy_proof(root, checkout, "prove_release_inventory.py")
+    _copy_proof(root, checkout, "prove_runtime_publication_input.py")
     bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
     updater = _copy_proof(root, checkout, "prove_updater_bootstrap.py")
     alias = root / "runtime-entry-alias"

@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import platform
 import plistlib
-import stat
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,34 +30,11 @@ from shared.native_job_observation import (
 )
 from shared.private_storage import write_private_bytes
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
+from shared.verified_file import regular_bytes as _regular_bytes
 
 
 def _canonical(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-
-
-def _regular_bytes(path: Path) -> bytes:
-    info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
-        raise ReleaseRejectedError("inventory member is not a bounded regular file")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    with os.fdopen(os.open(path, flags), "rb") as stream:
-        opened = os.fstat(stream.fileno())
-        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
-            info.st_dev,
-            info.st_ino,
-        ):
-            raise ReleaseRejectedError("inventory member changed while opening")
-        body = stream.read(1024 * 1024 + 1)
-        after = os.fstat(stream.fileno())
-    current = path.lstat()
-    if (
-        len(body) > 1024 * 1024
-        or (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
-        or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
-    ):
-        raise ReleaseRejectedError("inventory member changed while reading")
-    return body
 
 
 def _sessions(home: Path) -> tuple[ExpectedSession, ...]:
