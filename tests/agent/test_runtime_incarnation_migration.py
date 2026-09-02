@@ -1,6 +1,7 @@
 """Up/down shape equivalence and fail-loud baseline replay."""
 
 from pathlib import Path
+from typing import LiteralString, cast
 from uuid import uuid4
 
 import psycopg
@@ -29,8 +30,9 @@ def test_incarnation_migration_round_trip_matches_baseline(db_conn: psycopg.Conn
             sql.SQL("SET LOCAL search_path TO {}, public").format(sql.Identifier(schema))
         )
         db_conn.execute("CREATE TABLE agents_meta (id bigint PRIMARY KEY)")
-        up = _MIGRATION.with_suffix(".sql").read_text()
-        down = _MIGRATION.with_suffix(".down.sql").read_text()
+        # Repository migration files are trusted SQL, never request input.
+        up = cast(LiteralString, _MIGRATION.with_suffix(".sql").read_text())
+        down = cast(LiteralString, _MIGRATION.with_suffix(".down.sql").read_text())
         db_conn.execute(sql.SQL(up))
         assert _shape(db_conn) == expected
         db_conn.execute(sql.SQL(up))  # current baseline + applied deltas must converge
@@ -58,4 +60,6 @@ def test_incarnation_migration_rejects_incompatible_existing_type(
             pytest.raises(psycopg.errors.RaiseException, match="incompatible existing"),
             db_conn.transaction(),
         ):
-            db_conn.execute(sql.SQL(_MIGRATION.with_suffix(".sql").read_text()))
+            db_conn.execute(
+                sql.SQL(cast(LiteralString, _MIGRATION.with_suffix(".sql").read_text()))
+            )

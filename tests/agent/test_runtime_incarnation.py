@@ -22,7 +22,7 @@ from shared.runtime_incarnation import (
 
 @pytest.fixture
 def sync_pool() -> Iterator[ConnectionPool]:
-    with ConnectionPool(
+    with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url,
         min_size=1,
         max_size=2,
