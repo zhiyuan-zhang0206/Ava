@@ -31,25 +31,25 @@ def _h_agents_cancel(args: argparse.Namespace) -> int:
 def _h_agents_restart(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_restart
 
-    return cmd_agents_restart(args.agent_id, args.config)
+    return cmd_agents_restart(args.agent_id, args.config, source=args.source)
 
 
 def _h_agents_resurrect(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_resurrect
 
-    return cmd_agents_resurrect(args.agent_id)
+    return cmd_agents_resurrect(args.agent_id, source=args.source)
 
 
 def _h_agents_terminate(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_terminate
 
-    return cmd_agents_terminate(args.agent_id)
+    return cmd_agents_terminate(args.agent_id, source=args.source)
 
 
 def _h_agents_kill(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_kill
 
-    return cmd_agents_kill(args.agent_id)
+    return cmd_agents_kill(args.agent_id, source=args.source)
 
 
 def _h_notices_list(args: argparse.Namespace) -> int:
@@ -113,9 +113,9 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     agents_send_p.add_argument("content", help="message text")
     agents_send_p.add_argument(
         "--source",
-        required=True,
-        help="message provenance (required, no default): shell:N / watcher:N for "
-        "generated notices, user for a human operator",
+        default=None,
+        help="explicit provenance; required unless AVA_CALLER_IDENTITY is configured. "
+        "shell:N / watcher:N for notices, user only for an actual human operator",
     )
     agents_send_p.add_argument(
         "--tail-file",
@@ -157,6 +157,18 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     agents_kill_p.add_argument("agent_id", type=int, help="agent id to kill")
     agents_kill_p.set_defaults(func=_h_agents_kill)
+
+    for lifecycle_parser in (
+        agents_restart_p,
+        agents_resurrect_p,
+        agents_terminate_p,
+        agents_kill_p,
+    ):
+        lifecycle_parser.add_argument(
+            "--source",
+            default=None,
+            help="explicit provenance (or AVA_CALLER_IDENTITY); never an authorization grant",
+        )
 
     notices_p = sub.add_parser(
         "notices",
