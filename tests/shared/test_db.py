@@ -169,10 +169,13 @@ async def test_signal_live_agents_restart_publishes_redis_wake(
 
 
 def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`check_connections=True` arms the checkout-time dead-connection check
-    (server-closed idle conns are discarded and replaced before a borrow is
-    handed out — Task #1027); the default leaves it off so hot pools do not pay
-    a round trip per checkout."""
+    """A POOLED pool arms the baseline-session restore on every checkout (and at
+    backend creation) — pgbouncer never resets backend session state between
+    clients, so a backend polluted by another client's session-level SET must be
+    scrubbed before each borrow (2026-09-02 P0). The restore doubles as the
+    Task #1027 dead-connection check (a dead connection raises and is replaced).
+    A DIRECT pool owns its backend exclusively — no scrub needed — and there the
+    `check_connections=True` flag keeps its original Task #1027 meaning."""
     real_check = db.ConnectionPool.check_connection
     captured: dict[str, object] = {}
 
@@ -183,8 +186,16 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
             captured.update(_kw)
 
     monkeypatch.setattr(db, "ConnectionPool", _FakePool)
-    db.pool(check_connections=True)
+    monkeypatch.setattr(db, "direct_db_url", lambda: "postgresql://direct-test")
+    # Pooled (the default): the baseline restore is armed on configure + check.
+    db.pool()
+    assert captured.get("configure") is db._restore_pooled_session
+    assert captured.get("check") is db._restore_pooled_session
+    captured.clear()
+    # Direct: no scrub; the flag keeps arming the plain dead-connection check.
+    db.pool(direct=True, check_connections=True)
+    assert captured.get("configure") is None
     assert captured.get("check") is real_check
     captured.clear()
-    db.pool()
+    db.pool(direct=True)
     assert captured.get("check") is None

@@ -94,9 +94,13 @@ PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # statement_timeout either (PgBouncer only tracks parameters Postgres reports
 # to clients, GUC_REPORT, and statement_timeout is not one of them — verified
 # against 1.25 source + live probe). A client-side SET is forwarded to the
-# backend like any query and sticks (transaction pooling does not reset backend
-# state between clients — which is exactly what makes the uniform ceiling hold).
-# `connect()` / `pool()` issue it on every pooled dial;
+# backend like any query and sticks — pgbouncer transaction pooling does NOT
+# reset backend session state between clients (server_reset_query_always=1 was
+# measured inert on the ordinary release path, pgbouncer 1.25.2; the 2026-09-02
+# P0 pooled read-only pollution rode exactly this). The uniform ceiling
+# therefore holds because every sanctioned pooled entry point restores the
+# baseline session on use (see _restore_pooled_session).
+# `connect()` / `pool()` issue it on every pooled dial/borrow;
 # `cli/commands/_pgbouncer.py` also runs it as the pooler's `connect_query` so
 # every pooled backend is bounded at birth regardless of the client's code path.
 PG_STATEMENT_TIMEOUT_SET_SQL = "SET statement_timeout = 60000"
@@ -111,19 +115,56 @@ PG_STATEMENT_TIMEOUT_KWARGS: dict[str, Any] = {
 }
 
 
-def _apply_statement_timeout(conn: psycopg.Connection) -> None:
-    """Apply the statement-timeout SET on a freshly opened connection.
+# The session-level scrub that makes a pooled backend safe to borrow. RESET ALL
+# clears every session GUC another borrower may have left behind (the 2026-09-02
+# P0: a polluter's `SET default_transaction_read_only = on` on a pooled
+# connection leaked onto shared backends and 500'd the message/schedule-stop
+# APIs' writes) — then the statement ceiling is re-applied, because RESET ALL
+# also clears the pooler connect_query's birth-time SET. Two statements, always
+# together: a restore that reset without re-bounding would silently drop the F7
+# ceiling for the next borrower.
+PG_POOLED_BASELINE_RESTORE_SQL = ("RESET ALL", PG_STATEMENT_TIMEOUT_SET_SQL)
 
-    Used on pooled dials only: PgBouncer drops the `options` startup parameter,
-    so `SET` is the one path that reaches the backend. Also the psycopg_pool
-    `configure` hook for `pool()` — pool backends are created once and borrowed
-    for the process lifetime, so the SET must land on the physical backend, and
-    the hook must leave the connection IDLE (psycopg_pool discards a connection
-    its configure callback leaves mid-transaction). `commit()` is a no-op on an
-    autocommit connection.
+
+def _restore_pooled_session(conn: psycopg.Connection) -> None:
+    """Scrub a pooled connection back to its baseline session state.
+
+    PgBouncer transaction pooling hands any backend to any client transaction
+    and never resets session state on the ordinary release path (measured on
+    1.25.2, 2026-09-02 P0), so a borrower can inherit another client's session
+    GUCs — `default_transaction_read_only=on` makes every write in the
+    transaction fail with ReadOnlySqlTransaction. Restoring the baseline is the
+    client-side fix: RESET ALL + the statement ceiling, run as one transaction
+    at every sanctioned pooled entry point — on a fresh dial (`connect()`), on
+    a pool backend's creation (`configure`), and on every borrow (`check`).
+    Each restore also heals the shared backend it lands on, so a polluted
+    backend stops hurting the next borrower.
+
+    Used as the psycopg_pool `configure`/`check` hook and on pooled dials:
+    PgBouncer drops the `options` startup parameter, so SQL is the one path
+    that reaches the backend. The hooks must leave the connection IDLE
+    (psycopg_pool discards a connection its callback leaves mid-transaction);
+    `commit()` ends the restore transaction and is a no-op on an autocommit
+    connection. On a dead connection the execute raises, which psycopg_pool
+    treats as a failed check — the connection is discarded and replaced, the
+    same discard path `ConnectionPool.check_connection` feeds.
     """
-    conn.execute(PG_STATEMENT_TIMEOUT_SET_SQL)
+    conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
+    conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1])
     conn.commit()
+
+
+async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
+    """Async twin of `_restore_pooled_session` for the agent-process pools.
+
+    The agent's `AsyncConnectionPool` (agent/loop.py) is built directly rather
+    than through `pool()`, so its per-borrow liveness check doubles as the
+    baseline scrub here — same RESET ALL + statement ceiling, same discard-on-
+    failure semantics (psycopg_pool replaces a connection whose check raises).
+    """
+    await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
+    await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1])
+    await conn.commit()
 
 
 # psycopg_pool's own `ConnectionPool(timeout=...)` default, restated as a name so
@@ -258,9 +299,11 @@ def connect(
     first statement as the same `_pg3_0` name, and two of them on one backend
     raise DuplicatePreparedStatement).
 
-    On a non-direct dial the statement ceiling is delivered as an explicit
-    `SET` (PgBouncer drops the `options` startup parameter; see
-    PG_STATEMENT_TIMEOUT_SET_SQL) — unless `unbounded=True`.
+    On a non-direct dial the session is scrubbed back to baseline — RESET ALL
+    plus the statement ceiling as an explicit `SET` (PgBouncer drops the
+    `options` startup parameter and never resets backend session state between
+    clients, so a borrowed backend may carry another client's session GUCs; see
+    _restore_pooled_session) — unless `unbounded=True`.
 
     `unbounded=True` (admin plane only — the migration applier) drops the
     statement-timeout ceiling entirely: migration DDL runs may legitimately
@@ -285,10 +328,14 @@ def connect(
         **({} if unbounded else PG_STATEMENT_TIMEOUT_KWARGS),
     )
     if not direct and not unbounded:
-        # Pooled dial: PgBouncer dropped the `options` startup parameter above,
-        # so deliver the statement ceiling as an explicit SET (see
-        # PG_STATEMENT_TIMEOUT_SET_SQL). Direct dials already got it via options.
-        _apply_statement_timeout(conn)
+        # Pooled dial: PgBouncer dropped the `options` startup parameter above
+        # AND does not reset backend session state between clients, so scrub
+        # the session back to baseline (RESET ALL + statement ceiling) before
+        # handing the connection to the caller — a backend polluted by another
+        # client's session-level SET must not reach this caller's writes
+        # (2026-09-02 P0; direct dials already got the ceiling via options and
+        # own their backend exclusively, so no scrub is needed there).
+        _restore_pooled_session(conn)
     return conn
 
 
@@ -327,11 +374,11 @@ def pool(
     tick, where a long wait delays every check behind it) must pass a short one;
     long-lived daemon pools keep the default.
 
-    On a pooled dial every new backend additionally gets the statement ceiling
-    via the pool's `configure` hook (an explicit `SET` — the pooler drops the
-    `options` startup parameter; see PG_STATEMENT_TIMEOUT_SET_SQL). The SET
-    sticks to the physical backend for the backend's lifetime, so every borrow
-    from the pool is bounded.
+    Pooled pools restore the baseline session (RESET ALL + the statement
+    ceiling) at backend creation AND on every borrow — pgbouncer never resets
+    backend session state between clients (2026-09-02 P0), so the borrow-time
+    scrub is what keeps a backend polluted by another client's session-level
+    SET from failing this borrower's writes. See _restore_pooled_session.
 
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
@@ -358,16 +405,26 @@ def pool(
         open=True,
         timeout=timeout,
         kwargs=connection_kwargs,
-        # Direct pools already carry the ceiling via `options` (parsed by
-        # Postgres itself); pooled backends need the explicit SET, and the hook
-        # must leave the connection idle (see _apply_statement_timeout).
-        configure=_apply_statement_timeout if not direct else None,
-        # Checkout-time dead-connection eviction (Task #1027): a server-closed
-        # idle conn otherwise surfaces as "the connection is closed" on the
-        # first borrow of the day. Costs one empty round-trip per checkout, so
-        # only pools whose borrows are rare (the ops daemon's dispatch pool)
-        # opt in.
-        check=ConnectionPool.check_connection if check_connections else None,
+        # A pooled pool's backends are shared, never reset by pgbouncer, and
+        # handed to any borrower — so both hooks restore the baseline session
+        # (RESET ALL + statement ceiling): `configure` at backend creation,
+        # `check` on EVERY borrow. The borrow-time restore is the load-bearing
+        # half: it scrubs the backend the borrower is about to use (pgbouncer
+        # prefers handing a client the backend it used last), so a backend
+        # polluted by another client's session-level SET cannot fail this
+        # borrower's writes (2026-09-02 P0: message/schedule-stop 500s). It
+        # doubles as the checkout-time dead-connection check (a dead connection
+        # raises and psycopg_pool discards + replaces it — Task #1027's
+        # eviction, now implicit for pooled pools), at the cost of two
+        # statements per checkout. Direct pools own their backends exclusively:
+        # no scrub needed, the ceiling already arrived via `options`, and the
+        # optional `check_connections` flag keeps its Task #1027 meaning.
+        configure=_restore_pooled_session if not direct else None,
+        check=(
+            _restore_pooled_session
+            if not direct
+            else (ConnectionPool.check_connection if check_connections else None)
+        ),
     )
 
 
