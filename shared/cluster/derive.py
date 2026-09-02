@@ -13,6 +13,7 @@ helper `per_cluster_base_urls`).
 from __future__ import annotations
 
 import hashlib
+import json
 import shlex
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -190,6 +191,12 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
         if IS_WINDOWS:
             raise RuntimeError("retained frontend launch has no Windows closure proof")
         retained = runtime_frontend_dir()
+        manifest = json.loads((retained / "frontend-manifest.json").read_text(encoding="utf-8"))
+        if manifest["publicBuildConfig"] != {
+            "gatewayPort": settings.gateway.gateway_port,
+            "apiBase": "",
+        }:
+            raise RuntimeError("prepared frontend public configuration differs from this unit")
         # The release admission gate verifies the complete image before start.
         # Missing assets never trigger npm/download or a source fallback here.
         return (

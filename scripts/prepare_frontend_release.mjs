@@ -4,6 +4,15 @@ import fs from "node:fs";
 import path from "node:path";
 
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const nodeVersion = `v${fs.readFileSync(new URL("./runtime-node-version", import.meta.url), "utf8").trim()}`;
+
+export function recordFrontendBuildConfig(frontend, gatewayPort, apiBase = "") {
+  if (!/^[0-9]+$/.test(gatewayPort) || Number(gatewayPort) < 1 || Number(gatewayPort) > 65535 || apiBase !== "") {
+    throw new Error("standalone build currently supports only a public gateway port and default API base");
+  }
+  fs.writeFileSync(path.join(frontend, ".next", "frontend-build-config.json"),
+    JSON.stringify({ gatewayPort: Number(gatewayPort), apiBase }) + "\n", { flag: "wx", mode: 0o600 });
+}
 
 function inventory(root, prefix = "") {
   const files = {};
@@ -26,6 +35,7 @@ function sameInventory(actual, expected) {
 }
 
 export function frontendInputs(frontend, node) {
+  if (process.version !== nodeVersion) throw new Error("Node differs from the release input pin");
   if (process.platform === "win32") throw new Error("retained frontend Node proof currently supports POSIX only");
   if (fs.realpathSync(node) !== fs.realpathSync(process.execPath)) {
     throw new Error("prepare must execute under the same Node binary it retains");
@@ -34,11 +44,18 @@ export function frontendInputs(frontend, node) {
   if (!fs.existsSync(path.join(standalone, "server.js"))) {
     throw new Error("standalone server missing; build with AVA_FRONTEND_RELEASE=1 before preparation");
   }
+  const config = JSON.parse(fs.readFileSync(path.join(frontend, ".next", "frontend-build-config.json")));
+  if (Object.keys(config).sort().join(",") !== "apiBase,gatewayPort"
+      || !Number.isInteger(config.gatewayPort) || config.gatewayPort < 1 || config.gatewayPort > 65535
+      || config.apiBase !== "") {
+    throw new Error("unsupported public frontend build configuration");
+  }
   return {
     standalone: inventory(standalone),
     static: inventory(path.join(frontend, ".next", "static")),
     public: fs.existsSync(path.join(frontend, "public")) ? inventory(path.join(frontend, "public")) : {},
     node: sha(fs.readFileSync(node)),
+    publicBuildConfig: config,
   };
 }
 
@@ -71,6 +88,7 @@ export function prepareFrontend(frontend, node, target, expected) {
   const manifest = {
     version: 1, nodeVersion: process.version, platform: process.platform, arch: process.arch,
     inputDigest: sha(JSON.stringify(expected)), files,
+    publicBuildConfig: expected.publicBuildConfig,
   };
   fs.writeFileSync(path.join(target, "frontend-manifest.json"), JSON.stringify(manifest) + "\n", {
     flag: "wx", mode: 0o400,
