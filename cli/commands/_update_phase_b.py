@@ -48,7 +48,7 @@ from cli.commands._update_recover import RolloutOutcome
 from shared.deploy_timing import (
     CONVERGING_POLL_TIMEOUT_S,
     HARVEST_GRACE_S,
-    NO_PROGRESS_TIMEOUT_S,
+    PHASE_B_ABSOLUTE_TIMEOUT_S,
     STAGE_NO_PROGRESS_TIMEOUT_S,
 )
 from shared.host_deploy_state import POSTURE_IDLE, POSTURE_PAUSED, read
@@ -63,7 +63,7 @@ _log = logging.getLogger(__name__)
 # mid-transition. A host that has provably stopped is cut loose in seconds
 # regardless, which is what makes a bound this generous affordable
 # (`_probe_one_until_unpaused`).
-_POLL_TIMEOUT_S = NO_PROGRESS_TIMEOUT_S
+_POLL_TIMEOUT_S = PHASE_B_ABSOLUTE_TIMEOUT_S
 _POLL_INTERVAL_S = 2.0
 # How long the poll keeps waiting on a host that is ALIVE AND MAKING PROGRESS (its
 # updater lease live, its stage evidence moving — the one shape that can otherwise

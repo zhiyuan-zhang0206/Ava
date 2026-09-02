@@ -71,6 +71,10 @@ tags:
   terminal elapsed/probe-count line. This keeps a two-second probe from nesting
   four transport attempts and makes the slow host identifiable without logging
   the full status payload.
+- Phase B's per-host **absolute** deadline is 900 seconds, the shared
+  `PHASE_B_ABSOLUTE_TIMEOUT_S` no-progress bound. C3's 300-second value is not a
+  competing deadline: it hands a host with continuous, evidenced progress to the
+  settle hold early, while stalled and no-progress verdicts remain faster exits.
 - `_gateway_ready` is a **precondition**, not a phase: the rollout's Phase B
   makes every agent-runner depend on the gateway (each runner's preflight
   refuses to stop services it cannot then restart), and the local leg's start
