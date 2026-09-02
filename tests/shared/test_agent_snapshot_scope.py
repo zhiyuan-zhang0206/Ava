@@ -7,7 +7,12 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from shared.agent_snapshot import AgentListScope, select_all
+from shared.agent_snapshot import (
+    AgentListScope,
+    AgentListSummary,
+    AgentSnapshot,
+    select_all,
+)
 
 
 class _RecordingCursor:
@@ -33,6 +38,42 @@ class _RecordingConnection:
 
     def cursor(self) -> _RecordingCursor:
         return self.recording_cursor
+
+
+def _seed_agents_meta(
+    db_conn: psycopg.Connection,
+    rows: list[tuple[int, str, str]],
+) -> None:
+    """Insert agent rows with explicit lineage for roster projection tests."""
+    with db_conn.cursor() as cur:
+        for agent_id, spawner, status in rows:
+            cur.execute("INSERT INTO agents (id) VALUES (%s)", (agent_id,))
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, %s, %s)",
+                (agent_id, spawner, status),
+            )
+    db_conn.commit()
+
+
+def _spawners_for_scope(
+    db_conn: psycopg.Connection,
+    scope: AgentListScope,
+) -> dict[int, str]:
+    """Return the observable roster lineage indexed by agent id."""
+    snapshots = cast(list[AgentSnapshot], select_all(db_conn, scope=scope))
+    return {agent.agent_id: agent.spawner for agent in snapshots}
+
+
+def _summary_spawners_for_scope(
+    db_conn: psycopg.Connection,
+    scope: AgentListScope,
+) -> dict[int, str]:
+    """Return the frontend roster's observable lineage indexed by agent id."""
+    summaries = cast(
+        list[AgentListSummary],
+        select_all(db_conn, scope=scope, fields="summary"),
+    )
+    return {agent.agent_id: agent.spawner for agent in summaries}
 
 
 @pytest.mark.parametrize(
@@ -119,3 +160,94 @@ def test_compact_projection_reads_only_cli_columns_in_sql(
     conn = _RecordingConnection()
     select_all(cast(psycopg.Connection[Any], conn), scope=scope, fields="compact")
     assert conn.recording_cursor.query == expected_query
+
+
+def test_live_roster_projects_dead_spawner_chains_to_nearest_live_ancestor(
+    db_conn: psycopg.Connection,
+) -> None:
+    _seed_agents_meta(
+        db_conn,
+        [
+            (228, "user", "running"),
+            (1581, "agent:228", "terminated"),
+            (2147, "agent:1581", "terminated"),
+            (2894, "agent:2147", "running"),
+            (240, "agent:228", "terminated"),
+            (312, "agent:240", "running"),
+            (405, "user", "running"),
+            (5709, "agent:405", "running"),
+        ],
+    )
+
+    spawners = _spawners_for_scope(db_conn, "live")
+
+    assert spawners[2894] == "agent:228"
+    assert spawners[312] == "agent:228"
+    assert spawners[5709] == "agent:405"
+    assert spawners[228] == "user"
+    assert _summary_spawners_for_scope(db_conn, "live")[2894] == "agent:228"
+
+
+def test_non_live_rosters_keep_raw_spawner_lineage(
+    db_conn: psycopg.Connection,
+) -> None:
+    _seed_agents_meta(
+        db_conn,
+        [
+            (228, "user", "running"),
+            (1581, "agent:228", "terminated"),
+            (2147, "agent:1581", "terminated"),
+            (2894, "agent:2147", "running"),
+        ],
+    )
+
+    assert _spawners_for_scope(db_conn, "all")[2894] == "agent:2147"
+
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = 2894")
+    db_conn.commit()
+
+    assert _spawners_for_scope(db_conn, "terminated")[2894] == "agent:2147"
+
+
+def test_live_roster_keeps_unresolvable_and_external_spawners(
+    db_conn: psycopg.Connection,
+) -> None:
+    _seed_agents_meta(
+        db_conn,
+        [
+            (777, "agent:778", "running"),
+            (778, "user", "terminated"),
+            (779, "agent:999999", "running"),
+            (780, "claude-code", "running"),
+            (781, "user", "running"),
+            (782, "agent:783", "running"),
+            (783, "agent:784", "terminated"),
+            (784, "agent:783", "terminated"),
+        ],
+    )
+
+    spawners = _spawners_for_scope(db_conn, "live")
+
+    assert spawners[777] == "agent:778"
+    assert spawners[779] == "agent:999999"
+    assert spawners[780] == "claude-code"
+    assert spawners[781] == "user"
+    assert spawners[782] == "agent:783"
+
+
+def test_live_roster_projection_uses_only_read_queries(
+    db_conn: psycopg.Connection,
+) -> None:
+    _seed_agents_meta(
+        db_conn,
+        [
+            (228, "user", "running"),
+            (2147, "agent:228", "terminated"),
+            (2894, "agent:2147", "running"),
+        ],
+    )
+
+    with db_conn.transaction():
+        db_conn.execute("SET TRANSACTION READ ONLY")
+        assert _spawners_for_scope(db_conn, "live")[2894] == "agent:228"
