@@ -14,6 +14,8 @@ import logging
 import os
 import tempfile
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, cast
 
@@ -123,6 +125,19 @@ def is_serving() -> bool:
     """Whether a completed current-generation start permits recovery actions."""
     state = _read_state()
     return state is not None and state[0] == "serving"
+
+
+@contextmanager
+def recovery_permitted() -> Generator[bool]:
+    """Authorize one recovery action while excluding a new start or stop.
+
+    The caller keeps this context through the actual revive or launch. That
+    makes the serving check and its effect one indivisible operation relative
+    to the start generation change, rather than a racy check-then-act pair.
+    """
+    with file_lock(_lock_path()):
+        state = _read_state()
+        yield state is not None and state[0] == "serving"
 
 
 def clear_serving() -> None:

@@ -15,11 +15,11 @@ Polls local `agents_meta` rows with `status='restarting'` every second and calls
 ## Core Responsibilities
 Each tick runs three machine-scoped, non-blocking (`blocks` always `BlockScope.NONE`) controllers: `RespawnController` (restart+reap), `CrashResurrectController` (auto-resurrect on crash), and `WedgedAgentController` (kill + resurrect live agents that stop consuming pending work).
 
-**Serving boundary**: automatic process launches wait for the local
-`shared.start_serving` generation to become serving after `ava start` passes its
-readiness verdict. Corpse and terminated-zombie cleanup still runs while it is
-closed; a failed start therefore cannot revive an agent, while the next successful
-start preserves normal crash and reboot recovery.
+**Serving boundary**: every automatic process launch holds the local
+`shared.start_serving` generation lock and proceeds only after `ava start` has
+completed fully ready. Corpse and terminated-zombie cleanup still runs while it
+is closed; a failed or waived-unready start therefore cannot revive an agent,
+while the next successful start preserves normal crash and reboot recovery.
 
 ### RespawnController (`ops/controllers/respawn.py`)
 - **Poll restart requests**: every second SELECT local `status='restarting'` agents.

@@ -30,6 +30,7 @@ stubbed per-reconcile-test (resurrect_agent shells out to it before relaunch).
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -731,11 +732,13 @@ def _confirm_launch(_agent_id: int) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def _host_is_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+def _host_is_serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Controller cases start from a host that already passed its start gate."""
     from shared import start_serving
 
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
 
 
 class TestControllerReconcile:
@@ -870,6 +873,82 @@ class TestControllerReconcile:
         assert _last_resurrect_at(db_conn, aid) is None  # not burned during the outage
         assert launched_agents == []
 
+    def test_new_start_before_continuous_claim_leaves_backoff_unstamped(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A newly-starting host closes recovery before a crash claim mutates it."""
+        from shared import start_serving
+
+        aid = _corpse(db_conn, source="reaper")
+        _add_pending_inbound(db_conn, aid)
+        launched_agents.clear()
+        controller = cr.CrashResurrectController(sync_pool)
+        controller._boot_pass_done = True
+        original = controller._resurrect_crashed
+
+        def close_before_claim(local_machine: str) -> bool:
+            start_serving.begin_start()
+            return original(local_machine)
+
+        monkeypatch.setattr(controller, "_resurrect_crashed", close_before_claim)
+
+        result = controller.reconcile("agent-runner")
+
+        assert result.acted is False
+        assert _row(db_conn, aid) == ("terminated", "reaper")
+        assert _last_resurrect_at(db_conn, aid) is None
+        assert launched_agents == []
+
+    def test_closed_boundary_does_not_throttle_the_next_serving_scan(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    ) -> None:
+        """A failed start defers recovery without delaying its ready successor."""
+        from shared import start_serving
+
+        start_serving.clear_serving()
+        aid = _corpse(db_conn, source="reaper")
+        _add_pending_inbound(db_conn, aid)
+        launched_agents.clear()
+        controller = cr.CrashResurrectController(sync_pool)
+        controller._boot_pass_done = True
+
+        assert controller.reconcile("agent-runner").acted is False
+        assert controller._last_scan == 0.0
+
+        generation = start_serving.begin_start()
+        assert start_serving.mark_serving(generation) is True
+
+        assert controller.reconcile("agent-runner").acted is True
+        assert _row(db_conn, aid) == ("idling", None)
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def test_closed_boundary_does_not_throttle_when_gateway_is_down(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An unavailable gateway cannot turn a failed start into a delayed retry."""
+        from shared import start_serving
+
+        start_serving.clear_serving()
+        aid = _corpse(db_conn, source="reaper")
+        _add_pending_inbound(db_conn, aid)
+        monkeypatch.setattr(cr, "_gateway_healthy", lambda: False)
+        controller = cr.CrashResurrectController(sync_pool)
+        controller._boot_pass_done = True
+
+        assert controller.reconcile("agent-runner").acted is False
+        assert controller._last_scan == 0.0
+        assert _last_resurrect_at(db_conn, aid) is None
+
     def test_disabled_is_noop(
         self,
         db_conn: psycopg.Connection,
@@ -963,8 +1042,7 @@ class TestBootRevivePass:
         """
         from shared import start_serving
 
-        serving = False
-        monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
+        start_serving.clear_serving()
         aid = _corpse(db_conn, source="reaper")
         launched_agents.clear()
         controller = cr.CrashResurrectController(sync_pool)
@@ -975,7 +1053,8 @@ class TestBootRevivePass:
         assert _row(db_conn, aid) == ("terminated", "reaper")
         assert launched_agents == []
 
-        serving = True
+        generation = start_serving.begin_start()
+        assert start_serving.mark_serving(generation) is True
         result = controller.reconcile("agent-runner")
 
         assert result.acted is True

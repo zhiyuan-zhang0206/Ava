@@ -741,6 +741,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         if waiver is None:
             return SERVICES_NOT_READY_EXIT_CODE
         print(f"  · {waiver}: exiting 0 anyway", file=sys.stderr)
+        return 0
 
     if not start_serving.mark_serving(serving_generation):
         print("  ✗ this start lost its serving generation", file=sys.stderr)

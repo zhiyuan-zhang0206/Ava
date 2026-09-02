@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -155,11 +156,13 @@ def _fresh_controller(pool: ConnectionPool | MagicMock) -> wedged_mod.WedgedAgen
 
 
 @pytest.fixture(autouse=True)
-def _host_is_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+def _host_is_serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Existing controller cases model a host that passed its start gate."""
     from shared import start_serving
 
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
 
 
 class TestGuards:
@@ -215,7 +218,7 @@ class TestGuards:
         from shared import start_serving
 
         monkeypatch.setattr(settings.daemon, "wedged_agent_enabled", True)
-        monkeypatch.setattr(start_serving, "is_serving", lambda: False)
+        start_serving.clear_serving()
         monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
         monkeypatch.setattr(
             wedged_mod,

@@ -193,8 +193,6 @@ class ScheduleManager:
         now = time.monotonic()
         from shared import start_serving
 
-        recovery_allowed = start_serving.is_serving()
-
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
         # reconcile retry rather than adopting the stale survivor forever.
@@ -221,17 +219,18 @@ class ScheduleManager:
             if status[sid] in ("completed", "error"):
                 self._backoff.pop(sid, None)  # terminal — clear any prior backoff
                 continue
-            if not recovery_allowed:
-                continue
             count, deadline = self._backoff.get(sid, (0, 0.0))
             if now < deadline:
                 continue  # backing off
             if count >= _BREAKER_MAX:
                 self._trip_breaker(sid, count)
                 continue
-            self._launch(sid)
-            delay = min(_BACKOFF_BASE_S * 2**count, _BACKOFF_CAP_S)
-            self._backoff[sid] = (count + 1, now + delay)
+            with start_serving.recovery_permitted() as permitted:
+                if not permitted:
+                    continue
+                self._launch(sid)
+                delay = min(_BACKOFF_BASE_S * 2**count, _BACKOFF_CAP_S)
+                self._backoff[sid] = (count + 1, now + delay)
 
         # Reset backoff for schedules that have stayed live past the stable window.
         for sid in enabled & live:

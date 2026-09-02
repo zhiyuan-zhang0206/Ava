@@ -396,8 +396,6 @@ class WedgedAgentController:
 
         from shared import start_serving
 
-        serving = start_serving.is_serving()
-
         # Throttle: only scan every CONTROLLER_SCAN_INTERVAL_S.
         now = time.monotonic()
         if now - self._last_scan < CONTROLLER_SCAN_INTERVAL_S:
@@ -411,23 +409,26 @@ class WedgedAgentController:
         # A live-agent recovery ends in a resurrect, so it must wait for a
         # reachable gateway. A user-terminated zombie only needs reaping and
         # runs below without that dependency.
-        candidates = []
-        if serving and _gateway_healthy():
-            candidates = _claim_wedged_candidates(
-                self._pool, local_machine, running_age_s, idling_age_s, _BACKOFF_S
-            )
-
         recovered_count = 0
+        with start_serving.recovery_permitted() as permitted:
+            candidates = []
+            if permitted and _gateway_healthy():
+                candidates = _claim_wedged_candidates(
+                    self._pool, local_machine, running_age_s, idling_age_s, _BACKOFF_S
+                )
         for agent_id, pid, claimed_at in candidates:
-            if _recover_wedged_candidate(
-                self._pool,
-                agent_id,
-                pid,
-                claimed_at,
-                running_age_s,
-                idling_age_s,
-            ):
-                recovered_count += 1
+            with start_serving.recovery_permitted() as permitted:
+                if not permitted:
+                    break
+                if _recover_wedged_candidate(
+                    self._pool,
+                    agent_id,
+                    pid,
+                    claimed_at,
+                    running_age_s,
+                    idling_age_s,
+                ):
+                    recovered_count += 1
 
         zombie_candidates = _claim_terminated_lease_zombies(self._pool, local_machine, _BACKOFF_S)
         for agent_id, pid in zombie_candidates:
