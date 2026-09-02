@@ -183,12 +183,26 @@ def _render_ini(
     parameters Postgres reports to clients can be tracked), so the connect_query
     SET is the one pooler-side path that reaches the backend. Same value +
     constant as shared/db.py's client-side SET (imported lazily — this module
-    runs in data-plane bring-up, before any settings/env load is guaranteed)."""
+    runs in data-plane bring-up, before any settings/env load is guaranteed).
+
+    `server_reset_query` + `server_reset_query_always = 1` scrub a backend back
+    to connect_query-fresh state when pgbouncer runs a release reset (measured
+    limitation, 2026-09-02: only the SV_ACTIVE window — the ordinary release
+    path never runs it; defense against session GUC pollution is upstream, in
+    pooled-client discipline). DISCARD ALL clears the birth-time statement
+    ceiling, so the reset re-applies PG_STATEMENT_TIMEOUT_SET_SQL as its second
+    half. (2026-09-02 P0: pooled read-only pollution 500'd agent APIs.)"""
     listen_addr = ", ".join(_bind_addrs(cluster_secret))
     socket_dir = _live_pg_socket_dir(pg_port)
     from shared.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
     connect_query = f"connect_query='{PG_STATEMENT_TIMEOUT_SET_SQL}'"
+    # Release-reset + always=1: pgbouncer's SV_ACTIVE-window reset only —
+    # measured 2026-09-02 on 1.25.2: the ordinary release path never runs it, so
+    # pooled session-level SET pollution must be prevented upstream. DISCARD ALL
+    # also clears the birth-time statement ceiling, so the reset re-applies it —
+    # the two halves are one contract, keep them together (2026-09-02 P0).
+    server_reset = f"server_reset_query = 'DISCARD ALL; {PG_STATEMENT_TIMEOUT_SET_SQL}'"
     return "\n".join(
         [
             "[databases]",
@@ -204,6 +218,11 @@ def _render_ini(
             "auth_type = scram-sha-256" if cluster_secret else "auth_type = trust",
             f"auth_file = {_userlist_path()}",
             "pool_mode = transaction",
+            server_reset,
+            # always=1: run the reset on EVERY return to the pool, not only when
+            # the client disconnects (the pgbouncer default) — pooled clients are
+            # long-lived by design here. Requires pgbouncer >= 1.21.
+            "server_reset_query_always = 1",
             f"max_client_conn = {_MAX_CLIENT_CONN}",
             f"default_pool_size = {_DEFAULT_POOL_SIZE}",
             f"ignore_startup_parameters = {_IGNORE_STARTUP_PARAMETERS}",
