@@ -15,7 +15,9 @@ Verification rejects symlinks, multiply-linked files, editable/path injection
 metadata, missing/extra/corrupt members, unsafe paths and incompatible observed
 platform/schema. Private-copy installation is required. It returns absolute
 interpreter/cwd paths captured once; consumers must not execute through a moving
-pointer. A bounded cross-platform file lock and expected-predecessor comparison
+pointer. `module_argv()` constructs shell-free isolated Python commands, disables
+bytecode writes and selects UTF-8 without spawning or changing lifecycle state.
+A bounded cross-platform file lock and expected-predecessor comparison
 serialize atomic pointer replacement. Failure leaves the prior pointer intact.
 
 This is not a supervisor, installer, migration runner, credential store or GC.

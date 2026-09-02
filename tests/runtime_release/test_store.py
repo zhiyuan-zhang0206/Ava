@@ -69,6 +69,22 @@ class ReleaseStoreTests(unittest.TestCase):
         self.activate(second, first)
         self.assertEqual(current_pointer(self.store), second)
         self.assertEqual(old.interpreter.read_bytes(), b"first")
+        self.assertEqual(
+            old.module_argv("services.agent_host.daemon", "--role", "agent-runner"),
+            (
+                str(old.interpreter),
+                "-I",
+                "-B",
+                "-X",
+                "utf8",
+                "-m",
+                "services.agent_host.daemon",
+                "--role",
+                "agent-runner",
+            ),
+        )
+        with self.assertRaisesRegex(ReleaseRejectedError, "entry point"):
+            old.module_argv("-c")
         self.activate(first, second)
         self.assertEqual(current_pointer(self.store), first)
 

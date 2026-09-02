@@ -76,6 +76,17 @@ class VerifiedRelease:
     interpreter: Path
     cwd: Path
 
+    def module_argv(self, module: str, *arguments: str) -> tuple[str, ...]:
+        """Construct isolated Python argv without a shell or moving pointer.
+
+        Disable bytecode writes so importing a sealed image does not mutate its
+        inventory. Isolation ignores cwd/PYTHONPATH; UTF-8 is explicit on Windows.
+        The lifecycle owner still decides whether and when to spawn this argv.
+        """
+        if not module or not all(part.isidentifier() for part in module.split(".")):
+            raise ReleaseRejectedError("invalid Python module entry point")
+        return (str(self.interpreter), "-I", "-B", "-X", "utf8", "-m", module, *arguments)
+
 
 def verify_release(
     store: Path,
