@@ -97,6 +97,47 @@ def test_authenticated_admin_legacy_retry_and_scoped_reconcile(
     assert _count_inbounds(db_conn, agent_id, "admin principal retry") == 2
 
 
+def test_browser_rotation_and_bearer_share_admin_retry_namespace(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.cluster_auth import cookie_name
+    from shared.config import settings
+
+    secret = "principal-rotation-test-secret"  # noqa: S105 — isolated test credential
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
+    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(settings.gateway, "session_cookie_secure", False)
+    url = f"/api/agents/{agent_id}/messages"
+    body = {"content": "same administrator across sessions", "source": "user"}
+    headers = {"Idempotency-Key": "session-rotation", "Idempotency-Scope": "principal-v1"}
+    login = client.post("/api/auth/login", json={"password": secret})
+    assert login.status_code == 200, login.text
+    old_cookie = login.cookies[cookie_name()]
+    first = client.post(url, json=body, headers=headers)
+    assert first.status_code == 201, first.text
+    assert client.post("/api/auth/logout").status_code == 200
+    client.cookies.clear()
+    revoked = client.post(
+        url, json=body, headers=headers | {"Cookie": f"{cookie_name()}={old_cookie}"}
+    )
+    assert revoked.status_code == 401
+    rotated = client.post("/api/auth/login", json={"password": secret})
+    assert rotated.status_code == 200, rotated.text
+    assert rotated.cookies[cookie_name()] != old_cookie
+    repeated = client.post(url, json=body, headers=headers)
+    assert repeated.status_code == 201, repeated.text
+    client.cookies.clear()
+    bearer = client.post(url, json=body, headers=headers | {"Authorization": f"Bearer {secret}"})
+    assert bearer.status_code == 201, bearer.text
+    assert (
+        first.json()["inbound_id"] == repeated.json()["inbound_id"] == bearer.json()["inbound_id"]
+    )
+    assert _count_inbounds(db_conn, agent_id, body["content"]) == 1
+
+
 def test_no_auth_mode_cannot_claim_verified_principal_namespace(
     client: TestClient,
     db_conn: psycopg.Connection,
