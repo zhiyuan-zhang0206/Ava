@@ -35,7 +35,8 @@ def require_restart_admission(
         "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
         "AND i.target_generation=m.runtime_generation AND i.target_owner=m.runtime_owner "
         "AND m.runtime_kind='process' "
-        "AND clock_timestamp()<i.applied_at+make_interval(secs=>%s) "
+        "AND clock_timestamp()<i.applied_at+make_interval(secs=>%s), "
+        "i.payload->'launch_attempts' "
         "FROM agents_meta m LEFT JOIN inbound_messages i "
         "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id WHERE m.id=%s",
         (command_id, BOOT_BUDGET_SEC, agent_id),
@@ -46,3 +47,5 @@ def require_restart_admission(
         return
     if command_id is None or row[0] != command_id or row[1] is not True:
         raise RuntimeError("restart admission command is stale, unproven, or expired")
+    if type(row[2]) is not int or row[2] <= 0:
+        raise RuntimeError("restart admission has no committed launch authorization")

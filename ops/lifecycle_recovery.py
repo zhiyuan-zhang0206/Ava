@@ -95,8 +95,6 @@ def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
             return False
         if command["kind"] != "restart" or owner["status"] not in {"restarting", "idling"}:
             return False
-        if count and native_proc().has_session(session_name(f"boot-{agent_id}-{pointer}-{count}")):
-            return False
         cur.execute(
             "SELECT extract(epoch FROM (%s+make_interval(secs=>%s)-clock_timestamp())) AS remaining",
             (command["applied_at"], BOOT_BUDGET_SEC),
@@ -116,6 +114,8 @@ def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
                 _log.warning(
                     "agent %s command %s remains unobserved: %s", agent_id, pointer, reason
                 )
+            return False
+        if count and native_proc().has_session(session_name(f"boot-{agent_id}-{pointer}-{count}")):
             return False
         payload["launch_attempts"] = count + 1
         cur.execute("UPDATE inbound_messages SET payload=%s WHERE id=%s", (Jsonb(payload), pointer))
