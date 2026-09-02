@@ -90,13 +90,16 @@ def validate_operation(context: PreparedObservation, projection: ObserverProject
         if remaining_ms <= 0:
             raise ReleaseRejectedError("bootstrap challenge expired while connecting")
         conn.execute("SELECT set_config('statement_timeout',%s,true)", (str(remaining_ms),))
-        at = lock_rollout(conn, context.operation)
+        lock_rollout(conn, context.operation)
         row = conn.execute(
             "SELECT home FROM machine_units WHERE machine_name=%s AND home=%s",
             (context.expected.machine, context.expected.home),
         ).fetchone()
         if row != (context.expected.home,):
             raise ReleaseRejectedError("prepared observer unit is not registered")
+        # A concurrent registry DDL can delay even the unit lookup. Do not use
+        # the clock captured before that wait as evidence of current authority.
+        at = lock_rollout(conn, context.operation)
         if context.challenge.valid_until <= at:
             raise ReleaseRejectedError("prepared observer challenge is expired")
 
