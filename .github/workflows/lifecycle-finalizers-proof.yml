@@ -32,6 +32,7 @@ jobs:
           timeout 240 uv run pytest tests/agent/test_lifecycle_finalizers.py tests/ops/test_cold_lifecycle.py -q --junitxml=proof/head.xml
           git show ee1dc850f:agent/_starting.py > agent/_starting.py
           git show ee1dc850f:services/delivery_watchdog/daemon.py > services/delivery_watchdog/daemon.py
+          git show ee1dc850f:ops/agent_launch.py > ops/agent_launch.py
           set +e
           timeout 120 uv run pytest tests/agent/test_lifecycle_finalizers.py -q --junitxml=proof/baseline.xml
           result=$?
@@ -40,12 +41,12 @@ jobs:
           python - <<'PY'
           import xml.etree.ElementTree as ET
           head = ET.parse('proof/head.xml')
-          assert len(head.findall('.//testcase')) == 12
+          assert len(head.findall('.//testcase')) == 16
           assert not head.findall('.//failure') and not head.findall('.//error')
           old = ET.parse('proof/baseline.xml')
-          assert len(old.findall('.//testcase')) == 4 and not old.findall('.//error')
+          assert len(old.findall('.//testcase')) == 8 and not old.findall('.//error')
           failures = old.findall('.//failure')
-          assert len(failures) == 3
+          assert len(failures) == 5
           assert all('AssertionError' in failure.text for failure in failures)
           PY
       - if: always()

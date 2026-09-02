@@ -417,7 +417,9 @@ def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
         # eligible (a re-launch attempt, spaced by the resurrect backoff).
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'launch-confirm' "
-            "WHERE id = %s AND status = 'idling' AND pid IS NULL",
+            "WHERE id = %s AND status = 'idling' AND pid IS NULL "
+            "AND runtime_generation IS NULL AND runtime_owner IS NULL AND runtime_kind IS NULL "
+            "AND lifecycle_command_id IS NULL",
             (agent_id,),
         )
         if cur.rowcount == 1:
@@ -525,7 +527,9 @@ def _launch_or_force_terminated(
                         # a duplicate launch manufactured by the cleanup itself.
                         "UPDATE agents_meta SET status = 'terminated', "
                         "termination_source = 'launch-confirm' "
-                        "WHERE id = %s AND status = 'idling' AND pid IS NULL",
+                        "WHERE id = %s AND status = 'idling' AND pid IS NULL "
+                        "AND runtime_generation IS NULL AND runtime_owner IS NULL AND runtime_kind IS NULL "
+                        "AND lifecycle_command_id IS NULL",
                         (agent_id,),
                     )
                     if cur.rowcount == 1:
