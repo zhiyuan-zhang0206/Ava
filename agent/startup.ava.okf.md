@@ -22,11 +22,11 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
 
 ### Stage 1: Schema Gate (`agent/_starting.py:claim_agent_row_or_die_on_stale_schema()`)
 - **Before claiming 'running'**, validates that DB schema matches the local code.
-- **Two mismatch types have the same runtime behavior**: both set 'terminated' + raise to exit, no catch-up in process
+- **Two mismatch types have the same runtime behavior**: both reject boot; only genuinely unowned legacy rows are marked terminated. A rejected attempt cannot settle an owned lifecycle command.
 - `CodeBehindSchema` (local code behind) — host layer can self-heal afterwards: update checkout to match cluster then resurrect
 - `SchemaVersionMismatch` (code ahead, checkout carries a migration unseen by DB) — host layer cannot self-heal (the code itself is the problem): must revert checkout to `main`
-- On failure: stay unclaimed 'idling' → directly set 'terminated', do not claim.
-- Both boot-rejection writes go through `_mark_preclaim_terminated`, stamping `termination_source='launch-confirm'` in the same guarded statement — the write IS what makes the launcher's confirm poll fail (NULL pid), and it makes the corpse crash-auto-resurrect-eligible, so the boot retries (backoff-spaced) once the schema or placement condition clears instead of stranding the agent's queued inbound forever. An unstamped terminated-write is permanently unresurrectable; `scripts/lint_termination_source.py` enforces the stamp.
+- On failure: do not claim. Legacy unowned 'idling' rows become terminated; owned/prepared rows remain under their durable command controller.
+- Both boot-rejection paths call `_mark_preclaim_terminated`; its legacy-only predicate requires absent runtime kind/generation/owner and command pointer before stamping `termination_source='launch-confirm'`. Owned attempts fail without rewriting the prepared target; their original command deadline and attempt budget govern recovery. Legacy crash-auto-resurrection still applies after schema or placement repair.
 
 ### Stage 0: Arm the boot watchdog (`agent/__main__.py` → `_boot_deadline.arm()`)
 - Runs before the `_starting` import, so it covers the import chain itself — which is why the window arrives on argv (`--boot-stall-seconds`, from `settings.gateway.agent_boot_stall_seconds` via `ops/agent_launch.py`) and not from `shared.config`: importing that module is part of what needs watching

@@ -1,8 +1,8 @@
 """One durable lifecycle command pointer; no additional queue or polling loop.
 
-This acceptance protocol is not yet wired into dispatch. Existing consumers
-must be upgraded before activation: old unconditional claims are not fenced
-by adding nullable columns. Acceptance never asserts that a process exited.
+Process and hosted dispatch share this acceptance boundary. All old consumers
+must still be upgraded before activation: unconditional legacy claims are not
+fenced by adding nullable columns. Acceptance never asserts that a process exited.
 """
 
 from typing import Literal, TypedDict
