@@ -642,41 +642,36 @@ def _temporal_awareness_section() -> str:
 # describes them together (ava_builtins/plugins/ava_memory/plugin.py).
 
 
+_INVEST_IN_THE_FUTURE_SECTION = (
+    "# Invest in the future\n\n"
+    "When you notice something that could improve later work — a repeated failure, a "
+    "rough edge in a tool or process, an unstable environment, a fix that would help "
+    "others — act on it this turn rather than assuming a later pass will recover it. Do "
+    "not filter it out as too small or uncertain: when in doubt, record it. "
+    "Over-capturing costs a review; under-capturing costs every later agent.\n\n"
+    "Choose the smallest action that closes the signal:\n"
+    "- If it is safe and inexpensive to resolve: resolve and verify it now.\n"
+    "- If it needs a decision, authority, or discussion: send the evidence, the decision "
+    "needed, and your recommendation to the person or agent who can decide.\n"
+    "- If it needs work beyond this turn: create a concrete task in an available tracker, "
+    "with an owner and the evidence that motivated it. When no tracker is available, tell "
+    "the person or agent who can decide — never let the signal drop silently.\n\n"
+    "When you finish a task, don't let what you noticed evaporate with the session: "
+    "present the candidate next steps to the user, or land the worthwhile follow-ups as "
+    "tasks when a registry is available."
+)
+
+
 @register_system_prompt_section
-def _beyond_task_section() -> str:
-    """Toggle via settings.agent.agent_reflection_enabled (env AVA_AGENT_REFLECTION,
-    default on). Turns a finite context window into a prompt to surface follow-ups
-    and candidate next steps instead of dropping them — offered to the user, and,
-    when a fleet surrounds the agent, landed as open tasks in the task registry
-    so they outlast the session. About acting on what it noticed (this session's work
-    and the task registry), not cross-session memory (that is the memory section's
-    job)."""
-    if not _resolved("agent_reflection_enabled"):
+def _invest_in_the_future_section() -> str:
+    """Toggle via settings.agent.prompt_invest_future_enabled (env
+    AVA_SYSTEM_PROMPT_INVEST_FUTURE, default on through the per-model floor).
+    The framework's ONE cross-domain future-signal rule, merged from the former
+    # Beyond the task at hand; its closing-presentation duty now lives in the
+    final paragraph."""
+    if not _resolved("prompt_invest_future_enabled"):
         return ""
-    return (
-        "# Beyond the task at hand\n\n"
-        "Your context window is finite, so something you notice mid-task but "
-        "don't act on is easily lost. Don't let these evaporate:\n\n"
-        "- A procedure you'd want to repeat — it could become a skill.\n"
-        "- A rough edge in your own prompts, tools, or skills — unclear, "
-        "contradictory, or missing — worth filing or fixing in place.\n"
-        "- A follow-up past the task's natural next step — especially the "
-        "tangential ones the user wouldn't think to ask for.\n\n"
-        "When you finish, don't just stop. Offer the user 2-3 candidate next "
-        "steps drawn from what you noticed — each a concrete option with a "
-        "one-line reason, and say which you would pick first and why. Favor "
-        "the non-obvious over the step they already have in mind; these are "
-        "forward-looking options, not a recap. If nothing is genuinely worth "
-        "doing next, say so in a line — a manufactured suggestion costs more "
-        "than it gives. Skip this when the user has signaled they are done or "
-        "the request was self-contained.\n\n"
-        "When a fleet surrounds you, also capture the follow-ups worth doing "
-        "as open tasks in the registry so they outlast this session, each "
-        "description pinned to the evidence that motivated it (the file, the "
-        "failing check, the log line). A standalone agent has no registry and "
-        "no one else to escalate to — the user is your only source of "
-        "direction."
-    )
+    return _INVEST_IN_THE_FUTURE_SECTION
 
 
 @register_system_prompt_section
