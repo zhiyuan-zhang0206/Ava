@@ -23,41 +23,17 @@ unified gateway: every trigger entering an agent goes through it):
 
 ### Connection model: shared pool + dedicated listener
 
-Two long-lived handles, both built once at process start (`agent/loop.py`):
-
-- `db_pool: AsyncConnectionPool` — a single pool (max_size=2) shared by
-  langgraph checkpoint SQL and kernel ad-hoc SQL (CRUD on
-  `inbound_messages` / `agents_meta`). The saver opens its cursors with
-  `row_factory=dict_row` itself, so the pool keeps psycopg's default
-  tuple rows for the positional reads in this module. Together with the
-  listener, each agent holds 2 Postgres connections (listener uses Redis
-  pub/sub, not PG), so fleet size times two is the Postgres connection
-  demand PgBouncer has to absorb (`cli/commands/_pgbouncer.py`).
-
-  The pool's `check_connection` health-checks every borrowed conn with
-  SELECT 1 and transparently reconnects when remote PgBouncer / Postgres
-  idle-times an underlying connection. Without the pool, a single
-  long-lived `AsyncConnection` silently dies after server-side idle
-  timeout and every subsequent SQL fails — agent 57 lost 5h of
-  checkpoints exactly this way (2026-05-27).
-
-- `RedisInboundListener` — holds a dedicated Redis pub/sub subscription
-  to `<prefix>:inbound:{agent_id}` (`shared.cluster.inbound_channel`).
-  Redis pub/sub needs its own connection for `get_message()`, so it cannot
-  share the pool. The listener auto-reconnects + re-subscribes transparently
-  after transient disconnects.
+`agent/loop.py` creates one `db_pool: AsyncConnectionPool` shared by
+checkpoint and kernel SQL, plus one `RedisInboundListener` subscription per
+agent. The pool retains positional psycopg rows, checks every borrow, and
+reconnects stale database connections; the listener owns its Redis pub/sub
+connection and resubscribes after transient failures.
 
 ### Wake: Redis pub/sub
 
-`insert_inbound_message` (`shared/db.py`) publishes to the cluster-scoped
-Redis channel `<prefix>:inbound:{agent_id}` (`shared.cluster.inbound_channel`)
-on every inbound INSERT. The claim node uses `listener.wait_one(timeout=...)`
-to block until a publish arrives.
-
-- only the INSERT publishes — mark-done UPDATEs need no wake
-- the `timeout` argument is a defensive message-loss recheck (Redis pub/sub
-  is fire-and-forget); on expiry, caller does one SELECT to catch up.
-  Default 30s.
+`insert_inbound_message` publishes each inbound INSERT to
+`<prefix>:inbound:{agent_id}`; the claim node waits through the listener. Its
+timeout is a defensive SELECT recheck for the fire-and-forget channel.
 """
 
 import time
@@ -76,10 +52,8 @@ from shared.log import logger
 from shared.redis_listener import RedisInboundListener
 from shared.timing import self_respawn_restarter_grace_s
 
-# wait_for_inbound default max block time — safety net for lost Redis pub/sub
-# wakes (connection jitter / Redis restart). On expiry, fallback SELECT once;
-# 30s is plenty for claim node.
-# env override: `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS`.
+# wait_for_inbound's fallback SELECT rechecks a missed pub/sub wake; configurable
+# through `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS`.
 DEFAULT_WAIT_TIMEOUT_S = settings.agent.db_notify_wait_timeout_seconds
 
 # A successful borrow that took at least this long still gets a WARNING — a
@@ -466,6 +440,46 @@ async def mark_agent_status(
             payload={"from": expected_from, "to": status},
         )
     await publish_agent_updated(pool, agent_id)
+
+
+async def flip_hosted_status(
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    to: str,
+    *,
+    expected_from: str,
+) -> bool:
+    """Soft-CAS one hosted turn status transition.
+
+    Hosted turns race ordinary lifecycle operations at their admission and
+    settlement boundaries. A lost compare-and-swap therefore means another
+    owner took the row, not that the host must crash; return False so the host
+    can skip the turn or leave that owner's status intact.
+    """
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE agents_meta SET status = %s WHERE id = %s AND status = %s",
+            (to, agent_id, expected_from),
+        )
+        if cur.rowcount != 1:
+            return False
+        logger.info(
+            "[{label}] {body}",
+            label="status-change",
+            body=f"{expected_from} -> {to}",
+            event="status_change",
+            **{"from": expected_from, "to": to},
+        )
+        from shared.audit_events import insert_event_log_async
+
+        await insert_event_log_async(
+            event_type="status_change",
+            agent_id=agent_id,
+            source="system",
+            payload={"from": expected_from, "to": to},
+        )
+    await publish_agent_updated(pool, agent_id)
+    return True
 
 
 async def enter_idling_state(pool: AsyncConnectionPool, agent_id: int) -> None:

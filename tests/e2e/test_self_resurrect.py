@@ -98,10 +98,10 @@ def test_resurrect_brings_back_terminated_agent(e2e_env: E2EEnv) -> None:
 
 def _assert_hosted_resurrect(e2e_env: E2EEnv, page: Page, agent_id: int) -> None:
     """Hosted auto-resurrect: no process to respawn and no pid to compare —
-    the row flips terminated -> idling with the resurrect inbound inside the
-    op, the dispatcher's turn task claims the marker, and the row stays
-    runnable (pid NULL for a hosted row's whole life). Asserts the resurrect
-    marker reaches the timeline and the row lands back on idling."""
+    the row becomes runnable with the resurrect inbound inside the op, and the
+    dispatcher's turn task claims the marker. The host settles its running
+    status after that marker is published, so the test waits for idling before
+    asserting the resurrected row is runnable with a NULL pid."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
@@ -140,6 +140,7 @@ def _assert_hosted_resurrect(e2e_env: E2EEnv, page: Page, agent_id: int) -> None
             break
         time.sleep(0.5)
     assert seen_marker, "hosted resurrect marker never reached the timeline"
+    wait_for_status(agent_id, AgentStatus.IDLING.value)
 
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))

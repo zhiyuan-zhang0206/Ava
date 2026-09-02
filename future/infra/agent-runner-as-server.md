@@ -19,6 +19,12 @@
 > default; `process` is the explicit rollback opt-out. Migration step 3's
 > remaining deletions stay future work.
 >
+> **Status truth (2026-09).** The hosted runner marks `agents_meta.status`
+> `running` when a turn starts and `idling` when it settles, so the roster and
+> UI report a hosted turn faithfully. This does not change the mode-based
+> quiesce and force-reap no-ops: hosted work is still owned by runner tasks,
+> not per-agent processes or the process restarter.
+>
 > One Phase 1 property was NOT achieved and is worth knowing before a soak: the
 > host builds ONE compiled graph per process, because `build_graph` mutates
 > process-global plugin registration. `_build_llm_retry()` is evaluated at build

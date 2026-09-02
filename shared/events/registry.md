@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 23 | events table |
-| telemetry (category=telemetry) | `events` | 138 | events table |
+| telemetry (category=telemetry) | `events` | 139 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -90,7 +90,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 138)
+## 3. Telemetry events (category=telemetry, 139)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -127,6 +127,7 @@ consumers: see the comments at each emit point.
 | `exec_timeout` | execute_code timed out | anomaly | — | — | events |
 | `exec_node_timeout` | node-level timeout | anomaly | — | — | events |
 | `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events |
+| `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events |
 | `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are lost; the delivery watchdog re-publish covers them) | noise | — | — | events |
 | `host_dispatcher_restart_required` | hosted dispatcher could not unwind a stale turn — exiting for supervisor recovery | anomaly | — | — | events |

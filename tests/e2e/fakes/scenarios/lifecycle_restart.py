@@ -1,7 +1,7 @@
-"""ava.self.restart — agent self-restart + restarter spawns new process lifecycle scenario.
+"""ava.self.restart lifecycle scenario for process and hosted runners.
 
-Cross-process build of two SCRIPT segments, distinguished by the presence of a
-kind='restart_completed' row in the inbound_messages table:
+Build two SCRIPT segments, distinguished by a durable restart record in the
+inbound_messages table:
 
   first process (before restart):
     ↓ build() sees no 'restart_completed' in DB → returns RESTART_SCRIPT
@@ -10,16 +10,18 @@ kind='restart_completed' row in the inbound_messages table:
     ↓ restarter daemon (1s poll) sees status='restarting' → respawn_agent
     ↓   INSERT 'restart_completed' inbound row
     ↓   session spawn starts fresh process
-  post-restart process (new PID, same agent_id):
-    ↓ build() sees 'restart_completed' in DB (restarter just INSERTed) → returns IDLE_SCRIPT
+  post-restart runtime (new process in process mode; cold runtime in hosted
+  mode, same agent_id):
+    ↓ build() sees the consumed 'restart' or 'restart_completed' record → returns IDLE_SCRIPT
     ↓ claim processes 'restart_completed' inbound, writes "[system ts] You have been restarted"
     ↓ marker enters messages → idle, waiting for next inbound (fake is not called at this stage)
     llm 1 (IDLE_SCRIPT[0]): short chat halt, only called if the user sends another message after idle
 
-Why inbound_messages rather than agent_events / messages: the 'restart_completed' inbound
-is the only marker row the restarter definitively writes on respawn, with a precise kind
-field; even after claim consumes it, the row is not deleted. The truncated_db fixture
-TRUNCATEs before each test so the first process sees a DB free of prior test residue.
+Why inbound_messages rather than agent events / messages: process mode has the
+restarter-written 'restart_completed' marker; hosted mode retains the consumed
+'restart' inbound after rendering the marker inline. Both records survive claim
+consumption. The truncated_db fixture truncates before each test so the first
+runtime sees a DB free of prior test residue.
 """
 
 from __future__ import annotations
@@ -52,9 +54,24 @@ IDLE_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 
-def _is_post_restart_process() -> bool:
-    """Fresh process starts, restarter has already INSERTed 'restart_completed' inbound = post-restart."""
+def _is_post_restart_runtime() -> bool:
+    """Whether this runtime follows a restart for its agent.
+
+    Process mode: the restarter has INSERTed a 'restart_completed' inbound,
+    which only exists after a full restart cycle — the fresh process is
+    post-restart. Hosted mode: no restarter exists, so 'restart_completed'
+    never appears; the SDK's own 'restart' inbound row marks the first
+    restart instead. The fake must switch to the idle script after the first
+    restart in both modes, or a hosted agent would keep calling
+    ``ava.self.restart()`` forever.
+    """
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM inbound_messages WHERE agent_id = %s AND kind = 'restart' LIMIT 1",
+            (ava.self.AGENT_ID,),
+        )
+        if cur.fetchone() is not None:
+            return True
         cur.execute(
             "SELECT 1 FROM inbound_messages "
             "WHERE agent_id = %s AND kind = 'restart_completed' LIMIT 1",
@@ -64,6 +81,6 @@ def _is_post_restart_process() -> bool:
 
 
 def build(model: str) -> ScriptedFakeChatModel:
-    if _is_post_restart_process():
+    if _is_post_restart_runtime():
         return ScriptedFakeChatModel(script=IDLE_SCRIPT)
     return ScriptedFakeChatModel(script=RESTART_SCRIPT)

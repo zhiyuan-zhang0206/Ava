@@ -902,11 +902,9 @@ async def test_claim_hosted_never_enters_idling_status(
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """The status row is the observable half: `_wait_for_batch` flips the agent to
-    IDLING before it blocks, and the hosted branch returns BEFORE that flip. Idle
-    must be the absence of a task, not a status a hosted agent sits in — otherwise
-    the reaper and the delivery watchdog, which both reason about idling owners,
-    would be told a lie about an agent that has no process at all."""
+    """The hosted claim branch never writes status: `_wait_for_batch` would flip
+    to IDLING before it blocks, while the host owns running/idling around the
+    task itself. A direct hosted claim therefore leaves its running row alone."""
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
@@ -922,8 +920,8 @@ async def test_claim_hosted_never_enters_idling_status(
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
         row = cur.fetchone()
     assert row is not None
-    # The row was already running from bootstrap; the hosted branch must return
-    # without touching it.
+    # The row was already running; the hosted claim branch must return without
+    # touching it.
     assert row[0] == "running", f"hosted claim left status {row[0]!r}"
 
 

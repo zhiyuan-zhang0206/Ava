@@ -146,8 +146,8 @@ class TurnScheduler:
 
     @property
     def active_agents(self) -> frozenset[int]:
-        """Agents with a turn task right now — the hosted answer to "who is
-        running", replacing the per-process status row."""
+        """Agents with a turn task right now — the in-process answer to "who is
+        running"; the host also mirrors that state in the database row."""
         return frozenset(self._tasks)
 
     def wake(self, agent_id: int) -> None:
