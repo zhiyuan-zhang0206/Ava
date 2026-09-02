@@ -92,9 +92,15 @@ outranking the lease.
 from __future__ import annotations
 
 # The one definition of "this host has stopped making progress". Consumers:
-# `cli.commands.update._POLL_TIMEOUT_S`, `shared.cluster_lock.SETTLE_TTL_S`,
+# `PHASE_B_ABSOLUTE_TIMEOUT_S`, `shared.cluster_lock.SETTLE_TTL_S`, and
 # `ops.updater_reap._UPDATER_STALL_TIMEOUT_S`.
 NO_PROGRESS_TIMEOUT_S = 900.0
+
+# The advertised per-host Phase-B absolute deadline. It is an alias rather than
+# another calibration: the poll, settle hold, and updater reaper must share one
+# definition of when a whole host update stopped making progress. C3's separate
+# `CONVERGING_POLL_TIMEOUT_S` is only the earlier handoff for continuous progress.
+PHASE_B_ABSOLUTE_TIMEOUT_S = NO_PROGRESS_TIMEOUT_S
 
 # How long one production `uv sync` may run before the updater kills its whole
 # process tree and reports a terminal failure (`cli.commands._update_uv_sync`).
