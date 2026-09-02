@@ -147,7 +147,7 @@ async def test_hosted_exit_matches_generation_and_owner(
         aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
     )
     assert incarnation is not None
-    with ConnectionPool(
+    with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=2, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
         stale = await asyncio.to_thread(
