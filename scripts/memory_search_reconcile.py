@@ -71,7 +71,7 @@ def _connect_backends(
     try:
         backend_a.connect()
         backend_b.connect()
-    except RuntimeError as exc:
+    except Exception as exc:
         backend_a.close()
         backend_b.close()
         if readonly:

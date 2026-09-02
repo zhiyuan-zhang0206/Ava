@@ -20,7 +20,7 @@ class _FakeProvider:
 
 
 class _FakeBackend:
-    def __init__(self, connect_error: RuntimeError | None = None) -> None:
+    def __init__(self, connect_error: Exception | None = None) -> None:
         self.connect_error = connect_error
         self.connected = False
         self.closed = False
@@ -119,11 +119,13 @@ def test_allow_write_requires_a_terminal(monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls == []
 
 
-def test_allow_write_with_exact_confirmation_connects_writable(
+def test_allow_write_with_exact_confirmation_connects_writable_and_runs_comparison(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An operator who types exact yes receives explicitly writable backends."""
-    backends = [_FakeBackend(), _FakeBackend()]
+    """An operator who types exact yes gets writable backends and a completed comparison."""
+    backend_a = _FakeBackend()
+    backend_b = _FakeBackend()
+    backends = [backend_a, backend_b]
     calls = _patch_reconcile_dependencies(monkeypatch, backends)
     monkeypatch.setattr(
         sys, "argv", ["memory_search_reconcile", "--a", "milvus", "--b", "numpy", "--allow-write"]
@@ -133,6 +135,31 @@ def test_allow_write_with_exact_confirmation_connects_writable(
 
     assert reconcile.main() == 0
     assert [call[-1] for call in calls] == [False, False]
+    assert backend_a.connected and backend_b.connected
+    assert backend_a.closed and backend_b.closed
+
+
+def test_writable_connection_failure_is_reported_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Any writable connection failure is reported after both backends close."""
+    backend_a = _FakeBackend(ValueError("Milvus unavailable"))
+    backend_b = _FakeBackend()
+    calls = _patch_reconcile_dependencies(monkeypatch, [backend_a, backend_b])
+    monkeypatch.setattr(
+        sys, "argv", ["memory_search_reconcile", "--a", "milvus", "--b", "numpy", "--allow-write"]
+    )
+    monkeypatch.setattr(reconcile.sys, "stdin", _TTYStdin())
+    monkeypatch.setattr(reconcile.builtins, "input", _exact_confirmation)
+
+    assert reconcile.main() == 1
+
+    err = capsys.readouterr().err
+    assert "backend connection failed" in err
+    assert "Milvus unavailable" in err
+    assert "Traceback" not in err
+    assert [call[-1] for call in calls] == [False, False]
+    assert backend_a.closed and backend_b.closed
 
 
 def test_readonly_connection_mismatch_is_reported_without_traceback(

@@ -1,10 +1,8 @@
 """Milvus-backed embedding index (the `milvus` memory search backend).
 
 This module holds the raw pymilvus storage primitives (module-level
-functions, moved verbatim from the pre-abstraction
-`services.memory_indexer.index` — that module still re-exports them for
-the legacy regression suite) plus the `MilvusBackend` class implementing
-the shared `MemorySearchBackend` protocol. New code goes through
+functions) plus the `MilvusBackend` class implementing the shared
+`MemorySearchBackend` protocol. New code goes through
 `backends.factory.get_backend()`, never these functions directly.
 
 connect via `MilvusClient(uri=<server_uri>)` — goes through the
