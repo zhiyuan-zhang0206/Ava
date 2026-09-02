@@ -9,6 +9,23 @@ tags:
 
 # Managed writer closure evidence
 
+`managed_writer_publication.py` defines the version-2 envelope in this SAME field:
+`current` is a committed exact all-unit release tuple; `pending` preserves that
+predecessor while freezing ordinary births. Each unit binds machine, canonical
+home, artifact/manifest digests and the complete prepared inventory receipt digest
+(including service-only declarations). Beginning pending requires the current live
+rollout, predecessor match and every registered unit, including stopped machines.
+Expiry or crash never silently clears pending/current. Ordinary admission checks
+deployment -> registry before any agent row lock, refuses unsettled deployment,
+pending/new units/image-selector mismatch, and retains the row locks through birth.
+Committed state outlives its originating lease; it is not liveness evidence.
+
+The current-publication commit producer is not connected: bootstrap observations
+are not normal ready-service readbacks, and historical version-1 collections are
+not converted to current permits. No admission callsite or protocol-1 activation
+is wired by these storage helpers. Fresh selector CAS/loaded-owner readbacks and
+rollback/recovery transitions require the existing updater's actual producers.
+
 `deployment_state.managed_writer_evidence` is nullable typed version-1 evidence
 for the existing operation, never another registry or command journal. Absence
 means unknown. `machine_units` is the authoritative machine/home inventory;
