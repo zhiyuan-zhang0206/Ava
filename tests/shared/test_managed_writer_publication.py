@@ -14,13 +14,21 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 
-from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
+from shared.managed_writer_barrier import (
+    ManagedUnit,
+    ManagedUnitClosure,
+    ManagedWriterBarrierError,
+    ManagedWriterCollection,
+    RolloutIdentity,
+)
 from shared.managed_writer_publication import (
     CommittedPublication,
     PendingPublication,
     PublishedUnit,
     WriterPublication,
+    adopt_pending_collection,
     begin_pending_publication,
+    recover_pending_publication,
     require_current_publication,
 )
 
@@ -100,6 +108,87 @@ def require(conn: psycopg.Connection) -> None:
     require_current_publication(
         conn, unit(), selector_artifact_digest="b" * 64, selector_manifest_digest="c" * 64
     )
+
+
+def closure(conn: psycopg.Connection, proposal: PendingPublication) -> ManagedWriterCollection:
+    row = conn.execute("SELECT clock_timestamp()").fetchone()
+    assert row is not None
+    return ManagedWriterCollection(
+        operation=proposal.operation,
+        candidate_digest=proposal.candidate_digest,
+        challenge=proposal.challenge,
+        collected_at=row[0],
+        valid_until=row[0] + timedelta(seconds=30),
+        units=tuple(
+            ManagedUnitClosure(
+                unit=ManagedUnit(
+                    machine=entry.machine, home=entry.home, inventory_digest=entry.inventory_digest
+                ),
+                boot_id=uuid4(),
+                observer_instance=uuid4(),
+                observation_digest="9" * 64,
+                outcome="old_writers_absent_relaunchers_fenced",
+            )
+            for entry in proposal.units
+        ),
+    )
+
+
+def test_adopted_stop_evidence_is_not_current_permission(
+    publication_db: psycopg.Connection,
+) -> None:
+    current = seed_current(publication_db)
+    proposal = pending(publication_db, current)
+    begin_pending_publication(publication_db, proposal)
+    collected = closure(publication_db, proposal)
+    adopt_pending_collection(publication_db, collected)
+    row = publication_db.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
+    assert row is not None
+    assert row[0]["current"] == current.model_dump(mode="json")
+    assert row[0]["pending"]["collection"] == collected.model_dump(mode="json")
+    with pytest.raises(ManagedWriterBarrierError, match="transitioning"):
+        require(publication_db)
+
+
+@pytest.mark.parametrize("change", ["challenge", "expired", "inventory"])
+def test_adoption_rejects_replay_and_drift(publication_db: psycopg.Connection, change: str) -> None:
+    current = seed_current(publication_db)
+    proposal = pending(publication_db, current)
+    begin_pending_publication(publication_db, proposal)
+    collected = closure(publication_db, proposal)
+    if change == "challenge":
+        collected = collected.model_copy(update={"challenge": uuid4()})
+    elif change == "expired":
+        collected = collected.model_copy(update={"valid_until": collected.collected_at})
+    else:
+        publication_db.execute(
+            "INSERT INTO machine_units(machine_name,home) VALUES('runner','/new')"
+        )
+    with pytest.raises(ManagedWriterBarrierError):
+        adopt_pending_collection(publication_db, collected)
+    row = publication_db.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
+    assert row is not None and row[0]["pending"]["collection"] is None
+
+
+def test_recovery_requires_new_closure_and_preserves_current(
+    publication_db: psycopg.Connection,
+) -> None:
+    current = seed_current(publication_db)
+    abandoned = pending(publication_db, current)
+    begin_pending_publication(publication_db, abandoned)
+    old_collection = closure(publication_db, abandoned)
+    adopt_pending_collection(publication_db, old_collection)
+    successor = pending(publication_db, current)
+    with pytest.raises(ManagedWriterBarrierError):
+        recover_pending_publication(publication_db, abandoned.operation, successor, old_collection)
+    collected = closure(publication_db, successor)
+    recover_pending_publication(publication_db, abandoned.operation, successor, collected)
+    row = publication_db.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
+    assert row is not None
+    assert row[0]["current"] == current.model_dump(mode="json")
+    assert row[0]["pending"]["operation"] == successor.operation.model_dump(mode="json")
+    with pytest.raises(ManagedWriterBarrierError, match="no longer matches"):
+        recover_pending_publication(publication_db, abandoned.operation, successor, collected)
 
 
 def test_settled_publication_outlives_lease(publication_db: psycopg.Connection) -> None:
