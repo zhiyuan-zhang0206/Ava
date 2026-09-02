@@ -117,7 +117,9 @@ def lock_registered_units(conn: psycopg.Connection) -> set[tuple[str, str]]:
     No endpoint/URL is persisted in evidence. Orphan machine rows fail closed.
     """
     with conn.cursor() as cur:
-        cur.execute("LOCK TABLE machines, machine_units IN SHARE MODE")
+        # register_self/mark_unit_stopped write units before composed machines.
+        # Match their order rather than deadlocking an in-flight registration.
+        cur.execute("LOCK TABLE machine_units, machines IN SHARE MODE")
         cur.execute("SELECT machine_name, home FROM machine_units ORDER BY machine_name, home")
         units = set(cur.fetchall())
         cur.execute("SELECT name FROM machines")
