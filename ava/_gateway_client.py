@@ -699,7 +699,15 @@ def exited(agent_id: int) -> None:
     keeps daemon-supervised serve() pages open. No body — the agent is
     finalizing itself.
     """
-    resp = _post(f"/api/agents/{agent_id}/exited")
+    from shared.runtime_incarnation import current_incarnation
+
+    incarnation = current_incarnation(agent_id)
+    body = (
+        {"generation": str(incarnation.generation), "owner": str(incarnation.owner)}
+        if incarnation is not None
+        else None
+    )
+    resp = _post(f"/api/agents/{agent_id}/exited", body)
     _raise_from_response(resp)
 
 

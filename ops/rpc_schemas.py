@@ -8,6 +8,7 @@ reach up into gateway. Split out of the former monolithic ops/schemas.py.
 
 from datetime import datetime
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -32,6 +33,14 @@ _UserContent = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=_MAX_CONTENT_CHARS),
 ]
+
+
+class AgentExitedRequest(BaseModel):
+    """The actual admitted runtime reporting exit, never a freshly read token."""
+
+    model_config = ConfigDict(extra="forbid")
+    generation: UUID
+    owner: UUID
 
 
 class TextContentBlock(BaseModel):

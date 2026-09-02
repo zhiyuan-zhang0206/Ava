@@ -25,6 +25,7 @@ from shared.migrations import (
     SchemaVersionMismatch,
     assert_schema_current,
 )
+from shared.runtime_incarnation import bind_process_incarnation, new_process_incarnation
 
 
 def claim_agent_row_or_die_on_stale_schema(agent_id: int) -> None:
@@ -81,6 +82,7 @@ def claim_agent_row(agent_id: int) -> None:
     identity with the process that already owns it.
     """
     local_machine = machine_name()
+    incarnation = new_process_incarnation(agent_id)
     with write_transaction() as conn, conn.cursor() as cur:
         # A guarded auto-resurrect transaction may still be committing the row
         # when its child starts. Lock first so this process validates that final
@@ -109,9 +111,20 @@ def claim_agent_row(agent_id: int) -> None:
 
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = %s, started_at = now(), "
-            "lease_expires_at = now() + make_interval(secs => %s) "
-            "WHERE id = %s AND status = %s AND pid IS NULL",
-            (AgentStatus.RUNNING, os.getpid(), AGENT_LEASE_TTL_S, agent_id, AgentStatus.IDLING),
+            "lease_expires_at = now() + make_interval(secs => %s), "
+            "runtime_generation = %s, runtime_owner = %s, runtime_kind = 'process', "
+            "runtime_protocol_version = 0 "
+            "WHERE id = %s AND status = %s AND pid IS NULL "
+            "AND (runtime_kind IS NULL OR runtime_kind = 'process')",
+            (
+                AgentStatus.RUNNING,
+                os.getpid(),
+                AGENT_LEASE_TTL_S,
+                incarnation.generation,
+                incarnation.owner,
+                agent_id,
+                AgentStatus.IDLING,
+            ),
         )
         if cur.rowcount != 1:
             raise RuntimeError(
@@ -119,4 +132,5 @@ def claim_agent_row(agent_id: int) -> None:
                 f"(rowcount={cur.rowcount}); another process or lifecycle operation won the race."
             )
         conn.commit()
+        bind_process_incarnation(incarnation)
         publish_agent_updated_sync(conn, agent_id)
