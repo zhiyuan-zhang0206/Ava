@@ -1,10 +1,13 @@
 """Generic cleanup cannot overwrite a durable lifecycle decision."""
 
+from unittest.mock import Mock
+
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 from agent._starting import _mark_preclaim_terminated, claim_agent_row
+from ops import agent_launch
 from services.delivery_watchdog.daemon import dead_letter_stale_claimed
 from shared.db import insert_inbound_message
 from tests.agent.test_restart_admission import _prepared
@@ -60,3 +63,23 @@ def test_generic_dead_letter_leaves_fixed_command_claimed(
     assert db_conn.execute(
         "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (command_id,)
+
+
+@pytest.mark.parametrize("retry", [False, True])
+@pytest.mark.parametrize("owned", [False, True])
+def test_delayed_launcher_cleanup_never_settles_new_owned_command(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, retry: bool, owned: bool
+) -> None:
+    agent_id, command_id = _prepared(db_conn) if owned else (_row(db_conn), None)
+    failure = Mock(side_effect=RuntimeError("injected old launch timeout"))
+    if retry:
+        monkeypatch.setattr(agent_launch, "_LAUNCH_MAX_RETRIES", 0)
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", failure)
+        with pytest.raises(RuntimeError, match="old launch timeout"):
+            agent_launch._launch_or_force_terminated(agent_id)
+    else:
+        monkeypatch.setattr(agent_launch, "_wait_for_agent_claim", failure)
+        assert not agent_launch._confirm_launch_or_force_terminated(agent_id)
+    assert db_conn.execute(
+        "SELECT status,pid,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("idling" if owned else "terminated", None, command_id)
