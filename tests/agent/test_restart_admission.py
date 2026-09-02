@@ -1,15 +1,18 @@
 """Restart boot identity and record failures cannot authorize another consumer."""
 
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import uuid4
 
+import psutil
 import psycopg
 import pytest
 
 from agent._starting import claim_agent_row
 from agent.restart_admission import consume_restart_command
-from agent.session_admission import publish_admitted_session
+from agent.session_admission import _may_replace, publish_admitted_session
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from shared.session_record import SessionRecord
 from tests.agent.test_lifecycle_intent import _command
 from tests.agent.test_runtime_incarnation import _row
 
@@ -117,3 +120,30 @@ def test_nonsecret_command_flag_removed_before_runtime_parser() -> None:
     assert consume_restart_command(argv) == 123
     assert argv == ["agent", "--agent-id", "4"]
     assert consume_restart_command(argv) is None
+
+
+@pytest.mark.parametrize("state", ["live", "denied", "unknown_birth", "zombie", "gone"])
+def test_canonical_record_requires_positive_identity_evidence(
+    monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    old = Mock(spec=psutil.Process)
+    old.pid = 100
+    old.create_time.return_value = 10.0
+    old.status.return_value = psutil.STATUS_ZOMBIE if state == "zombie" else psutil.STATUS_RUNNING
+    current = Mock(spec=psutil.Process)
+    current.pid = 200
+    factory = Mock(return_value=old)
+    if state == "denied":
+        factory.side_effect = psutil.AccessDenied(100)
+    elif state == "gone":
+        factory.side_effect = psutil.NoSuchProcess(100)
+    monkeypatch.setattr("agent.session_admission.psutil.Process", factory)
+    record = SessionRecord(100, 0.0 if state == "unknown_birth" else 10.0, "agent", "/", 10.0)
+    if state == "denied":
+        with pytest.raises(psutil.AccessDenied):
+            _may_replace(record, current)
+    elif state == "unknown_birth":
+        with pytest.raises(RuntimeError, match="birth identity is unknown"):
+            _may_replace(record, current)
+    else:
+        assert _may_replace(record, current) == (state in {"zombie", "gone"})

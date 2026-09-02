@@ -31,6 +31,8 @@ def _may_replace(record: SessionRecord, current: psutil.Process) -> bool:
             if matches is None:
                 raise RuntimeError("canonical agent session identity is unreadable")
         else:
+            if record.create_time <= 0:
+                raise RuntimeError("canonical agent session birth identity is unknown")
             matches = previous.create_time() == record.create_time
         if not matches:
             return True
