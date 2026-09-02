@@ -13,6 +13,13 @@ loaded package's baseline file supplies an independent integrity comparison for
 the verified image, not proof of live applied migrations. Selector and machine
 facts are reread to reject drift. A source/dev runtime returns no new input.
 
+Full image verification runs once per actual Python process or hosted-daemon
+boot, outside the database lock. Ordinary claims and same-incarnation hosted
+turns must not call it. Before a new hosted incarnation, the process-local
+result has a cheap selector/manifest/full-receipt/machine binding check followed
+by the same-transaction publication gate. Cross-process reuse or a changed
+selector refuses; no shared global cache or environment flag bypasses validation.
+
 This read-only output is not normal-service readiness, an all-writer closure, a
 birth permit or protocol-one authority. Actual admission retains the separate
 publication transaction gate. The selector writer and rollback CAS remain the

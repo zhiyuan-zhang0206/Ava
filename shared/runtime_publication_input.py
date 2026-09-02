@@ -7,10 +7,13 @@ publication; normal-service readiness and live schema compatibility remain separ
 
 import hashlib
 import json
+import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
+
+from pydantic import Field
 
 from shared.managed_writer_barrier import Digest, EvidenceModel
 from shared.managed_writer_observation import ExpectedUnitWriters
@@ -38,44 +41,42 @@ class PreparedService(EvidenceModel):
     gate: str | None
 
 
+class PreparationReceipt(EvidenceModel):
+    version: Literal[1]
+    expected: ExpectedUnitWriters
+    services: tuple[PreparedService, ...] = Field(min_length=1)
+    inventory_digest: Digest
+    closure: Literal["unknown"]
+    unresolved: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class RuntimePublicationInput:
     actual: PublishedUnit
     selector: PublicationSelector
     selector_bytes_digest: str
+    loaded_prefix: Path
+    process_pid: int
 
 
 def read_publication_selector(body: bytes) -> PublicationSelector | None:
     """An exact old selector has no receipt binding and grants no new input."""
     raw = json.loads(body)
-    if isinstance(raw, dict) and set(raw) == {"artifact_digest", "manifest_digest"}:
+    if isinstance(raw, dict) and set(cast(dict[object, object], raw)) == {
+        "artifact_digest",
+        "manifest_digest",
+    }:
         LegacySelector.model_validate_json(body)
         return None
     return PublicationSelector.model_validate_json(body)
 
 
 def _receipt_expected(body: bytes) -> ExpectedUnitWriters:
-    raw = json.loads(body)
-    if (
-        not isinstance(raw, dict)
-        or set(raw)
-        != {"version", "expected", "services", "inventory_digest", "closure", "unresolved"}
-        or type(raw["version"]) is not int
-        or raw["version"] != 1
-    ):
-        raise ReleaseRejectedError("unsupported complete preparation receipt")
-    expected = ExpectedUnitWriters.model_validate_json(json.dumps(raw["expected"]))
-    if (
-        not isinstance(raw["services"], list)
-        or not raw["services"]
-        or raw["inventory_digest"] != expected.unit().inventory_digest
-        or raw["closure"] != "unknown"
-        or not isinstance(raw["unresolved"], list)
-        or not all(isinstance(item, str) for item in raw["unresolved"])
-    ):
+    receipt = PreparationReceipt.model_validate_json(body)
+    expected = receipt.expected
+    if receipt.inventory_digest != expected.unit().inventory_digest:
         raise ReleaseRejectedError("incomplete preparation receipt")
-    services = [PreparedService.model_validate_json(json.dumps(item)) for item in raw["services"]]
-    names = [service.session for service in services]
+    names = [service.session for service in receipt.services]
     if any(not name for name in names) or names != sorted(set(names)):
         raise ReleaseRejectedError("preparation service roster is empty or ambiguous")
     # This is expected inventory, not a readiness assertion. Its complete byte
@@ -86,6 +87,7 @@ def _receipt_expected(body: bytes) -> ExpectedUnitWriters:
 def resolve_runtime_publication_input() -> RuntimePublicationInput | None:
     """Resolve from this imported runtime; None is not protocol-one authority.
 
+    Call once at actual process/host boot, never on each inbox claim or turn.
     Source/dev and exact legacy selectors provide no new-publication input.
     A wheel with missing/malformed metadata refuses rather than guessing.
     """
@@ -150,4 +152,39 @@ def resolve_runtime_publication_input() -> RuntimePublicationInput | None:
         ),
         selector,
         hashlib.sha256(before).hexdigest(),
+        prefix,
+        os.getpid(),
     )
+
+
+def revalidate_runtime_publication_input(value: RuntimePublicationInput) -> None:
+    """Cheap local binding check before a new hosted incarnation, not every turn.
+
+    The object stays inside its originating process and loaded generation. This
+    is not a cross-process cache or a replacement for the locked DB publication
+    decision. A selector change requires fresh resolution, never reuse.
+    """
+    if (
+        not WHEEL_RUNTIME
+        or value.process_pid != os.getpid()
+        or value.loaded_prefix != runtime_venv()
+    ):
+        raise ReleaseRejectedError("publication input belongs to another loaded process")
+    root = runtime_venv().parent
+    home = root.parent.parent
+    if str(home) != value.actual.home or root.name != value.actual.artifact_digest:
+        raise ReleaseRejectedError("publication input belongs to another unit image")
+    selector = regular_bytes(root.parent / "current-release")
+    if hashlib.sha256(selector).hexdigest() != value.selector_bytes_digest:
+        raise ReleaseRejectedError("selector changed since runtime verification")
+    if read_publication_selector(selector) != value.selector:
+        raise ReleaseRejectedError("selector binding changed since runtime verification")
+    if file_sha256(root / "manifest.json") != value.actual.manifest_digest:
+        raise ReleaseRejectedError("loaded manifest changed since runtime verification")
+    receipt = home / "run" / f"release-inventory-{value.actual.inventory_digest}.json"
+    if receipt.resolve(strict=True) != receipt:
+        raise ReleaseRejectedError("runtime receipt path changed")
+    if hashlib.sha256(regular_bytes(receipt)).hexdigest() != value.actual.inventory_digest:
+        raise ReleaseRejectedError("runtime receipt changed since verification")
+    if regular_bytes(home / "machine_name").decode().strip() != value.actual.machine:
+        raise ReleaseRejectedError("installed machine identity changed")
