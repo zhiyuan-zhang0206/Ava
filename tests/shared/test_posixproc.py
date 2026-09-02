@@ -510,8 +510,16 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
         assert _wait(lambda: not psutil.pid_exists(pid)), "top process must be gone"
         assert _wait(late_file.exists), "late child never spawned"
         late_pid = int(late_file.read_text())
-        assert _wait(lambda: not psutil.pid_exists(late_pid)), (
-            "late-spawned child must die with the group"
+
+        def child_exited() -> bool:
+            try:
+                return psutil.Process(late_pid).status() == psutil.STATUS_ZOMBIE
+            except psutil.NoSuchProcess:
+                return True
+
+        assert _wait(child_exited), (
+            f"late-spawned child must exit with the group: pid={late_pid}, "
+            f"status={psutil.Process(late_pid).status()}"
         )
     finally:
         posixproc.kill_session(name, graceful=False)
