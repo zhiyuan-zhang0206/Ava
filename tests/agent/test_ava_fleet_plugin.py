@@ -174,6 +174,7 @@ def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
     assert "one business delivery to the current delegator" in section
     assert "`created_by` is an audit trail, not a routing field" in section
     assert "no automatic notification to the creator" in section
+    assert "reserve `ava.tasks.create_and_assign` for when the owner must be spawned" in section
 
 
 def test_prompt_section_task_conversion_is_domain_instance_only(
