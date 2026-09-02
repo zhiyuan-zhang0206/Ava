@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -20,7 +21,69 @@ from shared.runtime_prepare import (
     prepare_release,
     verify_native_closure,
 )
-from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
+from shared.runtime_release import (
+    ReleaseRejectedError,
+    VerifiedRelease,
+    file_sha256,
+    verify_release,
+)
+
+
+def prove_checkout_absent(
+    root: Path, checkout: Path, application_name: str, release: VerifiedRelease
+) -> None:
+    """Run the existing CLI with no source checkout at its original path."""
+    verifier = root / "verify_runtime_wheel.py"
+    shutil.copy2(checkout / "scripts/verify_runtime_wheel.py", verifier)
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or Path(os.environ["GITHUB_WORKSPACE"]).resolve() != checkout
+    ):
+        raise RuntimeError(
+            "checkout-retirement proof is restricted to the exact GitHub CI checkout"
+        )
+    retired_checkout = checkout.with_name(checkout.name + "-inactive-prepare-proof")
+    if retired_checkout.exists():
+        raise RuntimeError("checkout retirement destination already exists")
+    child_env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(root),
+        "AVA_CONFIG_FETCH": "skip",
+        "AVA_TIMEZONE": "UTC",
+        "AVA_HOME": str(root / "probe-home"),
+        "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
+        "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
+    }
+    checkout.rename(retired_checkout)
+    try:
+        subprocess.run(  # noqa: S603 — verified generation interpreter, no shell.
+            [
+                str(release.interpreter),
+                "-I",
+                "-B",
+                str(verifier),
+                str(root / "retired-wheels" / application_name),
+                "--checkout",
+                str(checkout),
+            ],
+            cwd=root,
+            env=child_env,
+            check=True,
+            timeout=120,
+        )
+        launched = subprocess.run(  # noqa: S603 — same verified generation, existing CLI consumer.
+            release.module_argv("cli.main", "--help"),
+            cwd=root,
+            env=child_env,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        if "usage:" not in launched.stdout.lower():
+            raise AssertionError("existing CLI did not execute from prepared generation")
+    finally:
+        retired_checkout.rename(checkout)
 
 
 def main() -> None:
@@ -72,28 +135,7 @@ def main() -> None:
     # prepared generation does not depend on input wheels or base Python paths.
     private_python.rename(root / "retired-python-input")
     wheels.rename(root / "retired-wheels")
-    subprocess.run(  # noqa: S603 — verified generation interpreter, no shell.
-        [
-            str(release.interpreter),
-            "-I",
-            "-B",
-            str(checkout / "scripts/verify_runtime_wheel.py"),
-            str(root / "retired-wheels" / application.name),
-            "--checkout",
-            str(checkout),
-        ],
-        cwd=root,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "AVA_CONFIG_FETCH": "skip",
-            "AVA_TIMEZONE": "UTC",
-            "AVA_HOME": str(root / "probe-home"),
-            "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
-            "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
-        },
-        check=True,
-        timeout=120,
-    )
+    prove_checkout_absent(root, checkout, application.name, release)
     verify_native_closure(release)
     import platform
 
@@ -128,6 +170,7 @@ def main() -> None:
     evidence = {
         "cold_offline_prepare": True,
         "input_paths_retired_imports": True,
+        "checkout_absent_imports_and_existing_cli": True,
         "serving_pointer_unchanged_success_and_failure": True,
         "artifact_digest": release.digest,
         "manifest_digest": release.manifest_digest,
