@@ -1,5 +1,6 @@
 """Incarnation fences exercise actual DB transitions, not just SQL strings."""
 
+from collections.abc import Iterator
 from uuid import uuid4
 
 import psycopg
@@ -9,13 +10,25 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent._starting import claim_agent_row
 from agent.db import renew_agent_lease
 from ops.ops_exit import _mark_exited_blocking
-from shared.db import create_agent
+from shared.config import settings
+from shared.db import PG_KEEPALIVE_KWARGS, create_agent
 from shared.machine import machine_name
 from shared.runtime_incarnation import (
     RuntimeIncarnation,
     bind_process_incarnation,
     current_incarnation,
 )
+
+
+@pytest.fixture
+def sync_pool() -> Iterator[ConnectionPool]:
+    with ConnectionPool(
+        settings.data_plane.db_url,
+        min_size=1,
+        max_size=2,
+        kwargs=PG_KEEPALIVE_KWARGS,
+    ) as pool:
+        yield pool
 
 
 def _row(conn: psycopg.Connection) -> int:
