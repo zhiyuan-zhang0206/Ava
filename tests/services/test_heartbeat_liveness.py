@@ -134,13 +134,17 @@ class FakeProbe:
 
 
 class TestLivenessPass:
-    def test_missing_probe_never_fabricates_online_or_observation_time(self, db_conn, pool):
+    def test_missing_probe_never_fabricates_online_or_observation_time(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
         _register_machine(db_conn)
         aid = _make_agent(db_conn)
         _merge_liveness(pool)
         assert _state(db_conn, aid) == ("unknown", None)
 
-    def test_merge_retains_actual_probe_time(self, db_conn, pool):
+    def test_merge_retains_actual_probe_time(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
         _register_machine(db_conn)
         aid = _make_agent(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=True, failures=0)
