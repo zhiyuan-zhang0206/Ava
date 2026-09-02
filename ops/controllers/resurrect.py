@@ -72,15 +72,15 @@ therefore never revived to process its own kill signal.
 pin-heal backoff shape). So a resurrect that keeps failing — an outage that
 re-crashes the agent on boot, a poison message that reliably kills it — is retried
 at most once per window (each a loud WARN) instead of a tight loop. The continuous
-crash-resurrect scan stops after ``auto_resurrect_max_attempts`` unconsumed
-``kind='resurrect'`` lifecycle inbounds; a successful boot consumes those rows, so
-the count represents consecutive failed recovery attempts. New post-death work still
-wakes the agent through the delivery path or delivery watchdog, so a permanently
-boot-failing corpse stops storming while a genuinely wanted agent is woken by a fresh
-delivery. The one-shot boot revive remains outside this continuous recovery budget.
-A one-off crash is recovered on the next scan (its ``last_resurrect_at`` is NULL or
-long-stale). The claim + backoff stamp is a single atomic UPDATE, so under any race
-only one pass resurrects a given corpse.
+crash-resurrect scan and one-shot boot revive stop after
+``auto_resurrect_max_attempts`` unconsumed ``kind='resurrect'`` lifecycle inbounds;
+a successful boot consumes those rows, so the count represents consecutive failed
+recovery attempts. New post-death work still wakes the agent through the delivery path
+or delivery watchdog, so a permanently boot-failing corpse stops storming while a
+genuinely wanted agent is woken by a fresh delivery. A one-off crash is recovered on
+the next scan (its ``last_resurrect_at`` is NULL or long-stale). The claim + backoff
+stamp is a single atomic UPDATE, so under any race only one pass resurrects a given
+corpse.
 
 **Gateway-health gated**, like RespawnController: a resurrected agent self-fetches
 its config from the gateway at boot, so resurrecting while the gateway is down would
@@ -247,10 +247,11 @@ def _claim_boot_revive_candidates(
 
     Same shape as the crash-resurrect claim -- one UPDATE both selects and
     claims (stamps last_resurrect_at, backoff-spaced, machine-scoped,
-    resurrectable sources only) -- plus a per-pass cap (`max_revive`): a
-    mass-death event (a whole host's corpses) drains over boots/passes instead
-    of launching the fleet in one tick. The cap rides `id IN (SELECT ... ORDER
-    BY id LIMIT %s)`, so the claim stays a single atomic statement.
+    resurrectable sources only) -- plus the shared recovery-attempt budget and
+    a per-pass cap (`max_revive`): a mass-death event (a whole host's corpses)
+    drains over boots/passes instead of launching the fleet in one tick. The
+    cap rides `id IN (SELECT ... ORDER BY id LIMIT %s)`, so the claim stays a
+    single atomic statement.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -260,14 +261,21 @@ def _claim_boot_revive_candidates(
             "AND machine = %s "
             "AND (last_resurrect_at IS NULL "
             "     OR now() - last_resurrect_at >= make_interval(secs => %s)) "
+            "AND (SELECT count(*) FROM inbound_messages lc "
+            "     WHERE lc.agent_id = agents_meta.id "
+            "       AND lc.kind = 'resurrect' AND lc.status = 'pending') < %s "
             "AND id IN ("
-            "  SELECT id FROM agents_meta "
-            "  WHERE status = 'terminated' "
-            "    AND termination_source = ANY(%s) "
-            "    AND machine = %s "
-            "    AND (last_resurrect_at IS NULL "
-            "         OR now() - last_resurrect_at >= make_interval(secs => %s)) "
-            "  ORDER BY id "
+            "  SELECT candidate.id FROM agents_meta candidate "
+            "  WHERE candidate.status = 'terminated' "
+            "    AND candidate.termination_source = ANY(%s) "
+            "    AND candidate.machine = %s "
+            "    AND (candidate.last_resurrect_at IS NULL "
+            "         OR now() - candidate.last_resurrect_at >= make_interval(secs => %s)) "
+            "    AND (SELECT count(*) FROM inbound_messages candidate_lc "
+            "         WHERE candidate_lc.agent_id = candidate.id "
+            "           AND candidate_lc.kind = 'resurrect' "
+            "           AND candidate_lc.status = 'pending') < %s "
+            "  ORDER BY candidate.id "
             "  LIMIT %s"
             ") "
             "RETURNING id, termination_source, status_changed_at, last_resurrect_at",
@@ -275,9 +283,11 @@ def _claim_boot_revive_candidates(
                 list(_RESURRECTABLE_SOURCES),
                 local_machine,
                 backoff_s,
+                settings.daemon.auto_resurrect_max_attempts,
                 list(_RESURRECTABLE_SOURCES),
                 local_machine,
                 backoff_s,
+                settings.daemon.auto_resurrect_max_attempts,
                 max_revive,
             ),
         )

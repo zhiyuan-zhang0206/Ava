@@ -618,8 +618,13 @@ async def dispatch_batch(
 
     Routing-guarded kinds (TERMINATE, RESTART, RESURRECT, COMPACT_REQUEST)
     are skipped when *routing.is_winner* returns False — one guard, not
-    three scattered across the loop body.
+    three scattered across the loop body. Multiple resurrect rows represent
+    repeated failed wakes, so only the newest one renders a lifecycle marker.
     """
+    latest_resurrect_id = max(
+        (item.id for item in batch if item.kind == InboundKind.RESURRECT),
+        default=None,
+    )
     for item in batch:
         kind = item.kind
         if kind in _ROUTING_KINDS and not routing.is_winner(item):
@@ -648,7 +653,8 @@ async def dispatch_batch(
         elif kind == InboundKind.RESTART_COMPLETED:
             await _handle_restart_completed(item, st)
         elif kind == InboundKind.RESURRECT:
-            await _handle_resurrect(item, st)
+            if item.id == latest_resurrect_id:
+                await _handle_resurrect(item, st)
         elif kind == InboundKind.FORK:
             await _handle_fork(agent_id, item, st, state)
         else:

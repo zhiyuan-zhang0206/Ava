@@ -32,7 +32,8 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
 3. **Terminated-owner resurrect retry** — every tick, for each DISTINCT
    terminated agent that still holds a `pending` chat created after its latest
    termination (the delivery-path auto-resurrect failed), re-run
-   `resurrect_if_terminated`.
+   `resurrect_if_terminated` until the shared unconsumed-resurrect budget is
+   exhausted.
    This extends the delivery check from live owners to ALL agents (Task #689
    G4, user ruling 2026-08-03): a chat to a dead agent must wake it, and a
    missed auto-resurrect must be retried, not just alerted. Per-agent cooldown
@@ -189,6 +190,8 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
     trigger stale before it can launch. Chat only: lifecycle kinds (terminate /
     restart) must not resurrect a dead agent against the caller's intent. A
     pile of 250 dead letters for one agent still means one attempt, not 250.
+    An owner at the shared recovery-attempt limit is excluded: its pending
+    resurrect lifecycle rows prove prior wakes were not consumed.
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -199,8 +202,12 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
             "  AND am.status = 'terminated' "
             "  AND m.created_at > am.status_changed_at "
             "  AND m.id > COALESCE(am.last_force_terminate_inbound_id, 0) "
+            "  AND (SELECT count(*) FROM inbound_messages lc "
+            "       WHERE lc.agent_id = am.id "
+            "         AND lc.kind = 'resurrect' AND lc.status = 'pending') < %s "
             "GROUP BY m.agent_id "
-            "ORDER BY m.agent_id"
+            "ORDER BY m.agent_id",
+            (settings.daemon.auto_resurrect_max_attempts,),
         )
         return [(r[0], r[1]) for r in cur.fetchall()]
 
@@ -236,6 +243,30 @@ def dead_letter_stale_claimed(pool: ConnectionPool, threshold_s: float) -> int:
             "  AND COALESCE(m.claimed_at, m.created_at) "
             "      < now() - make_interval(secs => %s)",
             (threshold_s,),
+        )
+        return cur.rowcount
+
+
+def dead_letter_stale_unconsumed_resurrects(
+    pool: ConnectionPool, threshold_s: float, max_attempts: int
+) -> int:
+    """Dead-letter stale pending resurrect rows once recovery is exhausted.
+
+    A pending resurrect row is the durable record of a wake whose turn never
+    reached the claim node. Once the per-agent count reaches ``max_attempts``,
+    retaining stale rows only preserves a recovery loop no consumer can drain.
+    Owner status is deliberately irrelevant: a row can still say idling after
+    a hosted runtime fails before its first claim.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
+            "WHERE m.status = 'pending' AND m.kind = 'resurrect' "
+            "  AND m.created_at < now() - make_interval(secs => %s) "
+            "  AND (SELECT count(*) FROM inbound_messages lc "
+            "       WHERE lc.agent_id = m.agent_id "
+            "         AND lc.kind = 'resurrect' AND lc.status = 'pending') >= %s",
+            (threshold_s, max_attempts),
         )
         return cur.rowcount
 
@@ -492,11 +523,11 @@ def _maybe_sweep_stale_claimed(
     threshold_s: float,
     last_sweep_at: float,
 ) -> float:
-    """Run the stale-claimed dead-letter sweep when `_CLAIMED_SWEEP_INTERVAL_S`
-    has elapsed since `last_sweep_at`; return the new last-sweep timestamp
-    (monotonic). Best-effort: a sweep failure is logged, never raised — the
-    next gate window retries, and the reconcile-side cutoff still protects
-    boots in between."""
+    """Run stale-inbound dead-letter sweeps on the configured cadence.
+
+    Return the new monotonic sweep timestamp. Both sweeps are best-effort: a
+    failure is logged, never raised, and the next gate window retries.
+    """
     now_mono = time.monotonic()
     if now_mono - last_sweep_at < _CLAIMED_SWEEP_INTERVAL_S:
         return last_sweep_at
@@ -507,8 +538,18 @@ def _maybe_sweep_stale_claimed(
                 "[delivery] dead-lettered %s stale claimed row(s) of terminated owner(s)",
                 dead_lettered,
             )
+        exhausted = dead_letter_stale_unconsumed_resurrects(
+            pool,
+            threshold_s,
+            settings.daemon.auto_resurrect_max_attempts,
+        )
+        if exhausted:
+            _log.info(
+                "[delivery] dead-lettered %s stale unconsumed resurrect row(s) after recovery exhaustion",
+                exhausted,
+            )
     except Exception:
-        _log.exception("[delivery] stale-claimed dead-letter sweep failed")
+        _log.exception("[delivery] stale-inbound dead-letter sweep failed")
     return now_mono
 
 
