@@ -9,10 +9,12 @@ tags:
 
 # Converge Ownership Preflight
 
-`cli/commands/_ownership_preflight.py` runs immediately after the `$AVA_HOME`
-directory skeleton converge step. On POSIX it compares `Path.stat().st_uid` to
-the current user for the home directory, `.env`, `logs/`, `configs/`,
-`secrets/`, and the source tree when it exists.
+`cli/commands/_ownership_preflight.py` is the first converge step
+(`CONVERGE_STEPS[0]`), running before the `$AVA_HOME` directory skeleton and
+every write-capable step so the repair command always prints before any step can
+fail on a foreign-owned path. On POSIX it compares `Path.stat().st_uid` to the
+current user for the home directory, `.env`, `logs/`, `configs/`, `secrets/`,
+and the source tree when it exists.
 
 Findings are warning-only: converge and start continue, while the console and
 `$AVA_HOME/logs/ownership_preflight.log` name each foreign-owned path and its
