@@ -27,6 +27,7 @@ from playwright.sync_api import Page
 
 from shared.agents import AgentStatus
 from shared.config import settings
+from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e.conftest import _HOSTED
 
@@ -72,9 +73,13 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
             row = cur.fetchone()
             if row:
                 last_status, last_pid = row
+        # #1464: the restarter pass is gateway-health-gated. When it defers
+        # (slow pass under CI load), the agent's own self-respawn fallback
+        # completes the restart cycle — new pid, row back to idling — without
+        # inserting the restarter's 'restart_completed' row. Both paths are a
+        # complete restart cycle; require only the observable outcome.
         if (
-            last_completed
-            and last_status == AgentStatus.IDLING.value
+            last_status == AgentStatus.IDLING.value
             and last_pid is not None
             and last_pid != first_pid
         ):
@@ -91,9 +96,9 @@ def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> N
     """Hosted self-restart: no process to respawn and no restarter to INSERT
     'restart_completed' — the claim renders the restart marker in the turn's
     state, the restart_requested channel drops the cached runtime inside the
-    agent-host, and the row never leaves a runnable status. Asserts the row
-    stays idling with a NULL pid, the marker reaches the timeline, and no
-    restarter-style inbound row appears."""
+    agent-host. The host settles its running status after the marker is
+    published, so the test waits for idling before asserting the row remains
+    runnable with a NULL pid and no restarter-style inbound row."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
@@ -119,6 +124,7 @@ def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> N
             break
         time.sleep(0.5)
     assert seen_marker, "hosted restart marker never reached the timeline"
+    wait_for_status(agent_id, AgentStatus.IDLING.value)
 
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))

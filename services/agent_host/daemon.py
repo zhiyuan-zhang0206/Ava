@@ -61,11 +61,12 @@ from psycopg_pool import AsyncConnectionPool
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
-from services.agent_host.host import AgentHost, build_shared_pool
+from services.agent_host.host import AgentHost, build_shared_pool, settle_stale_running_rows
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.log import init_gateway_process, logger
+from shared.machine import machine_name
 
 _log = logging.getLogger("services.agent_host.daemon")
 
@@ -419,6 +420,8 @@ async def run() -> None:
         # than one per agent (services/agent_host/host.py explains the cost).
         graph = build_graph(checkpointer)
         host = AgentHost(pool=pool, checkpointer=checkpointer, graph=graph)
+        settled = await settle_stale_running_rows(pool, machine_name())
+        logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long
         # a stuck agent has really been silent.
