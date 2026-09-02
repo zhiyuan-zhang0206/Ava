@@ -1,3 +1,12 @@
+---
+type: doc
+title: Runtime release store
+description: Private generation verification and dormant atomic selection, with explicit input and installed-manifest identities.
+tags:
+- shared
+- runtime
+---
+
 # Runtime release store
 
 Active `.pth` files are rejected except the standard setuptools helper whose
