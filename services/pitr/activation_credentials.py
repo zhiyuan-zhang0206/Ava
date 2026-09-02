@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
 """Activation credential identity + read-access probes per backend.
 
 The activation readiness path proves the store credentials without any
@@ -99,7 +99,12 @@ def probe_oss_read_access(credentials_path: Path) -> str:
         credentials_file=credentials_path,
         timeout_seconds=30.0,
     )
-    next(iter(bucket.list_objects(max_keys=1)), None)
+    # oss2 returns a ListObjectsResult, not an iterator: the API call itself
+    # authenticates the viewer, and touching object_list parses the page
+    # (empty bucket included). One page proves read scope without creating a
+    # synthetic probe object or deleting retained evidence.
+    page = bucket.list_objects(max_keys=1)
+    _ = page.object_list
     return config.pitr_oss_bucket
 
 
