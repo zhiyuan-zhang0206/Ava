@@ -26,9 +26,19 @@ jobs:
         with:
           version: 0.10.2
       - run: uv sync --frozen
-      - run: uv run python -m unittest tests.native_agent_record_probe -v
+      - shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          uv run python -m unittest tests.native_agent_record_probe -v 2>&1 | tee proof/native.log
         env:
           AVA_HOME: ${{ runner.temp }}/ava-native-record-probe
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-records-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
+          path: proof/
+          if-no-files-found: error
   owner-and-launch:
     if: github.head_ref == 'ava-stability-no-replacement-launch'
     runs-on: ubuntu-24.04
