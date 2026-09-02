@@ -12,7 +12,7 @@ from pathlib import Path
 
 from shared.platform import IS_WINDOWS
 
-_PREFIX = Path(sys.prefix).absolute()
+_PREFIX = Path(sys.prefix).resolve()
 INSTALLED_RUNTIME = Path(__file__).resolve().is_relative_to(_PREFIX.resolve())
 
 

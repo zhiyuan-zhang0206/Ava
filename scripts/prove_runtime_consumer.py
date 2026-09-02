@@ -24,6 +24,8 @@ def require(condition: bool, detail: str) -> None:  # noqa: FBT001 — assertion
 def main() -> None:
     root = Path(sys.argv[1]).resolve()
     prefix = Path(sys.prefix).resolve()
+    alias = Path(sys.argv[2])
+    require(alias.is_symlink() and alias.resolve() == prefix, "entry alias did not select A")
     require(INSTALLED_RUNTIME, "proof did not load the installed wheel")
     require(runtime_venv().resolve() == prefix, "venv escaped current prefix")
     python = runtime_python()
@@ -41,8 +43,12 @@ def main() -> None:
     # A's delayed subprocesses. Neither consumer reads this mutable selector.
     pointer = prefix.parent.parent / "current-release"
     previous = pointer.read_bytes()
+    other = root / "generation-B-not-started"
+    other.mkdir()
     try:
         pointer.write_bytes(b"different-generation-B\n")
+        alias.unlink()
+        alias.symlink_to(other, target_is_directory=True)
         require(runtime_python() == python, "selector changed running interpreter")
         late = subprocess.run(  # noqa: S603 — exact current generation, no shell.
             [str(python), "-I", "-B", "-c", "import sys;print(sys.prefix)"],
@@ -69,6 +75,8 @@ def main() -> None:
         )
     finally:
         pointer.write_bytes(previous)
+        alias.unlink()
+        alias.symlink_to(prefix, target_is_directory=True)
     no_home = os.environ.copy()
     no_home.pop("AVA_HOME", None)
     rejected = subprocess.run(  # noqa: S603 — fail-closed bootstrap probe, no data access.
