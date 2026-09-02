@@ -24,7 +24,7 @@ Usage as CLI:
     persistent gh/network errors, 4 enqueue failed or was rejected twice.
     `--merge` implies `--wait`
     and enqueues the PR once green. `--queue` (or `CI_QUEUE`) selects Mergify
-    (the gray-phase default) or Trunk; `--priority` maps the Trunk submission
+    (the default) or Trunk; `--priority` maps the Trunk submission
     priority, which requires `TRUNK_API_TOKEN`. Mergify posts `@mergifyio
     queue` (or `@mergifyio requeue` after a dequeue); Trunk submits the PR then
     polls its queue state. Trunk refuses submission unless the PR has the
@@ -129,7 +129,7 @@ _TRUNK_REQUEST_TIMEOUT_SECONDS = 30
 
 def _resolve_queue(queue: str | None) -> str:
     """Return the CLI-selected queue, then CI_QUEUE, then the gray default."""
-    resolved = queue or os.environ.get("CI_QUEUE") or "mergify"
+    resolved = queue or os.environ.get("CI_QUEUE") or "trunk"
     if resolved not in _QUEUE_NAMES:
         raise ValueError(f"unknown CI queue: {resolved}")
     return resolved
