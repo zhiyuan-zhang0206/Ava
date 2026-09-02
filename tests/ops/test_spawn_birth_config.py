@@ -12,7 +12,6 @@ so `launched_agents` is what the child would have been handed.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import psycopg
@@ -133,95 +132,6 @@ class TestReplayOnWake:
         db_conn.commit()
         resurrect_agent(agent_id, resurrected_by="user")
         assert launched_agents[-1].birth_config == stamp
-
-
-class TestSelfRespawnFallback:
-    """`agent/db.py:schedule_self_respawn` is the ONE launch path outside
-    `ops/agent_launch.py` — an atexit fallback that fires exactly when the
-    restarter is paused, i.e. mid-rollout. It must carry the same two maps, or a
-    rollout would quietly drop agents back onto cluster defaults."""
-
-    def test_replacement_env_carries_both_maps(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Neither map rides argv (issue #974: either JSON blob may carry a
-        provider api_key, and argv is world-readable via `ps`) — both land in
-        the replacement's env dict instead."""
-        import atexit
-        import subprocess
-        import time
-
-        from agent.db import schedule_self_respawn
-        from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
-
-        agent_id = _spawn_agent(spawner="test", config={"llm_model": "claude-sonnet-5"})
-        stamp = _birth_config(db_conn, agent_id)
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'restarting' WHERE id = %s", (agent_id,))
-        db_conn.commit()
-
-        registered: list[object] = []
-        monkeypatch.setattr(atexit, "register", registered.append)
-        schedule_self_respawn(agent_id)
-        monkeypatch.setattr(time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-        launched: list[tuple[list[str], dict[str, str]]] = []
-        monkeypatch.setattr(
-            subprocess,
-            "Popen",
-            lambda argv, *, env, **_kw: launched.append((list(argv), dict(env))),  # pyright: ignore[reportUnknownArgumentType]
-        )
-
-        registered[0]()  # type: ignore[operator] — the atexit callable
-
-        assert launched, "self-respawn should have launched a replacement"
-        argv, env = launched[0]
-        assert "--config-overlay" not in argv
-        assert "--birth-config" not in argv
-        assert json.loads(env[AGENT_CONFIG_OVERLAY_ENV]) == {"llm_model": "claude-sonnet-5"}
-        assert json.loads(env[AGENT_BIRTH_CONFIG_ENV]) == stamp
-
-    def test_restarter_never_claims_and_fallback_launches_when_the_row_carries_nothing(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import atexit
-        import subprocess
-        import time
-
-        from agent.db import schedule_self_respawn
-        from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
-
-        agent_id = _spawn_agent(spawner="test")
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status = 'restarting', config_overlay = NULL, "
-                "birth_config = NULL WHERE id = %s",
-                (agent_id,),
-            )
-        db_conn.commit()
-
-        registered: list[object] = []
-        monkeypatch.setattr(atexit, "register", registered.append)
-        schedule_self_respawn(agent_id)
-        monkeypatch.setattr(time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-        launched: list[tuple[list[str], dict[str, str]]] = []
-        monkeypatch.setattr(
-            subprocess,
-            "Popen",
-            lambda argv, *, env, **_kw: launched.append((list(argv), dict(env))),  # pyright: ignore[reportUnknownArgumentType]
-        )
-
-        registered[0]()  # type: ignore[operator] — the atexit callable
-
-        assert launched
-        argv, env = launched[0]
-        assert "--config-overlay" not in argv
-        assert "--birth-config" not in argv
-        assert AGENT_CONFIG_OVERLAY_ENV not in env
-        assert AGENT_BIRTH_CONFIG_ENV not in env
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-            row = cur.fetchone()
-        assert row is not None and row[0] == "idling"
 
 
 class TestForkInheritance:

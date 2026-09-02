@@ -392,9 +392,9 @@ async def _handle_restart(
 ) -> None:
     """RESTART: route to END.
 
-    Process mode: flip status to 'restarting' (the restarter relaunches a
-    process; the self-restart atexit fallback arms for the rollout window when
-    the restarter is paused) — the NEW process writes the lifecycle marker via
+    Process mode: install the durable restart decision. The restarter alone
+    relaunches the process after its normal pause and ownership gates; no
+    agent-side fallback bypasses them. The NEW process writes the marker via
     RESTART_COMPLETED, so no message is appended here.
 
     Hosted mode: there is no process to relaunch and no restarter to flip the
@@ -402,8 +402,7 @@ async def _handle_restart(
     the next wake starts clean (the config view rebinds from `agents_meta`,
     which is exactly the hosted replacement for "the process exits and boots
     with the merged config"). The row must therefore NEVER leave a runnable
-    status, so the 'restarting' flip and the self-respawn are skipped, the
-    lifecycle marker renders right here (nothing else will), and the separate
+    status. An acceptance marker renders here, and the separate
     `restart_requested` channel carries the intent to the host — `exit_requested`
     stays False so the END does not route through the process-exit path.
 
@@ -428,10 +427,6 @@ async def _handle_restart(
                 st.next_goto = END
                 return
         st.restart_cas_applied = True
-        if item.source == "self":
-            from agent.db import schedule_self_respawn
-
-            schedule_self_respawn(agent_id)
 
     st.next_goto = END
 

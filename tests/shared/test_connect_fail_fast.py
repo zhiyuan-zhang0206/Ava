@@ -188,34 +188,3 @@ def test_shell_session_index_passes_the_resilience_kwargs(
     with pytest.raises(psycopg.OperationalError):
         sessions._next_session_index_from_db()
     assert seen.items() >= PG_KEEPALIVE_KWARGS.items()
-
-
-def test_self_respawn_passes_the_resilience_kwargs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Configuration pin, not a behavioural assertion: the self-respawn atexit
-    handler's status CAS hands libpq `PG_KEEPALIVE_KWARGS`.
-
-    Its `except Exception` already falls through to "launch anyway", so a
-    *raising* connect is harmless — but a bare connect against a black hole never
-    raises, and the handler would never reach the Popen at all.
-    """
-    import subprocess
-
-    from agent.db import schedule_self_respawn
-
-    registered: list[Any] = []
-    monkeypatch.setattr("atexit.register", registered.append)
-    schedule_self_respawn(1)
-    assert len(registered) == 1
-
-    seen = _record_connect_kwargs(monkeypatch)
-    monkeypatch.setattr(time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    launched: list[Any] = []
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: launched.append((a, k)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-
-    registered[0]()
-
-    # Superset, not equality: the site also passes its own `autocommit=True`.
-    assert seen.items() >= PG_KEEPALIVE_KWARGS.items()
-    assert launched, "the CAS failure should still launch the replacement process"
