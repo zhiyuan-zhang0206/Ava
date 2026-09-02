@@ -8,13 +8,27 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.db import claim_inbound_batch
+from agent.db import ClaimedInbound, claim_inbound_batch
+from agent.graph._claim_dispatch import _BatchState, _handle_restart
 from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
 from services.agent_host.host import AgentHost
 from shared.context import AvaContext
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
 from tests.agent.test_lifecycle_intent import _command
+
+
+async def test_hosted_restart_marker_does_not_claim_completion() -> None:
+    state = _BatchState()
+    await _handle_restart(
+        AvaContext(hosted=True),
+        1,
+        ClaimedInbound(id=1, agent_id=1, content="", kind="restart", source="self", payload={}),
+        state,
+    )
+    assert state.restart_requested
+    assert "Restart was accepted" in str(state.new_msgs[0].content)
+    assert "have been restarted" not in str(state.new_msgs[0].content)
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
