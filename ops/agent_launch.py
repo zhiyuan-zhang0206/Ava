@@ -213,21 +213,9 @@ def agent_spawn_env_dict() -> dict[str, str]:
     env = child_env("agent", "windows" if IS_WINDOWS else "posix")
     db_url = os.environ.get("AVA_DB_URL", "")
     if db_url:
-        from shared.cluster import runner_password_from_env
-        from shared.cluster.derive import RUNNER_ROLE
-        from shared.config.data_plane import _is_runner_db_url
-        from shared.url_secret import url_with_userinfo
+        from shared.cluster.derive import runner_db_url_projection
 
-        if _is_runner_db_url(db_url):
-            env["AVA_DB_URL"] = db_url
-        else:
-            runner_password = runner_password_from_env()
-            if not runner_password:
-                raise RuntimeError(
-                    "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
-                    "`ava cluster ensure-db-role` before spawning agents."
-                )
-            env["AVA_DB_URL"] = url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
+        env["AVA_DB_URL"] = runner_db_url_projection(db_url)
     # Mark this process as an agent so shared.dotenv_boot does not apply the
     # gateway profile filter (the gateway pop would drop cluster-scoped
     # agent-runner keys that the agent needs to backfill from .env on a
