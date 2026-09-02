@@ -6378,6 +6378,10 @@ export interface components {
          *     'restart' inbound's source; the claim-side dispatch composes it into
          *     the marker `[system ts] You have been restarted by {source}` so the
          *     agent knows who restarted it.
+         *
+         *     `config_overlay`, when nonempty, is validated before it reaches either
+         *     gateway or runner writes, merged into the persistent agent overlay, and
+         *     carried in the restart inbound payload for the completion marker.
          */
         RestartAgentRequest: {
             /**
@@ -6385,6 +6389,10 @@ export interface components {
              * @default user
              */
             source: string;
+            /** Config Overlay */
+            config_overlay?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * RestartAgentResponse

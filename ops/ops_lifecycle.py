@@ -18,6 +18,7 @@ its home-machine forward cannot loop either.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from typing import Any, Literal
@@ -389,7 +390,27 @@ def _restart_blocking(
     if get_agent_status(agent_id) is AgentStatus.TERMINATED:
         return None
     with db_pool.connection() as conn:
-        return insert_inbound_message(conn, agent_id, "", source=body.source, kind="restart")
+        payload: dict[str, object] | None = None
+        if body.config_overlay:
+            # This overlay write must not depend on borrowed-backend session
+            # state: PgBouncer can hand us a backend whose session a previous
+            # client left with default_transaction_read_only=on, and this
+            # emergency channel (provider-outage model switch) is exactly when
+            # the pool is most likely poisoned. Declare the transaction
+            # writable before the DML (same posture as #1428/#1436).
+            conn.execute("SET TRANSACTION READ WRITE")
+            conn.execute(
+                "UPDATE agents_meta "
+                "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
+                "WHERE id = %s",
+                (json.dumps(dict(body.config_overlay)), agent_id),
+            )
+            payload = {"config_overlay": dict(body.config_overlay)}
+        # insert_inbound_message commits this connection, so its INSERT commits
+        # the preceding overlay UPDATE in the same transaction.
+        return insert_inbound_message(
+            conn, agent_id, "", source=body.source, kind="restart", payload=payload
+        )
 
 
 async def restart_agent_op(

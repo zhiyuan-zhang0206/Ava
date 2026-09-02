@@ -596,8 +596,8 @@ def respawn_agent(agent_id: int) -> bool:
         # would render the wrong marker wording (2026-08-08 audit, P3-2).
         # Payload passthrough (PR-E):
         # `ava.self.restart(config_overlay={...})` posts `{"config_overlay": {...}}`;
-        # when the new process boots, argparse receives --config-overlay and
-        # applies, the restart_completed row is freshly written with an
+        # when the new process boots, it reads the merged overlay from
+        # agents_meta and applies it. The restart_completed row is freshly written with an
         # effective_config snapshot by the claim node inside the new process
         # after writing the marker (the restart_completed row this function
         # inserts has payload containing only config_overlay; the new
