@@ -6562,22 +6562,32 @@
       "AgentExitedRequest": {
         "properties": {
           "generation": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Generation"
           },
           "owner": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Owner"
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "generation",
-          "owner"
-        ],
         "title": "AgentExitedRequest",
         "description": "The actual admitted runtime reporting exit, never a freshly read token."
       },

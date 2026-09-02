@@ -39,8 +39,15 @@ class AgentExitedRequest(BaseModel):
     """The actual admitted runtime reporting exit, never a freshly read token."""
 
     model_config = ConfigDict(extra="forbid")
-    generation: UUID
-    owner: UUID
+    generation: UUID | None = None
+    owner: UUID | None = None
+
+    @model_validator(mode="after")
+    def require_complete_incarnation(self) -> "AgentExitedRequest":
+        """The legacy SDK serializes its empty body as {}; partial tokens are invalid."""
+        if (self.generation is None) != (self.owner is None):
+            raise ValueError("generation and owner must be supplied together")
+        return self
 
 
 class TextContentBlock(BaseModel):

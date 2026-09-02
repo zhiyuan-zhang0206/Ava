@@ -2,7 +2,7 @@ name: Runtime incarnation regression proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['agent/**', 'ops/ops_exit.py', 'shared/runtime_incarnation.py', 'tests/agent/test_runtime_incarnation.py', '.github/workflows/runtime-incarnation-proof.yml']
+    paths: ['agent/**', 'ops/ops_exit.py', 'ops/rpc_schemas.py', 'shared/runtime_incarnation.py', 'tests/agent/test_runtime_incarnation.py', 'tests/gateway/test_exit_wire_incarnation.py', '.github/workflows/runtime-incarnation-proof.yml']
 permissions:
   contents: read
 jobs:
@@ -32,6 +32,14 @@ jobs:
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
           printf '%s\n' "$BASELINE_SHA" > proof/baseline-sha.txt
+          timeout 180 uv run pytest tests/gateway/test_exit_wire_incarnation.py -q --junitxml=proof/wire.xml
+          git show 462073205:ops/rpc_schemas.py > ops/rpc_schemas.py
+          set +e
+          timeout 180 uv run pytest tests/gateway/test_exit_wire_incarnation.py -k legacy_sdk -q --junitxml=proof/wire-baseline.xml
+          wire_result=$?
+          set -e
+          test "$wire_result" -eq 1
+          git show HEAD:ops/rpc_schemas.py > ops/rpc_schemas.py
           timeout 180 uv run pytest tests/agent/test_runtime_incarnation.py -q --junitxml=proof/head.xml
           timeout 180 uv run pytest tests/agent/test_runtime_incarnation_migration.py -q --junitxml=proof/migration.xml
           git show "$BASELINE_SHA:ops/ops_exit.py" > ops/ops_exit.py
@@ -44,6 +52,14 @@ jobs:
           python - <<'PY'
           import xml.etree.ElementTree as ET
           head = ET.parse('proof/head.xml')
+          wire = ET.parse('proof/wire.xml')
+          assert len(wire.findall('.//testcase')) == 4
+          assert not wire.findall('.//failure') and not wire.findall('.//error')
+          wire_old = ET.parse('proof/wire-baseline.xml')
+          assert len(wire_old.findall('.//testcase')) == 2 and not wire_old.findall('.//error')
+          wire_failures = wire_old.findall('.//failure')
+          assert len(wire_failures) == 2
+          assert all('422' in failure.text for failure in wire_failures)
           old = ET.parse('proof/baseline.xml')
           assert len(head.findall('.//testcase')) == 12
           assert not head.findall('.//failure') and not head.findall('.//error')

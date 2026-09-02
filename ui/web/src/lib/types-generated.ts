@@ -3732,16 +3732,10 @@ export interface components {
          * @description The actual admitted runtime reporting exit, never a freshly read token.
          */
         AgentExitedRequest: {
-            /**
-             * Generation
-             * Format: uuid
-             */
-            generation: string;
-            /**
-             * Owner
-             * Format: uuid
-             */
-            owner: string;
+            /** Generation */
+            generation?: string | null;
+            /** Owner */
+            owner?: string | null;
         };
         /**
          * AgentInspect
