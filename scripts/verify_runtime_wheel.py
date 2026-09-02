@@ -68,7 +68,7 @@ def verify_installed(checkout: Path) -> None:
             if not origin.is_relative_to(Path(sys.prefix).resolve()):
                 raise ValueError(f"{name} imported outside generation venv: {origin}")
     for member in REQUIRED:
-        if not Path(distribution.locate_file(member)).is_file():
+        if not Path(str(distribution.locate_file(member))).is_file():
             raise ValueError(f"installed runtime member missing: {member}")
 
 
