@@ -7,7 +7,14 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.db import claim_inbound_batch, mark_agent_status, wait_for_inbound
+from agent.db import (
+    claim_inbound_batch,
+    finalize_claimed_inbounds,
+    mark_agent_status,
+    reconcile_claimed_inbounds,
+    wait_for_inbound,
+)
+from agent.graph._claim_batch import _defer_chats_to_pending
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.inbound_ownership import RuntimeOwnershipLostError, lock_inbound_owner
 from shared.db import create_agent
@@ -166,3 +173,50 @@ async def test_missing_redis_publish_recovers_from_durable_pg(
             wait_for_inbound(aops_pool, aredis_inbound_listener, agent_id=agent_id), 3
         )
         assert [r.id for r in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
+
+
+@pytest.mark.parametrize("action", ["reconcile_empty", "reconcile_committed", "finalize", "defer"])
+async def test_old_owner_cannot_reconcile_finalize_or_defer_successor_work(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    action: str,
+) -> None:
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    inbound = _insert(db_conn, agent_id)
+    with bind_turn_identity(agent_id, incarnation=owner):
+        await claim_inbound_batch(aops_pool, agent_id)
+    stale = RuntimeIncarnation(agent_id, uuid4(), uuid4())
+    with bind_turn_identity(agent_id, incarnation=stale), pytest.raises(RuntimeOwnershipLostError):
+        if action == "reconcile_empty":
+            await reconcile_claimed_inbounds(aops_pool, agent_id, set())
+        elif action == "reconcile_committed":
+            await reconcile_claimed_inbounds(aops_pool, agent_id, {inbound})
+        elif action == "finalize":
+            await finalize_claimed_inbounds(aops_pool, agent_id)
+        else:
+            await _defer_chats_to_pending(aops_pool, agent_id, [inbound])
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
+    ).fetchone() == ("claimed",)
+
+
+async def test_chat_finalization_does_not_ack_lifecycle_intent(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    chat = _insert(db_conn, agent_id)
+    lifecycle = _insert(db_conn, agent_id)
+    db_conn.execute(
+        "UPDATE inbound_messages SET kind='restart', status='claimed' WHERE id=%s", (lifecycle,)
+    )
+    db_conn.commit()
+    with bind_turn_identity(agent_id, incarnation=owner):
+        await claim_inbound_batch(aops_pool, agent_id)
+        assert await finalize_claimed_inbounds(aops_pool, agent_id) == 1
+        assert await reconcile_claimed_inbounds(aops_pool, agent_id, {lifecycle}) == (0, 0, 0)
+    assert db_conn.execute(
+        "SELECT id,status FROM inbound_messages WHERE id=ANY(%s) ORDER BY id", ([chat, lifecycle],)
+    ).fetchall() == [(chat, "done"), (lifecycle, "claimed")]
