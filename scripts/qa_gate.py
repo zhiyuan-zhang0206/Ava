@@ -52,6 +52,16 @@ def evaluate(pr_number: int) -> None:
     if current["head"]["sha"] != sha:
         status("failure", "HEAD changed while QA was evaluated")
         return
+    # Commit statuses are SHA-global, not PR-bound. Do not let one PR's
+    # receipt authorize another PR pointing at the same commit.
+    same_head = [
+        item
+        for item in _records(f"commits/{sha}/pulls?per_page=100")
+        if item["state"] == "open" and item["head"]["sha"] == sha
+    ]
+    if {item["number"] for item in same_head} != {pr_number}:
+        status("failure", "Ambiguous shared HEAD: use a unique commit per open PR")
+        return
     verdict = approved(current, comments, reviews)
     status(
         "success" if verdict else "failure",

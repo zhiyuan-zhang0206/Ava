@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from scripts import qa_gate
 from scripts.qa_receipt import QA_ACCOUNT_ID, REPOSITORY, TRUNK_ACCOUNT_ID, approved
 
 
@@ -90,3 +91,28 @@ def test_forged_queue_prefix_cannot_bypass_qa() -> None:
     assert approved(pr, [], [])
     pr["head"]["repo"]["full_name"] = "attacker/Ava"
     assert not approved(pr, [], [])
+
+
+def test_sha_global_status_refuses_shared_open_pr_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    pr = _pr()
+    writes: list[tuple[str, ...]] = []
+
+    def api(path: str, *args: str) -> Any:
+        if path.startswith("statuses/"):
+            writes.append(args)
+            return {}
+        assert path == "pulls/42"
+        return pr
+
+    def records(path: str) -> list[dict[str, Any]]:
+        if path.startswith("issues/"):
+            return [_comment(pr)]
+        if path.startswith("commits/"):
+            return [{"number": number, "state": "open", "head": pr["head"]} for number in (42, 43)]
+        return []
+
+    monkeypatch.setattr(qa_gate, "_api", api)
+    monkeypatch.setattr(qa_gate, "_records", records)
+    qa_gate.evaluate(42)
+    assert any("state=failure" in args for args in writes)
+    assert not any("state=success" in args for args in writes)

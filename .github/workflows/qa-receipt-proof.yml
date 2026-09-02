@@ -19,7 +19,7 @@ jobs:
           mkdir -p proof
           task_scratch=$(mktemp -d)
           mkdir -p "$task_scratch/scripts"
-          cp scripts/qa_receipt.py "$task_scratch/scripts/"
+          cp scripts/qa_receipt.py scripts/qa_gate.py "$task_scratch/scripts/"
           cp tests/test_qa_receipt.py "$task_scratch/"
           cd "$task_scratch"
           timeout 60 python -m pytest -c /dev/null test_qa_receipt.py -q --junitxml="$GITHUB_WORKSPACE/proof/head.xml"
