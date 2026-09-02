@@ -31,12 +31,24 @@ from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
 
 def _expected_args(repo: Path) -> list[str]:
+    """Mirror the implementation: the --python pin rides only when the venv
+    interpreter already exists (a real host's converged venv). A fresh staging
+    repo has no venv, so no pin — uv creates one."""
     python_name = "python.exe" if _native_sync.IS_WINDOWS else "python"
-    return [
-        *_native_sync._PROD_SYNC_ARGS,
-        "--python",
-        str(repo / ".venv" / _native_sync.get_backend().venv_bin_dir_name() / python_name),
-    ]
+    interpreter = repo / ".venv" / _native_sync.get_backend().venv_bin_dir_name() / python_name
+    argv = [*_native_sync._PROD_SYNC_ARGS]
+    if interpreter.exists():
+        argv += ["--python", str(interpreter)]
+    return argv
+
+
+def _fake_venv_python(repo: Path) -> Path:
+    """Create the venv-interpreter marker a converged host would have."""
+    python_name = "python.exe" if _native_sync.IS_WINDOWS else "python"
+    interpreter = repo / ".venv" / _native_sync.get_backend().venv_bin_dir_name() / python_name
+    interpreter.parent.mkdir(parents=True, exist_ok=True)
+    interpreter.touch()
+    return interpreter
 
 
 def _read_only_pth(repo: Path) -> Path:
@@ -88,6 +100,7 @@ def test_prod_sync_argv_excludes_dev_group_and_carries_the_bound(
     Only `--locked` is allowed: `--frozen` merely skips lockfile *updates*
     (uv's default) and would not catch a drift."""
     repo = tmp_path / "source"
+    _fake_venv_python(repo)  # a converged host's venv: the pin branch
     seen: dict[str, object] = {}
     monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "foreign-venv"))
 
