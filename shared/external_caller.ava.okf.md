@@ -36,6 +36,12 @@ gap, not a claim that an undeclared caller is human. MCP source defaults and
 automatic wrapper activation also remain pending the generation-bound write gate. No new
 authorization scope, token store, or idempotency namespace is defined here.
 
+MCP tool audit events use the existing authenticated token lookup: display
+source is `external_agent:mcp:<client-id>`, while separate
+`auth_principal={kind:mcp_client,id:...}` identifies the server-bound credential.
+The client name is metadata, not authority; tokens never enter audit attributes.
+This changes audit only, not the still-gated agent-facing source protocol.
+
 The Codex and Claude launch wrappers accept `--caller-instance run-42` as an
 explicit opt-in, placing a shell-quoted JSON profile only on the external child.
 Omitting the flag leaves existing launch commands unchanged. Validate the
