@@ -1385,17 +1385,29 @@ class TestUpdateCheck:
         assert out.backend_changed is False
 
     @pytest.mark.parametrize(
-        ("installed_sha", "running_sha"),
-        [("installed-old", "running-new"), ("installed-new", "running-old")],
+        ("installed_sha", "running_sha", "relation", "needs_replay"),
+        [
+            ("installed-old", "running-new", "behind", False),
+            ("installed-new", "running-old", "ahead", True),
+        ],
     )
-    def test_bookmark_disagreement_requires_replay(
+    def test_bookmark_direction_determines_replay(
         self,
         monkeypatch: pytest.MonkeyPatch,
         installed_sha: str,
         running_sha: str,
+        relation: Literal["ahead", "behind"],
+        needs_replay: bool,
     ) -> None:
-        """Either bookmark leading names an incomplete rollout instead of a no-op."""
+        """Only installation ahead of running code names an interrupted rollout."""
         rev_list: list[tuple[str, ...]] = []
+        relation_args: list[tuple[str, str, Path | None]] = []
+
+        def _relation(
+            pin: str, head: str, *, repo: Path | None = None
+        ) -> Literal["ahead", "behind"]:
+            relation_args.append((pin, head, repo))
+            return relation
 
         def _git_ro(*args: str) -> str:
             if args[:2] == ("rev-list", "--count"):
@@ -1406,11 +1418,13 @@ class TestUpdateCheck:
         monkeypatch.setattr(update_check_mod, "_git_ro", _git_ro)
         monkeypatch.setattr(update_check_mod, "_get_installed_sha", lambda: installed_sha)
         monkeypatch.setattr(update_check_mod, "_get_running_sha", lambda: running_sha)
+        monkeypatch.setattr("shared.cluster_drift.prod_source_pin_relation", _relation)
 
         out = cluster_mod.update_check()
 
         assert out.behind == 0
-        assert out.needs_replay is True
+        assert out.needs_replay is needs_replay
+        assert relation_args == [(running_sha, installed_sha, update_check_mod._REPO_ROOT)]
         assert rev_list == [("rev-list", "--count", f"{installed_sha}..origin/main")]
 
 

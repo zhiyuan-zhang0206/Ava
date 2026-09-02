@@ -86,12 +86,13 @@ def _classify_rollout(repo: Path, *, restart_only: bool, origin: str) -> tuple[i
         return None, True
     from shared.running_sha import get as get_running_sha
     from shared.source_integrity import get as get_installed_sha
+    from shared.source_integrity import installed_sha_needs_replay
 
     installed_sha = get_installed_sha()
     running_sha = get_running_sha()
-    if installed_sha is not None and running_sha is not None and installed_sha != running_sha:
+    if installed_sha_needs_replay(installed_sha, running_sha, repo=repo):
         print(
-            "\n→ half-deployed state: installed and running commits disagree; "
+            "\n→ half-deployed state: installed commit is ahead of the running commit; "
             "replaying the full rollout"
         )
         return None, True

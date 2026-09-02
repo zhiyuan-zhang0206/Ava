@@ -11,6 +11,7 @@ Two layers:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -61,6 +62,41 @@ class TestClassifyChange:
 
     def test_empty(self) -> None:
         assert _up._classify_change([]) == (False, False)
+
+
+@pytest.mark.parametrize(
+    ("installed_sha", "running_sha", "relation", "expected"),
+    [
+        ("installed-new", "running-old", "ahead", (None, True)),
+        ("installed-old", "running-new", "behind", (0, True)),
+    ],
+)
+def test_classify_rollout_replays_only_when_installed_is_ahead(
+    monkeypatch: pytest.MonkeyPatch,
+    installed_sha: str,
+    running_sha: str,
+    relation: Literal["ahead", "behind"],
+    expected: tuple[int | None, bool],
+) -> None:
+    """A fast-path pull advances running code; only the reverse is interrupted."""
+
+    def _relation(_pin: str, _head: str, *, repo: Path | None = None) -> Literal["ahead", "behind"]:
+        return relation
+
+    def _persist(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("shared.source_integrity.get", lambda: installed_sha)
+    monkeypatch.setattr("shared.running_sha.get", lambda: running_sha)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_pin_relation", _relation)
+    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", list)
+    monkeypatch.setattr(_cli, "git_pull_main", lambda: _up.GitPullResult("a", "b", 1))
+    monkeypatch.setattr(_orch, "_persist_cluster_pin", _persist)
+
+    assert (
+        _orch._classify_rollout(Path("/unused"), restart_only=False, origin="test-origin")
+        == expected
+    )
 
 
 def test_frontend_only_takes_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:

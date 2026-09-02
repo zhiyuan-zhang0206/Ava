@@ -294,7 +294,11 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
     // Native confirm — cluster-wide restart is irreversible-in-progress; one
     // misclick stops every agent. Native dialog is mobile-friendly, blocks
     // the event loop until decided, and adds no headless-component baggage.
-    const sides = check.data ? t("restartSides", { sides: restartSides(check.data) }) : "";
+    const sides = check.data
+      ? needsReplay
+        ? t("replaySides")
+        : t("restartSides", { sides: restartSides(check.data) })
+      : "";
     const n = needsReplay
       ? t("replayRequired")
       : typeof behind === "number"

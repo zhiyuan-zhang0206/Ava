@@ -16,6 +16,7 @@ from shared.config import settings
 from shared.repo_change import classify_change
 from shared.running_sha import get as _get_running_sha
 from shared.source_integrity import get as _get_installed_sha
+from shared.source_integrity import installed_sha_needs_replay as _installed_sha_needs_replay
 
 # Ceiling on each read-only git subprocess. `git fetch` against a wedged
 # network has no natural bound; without this a hung fetch parks whatever
@@ -29,10 +30,11 @@ class UpdateCheck(BaseModel):
     checkout is behind its track target, and which side a pull would restart.
 
     `behind` is the commit count from the last fully installed commit to the
-    track target. `needs_replay` names the exceptional state where that install
-    bookmark and the running-commit bookmark disagree: a rollout was interrupted
-    between them, so zero commits behind is not an up-to-date verdict. The
-    frontend must offer a replay rather than hide that state behind a no-op.
+    track target. `needs_replay` names the exceptional state where the fully
+    installed commit is ahead of the running-commit bookmark: a rollout was
+    interrupted between them, so zero commits behind is not an up-to-date
+    verdict. A running commit ahead of installation is the normal fast-path
+    state and does not need replay.
 
     `frontend_changed` / `backend_changed` mirror `ava cluster update`'s own
     classification so the UI can tell the user what a rollout would actually
@@ -73,18 +75,17 @@ def update_check() -> UpdateCheck:
 
     Fetches the track target — origin/main in `latest` mode, the newest dated
     release tag in `releases` mode — then compares the fully installed commit
-    against it. The running bookmark remains a cross-check: disagreement is a
-    half-deployed state that needs a replay, never an "already up to date"
-    verdict. Falls back to the running bookmark, then HEAD, for pre-bookmark
-    installations. Pure read-only — no pull, no working-tree mutation — so the
-    UI can poll it without side effects. Mirrors the classification `ava cluster
-    update` runs internally before deciding what to restart.
+    against it. The running bookmark remains a directional cross-check: only an
+    installed commit ahead of it is a half-deployed state needing replay. A
+    running commit ahead is normal after a fast-path pull. Falls back to the
+    running bookmark, then HEAD, for pre-bookmark installations. Pure read-only
+    — no pull, no working-tree mutation — so the UI can poll it without side
+    effects. Mirrors the classification `ava cluster update` runs internally
+    before deciding what to restart.
     """
     installed_sha = _get_installed_sha()
     running_sha = _get_running_sha()
-    needs_replay = (
-        installed_sha is not None and running_sha is not None and installed_sha != running_sha
-    )
+    needs_replay = _installed_sha_needs_replay(installed_sha, running_sha, repo=_REPO_ROOT)
 
     _git_ro("fetch", "origin", settings.general.track_branch)
     if settings.general.track_mode == "releases":

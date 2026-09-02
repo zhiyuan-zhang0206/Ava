@@ -610,6 +610,7 @@
       "rolloutConfirm": "Roll the whole cluster forward?\n\n{behind}{sides}\n\nAll agents across every host finish their current turn, then restart on new code.",
       "restartConfirm": "Restart the whole cluster on the current code?\n\nNo git pull — every service bounces to apply config changes. Agents finish their current turn, then restart.",
       "restartSides": " Restarts: {sides}.",
+      "replaySides": " Replays the interrupted rollout and restarts all services.",
       "commitsBehind": "{count, plural, one {# commit behind.} other {# commits behind.}}",
       "services": "Services",
       "restarting": "Restarting…",
