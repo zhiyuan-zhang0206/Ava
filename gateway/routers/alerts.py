@@ -62,6 +62,7 @@ from shared.alerts import (
 )
 from shared.cluster_auth import verify_bearer
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.redis_client import sync_redis
 
 router = APIRouter()
@@ -151,7 +152,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     rows: list[dict[str, Any]] = []
     pending: list[tuple[AlertKey, str]] = []  # (key, text)
 
-    with request.app.state.db_pool.connection() as conn:
+    with write_transaction(request.app.state.db_pool) as conn:
         lang = display_language(conn)
         for alert in body.flattened():
             key, did_insert, should_notify, row = _upsert_alert(conn, alert, source=body.source)
@@ -169,7 +170,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     publish_alert_rows(rows)
 
     if pending:
-        with request.app.state.db_pool.connection() as conn:
+        with write_transaction(request.app.state.db_pool) as conn:
             for key, text in pending:
                 if _notify_im(text):
                     notified += 1

@@ -47,6 +47,7 @@ from gateway.schemas import (
 )
 from ops import ops_lifecycle as _ops
 from shared.db import NOTICE_FYI_TTL_DAYS
+from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync
 
 router = APIRouter()
@@ -131,7 +132,7 @@ def _open_notices_blocking(
     the open feed, the resolved history, and every later query agree. The
     query-side cutoff below is belt-and-braces for readers that skip the
     sweep (require_response notices never expire)."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_notices SET resolved_at = now(), resolution = 'read' "
             "WHERE NOT require_response AND resolved_at IS NULL "
@@ -489,7 +490,7 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
                     raise HTTPException(
                         status_code=422, detail=f"task {body.task_id} does not exist"
                     )
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             # Auto-resolve any existing open notice (supersede).
             cur.execute(
                 "SELECT id, local_id, require_response FROM agent_notices "
@@ -648,7 +649,7 @@ async def patch_notice_edit(agent_id: int, body: NoticeEditIn, request: Request)
             )
 
     def _edit_wrapper(pool: ConnectionPool) -> tuple[int, bool, str, str, int | None] | None:
-        with pool.connection() as conn:
+        with write_transaction(pool) as conn:
             edited = _edit(conn)
             conn.commit()
             if edited is not None and edited[1]:
@@ -671,7 +672,7 @@ async def post_notice_dismiss(agent_id: int, request: Request) -> Response:
     -> idempotent 204."""
 
     def _dismiss(pool: ConnectionPool) -> int | None:
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE agent_notices SET resolved_at = now(), resolution = 'withdrawn' "
                 "WHERE agent_id = %s AND resolved_at IS NULL RETURNING id, require_response",
