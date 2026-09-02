@@ -107,7 +107,9 @@ def _select_local_restarting_ids(pool: ConnectionPool, local_machine: str) -> li
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id FROM agents_meta WHERE machine = %s AND "
-            "(status = 'restarting' OR (runtime_kind='process' AND lifecycle_command_id IS NOT NULL))",
+            "(status = 'restarting' OR (runtime_kind='process' AND "
+            "(lifecycle_command_id IS NOT NULL OR EXISTS(SELECT 1 FROM inbound_messages i "
+            "WHERE i.agent_id=agents_meta.id AND i.status='pending' AND i.kind IN ('restart','terminate')))))",
             (local_machine,),
         )
         return [r[0] for r in cur.fetchall()]

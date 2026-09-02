@@ -58,6 +58,8 @@ class TerminationSource(StrEnum):
     USER = "user"
     # Intentional — the agent's own graceful process-exit finalize (self-terminate,
     # or a caught SIGTERM/SIGHUP that ran the exit finally). Never auto-resurrected.
+    # Also records a positively exited target after its restart deadline fails;
+    # the command retains that failure separately, never a successful observation.
     EXIT = "exit"
     # Involuntary — a restarter corpse reaper found a dead pid / stale unclaimed idling
     # row (OOM/SIGKILL/crash leaves no finally, so it never reaches EXIT).
