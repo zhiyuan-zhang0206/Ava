@@ -7,6 +7,7 @@ import json
 import platform
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import psycopg
 
@@ -78,7 +79,7 @@ def load_candidate(conn: psycopg.Connection, path: Path) -> ReleaseMigrationCont
     """Revalidate persisted candidate evidence against the *current* operation."""
     if path.resolve(strict=True) != path or path.is_symlink():
         raise ReleaseRejectedError("candidate receipt must have a canonical path")
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw = cast(object, json.loads(path.read_text(encoding="utf-8")))
     fields = {
         "version",
         "home",
@@ -90,10 +91,17 @@ def load_candidate(conn: psycopg.Connection, path: Path) -> ReleaseMigrationCont
         "platform",
         "schema_digest",
     }
-    if not isinstance(payload, dict) or set(payload) != fields or payload["version"] != 1:
+    if not isinstance(raw, dict):
         raise ReleaseRejectedError("unsupported candidate receipt")
-    if any(not isinstance(payload[key], str) for key in fields - {"version"}):
-        raise ReleaseRejectedError("candidate receipt fields must be strings")
+    values = cast(dict[object, object], raw)
+    if set(values) != fields or type(values["version"]) is not int or values["version"] != 1:
+        raise ReleaseRejectedError("unsupported candidate receipt")
+    payload: dict[str, str] = {}
+    for key in fields - {"version"}:
+        value = values[key]
+        if not isinstance(value, str):
+            raise ReleaseRejectedError("candidate receipt fields must be strings")
+        payload[key] = value
     home = Path(payload["home"])
     release = verify_release(
         home / "releases",
