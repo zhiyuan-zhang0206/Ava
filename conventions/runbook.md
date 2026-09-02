@@ -1042,7 +1042,10 @@ failure, including a deploy-suppressed or environment-class one, restarts the pe
 known-good observation streak. A backend rollout writes its target as
 `pending_known_good_sha` while preserving `last_known_good_sha`; two consecutive
 gating-pass probes after at least 10 minutes promote that target to the rollback anchor.
-Rollout completion is therefore not itself proof that the new commit is known good.
+Rollout completion is therefore not itself proof that the new commit is known good. If
+an `INCOMPLETE` Phase-B rollout self-heals onto that same target, this authoritative
+promotion finalizes its last-update record as `RECOVERED`, retaining the original
+failure detail while making clear that there is nothing left to repair.
 
 **`ava start`'s exit code means something.** Three outcomes, because "the start
 sequence ran" and "this host is serving" are different facts:

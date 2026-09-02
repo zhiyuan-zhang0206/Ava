@@ -273,6 +273,58 @@ def test_a_failure_an_observer_recovered_reads_as_recovered_and_keeps_what_faile
     assert "Phase-B poll" in (record.failing_step or "")
 
 
+def test_lkg_promotion_officially_finalizes_its_incomplete_rollout(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A Phase-B timeout remains historical, not an open failure, once the health
+    window has proved its target became last-known-good after self-healing."""
+    from shared.cluster_pin import (
+        promote_pending_known_good_if_ready,
+        set_target_with_pending_known_good,
+    )
+
+    target = "8bdd366"
+    begin_update(target_sha=target, origin="cli:mini", holder="mini:pid1")
+    finish_update(
+        UpdateOutcome.INCOMPLETE,
+        failing_step="the Phase-B poll: an acked runner did not report back",
+        pin_advanced=True,
+    )
+    set_target_with_pending_known_good(target)
+
+    assert promote_pending_known_good_if_ready(min_age_s=0.0) is True
+
+    record = read_last_update()
+    assert record is not None
+    assert record.outcome is UpdateOutcome.RECOVERED
+    assert record.failed is True
+    assert record.failing_step == "the Phase-B poll: an acked runner did not report back"
+    assert record.observed_by == "cluster self-healed; last-known-good advanced to 8bdd366"
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT outcome FROM cluster_last_update WHERE id = 1")
+        row = cur.fetchone()
+    assert row is not None and row[0] == "recovered"
+
+
+def test_lkg_promotion_never_finalizes_an_unrelated_incomplete_rollout() -> None:
+    """The promotion may prove only the target it promotes; a newer pending target
+    cannot rewrite an older rollout record."""
+    from shared.cluster_pin import (
+        promote_pending_known_good_if_ready,
+        set_target_with_pending_known_good,
+    )
+
+    begin_update(target_sha="failed-target", origin="cli:mini", holder="mini:pid1")
+    finish_update(UpdateOutcome.INCOMPLETE, pin_advanced=True)
+    set_target_with_pending_known_good("different-target")
+
+    assert promote_pending_known_good_if_ready(min_age_s=0.0) is True
+
+    record = read_last_update()
+    assert record is not None
+    assert record.outcome is UpdateOutcome.INCOMPLETE
+
+
 # ─── the self-recovered half: the orchestration reporting its own rollback ────
 
 
