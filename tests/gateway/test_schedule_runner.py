@@ -333,8 +333,8 @@ def test_run_record_failure_does_not_break_the_run(
         def cursor(self) -> _FlakyCursor:
             return _FlakyCursor(self._inner.cursor())
 
-        def execute(self, sql: str, params: Any = None) -> Any:
-            return self._inner.execute(sql, params)
+        def execute(self, query: Any, params: Any = None) -> Any:
+            return self._inner.execute(query, params)
 
     def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
         return _Flaky(real_connect(*args, **kwargs))  # pyright: ignore[reportArgumentType]
@@ -406,8 +406,8 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
         def cursor(self) -> _FlakyCursor:
             return _FlakyCursor(self._inner.cursor())
 
-        def execute(self, sql: str, params: Any = None) -> Any:
-            return self._inner.execute(sql, params)
+        def execute(self, query: Any, params: Any = None) -> Any:
+            return self._inner.execute(query, params)
 
     def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
         return _Flaky(real_connect(*args, **kwargs))  # pyright: ignore[reportArgumentType]
