@@ -70,7 +70,7 @@ def test_live_or_unknown_original_process_never_allocates(
     ).fetchone() == (None,)
 
 
-def test_expired_command_does_not_allocate_or_clear_pointer(
+def test_expired_command_fails_without_successful_observation(
     db_conn: psycopg.Connection, owned_restart: tuple[int, int]
 ) -> None:
     agent_id, command_id = owned_restart
@@ -84,7 +84,13 @@ def test_expired_command_does_not_allocate_or_clear_pointer(
         "SELECT payload FROM inbound_messages WHERE id=%s", (command_id,)
     ).fetchone()
     assert row is not None and "launch_attempts" not in row[0]
-    assert row[0]["lifecycle_result"]["reason"] == "deadline_expired"
+    assert row[0]["lifecycle_result"] == {"outcome": "failed", "reason": "restart_deadline_expired"}
+    assert db_conn.execute(
+        "SELECT status,observed_at FROM inbound_messages WHERE id=%s", (command_id,)
+    ).fetchone() == ("done", None)
+    assert db_conn.execute(
+        "SELECT status,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated", None)
 
 
 def test_original_application_time_and_target_survive_prepare_idling_crash(

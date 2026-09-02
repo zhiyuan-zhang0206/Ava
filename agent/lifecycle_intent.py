@@ -5,27 +5,15 @@ must be upgraded before activation: old unconditional claims are not fenced
 by adding nullable columns. Acceptance never asserts that a process exited.
 """
 
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal, TypedDict
-from uuid import UUID
 
 import psycopg
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
 from agent.inbound_ownership import lock_inbound_owner
+from shared.lifecycle_acceptance import LifecycleIntent, accept_lifecycle_command_async
 from shared.runtime_incarnation import current_incarnation
-
-
-@dataclass(frozen=True)
-class LifecycleIntent:
-    id: int
-    agent_id: int
-    kind: str
-    generation: UUID
-    owner: UUID
-    accepted_at: datetime
 
 
 class LifecycleNoopResult(TypedDict):
@@ -48,44 +36,7 @@ async def accept_lifecycle_intent(
     token = current_incarnation(agent_id)
     if token is None:
         raise RuntimeError("lifecycle acceptance requires an admitted runtime incarnation")
-    cursor = await conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    )
-    pointer = await cursor.fetchone()
-    if pointer is None:
-        raise RuntimeError("admitted runtime metadata disappeared during lifecycle acceptance")
-    if pointer[0] is not None:
-        cursor = await conn.execute(
-            "SELECT id,agent_id,kind,target_generation,target_owner,claimed_at "
-            "FROM inbound_messages WHERE id=%s AND agent_id=%s AND status='claimed' FOR UPDATE",
-            (pointer[0], agent_id),
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            raise RuntimeError("lifecycle pointer does not reference an unfinished command")
-        return LifecycleIntent(*row)
-    cursor = await conn.execute(
-        "SELECT id FROM inbound_messages WHERE agent_id=%s AND status='pending' "
-        "AND kind IN ('restart','terminate') ORDER BY id LIMIT 1 FOR UPDATE",
-        (agent_id,),
-    )
-    pending = await cursor.fetchone()
-    if pending is None:
-        return None
-    cursor = await conn.execute(
-        "UPDATE inbound_messages SET status='claimed',claimed_at=clock_timestamp(), "
-        "target_generation=%s,target_owner=%s WHERE id=%s AND status='pending' "
-        "AND target_generation IS NULL AND target_owner IS NULL "
-        "RETURNING id,agent_id,kind,target_generation,target_owner,claimed_at",
-        (token.generation, token.owner, pending[0]),
-    )
-    accepted = await cursor.fetchone()
-    if accepted is None:
-        raise RuntimeError("pending lifecycle request already carries a target")
-    await conn.execute(
-        "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (pending[0], agent_id)
-    )
-    return LifecycleIntent(*accepted)
+    return await accept_lifecycle_command_async(conn, token)
 
 
 async def settle_superseded_intent(conn: psycopg.AsyncConnection, command: LifecycleIntent) -> bool:

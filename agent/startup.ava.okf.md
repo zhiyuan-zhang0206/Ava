@@ -57,8 +57,19 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
   commit consumes an attempt, including when no OS process was started. Both
   the retry ceiling and original command deadline apply. Exhaustion records an
   explicit unobserved result without pretending `observed_at` or a new PID exists.
-  Safe terminal failure and queued-follow-up recovery remain required before
-  activation; a retained pointer is visible blocked recovery, not completion.
+  Before the deadline, exhausted attempts remain explicitly unobserved. After
+  the original deadline, positive target absence permits a failed command result
+  and fenced pointer release, never a successful observation timestamp. The
+  ended runtime becomes terminated; its restart failure remains in the command.
+- Live runtime and cold controller acceptance share `shared/lifecycle_acceptance.py`.
+  The existing controller accepts a new explicit restart/terminate only after
+  proving no admitted owner for that exact agent. A new command has its own
+  budget; the old command is never retargeted or reset. Ordinary chat, compact
+  and system-note delivery cannot revive a released failed process: both the
+  watchdog candidate selection and final pending-work resurrection CAS refuse.
+  Explicit restart queues through the public lifecycle operation. Legacy
+  unowned terminated-agent policy is unchanged. Protocol advertisement and
+  full mixed-writer rollout validation remain activation gates.
 
 ### Stage 3: Boot Stage
 - This stage is between '_starting' and run loop

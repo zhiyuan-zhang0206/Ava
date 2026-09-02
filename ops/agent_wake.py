@@ -155,18 +155,22 @@ def _transition_terminated_to_unclaimed_idling(
     """Run the one final resurrection CAS with a fully static SQL shape."""
     base_params = (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED)
     if trigger_inbound_id is not None:
+        from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
+
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
-            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-            "termination_source = NULL, lease_expires_at = NULL "
-            "WHERE id = %s AND status = %s "
-            "AND EXISTS ("
-            "  SELECT 1 FROM inbound_messages m "
-            "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
-            "    AND m.status = 'pending' AND m.kind = %s "
-            "    AND m.created_at > agents_meta.status_changed_at "
-            "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
-            ") RETURNING status_changed_at",
+            psycopg.sql.SQL(
+                "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
+                "termination_source = NULL, lease_expires_at = NULL "
+                "WHERE id = %s AND status = %s "
+                "AND NOT {} AND EXISTS ("
+                "  SELECT 1 FROM inbound_messages m "
+                "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
+                "    AND m.status = 'pending' AND m.kind = %s "
+                "    AND m.created_at > agents_meta.status_changed_at "
+                "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
+                ") RETURNING status_changed_at"
+            ).format(psycopg.sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)),
             (*base_params, trigger_inbound_id, trigger_inbound_kind),
         )
     elif auto_claim is not None and auto_claim.claim_kind == "crash":
