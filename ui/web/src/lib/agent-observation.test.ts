@@ -16,6 +16,6 @@ describe("independent observation evidence", () => {
   });
   it("unknown evidence is not fresh and expired lease is distinct", () => {
     expect(observationText(undefined)).toContain("Machine probe: unknown");
-    expect(observationText({ runtime_lease_expires_at: "2026-01-01T00:00:00Z" }, Date.parse("2026-09-03T00:00:00Z"))).toContain("runtime lease: expired");
+    expect(observationText({ runtime_owner: "unknown", runtime_lease_expires_at: "2026-01-01T00:00:00Z" }, Date.parse("2026-09-03T00:00:00Z"))).toContain("runtime lease: expired");
   });
 });
