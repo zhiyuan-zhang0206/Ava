@@ -8,6 +8,7 @@ transaction pooling in front of Postgres) lives in test_pgbouncer_wire.py.
 from __future__ import annotations
 
 import inspect
+import re
 
 from cli.commands import _pgbouncer
 
@@ -135,5 +136,12 @@ def test_shared_db_connect_and_pool_dial_one_url_with_direct_escape() -> None:
         assert "dp.db_url if not direct else direct_db_url()" in src
         assert "prepare_threshold" in src
     assert "unbounded" in inspect.signature(shared.db.connect).parameters
-    assert "PG_STATEMENT_TIMEOUT_SET_SQL" in inspect.getsource(shared.db.connect)
-    assert "configure=_apply_statement_timeout" in inspect.getsource(shared.db.pool)
+    # Pooled dials restore the baseline session (RESET ALL + statement ceiling)
+    # — pgbouncer never resets backend session state between clients, so a
+    # borrowed backend may carry another client's session GUCs (2026-09-02 P0).
+    assert "_restore_pooled_session" in inspect.getsource(shared.db.connect)
+    pool_src = inspect.getsource(shared.db.pool)
+    assert "configure=_restore_pooled_session" in pool_src
+    # The check hook spans a formatted multi-line conditional; assert the wiring
+    # shape rather than a contiguous literal.
+    assert re.search(r"check=\s*\(\s*_restore_pooled_session\s*if not direct", pool_src)
