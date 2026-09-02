@@ -16,6 +16,7 @@ from tests.agent.test_restart_admission import _prepared
 @pytest.fixture
 def owned_restart(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> tuple[int, int]:
     agent_id, command_id = _prepared(db_conn)
+    db_conn.execute("UPDATE inbound_messages SET payload=NULL WHERE id=%s", (command_id,))
     db_conn.execute("UPDATE agents_meta SET status='restarting',pid=12345 WHERE id=%s", (agent_id,))
     db_conn.commit()
     monkeypatch.setattr(
