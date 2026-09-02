@@ -103,15 +103,17 @@ def test_restart_handler_forwards_the_parsed_config_overlay(
     """The restart parser keeps the JSON string intact for its HTTP command."""
     from cli.commands import agents as agents_commands
 
-    calls: list[tuple[int, str | None]] = []
+    calls: list[tuple[int, str | None, str | None]] = []
     monkeypatch.setattr(
         agents_commands,
         "cmd_agents_restart",
-        lambda agent_id, config_json=None: calls.append((agent_id, config_json)) or 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda agent_id, config_json=None, source=None: (
+            calls.append((agent_id, config_json, source)) or 0
+        ),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
 
     assert _main.main(["agents", "restart", "8", "--config", '{"llm_model":"gpt-5.6-sol"}']) == 0
-    assert calls == [(8, '{"llm_model":"gpt-5.6-sol"}')]
+    assert calls == [(8, '{"llm_model":"gpt-5.6-sol"}', None)]
 
 
 def test_migrations_subcommand_removed() -> None:
