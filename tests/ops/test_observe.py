@@ -42,7 +42,13 @@ def test_probe_set_agent_runner_membership() -> None:
     } == sessions
     views = {v.session: v for v in observe.probe_set(frozenset({"agent-runner"}))}
     assert views["browser-mcp"].kind == "none"  # MCP over a unix socket — no HTTP/TCP probe
-    assert views["agent-host"].gate_reason == "disabled (AVA_RUNNER_MODE is process)"
+    # Default shape since 2026-09: hosted — the agent-host is ungated and the
+    # restarter carries the mode reason (the annotated view keeps gated-out
+    # services so an operator sees why they are absent).
+    assert views["agent-host"].gate_reason is None
+    assert views["restarter"].gate_reason == (
+        "disabled (AVA_RUNNER_MODE is hosted — per-agent process supervision retired)"
+    )
 
 
 def test_observe_gated_service_reports_na_with_reason(monkeypatch: pytest.MonkeyPatch) -> None:
