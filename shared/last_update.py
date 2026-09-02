@@ -32,9 +32,11 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
+import psycopg
 from pydantic import BaseModel, ConfigDict
 
 import shared.db
+from shared.log import logger
 
 
 class UpdateOutcome(StrEnum):
@@ -48,12 +50,13 @@ class UpdateOutcome(StrEnum):
     `RECOVERED` is the fourth terminal state, and it is a distinct one rather than a
     shade of `ABORTED` because it answers a different operator question: the attempt
     failed AND the cluster is already back on a commit that works, so there is
-    nothing to repair — only something to know. It is reached two ways, and both are
-    real recoveries: the orchestration's own gateway leg rolling back to
-    last-known-good (written by `finish_update`), and a *later* `ava cluster
-    rollback` cleaning up after an orchestration that died (derived by
-    `read_last_update` from the observation that rollback left behind). Collapsing
-    it into `ABORTED` was what made the 2026-07-30 recovery read as an open incident.
+    nothing to repair — only something to know. It is reached three ways, and all
+    are real recoveries: the orchestration's own gateway leg rolling back to
+    last-known-good (written by `finish_update`), a *later* `ava cluster rollback`
+    cleaning up after an orchestration that died (derived by `read_last_update` from
+    the observation that rollback left behind), and an incomplete rollout whose
+    target becomes last-known-good after the cluster self-heals. Collapsing it into
+    `ABORTED` was what made the 2026-07-30 recovery read as an open incident.
 
     `RUNNING` and `ORPHANED` are the two readings of a row with no recorded end, and
     they are told apart by the deploy lease rather than by a timeout: a rollout runs
@@ -273,6 +276,63 @@ def note_observed_recovery(reason: str) -> None:
             "WHERE id = 1 AND started_at IS NOT NULL AND outcome IS DISTINCT FROM %s",
             (reason, str(UpdateOutcome.CLEAN)),
         )
+
+
+def finalize_incomplete_update_after_lkg_advance(
+    target_sha: str, *, conn: psycopg.Connection
+) -> bool:
+    """Close the matching incomplete rollout when its target becomes LKG.
+
+    The LKG promotion is the authoritative proof that a rollout which timed out in
+    Phase B has since self-healed: it happens only after the target is still pinned
+    and has passed the health observation window. This function runs in the same
+    transaction as that promotion, so a crash cannot leave the new anchor behind
+    while the last-update record remains permanently `INCOMPLETE`. A stale
+    `deployment_state` mirror is the one exception: it rolls back only this
+    optional finalization, logs the mismatch, and lets the authoritative LKG
+    promotion commit.
+
+    It is deliberately narrower than `note_observed_recovery`: only the current
+    record, its exact target, and its recorded `INCOMPLETE` outcome qualify. A
+    manual rollback, a later rollout, and an already-finalized record retain their
+    own stated outcome.
+    """
+    reason = f"cluster self-healed; last-known-good advanced to {target_sha}"
+    with conn.cursor() as cur:
+        cur.execute("SAVEPOINT finalize_incomplete_update")
+        cur.execute(
+            "UPDATE cluster_last_update SET outcome = %s, observed_by = %s "
+            "WHERE id = 1 AND target_sha = %s AND outcome = %s",
+            (
+                str(UpdateOutcome.RECOVERED),
+                reason,
+                target_sha,
+                str(UpdateOutcome.INCOMPLETE),
+            ),
+        )
+        finalized = cur.rowcount == 1
+        cur.execute(
+            "UPDATE deployment_state SET outcome = %s, observed_by = %s "
+            "WHERE id = 1 AND target_sha = %s AND outcome = %s",
+            (
+                str(UpdateOutcome.RECOVERED),
+                reason,
+                target_sha,
+                str(UpdateOutcome.INCOMPLETE),
+            ),
+        )
+        expected_count = 1 if finalized else 0
+        if cur.rowcount != expected_count:
+            cur.execute("ROLLBACK TO SAVEPOINT finalize_incomplete_update")
+            cur.execute("RELEASE SAVEPOINT finalize_incomplete_update")
+            logger.warning(
+                "last-update mirror disagreed during LKG promotion; preserving the incomplete "
+                "record while advancing the LKG anchor (target={target_sha})",
+                target_sha=target_sha,
+            )
+            return False
+        cur.execute("RELEASE SAVEPOINT finalize_incomplete_update")
+    return finalized
 
 
 def read_last_update() -> LastUpdate | None:
