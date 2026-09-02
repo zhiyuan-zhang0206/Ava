@@ -1,0 +1,61 @@
+name: Hosted incarnation regression proof
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ['agent/**', 'services/agent_host/**', 'shared/*incarnation*', 'shared/turn_identity.py', 'tests/agent/test_hosted_ownership.py', 'tests/services/test_agent_host.py', 'tests/services/test_turn_dispatcher.py', '.github/workflows/hosted-incarnation-proof.yml']
+permissions:
+  contents: read
+jobs:
+  prove-hosted-incarnation:
+    if: github.head_ref == 'ava-stability-hosted-incarnation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+      AVA_RUNNER_MODE: hosted
+      BASELINE_SHA: fa75d2e0f658577d264699197d8415c728856299
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: 0.10.2
+      - uses: ./.github/actions/install-pg-redis
+      - run: uv sync --frozen
+      - name: Verify hosted authority and single-flight settlement
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          git rev-parse HEAD > proof/head-sha.txt
+          printf '%s\n' "$BASELINE_SHA" > proof/baseline-sha.txt
+          timeout 240 uv run pytest tests/agent/test_hosted_ownership.py tests/services/test_agent_host.py -q --junitxml=proof/head.xml
+          timeout 180 uv run pytest tests/services/test_turn_dispatcher.py -k same_incarnation_settlement -q --junitxml=proof/single-flight.xml
+          timeout 180 uv run pytest tests/agent/test_db.py -k 'flip_hosted_status or settle_stale_running' -q --junitxml=proof/status.xml
+          git show "$BASELINE_SHA:services/agent_host/host.py" > services/agent_host/host.py
+          git show "$BASELINE_SHA:agent/db.py" > agent/db.py
+          set +e
+          timeout 180 uv run pytest tests/agent/test_hosted_ownership.py -k host_refuses_a_turn -q --junitxml=proof/baseline.xml
+          result=$?
+          set -e
+          test "$result" -eq 1
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          for name in ('head', 'single-flight', 'status'):
+              doc = ET.parse(f'proof/{name}.xml')
+              assert doc.findall('.//testcase')
+              assert not doc.findall('.//failure') and not doc.findall('.//error')
+          old = ET.parse('proof/baseline.xml')
+          assert len(old.findall('.//testcase')) == 2 and not old.findall('.//error')
+          failed = {c.attrib['name'] for c in old.findall('.//testcase') if c.find('failure') is not None}
+          assert failed == {f'test_host_refuses_a_turn_owned_by_another_live_instance[{state}]' for state in ('running', 'idling')}
+          PY
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hosted-incarnation-proof-${{ github.event.pull_request.head.sha }}
+          path: proof/
+          if-no-files-found: error
