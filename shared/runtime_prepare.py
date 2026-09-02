@@ -118,6 +118,13 @@ def native_dependencies(root: Path) -> list[str]:
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
+        # Retained stdlib bytes are inventoried, but optional extension modules
+        # are not all runtime capabilities. Inspect the executable and installed
+        # application dependencies; declared boot imports validate their stdlib
+        # closure. In particular, ldd(_tkinter) omits its executable's RPATH:
+        # https://github.com/astral-sh/python-build-standalone/issues/742
+        if path.is_relative_to(root / "python") and path.parent != root / "python/bin":
+            continue
         with path.open("rb") as stream:
             magic = stream.read(4)
             if magic not in (
@@ -192,6 +199,29 @@ class PrepareInputs:
     application_wheel: str
     schema_digest: str
     uv: Path
+
+
+def _optional_stdlib_receipt(source: Path, root: Path, interpreter: Path) -> None:
+    probe = """
+import json
+try:
+    import _tkinter
+except ImportError as exc:
+    print(json.dumps({'available': False, 'reason': str(exc)}))
+else:
+    print(json.dumps({'available': True}))
+"""
+    optional = {
+        label: json.loads(_run([str(binary), "-I", "-B", "-c", probe], root))
+        for label, binary in (
+            ("input", source / "bin/python3"),
+            ("retained", root / "python/bin/python3"),
+            ("venv", interpreter),
+        )
+    }
+    _write_json(root / "optional-stdlib.json", optional)
+    if optional["input"]["available"] != optional["retained"]["available"]:
+        raise ReleaseRejectedError("retained Python changed optional tkinter availability")
 
 
 def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
@@ -284,6 +314,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
             timeout=600,
         )
     _materialize_venv_links(root / "venv")
+    _optional_stdlib_receipt(source, root, interpreter)
     # Ensure the retained interpreter/stdlib, not a mutable Homebrew/system Python,
     # supplies base_prefix. Prove real service imports with all sockets denied.
     facts = json.loads(

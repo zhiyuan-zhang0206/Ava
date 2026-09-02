@@ -22,6 +22,14 @@ Windows preparation, Mach-O rpath contracts not yet understood, process privileg
 separation, frontend artifacts and plugin state compatibility are not covered.
 Same-UID chmod is accidental-write protection, not an adversarial security seal.
 
+The declared import roots are CLI, exec child, ops spec, agent-host and gateway.
+The native scan covers their interpreter executables and installed application
+dependencies, not every optional stdlib extension. All retained stdlib bytes are
+hashed, but this is not a claim that every GUI/optional module works. A separate
+receipt compares `_tkinter` availability in the managed input, retained base,
+and venv; changing the retained base capability fails preparation. This avoids
+misreading standalone `ldd(_tkinter)` as CPython's executable-RPATH behavior.
+
 CI builds real wheel inputs and exercises offline preparation on Linux and
 macOS arm64, retires the input interpreter/wheel paths, runs isolated imports,
 rechecks the installed inventory and injects a failed preparation. The serving
