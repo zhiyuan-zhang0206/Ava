@@ -189,15 +189,14 @@ def test_qwen_27b_uses_its_own_published_usd_not_a_derived_rate() -> None:
     assert cheap < flagship
 
 
-def test_qwen3_8_flash_uses_the_official_qwencloud_usd() -> None:
-    """Locks the official QwenCloud USD figures ($0.16 / $0.016 / $0.47), the
-    only official USD published at onboarding — the Model Studio EN page
-    (Beijing USD column) was not yet live on 2026-08-27, and the no-conversion
-    rule forbids deriving Beijing USD from the published CNY (1 / 0.1 / 3).
-    Re-check when the alibabacloud.com page lands (see the module docstring)."""
-    assert cost_usd("qwen3.8-flash", _M, _M, 0) == pytest.approx(0.16 + 0.47)  # pyright: ignore[reportUnknownMemberType]
-    assert cost_usd("qwen3.8-flash", _M, 0, _M) == pytest.approx(0.016)  # pyright: ignore[reportUnknownMemberType]
-    # and it is genuinely cheaper than the flagship, the reason it is registered
+def test_qwen3_8_flash_uses_published_beijing_usd() -> None:
+    """Locks the Model Studio EN page's landed Beijing USD column ($0.113 /
+    $0.014 / $0.382, checked 2026-09-02). It replaces QwenCloud's Singapore
+    column figures ($0.16 / $0.016 / $0.47), which overstated Beijing cost;
+    the no-conversion rule remains intact (see the module docstring)."""
+    assert cost_usd("qwen3.8-flash", _M, _M, 0) == pytest.approx(0.113 + 0.382)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-flash", _M, 0, _M) == pytest.approx(0.014)  # pyright: ignore[reportUnknownMemberType]
+    # The published Beijing rate remains cheaper than the registered flagship.
     cheap = cost_usd("qwen3.8-flash", _M, _M, 0)
     assert cheap is not None and cheap < 1.65 + 4.951
 
