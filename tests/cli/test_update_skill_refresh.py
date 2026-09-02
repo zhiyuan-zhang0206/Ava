@@ -109,7 +109,9 @@ def test_runner_leg_refreshes_after_checkout(monkeypatch: pytest.MonkeyPatch, re
             return type("R", (), {"returncode": 0})()
 
     monkeypatch.setattr(_runner, "subprocess", _FakeSubprocess())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_runner, "run_uv_sync", lambda _repo: type("R", (), {"returncode": 0})())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        _runner, "run_uv_sync_verified", lambda _repo: type("R", (), {"returncode": 0})()
+    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
     assert (
         _runner._run_agent_runner_self_update_inner(

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,7 +17,7 @@ from shared import editable_install
 def _write_pth(source_root: Path, target: Path) -> Path:
     pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
     pth.parent.mkdir(parents=True)
-    pth.write_text(str(target))
+    pth.write_text(f"{target}\n")
     return pth
 
 
@@ -35,7 +37,7 @@ def test_poisoned_missing_target_is_repaired_and_emits_warning_event(
 
     editable_install.repair_editable_ava_pth(source_root)
 
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
     assert stat.S_IMODE(pth.stat().st_mode) == 0o444
     assert emitted == [
         (
@@ -63,7 +65,7 @@ def test_worktree_below_allowlisted_dev_clone_is_still_repaired(tmp_path: Path) 
 
     editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
 
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
 
 
 def test_exact_allowlisted_dev_clone_target_is_left_unchanged(tmp_path: Path) -> None:
@@ -75,7 +77,76 @@ def test_exact_allowlisted_dev_clone_target_is_left_unchanged(tmp_path: Path) ->
 
     editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
 
-    assert pth.read_text() == str(dev_clone)
+    assert pth.read_text() == f"{dev_clone}\n"
+
+
+def test_repair_canonicalizes_an_allowlisted_clone_missing_its_newline(tmp_path: Path) -> None:
+    """A legal target keeps its identity while its pointer bytes are normalized."""
+
+    source_root = tmp_path / "prod" / "source"
+    dev_clone = tmp_path / "Ava"
+    dev_clone.mkdir(parents=True)
+    pth = _write_pth(source_root, dev_clone)
+    pth.write_text(str(dev_clone))
+
+    editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
+
+    assert pth.read_bytes() == f"{dev_clone}\n".encode()
+
+
+def test_repair_canonicalizes_duplicate_pth_entries(tmp_path: Path) -> None:
+    """The same root twice is still repaired to the one-line pointer contract."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_text(f"{source_root}\n{source_root}\n")
+
+    editable_install.repair_editable_ava_pth(source_root)
+
+    assert pth.read_bytes() == f"{source_root}\n".encode()
+
+
+def test_repair_adds_missing_pth_trailing_newline(tmp_path: Path) -> None:
+    """A syntactically legal target is not canonical until it ends in one newline."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    pth.write_text(str(source_root))
+
+    editable_install.repair_editable_ava_pth(source_root)
+
+    assert pth.read_bytes() == f"{source_root}\n".encode()
+
+
+def test_crlf_canonical_pth_is_read_without_repair(tmp_path: Path) -> None:
+    """Universal-newline reading accepts a Windows pointer without changing its bytes."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_bytes(f"{source_root}\r\n".encode())
+    before = pth.read_bytes()
+
+    assert editable_install.editable_install_violations(source_root) == ()
+    assert editable_install.repair_editable_ava_pth(source_root) == ()
+    assert pth.read_bytes() == before
+
+
+def test_empty_pth_is_reported_and_repaired_to_canonical_content(tmp_path: Path) -> None:
+    """An empty pointer cannot be interpreted as a legal editable target."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_text("")
+
+    violations = editable_install.editable_install_violations(source_root)
+    editable_install.repair_editable_ava_pth(source_root)
+
+    assert len(violations) == 1
+    assert "non-canonical editable pointer" in violations[0]
+    assert pth.read_bytes() == f"{source_root}\n".encode()
 
 
 def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> Path:
@@ -92,6 +163,86 @@ def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> 
     du.parent.mkdir(parents=True)
     du.write_text(json.dumps({"url": url, "dir_info": {"editable": editable}}))
     return du
+
+
+def test_missing_direct_url_beside_pth_is_reported_and_repaired(tmp_path: Path) -> None:
+    """A removed direct-URL record is the reverse half-uninstall direction."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    direct_url = _write_direct_url(source_root, source_root.as_uri())
+    direct_url.unlink()
+
+    violations = editable_install.editable_install_violations(source_root)
+    repairs = editable_install.repair_editable_install(source_root)
+
+    assert len(violations) == 1
+    assert str(pth) in violations[0]
+    assert "metadata missing" in violations[0]
+    assert json.loads(direct_url.read_text()) == {
+        "url": source_root.as_uri(),
+        "dir_info": {"editable": True},
+    }
+    assert repairs == (
+        editable_install.EditableInstallRepair(
+            path=direct_url,
+            poisoned_target="(missing)",
+            source_root=source_root,
+        ),
+    )
+
+
+def test_missing_dist_info_beside_pth_is_reported_without_fabrication(tmp_path: Path) -> None:
+    """A missing directory supplies no version, so only uv may recreate it."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+
+    violations = editable_install.editable_install_violations(source_root)
+    repairs = editable_install.repair_editable_install(source_root)
+
+    assert len(violations) == 1
+    assert str(pth) in violations[0]
+    assert "metadata missing" in violations[0]
+    assert repairs == ()
+    assert not list(pth.parent.glob("ava-*.dist-info"))
+
+
+def test_editable_console_script_violations_follow_the_posix_venv_layout(tmp_path: Path) -> None:
+    """The POSIX launcher is judged beside the POSIX venv interpreter."""
+
+    source_root = tmp_path / "source"
+    interpreter = source_root / ".venv" / "bin" / "python"
+    console_script = interpreter.with_name("ava")
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
+    console_script.touch()
+
+    assert editable_install.editable_console_script_violations(source_root) == ()
+
+    console_script.unlink()
+
+    assert editable_install.editable_console_script_violations(source_root) == (
+        f"{console_script} editable console script missing",
+    )
+
+
+def test_editable_console_script_violations_follow_the_windows_venv_layout(tmp_path: Path) -> None:
+    """A Windows tree is inspected structurally even on a POSIX test host."""
+
+    source_root = tmp_path / "source"
+    interpreter = source_root / ".venv" / "Scripts" / "python.exe"
+    console_script = interpreter.with_name("ava.exe")
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
+
+    assert editable_install.editable_console_script_violations(source_root) == (
+        f"{console_script} editable console script missing",
+    )
+
+    console_script.touch()
+
+    assert editable_install.editable_console_script_violations(source_root) == ()
 
 
 def test_poisoned_direct_url_is_repaired_and_emits_warning_event(
@@ -216,7 +367,7 @@ def test_repair_editable_install_repairs_pointer_and_direct_url(tmp_path: Path) 
 
     repairs = editable_install.repair_editable_install(source_root)
 
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
     assert json.loads(du.read_text())["url"] == source_root.as_uri()
     assert len(repairs) == 2
 
@@ -245,16 +396,20 @@ def test_editable_install_violations_healthy_is_empty(tmp_path: Path) -> None:
     assert editable_install.editable_install_violations(source_root) == ()
 
 
-def test_editable_install_violations_accepts_repeated_checkout_pth_entries(
+def test_editable_install_violations_reports_repeated_checkout_pth_entries(
     tmp_path: Path,
 ) -> None:
-    """Repeated equivalent .pth entries are harmless, unlike a foreign entry."""
+    """Repeated equivalent .pth entries are import-ambiguous and non-canonical."""
     source_root = tmp_path / "prod" / "source"
     source_root.mkdir(parents=True)
     pth = _write_pth(source_root, source_root)
-    pth.write_text(f"{source_root}\n{source_root}")
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_text(f"{source_root}\n{source_root}\n")
 
-    assert editable_install.editable_install_violations(source_root) == ()
+    violations = editable_install.editable_install_violations(source_root)
+
+    assert len(violations) == 1
+    assert "non-canonical editable pointer" in violations[0]
 
 
 def test_editable_install_violations_both_missing_records_are_empty(tmp_path: Path) -> None:
@@ -278,7 +433,7 @@ def test_half_uninstall_pointer_missing_beside_metadata_is_repaired(tmp_path: Pa
     assert str(pth) in violations[0]
     assert "metadata present but pointer missing" in violations[0]
     repairs = editable_install.repair_editable_install(source_root)
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
     assert repairs == (
         editable_install.EditableInstallRepair(
             path=pth,
@@ -331,6 +486,60 @@ def test_editable_install_violations_unparsable_record_is_reported(
     assert len(violations) == 1 and str(record) in violations[0]
 
 
+def test_editable_import_gate_requires_the_checkout_editable_import(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The gate rejects a poisoned pointer and a cwd decoy outside the checkout."""
+
+    source_root = tmp_path / "source"
+    agent_package = source_root / "agent"
+    agent_package.mkdir(parents=True)
+    (agent_package / "__init__.py").write_text("")
+    (agent_package / "exec_child.py").write_text("VALUE = 'source'\n")
+    subprocess.run(  # noqa: S603 — test-owned interpreter and venv path
+        [sys.executable, "-m", "venv", str(source_root / ".venv")],
+        check=True,
+        capture_output=True,
+    )
+    interpreter = editable_install._venv_python(source_root)
+    assert interpreter is not None
+    site_packages = Path(
+        subprocess.check_output(  # noqa: S603 — test-owned interpreter and venv path
+            [str(interpreter), "-c", "import site; print(site.getsitepackages()[0])"],
+            text=True,
+        ).strip()
+    )
+    pth = site_packages / editable_install.EDITABLE_PTH_NAME
+    pth.write_text(f"{source_root}\n")
+
+    assert editable_install.editable_import_gate(source_root) == ()
+
+    pth.write_text(f"{tmp_path / 'missing'}\n")
+    assert editable_install.editable_import_gate(source_root)
+
+    neutral_dir = tmp_path / "neutral"
+    decoy = neutral_dir / "agent"
+    decoy.mkdir(parents=True)
+    (decoy / "__init__.py").write_text("")
+    (decoy / "exec_child.py").write_text("VALUE = 'decoy'\n")
+    pth.write_text(f"{neutral_dir}\n")
+    monkeypatch.setattr(editable_install.tempfile, "gettempdir", lambda: str(neutral_dir))
+    violations = editable_install.editable_import_gate(source_root)
+
+    assert len(violations) == 1
+    assert "path=" in violations[0]
+    assert str(decoy / "exec_child.py") in violations[0]
+
+    for candidate in (
+        source_root / ".venv" / "bin" / "python3",
+        source_root / ".venv" / "bin" / "python",
+        source_root / ".venv" / "Scripts" / "python.exe",
+    ):
+        candidate.unlink(missing_ok=True)
+
+    assert editable_install.editable_import_gate(source_root) == ("venv python missing",)
+
+
 def test_current_interpreter_source_root_reads_a_posix_venv_layout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -376,7 +585,7 @@ def test_guard_editable_install_repairs_all_records_and_emits_exec_event(
     violations = editable_install.guard_editable_install(source_root)
 
     assert len(violations) == 2
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
     assert [entry[0][1] for entry in emitted] == [
         "editable_pth_repaired",
@@ -407,7 +616,7 @@ def test_guard_editable_install_recovers_a_half_uninstall(tmp_path: Path) -> Non
 
     assert len(violations) == 1
     assert "half-uninstalled" in violations[0]
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
 
 
 def test_guard_editable_install_repairs_with_registered_real_emitter(tmp_path: Path) -> None:
@@ -420,7 +629,7 @@ def test_guard_editable_install_repairs_with_registered_real_emitter(tmp_path: P
     violations = editable_install.guard_editable_install(source_root)
 
     assert len(violations) == 2
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
 
 
@@ -442,7 +651,7 @@ def test_guard_editable_install_repairs_when_telemetry_emit_fails(
     violations = editable_install.guard_editable_install(source_root)
 
     assert len(violations) == 2
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
 
 
@@ -530,7 +739,7 @@ def test_repair_editable_install_opens_protected_site_packages_directory(
 
     editable_install.repair_editable_install(source_root)
 
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
     assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555
 
@@ -548,5 +757,5 @@ def test_repair_half_uninstall_opens_protected_site_packages_directory(
 
     editable_install.repair_editable_install(source_root)
 
-    assert pth.read_text() == str(source_root)
+    assert pth.read_text() == f"{source_root}\n"
     assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555

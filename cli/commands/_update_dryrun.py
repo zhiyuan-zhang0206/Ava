@@ -236,7 +236,10 @@ def _staging_worktree(
 
 
 def _warm_staging_uv(staging: Path) -> str | None:
-    result = _update_uv_sync.run_uv_sync(staging, timeout_s=_DRY_RUN_UV_SYNC_TIMEOUT_S)
+    result = _update_uv_sync.run_uv_sync_verified(
+        staging,
+        timeout_s=_DRY_RUN_UV_SYNC_TIMEOUT_S,
+    )
     if result.returncode != 0:
         return f"target build uv sync failed (rc={result.returncode})"
     return None

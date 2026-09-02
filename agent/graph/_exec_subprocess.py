@@ -104,8 +104,16 @@ def _build_child_env(
     by dotenv_boot), plus the identity the session env allowlist deliberately
     drops (Task #856) and the two envelope paths. The per-agent config maps the
     agent process popped at boot are re-emitted here so the child's SDK calls
-    see the same effective settings (json in env, never argv — issue #974)."""
+    see the same effective settings (json in env, never argv — issue #974).
+
+    A child spawned outside its interpreter checkout drops ``VIRTUAL_ENV`` so
+    a bare uv command cannot target a different checkout's editable install.
+    Children running inside their own checkout preserve their venv identity.
+    """
     env = os.environ.copy()
+    source_root = editable_install.current_interpreter_source_root()
+    if source_root is not None and not Path.cwd().resolve().is_relative_to(source_root):
+        env.pop("VIRTUAL_ENV", None)
     if agent_id is not None:
         env["AVA_AGENT_ID"] = str(agent_id)
     env["AVA_PROCESS_PROFILE"] = "agent"

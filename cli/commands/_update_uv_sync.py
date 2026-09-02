@@ -54,11 +54,13 @@ from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 from shared.editable_install import (
     editable_ava_pth_paths,
     editable_direct_url_paths,
+    editable_import_gate,
     editable_pth_write_window,
     editable_site_packages_dirs,
 )
 from shared.paths import ava_home
 from shared.platform import IS_WINDOWS
+from shared.platform_backend import get_backend
 from shared.proc import run_bounded
 
 _PROD_SYNC_ARGS = ["uv", "sync", "--locked", "--no-dev", "--inexact", "--verbose"]
@@ -71,6 +73,14 @@ class _EditableRecordSnapshot:
     path: Path
     exists: bool
     content: bytes | None
+
+
+def _prod_sync_argv(repo: Path) -> list[str]:
+    """Production sync command pinned to ``repo``'s virtualenv interpreter."""
+
+    python_name = "python.exe" if IS_WINDOWS else "python"
+    interpreter = repo / ".venv" / get_backend().venv_bin_dir_name() / python_name
+    return [*_PROD_SYNC_ARGS, "--python", str(interpreter)]
 
 
 def _uv_cache_dir() -> str | None:
@@ -230,8 +240,9 @@ def run_uv_sync(
             return _failed_uv_sync(126)
         try:
             result = run_bounded(
-                _PROD_SYNC_ARGS,
+                _prod_sync_argv(repo),
                 cwd=repo,
+                env={key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"},
                 capture_output=False,
                 timeout=timeout_s,
             )
@@ -253,6 +264,25 @@ def run_uv_sync(
         if result.returncode != 0:
             _restore_editable_records(snapshots)
         return result
+
+
+def run_uv_sync_verified(
+    repo: Path, *, timeout_s: float = UV_SYNC_TIMEOUT_S
+) -> subprocess.CompletedProcess[bytes]:
+    """Run production sync, then prove its venv imports the checked-out agent code."""
+
+    result = run_uv_sync(repo, timeout_s=timeout_s)
+    if result.returncode != 0:
+        return result
+    violations = editable_import_gate(repo)
+    if not violations:
+        return result
+    return subprocess.CompletedProcess(
+        result.args,
+        returncode=126,
+        stdout=result.stdout,
+        stderr="\n".join(violations).encode(),
+    )
 
 
 def _main() -> int:

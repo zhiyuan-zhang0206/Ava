@@ -13,7 +13,7 @@ import ava._boot
 from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.cluster import session_name
-from shared.paths import workspace_dir
+from shared.paths import repo_root, workspace_dir
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
 
@@ -200,7 +200,14 @@ def _create_session(
     # operator freeze a refused attempt therefore leaves a harmless gap in this
     # monotonic per-agent sequence. Never roll it back or reuse it: an old
     # numeric handle must remain stale instead of naming a later session.
-    ok = backend.new_session(full, "", Path(cwd), env=forward_env_dict())
+    session_cwd = Path(cwd)
+    activate_venv = session_cwd.resolve().is_relative_to(repo_root().resolve())
+    ok = backend.new_session(
+        full,
+        "",
+        session_cwd,
+        env=forward_env_dict(activate_venv=activate_venv),
+    )
     if not ok:
         raise RuntimeError(f"failed to create session {full!r}")
     if ttl is not None:
