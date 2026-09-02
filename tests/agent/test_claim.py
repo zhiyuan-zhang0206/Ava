@@ -374,7 +374,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     state.messages empty (agent first round) → claim simultaneously injects SystemMessage as
     messages[0] for prompt cache hit across restarts.
     """
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     insert_inbound_message(db_conn, tid, "hello", source="user")
 
     cmd = await claim_node(
@@ -693,7 +693,7 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
     delivers it in the freshly established context. Regression: the chat used to
     be parked after the summary (the extra_msgs tail), which the user observed
     as original messages surviving a compact."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     summary_text = "agent summary"
     _insert_inbound_kind(db_conn, tid, summary_text, "compact_summary")
     chat_id = insert_inbound_message(db_conn, tid, "user during compact", source="user")
@@ -933,7 +933,7 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
     """Hosted mode changes only the empty-batch branch. When the first SELECT
     finds work, dispatch is byte-for-byte the process path — the turn runs, and
     `turn_idle` is NOT set (the host must re-invoke, not end the task)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     insert_inbound_message(db_conn, tid, "hello", kind="chat", source="user")
 
     cmd = await claim_node(
@@ -1803,7 +1803,7 @@ async def test_claim_terminate_before_restart_completed_still_exits(
     override the stronger END back to wake' — the marker arm once unconditionally set
     next_goto=BEFORE_LLM; this ordering would consume the terminate but the agent wakes up alive
     (ordering-dependent bug)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
 
@@ -2757,7 +2757,7 @@ async def test_claim_idles_on_a_freshly_established_window(
     just-started agent arrived here with a non-empty window and went straight to
     the LLM, spending a turn on an empty conversation.
     """
-    tid = create_agent(db_conn)  # no inbound inserted
+    tid = spawn_agent()  # no inbound inserted
 
     waited = False
 
@@ -3170,7 +3170,7 @@ async def test_claim_compact_summary_returns_before_llm_with_halted_false(
 
     Lock down mutant_168 (goto=None), mutant_170 (goto kw deleted), mutant_175-177
     (halted False → True / case change)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "summary text", "compact_summary")
 
     cmd = await claim_node(

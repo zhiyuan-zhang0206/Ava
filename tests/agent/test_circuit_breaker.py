@@ -411,7 +411,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     inbound_ids: dict[str, int] = {}
     for kind in (first_kind, second_kind):
         content = "real user work" if kind == "chat" else "Heartbeat."
