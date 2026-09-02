@@ -33,5 +33,12 @@ v1 support reject the source before delivery. Never retry with user/system/agent
 as a fallback. Existing non-opted-in lifecycle CLI behavior remains unchanged
 for the staged upgrade; its legacy server default is still a known attribution
 gap, not a claim that an undeclared caller is human. MCP source defaults and
-wrapper activation also remain pending the generation-bound write gate. No new
+automatic wrapper activation also remain pending the generation-bound write gate. No new
 authorization scope, token store, or idempotency namespace is defined here.
+
+The Codex and Claude launch wrappers accept `--caller-instance run-42` as an
+explicit opt-in, placing a shell-quoted JSON profile only on the external child.
+Omitting the flag leaves existing launch commands unchanged. Validate the
+instance before touching files or creating sessions. Existing live canonical
+Codex generations are adopted as-is; this option cannot retrofit a running
+process environment. Do not use it before target runtime protocol support.

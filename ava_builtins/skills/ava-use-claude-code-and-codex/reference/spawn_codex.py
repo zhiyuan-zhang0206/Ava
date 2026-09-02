@@ -154,12 +154,19 @@ def _launch_supervisor(
     )
 
 
-def _codex_command(owner: coding_session_owner.CodingSessionOwner, workspace: Path) -> str:
+def _codex_command(
+    owner: coding_session_owner.CodingSessionOwner,
+    workspace: Path,
+    caller_instance: str | None = None,
+) -> str:
+    from shared.external_caller import launch_caller_assignment
+
     if owner.state_dir is None:
         raise RuntimeError("launching owner has no isolated state directory")
     return (
         f"cd {shlex.quote(workspace.as_posix())} && "
         f"CODEX_HOME={shlex.quote(str(owner.state_dir))} "
+        f"{launch_caller_assignment('codex', caller_instance)}"
         "exec codex --dangerously-bypass-approvals-and-sandbox"
     )
 
@@ -258,7 +265,12 @@ def _launch(
     tasks_file: Path,
     work_file: Path,
     ttl_seconds: float,
+    caller_instance: str | None = None,
 ) -> int:
+    from shared.external_caller import launch_caller_assignment
+
+    # Validate before creating files, owner records, or sessions.
+    launch_caller_assignment("codex", caller_instance)
     _init_file(tasks_file, "")
     _init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
     key = coding_session_owner.canonical_key(workspace, tool="codex")
@@ -294,7 +306,7 @@ def _launch(
         )
         sid = ava.shell.sessions.new(name=expected_suffix, ttl=ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
-        ava.shell.sessions.send(sid, _codex_command(owner, workspace))
+        ava.shell.sessions.send(sid, _codex_command(owner, workspace, caller_instance))
         _wait_for_ready(sid)
         ava.shell.sessions.send(sid, _bootstrap_message(workspace, tasks_file, work_file))
         active = coding_session_owner.publish_active(
@@ -328,6 +340,11 @@ def main() -> int:
         description="Launch or adopt the canonical supervised Codex workspace generation."
     )
     parser.add_argument("workspace", help="Canonical workspace directory for Codex.")
+    parser.add_argument(
+        "--caller-instance",
+        default=None,
+        help="opt in to v1 external provenance (bounded instance ID); requires target protocol support",
+    )
     parser.add_argument(
         "--tasks-file",
         default="tasks.md",
@@ -366,6 +383,7 @@ def main() -> int:
         _resolve_file(workspace, args.tasks_file),
         _resolve_file(workspace, args.work_file),
         args.ttl_seconds,
+        args.caller_instance,
     )
 
 

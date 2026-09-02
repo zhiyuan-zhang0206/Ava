@@ -7,6 +7,7 @@ impersonate the human, system, or an Ava agent whose environment was inherited.
 from __future__ import annotations
 
 import os
+import shlex
 
 from shared.caller_identity import CallerIdentity
 from shared.envelope import validate_source
@@ -40,3 +41,11 @@ def explicit_caller_source(source: str | None = None) -> str | None:
     if source is not None:
         validate_source(source)
     return source
+
+
+def launch_caller_assignment(tool: str, instance: str | None) -> str:
+    """Optional shell-safe launch assignment; no opt-in means no activation."""
+    if instance is None:
+        return ""
+    caller = CallerIdentity(kind="external_agent", subject=tool, instance=instance)
+    return f"AVA_CALLER_IDENTITY={shlex.quote(caller.model_dump_json(exclude_none=True))} "

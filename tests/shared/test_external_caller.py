@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from shared.external_caller import explicit_caller_source, external_caller
+from shared.external_caller import explicit_caller_source, external_caller, launch_caller_assignment
 
 
 def test_absence_stays_absent_not_human(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,3 +69,17 @@ def test_actual_hosted_turn_context_remains_authoritative(monkeypatch: pytest.Mo
     monkeypatch.setattr(_boot, "current_turn_agent_id", lambda: 405)
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     assert _boot.require_actor() == "agent:405"
+
+
+@pytest.mark.parametrize("tool", ["codex", "claude_code"])
+def test_wrapper_assignment_is_opt_in_and_shell_safe(tool: str) -> None:
+    import shlex
+
+    assert launch_caller_assignment(tool, None) == ""
+    assignment = shlex.split(launch_caller_assignment(tool, "run-42"))
+    assert len(assignment) == 1
+    name, value = assignment[0].split("=", 1)
+    assert name == "AVA_CALLER_IDENTITY"
+    assert json.loads(value) == {"kind": "external_agent", "subject": tool, "instance": "run-42"}
+    with pytest.raises(ValueError):
+        launch_caller_assignment(tool, "run; rm -rf /")
