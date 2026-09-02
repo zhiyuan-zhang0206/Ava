@@ -1,5 +1,7 @@
 ---
-summary: Prepared unit inventory binds retained service discovery and residual session/job facts without granting maintenance permission.
+type: doc
+title: Prepared unit inventory
+description: Prepared unit inventory binds retained service discovery and residual session/job facts without granting maintenance permission.
 read_when: Connecting verified release preparation to managed-writer observation.
 ---
 
