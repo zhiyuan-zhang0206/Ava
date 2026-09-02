@@ -193,6 +193,14 @@ print(json.dumps(sorted(set(images))))
 
 
 @dataclass(frozen=True)
+class FrontendInput:
+    """A prebuilt, privately copied standalone bundle and its trusted inventory."""
+
+    root: Path
+    digest: str
+
+
+@dataclass(frozen=True)
 class PrepareInputs:
     """Trusted build receipt; all paths are local, verified inputs."""
 
@@ -205,6 +213,7 @@ class PrepareInputs:
     application_wheel: str
     schema_digest: str
     uv: Path
+    frontend: FrontendInput | None = None
 
 
 def _optional_stdlib_receipt(source: Path, root: Path, interpreter: Path) -> None:
@@ -244,6 +253,25 @@ def _retain_startup_wheel(wheels: Path, root: Path) -> None:
         raise ReleaseRejectedError("setuptools evidence changed during private copy")
 
 
+def _frontend_input_inventory(frontend: FrontendInput | None) -> dict[str, str] | None:
+    if frontend is None:
+        return None
+    files = tree_inventory(frontend.root)
+    if inventory_digest(files) != frontend.digest:
+        raise ReleaseRejectedError("frontend input hash mismatch")
+    return files
+
+
+def _copy_frontend(
+    frontend: FrontendInput | None, root: Path, expected: dict[str, str] | None
+) -> None:
+    if frontend is None:
+        return
+    shutil.copytree(frontend.root, root / "frontend", symlinks=False)
+    if tree_inventory(root / "frontend") != expected:
+        raise ReleaseRejectedError("retained frontend differs from trusted input inventory")
+
+
 def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     """Create one final inactive generation or fail without touching serving state.
 
@@ -266,6 +294,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
         raise ReleaseRejectedError("Python input hash mismatch")
     if file_sha256(inputs.requirements) != inputs.requirements_digest:
         raise ReleaseRejectedError("requirements hash mismatch")
+    frontend_files = _frontend_input_inventory(inputs.frontend)
     requirements = inputs.requirements.read_text(encoding="utf-8")
     if (
         "://" in requirements
@@ -291,10 +320,12 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
             "schema": inputs.schema_digest,
             "application": inputs.application_wheel,
             "platform": platform.platform(),
+            "frontend": "absent" if inputs.frontend is None else inputs.frontend.digest,
         }
     )
     root = store / identity
     root.mkdir(mode=0o700)  # Never reuse a partial or previously sealed generation.
+    _copy_frontend(inputs.frontend, root, frontend_files)
     _retain_startup_wheel(wheels, root)
     _copy_verified_python(source, root / "python", python_files)
     python = root / "python/bin/python3"

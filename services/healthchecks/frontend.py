@@ -78,6 +78,11 @@ def _restart() -> bool:
     """kill old session + start a new one running build + start (cwd = repo/ui/web/)."""
     project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
     frontend_dir = project_root / "ui" / "web"
+    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_frontend_dir, runtime_venv
+
+    if WHEEL_RUNTIME:
+        project_root = runtime_venv().parent
+        frontend_dir = runtime_frontend_dir() / "server"
     if not frontend_dir.is_dir():
         _log.error("[frontend healthcheck] %s does not exist", frontend_dir)
         return False

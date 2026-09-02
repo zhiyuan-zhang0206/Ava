@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { frontendInputs, prepareFrontend, verifyFrontend } from "./prepare_frontend_release.mjs";
 
@@ -11,7 +11,8 @@ const checkout = fs.realpathSync(process.env.GITHUB_WORKSPACE);
 const temporary = fs.realpathSync(process.env.RUNNER_TEMP);
 assert.equal(process.env.GITHUB_ACTIONS, "true", "this proof is CI-only");
 const frontend = path.join(checkout, "ui", "web");
-const target = path.join(temporary, "frontend-image");
+const target = process.argv[2] ?? path.join(temporary, "frontend-image");
+assert(path.isAbsolute(target) && target.startsWith(`${temporary}${path.sep}`));
 const node = fs.realpathSync(process.execPath);
 // Negative prepare gates use a tiny input, not a fake HTTP acceptance server.
 const fixture = path.join(temporary, "frontend-negative-input");
@@ -29,7 +30,9 @@ assert(!fs.existsSync(rejected), "changed input wrote a generation");
 fs.writeFileSync(path.join(fixture, ".next", "standalone", ".env.production"), "SECRET=fixture-only\n");
 assert.throws(() => frontendInputs(fixture, node), /dotenv/);
 const expected = frontendInputs(frontend, node);
-const receipt = prepareFrontend(frontend, node, target, expected);
+const receipt = process.argv[2]
+  ? JSON.parse(fs.readFileSync(path.join(target, "frontend-manifest.json")))
+  : prepareFrontend(frontend, node, target, expected);
 const hash = createHash("sha256").update(fs.readFileSync(path.join(target, "frontend-manifest.json"))).digest("hex");
 verifyFrontend(target, hash);
 const retired = `${checkout}-frontend-proof-retired`;
@@ -39,7 +42,19 @@ let log = "";
 try {
   process.chdir(temporary);
   fs.renameSync(checkout, retired);
-  child = spawn(path.join(target, "node"), [path.join(target, "server", "server.js")], {
+  let executable = path.join(target, "node");
+  let arguments_ = [path.join(target, "server", "server.js")];
+  if (process.argv[3]) {
+    const result = spawnSync(process.argv[3], ["-I", "-B", "-c", "from shared.cluster import frontend_service_cmd; print(frontend_service_cmd(43871))"], {
+      cwd: target, encoding: "utf8",
+      env: { PATH: "/usr/bin:/bin", HOME: temporary, AVA_HOME: process.argv[4], AVA_CONFIG_FETCH: "skip", AVA_TIMEZONE: "UTC", AVA_DB_URL: "postgresql://unused@127.0.0.1:1/unused", AVA_REDIS_URL: "redis://127.0.0.1:1/0" },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert(result.stdout.includes(path.join(target, "node")) && !result.stdout.includes("npm"));
+    executable = "/bin/sh";
+    arguments_ = ["-c", result.stdout.trim()];
+  }
+  child = spawn(executable, arguments_, {
     cwd: target,
     env: { PATH: "/usr/bin:/bin", HOME: temporary, NODE_ENV: "production", PORT: "43871", HOSTNAME: "127.0.0.1", NEXT_TELEMETRY_DISABLED: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -76,6 +91,7 @@ try {
   fs.writeFileSync(path.join(temporary, "frontend-proof.json"), JSON.stringify({
     sourceAbsentHttp: true, staticResources: resources.length, publicAsset: publicFile ?? null,
     changedInputRejectedBeforeWrite: true, dotenvRejected: true,
+    actualWheelFrontendCommand: Boolean(process.argv[3]),
     servingImageSurvivesFailedPrepare: true, manifestHash: hash,
     nodeVersion: receipt.nodeVersion, platform: receipt.platform, architecture: receipt.arch,
   }) + "\n", { flag: "wx", mode: 0o600 });
