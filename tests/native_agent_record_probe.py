@@ -115,7 +115,8 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                 f"Path({str(received)!r}).write_text(str(os.getpid())));"
                 "wait_for_launch_record(124);"
                 "publish_admitted_session(RuntimeIncarnation(124,UUID(int=3),UUID(int=4)));"
-                f"Path({str(ready)!r}).write_text(str(os.getpid()));time.sleep(30)"
+                f"Path({str(ready)!r}).write_text(str(os.getpid()));"
+                "[time.sleep(0.05) for _ in range(600)]"
             )
             try:
                 self.assertTrue(
