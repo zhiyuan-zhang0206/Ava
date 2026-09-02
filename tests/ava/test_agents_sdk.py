@@ -877,8 +877,9 @@ class TestListAgents:
         r = rows[0]
         assert r.agent_id == a_id
         assert r.status == ava.agents.AgentStatus.IDLING
-        # Live children fold to their nearest living ancestor when a parent terminates.
-        assert r.spawner == "user"
+        # Lifecycle status transitions preserve spawn lineage (immutable spawner):
+        # terminating the parent does not rewrite the child's spawn record.
+        assert r.spawner == f"agent:{ava.self.AGENT_ID}"
         assert r.label is None  # no label set on this test agent
         assert r.pid is None
         assert r.spawned_at is not None
