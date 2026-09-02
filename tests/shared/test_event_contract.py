@@ -127,8 +127,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # poisoned-install guard, Task #2285) bring it to 133; exec_child_boot
     # and compaction_completed (Task #5643) bring the current total to 135;
     # remote PITR inventory and scheduled recovery-proof failures raise it to
-    # 137.
-    assert len(_TELEMETRY_KINDS) == 137
+    # 137; restart_handoff_host_unhealthy (Task #2338's hosted restart
+    # handoff failure marker) raises it to 138.
+    assert len(_TELEMETRY_KINDS) == 138
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
