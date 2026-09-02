@@ -282,6 +282,7 @@ def _launch_agent_process(
     birth_config: dict[str, object] | None = None,
     confirm: bool = True,
     restart_attempt: tuple[int, int, float] | None = None,
+    resurrect_attempt: tuple[int, int, float] | None = None,
 ) -> str:
     """Spawn a new detached agent process via the native supervisor.
     Raises RuntimeError if the spawn itself fails; does **not** clean up DB on
@@ -319,10 +320,13 @@ def _launch_agent_process(
     """
     supervisor = native_proc()
     _require_released_agent_session(agent_id)
-    if restart_attempt is None:
+    if restart_attempt is not None and resurrect_attempt is not None:
+        raise ValueError("one launch cannot belong to two lifecycle commands")
+    bound_attempt = restart_attempt if restart_attempt is not None else resurrect_attempt
+    if bound_attempt is None:
         agent_session = session_name(f"boot-{agent_id}-{uuid4().hex}")
     else:
-        command_id, attempt_number, remaining_budget = restart_attempt
+        command_id, attempt_number, remaining_budget = bound_attempt
         if command_id <= 0 or attempt_number <= 0 or remaining_budget <= 0 or confirm:
             raise ValueError("invalid command-bound asynchronous restart attempt")
         # Parent publication can only touch this exact attempt, never the
@@ -357,6 +361,9 @@ def _launch_agent_process(
     if restart_attempt is not None:
         argv[-1] = str(min(BOOT_BUDGET_SEC, restart_attempt[2]))
         argv.extend(["--restart-command-id", str(restart_attempt[0])])
+    if resurrect_attempt is not None:
+        argv[-1] = str(min(BOOT_BUDGET_SEC, resurrect_attempt[2]))
+        argv.extend(["--resurrect-command-id", str(resurrect_attempt[0])])
 
     env = agent_spawn_env_dict()
     env["PYTHONMALLOC"] = "malloc"

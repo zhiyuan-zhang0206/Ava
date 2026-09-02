@@ -29,7 +29,7 @@ from shared.runtime_incarnation import bind_process_incarnation, new_process_inc
 
 
 def claim_agent_row_or_die_on_stale_schema(
-    agent_id: int, *, restart_command_id: int | None = None
+    agent_id: int, *, restart_command_id: int | None = None, resurrect_command_id: int | None = None
 ) -> None:
     """Schema-gate, then claim this process's row in one early boot step.
 
@@ -48,7 +48,9 @@ def claim_agent_row_or_die_on_stale_schema(
         _mark_preclaim_terminated(agent_id)
         raise
     _boot_timing.mark("schema_check")
-    claim_agent_row(agent_id, restart_command_id=restart_command_id)
+    claim_agent_row(
+        agent_id, restart_command_id=restart_command_id, resurrect_command_id=resurrect_command_id
+    )
 
 
 def _mark_preclaim_terminated(agent_id: int) -> None:
@@ -78,7 +80,9 @@ def _mark_preclaim_terminated(agent_id: int) -> None:
             publish_page_closed_sync(agent_id, page_name)
 
 
-def claim_agent_row(agent_id: int, *, restart_command_id: int | None = None) -> None:
+def claim_agent_row(
+    agent_id: int, *, restart_command_id: int | None = None, resurrect_command_id: int | None = None
+) -> None:
     """Atomically claim an unowned row as running and grant its first lease.
 
     ``status='idling' AND pid IS NULL`` is the single-winner boundary. A
@@ -118,6 +122,9 @@ def claim_agent_row(agent_id: int, *, restart_command_id: int | None = None) -> 
         from shared.deploy_timing import AGENT_LEASE_TTL_S
 
         require_restart_admission(conn, agent_id, restart_command_id)
+        from shared.resurrection_launch import require_admission
+
+        require_admission(conn, agent_id, resurrect_command_id)
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = %s, started_at = now(), "
             "lease_expires_at = now() + make_interval(secs => %s), "

@@ -5,9 +5,9 @@ both are reached through `ops/agents.py`. Two wake paths here, one shape: a CAS
 on `agents_meta.status` into unclaimed 'idling' (clearing pid / started_at), a
 lifecycle inbound, then a relaunch attached to the same `agent_id` —
 LangGraph's checkpointer restores the message history, so the process resumes
-rather than starts over. Resurrection creates the detached session while its
-machine and agent row locks are held; the child cannot claim the row or process
-the inbound until that transaction commits. `resurrect_agent` comes from
+rather than starts over. Resurrection commits allocation and OS authorization
+before starting a detached session outside database locks. Early child admission
+revalidates its exact allocation and deadline. `resurrect_agent` comes from
 'terminated', `respawn_agent` from 'restarting'; the no-inbound wake path
 (`revive_agent` from a dead pid) lives in `ops/agent_revive.py` (Task #1999
 split, re-exported here). The *mechanics* of launching the child live in
@@ -84,6 +84,7 @@ from shared.lifecycle_termination_observe import observe_applied_termination
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
 from shared.machine import machine_name
+from shared.resurrection_launch import authorize_launch, prepare_launch
 
 class ResurrectTriggerStaleError(ResurrectError):
     """An auto-resurrect trigger no longer qualifies for the current death.
@@ -112,6 +113,7 @@ class _PreparedResurrect:
     birth_config: dict[str, object] | None
     event_target: int | None
     attempt_session: str | None = None
+    command_id: int | None = None
 
 class _ResurrectSessionStartError(RuntimeError):
     """Detached session creation failed before the resurrect commit."""
@@ -273,10 +275,14 @@ def _prepare_resurrect_attempt(
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
     auto_claim: AutoResurrectClaim | None,
 ) -> _PreparedResurrect:
+<<<<<<< HEAD
     """Transition, persist lifecycle rows, and create the session under one row lock."""
     from shared.envelope import reject_unnegotiated_caller
 
     reject_unnegotiated_caller(resurrected_by)
+=======
+    """Commit the allocation and its launch identity; never wait for OS work here."""
+>>>>>>> 7f4039be5 (fix(lifecycle): commit resurrection launch budget before OS effects)
     with write_transaction() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
         cur.execute("SELECT status FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
@@ -314,9 +320,10 @@ def _prepare_resurrect_attempt(
         )
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'resurrect', %s)",
+            "VALUES (%s, '', 'resurrect', %s) RETURNING id",
             (agent_id, resurrected_by),
         )
+        command_id = fetch_one(cur, "resurrect: persist launch identity")[0]
         if prompt is not None:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source) "
@@ -344,15 +351,7 @@ def _prepare_resurrect_attempt(
                 birth_config=birth_config,
                 event_target=_resurrect_event_target(resurrected_by),
             )
-        try:
-            attempt_session = agent_launch._launch_agent_process(
-                agent_id,
-                config_overlay=config_overlay,
-                birth_config=birth_config,
-                confirm=False,
-            )
-        except RuntimeError as exc:
-            raise _ResurrectSessionStartError(str(exc)) from exc
+        prepare_launch(conn, agent_id, command_id, allocation_epoch, trigger_inbound_id)
         conn.commit()
         publish_agent_updated_sync(conn, agent_id)
     return _PreparedResurrect(
@@ -360,11 +359,13 @@ def _prepare_resurrect_attempt(
         config_overlay=config_overlay,
         birth_config=birth_config,
         event_target=_resurrect_event_target(resurrected_by),
-        attempt_session=attempt_session,
+        command_id=command_id,
     )
 
 def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> str | None:
-    """Create another session only while the same active allocation still owns the row."""
+    """Commit one bounded authorization before creating its exact OS attempt."""
+    if prepared.command_id is None:
+        raise ResurrectError("resurrection allocation lacks a durable launch identity")
     with write_transaction() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
         cur.execute(
@@ -379,12 +380,18 @@ def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> str
             or row[2] is not None
         ):
             return None
-        return agent_launch._launch_agent_process(
-            agent_id,
-            config_overlay=prepared.config_overlay,
-            birth_config=prepared.birth_config,
-            confirm=False,
+        attempt_number, remaining = authorize_launch(
+            conn, agent_id, prepared.command_id, agent_launch._LAUNCH_MAX_RETRIES + 1
         )
+    # A failure or crash here consumes the authorization. Admission independently
+    # refuses a delayed attempt after the allocation changes or deadline passes.
+    return agent_launch._launch_agent_process(
+        agent_id,
+        config_overlay=prepared.config_overlay,
+        birth_config=prepared.birth_config,
+        confirm=False,
+        resurrect_attempt=(prepared.command_id, attempt_number, remaining),
+    )
 
 def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -> None:
     """Terminate only the still-unclaimed allocation owned by this resurrect."""
@@ -422,9 +429,10 @@ def _confirm_resurrect_with_retries(
     while True:
         try:
             if attempt_session is None:
-                agent_launch._wait_for_agent_claim(agent_id)
-            else:
-                agent_launch._wait_for_agent_claim(agent_id, attempt_session)
+                attempt_session = _retry_resurrect_session(agent_id, prepared)
+                if attempt_session is None:
+                    return False
+            agent_launch._wait_for_agent_claim(agent_id, attempt_session)
             return True
         except RuntimeError as exc:
             if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
@@ -447,6 +455,7 @@ def _confirm_resurrect_with_retries(
                 if attempt_session is None:
                     return False
             except RuntimeError:
+                attempt_session = None
                 if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
                     _mark_resurrect_launch_failed(agent_id, prepared)
                     raise
@@ -474,10 +483,10 @@ def resurrect_agent(
 
     `prompt` is optional. When given, INSERT one 'chat' inbound in **the same
     transaction** as the lifecycle 'resurrect' inbound (kind='chat',
-    content=prompt, source=resurrected_by). The detached session is created
-    before commit while the machine and agent locks are held, but its child
-    blocks on the agent row and cannot claim or process either inbound until
-    commit. When the agent wakes and SELECTs the batch, both rows are visible, with
+    content=prompt, source=resurrected_by). Allocation and a bounded launch
+    authorization commit before the detached session is created outside locks.
+    Early child admission validates that exact allocation and original deadline.
+    When the agent wakes and SELECTs the batch, both rows are visible, with
     ordering guaranteed by inbound_messages.id (BIGSERIAL monotonic) so
     lifecycle is before chat. When no prompt is given (the UI resurrect
     event), only the lifecycle inbound is written.
@@ -499,7 +508,7 @@ def resurrect_agent(
             an out-of-whitelist value kills the resurrected process on its
             first claim (envelope wrap ValueError).
         prompt: optional follow-up message — when given, delivered as a 'chat'
-            inbound committed in the same transaction as the lifecycle
+    inbound committed in the same transaction as the lifecycle
             'resurrect' inbound, so the agent knows why it was resurrected and
             what to do. None (the UI event path) delivers only the marker.
         trigger_inbound_id: optional pending-work auto-resurrect guard. When
