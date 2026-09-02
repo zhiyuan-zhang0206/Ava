@@ -2,7 +2,7 @@ name: Reparent incident evidence
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['tests/shared/process_evidence.py', 'tests/shared/test_posixproc.py', '.github/workflows/reparent-evidence.yml']
+    paths: ['tests/shared/process_evidence.py', 'tests/shared/test_posixproc.py', 'tests/shared/*subreaper*', '.github/workflows/reparent-evidence.yml']
 permissions:
   contents: read
 jobs:
@@ -27,6 +27,8 @@ jobs:
         run: |
           mkdir -p proof
           timeout 180 uv run pytest tests/shared/test_posixproc.py -k 'new_session_reparents_to_init_no_zombie or kill_session_group_kill_reaps_late_spawned_child' -q --junitxml=proof/reparent.xml
+      - name: Controlled ancestor adoption and caller exit
+        run: timeout 90 uv run pytest tests/shared/test_subreaper_contract.py -q --junitxml=proof/subreaper.xml
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
