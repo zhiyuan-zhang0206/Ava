@@ -276,7 +276,8 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     (`AVA_DB_URL` / `AVA_REDIS_URL`) have their loopback host rewritten to this
     gateway's reachable address (`_serve_reachable_data_plane_hosts`) — required
     for cross-machine enroll, everything else survives verbatim. A field absent
-    from `.env` is served as its stringified boot-time value; only None is skipped
+    from `.env` is served as its stringified boot-time value, except the required
+    DB URL and runner credential, which must share this fresh snapshot. Only None is skipped
     (env can't express "no value"), so the recipient falls back to the field
     default. An empty string IS served: it is the env form of an explicit
     set-to-empty (e.g. AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT="" on a bench
