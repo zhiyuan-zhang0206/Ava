@@ -32,7 +32,7 @@ Three entry points, three session classes:
 
 - **PosixProcSessionBackend** — the native supervisor for services: double-fork reparent to init, `SessionRecord` + logs under `$AVA_HOME/run/sessions/` / `$AVA_HOME/logs/`. No PTY is allocated, so the per-box PTY ceiling (`kern.tty.ptmx_max`) does not bound service count.
 - **PtySessionBackend** — agent shells / watchers. Each mutating op is a `python -m shared.pty_sessions.cli` subprocess whose exit code maps to the interface shape; enumeration and bulk launch timestamps use one in-process record scan, with individual record reads as the I/O-failure fallback. Env rides a 0600 file, the launch command rides base64 (never argv), and the session's host submits it only once the login shell's prompt is ready. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the host. See [[shared/pty_sessions/pty_sessions.ava.okf.md|pty sessions]].
-- **WinprocSessionBackend** — Windows; kills stop at session boundaries (`winproc._spared_pids`).
+- **WinprocSessionBackend** — new Windows sessions use a private hidden console, explicit log handles and `control_mode=private-console-v1` in their record. `shared/windows_console_signal.py` runs once via an absolute loaded-package path under isolated Python; it verifies exact PID/birth, record provenance and console members before a console-scoped Ctrl-Break. It never changes the daemon's console. Legacy/unknown records refuse graceful delivery; a successful send is OS acceptance, not proof of exit. Force cleanup preserves other session boundaries (`winproc._spared_pids`). Actual admitted agent PID remains separate from a verified venv redirector's native control PID.
 
 ### Stopping a session
 
