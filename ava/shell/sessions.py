@@ -85,6 +85,38 @@ def _own_sessions() -> builtins.list[str]:
     return [s for s in _list_all_sessions() if s.startswith(prefix)]
 
 
+def _session_generation(session_id: int) -> str | None:
+    """Persisted generation of one live shell session, if the backend tracks it."""
+    try:
+        target = _resolve(session_id)
+    except ValueError:
+        return None
+    return get_shell_backend().session_generation(target)
+
+
+def _current_session_generation() -> str | None:
+    """Host flip generation used to classify desired session records."""
+    from shared.pty_sessions.allocation_freeze import current_generation
+
+    return current_generation()
+
+
+def _reap(session_id: int) -> bool:
+    """Reap one exact session without changing its desired-state record.
+
+    Desired-state reconcilers use this for a superseded generation, then retain
+    their own record as terminal history. Public ``kill()`` intentionally has
+    different semantics: a user cancellation deletes any watcher registry row
+    so it cannot be restored.
+    """
+    try:
+        target = _resolve(session_id)
+    except ValueError:
+        return False
+    ok, _mode = get_shell_backend().kill_session(target, graceful=False)
+    return ok
+
+
 def _resolve(session_id: int) -> str:
     # Resolve an int session id to its full session name. The id is unique
     # within the agent, so `…-shell-<id>` matches exactly one session whether

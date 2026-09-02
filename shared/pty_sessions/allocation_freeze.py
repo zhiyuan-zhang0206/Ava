@@ -2,13 +2,15 @@
 
 Every co-located Ava cluster consumes the same host PTY pool, so the marker and
 its lock live beside the host-level cluster registry rather than under one
-``$AVA_HOME``. Existing sessions are unaffected. The one protected transition
-is absent session -> new detached PTY host.
+``$AVA_HOME``. The allocation gate affects only absent session -> new detached
+PTY host; desired-state reconcilers reap existing exact sessions that belong to
+an earlier generation.
 
 The marker is an operator capability: only its exact random generation may
-resume allocation. Readers classify malformed state as ``invalid`` so the
-allocation path fails closed instead of guessing that a corrupt marker means
-unfrozen.
+resume allocation. Resuming leaves that UUID as the current session generation,
+so desired-state reconcilers can reject records from the preceding flip.
+Readers classify malformed state as ``invalid`` so the allocation path fails
+closed instead of guessing that a corrupt marker means unfrozen.
 """
 
 from __future__ import annotations
@@ -94,8 +96,9 @@ def _parse(raw_value: object) -> PtyAllocationFreeze:
     raw = cast("dict[str, object]", raw_value)
     if raw.get("schema_version") != SCHEMA_VERSION:
         _invalid(f"unknown schema_version {raw.get('schema_version')!r}")
-    if raw.get("state") != "frozen":
-        _invalid(f"unknown state {raw.get('state')!r}")
+    state = raw.get("state")
+    if state not in ("active", "frozen"):
+        _invalid(f"unknown state {state!r}")
     generation = raw.get("generation")
     holder = raw.get("holder")
     reason = raw.get("reason")
@@ -106,7 +109,7 @@ def _parse(raw_value: object) -> PtyAllocationFreeze:
     if not isinstance(reason, str) or not reason:
         _invalid("reason must be a non-empty string")
     return PtyAllocationFreeze(
-        status="frozen",
+        status="frozen" if state == "frozen" else "inactive",
         generation=generation,
         holder=holder,
         reason=reason,
@@ -132,6 +135,14 @@ def _read_unlocked(path: Path) -> PtyAllocationFreeze:
 def read() -> PtyAllocationFreeze:
     """Read one atomic marker snapshot without taking the allocation lock."""
     return _read_unlocked(state_path())
+
+
+def current_generation() -> str | None:
+    """The current or pending flip generation, failing closed when corrupt."""
+    snapshot = read()
+    if snapshot.status == "invalid":
+        raise InvalidPtyAllocationFreezeError(f"invalid marker {state_path()}: {snapshot.error}")
+    return snapshot.generation
 
 
 def _fsync_parent(path: Path) -> None:
@@ -209,7 +220,7 @@ def freeze(*, holder: str, reason: str) -> PtyAllocationFreeze:
 
 
 def resume(generation: str) -> bool:
-    """CAS-clear exactly ``generation``; never clear a replacement owner."""
+    """CAS-activate exactly ``generation``; never clear a replacement owner."""
     if not generation:
         raise ValueError("generation must be non-empty")
     path = state_path()
@@ -220,7 +231,15 @@ def resume(generation: str) -> bool:
             )
         if current.status != "frozen" or current.generation != generation:
             return False
-        path.unlink()
-        with contextlib.suppress(OSError):
-            _fsync_parent(path)
+        _write_atomic(
+            path,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "state": "active",
+                "generation": current.generation,
+                "holder": current.holder,
+                "reason": current.reason,
+                "created_at": current.created_at.isoformat() if current.created_at else None,
+            },
+        )
         return True

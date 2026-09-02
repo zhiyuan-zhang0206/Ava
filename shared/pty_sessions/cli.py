@@ -16,8 +16,7 @@ Ops (session ops take the session name first):
                             process (``host.py``), which allocates the pty
                             and runs ``bash -l -i`` with env loaded from the
                             0600 envfile (see ``write_env_file``).
-                            Idempotent: a live session of the same name is
-                            left untouched, exit 0.
+                            Idempotent only within its allocation generation.
 - ``send <name> <b64>``     write text (no Enter) — base64 single argument
                             so arbitrary text survives argv quoting.
 - ``send_keys <name> <key>...``    translate screen-vocabulary key names to
@@ -266,6 +265,14 @@ def session_started_at(name: str) -> float | None:
     return rec.started_at
 
 
+def session_generation(name: str) -> str | None:
+    """The live PTY session's persisted flip generation, if one exists."""
+    rec = SessionRecord.read(record_path(name))
+    if rec is None or not _record_alive(rec):
+        return None
+    return rec.generation
+
+
 # Last warning reason per retained record: a tick-scanning poller (the
 # page-server daemon scans every ~2s pass) would otherwise flood the log with
 # an identical warning every pass. Entries exist only while a record keeps
@@ -402,7 +409,13 @@ def _op_has(name: str) -> int:
     return 0 if has_session(name) else 1
 
 
-def _spawn_host(name: str, cwd: str, envfile: str, cmd_b64: str) -> int:
+def _spawn_host(
+    name: str,
+    cwd: str,
+    envfile: str,
+    generation: str | None,
+    cmd_b64: str,
+) -> int:
     """Launch the session's detached host via _reparent and wait for it to
     answer. Returns the CLI exit code.
 
@@ -428,6 +441,7 @@ def _spawn_host(name: str, cwd: str, envfile: str, cmd_b64: str) -> int:
         str(record_path(name)),
         str(socket_path(name)),
         str(transcript_path(name)),
+        generation or "",
     ]
     if cmd_b64:
         argv.append(cmd_b64)
@@ -521,7 +535,18 @@ def _op_new(name: str, rest: list[str]) -> int:
                 logger.warning(
                     "pty new {name}: reaped {count} orphan host(s)", name=name, count=reaped
                 )
+            generation = freeze.generation
             if has_session(name):
+                if (
+                    freeze.status != "frozen"
+                    and generation is not None
+                    and session_generation(name) != generation
+                ):
+                    sys.stderr.write(
+                        f"pty session {name} belongs to a prior generation; reap it before "
+                        "rebuilding desired state\n"
+                    )
+                    return 1
                 # Already exists = idempotent no-op, including while frozen. A
                 # freeze protects absent -> live allocation, never use of an
                 # existing session.
@@ -541,7 +566,7 @@ def _op_new(name: str, rest: list[str]) -> int:
             # Keep the host-wide lock until ready. Once a concurrent freeze
             # returns, every allocation before it has a visible live record and
             # every allocation after it observes the marker above.
-            return _spawn_host(name, cwd, envfile, cmd_b64)
+            return _spawn_host(name, cwd, envfile, generation, cmd_b64)
     except (LockTimeoutError, OSError) as exc:
         sys.stderr.write(
             f"pty allocation for {name} could not take the host allocation lock: {exc}\n"

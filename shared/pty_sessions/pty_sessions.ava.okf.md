@@ -86,7 +86,7 @@ subtree.
 - **create** — CLI `new`: under the host allocation lock, reap name-specific
   orphans, return success for an already-live same-name session, refuse an
   absent session when the marker is frozen or invalid, otherwise `_reparent`
-  → `host.py <name> <cwd> <envfile> [cmd_b64]`. The lock stays held until the
+  → `host.py <name> <cwd> <envfile> <generation> [cmd_b64]`. The lock stays held until the
   host answers ready, so a completed `ava pty freeze` is an exact boundary:
   every earlier allocation is visible and every later allocation is refused.
   A host that misses its ready deadline is terminated with its process tree
@@ -108,9 +108,12 @@ subtree.
   a TERM aimed at the shell's tree must not take the session down; ending a
   session is the kill op's job. SIGKILL ends host + session.
 - **operator freeze** — `ava pty freeze --holder HOLDER --reason REASON`
-  atomically creates one random generation without killing anything;
-  `ava pty status` reads it locally; `ava pty resume GENERATION` removes only
-  that exact generation. A stale token cannot clear a replacement freeze.
+  atomically creates one random generation. The allocation command itself
+  does not directly kill a PTY, but desired-state reconcilers treat the new
+  generation as the boundary immediately;
+  `ava pty status` reads it locally; `ava pty resume GENERATION` releases only
+  that exact allocation freeze and retains its UUID as the active session
+  generation. A stale token cannot activate a replacement freeze.
 
 ## Consumers
 
@@ -126,9 +129,11 @@ ScheduleManager, the page-server daemon, `ops.ops_cluster.capture_shell`, and
   [conventions/windows-setup.md](../../conventions/windows-setup.md)).
 - One pty per session counts against the host-wide `kern.tty.ptmx_max`
   ceiling (macOS default 511) — see `shared/platform.py`.
-- Freeze affects allocation only. Existing sessions and every non-creation
-  operation continue normally. A corrupt marker fails closed and must be
-  repaired by an operator; it is never silently replaced or cleared.
+- [[generation-boundary.ava.okf.md]] defines the desired-state implications of
+  a freeze and the fail-closed corrupt-marker repair contract.
+- Session records carry the generation under which their host was admitted.
+  A desired-state owner may rebuild a missing record only when its persisted
+  desired generation is current; superseded exact records are reaped instead.
 - A machine reboot ends every session (hosts are processes, not state);
   the watcher registry ([[shared/watcher_registry.ava.okf.md]]) is the
   rebuild net for watchers, and page servers self-heal via the heartbeat

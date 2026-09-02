@@ -178,6 +178,7 @@ class ScheduleManager:
         # Read liveness before status: on a clean exit the runner commits
         # status='completed' before its process exits (and the session dies), so a
         # session seen dead here is guaranteed to already carry its terminal status.
+        retrying = self._reap_retries.copy()
         live = self._live_ids()  # {id}
         status = self._load_enabled()  # {id: status}
         enabled = set(status)
@@ -193,7 +194,7 @@ class ScheduleManager:
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
         # reconcile retry rather than adopting the stale survivor forever.
-        retrying = live & self._reap_retries
+        retrying.intersection_update(live)
         for sid in retrying:
             if self._reap(sid):
                 live.remove(sid)
@@ -240,8 +241,11 @@ class ScheduleManager:
         self._close_orphan_runs()
 
     def _live_ids(self) -> set[int]:
+        from shared.pty_sessions.allocation_freeze import current_generation
+
         live: set[int] = set()
         backend = get_shell_backend()
+        generation = current_generation()
         names = backend.list_sessions(prefix=_SCHEDULE_PREFIX)
         home = ava_home()
         _log.debug(
@@ -254,7 +258,28 @@ class ScheduleManager:
         for name in names:
             tail = name.removeprefix(_SCHEDULE_PREFIX)
             if tail.isdigit():
-                live.add(int(tail))
+                schedule_id = int(tail)
+                if backend.session_generation(name) == generation:
+                    live.add(schedule_id)
+                    continue
+                # An enabled schedule is current desired state, but a matching
+                # name from the preceding flip is not its current exact
+                # session. Reap the old record and let this tick launch the
+                # desired runner under the active generation.
+                if schedule_id in self._reap_retries:
+                    live.add(schedule_id)
+                    continue
+                _log.warning(
+                    "schedule %s: reaping superseded generation session %s",
+                    tail,
+                    name,
+                )
+                if not self._reap(schedule_id):
+                    self._reap_retries.add(schedule_id)
+                    # Do not launch a second runner while the old exact session
+                    # is still live. The centralized reaper retries with
+                    # rate-limited failure accounting on the next tick.
+                    live.add(schedule_id)
         return live
 
     def _close_null_runs(self, schedule_id: int) -> None:

@@ -46,6 +46,10 @@ def test_resume_is_generation_scoped_and_never_clears_a_newer_owner() -> None:
     assert not allocation_freeze.resume("stale-generation")
     assert allocation_freeze.read() == first
     assert allocation_freeze.resume(first.generation)
+    active = allocation_freeze.read()
+    assert active.status == "inactive"
+    assert active.generation == first.generation
+    assert allocation_freeze.current_generation() == first.generation
 
     second = allocation_freeze.freeze(holder="second", reason="second cleanup")
     assert second.generation is not None and second.generation != first.generation
@@ -124,3 +128,46 @@ def test_frozen_new_reuses_live_name_but_refuses_missing_until_resume(
     resumed_env.write_text("A=1\n")
     assert pty_cli._op_new("ava-agent-1-shell-1-missing", [str(tmp_path), str(resumed_env)]) == 0
     assert spawned == ["ava-agent-1-shell-1-missing"]
+
+
+def test_active_generation_rejects_a_live_name_from_a_prior_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A reconcile cannot idempotently reuse an exact session from the prior flip."""
+    name = "ava-agent-1-shell-0-stale"
+    spawned: list[str] = []
+
+    def _reap_none(_name: str) -> int:
+        return 0
+
+    def _has_live(_name: str) -> bool:
+        return True
+
+    def _prior_generation(_name: str) -> str:
+        return "prior-generation"
+
+    def _record_spawn(
+        session_name: str,
+        _cwd: str,
+        _envfile: str,
+        _generation: str | None,
+        _cmd_b64: str,
+    ) -> int:
+        spawned.append(session_name)
+        return 0
+
+    monkeypatch.setattr(pty_cli, "_reap_orphaned_hosts", _reap_none)
+    monkeypatch.setattr(pty_cli, "has_session", _has_live)
+    monkeypatch.setattr(pty_cli, "session_generation", _prior_generation)
+    monkeypatch.setattr(pty_cli, "_spawn_host", _record_spawn)
+    frozen = allocation_freeze.freeze(holder="operator", reason="generation flip")
+    assert frozen.generation is not None
+    assert allocation_freeze.resume(frozen.generation)
+    envfile = tmp_path / "stale.env"
+    envfile.write_text("A=1\n")
+
+    assert pty_cli._op_new(name, [str(tmp_path), str(envfile)]) == 1
+
+    assert spawned == []
+    assert not envfile.exists()
+    assert "belongs to a prior generation" in capsys.readouterr().err

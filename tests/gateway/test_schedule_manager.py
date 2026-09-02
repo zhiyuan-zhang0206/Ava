@@ -27,12 +27,16 @@ class _FakeBackend:
         self.killed: list[str] = []
         self.kill_results: list[bool] = []
         self.launch_envs: list[dict[str, object]] = []
+        self.generations: dict[str, str | None] = {}
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         return [s for s in self.live if s.startswith(prefix)]
 
     def has_session(self, name: str) -> bool:
         return name in self.live
+
+    def session_generation(self, name: str) -> str | None:
+        return self.generations.get(name)
 
     def new_session(self, name: str, cmd: str, cwd: object, *, env: dict[str, object]) -> bool:
         return True
@@ -61,6 +65,8 @@ def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
 
 @pytest.fixture
 def fake_session(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBackend, list[int]]:
+    from shared.pty_sessions import allocation_freeze
+
     backend = _FakeBackend()
     launched: list[int] = []
 
@@ -77,6 +83,7 @@ def fake_session(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBackend, list[in
 
     monkeypatch.setattr(sm, "get_shell_backend", lambda: backend)
     monkeypatch.setattr(_FakeBackend, "new_session", _fake_new_session)
+    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: None)
     return backend, launched
 
 
@@ -193,20 +200,68 @@ def test_sync_stop_closes_orphan_rows_immediately(
     assert _run_row(db_conn, rid) == (False, "interrupted")
 
 
-def test_gateway_restart_rebuilds_missing_enabled_current_generation_session(
-    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+def test_launches_enabled_missing_session(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
-    """A current desired schedule rebuilds if a gateway restart finds no PTY.
+    """An enabled schedule remains desired after a current-generation restart."""
+    from shared.pty_sessions import allocation_freeze
 
-    Reconciliation deliberately derives this from the enabled schedule row,
-    not from a prior PTY record. Old-generation record cleanup must therefore
-    never suppress a declared current-generation schedule.
-    """
     _backend, launched = fake_session
+    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: "current-generation")
     sid = _insert(db_conn, "job-a")
 
     sm.ScheduleManager(pool)._reconcile()
 
+    assert launched == [sid]
+    assert _status(db_conn, sid) == "running"
+
+
+def test_live_superseded_generation_is_reaped_before_schedule_reconcile(
+    monkeypatch: pytest.MonkeyPatch,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+) -> None:
+    """A same-name schedule session from a flip cannot be adopted as current."""
+    from shared.pty_sessions import allocation_freeze
+
+    backend, _launched = fake_session
+    name = session_name("schedule-77")
+    backend.live.append(name)
+    backend.generations[name] = "previous-generation"
+    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: "current-generation")
+
+    assert sm.ScheduleManager(pool)._live_ids() == set()
+    assert backend.killed == [name]
+
+
+def test_superseded_generation_reap_retries_before_rebuilding_enabled_schedule(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+) -> None:
+    """A failed old-generation reap blocks replacement until the official retry wins."""
+    from shared.pty_sessions import allocation_freeze
+
+    backend, launched = fake_session
+    sid = _insert(db_conn, "generation-retry")
+    name = session_name(f"schedule-{sid}")
+    backend.live.append(name)
+    backend.generations[name] = "previous-generation"
+    backend.kill_results = [False, True]
+    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: "current-generation")
+    manager = sm.ScheduleManager(pool)
+
+    manager._reconcile()
+    assert backend.killed == [name]
+    assert launched == []
+    assert name in backend.live
+
+    manager._reconcile()
+    assert backend.killed == [name, name]
     assert launched == [sid]
     assert _status(db_conn, sid) == "running"
 
