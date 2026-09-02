@@ -424,8 +424,13 @@ def _descendants(proc: psutil.Process, *, spare: frozenset[int]) -> list[psutil.
 
 
 def _terminate_tree(
-    proc: psutil.Process, *, graceful: bool, timeout: float, spare: frozenset[int] = frozenset()
-) -> None:
+    proc: psutil.Process,
+    *,
+    session: str,
+    graceful: bool,
+    timeout: float,
+    spare: frozenset[int] = frozenset(),
+) -> str:
     """Terminate `proc` and its descendants (cmd -> uv -> python, …), except the
     subtrees rooted at a pid in `spare` (see `_spared_pids`).
 
@@ -436,15 +441,19 @@ def _terminate_tree(
     """
     children = _descendants(proc, spare=spare)
     if graceful:
+        graceful_signal(session)
         _gone, alive = psutil.wait_procs([proc, *children], timeout=timeout)
         if not alive:
-            return
+            return "graceful"
     # Hard kill: the session's own process last, so it cannot respawn one of the
     # children already taken down.
     for p in [*children, proc]:
         with contextlib.suppress(*_GONE):
             p.kill()
-    psutil.wait_procs([proc, *children], timeout=5)
+    _gone, alive = psutil.wait_procs([proc, *children], timeout=5)
+    if alive:
+        raise RuntimeError("native session descendants survived force cleanup")
+    return "forced"
 
 
 def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) -> tuple[bool, str]:
@@ -472,13 +481,18 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
     if proc is None:
         _record_path(name).unlink(missing_ok=True)
         return True, "noop"
+    mode = "graceful" if graceful else "forced"
     try:
-        if graceful:
-            graceful_signal(name)
-        _terminate_tree(proc, graceful=graceful, timeout=timeout, spare=_spared_pids(name, proc))
+        mode = _terminate_tree(
+            proc,
+            session=name,
+            graceful=graceful,
+            timeout=timeout,
+            spare=_spared_pids(name, proc),
+        )
     except Exception as exc:
         logger.warning("winproc kill {name} hit {exc}", name=name, exc=exc)
-    mode = "graceful" if graceful else "forced"
+        return False, mode
     if proc.is_running():
         logger.error(
             "winproc kill {name}: pid {pid} is still running after the kill — leaving its "
