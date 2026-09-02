@@ -29,7 +29,9 @@ async def test_hosted_restart_marker_does_not_claim_completion() -> None:
     )
     assert state.restart_requested
     assert isinstance(state.new_msgs[0], HumanMessage)
-    assert state.new_msgs[0].additional_kwargs["ava_note_tag"] == "lifecycle_restart"
+    assert (
+        state.new_msgs[0].model_dump()["additional_kwargs"]["ava_note_tag"] == "lifecycle_restart"
+    )
     content = state.new_msgs[0].model_dump()["content"]
     assert isinstance(content, str)
     assert "Restart was accepted" in content
