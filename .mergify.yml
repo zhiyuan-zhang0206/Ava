@@ -1,0 +1,5 @@
+# Mergify queue rules retired 2026-09-02 — Trunk Merge Queue is the single merge
+# system (P2 full switch). This file intentionally declares NO queue rules, so
+# Mergify is inert. Restoring the retired rules from git history re-enables
+# Mergify as the rollback path; the Mergify App stays installed through the
+# transition window (P3 removes it).

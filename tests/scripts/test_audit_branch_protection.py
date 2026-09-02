@@ -8,16 +8,46 @@ from types import ModuleType
 from typing import NoReturn
 
 import pytest
+import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "audit_branch_protection.py"
-_EXPECTED_CHECKS = frozenset(
+_ADMISSION_CHECKS = frozenset(
     {
         "backend (pytest + pyright)",
         "frontend (eslint + tsc + vitest)",
         "e2e (Playwright happy path)",
+        "qa-approved-gate",
     }
 )
+_EXPECTED_CHECKS = _ADMISSION_CHECKS  # legacy alias for the drift tests below
+
+_TRUNK_FIXTURE = """
+version: 0.1
+merge:
+  required_statuses:
+    - backend (pytest + pyright)
+    - backend serial (flaky)
+    - backend static (ruff + pyright + migration smoke)
+    - backend structure (pre-commit lint + codegen freshness)
+    - backend vendored pgvector smoke (Linux)
+    - classify change
+    - e2e (Playwright happy path)
+    - e2e env guard (serial)
+    - e2e hosted (agent-runner-as-server happy path)
+    - frontend (eslint + tsc + vitest)
+    - repo language (no raw CJK)
+    - qa-approved-gate
+"""
+
+_TRUNK_BAD_FIXTURE = """
+version: 0.1
+merge:
+  required_statuses:
+    - backend (pytest + pyright)
+    - backend shard (${{ matrix.group }}/12)
+    - qa-approved-gate
+"""
 
 _MERGIFY_FIXTURE = """
 queue_rules:
@@ -86,34 +116,44 @@ def _fake_gh(protection: dict[str, object], workflows: dict[str, object]):
     return fake
 
 
-def test_expected_checks_collects_success_and_skipped_conditions() -> None:
+def test_expected_checks_is_the_trunk_admission_gate() -> None:
     audit = _audit()
-    assert audit.expected_checks(_MERGIFY_FIXTURE) == frozenset(
-        {
-            "backend (pytest + pyright)",
-            "frontend (eslint + tsc + vitest)",
-        }
-    )
+    assert audit.expected_checks() == _ADMISSION_CHECKS
 
 
-def test_queue_and_merge_condition_mismatch_is_drift() -> None:
+def test_trunk_gate_findings_reject_matrix_template_names() -> None:
     audit = _audit()
-    mismatched = _MERGIFY_FIXTURE.replace(
-        "    merge_conditions:\n",
-        "    merge_conditions:\n      - check-success=e2e (Playwright happy path)\n",
-    )
-
-    assert audit.expected_checks(mismatched) == _EXPECTED_CHECKS
-    assert audit.declaration_drift(mismatched) == [
-        "merge_conditions has checks absent from queue_conditions: e2e (Playwright happy path)"
-    ]
+    findings = audit.trunk_gate_findings(_TRUNK_BAD_FIXTURE)
+    assert (
+        "trunk.yaml required_statuses contains a matrix template name: "
+        "backend shard (${{ matrix.group }}/12)"
+    ) in findings
 
 
-def test_real_mergify_declaration_has_the_three_required_checks() -> None:
+def test_trunk_gate_findings_accept_the_real_declaration() -> None:
+    audit = _audit()
+    text = (_REPO_ROOT / ".trunk" / "trunk.yaml").read_text()
+    assert audit.trunk_gate_findings(text) == []
+
+
+def test_real_trunk_yaml_declares_the_full_gate() -> None:
+    audit = _audit()
+    text = (_REPO_ROOT / ".trunk" / "trunk.yaml").read_text()
+    document = yaml.safe_load(text)  # type: ignore[name-defined]
+    statuses = document["merge"]["required_statuses"]
+    assert len(statuses) == 12
+    assert "qa-approved-gate" in statuses
+    assert "backend (pytest + pyright)" in statuses
+    assert "frontend (eslint + tsc + vitest)" in statuses
+    assert "e2e (Playwright happy path)" in statuses
+    assert not any("${{" in name for name in statuses)
+
+
+def test_mergify_stub_is_inert() -> None:
     audit = _audit()
     text = (_REPO_ROOT / ".mergify.yml").read_text()
-    assert audit.expected_checks(text) == _EXPECTED_CHECKS
-    assert audit.declaration_drift(text) == []
+    document = yaml.safe_load(text)
+    assert document is None or "queue_rules" not in document
 
 
 def test_drift_report_accepts_the_exact_live_contract() -> None:
@@ -201,13 +241,9 @@ def test_cli_reports_declaration_mismatch_as_drift_without_calling_github(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     audit = _audit()
-    mismatched = _MERGIFY_FIXTURE.replace(
-        "    merge_conditions:\n",
-        "    merge_conditions:\n      - check-success=e2e (Playwright happy path)\n",
-    )
-    mergify_file = tmp_path / ".mergify.yml"
-    mergify_file.write_text(mismatched)
-    monkeypatch.setattr(audit, "_MERGIFY_FILE", mergify_file)
+    trunk_file = tmp_path / "trunk.yaml"
+    trunk_file.write_text(_TRUNK_BAD_FIXTURE)
+    monkeypatch.setattr(audit, "_TRUNK_FILE", trunk_file)
 
     def unexpected_gh(_args: list[str]) -> NoReturn:
         raise AssertionError("declaration drift must not depend on the GitHub API")
