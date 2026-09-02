@@ -1,33 +1,33 @@
-# QA approval label gate: runs on all PRs, including drafts, so label changes flip this check.
-# Trunk test PRs are exempt by head-ref prefix; P0 is not branch-protection required until P2.
 name: QA Approved Gate
-
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
-
+  workflow_run:
+    workflows: [QA Review Signal]
+    types: [completed]
+  issue_comment:
+    types: [created, edited, deleted]
 permissions:
   contents: read
-
+  pull-requests: read
+  issues: read
+  statuses: write
+concurrency:
+  group: qa-evidence-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+  cancel-in-progress: true
 jobs:
-  qa-approved-gate:
+  evaluate-qa-evidence:
+    if: github.event.pull_request || github.event.issue.pull_request || github.event.workflow_run.pull_requests[0].number
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Check QA approval label
-        shell: bash
+      # Never execute a PR's evaluator with a write token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Publish target-head QA result
         env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          if [[ "$HEAD_REF" == trunk-merge/* || "$HEAD_REF" == trunk-temp/* ]]; then
-            echo "Trunk Merge Queue test PRs are exempt from the QA approval label gate."
-            exit 0
-          fi
-
-          if jq -e 'any(.pull_request.labels[]?; .name == "qa-approved")' "$GITHUB_EVENT_PATH" > /dev/null; then
-            echo "The PR has the qa-approved label."
-            exit 0
-          fi
-
-          echo "The PR needs the qa-approved label before it can merge."
-          exit 1
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+        run: python scripts/qa_gate.py "$PR_NUMBER"
