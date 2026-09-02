@@ -128,7 +128,7 @@ def _validate_script(script: str) -> None:
 
 def _update_blocking(
     pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any]
-) -> tuple[Any, ...]:
+) -> tuple[tuple[Any, ...], bool]:
     """Sync partial-update (syntax check + UPDATE + version snapshot) — via to_thread."""
     if "script" in fields:
         _validate_script(fields["script"])
@@ -139,6 +139,15 @@ def _update_blocking(
 
     try:
         with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            previous_enabled: bool | None = None
+            if "enabled" in fields:
+                cur.execute(
+                    "SELECT enabled FROM schedules WHERE id = %s FOR UPDATE", (schedule_id,)
+                )
+                previous = cur.fetchone()
+                if previous is None:
+                    raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
+                previous_enabled = previous[0]
             cur.execute(
                 f"UPDATE schedules SET {', '.join(set_parts)} "  # noqa: S608 — set_parts from the _UPDATABLE whitelist
                 f"WHERE id = %s RETURNING {_FULL_COLS}",
@@ -158,7 +167,7 @@ def _update_blocking(
         raise HTTPException(
             status_code=409, detail=f"schedule named {fields['name']!r} already exists"
         ) from exc
-    return row
+    return row, previous_enabled is not None and row[4] != previous_enabled
 
 
 def _list_blocking(pool: ConnectionPool[Any]) -> list[ScheduleSummary]:
@@ -219,15 +228,21 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
     """Partial-update a schedule — only the fields present in the body change. A
     script/command change is snapshotted into schedule_versions and, if the
     schedule is enabled, applied immediately (the session is relaunched on the new
-    script). 400 on a script syntax error, 404 if missing, 409 on a name clash."""
+    script). An enabled-flag value change also converges immediately, so disable
+    reaps the session and enable creates it; a same-value update leaves the
+    session intact. 400 on a script syntax error, 404 if missing, 409 on a name
+    clash."""
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(status_code=400, detail="no fields to update")
 
-    row = await asyncio.to_thread(_update_blocking, request.app.state.db_pool, schedule_id, fields)
+    row, enabled_changed = await asyncio.to_thread(
+        _update_blocking, request.app.state.db_pool, schedule_id, fields
+    )
     code_changed = "script" in fields or "command" in fields
-    # row[4] = enabled. Reload the running session onto the new script now.
-    if code_changed and row[4]:
+    # row[4] = enabled. Reload changed code for a running schedule, and
+    # converge only an enabled value change so a no-op PUT cannot restart it.
+    if (code_changed and row[4]) or enabled_changed:
         await request.app.state.schedule_manager.sync(schedule_id)
     return _view(row)
 

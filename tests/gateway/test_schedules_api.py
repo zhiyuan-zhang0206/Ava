@@ -101,6 +101,46 @@ class TestReadUpdateDelete:
         assert r.json()["script"] == "print(2)\n"
         assert _versions(db_conn, "e") == ["initial", "edit"]
 
+    def test_put_enabled_change_routes_through_immediate_session_sync(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The CLI's update --disable surface shares stop's immediate reap path."""
+        from gateway.schedule_manager import ScheduleManager
+
+        synced: list[int] = []
+
+        async def _record_sync(self: object, schedule_id: int) -> None:
+            synced.append(schedule_id)
+
+        monkeypatch.setattr(ScheduleManager, "sync", _record_sync)
+        with TestClient(app) as client:
+            sid = _create(client, name="e").json()["id"]
+            stopped = client.put(f"/api/schedules/{sid}", json={"enabled": False})
+
+        assert stopped.status_code == 200
+        assert stopped.json()["enabled"] is False
+        assert synced == [sid]
+
+    def test_put_same_enabled_value_does_not_sync(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A no-op --enable must not interrupt an already-live schedule."""
+        from gateway.schedule_manager import ScheduleManager
+
+        synced: list[int] = []
+
+        async def _record_sync(self: object, schedule_id: int) -> None:
+            synced.append(schedule_id)
+
+        monkeypatch.setattr(ScheduleManager, "sync", _record_sync)
+        with TestClient(app) as client:
+            sid = _create(client, name="e").json()["id"]
+            enabled = client.put(f"/api/schedules/{sid}", json={"enabled": True})
+
+        assert enabled.status_code == 200
+        assert enabled.json()["enabled"] is True
+        assert synced == []
+
     def test_put_no_fields_400(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
             sid = _create(client, name="e").json()["id"]
@@ -115,12 +155,23 @@ class TestReadUpdateDelete:
 
 
 class TestControl:
-    def test_start_stop_toggle_enabled(self, db_conn: psycopg.Connection) -> None:
+    def test_start_stop_toggle_enabled_and_sync_the_session(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from gateway.schedule_manager import ScheduleManager
+
+        synced: list[int] = []
+
+        async def _record_sync(self: object, schedule_id: int) -> None:
+            synced.append(schedule_id)
+
+        monkeypatch.setattr(ScheduleManager, "sync", _record_sync)
         with TestClient(app) as client:
             sid = _create(client, name="c", enabled=False).json()["id"]
             assert client.post(f"/api/schedules/{sid}/start").json()["enabled"] is True
             stopped = client.post(f"/api/schedules/{sid}/stop").json()
         assert stopped["enabled"] is False
+        assert synced == [sid, sid]
 
     def test_restart_disabled_409(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:

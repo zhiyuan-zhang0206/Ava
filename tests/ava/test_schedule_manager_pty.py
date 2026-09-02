@@ -2,7 +2,7 @@
 
 Real session hosts + real DB + real backend + the real `gateway.schedule_runner`
 entrypoint: `_launch` creates a PTY-supervisor session, `_live_ids` /
-`capture_blocking` see it, `_kill` tears it down, reconcile rebuilds after a
+`capture_blocking` see it, `_reap` tears it down, reconcile rebuilds after a
 crash, and the breaker trips after repeated crashes.
 
 The schedule commands are deliberately trivial (`sleep 30` for the live
@@ -184,7 +184,7 @@ def test_pty_launch_live_capture(
     if not (captured and "RUNNER_ALIVE" in captured):
         raise AssertionError("runner output never appeared; session logs:\n" + _dump_logs(home))
 
-    mgr._kill(sid)
+    assert mgr._reap(sid)
     _wait_session_gone(name)
 
 
@@ -213,7 +213,7 @@ def test_pty_crash_then_reconcile_rebuilds(
         assert backend.has_session(name)
     finally:
         _sm.time.monotonic = orig  # type: ignore[method-assign]
-    mgr._kill(sid)
+    assert mgr._reap(sid)
     _wait_session_gone(name)
 
 
