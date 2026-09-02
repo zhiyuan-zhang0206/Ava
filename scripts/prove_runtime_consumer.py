@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ops.agent_launch import _agent_interpreter
 from ops.spec import build_services
+from shared.migrations import required_migration_set
 from shared.platform_backend import get_backend
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
 from shared.session_env import forward_env_dict, venv_activation_prefix
@@ -31,6 +32,7 @@ def main() -> None:
         "interpreter canonicalized the entry alias; this is not a moving-prefix proof",
     )
     require(WHEEL_RUNTIME, "proof did not load the installed wheel")
+    require(bool(required_migration_set()), "installed read-only schema inventory is unavailable")
     require(runtime_venv().resolve() == prefix, "venv escaped current prefix")
     python = runtime_python()
     require(Path(_agent_interpreter()[0]) == python, "agent interpreter mismatch")

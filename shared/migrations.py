@@ -87,7 +87,8 @@ from shared.dotenv_boot import checkout_anchored_home
 from shared.log import logger
 from shared.machine import MachineNameMissing, machine_name
 from shared.platform import CREATE_NO_WINDOW
-from shared.runtime_migration import ReleaseMigrationContext
+from shared.runtime_interpreter import INSTALLED_RUNTIME
+from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 
 # Repo root = shared/.. = `<root>/`; migrations dir is under repo root.
 MIGRATIONS_DIR: Path = Path(__file__).resolve().parent.parent / "migrations"
@@ -328,6 +329,8 @@ def _tracked_migration_paths() -> set[Path] | None:
     entries.
     """
 
+    if INSTALLED_RUNTIME:
+        return installed_migration_paths(MIGRATIONS_DIR)
     root_result = _git_probe(["-C", str(MIGRATIONS_DIR), "rev-parse", "--show-toplevel"])
     if root_result.returncode != 0:
         return None

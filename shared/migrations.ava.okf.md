@@ -64,6 +64,12 @@ before any legacy conversion or migration. It does not obtain authority from an
 environment override. Ordinary checkout enumeration remains Git-bound. Legacy
 integer-history conversion also checks gateway authority before its first write.
 
+Installed wheel startup can compare schema versions without Git using the loaded
+distribution's hash-declared SQL members. The distribution must correspond to the
+loaded module, must not be editable, and changed or undeclared SQL is rejected.
+This RECORD check is package integrity for read-only comparison, not deployment
+authority: an ordinary unanchored wheel still cannot migrate the database.
+
 Rationale and the rejected alternatives:
 [2026-07-31-migrations-are-gateway-only](../decisions/2026-07-31-migrations-are-gateway-only.md).
 
