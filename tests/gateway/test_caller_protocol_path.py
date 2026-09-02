@@ -6,6 +6,8 @@ by a mocked lookup. Production admission still advertises protocol zero.
 """
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
@@ -167,3 +169,47 @@ async def test_gate_holds_owner_lock_until_transaction_ends(
         # immediately on an autocommit connection and admit stale ownership.
         with pytest.raises(RuntimeError, match="INSERT transaction"):
             require_caller_protocol(other, incarnation.agent_id, _SOURCE)
+
+
+async def test_lease_expiring_while_waiting_for_unchanged_row_lock_is_rejected(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    from shared.caller_protocol import CallerProtocolUnavailableError, require_caller_protocol
+
+    incarnation = await _admit(db_conn, aops_pool)
+    _after_proven_old_writer_barrier(db_conn, incarnation)
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() + interval '1 second' "
+        "WHERE id = %s",
+        (incarnation.agent_id,),
+    )
+    db_conn.commit()
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as waiter:
+
+        def gate() -> None:
+            with waiter.transaction():
+                require_caller_protocol(waiter, incarnation.agent_id, _SOURCE)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with db_conn.transaction():
+                db_conn.execute(
+                    "SELECT id FROM agents_meta WHERE id = %s FOR UPDATE", (incarnation.agent_id,)
+                )
+                future = executor.submit(gate)
+                for _ in range(200):
+                    blocked = db_conn.execute(
+                        "SELECT cardinality(pg_blocking_pids(%s)) > 0", (waiter.info.backend_pid,)
+                    ).fetchone()
+                    expired = db_conn.execute(
+                        "SELECT lease_expires_at <= clock_timestamp() FROM agents_meta WHERE id = %s",
+                        (incarnation.agent_id,),
+                    ).fetchone()
+                    if blocked == (True,) and expired == (True,):
+                        break
+                    time.sleep(0.01)
+                else:
+                    pytest.fail("gate did not block through lease expiry")
+            # The locker commits without changing the tuple: the gate must
+            # re-sample the clock, not rely on PostgreSQL update rechecks.
+            with pytest.raises(CallerProtocolUnavailableError):
+                future.result(timeout=5)
