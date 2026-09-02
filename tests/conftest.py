@@ -312,6 +312,18 @@ os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
             # declaration the drop deletes the pinned 60s and the D5 fallback reads the
             # field default (300s) — test_config bootstrap/panel tests assert equality.
             "AVA_EXEC_TIMEOUT_SECONDS=60.0",  # the pinned value below; constant, not env-read (write precedes the pin)
+            # Same force-branch reasoning: runner-mode is cluster-scoped, and a
+            # CI job export the test home's .env does not declare would be DROPPED
+            # by the authority pass at the first load_ava_env — the process-shaped
+            # lifecycle suites (backend shards, e2e shards) would silently run the
+            # code default (hosted since 2026-09) as a second hosted net. Declare
+            # it when the environment carries it (e2e/backend CI jobs export it);
+            # local runs without the var keep the code default.
+            *(
+                [f"AVA_RUNNER_MODE={os.environ['AVA_RUNNER_MODE']}"]
+                if os.environ.get("AVA_RUNNER_MODE")
+                else []
+            ),
             "",
         ]
     )
