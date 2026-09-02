@@ -819,7 +819,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     aredis_inbound_listener: RedisInboundListener,
 ):
     """terminate inbound → claim appends lifecycle marker (HumanMessage containing
-    'You are terminated by {source}' text + ava_msg_type='lifecycle' metadata)
+    'Termination was accepted from {source}' text + ava_msg_type='lifecycle' metadata)
     + goto END with exit_requested=True, so the per-turn runloop returns
     (instead of re-invoking) and the process exits naturally."""
     tid = running_agent()
@@ -841,7 +841,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     # passes str, narrow with string methods
     assert isinstance(lifecycle.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = lifecycle.content
-    assert "You are terminated by user" in content
+    assert "Termination was accepted from user" in content
     # marker content has timestamp prefix + [system] in single brackets (now_timestamp already has square brackets, no nesting)
     assert content.startswith("[")  # timestamp start: e.g. [2026-...
     assert "[system]" in content
@@ -1114,7 +1114,7 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
     assert any(
         isinstance(m, HumanMessage)
         and isinstance(m.content, str)  # pyright: ignore[reportUnknownMemberType]
-        and "You are terminated" in m.content
+        and "Termination was accepted" in m.content
         for m in msgs
     )
 
@@ -1138,7 +1138,7 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
         _config(tid),
     )
     content = cmd.update["messages"][-1].content  # type: ignore[index]
-    assert content.startswith("[system] You are terminated by user")  # pyright: ignore[reportUnknownMemberType]
+    assert content.startswith("[system] Termination was accepted from user")  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_terminate_self_renders_by_yourself(
@@ -1160,7 +1160,7 @@ async def test_claim_terminate_self_renders_by_yourself(
     assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
     lifecycle = msgs[0]
-    assert "You are terminated by yourself" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
+    assert "Termination was accepted from yourself" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_self_terminate_with_chat_cobatch_abandons_terminate(
@@ -1194,7 +1194,7 @@ async def test_claim_self_terminate_with_chat_cobatch_abandons_terminate(
     assert isinstance(msgs[0], HumanMessage)
     assert "peer message during suicide" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     # no terminate lifecycle marker — the death was abandoned
-    assert not any("You are terminated" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert not any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_self_terminate_with_older_chat_cobatch_abandons_terminate(
@@ -1221,7 +1221,7 @@ async def test_claim_self_terminate_with_older_chat_cobatch_abandons_terminate(
     assert cmd.goto == "before_llm"
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert any("queued before the suicide" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
-    assert not any("You are terminated" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert not any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_external_terminate_with_newer_chat_abandons_terminate(
@@ -1248,7 +1248,7 @@ async def test_claim_external_terminate_with_newer_chat_abandons_terminate(
     assert cmd.goto != END
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert any("message after the kill" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
-    assert not any("You are terminated" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert not any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_external_terminate_with_older_chat_still_dies(
@@ -1275,8 +1275,10 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
 
     assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("You are terminated by user" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
-    assert any("old message before the kill" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert any("Termination was accepted from user" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
+    ).fetchone() == ("pending", "old message before the kill")
 
 
 async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
@@ -1746,15 +1748,13 @@ async def test_claim_restart_system_update_after_self_update_wakes(
     assert cmd.update["halted"] is False  # type: ignore[index]
 
 
-async def test_claim_restart_idle_with_chat_cobatch_commits_halted_false(
+async def test_claim_restart_preserves_chat_for_successor(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """idle agent's same batch has both chat + restart (user message coinciding with restart) →
-    chat already committed into messages, committed halted must be False, otherwise after respawn
-    it would silently idle and this user message would never be answered."""
+    """Only the accepted lifecycle command dispatches; chat remains durable pending work."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user")
@@ -1767,9 +1767,12 @@ async def test_claim_restart_idle_with_chat_cobatch_commits_halted_false(
     )
 
     assert cmd.goto == END
-    assert cmd.update["halted"] is False  # type: ignore[index]
+    assert cmd.update["halted"] is True  # type: ignore[index]
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1 and "hello" in msgs[0].content  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert msgs == []
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
+    ).fetchone() == ("pending", "hello")
 
 
 async def test_claim_restart_before_terminate_preserves_serial_order(
@@ -1820,10 +1823,13 @@ async def test_claim_terminate_before_restart_completed_still_exits(
     )
 
     assert cmd.goto == END
-    # both markers are still committed as usual (terminate's exit + restart's completion leave traces)
+    # The accepted command does not consume an unrelated completion marker.
     contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
-    assert any("You are terminated by user" in c for c in contents)
-    assert any("You have been restarted by user" in c for c in contents)
+    assert any("Termination was accepted from user" in c for c in contents)
+    assert not any("You have been restarted" in c for c in contents)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'", (tid,)
+    ).fetchone() == ("pending",)
 
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
@@ -1855,8 +1861,11 @@ async def test_claim_cancel_batched_with_restart_idle_respawn_silent(
     assert cmd.goto == END
     # idle before restart (halted=True) + external → silent after respawn
     assert cmd.update["halted"] is True  # type: ignore[index]
-    # Cancelled event still emitted
-    assert any("cancelled" in str(c.args[0]).lower() for c in pub.emit.call_args_list)
+    # No phantom cancellation: the successor will consume the still-pending command.
+    assert not any("cancelled" in str(c.args[0]).lower() for c in pub.emit.call_args_list)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'", (tid,)
+    ).fetchone() == ("pending",)
     await _await_status(aops_pool, tid, "restarting")
 
 
@@ -1885,7 +1894,10 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
     assert cmd.goto == END
     assert cmd.update["halted"] is True  # type: ignore[index]
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1 and "You have been restarted by user" in msgs[0].content  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert msgs == []
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'", (tid,)
+    ).fetchone() == ("pending",)
     await _await_status(aops_pool, tid, "restarting")
 
 
@@ -1955,12 +1967,13 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
         _config(tid),
     )
 
-    # The compaction detours through init_context to have the head rebuilt, and
-    # carries END on as where the batch resumes — the restart's override survives.
-    assert cmd.goto == "init_context"
-    assert cmd.update["context_reset"].resume == END  # type: ignore[index]
-    tail = _compact_tail(cmd.update)
-    assert any(isinstance(m, HumanMessage) and "compacted summary" in m.content for m in tail)  # pyright: ignore[reportUnknownMemberType]
+    # Already-authored data is retained for the successor, not applied by an exiting owner.
+    assert cmd.goto == END
+    assert cmd.update["messages"] == []  # type: ignore[index]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='compact_summary'",
+        (tid,),
+    ).fetchone() == ("pending", "compacted summary")
     # external restart + idle before restart → halted=True preserved (respawn silent)
     assert cmd.update["halted"] is True  # type: ignore[index]
     # Read status on the pool claim_node wrote through; _await_status dumps full
@@ -2081,7 +2094,7 @@ async def test_claim_stale_terminate_loses_to_newer_resurrect(
     assert cmd.update["halted"] is False  # type: ignore[index]
     contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
     assert any("You have been resurrected by user" in c for c in contents)
-    assert not any("You are terminated" in c for c in contents)  # stale terminate dropped
+    assert not any("Termination was accepted" in c for c in contents)  # stale terminate dropped
 
 
 async def test_claim_resurrect_then_terminate_still_dies(
@@ -2107,7 +2120,7 @@ async def test_claim_resurrect_then_terminate_still_dies(
 
     assert cmd.goto == END
     contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
-    assert any("You are terminated by user" in c for c in contents)
+    assert any("Termination was accepted from user" in c for c in contents)
     assert not any("resurrected" in c for c in contents)  # superseded revive dropped
 
 
@@ -2169,7 +2182,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
     assert any("You have been resurrected by user" in c for c in contents)
     assert any("are you there?" in c for c in contents)  # chat not swallowed
-    assert not any("You are terminated" in c for c in contents)
+    assert not any("Termination was accepted" in c for c in contents)
 
 
 async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
@@ -3078,7 +3091,7 @@ async def test_claim_terminate_external_source_renders_source_verbatim(
     assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert isinstance(msgs[0].content, str)  # pyright: ignore[reportUnknownMemberType]
-    assert "You are terminated by agent:42" in msgs[0].content
+    assert "Termination was accepted from agent:42" in msgs[0].content
     # anti-regression: must not contain 'yourself' (mutation that changed != to == made all sources go through self)
     assert "yourself" not in msgs[0].content
 
