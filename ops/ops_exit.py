@@ -124,6 +124,10 @@ async def mark_agent_exited_op(
 ) -> list[str]:
     """Finalize a self-exiting agent process: guarded status flip + events.
 
+    Match the original generation and owner, not merely the agent id. Missing
+    tokens can match only unknown legacy rows. Process ownership also requires
+    a non-NULL pid: a handed-off unclaimed successor must not be finalized.
+
     POST /api/agents/{id}/exited calls this when an agent reaches its own
     process-exit finally block (graceful terminate or silent death from a
     SIGHUP/SIGTERM). The agent used to do this inline; it now notifies the
