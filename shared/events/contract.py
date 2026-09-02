@@ -994,6 +994,12 @@ EVENTS: dict[str, EventSpec] = {
     ),
     # hosted runner (future/infra/agent-runner-as-server.md) — the dispatcher
     # that turns an inbound wake into a turn task, and the turn tasks it runs
+    "host_stale_running_settled": _telemetry(
+        "host_stale_running_settled",
+        "hosted boot settle restored rows a previous host instance left running "
+        "without a task (crash / kill -9); carries n = rows settled",
+        tier="noise",
+    ),
     "host_dispatcher_subscribed": _telemetry(
         "host_dispatcher_subscribed",
         "hosted dispatcher subscribed to the inbound wake pattern",

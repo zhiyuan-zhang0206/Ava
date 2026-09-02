@@ -127,6 +127,7 @@ consumers: see the comments at each emit point.
 | `exec_timeout` | execute_code timed out | anomaly | — | — | events |
 | `exec_node_timeout` | node-level timeout | anomaly | — | — | events |
 | `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events |
+| `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events |
 | `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are lost; the delivery watchdog re-publish covers them) | noise | — | — | events |
 | `host_dispatcher_restart_required` | hosted dispatcher could not unwind a stale turn — exiting for supervisor recovery | anomaly | — | — | events |
