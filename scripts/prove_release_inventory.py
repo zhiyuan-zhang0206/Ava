@@ -73,6 +73,7 @@ def check_observer(expected: ExpectedUnitWriters, receipt: Path) -> None:
 
 
 def session_fixture(home: Path) -> SessionRecord:
+    check_bounded_read(home)
     sessions = home / "run/sessions"
     sessions.mkdir(parents=True, exist_ok=True)
     process = psutil.Process()
@@ -87,6 +88,35 @@ def session_fixture(home: Path) -> SessionRecord:
     record.write(sessions / "ava-restarter.json")
     record.write(sessions / "ava-obsolete-plugin-service.json")
     return record
+
+
+def check_bounded_read(home: Path) -> None:
+    path = home / "inventory-read-fixture"
+    path.write_bytes(b"original")
+    require(inventory._regular_bytes(path) == b"original", "regular inventory read failed")
+    replacement = home / "inventory-read-replacement"
+    replacement.write_bytes(b"replacement")
+    original_open = os.open
+
+    def replace_before_open(target: Path, flags: int) -> int:
+        replacement.replace(target)
+        return original_open(target, flags)
+
+    with patch.object(inventory.os, "open", side_effect=replace_before_open):
+        try:
+            inventory._regular_bytes(path)
+        except ReleaseRejectedError:
+            pass
+        else:
+            raise AssertionError("replaced inventory inode accepted")
+    path.write_bytes(b"x" * (1024 * 1024 + 1))
+    try:
+        inventory._regular_bytes(path)
+    except ReleaseRejectedError:
+        pass
+    else:
+        raise AssertionError("oversized inventory accepted")
+    path.unlink()
 
 
 def main() -> None:
