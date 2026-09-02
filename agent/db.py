@@ -153,6 +153,23 @@ async def claim_inbound_batch(
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await lock_inbound_owner(conn, agent_id)
+        await cur.execute("SELECT runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
+        runtime = await cur.fetchone()
+        process_owned = runtime == ("process",)
+        if process_owned:
+            from agent.lifecycle_intent import accept_lifecycle_intent
+
+            command = await accept_lifecycle_intent(conn, agent_id)
+            if command is not None:
+                await cur.execute(
+                    "SELECT id,agent_id,content,kind,source,payload,created_at,claimed_at "
+                    "FROM inbound_messages WHERE id=%s",
+                    (command.id,),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    raise RuntimeError("accepted lifecycle command disappeared")
+                return [ClaimedInbound.from_row(row)]
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not
@@ -165,10 +182,11 @@ async def claim_inbound_batch(
             "WHERE id IN ("
             "  SELECT id FROM inbound_messages "
             "  WHERE status = 'pending' AND agent_id = %s "
+            "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"
             ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at",
-            (agent_id,),
+            (agent_id, process_owned),
         )
         rows = await cur.fetchall()
     rows.sort(key=lambda r: r[6])  # created_at FIFO (index follows SELECT column count)
