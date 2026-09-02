@@ -46,7 +46,6 @@ enforces this with a 422 (`ResurrectAgentRequest`).
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -72,7 +71,7 @@ from shared.agents import (
 from shared.audit_events import insert_event_log
 from shared.config import settings
 from shared.daemon_health import health_port, probe_daemon
-from shared.db import fetch_one, publish_inbound_wake
+from shared.db import fetch_one, insert_restart_completed_inbound, publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
@@ -598,7 +597,7 @@ def respawn_agent(agent_id: int) -> bool:
             agent_id=agent_id,
         )
 
-        # Phase 2: find the original 'restart' inbound's source + content + payload, INSERT 'restart_completed'.
+        # Phase 2: trace the original restart inbound into restart_completed.
         # Status 'restarting' implies an earlier 'restart' inbound triggered
         # the claim to switch status to 'restarting' (the claim_node case
         # "restart" branch only marks RESTARTING after receiving a restart
@@ -607,32 +606,8 @@ def respawn_agent(agent_id: int) -> bool:
         # it visible to ops. At this point status is unclaimed 'idling', restarter
         # will not retrigger (raise once and stop).
         #
-        # Source passthrough: `ava.self.restart()` posts empty content with
-        # source='self' (the removed `ava.self.update()` initiator used
-        # 'self:update' — historical rows may still carry it); 'system:update'
-        # is a cluster rollout quiesce. The claim node dispatches on that source
-        # to render either "restarted by X" or "updated and restarted" marker.
-        # The SELECT takes the NEWEST restart row (id DESC) — an older
-        # system:update row must not shadow a newer user/self restart, which
-        # would render the wrong marker wording (2026-08-08 audit, P3-2).
-        # Payload passthrough (PR-E):
-        # `ava.self.restart(config_overlay={...})` posts `{"config_overlay": {...}}`;
-        # when the new process boots, it reads the merged overlay from
-        # agents_meta and applies it. The restart_completed row is freshly written with an
-        # effective_config snapshot by the claim node inside the new process
-        # after writing the marker (the restart_completed row this function
-        # inserts has payload containing only config_overlay; the new
-        # process fills in effective_config after coming up; see
-        # agent/loop.py).
-        cur.execute(
-            "SELECT source, content, payload FROM inbound_messages "
-            "WHERE agent_id = %s AND kind = 'restart' "
-            "ORDER BY id DESC "
-            "LIMIT 1",
-            (agent_id,),
-        )
-        row = cur.fetchone()
-        if row is None:
+        restart_trace = insert_restart_completed_inbound(cur, agent_id)
+        if restart_trace is None:
             # DB integrity violated; first mark status 'terminated' and
             # commit so ops can see + caller can resurrect to retry, then
             # raise so the stack trace is visible.
@@ -665,14 +640,8 @@ def respawn_agent(agent_id: int) -> bool:
                 f"inbound found — DB integrity violated; status forced to 'terminated', "
                 f"caller may resurrect to retry."
             )
-        original_source: str = row[0]
-        original_content: str = row[1]
-        # original_payload is the restart inbound's payload, trusted as
-        # dict | None per its annotation. It is passed through verbatim into the
-        # restart_completed INSERT below (drives the lifecycle marker diff). The
-        # launch overlay is NOT derived from it — that comes from the column.
-        original_payload: dict[str, object] | None = row[2]
-        # Launch overlay is read from the authoritative column, NOT the restart
+        original_source = restart_trace[0]
+        # The launch overlay is read from the authoritative column, NOT the restart
         # inbound payload. The payload still carries this-restart's diff and is
         # passed through to restart_completed so the lifecycle marker shows what
         # changed (see _render_restart_completed_marker).
@@ -682,30 +651,6 @@ def respawn_agent(agent_id: int) -> bool:
         config_overlay: dict[str, object] | None
         birth_config: dict[str, object] | None
         config_overlay, birth_config = fetch_one(cur, "respawn: read per-agent config")
-        # The restart_completed row is INSERTed first to pass through
-        # source/content/payload; once the new process comes up and applies
-        # the overlay, it INSERTs another restart_completed with
-        # effective_config (full event trail, see agent/loop.py). This
-        # function only guarantees that "the original restart's envelope"
-        # lands in DB; snapshot writes on the new-process side are the claim
-        # node's job.
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, %s, 'restart_completed', %s, %s::jsonb)",
-            (
-                agent_id,
-                original_content,
-                original_source,
-                json.dumps(original_payload) if original_payload else None,
-            ),
-        )
-        # --- lifecycle event ---
-        insert_event_log(
-            event_type="restart_completed",
-            agent_id=agent_id,
-            source=original_source,
-            payload={"config_overlay": config_overlay} if config_overlay else {},
-        )
         conn.commit()
         publish_agent_updated_sync(conn, agent_id)
     if hosted:
