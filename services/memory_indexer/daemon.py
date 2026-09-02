@@ -10,7 +10,7 @@ After startup:
      embed + upsert / delete.
 
 Backed by the configured memory search backend
-(`AVA_MEMORY_SEARCH_BACKEND`, default `milvus` — the standalone
+(`AVA_MEMORY_SEARCH_BACKEND`, default `numpy` — the standalone
 milvus-lite server in the `services/milvus/` session, URI
 `AVA_MILVUS_URI` = `http://127.0.0.1:19530`). Switching backends is one
 env var + a restart; the cold-start scan rebuilds the index on the new

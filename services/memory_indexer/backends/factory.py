@@ -3,7 +3,7 @@
 `get_backend()` is the single entry point: the indexer daemon (write
 path) and the gateway search endpoint (read path) both take their backend
 from here, keyed by `settings.services.memory_search_backend`
-(`AVA_MEMORY_SEARCH_BACKEND`, default `milvus`). Switching storage is one
+(`AVA_MEMORY_SEARCH_BACKEND`, default `numpy`). Switching storage is one
 env var + a restart; the cold-start reconcile rebuilds the index on the
 new backend.
 

@@ -87,7 +87,7 @@ def _probe_numpy() -> ProbeResult:
                 f"({type(exc).__name__}: {exc}) — the memory-search session may "
                 "still be booting (`ava start` spawns it before the indexer); if "
                 "it stays down, ensure the session is not disabled, or set "
-                "AVA_MEMORY_SEARCH_BACKEND=milvus (default)"
+                "AVA_MEMORY_SEARCH_BACKEND=numpy (default)"
             )
         )
 
@@ -131,8 +131,8 @@ def _probe_pgvector() -> ProbeResult:
                 "converged vendored tree: re-run `ava start` (converge + inject), or "
                 "install the pgvector package into a brew/apt Postgres, or provision "
                 "pgvector on a remote-managed plane. pgvector stays fallback-only "
-                "(milvus is the default) — use AVA_MEMORY_SEARCH_BACKEND=milvus or "
-                "numpy instead"
+                "(numpy is the default) — use AVA_MEMORY_SEARCH_BACKEND=numpy or "
+                "milvus instead"
             ),
             fatal=True,
         )
