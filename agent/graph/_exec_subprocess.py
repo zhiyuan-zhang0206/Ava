@@ -5,7 +5,7 @@ The parent polls every 50ms and owns teardown through direct-child reap,
 root-independent process-domain close, and a bounded output-reader join. POSIX
 owns a new process group; Windows owns a Job Object. The child's result
 envelope stays advisory except for lifecycle outcomes. It spawns
-`python -I -X utf8 -m agent.exec_child`: isolated mode keeps the inherited cwd
+`python -I -B -X utf8 -m agent.exec_child`: isolated mode keeps the inherited cwd
 and Python environment out of bootstrap import resolution, and explicit UTF-8
 mode keeps output portable after isolated mode ignores encoding environment
 variables.
@@ -192,7 +192,7 @@ def _spawn(
     windows_job = WindowsJob.create() if IS_WINDOWS else None
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
+            [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.exec_child"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # OS-level merge — preserves print/traceback order

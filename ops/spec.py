@@ -590,7 +590,9 @@ def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
     prefix = ".venv/bin/python "
     if not INSTALLED_RUNTIME or not spec.cmd.startswith(prefix):
         return spec
-    return replace(spec, cmd=f"{shlex.quote(str(runtime_python()))} {spec.cmd[len(prefix) :]}")
+    return replace(
+        spec, cmd=f"{shlex.quote(str(runtime_python()))} -I -B -X utf8 {spec.cmd[len(prefix) :]}"
+    )
 
 
 def _plugin_services() -> tuple[ServiceSpec, ...]:

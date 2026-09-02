@@ -312,8 +312,11 @@ def _launch_agent_process(
     # against a live process's cmdline to tell this agent from whatever inherited
     # its pid. Spelling them literally here would let the launcher and the probe
     # drift apart silently (issue #1123).
+    from shared.runtime_interpreter import INSTALLED_RUNTIME
+
     argv = [
         agent_python,
+        *(["-I", "-B", "-X", "utf8"] if INSTALLED_RUNTIME else []),
         *AGENT_MODULE_ARGV,
         AGENT_ID_FLAG,
         str(agent_id),
