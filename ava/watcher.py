@@ -360,7 +360,14 @@ def _spawn(
     import sys
 
     agent_id = _agent_id()
-    session_id, _name = _sessions._create_session(name)
+    session_id, session_name = _sessions._create_session(name)
+    # The registry is desired state, so it must remember the generation of
+    # the exact PTY record it can later rebuild. Reading the backend record
+    # (rather than today's marker) binds the row to the session actually
+    # admitted under the allocation lock.
+    from shared.session_backend import get_shell_backend
+
+    generation = get_shell_backend().session_generation(session_name)
     script_path = _watchers_dir() / f"watcher_{session_id}.py"
     # Prune files from earlier watchers before writing: a watcher reads its
     # script + bootstrap exactly once at launch, so everything already on
@@ -431,6 +438,7 @@ def _spawn(
                 alive_provider=_fresh_alive,
                 exclude_session=_exclude_session,
                 template_version=TEMPLATE_VERSION,
+                generation=generation,
             )
             if reused is not None:
                 # A concurrent registration won the race — the schedule is
@@ -459,6 +467,7 @@ def _spawn(
                 cron_end_at=cron_end_at,
                 timeout_secs=timeout_secs,
                 template_version=TEMPLATE_VERSION,
+                generation=generation,
             )
     except Exception:
         logger.error(
@@ -673,6 +682,7 @@ def _live_cron_session(
     cron_expr: str,
     cron_timezone: str,
     cron_end_at: datetime.datetime | None,
+    generation: str | None,
     alive: set[int] | None,
     exclude_session: int | None = None,
 ) -> int | None:
@@ -715,6 +725,8 @@ def _live_cron_session(
     for row in rows:
         if row["kind"] != "cron" or row["status"] != "running":
             continue
+        if row.get("generation") != generation:
+            continue
         if row["session_id"] == exclude_session:
             continue
         if row["session_id"] not in alive:
@@ -728,7 +740,20 @@ def _live_cron_session(
     return None
 
 
-def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[int]) -> str | None:
+def _notify_missed_watcher(agent_id: int, content: str) -> None:
+    """Best-effort notification for a one-shot watcher that cannot run."""
+    from ava import agents as _agents
+
+    with contextlib.suppress(Exception):
+        _agents.send_message(agent_id, content)
+
+
+def _reconcile_missing(
+    row: dict[str, Any],
+    now: datetime.datetime,
+    generation: str | None,
+    alive: set[int],
+) -> str | None:
     """Handle one registry row whose session is gone: rebuild a standing
     schedule / future one-shot, mark a passed one-shot or launch watcher missed,
     drop an ended schedule. Returns the action sentence (None when nothing was
@@ -736,9 +761,6 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[i
 
     `alive` is the caller's live-session set, used to spot a live duplicate
     before rebuilding a cron (Task #1825)."""
-    import contextlib
-
-    from ava import agents as _agents
     from shared.watcher_registry import delete_watcher, mark_status, wake_delivered
 
     agent_id = _agent_id()
@@ -766,6 +788,7 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[i
                 cron_expr=row["cron_expr"],
                 cron_timezone=row["cron_timezone"],
                 cron_end_at=end_at,
+                generation=generation,
                 alive=alive,
                 exclude_session=session_id,
             )
@@ -799,20 +822,18 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[i
                 delete_watcher(agent_id, session_id)
                 return f"one-shot watcher '{name}' already fired; row dropped"
             mark_status(agent_id, session_id, "missed")
-            with contextlib.suppress(Exception):
-                _agents.send_message(
-                    agent_id,
-                    f"[watcher] '{name}' was not running at boot and its "
-                    f"moment ({row['fires_at']}) has passed — marked missed.",
-                )
+            _notify_missed_watcher(
+                agent_id,
+                f"[watcher] '{name}' was not running at boot and its "
+                f"moment ({row['fires_at']}) has passed — marked missed.",
+            )
             return f"one-shot watcher '{name}' marked missed"
         mark_status(agent_id, session_id, "missed")
-        with contextlib.suppress(Exception):
-            _agents.send_message(
-                agent_id,
-                f"[watcher] '{name}' (one-shot launch watcher) was not "
-                "running at boot — marked missed.",
-            )
+        _notify_missed_watcher(
+            agent_id,
+            f"[watcher] '{name}' (one-shot launch watcher) was not "
+            "running at boot — marked missed.",
+        )
         return f"launch watcher '{name}' marked missed"
     except Exception:
         logger.warning(
@@ -822,6 +843,40 @@ def _reconcile_missing(row: dict[str, Any], now: datetime.datetime, alive: set[i
             exc_info=True,
         )
         return None
+
+
+def _reap_superseded_watcher(row: dict[str, Any], alive: set[int]) -> str:
+    """Retain an obsolete desired record while reaping its exact session.
+
+    A row from another allocation generation must never reach the ordinary
+    missing-session path: its cron payload was desired by the previous
+    generation, not a declaration to recreate in this one.  The retained
+    `reaped` status makes that decision auditable without reintroducing it on
+    a later boot.
+    """
+    from ava.shell import sessions as _sessions_mod
+    from shared.watcher_registry import mark_status
+
+    session_id = row["session_id"]
+    if session_id in alive:
+        if not _sessions_mod._reap(session_id):
+            logger.warning(
+                "watcher reconcile: could not reap superseded session %s (%s)",
+                session_id,
+                row["name"],
+            )
+            return f"watcher '{row['name']}' from superseded generation retained for reaping"
+        alive.discard(session_id)
+    _kill_watcher_orphan_processes(session_id)
+    agent_id = _agent_id()
+    mark_status(agent_id, session_id, "reaped")
+    if row["kind"] in ("at", "launch"):
+        _notify_missed_watcher(
+            agent_id,
+            f"[watcher] '{row['name']}' ({row['kind']} one-shot watcher) was reaped "
+            "by an allocation generation flip before it could run — marked missed.",
+        )
+    return f"watcher '{row['name']}' from superseded generation reaped"
 
 
 def _rebuild_stale_cron_watcher(row: dict[str, Any]) -> str | None:
@@ -873,9 +928,11 @@ def reconcile() -> list[str]:
     Called from the agent boot (`agent/loop.py`): every row in this agent's
     watcher registry whose session is gone is either rebuilt or marked:
 
-    - `cron` — re-spawned from the stored expression (the standing schedule is
+    - `cron` — re-spawned from the stored expression only when its row belongs
+      to the current allocation generation (the standing schedule is
       the whole point of the registry: a rollout reaped its session and nothing
-      else knew it should exist). A schedule whose `end_time` has passed is
+      else knew it should exist). A row from a superseded generation is reaped
+      and retained as history instead. A schedule whose `end_time` has passed is
       deleted instead — it ended, just not cleanly. The old row is marked
       `rebuilt`; the new session gets its own `running` row.
     - `at` — re-spawned while its moment is still in the future; once the
@@ -917,6 +974,7 @@ def reconcile() -> list[str]:
 
     actions: list[str] = []
     now = datetime.datetime.now(datetime.UTC)
+    current_generation = _sessions_mod._current_session_generation()
     for row in rows:
         if row["status"] != "running":
             # rebuilt / missed are terminal history: a rebuilt row's live
@@ -927,20 +985,36 @@ def reconcile() -> list[str]:
             # cron came back TWICE (rebuilt rows kept re-rebuilding).
             continue
         session_id = row["session_id"]
-        if session_id in alive:
-            # Live but stale: a generated watcher script is frozen at launch, so
-            # a template fix (issue #182 / #1330) never reaches a session that
-            # was already running when it landed — it keeps the old loop until
-            # rebuilt. Rebuild live cron watchers whose spawn version is behind
-            # the current template: spawn the replacement first (its own row
-            # carries the rebuild duty from here), then kill the stale session
-            # (which drops its old row — the deliberate-kill semantics).
-            if row["kind"] == "cron" and (row.get("template_version") or 0) < TEMPLATE_VERSION:
-                action = _rebuild_stale_cron_watcher(row)
-                if action:
-                    actions.append(action)
+        if row.get("generation") != current_generation:
+            actions.append(_reap_superseded_watcher(row, alive))
             continue
-        action = _reconcile_missing(row, now, alive)
+        if session_id in alive:
+            # Session liveness alone cannot make an exact record current: a
+            # stale host can retain the old name across a flip. Reap that
+            # record, then let the still-current desired row rebuild below.
+            if _sessions_mod._session_generation(session_id) != current_generation:
+                if not _sessions_mod._reap(session_id):
+                    logger.warning(
+                        "watcher reconcile: could not reap stale session %s (%s)",
+                        session_id,
+                        row["name"],
+                    )
+                    continue
+                alive.discard(session_id)
+            else:
+                # Live but stale: a generated watcher script is frozen at launch, so
+                # a template fix (issue #182 / #1330) never reaches a session that
+                # was already running when it landed — it keeps the old loop until
+                # rebuilt. Rebuild live cron watchers whose spawn version is behind
+                # the current template: spawn the replacement first (its own row
+                # carries the rebuild duty from here), then kill the stale session
+                # (which drops its old row — the deliberate-kill semantics).
+                if row["kind"] == "cron" and (row.get("template_version") or 0) < TEMPLATE_VERSION:
+                    action = _rebuild_stale_cron_watcher(row)
+                    if action:
+                        actions.append(action)
+                continue
+        action = _reconcile_missing(row, now, current_generation, alive)
         if action:
             actions.append(action)
     return actions

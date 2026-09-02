@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 # The statuses the reconcile transitions through. `running` is the spawn state;
 # `rebuilt` marks a row whose watcher died and was re-spawned (history kept —
 # the rebuild's NEW session has its own `running` row); `missed` marks a
-# one-shot whose moment passed while its session was gone.
-_WATCHER_STATUSES = ("running", "rebuilt", "missed")
+# one-shot whose moment passed while its session was gone; and `reaped` retains
+# an obsolete generation without letting a later boot rebuild it.
+_WATCHER_STATUSES = ("running", "rebuilt", "missed", "reaped")
 
 # The rebuild payload columns, per kind. The reconcile rebuilds a watcher by
 # re-calling the SDK verb with exactly these arguments, so the row must carry
@@ -49,8 +50,8 @@ _REGISTER_SQL = """
     INSERT INTO agent_watchers (
         session_id, agent_id, kind, name, message, fires_at,
         cron_expr, cron_timezone, cron_end_at, timeout_secs,
-        template_version
-    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        template_version, generation
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (agent_id, session_id) DO NOTHING
 """
 
@@ -91,6 +92,7 @@ def register_cron_atomic(
     alive_provider: Callable[[], set[int] | None],
     exclude_session: int | None = None,
     template_version: int | None = None,
+    generation: str | None = None,
 ) -> int | None:
     """Register one cron watcher row atomically — reuse a live duplicate or insert.
 
@@ -120,11 +122,11 @@ def register_cron_atomic(
     It returns the fresh session-id set, or None when the session list is
     unavailable (no dedupe then — a duplicate is recoverable, a reused dead
     session would silently lose the schedule); it must not raise. A
-    same-schedule `running` row counts as a duplicate only when its session
-    is in the set (a dead row is exactly what the boot reconcile is about to
-    rebuild — it must not block a fresh registration). `exclude_session`
-    skips one row — the stale-template rebuild must not dedupe against the
-    live session it is replacing.
+    same-generation, same-schedule `running` row counts as a duplicate only
+    when its session is in the set (a dead row is exactly what the boot
+    reconcile is about to rebuild — it must not block a fresh registration).
+    `exclude_session` skips one row — the stale-template rebuild must not
+    dedupe against the live session it is replacing.
     """
     # `exclude_session` may be 0 — an agent's very first session
     # (session_index starts at 0) — so the sentinel must be an explicit None
@@ -145,11 +147,12 @@ def register_cron_atomic(
             WHERE agent_id = %s AND kind = 'cron' AND status = 'running'
               AND cron_expr = %s AND cron_timezone = %s
               AND cron_end_at IS NOT DISTINCT FROM %s
+              AND generation IS NOT DISTINCT FROM %s
               AND session_id != %s
             ORDER BY created_at DESC, session_id DESC
             LIMIT 1
             """,
-            (agent_id, cron_expr, cron_timezone, cron_end_at, exclude),
+            (agent_id, cron_expr, cron_timezone, cron_end_at, generation, exclude),
         )
         row = cur.fetchone()
         if row is not None and alive is not None and row[0] in alive:
@@ -168,6 +171,7 @@ def register_cron_atomic(
                 cron_end_at,
                 None,
                 template_version,
+                generation,
             ),
         )
     return None
@@ -186,6 +190,7 @@ def register_watcher(
     cron_end_at: Any = None,
     timeout_secs: float | None = None,
     template_version: int | None = None,
+    generation: str | None = None,
 ) -> None:
     """Record a watcher session at spawn (`ava.watcher._spawn`).
 
@@ -194,7 +199,8 @@ def register_watcher(
     script's template generation (shared.watcher.TEMPLATE_VERSION); the boot
     reconcile rebuilds a live cron watcher whose row version is behind, so a
     template fix reaches sessions that were already running when it landed
-    (issue #1330). Fail-soft at the call site: a registry write must never
+    (issue #1330). `generation` identifies the PTY record that this desired
+    row may restore. Fail-soft at the call site: a registry write must never
     break the watcher it is only observing.
 
     Cron registrations go through `register_cron_atomic` instead — the
@@ -217,6 +223,7 @@ def register_watcher(
                 cron_end_at,
                 timeout_secs,
                 template_version,
+                generation,
             ),
         )
 
@@ -241,7 +248,7 @@ def delete_watcher(agent_id: int, session_id: int) -> None:
 
 
 def mark_status(agent_id: int, session_id: int, status: str) -> None:
-    """Transition a row's status (`running` → `rebuilt` / `missed`)."""
+    """Transition a row's status (`running` → terminal history)."""
     if status not in _WATCHER_STATUSES:
         raise ValueError(f"unknown watcher status {status!r}")
     with connect(autocommit=True) as conn, conn.cursor() as cur:

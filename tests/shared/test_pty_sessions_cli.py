@@ -277,6 +277,7 @@ def test_host_startup_leaves_log_retention_to_the_cli(
             str(tmp_path / "record.json"),
             str(tmp_path / "session.sock"),
             str(transcript),
+            "",
         ]
     )
 
@@ -760,6 +761,7 @@ def test_desired_state_session_families_rebuild_once_after_resume(
         started_at = backend.session_started_at(name)
         assert started_at is not None
         started[name] = started_at
+        assert backend.session_generation(name) == frozen.generation
     for name in names:
         assert backend.new_session(name, "", home, env={})
         assert backend.session_started_at(name) == started[name]

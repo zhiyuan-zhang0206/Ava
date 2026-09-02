@@ -1156,8 +1156,9 @@ CREATE TABLE agent_watchers (
     cron_end_at    TIMESTAMPTZ,           -- kind='cron' (NULL = standing)
     timeout_secs   REAL,                  -- kind='launch'
     template_version INTEGER,             -- watcher template generation at spawn (issue #1330)
+    generation     TEXT,                  -- PTY allocation generation at spawn (NULL = legacy)
     status         TEXT NOT NULL DEFAULT 'running'
-                   CHECK (status IN ('running', 'rebuilt', 'missed')),
+                   CHECK (status IN ('running', 'rebuilt', 'missed', 'reaped')),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1165,7 +1166,7 @@ CREATE TABLE agent_watchers (
 CREATE INDEX agent_watchers_agent_idx ON agent_watchers (agent_id);
 
 COMMENT ON TABLE agent_watchers IS
-    'Watcher registry: every ava.watcher.at/cron/launch session, keyed by its shell-session id. Written at spawn, deleted on clean exit; a killed watcher leaves its row and the agent boot reconcile rebuilds cron / marks missed one-shots (R1 wave, Task #1021).';
+    'Watcher registry: every ava.watcher.at/cron/launch session, keyed by its shell-session id. Written at spawn, deleted on clean exit; a killed watcher leaves its row and the agent boot reconcile rebuilds current-generation cron / marks missed one-shots. Superseded generation rows are retained as reaped history (R1 wave, Task #1021).';
 
 -- ─────────────── agent_presets ───────────────
 -- Named config templates for spawning agents. A preset bundles a flat per-agent

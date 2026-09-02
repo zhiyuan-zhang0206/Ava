@@ -724,10 +724,22 @@ The command takes the host allocation lock and prints a random generation
 token. Its acknowledgement is the boundary: an allocation already in flight is
 ready and recorded before the command returns, while every later missing-name
 allocation is refused before a host is forked. All co-located `$AVA_HOME`
-values cross the same gate. Existing sessions remain usable, and a request for
-an already-live name remains an idempotent success. Refused requests remove
-their 0600 environment handoff files; they may leave harmless gaps in an
-agent's monotonic shell IDs, which are never rolled back or reused.
+values cross the same gate. A request for an already-live name remains an
+idempotent success while frozen. Refused requests remove their 0600 environment
+handoff files; they may leave harmless gaps in an agent's monotonic shell IDs,
+which are never rolled back or reused.
+
+The boundary has a deliberate reconciliation effect at **freeze**, not at
+resume. The allocation command does not directly kill an existing PTY, but the
+next ScheduleManager tick (about five seconds) reaps every schedule PTY from
+the preceding generation, interrupts any open schedule run, and leaves the
+enabled schedule as the current desired state for a later replacement. The
+next agent boot reaps every preceding-generation watcher row and retains it as
+`reaped` history; its prior watcher cron declaration is not automatically
+restored and must be declared again. A reaped `at` or `launch` one-shot sends
+the owner a missed notification. This applies to an inspection-only freeze too:
+it is not safe to assume that existing desired-state sessions keep running after
+the freeze acknowledgement.
 
 Resume with the exact token printed by the freeze that this operator owns:
 
@@ -739,14 +751,21 @@ A stale token cannot clear a newer freeze. `freeze`, `status`, and `resume` are
 local host operations and remain usable while the gateway, Postgres, or Redis
 is unavailable. A malformed marker fails closed; inspect the marker path shown
 by `ava pty status` and perform an audited manual repair rather than treating
-corruption as an implicit resume.
+corruption as an implicit resume. Do **not** delete the marker: that changes the
+current generation to `None` and can make the next watcher reconcile reap every
+generation-bound declaration. Recover the original generation UUID from any
+known-live PTY session record, rebuild a valid marker with that exact UUID, and
+only then allow reconciliation to resume. If no record establishes the UUID,
+leave the marker fail-closed and restore desired state only after an operator
+has made the boundary explicit.
 
 For a bounded host cleanup, keep the order explicit:
 
-1. Freeze allocation and retain the returned generation token.
-2. Snapshot the official PTY inventory and the durable desired state that will
+1. Stop or fence every reconciler that can create replacement sessions; this is
+   required before freeze when the cleanup must be selective.
+2. Freeze allocation and retain the returned generation token.
+3. Snapshot the official PTY inventory and the durable desired state that will
    be rebuilt.
-3. Stop or fence every reconciler that can create replacement sessions.
 4. Terminate only the selected sessions through the identity-aware PTY API.
 5. Verify that no later session start crossed the freeze boundary.
 6. Rebuild the selected durable state.
