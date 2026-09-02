@@ -42,12 +42,13 @@ fetches gateway configuration nor reads an ordinary Settings singleton. Each
 challenge revalidates the operation. The normal daemon PID and unit registration
 paths are never invoked. Auth/bind posture remains the existing ops policy.
 
-The current observer returns `closure: unknown` unconditionally: platform job
-observation, actual updater replacement and complete inventory production are
-not yet connected. An empty
+The current observer returns `closure: unknown` unconditionally: native job
+declaration reads do not establish complete launcher closure, and actual updater
+replacement and complete inventory production are not yet connected. An empty
 test inventory is not evidence of complete unit or fleet closure. Normal ops
 routes are not registered on the test observation socket.
-# Native launcher observation
+
+## Native launcher observation
 
 `shared.native_job_observation` reuses the existing native user-crontab and
 launchd surfaces without importing Settings or registering jobs. Expected launchd

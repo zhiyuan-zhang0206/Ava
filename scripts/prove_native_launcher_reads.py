@@ -6,7 +6,12 @@ import json
 import sys
 from datetime import UTC, datetime, timedelta
 
-from shared.native_job_observation import native_read, read_crontab
+from shared.native_job_observation import (
+    NativeReadUnavailableError,
+    native_read,
+    read_crontab,
+    read_launchd_labels,
+)
 
 
 def main() -> None:
@@ -32,12 +37,18 @@ def main() -> None:
         result = native_read(("/bin/launchctl", "print", "system"), until)
         if result.returncode != 0 or not result.stdout:
             raise RuntimeError("native launchctl system domain is unreadable")
+        try:
+            read_launchd_labels(until)
+            gui_enumeration = True
+        except NativeReadUnavailableError:
+            gui_enumeration = False
         print(
             json.dumps(
                 {
                     "platform": "darwin",
                     "realLaunchctlRead": True,
                     "effectiveEnabledProof": False,
+                    "guiEnumerationAvailable": gui_enumeration,
                     "writes": False,
                     "closure": "unknown",
                 }

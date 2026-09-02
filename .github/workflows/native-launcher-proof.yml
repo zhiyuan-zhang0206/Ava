@@ -29,5 +29,7 @@ jobs:
       - run: uv sync --frozen
       - if: runner.os == 'Linux'
         run: uv run pytest tests/shared/test_native_job_observation.py tests/shared/test_managed_writer_observation.py -q
+      - if: runner.os == 'Linux'
+        run: uv run pyright shared/native_job_observation.py shared/managed_writer_observation.py scripts/prove_native_launcher_reads.py tests/shared/test_native_job_observation.py
       - name: Actual read-only OS query (no job registration)
         run: uv run python scripts/prove_native_launcher_reads.py

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import plistlib
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -94,3 +95,33 @@ def test_expired_native_query_never_starts(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(jobs.subprocess, "run", unexpected)
     with pytest.raises(jobs.NativeReadUnavailableError, match="expired"):
         jobs.native_read(("/usr/bin/crontab", "-l"), datetime.now(UTC) - timedelta(seconds=1))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"",
+        b"different header\n",
+        b"PID Status Label\n- bad job\n",
+        b"PID Status Label\n- 0 x\n- 0 x\n",
+    ],
+)
+def test_launchd_unknown_list_format_is_not_empty(body: bytes) -> None:
+    with pytest.raises(jobs.NativeReadUnavailableError):
+        jobs.parse_launchd_labels(body)
+
+
+def test_launchd_documented_list_columns() -> None:
+    assert jobs.parse_launchd_labels(
+        b"PID\tStatus\tLabel\n-\t0\tcom.ava.test\n123\t-15\tcom.apple.test\n"
+    ) == frozenset({"com.ava.test", "com.apple.test"})
+
+
+def test_failed_crontab_read_is_not_absence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(jobs.sys, "platform", "linux")
+    failed = subprocess.CompletedProcess(
+        ("/usr/bin/crontab", "-l"), 1, b"", b"permission denied; no crontab for user\n"
+    )
+    monkeypatch.setattr(jobs, "native_read", lambda _argv, _until: failed)
+    with pytest.raises(jobs.NativeReadUnavailableError):
+        jobs.read_crontab(deadline())

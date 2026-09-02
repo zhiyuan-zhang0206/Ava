@@ -96,6 +96,44 @@ def launchd_loaded(label: str, valid_until: datetime) -> bool | None:
     return True if result.returncode == 0 else None
 
 
+def parse_launchd_labels(body: bytes) -> frozenset[str]:
+    """Parse only launchctl list's documented three columns, not print output."""
+    lines = body.decode("utf-8").splitlines()
+    if not lines or lines[0].split() != ["PID", "Status", "Label"]:
+        raise NativeReadUnavailableError("launchctl list format is unsupported")
+    labels: set[str] = set()
+    for line in lines[1:]:
+        fields = line.split()
+        if len(fields) != 3:
+            raise NativeReadUnavailableError("launchctl list row is unsupported")
+        pid, status, label = fields
+        if (pid != "-" and not pid.isdecimal()) or not re.fullmatch(r"-?[0-9]+", status):
+            raise NativeReadUnavailableError("launchctl list state is unsupported")
+        if label in labels or any(ord(character) < 32 for character in label):
+            raise NativeReadUnavailableError("launchctl list label is inconsistent")
+        labels.add(label)
+    return frozenset(labels)
+
+
+def read_launchd_labels(valid_until: datetime) -> frozenset[str]:
+    """Current GUI-domain enumeration; a background domain cannot prove absence."""
+    if sys.platform != "darwin":
+        raise NativeReadUnavailableError("launchd enumeration is macOS-only")
+    uid = native_read(("/bin/launchctl", "manageruid"), valid_until)
+    name = native_read(("/bin/launchctl", "managername"), valid_until)
+    if (
+        uid.returncode
+        or name.returncode
+        or uid.stdout.strip() != str(os.getuid()).encode()
+        or name.stdout.strip() != b"Aqua"
+    ):
+        raise NativeReadUnavailableError("launchctl is not in this user's GUI domain")
+    result = native_read(("/bin/launchctl", "list"), valid_until)
+    if result.returncode:
+        raise NativeReadUnavailableError("launchctl list is unreadable")
+    return parse_launchd_labels(result.stdout)
+
+
 def declaration_binding(
     home: Path, artifact_digest: str, declared_home: object, argv: object
 ) -> dict[str, str]:
@@ -119,8 +157,21 @@ def observe_launchd(
 ) -> LauncherObservation:
     first = read_launchd_definition(label)
     loaded = launchd_loaded(label, valid_until)
+    # Positive absence needs the matching GUI enumeration, not a failed print.
+    if loaded is None:
+        try:
+            before_labels = read_launchd_labels(valid_until)
+            after_labels = read_launchd_labels(valid_until)
+            loaded = label in after_labels if before_labels == after_labels else None
+        except NativeReadUnavailableError:
+            loaded = None
     second = read_launchd_definition(label)
-    if first != second or loaded != launchd_loaded(label, valid_until):
+    after_loaded = launchd_loaded(label, valid_until)
+    if (
+        first != second
+        or (loaded is True and after_loaded is not True)
+        or (loaded is False and after_loaded is True)
+    ):
         raise NativeReadUnavailableError("launchd state changed during observation")
     if hashlib.sha256(first).hexdigest() != digest:
         return LauncherObservation(definition="mismatch")
