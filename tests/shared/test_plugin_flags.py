@@ -67,8 +67,30 @@ def test_declarations_are_idempotent_per_plugin_and_shared_across_plugins() -> N
 
 
 def test_read_flag_requires_plugin_context() -> None:
-    with pytest.raises(NoPluginContext, match="PluginContext"):
+    with pytest.raises(NoPluginContext, match="pass plugin=<name> explicitly"):
         read_flag("agent.prompt_invest_future_enabled")
+
+
+def test_read_flag_accepts_explicit_plugin_outside_plugin_context() -> None:
+    key = "agent.prompt_invest_future_enabled"
+    previous = get_field("prompt_invest_future_enabled")
+    try:
+        set_field("prompt_invest_future_enabled", False)
+        with PluginContext("plugin"):
+            declare_flags(key)
+
+        assert read_flag(key, plugin="plugin") is False
+    finally:
+        set_field("prompt_invest_future_enabled", previous)
+
+
+def test_read_flag_explicit_plugin_wins_over_plugin_context() -> None:
+    key = "agent.prompt_invest_future_enabled"
+    with PluginContext("declared-plugin"):
+        declare_flags(key)
+
+    with PluginContext("other-plugin"):
+        assert read_flag(key, plugin="declared-plugin") is True
 
 
 def test_read_flag_requires_a_declaration() -> None:
@@ -111,20 +133,20 @@ def test_clear_plugin_flags_removes_declarations() -> None:
         read_flag(key)
 
 
-def test_declared_flag_can_change_plugin_behavior() -> None:
+def test_hook_shaped_behavior_can_read_declared_flag_outside_plugin_context() -> None:
     previous = get_field("prompt_invest_future_enabled")
 
-    def plugin_behavior() -> str:
-        if read_flag("agent.prompt_invest_future_enabled"):
+    def hook_behavior() -> str:
+        if read_flag("agent.prompt_invest_future_enabled", plugin="plugin"):
             return "include future work"
         return "skip future work"
 
     try:
         with PluginContext("plugin"):
             declare_flags("agent.prompt_invest_future_enabled")
-            set_field("prompt_invest_future_enabled", False)
-            assert plugin_behavior() == "skip future work"
-            set_field("prompt_invest_future_enabled", True)
-            assert plugin_behavior() == "include future work"
+        set_field("prompt_invest_future_enabled", False)
+        assert hook_behavior() == "skip future work"
+        set_field("prompt_invest_future_enabled", True)
+        assert hook_behavior() == "include future work"
     finally:
         set_field("prompt_invest_future_enabled", previous)
