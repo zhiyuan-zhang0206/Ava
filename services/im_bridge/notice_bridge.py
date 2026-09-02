@@ -29,6 +29,7 @@ from typing import Any
 
 from services.im_bridge import copy
 from shared.config import settings
+from shared.db_transaction import write_transaction
 
 _log = logging.getLogger("services.im_bridge.notice_bridge")
 
@@ -179,7 +180,7 @@ class NoticeBridge:
         direct-DB twin of the gateway's /api/notices/open query."""
         from shared.db import NOTICE_FYI_TTL_DAYS
 
-        with self.db_pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(self.db_pool) as conn, conn.cursor() as cur:
             # Lazy FYI expiry, same as the gateway's open feed: expired FYIs
             # are auto-resolved so the queue view and every later query agree.
             cur.execute(

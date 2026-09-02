@@ -10,6 +10,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from shared.db_transaction import write_transaction
+
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
@@ -19,7 +21,7 @@ def create_client(pool: ConnectionPool[Any], name: str, scope: str) -> tuple[int
     """Create a client and return its id plus the plaintext token shown once."""
     token = secrets.token_urlsafe(32)
     try:
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO mcp_clients (name, token_hash, scope) "
                 "VALUES (%s, %s, %s) RETURNING id",
@@ -34,7 +36,7 @@ def create_client(pool: ConnectionPool[Any], name: str, scope: str) -> tuple[int
 
 def lookup_client_by_token(pool: ConnectionPool[Any], token: str) -> dict[str, Any] | None:
     """Authenticate an active token and record its latest use atomically."""
-    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with write_transaction(pool) as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
             UPDATE mcp_clients
@@ -62,7 +64,7 @@ def list_clients(pool: ConnectionPool[Any]) -> list[dict[str, Any]]:
 
 def revoke_client(pool: ConnectionPool[Any], client_id: int) -> bool:
     """Revoke an active client; return false when missing or already revoked."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             """
             UPDATE mcp_clients
