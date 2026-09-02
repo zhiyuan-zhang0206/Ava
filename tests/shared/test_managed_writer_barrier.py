@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 from typing import LiteralString, cast
@@ -10,6 +12,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg import sql
 from pydantic import ValidationError
 
 from shared.managed_writer_barrier import (
@@ -179,3 +182,63 @@ def test_unknown_fields_and_unsafe_home_refuse() -> None:
         ManagedUnit.model_validate(
             {"machine": "runner", "home": "/ava", "inventory_digest": "a" * 64, "online": True}
         )
+
+
+def test_inventory_lock_wait_cannot_extend_expired_operation(db_conn: psycopg.Connection) -> None:
+    """Two real connections: inventory waits must recheck time after acquiring it."""
+    schema = "barrier_" + uuid4().hex
+    db_conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+    for table in ("deployment_state", "machines", "machine_units"):
+        db_conn.execute(
+            sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING ALL)").format(
+                sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+            )
+        )
+    db_conn.execute("SELECT set_config('search_path',%s,false)", (schema + ",public",))
+    db_conn.execute("INSERT INTO deployment_state(id) VALUES (1)")
+    db_conn.execute("INSERT INTO machines(name) VALUES ('runner')")
+    db_conn.execute("INSERT INTO machine_units(machine_name,home) VALUES ('runner','/ava')")
+    collection = _collection(db_conn)
+    db_conn.execute("UPDATE deployment_state SET expires_at=clock_timestamp()+interval '1 second'")
+    db_conn.commit()
+    try:
+        with psycopg.connect(db_conn.info.dsn) as worker:
+            worker.execute("SELECT set_config('search_path',%s,false)", (schema + ",public",))
+            worker.commit()
+            worker_pid = worker.info.backend_pid
+            db_conn.execute("LOCK TABLE machine_units IN ACCESS EXCLUSIVE MODE")
+            with ThreadPoolExecutor(max_workers=1) as executor:
+
+                def adopt() -> None:
+                    with worker.transaction():
+                        _record(worker, collection)
+
+                future = executor.submit(adopt)
+                deadline = time.monotonic() + 5
+                while True:
+                    row = db_conn.execute(
+                        "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=%s AND NOT granted)",
+                        (worker_pid,),
+                    ).fetchone()
+                    if row == (True,):
+                        break
+                    if time.monotonic() >= deadline:
+                        db_conn.rollback()
+                        raise AssertionError("worker never blocked on the inventory lock")
+                    time.sleep(0.01)
+                # Wait for actual server-side lease expiry while retaining the lock.
+                db_conn.execute(
+                    "SELECT pg_sleep(GREATEST(0,EXTRACT(EPOCH FROM "
+                    "(expires_at-clock_timestamp())))+0.01) FROM deployment_state"
+                )
+                db_conn.commit()
+                with pytest.raises(ManagedWriterBarrierError, match="live rollout"):
+                    future.result(timeout=5)
+            assert db_conn.execute(
+                "SELECT managed_writer_evidence IS NULL FROM deployment_state"
+            ).fetchone() == (True,)
+    finally:
+        db_conn.rollback()
+        db_conn.execute("SELECT set_config('search_path','public',false)")
+        db_conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+        db_conn.commit()
