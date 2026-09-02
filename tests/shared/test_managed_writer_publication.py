@@ -196,6 +196,7 @@ def test_pending_waits_for_admission_transaction(db_conn: psycopg.Connection) ->
         with psycopg.connect(db_conn.info.dsn) as worker:
             worker.execute("SELECT set_config('search_path',%s,false)", (schema + ",public",))
             worker.commit()
+            db_conn.execute("BEGIN")
             require(db_conn)
             with ThreadPoolExecutor(max_workers=1) as executor:
 
@@ -220,6 +221,7 @@ def test_pending_waits_for_admission_transaction(db_conn: psycopg.Connection) ->
                     future.result(timeout=5)
                 finally:
                     db_conn.rollback()
+            db_conn.execute("BEGIN")
             with pytest.raises(ManagedWriterBarrierError, match="transitioning"):
                 require(db_conn)
     finally:
