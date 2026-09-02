@@ -82,9 +82,9 @@ function timeRange(startValue: string, endValue: string): string {
   return `${datePart(start)} ${timePart(start)} – ${endLabel}`;
 }
 
-function tickLabel(timestamp: string): string {
+function tickLabel(timestamp: string, includeSeconds: boolean): string {
   const date = new Date(timestamp);
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return includeSeconds ? timePart(date) : `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function rowFailed(row: RunTimelineResponse["rows"][number]): boolean {
@@ -93,15 +93,15 @@ function rowFailed(row: RunTimelineResponse["rows"][number]): boolean {
 
 function eventChipClass(kind: string): string {
   if (kind.includes("failed") || kind.includes("timeout")) {
-    return "border-[var(--series-5)] bg-red-50 text-red-700";
+    return "border-[var(--series-5)] bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400";
   }
   if (kind === "compact" || kind === "auto_compact") {
-    return "border-violet-300 bg-violet-50 text-violet-700";
+    return "border-violet-300 bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-400";
   }
   if (kind.includes("restart") || kind.includes("resurrect")) {
-    return "border-blue-300 bg-blue-50 text-blue-700";
+    return "border-blue-300 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400";
   }
-  return "border-[#e7e7e9] bg-white text-neutral-600";
+  return "border-border bg-card text-muted-foreground";
 }
 
 function prioritizedRailEvents(events: RunTimelineResponse["events"]) {
@@ -129,9 +129,9 @@ function prioritizedRailEvents(events: RunTimelineResponse["events"]) {
 
 function DetailMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="space-y-1 rounded-[10px] border border-[#e7e7e9] bg-neutral-50 px-3 py-2">
-      <dt className="text-[10px] font-medium uppercase tracking-wide text-neutral-500">{label}</dt>
-      <dd className="font-mono text-xs tabular-nums text-neutral-900">{value}</dd>
+    <div className="space-y-1 rounded-[10px] border border-border bg-muted px-3 py-2">
+      <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="font-mono text-xs tabular-nums text-foreground">{value}</dd>
     </div>
   );
 }
@@ -149,18 +149,18 @@ function TurnDetailPanel({
     <aside
       role="region"
       aria-label={labels.turnDetails}
-      className="h-fit space-y-4 rounded-[10px] border border-[#e7e7e9] bg-white p-4 text-neutral-900"
+      className="h-fit space-y-4 rounded-[10px] border border-border bg-card p-4 text-foreground"
     >
       <header className={cn(FLEX, "items-start justify-between gap-3")}>
         <div>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-500">{labels.turnDetails}</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{labels.turnDetails}</p>
           <h3 className="text-sm font-semibold">{rowLabel(row, labels)}</h3>
         </div>
         <button
           type="button"
           onClick={onClose}
           aria-label={labels.closeDetails}
-          className="rounded-md px-1.5 py-0.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+          className="rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           ×
         </button>
@@ -184,10 +184,10 @@ function TurnDetailPanel({
       <section className="space-y-2">
         <h4 className="text-xs font-semibold">{labels.executions}</h4>
         {row.execs.length === 0 ? (
-          <p className="text-xs text-neutral-500">{labels.noExecutions}</p>
+          <p className="text-xs text-muted-foreground">{labels.noExecutions}</p>
         ) : (
-          <div className={cn(OVERFLOW_HIDDEN, "rounded-[10px] border border-[#e7e7e9]")}>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 bg-neutral-50 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+          <div className={cn(OVERFLOW_HIDDEN, "rounded-[10px] border border-border")}>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 bg-muted px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               <span>{labels.tool}</span>
               <span>{labels.duration}</span>
               <span>{labels.status}</span>
@@ -195,11 +195,11 @@ function TurnDetailPanel({
             {row.execs.map((execution, index) => (
               <div
                 key={`${execution.tool}-${index}`}
-                className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-t border-[#e7e7e9] px-3 py-2 font-mono text-[11px]"
+                className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-t border-border px-3 py-2 font-mono text-[11px]"
               >
                 <span className="truncate">{execution.tool}</span>
                 <span className="tabular-nums">{execution.dur_s.toFixed(2)}s</span>
-                <span className={execution.ok ? "text-emerald-700" : "text-red-700"}>
+                <span className={execution.ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}>
                   {execution.ok ? labels.succeeded : labels.failed}
                 </span>
               </div>
@@ -211,13 +211,13 @@ function TurnDetailPanel({
       <section className="space-y-2">
         <h4 className="text-xs font-semibold">{labels.anomalies}</h4>
         {row.anomalies.length === 0 ? (
-          <p className="text-xs text-neutral-500">{labels.none}</p>
+          <p className="text-xs text-muted-foreground">{labels.none}</p>
         ) : (
           <div className={cn(FLEX, "flex-wrap gap-1.5")}>
             {row.anomalies.map((anomaly) => (
               <span
                 key={anomaly}
-                className="rounded-md border border-red-200 bg-red-50 px-2 py-1 font-mono text-[10px] text-red-700"
+                className="rounded-md border border-red-200 bg-red-50 px-2 py-1 font-mono text-[10px] text-red-700 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-400"
               >
                 {anomaly}
               </span>
@@ -252,6 +252,10 @@ export function RunTimelineChart({
   );
   const selectedRow =
     selectedRowIndex === null ? null : (timeline.rows[selectedRowIndex] ?? null);
+  const tickSpacingMs =
+    (Date.parse(timeline.window.to) - Date.parse(timeline.window.from)) /
+    (layout.ticks.length - 1);
+  const includeTickSeconds = tickSpacingMs < 60_000;
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -268,19 +272,19 @@ export function RunTimelineChart({
   if (timeline.rows.length === 0) {
     return (
       <section
-        className="rounded-[10px] border border-[#e7e7e9] bg-white p-4"
+        className="rounded-[10px] border border-border bg-card p-4"
         aria-label={labels.chart}
       >
-        <p className="font-mono text-sm text-neutral-500">{labels.empty}</p>
+        <p className="font-mono text-sm text-muted-foreground">{labels.empty}</p>
       </section>
     );
   }
 
   return (
-    <section aria-label={labels.chart} className="rounded-[10px] border border-[#e7e7e9] bg-white p-3">
+    <section aria-label={labels.chart} className="rounded-[10px] border border-border bg-card p-3">
       <div className={cn("grid gap-3", selectedRow ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "")}>
         <div className={cn(MIN_W_0, "space-y-2")}>
-          <div className={cn(FLEX, "items-center justify-between px-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500")}>
+          <div className={cn(FLEX, "items-center justify-between px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground")}>
             <span>{labels.time}</span>
             <span>{labels.eventRail}</span>
           </div>
@@ -303,7 +307,7 @@ export function RunTimelineChart({
                   x2={layout.plot.right}
                   y1={layout.axisY}
                   y2={layout.axisY}
-                  stroke="#d4d4d8"
+                  stroke="var(--border)"
                 />
                 {layout.ticks.map((tick) => (
                   <line
@@ -312,7 +316,7 @@ export function RunTimelineChart({
                     x2={tick.x}
                     y1={layout.axisY - 4}
                     y2={layout.track.top + layout.track.height}
-                    stroke="#e7e7e9"
+                    stroke="var(--border)"
                     strokeDasharray="2 4"
                   />
                 ))}
@@ -357,8 +361,8 @@ export function RunTimelineChart({
                   width={layout.plot.width}
                   height={layout.track.height}
                   rx="10"
-                  fill="#fafafa"
-                  stroke="#e7e7e9"
+                  fill="var(--muted)"
+                  stroke="var(--border)"
                 />
                 {layout.turns.map((turn, index) => {
                   const row = timeline.rows[turn.rowIndex];
@@ -380,7 +384,7 @@ export function RunTimelineChart({
                             : "var(--series-3)"
                       }
                       fillOpacity={failed ? 0.95 : 0.82}
-                      stroke={selectedRowIndex === turn.rowIndex ? "#18181b" : "#ffffff"}
+                      stroke={selectedRowIndex === turn.rowIndex ? "var(--foreground)" : "var(--card)"}
                       strokeWidth={selectedRowIndex === turn.rowIndex ? 2 : 1}
                     />
                   );
@@ -395,12 +399,12 @@ export function RunTimelineChart({
                     data-timeline-tick=""
                     data-testid="fixed-timeline-text"
                     className={cn(
-                      "absolute w-[72px] font-mono text-[10px] tabular-nums text-neutral-500",
+                      "absolute w-[72px] font-mono text-[10px] tabular-nums text-muted-foreground",
                       index === 0 ? "text-left" : index === layout.ticks.length - 1 ? "text-right" : "text-center",
                     )}
                     style={{ left: `${Math.round(left)}px`, top: "4px" }}
                   >
-                    {tickLabel(tick.timestamp)}
+                    {tickLabel(tick.timestamp, includeTickSeconds)}
                   </span>
                 );
               })}
@@ -451,7 +455,7 @@ export function RunTimelineChart({
                     type="button"
                     aria-label={label}
                     onClick={() => setSelectedRowIndex(turn.rowIndex)}
-                    className="absolute rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+                    className="absolute rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
                     style={{
                       left: `${turn.left}px`,
                       top: `${layout.track.top}px`,
@@ -474,7 +478,7 @@ export function RunTimelineChart({
             </div>
           </div>
           {rail.skippedCount > 0 ? (
-            <p className="px-1 font-mono text-[10px] text-neutral-500">
+            <p className="px-1 font-mono text-[10px] text-muted-foreground">
               {labels.moreEvents(rail.skippedCount, rail.skippedSummary)}
             </p>
           ) : null}
