@@ -22,7 +22,7 @@ class ReleaseStoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.store = Path(self.temporary.name)
+        self.store = Path(self.temporary.name).resolve()
         self.schema = "e" * 64
 
     def make_release(self, content: bytes) -> tuple[str, str]:
@@ -55,6 +55,41 @@ class ReleaseStoreTests(unittest.TestCase):
             platform_tag="test-platform",
             schema_digest=self.schema,
         )
+
+    def test_symlink_ancestor_cannot_redirect_verified_generation(self) -> None:
+        release = self.make_release(b"alias")
+        alias = self.store / "ancestor-alias"
+        try:
+            alias.symlink_to(self.store.parent, target_is_directory=True)
+        except OSError:
+            self.skipTest("host does not permit directory symlinks")
+        redirected = alias / self.store.name
+        self.assertFalse(redirected.is_symlink())
+        with self.assertRaises(ReleaseRejectedError):
+            verify_release(
+                redirected,
+                release[0],
+                manifest_digest=release[1],
+                platform_tag="test-platform",
+                schema_digest=self.schema,
+            )
+        with self.assertRaises(ReleaseRejectedError):
+            activate_release(
+                redirected,
+                release[0],
+                expected_current=None,
+                manifest_digest=release[1],
+                platform_tag="test-platform",
+                schema_digest=self.schema,
+            )
+        self.assertFalse((self.store / "activation.lock").exists())
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX special-file proof")
+    def test_unlisted_fifo_is_not_a_complete_inventory(self) -> None:
+        release = self.make_release(b"fifo")
+        os.mkfifo(self.store / release[0] / "unexpected-pipe")
+        with self.assertRaisesRegex(ReleaseRejectedError, "special file"):
+            self.activate(release)
 
     def test_switch_and_rollback_keep_old_absolute_paths(self) -> None:
         first = self.make_release(b"first")
