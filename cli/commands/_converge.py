@@ -295,6 +295,45 @@ def _migrate_host_config_to_env(ctx: ConvergeCtx) -> None:
     runtime_config.migrate_primary_gateway_url_key(ctx.ava_home / ".env")
 
 
+def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
+    """Backfill missing AVA_*_HEALTH_PORT keys into a block-style unit's .env.
+
+    A unit enrolled before a health daemon joined `_HEALTH_PORT_SERVICES`
+    carries no key for it, so that daemon falls back to the LEGACY shared port
+    (`daemon_health.health_port`) — and two co-located units on one localhost
+    namespace (a Windows unit and its WSL2 sibling) then collide on the same
+    shared default (2026-09-02: win/wsl both on 8114). When the unit's present
+    health keys prove one block base (see
+    `env_registry.backfill_missing_health_ports`), the missing keys are derived
+    and written under the env lock, exactly as enroll would have written them.
+    A legacy unit's fixed 8102-8111 pins are not offset-consistent, so it is
+    never touched; a complete key set is a no-op. Idempotent by construction.
+    """
+    from shared.env_registry import (
+        backfill_missing_health_ports,
+        health_port_env_aliases,
+    )
+    from shared.envfile import upsert_env
+
+    env_path = ctx.ava_home / ".env"
+    if not env_path.exists():
+        return
+    wanted = set(health_port_env_aliases().values())
+    existing: dict[str, str] = {}
+    for line in env_path.read_text().splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip() in wanted:
+            existing[key.strip()] = value.strip()
+    missing = backfill_missing_health_ports(existing)
+    if not missing:
+        return
+    upsert_env(env_path, missing, audit_site="converge_health_port_backfill")
+    print(
+        f"  · backfilled {len(missing)} daemon health-port key(s) from this unit's "
+        f"port block: {', '.join(f'{k}={v}' for k, v in sorted(missing.items()))}"
+    )
+
+
 def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     from shared.plugins_config import update_all_disk_images
 
@@ -657,6 +696,15 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "migrate legacy env keys -> .env",
         _migrate_host_config_to_env,
+        requires_unit_config=True,
+    ),
+    # A block-style unit whose .env predates a health daemon's slot gets the
+    # missing keys derived from its own block, so no daemon falls back to the
+    # shared legacy segment on a co-located namespace. File-only, idempotent;
+    # legacy units (no consistent block) are untouched.
+    ConvergeStep(
+        "backfill missing daemon health-port keys",
+        _backfill_health_port_keys_step,
         requires_unit_config=True,
     ),
     # Warning-only: untracked `.sql` files in migrations/ are never applied

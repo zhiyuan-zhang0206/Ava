@@ -167,6 +167,20 @@ CONVERGING_POLL_TIMEOUT_S = 300.0
 # stage for longer than any stage has ever legitimately taken.
 STAGE_NO_PROGRESS_TIMEOUT_S = 675.0
 
+# How long a Phase-B poll keeps reading a paused host with no live updater
+# lease as "the updater has not armed yet". The updater arms its lease at the
+# chain head within seconds of its spawn, and the spawn precedes the poll, so a
+# paused host still lease-less past this grace is one whose updater provably
+# ended without clearing posture — a stall candidate (2026-09-02 win: the
+# updater's recovery `ava start` exited rc=1 under the executing deploy lease,
+# its lease clear ran, and the poll then burned the whole 900 s bound on the
+# never-stall "paused with no lease" reading). Anchored to the poll's OWN
+# elapsed clock, never `paused_at`: the pause (Phase A fan-out) and the updater
+# spawn (Phase B trigger) are minutes apart by design — the gateway's local leg
+# sits between them. Legacy pre-lease chains predate this fleet; a working
+# updater always arms inside the grace.
+LEASE_ARM_GRACE_S = 90.0
+
 # How long the Phase-B poll harvest waits before re-probing a host whose posture
 # just went idle but whose updater stage capture is missing its final `start`
 # stage line (Task #1820). The updater's `start` line lands a few ms AFTER the

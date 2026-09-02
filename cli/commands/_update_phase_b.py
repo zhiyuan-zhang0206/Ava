@@ -48,6 +48,7 @@ from cli.commands._update_recover import RolloutOutcome
 from shared.deploy_timing import (
     CONVERGING_POLL_TIMEOUT_S,
     HARVEST_GRACE_S,
+    LEASE_ARM_GRACE_S,
     PHASE_B_ABSOLUTE_TIMEOUT_S,
     STAGE_NO_PROGRESS_TIMEOUT_S,
 )
@@ -81,6 +82,9 @@ _CONVERGING_TIMEOUT_S = CONVERGING_POLL_TIMEOUT_S
 # A module-level alias read through the `cli.commands` namespace so tests can shrink
 # it, exactly like _POLL_TIMEOUT_S.
 _STAGE_NO_PROGRESS_S = STAGE_NO_PROGRESS_TIMEOUT_S
+# Alias of the deploy family's lease-arm grace — a registered clock
+# (shared.deploy_timing); the poll's own elapsed clock anchors it (branch above).
+_LEASE_ARM_GRACE_S = LEASE_ARM_GRACE_S
 
 
 # Phase-B poll verdicts. Four facts, deliberately not one word: 'the poll ran out
@@ -100,8 +104,8 @@ POLL_NO_PROGRESS = "no_progress"  # updater alive, but its stage evidence has st
 # no lease at all. The DB row is the authority:
 # - posture `idle` (or no row) -> converged;
 # - a LIVE updater lease -> still working, keep polling;
-# - `paused` with NO lease -> the fan-out window / a legacy pre-lease chain
-#   ("cannot tell", never a stall);
+# - `paused` with NO lease -> the fan-out window while inside the arm grace,
+#   a provable stop past it (the updater's clear ran without reaching idle);
 # - `paused` with an EXPIRED lease, or `converging` with no live lease (the
 #   updater finished or aborted and the host did not return to idle) -> the
 #   provable-stall fact, confirmed `_STALL_CONFIRMATIONS` times.
@@ -165,6 +169,8 @@ def _probe_verdict(
     stalls: int,
     machine: str,
     no_progress: int,
+    *,
+    poll_elapsed: float = 0.0,
 ) -> tuple[PollVerdict | None, int, int, bool]:
     """One status_probe response + this host's deploy-state row →
     (verdict, stalls, no_progress, progressing).
@@ -174,8 +180,9 @@ def _probe_verdict(
     the expected mid-restart reading, never evidence. The verdict itself reads the
     host_deploy_state row (the R1 authority), not the probe's `paused` field: posture
     `idle` is convergence; a live updater lease is "still working"; `paused` with no
-    lease is the fan-out window / a legacy chain ("cannot tell", never a stall);
-    `paused` with an expired lease or `converging` with no live lease is the
+    lease is the fan-out window inside the arm grace and a provable stop past it
+    (`_LEASE_ARM_GRACE_S`, the updater's clear ran without reaching idle); `paused`
+    with an expired lease or `converging` with no live lease is likewise the
     provable-stall fact, confirmed `_STALL_CONFIRMATIONS` times before it ends the
     poll. A row read failure is "cannot tell" (fail-soft — the poll keeps its
     deadline, and neither counter advances).
@@ -278,12 +285,13 @@ def _probe_verdict(
             if parsed is None or parsed.current_stage is None or parsed.current_stage_s is None:
                 return None, 0, no_progress, False
             return None, 0, no_progress, True
-        if state.posture == POSTURE_PAUSED and not state.updater_expired:
-            # Paused with no lease this pause window armed: the updater has not
-            # touched yet (a session spawn plus a Python cold start), or a legacy
-            # pre-lease chain, or a PREVIOUS run's uncleared expiry still sitting in
-            # the row. "Cannot tell", never a stall — see `updater_expired`. Any
-            # stage evidence here belongs to an earlier run, so it never counts.
+        if (
+            state.posture == POSTURE_PAUSED
+            and not state.updater_expired
+            and poll_elapsed < _LEASE_ARM_GRACE_S
+        ):
+            # Paused with no lease inside the arm grace: the updater has not
+            # armed yet; past the grace it is a provable stop, never a wait.
             return None, 0, 0, False
     stalls += 1
     if stalls >= _STALL_CONFIRMATIONS:
@@ -381,7 +389,7 @@ async def _probe_one_until_unpaused(
         )
         _capture_host_stages(host_outcomes, name, result)
         verdict, stalls, no_progress, progressing = _probe_verdict(
-            result, stalls, name, no_progress
+            result, stalls, name, no_progress, poll_elapsed=time.monotonic() - started
         )
         if verdict is not None:
             if (
