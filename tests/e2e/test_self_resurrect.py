@@ -117,7 +117,9 @@ def test_resurrect_brings_back_terminated_agent(e2e_env: E2EEnv) -> None:
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_resurrect:build")
-def test_explicit_resurrection_after_observed_process_exit(e2e_env: E2EEnv) -> None:
+def test_explicit_resurrection_after_observed_process_exit(
+    e2e_env: E2EEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Separate supported lifecycle RPC, not the chat auto-resurrection path."""
     if _HOSTED:
         pytest.skip("process exit identity belongs to the process-mode contract")
@@ -144,6 +146,9 @@ def test_explicit_resurrection_after_observed_process_exit(e2e_env: E2EEnv) -> N
         time.sleep(0.05)
     # Playwright's sync bridge keeps an event loop on this thread. The real
     # lifecycle RPC therefore runs on a separate, bounded test-owned thread.
+    # Root truncated_db disables auth only in this pytest process, while the
+    # real ops subprocess retains the root fixture's public test credential.
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-cluster-secret")
     with ThreadPoolExecutor(max_workers=1) as executor:
         response = executor.submit(
             asyncio.run,

@@ -38,7 +38,9 @@ if _agent_id is not None:
 
     _boot_timing.mark("starting_import")
     claim_agent_row_or_die_on_stale_schema(
-        _agent_id, restart_command_id=consume_restart_command(sys.argv)
+        _agent_id,
+        restart_command_id=consume_restart_command(sys.argv),
+        resurrect_command_id=consume_restart_command(sys.argv, flag="--resurrect-command-id"),
     )
     _boot_timing.mark("claim_row")
     _boot_deadline.disarm()

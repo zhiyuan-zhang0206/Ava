@@ -5,9 +5,8 @@ import psycopg
 from shared.boot_timing import BOOT_BUDGET_SEC
 
 
-def consume_restart_command(argv: list[str]) -> int | None:
+def consume_restart_command(argv: list[str], *, flag: str = "--restart-command-id") -> int | None:
     """Consume the non-secret launch identity before the strict runtime parser."""
-    flag = "--restart-command-id"
     if flag not in argv:
         return None
     if argv.count(flag) != 1:

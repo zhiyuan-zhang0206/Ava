@@ -32,6 +32,17 @@ metadata row lock, `agent/restart_admission.py` checks target incarnation, pendi
 pointer and original application-time deadline. Missing, delayed or superseded
 attempts cannot use legacy admission.
 
+Process resurrection similarly uses `--resurrect-command-id`, referring to the
+existing notification inbound with server-reserved `resurrection_launch`
+evidence. It does not use restart/terminate-only target columns. Preparation
+fixes the actual allocation epoch, old incarnation, machine, original request
+deadline and trigger identity. Each OS attempt is authorized in a short committed
+transaction before launch outside locks. A pending user's persisted OS counter
+survives redispatch and is distinct from exit-wait preparation attempts. Missing
+or stale launch identity cannot claim that allocation. This establishes bounded
+authorization, not OS exactly-once; recovery after controller death between
+allocation commit and its first launch remains an explicit integration gate.
+
 `agent/session_admission.py` publishes the winning process's canonical record
 before admission commits. The record is repairable observation, not a second
 ownership authority. Publication failure rolls back the DB transaction; live or
