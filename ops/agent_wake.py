@@ -1,40 +1,24 @@
 """Agent wake: an EXISTING agents_meta row back into a running process.
 
-The other lifecycle half from `ops/agent_spawn.py` (which creates new rows);
-both are reached through `ops/agents.py`. Two wake paths here, one shape: a CAS
-on `agents_meta.status` into unclaimed 'idling' (clearing pid / started_at), a
-lifecycle inbound, then a relaunch attached to the same `agent_id` —
-LangGraph's checkpointer restores the message history, so the process resumes
-rather than starts over. Resurrection commits allocation and OS authorization
-before starting a detached session outside database locks. Early child admission
-revalidates its exact allocation and deadline. `resurrect_agent` comes from
-'terminated', `respawn_agent` from 'restarting'; the no-inbound wake path
-(`revive_agent` from a dead pid) lives in `ops/agent_revive.py` (Task #1999
-split, re-exported here). The *mechanics* of launching the child live in
-`ops/agent_launch.py`, reached via module-qualified access
-(`agent_launch._launch_or_force_terminated`).
+Unlike `ops/agent_spawn.py`, this module resumes existing rows and checkpoints.
+Resurrection commits allocation and OS authorization before detached launch
+outside database locks. Early child admission checks the exact allocation and
+deadline. The original pending wake can resume a prepared allocation without
+resetting its durable budget. Native mechanics live in `ops/agent_launch.py`;
+the no-inbound revive path lives in `ops/agent_revive.py` (re-exported here).
 
 Hosted mode (`AVA_RUNNER_MODE=hosted`): the CAS and the inbound rows are the
 whole op — no process to launch. The hosted branches commit, publish the Redis
 wake (the inbound INSERTs here are raw SQL and do not publish), and skip the
 launch + pid-confirm machinery entirely.
 
-- **resurrect_agent(...)** — a 'terminated' row -> unclaimed 'idling' + launch.
-  INSERTs a kind='resurrect' inbound so the LLM sees why it resumed; an
-  optional `prompt` adds a chat in the same transaction. The child cannot claim
-  or process either inbound
-  before the transaction commits, eliminating the race "prompt has not arrived
-  yet but agent has already started running". Pending-work auto-resurrect also
-  carries the exact inbound id and expected kind (`chat` or `compact_request`):
-  the final UPDATE accepts it only while that row is pending, newer than the
-  current termination, and above the latest force-terminate inbound fence. A
-  later kill therefore wins without a marker or launch. Crash and wedged
-  recovery instead carry an exact controller claim for the current death;
-  explicit manual resurrection has neither automatic-work guard.
-- **respawn_agent(agent_id)** — 'restarting' -> unclaimed 'idling' + launch process,
-  same pattern as resurrect. **Automatically INSERTs one
-  kind='restart_completed' inbound** (source taken from the original 'restart'
-  inbound, empty content), used by the restarter daemon, race-safe.
+- `resurrect_agent`: terminated -> unclaimed idling, with a resurrect marker and
+  optional prompt committed together. Pending-work callers carry the exact
+  still-pending post-death inbound above the force-intent fence. Crash/wedged
+  recovery carries its exact death claim; explicit manual resurrection does not.
+- `respawn_agent`: owned runtimes use the existing durable command controller;
+  actual successor admission, not launch, records completion. Legacy unowned
+  compatibility is separately bounded and cannot replace an owned runtime.
 
 `resurrected_by` is required (no default) — the caller must consciously decide
 who triggered the resurrect: SDK path `f"agent:{ava.self.AGENT_ID}"`, gateway HTTP
