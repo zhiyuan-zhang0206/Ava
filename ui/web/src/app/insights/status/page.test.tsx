@@ -611,7 +611,7 @@ describe("StatusPage Services and Gateway sections", () => {
       backend_changed: false,
       needs_replay: true,
     });
-    const confirmSpy = vi.fn((_: string) => false);
+    const confirmSpy = vi.fn((_message?: string) => false);
     window.confirm = confirmSpy;
     wrap(<StatusPage />);
     await waitFor(() => screen.getByText("Services"));
