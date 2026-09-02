@@ -31,7 +31,7 @@ def _h_agents_cancel(args: argparse.Namespace) -> int:
 def _h_agents_restart(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_restart
 
-    return cmd_agents_restart(args.agent_id)
+    return cmd_agents_restart(args.agent_id, args.config)
 
 
 def _h_agents_resurrect(args: argparse.Namespace) -> int:
@@ -135,6 +135,9 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         "restart", help="restart the agent in place (history preserved)"
     )
     agents_restart_p.add_argument("agent_id", type=int, help="agent id to restart")
+    agents_restart_p.add_argument(
+        "--config", default=None, help='config overlay as JSON (e.g. {"llm_model":"gpt-5.6-sol"})'
+    )
     agents_restart_p.set_defaults(func=_h_agents_restart)
 
     agents_resurrect_p = agents_sub.add_parser(

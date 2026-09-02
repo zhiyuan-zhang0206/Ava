@@ -137,17 +137,37 @@ def cmd_agents_cancel(agent_id: int) -> int:
     return 0
 
 
-def cmd_agents_restart(agent_id: int) -> int:
-    """`ava agents restart <id>` — POST /api/agents/{id}/restart.
+def cmd_agents_restart(agent_id: int, config_json: str | None = None) -> int:
+    """`ava agents restart <id> [--config JSON]` — POST /api/agents/{id}/restart.
 
     The agent exits after its current turn and a fresh process is respawned
-    attached to the same agent_id (history preserved). A dead agent returns
+    attached to the same agent_id (history preserved). `--config` merges a
+    per-agent overlay before the restart. A dead agent returns
     `already_terminated` — use `resurrect` instead."""
+    import json
+    import sys
+
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/restart"
-    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    if config_json is None:
+        resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    else:
+        try:
+            config_overlay = json.loads(config_json)
+        except json.JSONDecodeError as exc:
+            print(f"invalid config JSON: {exc}", file=sys.stderr)
+            return 1
+        if not isinstance(config_overlay, dict):
+            print("config must be a JSON object", file=sys.stderr)
+            return 1
+        resp = dial_post(
+            url,
+            json={"config_overlay": config_overlay},
+            timeout=_TIMEOUT_S,
+            headers=gateway_auth_headers(),
+        )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} restart: {resp.json().get('status')}")
     return 0

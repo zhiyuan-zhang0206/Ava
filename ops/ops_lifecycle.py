@@ -18,6 +18,7 @@ its home-machine forward cannot loop either.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from typing import Any, Literal
@@ -389,7 +390,20 @@ def _restart_blocking(
     if get_agent_status(agent_id) is AgentStatus.TERMINATED:
         return None
     with db_pool.connection() as conn:
-        return insert_inbound_message(conn, agent_id, "", source=body.source, kind="restart")
+        payload: dict[str, object] | None = None
+        if body.config_overlay:
+            conn.execute(
+                "UPDATE agents_meta "
+                "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
+                "WHERE id = %s",
+                (json.dumps(dict(body.config_overlay)), agent_id),
+            )
+            payload = {"config_overlay": dict(body.config_overlay)}
+        # insert_inbound_message commits this connection, so its INSERT commits
+        # the preceding overlay UPDATE in the same transaction.
+        return insert_inbound_message(
+            conn, agent_id, "", source=body.source, kind="restart", payload=payload
+        )
 
 
 async def restart_agent_op(

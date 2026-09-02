@@ -306,9 +306,28 @@ class RestartAgentRequest(BaseModel):
     'restart' inbound's source; the claim-side dispatch composes it into
     the marker `[system ts] You have been restarted by {source}` so the
     agent knows who restarted it.
+
+    `config_overlay`, when nonempty, is validated before it reaches either
+    gateway or runner writes, merged into the persistent agent overlay, and
+    carried in the restart inbound payload for the completion marker.
     """
 
     source: str = Field(default="user", min_length=1, max_length=64)
+    config_overlay: dict[str, object] | None = None
+
+    @model_validator(mode="after")
+    def _validate_config_overlay(self) -> "RestartAgentRequest":
+        if self.config_overlay is None:
+            return self
+        from shared.plugin_config_registry import InvalidConfigOverlay, validate_config_overlay
+
+        try:
+            validate_config_overlay(self.config_overlay)
+        except InvalidConfigOverlay as exc:
+            # Pydantic converts ValueError into a boundary validation failure;
+            # propagating InvalidConfigOverlay directly would become a 500.
+            raise ValueError(str(exc)) from exc
+        return self
 
 
 class RestartAgentResponse(BaseModel):

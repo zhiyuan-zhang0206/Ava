@@ -11957,11 +11957,23 @@
             "minLength": 1,
             "title": "Source",
             "default": "user"
+          },
+          "config_overlay": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Overlay"
           }
         },
         "type": "object",
         "title": "RestartAgentRequest",
-        "description": "POST /api/agents/{id}/restart request body — fully optional.\n\n`source` default \"user\" — frontend restart button does not need to\npass it; SDK paths pass f\"agent:{my_id}\". Written into the lifecycle\n'restart' inbound's source; the claim-side dispatch composes it into\nthe marker `[system ts] You have been restarted by {source}` so the\nagent knows who restarted it."
+        "description": "POST /api/agents/{id}/restart request body — fully optional.\n\n`source` default \"user\" — frontend restart button does not need to\npass it; SDK paths pass f\"agent:{my_id}\". Written into the lifecycle\n'restart' inbound's source; the claim-side dispatch composes it into\nthe marker `[system ts] You have been restarted by {source}` so the\nagent knows who restarted it.\n\n`config_overlay`, when nonempty, is validated before it reaches either\ngateway or runner writes, merged into the persistent agent overlay, and\ncarried in the restart inbound payload for the completion marker."
       },
       "RestartAgentResponse": {
         "properties": {

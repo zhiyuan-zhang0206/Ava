@@ -10,8 +10,7 @@ helper double-forks so the agent reparents to **init (pid 1)** immediately; init
 reaps it on death, and the spawner's only direct child (this helper) exits at
 once and is reaped by the spawner's own ``subprocess`` wait.
 
-Invocation (argv, no shell — a JSON ``--config-overlay`` element passes through
-intact)::
+Invocation (argv, no shell — JSON argument elements pass through intact)::
 
     python -m shared._reparent <stdout_log> <stderr_log> <cmd> [args...]
 

@@ -100,16 +100,30 @@ def test_agents_cancel_posts_to_cancel_route(
 def test_agents_restart_posts(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    seen: dict[str, object] = {}
-
-    def fake_post(url: str, **_kwargs: object) -> _FakeResp:
-        seen["url"] = url
-        return _FakeResp({"status": "enqueued"})
-
-    monkeypatch.setattr(httpx, "post", fake_post)
+    seen = _patch_post(monkeypatch, {"status": "enqueued"})
     assert _agents.cmd_agents_restart(9) == 0
     assert seen["url"] == "http://gw:8000/api/agents/9/restart"
+    assert seen["json"] is None
     assert "enqueued" in capsys.readouterr().out
+
+
+def test_agents_restart_posts_config_overlay(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = _patch_post(monkeypatch, {"status": "enqueued"})
+    assert _agents.cmd_agents_restart(9, '{"llm_model":"gpt-5.6-sol"}') == 0
+    assert seen["url"] == "http://gw:8000/api/agents/9/restart"
+    assert seen["json"] == {"config_overlay": {"llm_model": "gpt-5.6-sol"}}
+    assert "enqueued" in capsys.readouterr().out
+
+
+def test_agents_restart_rejects_non_object_config_json(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = _patch_post(monkeypatch, {"status": "enqueued"})
+    assert _agents.cmd_agents_restart(9, '["not", "an", "object"]') == 1
+    assert "url" not in seen
+    assert "config must be a JSON object" in capsys.readouterr().err
 
 
 def test_agents_terminate_is_graceful(
