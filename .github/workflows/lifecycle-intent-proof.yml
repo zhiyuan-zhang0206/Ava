@@ -27,11 +27,11 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          timeout 240 uv run pytest tests/agent/test_lifecycle_intent.py -q --junitxml=proof/head.xml
+          timeout 240 uv run pytest tests/agent/test_lifecycle_intent.py tests/agent/test_lifecycle_intent_migration.py -q --junitxml=proof/head.xml
           python - <<'PY'
           import xml.etree.ElementTree as ET
           tree = ET.parse('proof/head.xml')
-          assert len(tree.findall('.//testcase')) >= 4
+          assert len(tree.findall('.//testcase')) >= 6
           assert not tree.findall('.//failure') and not tree.findall('.//error')
           PY
       - if: always()
