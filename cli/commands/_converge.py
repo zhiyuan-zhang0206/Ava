@@ -143,7 +143,13 @@ def _ensure_prod_editable_dir_protection(ctx: ConvergeCtx) -> None:  # noqa: ARG
         return
     import shared.cluster_drift
     import shared.editable_install
+    from cli.commands.status import _update_in_flight
 
+    if _update_in_flight():
+        print(
+            "  · prod site-packages protection skipped: cluster update in flight", file=sys.stderr
+        )
+        return
     source_root = shared.cluster_drift.prod_source_dir()
     if source_root is None:
         return

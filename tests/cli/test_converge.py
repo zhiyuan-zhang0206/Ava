@@ -189,6 +189,7 @@ def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
     pth.write_text(str(source_root))
     pth.parent.chmod(0o755)
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: False)
     step = next(
         step
         for step in _converge.CONVERGE_STEPS
@@ -199,6 +200,28 @@ def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
 
     assert step.host_global
     assert stat.S_IMODE(pth.parent.stat().st_mode) == 0o555
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX site-packages protection")
+def test_prod_editable_dir_protection_skips_while_update_in_flight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A live rollout owns writable site-packages until its syncs complete."""
+    source_root = tmp_path / "prod" / "source"
+    pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
+    pth.parent.mkdir(parents=True)
+    pth.parent.chmod(0o755)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: True)
+    step = next(
+        step
+        for step in _converge.CONVERGE_STEPS
+        if step.name == "prod editable site-packages protection"
+    )
+
+    step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert stat.S_IMODE(pth.parent.stat().st_mode) == 0o755
 
 
 def test_prod_editable_pth_converge_step_repairs_and_warns(
