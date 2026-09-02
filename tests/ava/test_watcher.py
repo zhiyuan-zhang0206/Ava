@@ -753,7 +753,16 @@ def test_watcher_child_overrides_stale_session_identity(
     monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
 
     stale = _agent_row + 1  # a WRONG identity, as if frozen into the session env
-    monkeypatch.setattr(_sessions, "forward_env_dict", lambda: {"AVA_AGENT_ID": str(stale)})  # pyright: ignore[reportUnknownArgumentType]
+
+    def forward_env(*, activate_venv: bool = True) -> dict[str, str]:
+        del activate_venv
+        return {"AVA_AGENT_ID": str(stale)}
+
+    monkeypatch.setattr(
+        _sessions,
+        "forward_env_dict",
+        forward_env,
+    )  # pyright: ignore[reportUnknownArgumentType]
 
     wid = watcher.launch(code, timeout="1h", name="test-stale-id")
 

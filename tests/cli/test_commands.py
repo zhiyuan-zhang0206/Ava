@@ -15,6 +15,7 @@ import asyncio
 import os
 import re
 import subprocess as _subprocess
+from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
@@ -2121,15 +2122,23 @@ def test_gateway_local_update_starts_in_fresh_process(
     # The uv sync itself runs through the production sync seam (run_uv_sync ->
     # run_bounded), not subprocess.run, so it is recorded separately.
 
-    def _fake_sync(_repo: Path) -> _FakeResult:
+    def _fake_sync(_repo: Path, *, timeout_s: float = 600.0) -> _FakeResult:
         calls.append("uv-sync")
         return _FakeResult(returncode=0)
+
+    def _passing_import_gate(
+        _repo: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
 
     def _fake_run(cmd, *_a, **_kw):
         cmds.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         return _FakeResult(returncode=0)
 
     monkeypatch.setattr(_update_uv_sync, "run_uv_sync", _fake_sync)
+    monkeypatch.setattr(_update_uv_sync, "editable_import_gate", _passing_import_gate)
     monkeypatch.setattr(_up.subprocess, "run", _fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _up._run_gateway_local_update(

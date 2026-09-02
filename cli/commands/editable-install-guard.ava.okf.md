@@ -15,8 +15,10 @@ tags:
 An Ava editable install is a path pointer stored in
 `<checkout>/.venv/.../site-packages/_editable_impl_ava.pth`, plus the editable
 source URL uv records in the matching `<dist-info>/direct_url.json`. The
-pointer's canonical form is exactly one allowed source-root line followed by a
-trailing newline; a disposable worktree is never a legal target.
+pointer is legal when every non-empty line names an allowed source root; a
+disposable worktree is never a legal target. uv writes one line per wheel
+package, so its native multi-line form (including repeated roots and no trailing
+newline) is healthy.
 `shared/editable_install.py` owns the platform-independent discovery, exact-root
 validation, atomic repair, and temporary permission window used by lifecycle
 callers.
@@ -25,9 +27,9 @@ callers.
 
 - `_converge` registers the prod assertion as a host-global step. It resolves
   the installed prod checkout, accepts that source plus explicitly allowlisted
-  stable dev-clone roots, and repairs every non-canonical pointer. A legal
-  stable dev-clone target is retained but normalized to one line plus newline;
-  all other content is rewritten to the prod source root.
+  stable dev-clone roots, and repairs only an illegal or missing pointer. Legal
+  records are byte-identical after the pass; repaired content is the prod source
+  root without a trailing newline.
   The same pass asserts the `direct_url.json` records: a URL naming anything
   outside the allowlist (or a record that is unparsable or not marked
   editable) is repaired too, so the pointer and the URL can never disagree.
@@ -37,12 +39,15 @@ callers.
 - The following host-global `prod editable exec gate` checks the remaining
   records and the virtualenv console script (`.venv/bin/ava` or
   `.venv/Scripts/ava.exe`). If a residual half-uninstall remains, it runs one
-  recovery `uv sync` and rechecks. Finally it runs the checkout virtualenv
+  recovery `uv sync --reinstall-package ava` and rechecks. Finally it runs the checkout virtualenv
   interpreter in isolated mode from the platform temp directory to import
   `agent.exec_child`; success requires the printed module path to resolve under
-  the prod source root. Any residual record, missing launcher, or failed import
+  the prod source root or the same stable-root allowlist used for the records.
+  Any residual record, missing launcher, or failed import
   raises after a clear stderr diagnostic, so `ava start`, `ava converge`, and
   `ava cluster update` fail fast instead of accepting uv's false-success exit.
+  The manual equivalent is `cd <source> && uv sync --reinstall-package ava`;
+  `ava cluster update` performs the managed recovery.
 - `converge_host` rejects host-global steps before execution in `.worktrees/`
   and `.claude/worktrees/` checkouts, so a worktree's own legal pointer is never
   inspected or rewritten. `ava start` inherits the same converge step.
@@ -84,9 +89,11 @@ callers.
 - Repair changes editable-record content only. The write window restores every
   record and directory mode that existed before lifecycle code entered it.
 - Session creation projects `VIRTUAL_ENV` only when its cwd is inside the
-  spawning checkout; foreign-cwd Codex/worktree sessions retain the venv PATH
-  prefix but omit that uv target-selection signal. Exec children make the same
-  projection when their inherited cwd is outside the current interpreter root.
+  spawning checkout and not below its `.worktrees/` or `.claude/worktrees/`
+  directories; foreign-cwd and sibling-worktree Codex sessions retain the venv
+  PATH prefix but omit that uv target-selection signal. Exec children make the
+  same projection when their inherited cwd is outside the current interpreter
+  root or below either sibling-worktree directory.
 
 ## Key dependencies
 

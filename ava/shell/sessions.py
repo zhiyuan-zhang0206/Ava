@@ -139,6 +139,20 @@ _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 _MAX_TTL_SECONDS = 86_400  # 24h — a session lives at most one day (user ruling 2026-09-01)
 
 
+def _cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:
+    """Whether a session cwd may select this checkout's virtualenv.
+
+    A stable checkout can host disposable sibling worktrees. They are
+    lexically below the checkout but must not inherit its ``VIRTUAL_ENV``.
+    """
+
+    return (
+        session_cwd.is_relative_to(checkout_root)
+        and not session_cwd.is_relative_to(checkout_root / ".worktrees")
+        and not session_cwd.is_relative_to(checkout_root / ".claude" / "worktrees")
+    )
+
+
 def _validate_ttl(ttl: float) -> float:
     if not math.isfinite(ttl) or ttl <= 0:
         raise ValueError("ttl must be finite and greater than zero")
@@ -201,7 +215,7 @@ def _create_session(
     # monotonic per-agent sequence. Never roll it back or reuse it: an old
     # numeric handle must remain stale instead of naming a later session.
     session_cwd = Path(cwd)
-    activate_venv = session_cwd.resolve().is_relative_to(repo_root().resolve())
+    activate_venv = _cwd_is_inside_checkout(session_cwd.resolve(), repo_root().resolve())
     ok = backend.new_session(
         full,
         "",

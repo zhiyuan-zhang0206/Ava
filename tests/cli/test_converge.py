@@ -4,14 +4,17 @@ import inspect
 import json
 import os
 import stat
+import subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
-from cli.commands import _converge
+from cli.commands import _converge, _update_uv_sync
 from cli.commands import _converge_frontend_env as _fe_env
+from shared import editable_install
+from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
 
 @pytest.fixture
@@ -242,7 +245,7 @@ def test_prod_editable_pth_converge_step_repairs_and_warns(
     if step is not None:
         step.apply(_ctx(source_root, tmp_path / ".ava"))
 
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert "poisoned editable install" in capsys.readouterr().err
 
 
@@ -337,13 +340,27 @@ def test_prod_editable_exec_gate_is_host_global_and_skips_healthy_sync(
     source_root = tmp_path / "prod" / "source"
     launcher = _write_healthy_prod_editable_install(source_root)
     launcher.touch()
-    calls: list[Path] = []
+    calls: list[tuple[Path, str | None]] = []
+
+    def import_gate(
+        _root: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
+
+    def sync(
+        root: Path,
+        *,
+        timeout_s: float = UV_SYNC_TIMEOUT_S,
+        reinstall_package: str | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append((root, reinstall_package))
+        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
-    monkeypatch.setattr("shared.editable_install.editable_import_gate", lambda _root: ())
-    monkeypatch.setattr(
-        "cli.commands._update_uv_sync.run_uv_sync",
-        lambda root: calls.append(root) or SimpleNamespace(returncode=0),
-    )
+    monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
+    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", sync)
 
     step = _prod_editable_gate_step()
     step.apply(_ctx(source_root, tmp_path / ".ava"))
@@ -359,20 +376,33 @@ def test_prod_editable_exec_gate_recovers_a_missing_console_script(
 
     source_root = tmp_path / "prod" / "source"
     launcher = _write_healthy_prod_editable_install(source_root)
-    calls: list[Path] = []
+    calls: list[tuple[Path, str | None]] = []
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
-    monkeypatch.setattr("shared.editable_install.editable_import_gate", lambda _root: ())
 
-    def recover(root: Path) -> SimpleNamespace:
-        calls.append(root)
-        launcher.touch()
-        return SimpleNamespace(returncode=0)
+    def import_gate(
+        _root: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
 
-    monkeypatch.setattr("cli.commands._update_uv_sync.run_uv_sync", recover)
+    def recover(
+        root: Path,
+        *,
+        timeout_s: float = UV_SYNC_TIMEOUT_S,
+        reinstall_package: str | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append((root, reinstall_package))
+        if reinstall_package == "ava":
+            launcher.touch()
+        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+
+    monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
+    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", recover)
 
     _prod_editable_gate_step().apply(_ctx(source_root, tmp_path / ".ava"))
 
-    assert calls == [source_root]
+    assert calls == [(source_root, "ava")]
     assert launcher.exists()
 
 
@@ -384,13 +414,29 @@ def test_prod_editable_exec_gate_rejects_a_fake_successful_recovery(
     source_root = tmp_path / "prod" / "source"
     _write_healthy_prod_editable_install(source_root)
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
-    monkeypatch.setattr("shared.editable_install.editable_import_gate", lambda _root: ())
-    monkeypatch.setattr(
-        "cli.commands._update_uv_sync.run_uv_sync",
-        lambda _root: SimpleNamespace(returncode=0),
-    )
 
-    with pytest.raises(RuntimeError, match="editable console script missing"):
+    def import_gate(
+        _root: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
+
+    def fake_success(
+        _root: Path,
+        *,
+        timeout_s: float = UV_SYNC_TIMEOUT_S,
+        reinstall_package: str | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+
+    monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
+    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", fake_success)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"cd .* && uv sync --reinstall-package ava",
+    ):
         _prod_editable_gate_step().apply(_ctx(source_root, tmp_path / ".ava"))
 
 
@@ -756,7 +802,15 @@ def test_cmd_converge_unconfigured_returns_zero(
     (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
     monkeypatch.setattr(_ns, "_repo_root", lambda: repo)
     monkeypatch.setattr(_ns, "_roles_or_none", lambda: None)
-    monkeypatch.setattr("shared.editable_install.editable_import_gate", lambda _root: ())
+
+    def import_gate(
+        _root: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
+
+    monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
     # host-global wiring (the ava symlink) is prod-install only, so this test must
     # run as the default home, not the suite's ambient tmpfs home.
     monkeypatch.setattr(_converge, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]

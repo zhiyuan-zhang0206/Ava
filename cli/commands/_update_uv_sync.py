@@ -206,7 +206,10 @@ def _restore_editable_records(snapshots: tuple[_EditableRecordSnapshot, ...]) ->
 
 
 def run_uv_sync(
-    repo: Path, *, timeout_s: float = UV_SYNC_TIMEOUT_S
+    repo: Path,
+    *,
+    timeout_s: float = UV_SYNC_TIMEOUT_S,
+    reinstall_package: str | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     """Run production ``uv sync`` while preserving the editable pointer's exact mode.
 
@@ -239,8 +242,11 @@ def run_uv_sync(
             )
             return _failed_uv_sync(126)
         try:
+            argv = _prod_sync_argv(repo)
+            if reinstall_package is not None:
+                argv.extend(("--reinstall-package", reinstall_package))
             result = run_bounded(
-                _prod_sync_argv(repo),
+                argv,
                 cwd=repo,
                 env={key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"},
                 capture_output=False,
