@@ -44,7 +44,7 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                 self.assertTrue(
                     backend.new_session(
                         name,
-                        [sys.executable, "-c", child],
+                        [sys.executable, "-I", "-c", child],
                         Path.cwd(),
                         env=dict(os.environ),
                     )
@@ -161,7 +161,7 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                 self.assertTrue(
                     backend.new_session(
                         bystander,
-                        [sys.executable, "-c", "import time;time.sleep(30)"],
+                        [sys.executable, "-I", "-c", "import time;time.sleep(30)"],
                         Path.cwd(),
                         env=dict(os.environ),
                     )
@@ -169,7 +169,7 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                 self.assertTrue(
                     backend.new_session(
                         attempt,
-                        [sys.executable, "-c", child],
+                        [sys.executable, "-I", "-c", child],
                         Path.cwd(),
                         env=dict(os.environ),
                     )
@@ -231,7 +231,10 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                 try:
                     self.assertTrue(
                         backend.new_session(
-                            attempt, [sys.executable, "-c", child], Path.cwd(), env=dict(os.environ)
+                            attempt,
+                            [sys.executable, "-I", "-c", child],
+                            Path.cwd(),
+                            env=dict(os.environ),
                         )
                     )
                     deadline = time.monotonic() + 15
