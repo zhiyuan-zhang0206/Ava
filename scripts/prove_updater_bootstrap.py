@@ -109,11 +109,20 @@ def fault_worker(mode: str, request: Path) -> int:
             occupied.bind(("127.0.0.1", plan.projection.ops_port))
             occupied.listen()
             real_start(plan, image, context_path)
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + challenge_budget(plan.candidate.challenge.valid_until) / 2
             while time.monotonic() < deadline:
-                process, kind = hop._recorded_observer(plan)
+                try:
+                    process, kind = hop._recorded_observer(plan)
+                except ReleaseRejectedError:
+                    time.sleep(0.05)
+                    continue
                 require(kind == "B", "failure fixture did not launch actual B")
                 if observe_process(process) == "exited":
+                    (request.parent / "occupied-candidate-exit.json").write_text(
+                        json.dumps(
+                            {"identity": process.model_dump(), "exited_while_occupied": True}
+                        )
+                    )
                     return
                 time.sleep(0.05)
             raise AssertionError("candidate did not encounter the actual occupied endpoint")
@@ -488,6 +497,12 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         check=False,
                     )
                     require(resumed.returncode == 1, "dead-owner resume did not restore A")
+                if mode == "candidate-bind-failure":
+                    failure = json.loads((home / "run/occupied-candidate-exit.json").read_text())
+                    require(
+                        failure["exited_while_occupied"] is True,
+                        "compensation swallowed a failed native bind fault fixture",
+                    )
                 if mode in {"expire-after-stop", "holder-change-after-stop"}:
                     effects = json.loads((home / f"run/effect-count-{mode}.json").read_text())
                     require(
