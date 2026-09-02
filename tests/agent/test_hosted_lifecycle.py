@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import ClaimedInbound, claim_inbound_batch
@@ -28,7 +28,8 @@ async def test_hosted_restart_marker_does_not_claim_completion() -> None:
         state,
     )
     assert state.restart_requested
-    assert isinstance(state.new_msgs[0], SystemMessage)
+    assert isinstance(state.new_msgs[0], HumanMessage)
+    assert state.new_msgs[0].additional_kwargs["ava_note_tag"] == "lifecycle_restart"
     content = state.new_msgs[0].model_dump()["content"]
     assert isinstance(content, str)
     assert "Restart was accepted" in content

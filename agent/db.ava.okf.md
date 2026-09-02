@@ -44,8 +44,10 @@ Ava's Postgres persistence layer—responsible for agent message history storage
 
 ## Notes
 
+- An owned lifecycle command dispatches alone with an internal receipt derived from its locked same-agent pointer and current generation/owner. Legacy latest-wins and pending-message vetoes cannot override this accepted command. Other rows remain pending; a real successor admission observes the restart before its next claim can consume them. The receipt is not effect authority: application still checks the fixed pointer and target incarnation, and acceptance never implies process exit.
+
 - Claim, startup reconcile, compaction finalization and co-batch deferral use the same owner lock. Reconcile/finalization/deferral only mutate chat rows, never acknowledge lifecycle work using missing checkpoint anchors. The caller must retain existing single-flight ordering around checkpoint reads and compaction.
-- This ownership fence is not lifecycle effect acknowledgement: non-chat rows still become done at claim, so crash-before-effect recovery remains unresolved. Old binaries issuing unconditional SQL need a verified shutdown/upgrade barrier; new columns alone cannot fence them.
+- Owned restart/terminate rows remain claimed through durable application and only become done on observed completion or explicit terminal failure. Other non-chat kinds and genuinely unowned legacy rows retain their existing acknowledgement rules. Old binaries issuing unconditional SQL still require a verified shutdown/upgrade barrier; new columns alone cannot fence them.
 - Connection budget: **2 PG connections per agent in steady state** (pool 2; the inbound listener uses Redis, not PG). Boot adds short-lived sync connections (schema gate, `assert_schema_current`, restart-completed write) — PgBouncer absorbs these bursts, so the 2-conn budget describes steady state only.
 - Process restart installs a durable decision for the admitted incarnation; only the existing restarter launches its replacement. There is no agent-side atexit launcher, fallback CAS, grace poll or launch-on-DB-error path. Pausing the restarter leaves the accepted restart pending rather than bypassing the pause. External exit/launcher crash recovery still requires the fenced controller slice before activation.
 - `RedisInboundListener` auto-reconnects and re-subscribes on disconnect to prevent publish loss

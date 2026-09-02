@@ -115,6 +115,20 @@ async def resolve_routing(
     ``has_pending_inbound_after``.  No other side-effects.
     """
     assert ctx.ops_pool is not None, "resolve_routing requires ctx.ops_pool"  # noqa: S101
+    if any(item.durable_lifecycle for item in batch):
+        if len(batch) != 1 or batch[0].kind not in (
+            InboundKind.RESTART,
+            InboundKind.TERMINATE,
+        ):
+            raise RuntimeError("durable lifecycle dispatch requires its single accepted command")
+        # Acceptance already serialized this command against the target owner.
+        # A later pending message cannot veto it and strand the durable pointer.
+        # The effect still rechecks the pointer and incarnation in its own CAS.
+        return _Routing(
+            exit_kind=InboundKind(batch[0].kind),
+            has_revive=False,
+            terminate_vetoed_by_pending=False,
+        )
     latest_exit = max(
         (it for it in batch if it.kind in (InboundKind.TERMINATE, InboundKind.RESTART)),
         key=lambda it: it.id,

@@ -123,6 +123,8 @@ class ClaimedInbound(NamedTuple):
     payload: dict[str, object] | None = None
     created_at: datetime | None = None
     claimed_at: datetime | None = None
+    durable_lifecycle: bool = False
+    """Internal dispatch fact from the locked command pointer, never payload input."""
 
     @classmethod
     def from_row(cls, row: tuple[Any, ...]) -> "ClaimedInbound":
@@ -134,21 +136,17 @@ async def claim_inbound_batch(
     pool: AsyncConnectionPool,
     agent_id: int,
 ) -> list[ClaimedInbound]:
-    """Atomically grab all pending rows for `agent_id`. Chat kinds flip to
-    `'claimed'` (entered the two-phase reconcile path); every other kind
-    flips straight to `'done'`. Returns the rows so the claim node can
-    dispatch.
+    """Claim under current runtime ownership in one explicit write transaction.
 
-    Chat uses pending → claimed → done|pending, reconciled against committed
-    checkpoint ava_inbound_id anchors. Lifecycle/compact records lack those
-    anchors (restart adds no message); naive replay could repeat termination
-    after resurrection. They still mark done at claim: crash-before-effect
-    loss is an unresolved durable acknowledgement gap, not an exactly-once
-    guarantee. See db.ava.okf.md for the queue contract.
+    Owned restart/terminate commands are accepted serially and returned alone,
+    retaining their fixed target and active pointer until observed or failed.
+    The internal dispatch fact is minted only from that locked pointer, never
+    caller payload. Other inbounds remain pending for the successor.
 
-    All kinds claimed together (no kind filter on the SELECT) — dispatch
-    happens inside the claim Node, not at the SQL layer. The explicit
-    read-write transaction commits the batch when its context exits.
+    Without an active lifecycle command, chat becomes claimed for checkpoint
+    reconciliation and other kinds become done. Legacy unowned lifecycle rows
+    retain their historical acknowledgement behavior; this is not an
+    exactly-once external-effect guarantee.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await lock_inbound_owner(conn, agent_id)
@@ -172,15 +170,26 @@ async def claim_inbound_batch(
                     )
                 command = await accept_lifecycle_intent(conn, agent_id)
             if command is not None:
+                if token is None or (command.generation, command.owner) != (
+                    token.generation,
+                    token.owner,
+                ):
+                    raise RuntimeError("lifecycle dispatch target is not the current incarnation")
                 await cur.execute(
-                    "SELECT id,agent_id,content,kind,source,payload,created_at,claimed_at "
-                    "FROM inbound_messages WHERE id=%s",
-                    (command.id,),
+                    "SELECT i.id,i.agent_id,i.content,i.kind,i.source,i.payload,"
+                    "i.created_at,i.claimed_at FROM inbound_messages i JOIN agents_meta m "
+                    "ON m.id=i.agent_id AND m.lifecycle_command_id=i.id "
+                    "WHERE i.id=%s AND m.id=%s AND i.status='claimed' "
+                    "AND i.kind IN ('restart','terminate') "
+                    "AND i.target_generation=m.runtime_generation "
+                    "AND i.target_owner=m.runtime_owner "
+                    "AND m.runtime_generation=%s AND m.runtime_owner=%s",
+                    (command.id, agent_id, token.generation, token.owner),
                 )
                 row = await cur.fetchone()
                 if row is None:
                     raise RuntimeError("accepted lifecycle command disappeared")
-                return [ClaimedInbound.from_row(row)]
+                return [ClaimedInbound.from_row(row)._replace(durable_lifecycle=True)]
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not
