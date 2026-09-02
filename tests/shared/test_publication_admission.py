@@ -13,13 +13,16 @@ from shared.managed_writer_publication import (
     CurrentAdmission,
     DeferredAdmission,
     LegacyProtocolZero,
+    begin_pending_publication,
     publication_admission,
     publication_admission_async,
 )
 from tests.shared.test_managed_writer_publication import pending, seed_current, unit
 
 
-@pytest.mark.parametrize("mode", ["legacy", "pending", "current", "corrupt", "empty", "missing"])
+@pytest.mark.parametrize(
+    "mode", ["legacy", "pending", "valid_pending", "current", "corrupt", "empty", "missing"]
+)
 async def test_sync_async_decisions_and_lock_interoperate(  # noqa: PLR0915 — one isolated schema and lock lifetime.
     db_conn: psycopg.Connection, mode: str
 ) -> None:
@@ -38,9 +41,11 @@ async def test_sync_async_decisions_and_lock_interoperate(  # noqa: PLR0915 — 
     current = seed_current(db_conn)
     if mode == "legacy":
         db_conn.execute("UPDATE deployment_state SET managed_writer_evidence=NULL")
-    elif mode == "pending":
+    elif mode in {"pending", "valid_pending"}:
         # A live operation before evidence adoption also freezes new births.
-        pending(db_conn, current)
+        proposal = pending(db_conn, current)
+        if mode == "valid_pending":
+            begin_pending_publication(db_conn, proposal)
     elif mode in {"corrupt", "empty"}:
         value = '{"version":99}' if mode == "corrupt" else '{"version":2}'
         db_conn.execute("UPDATE deployment_state SET managed_writer_evidence=%s::jsonb", (value,))
@@ -67,6 +72,7 @@ async def test_sync_async_decisions_and_lock_interoperate(  # noqa: PLR0915 — 
                 {
                     "legacy": LegacyProtocolZero,
                     "pending": DeferredAdmission,
+                    "valid_pending": DeferredAdmission,
                     "current": CurrentAdmission,
                 }[mode],
             )
