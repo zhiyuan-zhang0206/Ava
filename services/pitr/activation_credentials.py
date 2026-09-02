@@ -72,6 +72,37 @@ def probe_baidu_read_access(credentials_path: Path) -> str:
     return config.pitr_baidu_app_root
 
 
+def oss_credential_identity(path: Path) -> str:
+    """The AccessKey id of an Aliyun OSS RAM credential pair.
+
+    OSS credentials are an AccessKey JSON (not a service-account), so the
+    activation evidence carries the AK id as the opaque identity — the same
+    treatment the COS evidence gives its SecretId.
+    """
+    from services.pitr.oss_credentials import aliyun_credentials
+
+    return aliyun_credentials(path).access_key_id
+
+
+def probe_oss_read_access(credentials_path: Path) -> str:
+    """Prove an OSS viewer credential against the configured bucket.
+
+    One list page authenticates the viewer and proves read scope without
+    creating a synthetic probe object or deleting retained evidence.
+    """
+    from services.pitr.oss_credentials import open_oss_bucket
+
+    config = settings.physical_backup
+    bucket = open_oss_bucket(
+        endpoint=config.pitr_oss_endpoint,
+        bucket=config.pitr_oss_bucket,
+        credentials_file=credentials_path,
+        timeout_seconds=30.0,
+    )
+    next(iter(bucket.list_objects(max_keys=1)), None)
+    return config.pitr_oss_bucket
+
+
 def require_store_config(config: PhysicalBackupSettings) -> None:
     """Fail fast when the configured backend lacks its store target.
 
@@ -84,5 +115,8 @@ def require_store_config(config: PhysicalBackupSettings) -> None:
     if config.pitr_store_backend == "baidu":
         if not config.pitr_baidu_app_root:
             raise RuntimeError("PITR Baidu app root must be configured")
+    elif config.pitr_store_backend == "oss":
+        if not config.pitr_oss_bucket:
+            raise RuntimeError("PITR OSS bucket must be configured")
     elif not config.pitr_gcs_bucket:
         raise RuntimeError("PITR bucket must be configured")

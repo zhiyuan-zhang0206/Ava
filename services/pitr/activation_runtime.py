@@ -343,6 +343,8 @@ def wal_evidence_common(
     """
     if config.pitr_store_backend == "baidu":
         store_target = config.pitr_baidu_app_root
+    elif config.pitr_store_backend == "oss":
+        store_target = str(config.pitr_oss_bucket)
     else:
         store_target = str(config.pitr_gcs_bucket)
     return {
