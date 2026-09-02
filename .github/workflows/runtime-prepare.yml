@@ -19,6 +19,7 @@ on:
       - 'cli/commands/_otel_collector.py'
       - 'shared/paths.py'
       - 'shared/runtime_plugins.py'
+      - 'cli/commands/_release_plugin_probe.py'
       - 'shared/plugins_config.py'
       - 'ava/_extend.py'
       - 'scripts/prove_runtime_plugins.py'
