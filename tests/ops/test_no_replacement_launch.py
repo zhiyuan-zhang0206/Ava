@@ -1,6 +1,7 @@
 """Normal boot and durable restart never replace a resident by name."""
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -9,7 +10,7 @@ import psycopg
 import pytest
 
 from agent._starting import claim_agent_row
-from ops import agent_launch
+from ops import agent_launch, agent_wake
 from shared.session_record import SessionRecord
 from tests.agent.test_runtime_incarnation import _row
 
@@ -45,6 +46,18 @@ def test_confirm_tracks_returned_attempt_before_canonical_publication(
     backend.has_session.return_value = False
     backend.has_session.side_effect = None
     assert not agent_launch._launched_process_alive(123, attempt)
+
+
+def test_postcommit_resurrect_confirmation_preserves_exact_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared = agent_wake._PreparedResurrect(
+        datetime.now(UTC), None, None, None, "ava-boot-123-exact"
+    )
+    confirm = Mock()
+    monkeypatch.setattr(agent_launch, "_wait_for_agent_claim", confirm)
+    assert agent_wake._confirm_resurrect_with_retries(123, prepared, first_attempt=0)
+    confirm.assert_called_once_with(123, prepared.attempt_session)
 
 
 def test_ordinary_admission_alone_publishes_canonical(
