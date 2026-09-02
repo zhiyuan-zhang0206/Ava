@@ -100,16 +100,15 @@ Issues = "https://github.com/zhiyuan-zhang0206/Ava/issues"
 
 [build-system]
 # hatchling is the default minimal builder for the uv / PEP 621 stack. `[tool.uv] package
-# = true` makes `[project.scripts]` take effect and install the `ava` CLI entry point. Other top-level dirs
-# (agent/ gateway/ services/ shared/) don't go into the wheel — these are an application,
-# not a library.
+# = true` makes `[project.scripts]` take effect and install the `ava` CLI entry point.
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# vendor `ava/` (SDK) + `cli/` (ops CLI); two independent packages, agent unaware of
-# CLI's existence. Both dev / deploy use editable install, the actual source running is the working tree.
-packages = ["ava", "cli"]
+# Include the application kernel, not only its SDK and CLI. A non-editable
+# installation must resolve exec children and service modules without a checkout.
+# This packaging step does not activate wheel-based production deployments.
+packages = ["ava", "cli", "agent", "shared", "ops", "gateway", "services", "ava_builtins"]
 
 [tool.uv]
 package = true
