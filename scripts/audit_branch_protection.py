@@ -86,14 +86,16 @@ def trunk_gate_findings(text: str) -> list[str]:
     findings: list[str] = []
     if "qa-approved-gate" not in statuses:
         findings.append("trunk.yaml required_statuses missing qa-approved-gate")
-    for aggregator in ("backend (pytest + pyright)", "frontend (eslint + tsc + vitest)", "e2e (Playwright happy path)"):
+    for aggregator in (
+        "backend (pytest + pyright)",
+        "frontend (eslint + tsc + vitest)",
+        "e2e (Playwright happy path)",
+    ):
         if aggregator not in statuses:
             findings.append(f"trunk.yaml required_statuses missing {aggregator}")
     for name in sorted(statuses):
         if _MATRIX_TEMPLATE.search(name):
-            findings.append(
-                f"trunk.yaml required_statuses contains a matrix template name: {name}"
-            )
+            findings.append(f"trunk.yaml required_statuses contains a matrix template name: {name}")
     return findings
 
 
