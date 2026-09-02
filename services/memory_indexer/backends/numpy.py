@@ -28,8 +28,9 @@ class NumPyBackend:
 
     name = "numpy"
 
-    def __init__(self) -> None:
+    def __init__(self, *, readonly: bool = False) -> None:
         self._client: httpx.Client | None = None
+        self._readonly = readonly
 
     @property
     def _uri(self) -> str:
@@ -58,6 +59,14 @@ class NumPyBackend:
             raise RuntimeError(f"{self.name} backend not connected — call connect() first")
         return self._client
 
+    def _require_writable(self) -> None:
+        """Reject mutations through a backend created for read-only work."""
+        if self._readonly:
+            raise RuntimeError(
+                "numpy backend is read-only; only the indexer daemon's cold-start "
+                "reconcile on startup may write this index"
+            )
+
     def upsert(
         self,
         path: str,
@@ -69,6 +78,7 @@ class NumPyBackend:
         chunk_idx: int = 0,
     ) -> None:
         """Write / update one chunk row — see `backends.base`."""
+        self._require_writable()
         resp = self._require_client().post(
             "/upsert",
             json={
@@ -84,6 +94,7 @@ class NumPyBackend:
 
     def delete(self, path: str) -> None:
         """Delete every chunk row of `path`; the service no-ops when absent."""
+        self._require_writable()
         self._require_client().post("/delete", json={"path": path}).raise_for_status()
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:

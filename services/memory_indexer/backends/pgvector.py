@@ -12,14 +12,15 @@ rows the milvus backend keeps:
 - `embedder` VARCHAR(64) — the embedding provider `fingerprint` the row
   was produced with (semantic-space id; a change re-embeds the row)
 - `vector` vector(dim) — pgvector; dim = the provider's width, injected by
-  the factory and checked at connect (mismatch drops + recreates)
+  the factory and checked at connect (the indexer daemon rebuilds a mismatch)
 
 The table is a **derived cache** (rebuildable from the memory pool by the
-cold-start reconcile), exactly like the milvus collection — so schema
-management lives in `connect()` (CREATE EXTENSION IF NOT EXISTS vector +
-CREATE TABLE IF NOT EXISTS + dim check, drop + recreate on mismatch) rather
-than in the migrations system, which governs business data. It requires the
-pgvector binary in the cluster's Postgres — provisioned by
+indexer daemon's cold-start reconcile), exactly like the milvus collection.
+Writable connections create or rebuild it; read-only connections reject a
+missing or mismatched table before issuing persistent mutations. Schema
+management therefore lives in `connect()` rather than in the migrations
+system, which governs business data. It requires the pgvector binary in the
+cluster's Postgres — provisioned by
 `scripts/provision/database.sh` and CI's `install-pg-redis` action.
 
 Search is exact: `vector <=> %s::vector` over every row (a few thousand rows
@@ -152,24 +153,53 @@ def _columns_of(client: psycopg.Connection) -> set[str]:
     return {r[0] for r in rows}
 
 
-def _ensure_schema(client: psycopg.Connection, dim: int) -> None:
-    """CREATE EXTENSION IF NOT EXISTS + table, with drop + recreate on dim
-    drift or a missing column — the same derived-cache philosophy as the
-    milvus collection: a mismatched cache (another provider's width, or a
-    pre-provider-era table without the `embedder` column) is rebuilt by the
-    cold-start reconcile, never migrated."""
-    client.execute("CREATE EXTENSION IF NOT EXISTS vector")
+def _schema_problem(client: psycopg.Connection, dim: int) -> str | None:
+    """Describe why the table cannot serve vectors at `dim`, if anything."""
     table_dim = _dim_of(client)
-    stale: str | None = None
-    if table_dim is not None and table_dim != dim:
-        stale = f"vector dim mismatch ({table_dim} != {dim})"
-    elif table_dim is not None and _columns_of(client) != _EXPECTED_COLUMNS:
-        stale = "column set mismatch with the current schema"
-    if stale is not None:
+    columns = _columns_of(client)
+    if not columns:
+        return "is missing"
+    if table_dim is None:
+        return "is missing its vector column"
+    if table_dim != dim:
+        return f"has vector dimension {table_dim}, expected {dim}"
+    if columns != _EXPECTED_COLUMNS:
+        missing = sorted(_EXPECTED_COLUMNS - columns)
+        extra = sorted(columns - _EXPECTED_COLUMNS)
+        details: list[str] = []
+        if missing:
+            details.append(f"missing columns {missing}")
+        if extra:
+            details.append(f"unexpected columns {extra}")
+        return "has a column mismatch (" + "; ".join(details) + ")"
+    return None
+
+
+def _ensure_schema(client: psycopg.Connection, dim: int, *, readonly: bool = False) -> None:
+    """Ensure the writable derived-cache schema, or validate it read-only.
+
+    Read-only validation never creates the pgvector extension/table or drops
+    a stale table. Only the indexer daemon's cold-start reconcile owns that
+    writable recovery path.
+    """
+    if readonly:
+        problem = _schema_problem(client, dim)
+        if problem is not None:
+            raise RuntimeError(
+                f"pgvector table {_TABLE!r} {problem}; a read-only connection will not "
+                "create or rebuild it. The indexer daemon's cold-start reconcile on "
+                "startup is the legitimate writer."
+            )
+        return
+
+    client.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    problem = _schema_problem(client, dim)
+    if problem is not None and problem != "is missing":
         _log.warning(
-            "[pgvector] table %s %s — dropping + recreating; cold-start will rebuild the index",
+            "[pgvector] table %s %s — dropping + recreating; the indexer daemon "
+            "cold-start reconcile will rebuild the index",
             _TABLE,
-            stale,
+            problem,
         )
         client.execute("DROP TABLE memory_embeddings")
     client.execute(_create_table_sql(dim))
@@ -190,10 +220,11 @@ class PGVectorBackend:
 
     name = "pgvector"
 
-    def __init__(self, dim: int, fingerprint: str) -> None:
+    def __init__(self, dim: int, fingerprint: str, *, readonly: bool = False) -> None:
         self._dim = dim
         self._fingerprint = fingerprint
         self._pool: ConnectionPool | None = None
+        self._readonly = readonly
 
     @contextmanager
     def _conn(self, *, timeout: float | None = None) -> Generator[psycopg.Connection, None, None]:
@@ -216,8 +247,20 @@ class PGVectorBackend:
         dial per batch; `shared.db.pool()` is the only sanctioned pool
         constructor (keepalives + statement ceiling)."""
         self._pool = shared.db.pool()
-        with self._pool.connection() as conn:
-            _ensure_schema(conn, self._dim)
+        try:
+            with self._pool.connection() as conn:
+                _ensure_schema(conn, self._dim, readonly=self._readonly)
+        except Exception:
+            self.close()
+            raise
+
+    def _require_writable(self) -> None:
+        """Reject mutations through a backend created for read-only work."""
+        if self._readonly:
+            raise RuntimeError(
+                "pgvector backend is read-only; only the indexer daemon's cold-start "
+                "reconcile on startup may write this table"
+            )
 
     def close(self) -> None:
         """Close the pool when one exists; idempotent."""
@@ -239,6 +282,7 @@ class PGVectorBackend:
 
         Re-upserting the same triple overwrites in place via the folded pk —
         identical semantics to the milvus backend."""
+        self._require_writable()
         with self._conn() as conn:
             conn.execute(
                 _UPSERT_SQL,
@@ -259,6 +303,7 @@ class PGVectorBackend:
 
         Plain equality — no filter-expression escaping worries the way milvus
         boolean filters have them."""
+        self._require_writable()
         with self._conn() as conn:
             conn.execute(_DELETE_SQL, (path,))
 
