@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import platform
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +12,7 @@ import psycopg
 
 from shared.migrations import MIGRATIONS_DIR, _assert_migration_authority
 from shared.platform import file_lock
+from shared.private_storage import write_private_bytes
 from shared.runtime_migration import ReleaseMigrationContext
 from shared.runtime_release import ReleaseRejectedError, verify_release
 
@@ -71,15 +70,7 @@ def record_candidate(
             if path.read_bytes() != encoded:
                 raise ReleaseRejectedError("operation already has a different candidate receipt")
             return path
-        descriptor, temporary = tempfile.mkstemp(prefix=".candidate-", dir=parent)
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(encoded)
-                stream.flush()
-                os.fsync(stream.fileno())
-            Path(temporary).replace(path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        write_private_bytes(path, encoded)
     return path
 
 
