@@ -83,6 +83,8 @@ def validate_operation(context: PreparedObservation, projection: ObserverProject
 
 
 def validate_entry(context: PreparedObservation, projection: ObserverProjection) -> VerifiedRelease:
+    if "shared.config" in sys.modules:
+        raise ReleaseRejectedError("bootstrap observer imported ordinary Settings")
     home = Path(context.expected.home)
     if not home.is_absolute() or home.resolve(strict=True) != home:
         raise ReleaseRejectedError("prepared observer home must be canonical and existing")
