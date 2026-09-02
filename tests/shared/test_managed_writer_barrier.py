@@ -184,6 +184,67 @@ def test_unknown_fields_and_unsafe_home_refuse() -> None:
         )
 
 
+def test_down_waits_for_adoption_before_checking_evidence(db_conn: psycopg.Connection) -> None:
+    """A real uncommitted adoption must become visible before down's guard runs.
+
+    Without the initial exclusive lock, down sees the previous NULL version,
+    waits only at ALTER, and then erases the just-committed evidence.
+    """
+    schema = "barrier_" + uuid4().hex
+    db_conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+    for table in ("deployment_state", "machines", "machine_units"):
+        db_conn.execute(
+            sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING ALL)").format(
+                sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+            )
+        )
+    db_conn.execute("SELECT set_config('search_path',%s,false)", (schema + ",public",))
+    db_conn.execute("INSERT INTO deployment_state(id) VALUES (1)")
+    db_conn.execute("INSERT INTO machines(name) VALUES ('runner')")
+    db_conn.execute("INSERT INTO machine_units(machine_name,home) VALUES ('runner','/ava')")
+    collection = _collection(db_conn)
+    db_conn.commit()
+    directory = Path(__file__).resolve().parents[2] / "migrations"
+    down = cast(
+        LiteralString,
+        (directory / "20260902T201145_managed-writer-evidence.down.sql").read_text(),
+    )
+    try:
+        with psycopg.connect(db_conn.info.dsn) as worker:
+            worker.execute("SELECT set_config('search_path',%s,false)", (schema + ",public",))
+            worker.commit()
+            _record(db_conn, collection)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+
+                def rollback_schema() -> None:
+                    with worker.transaction():
+                        worker.execute(down)
+
+                future = executor.submit(rollback_schema)
+                try:
+                    deadline = time.monotonic() + 5
+                    while db_conn.execute(
+                        "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=%s "
+                        "AND mode='AccessExclusiveLock' AND NOT granted)",
+                        (worker.info.backend_pid,),
+                    ).fetchone() != (True,):
+                        if time.monotonic() >= deadline:
+                            raise AssertionError("down never waited for the adoption lock")
+                        time.sleep(0.01)
+                    db_conn.commit()
+                    with pytest.raises(psycopg.errors.RaiseException, match="explicitly retired"):
+                        future.result(timeout=5)
+                finally:
+                    db_conn.rollback()  # release the writer even when the lock assertion fails
+            row = db_conn.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
+            assert row == (collection.model_dump(mode="json"),)
+    finally:
+        db_conn.rollback()
+        db_conn.execute("SELECT set_config('search_path','public',false)")
+        db_conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+        db_conn.commit()
+
+
 def test_inventory_lock_wait_cannot_extend_expired_operation(db_conn: psycopg.Connection) -> None:
     """Two real connections: inventory waits must recheck time after acquiring it."""
     schema = "barrier_" + uuid4().hex
