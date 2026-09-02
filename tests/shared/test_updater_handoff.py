@@ -12,6 +12,60 @@ import pytest
 from shared import updater_handoff as handoff
 
 
+def _retained_bootstrap(stage: str) -> None:
+    handoff.begin(expected_session="ava-updater", generation="bootstrap")
+    assert handoff.claim_running("bootstrap", expected_session="ava-updater")
+    path = handoff.state_path()
+    raw = json.loads(path.read_text())
+    raw["bootstrap_hop"] = {"stage": stage, "private_reference": "retained"}
+    path.write_text(json.dumps(raw))
+
+
+def test_unfinished_bootstrap_cannot_be_cleared_or_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _retained_bootstrap("old_stopped")
+    before = handoff.state_path().read_bytes()
+    assert not handoff.clear("bootstrap")
+    assert not handoff.force_clear()
+    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
+    with pytest.raises(handoff.UpdaterHandoffActive):
+        handoff.begin(expected_session="another-updater")
+    assert handoff.state_path().read_bytes() == before
+
+
+def test_bootstrap_resume_requires_dead_owner_and_preserves_compensation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _retained_bootstrap("candidate_starting")
+    assert not handoff.resume_bootstrap("bootstrap", expected_session="recovery")
+    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
+    assert not handoff.resume_bootstrap("other-generation", expected_session="recovery")
+    assert handoff.resume_bootstrap("bootstrap", expected_session="recovery")
+    raw = json.loads(handoff.state_path().read_text())
+    assert raw["bootstrap_hop"] == {
+        "stage": "candidate_starting",
+        "private_reference": "retained",
+    }
+    assert raw["owner_pid"] == os.getpid()
+    assert raw["owner_create_time"] == psutil.Process().create_time()
+    assert raw["expected_session"] == "recovery"
+
+
+@pytest.mark.parametrize("stage", ["candidate_ready", "recovered"])
+def test_only_terminal_bootstrap_can_complete(stage: str) -> None:
+    _retained_bootstrap(stage)
+    assert handoff.clear("bootstrap")
+    assert handoff.read().status == "inactive"
+
+
+def test_unreadable_handoff_is_not_force_discarded() -> None:
+    path = handoff.state_path()
+    path.write_text("{unfinished recovery record")
+    assert not handoff.force_clear()
+    assert path.read_text() == "{unfinished recovery record"
+
+
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(handoff, "state_path", lambda: tmp_path / "handoff.json")

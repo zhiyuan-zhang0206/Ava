@@ -185,6 +185,8 @@ def begin(
             raise UpdaterHandoffActive(
                 f"updater handoff {current.generation!r} is already active or unreadable"
             )
+        if path.exists() and json.loads(path.read_text()).get("bootstrap_hop") is not None:
+            raise UpdaterHandoffActive("restricted bootstrap handoff requires checked recovery")
         now = dt.datetime.now(dt.UTC)
         payload: dict[str, object] = {
             "phase": "pending",
@@ -269,6 +271,9 @@ def clear(generation: str) -> bool:
         current = _read_unlocked(path)
         if current.generation != generation:
             return False
+        bootstrap = json.loads(path.read_text()).get("bootstrap_hop")
+        if bootstrap is not None and bootstrap["stage"] not in {"candidate_ready", "recovered"}:
+            return False
         path.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
             _fsync_parent(path)
@@ -280,8 +285,40 @@ def force_clear() -> bool:
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
         existed = path.exists()
+        if _read_unlocked(path).status == "invalid":
+            # An unreadable record may contain unfinished compensating inputs.
+            return False
+        if existed and json.loads(path.read_text()).get("bootstrap_hop") is not None:
+            return False
         path.unlink(missing_ok=True)
         if existed:
             with contextlib.suppress(OSError):
                 _fsync_parent(path)
         return existed
+
+
+def resume_bootstrap(generation: str, *, expected_session: str) -> bool:
+    """Reclaim this same retained handoff only after exact owner death evidence.
+
+    The updater first validates the persisted request, operation and image
+    references. This changes local process ownership, not release authority.
+    """
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        path = state_path()
+        current = _read_unlocked(path)
+        if (
+            current.generation != generation
+            or current.status != "running"
+            or owner_is_live(current)
+        ):
+            return False
+        payload = json.loads(path.read_text())
+        if payload.get("bootstrap_hop") is None:
+            return False
+        payload.update(
+            expected_session=expected_session,
+            owner_pid=os.getpid(),
+            owner_create_time=psutil.Process().create_time(),
+        )
+        _write_atomic(path, payload)
+        return True

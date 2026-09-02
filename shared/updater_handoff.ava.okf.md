@@ -29,3 +29,14 @@ Writes are atomic, mode `0600`, and generation-CAS.
 
 The updater OS mutex keeps a permanent stable inode: release unlocks and closes
 without unlinking, and only genuine contention errors become a `False` result.
+
+The restricted immutable-ops updater leg retains its compensating inputs in an
+optional `bootstrap_hop` section of this same record. It binds private request,
+context and complete inventory receipt hashes, the exact known cron definition,
+and the transition stage. No database URL or secret is recorded. An unfinished
+leg cannot be cleared, replaced by ordinary `begin`, or discarded by generic
+recovery. An unreadable record is likewise preserved. Only checked recovery
+under the existing updater mutex can reclaim the same generation after exact
+owner death. A missing post-fork session record remains ambiguous, not permission
+to launch another process. Terminal restricted-B readback or verified-A recovery
+allows the normal generation-CAS clear. This is not normal service activation.
