@@ -9,6 +9,10 @@ window so an operator's emergency read-only mode does not block a legitimate
 sync. The exec boundary runs the read/repair guard for every child spawn: its
 few file stats are negligible beside a process spawn, and deliberately remain
 uncached so a newly poisoned install cannot evade the next execution.
+
+A failed sync that removes the pointer while leaving its ``direct_url.json``
+metadata is a half-uninstall, not a missing-install no-op. The repair guard
+recreates that pointer before converge or an exec child proceeds.
 """
 
 from __future__ import annotations
@@ -77,6 +81,16 @@ def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
     ):
         matches.update(venv.glob(pattern))
     return tuple(sorted(matches, key=str))
+
+
+def _missing_editable_ava_pth_paths(source_root: Path) -> tuple[Path, ...]:
+    """Pointer paths missing beside existing Ava editable metadata records."""
+
+    paths = {
+        record.parent.parent / EDITABLE_PTH_NAME
+        for record in editable_direct_url_paths(source_root)
+    }
+    return tuple(sorted((path for path in paths if not path.exists()), key=str))
 
 
 def editable_site_packages_dirs(source_root: Path) -> tuple[Path, ...]:
@@ -197,10 +211,12 @@ def repair_editable_ava_pth(
     *,
     allowed_roots: Iterable[Path] = (),
 ) -> tuple[EditableInstallRepair, ...]:
-    """Repair pointers outside the exact source-root allowlist.
+    """Repair missing or non-allowlisted pointers to the exact source root.
 
     An allowlisted clone root is legal only as that exact path. Its
-    ``.worktrees/*`` descendants remain disposable and are repaired.
+    ``.worktrees/*`` descendants remain disposable and are repaired. A missing
+    pointer beside an existing Ava ``direct_url.json`` is a failed-sync
+    half-uninstall and is recreated.
     """
 
     resolved_source = source_root.expanduser().resolve(strict=False)
@@ -208,16 +224,19 @@ def repair_editable_ava_pth(
         {_normalized_exact_path(resolved_source)}
         | {_normalized_exact_path(root) for root in allowed_roots}
     )
-    repairs: list[EditableInstallRepair] = []
+    pending_repairs = dict.fromkeys(_missing_editable_ava_pth_paths(resolved_source), "(missing)")
     for pth_path in editable_ava_pth_paths(resolved_source):
         raw_target = pth_path.read_text().strip()
         if _target_is_allowed(raw_target, normalized_allowed):
             continue
+        pending_repairs[pth_path] = raw_target
+    repairs: list[EditableInstallRepair] = []
+    for pth_path, poisoned_target in sorted(pending_repairs.items(), key=lambda item: str(item[0])):
         with editable_pth_write_window(resolved_source):
             _atomic_write_text(pth_path, str(resolved_source))
         repair = EditableInstallRepair(
             path=pth_path,
-            poisoned_target=raw_target,
+            poisoned_target=poisoned_target,
             source_root=resolved_source,
         )
         repairs.append(repair)
@@ -228,7 +247,7 @@ def repair_editable_ava_pth(
             source="converge",
             attributes={
                 "pth_path": str(pth_path),
-                "poisoned_target": raw_target,
+                "poisoned_target": poisoned_target,
                 "source_root": str(resolved_source),
             },
         )
@@ -337,8 +356,9 @@ def editable_install_violations(
     converge guard's repair semantics. A record that cannot be read is
     reported as a violation rather than crashing the caller.
 
-    Returns an empty tuple when every record is legal — a missing record is a
-    no-op, matching the repair side.
+    Returns an empty tuple when every record is legal. Both editable records
+    missing is a no-op, while a missing pointer beside existing ``direct_url``
+    metadata is a half-uninstall violation repaired by the write side.
     """
 
     resolved_source = source_root.expanduser().resolve(strict=False)
@@ -351,6 +371,10 @@ def editable_install_violations(
         | {root.expanduser().resolve(strict=False).as_uri() for root in allowed_roots}
     )
     violations: list[str] = []
+    for pth_path in _missing_editable_ava_pth_paths(resolved_source):
+        violations.append(
+            f"{pth_path} editable install metadata present but pointer missing — half-uninstalled"
+        )
     for pth_path in editable_ava_pth_paths(resolved_source):
         try:
             raw_target = pth_path.read_text().strip()
