@@ -62,6 +62,10 @@ multi-chunk.
   (see `_ports.py` + `conftest.py` env override section).
 - **gateway is function-scoped** — restarts per test with fresh `AVA_LLM_OVERRIDE`
   env; frontend / browser are session-scoped (slow to start, not related to env injection).
+- **lifecycle daemons publish the start boundary** — the bare gateway fixture opens
+  a fresh generation before gateway launch; after its health checks, the process
+  restarter or hosted agent-host marks that generation serving. The fixture clears
+  it after each test, because the file-backed marker outlives database truncation.
 - **AVA_* env forwarding**: the gateway launches an agent as a detached, native process
   with an explicitly built child env dict (`ops.agent_launch.agent_spawn_env_dict`), so the
   test's `AVA_*` overrides reach it. Sessions (daemons, agent shells) need the same

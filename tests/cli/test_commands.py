@@ -895,6 +895,67 @@ def test_stop_proceeds_on_yes(
     assert len(infra_stops) == 1, "stop must stop this cluster's pg/redis once"
 
 
+def test_stop_revokes_serving_before_stopping_sessions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A deliberate stop removes recovery authority before daemons unwind."""
+    from cli.commands import stop as stop_mod
+    from shared import start_serving
+
+    path = tmp_path / "start-serving.json"
+    monkeypatch.setattr(start_serving, "state_path", lambda: path)
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
+    observed: list[bool] = []
+
+    def _compute_stop_scope(
+        *, preserve_sessions: frozenset[str], keep_browser: bool, keep_infra: bool
+    ) -> tuple[list[str], bool, bool]:
+        return [], False, True
+
+    def _print_stop_plan(
+        service_sessions: list[str],
+        *,
+        reap_agents: bool,
+        keep_browser: bool,
+        runner_only: bool,
+        keep_infra: bool,
+        graceful: bool,
+    ) -> None:
+        return None
+
+    def _stop_data_plane(*, skip_infra: bool, runner_only: bool) -> None:
+        return None
+
+    def _reap_orphan_step(
+        repo: Path,
+        *,
+        keep_browser: bool,
+        keep_infra: bool,
+        preserve_sessions: frozenset[str],
+        keep_gate: bool,
+    ) -> None:
+        return None
+
+    def _stop_sessions(
+        sessions: list[str],
+        *,
+        graceful: bool,
+        include_agent_processes: bool = False,
+        deadline: float | None = None,
+    ) -> None:
+        observed.append(start_serving.is_serving())
+
+    monkeypatch.setattr(stop_mod, "_compute_stop_scope", _compute_stop_scope)
+    monkeypatch.setattr(stop_mod, "_print_stop_plan", _print_stop_plan)
+    monkeypatch.setattr(stop_mod, "_stop_data_plane", _stop_data_plane)
+    monkeypatch.setattr(stop_mod, "_reap_orphan_step", _reap_orphan_step)
+    monkeypatch.setattr(stop_mod, "_stop_sessions", _stop_sessions)
+
+    assert stop_mod._do_stop(tmp_path, graceful=False, require_confirmation=False) == 0
+    assert observed == [False]
+
+
 def test_do_stop_keep_infra_skips_infra_teardown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

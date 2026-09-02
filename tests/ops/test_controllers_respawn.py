@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import socket
 import time
+from pathlib import Path
 from typing import Any, Never, cast
 
 import httpx
@@ -23,6 +24,16 @@ from psycopg_pool import ConnectionPool
 import ops.controllers.respawn as respawn_mod
 from shared.http_dial import PinnedIPv4Transport
 from shared.log import _install_stdlib_intercept
+
+
+@pytest.fixture(autouse=True)
+def _host_is_serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Controller cases start from a host that already passed its start gate."""
+    from shared import start_serving
+
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
 
 
 def test_gateway_health_pins_private_ipv4_and_follows_redirects(
@@ -125,6 +136,37 @@ def test_gateway_healthy_dispatches_without_deferral_log(
     assert not any("deferring respawn" in r["message"] for r in loguru_records)
 
 
+def test_restart_respawn_waits_until_the_host_is_serving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restart queued before readiness remains queued for the next pass."""
+    from shared import start_serving
+
+    respawned: list[int] = []
+    start_serving.clear_serving()
+
+    def _select_restarting(_pool: ConnectionPool, _local_machine: str) -> list[int]:
+        return [11]
+
+    def _respawn(agent_id: int) -> bool:
+        respawned.append(agent_id)
+        return True
+
+    monkeypatch.setattr(respawn_mod, "_select_local_restarting_ids", _select_restarting)
+    monkeypatch.setattr(respawn_mod, "_gateway_healthy", lambda: True)
+    monkeypatch.setattr(respawn_mod, "respawn_agent", _respawn)
+    controller = respawn_mod.RespawnController(cast(ConnectionPool, object()))
+
+    assert controller._dispatch_respawns("test-machine") is False
+    assert respawned == []
+
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
+
+    assert controller._dispatch_respawns("test-machine") is True
+    assert respawned == [11]
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # Post-outage grace window for the lease-zombie pass (2026-08-08 audit P1-2)
 # ───────────────────────────────────────────────────────────────────────────
@@ -211,3 +253,62 @@ def test_lease_zombie_grace_defaults_to_no_skip(monkeypatch: pytest.MonkeyPatch)
 
     assert len(calls) == 1
     assert calls[0] == {}
+
+
+def test_reap_corpses_defers_revival_until_the_host_is_serving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed start may reap dead rows but must not relaunch them.
+
+    Removing the serving check from the dead-running/idling branch would make
+    the first assertion fail; moving it around the whole method would make the
+    cleanup assertion fail.
+    """
+    from shared import start_serving
+
+    cleanup: list[str] = []
+    revived: list[int] = []
+    start_serving.clear_serving()
+
+    def _reap_unclaimed(_pool: ConnectionPool, _local_machine: str, _grace_s: float) -> list[int]:
+        cleanup.append("unclaimed")
+        return []
+
+    def _reap_boot_phase(_pool: ConnectionPool, _local_machine: str) -> list[int]:
+        cleanup.append("boot-phase")
+        return []
+
+    def _collect_zombies(_pool: ConnectionPool, _local_machine: str) -> list[int]:
+        return []
+
+    def _revive(_pool: ConnectionPool, _local_machine: str, _max_revive: int) -> list[int]:
+        revived.append(42)
+        return [42]
+
+    monkeypatch.setattr(
+        respawn_mod,
+        "_reap_local_unclaimed_idling",
+        _reap_unclaimed,
+    )
+    monkeypatch.setattr(
+        respawn_mod,
+        "_reap_local_dead_boot_phase_agents",
+        _reap_boot_phase,
+    )
+    monkeypatch.setattr(respawn_mod, "_collect_local_lease_zombies", _collect_zombies)
+    monkeypatch.setattr(
+        respawn_mod,
+        "_revive_local_dead_running_idling",
+        _revive,
+    )
+    controller = respawn_mod.RespawnController(cast(ConnectionPool, object()))
+
+    assert controller._reap_corpses("test-machine") is False
+    assert cleanup == ["unclaimed", "boot-phase"]
+    assert revived == []
+
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
+
+    assert controller._reap_corpses("test-machine") is True
+    assert revived == [42]

@@ -507,12 +507,19 @@ def scenario_env(request: pytest.FixtureRequest) -> Iterator[None]:
 
 
 @pytest.fixture
-def gateway_proc(scenario_env: None) -> Iterator[None]:
+def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """gateway uvicorn (kernel-assigned port, see `_ports.py`)——inherits current os.environ (including AVA_LLM_OVERRIDE).
 
     function-scoped rather than session: each test restarts gateway to pick up new scenario env.
     Startup ~2-3s acceptable.
     """
+    from shared import start_serving
+
+    # The pytest process imported Settings before this package redirected
+    # AVA_HOME. Keep its marker writes in the exact home inherited by the
+    # gateway, restarter, and agent-host subprocesses.
+    monkeypatch.setattr(settings.general, "ava_home", _AVA_HOME)
+    generation = start_serving.begin_start()
     cmd = [
         "uv",
         "run",
@@ -547,7 +554,10 @@ def gateway_proc(scenario_env: None) -> Iterator[None]:
                 f"gateway /api/agents not ready within 30s: "
                 f"last_status={last_status} last_err={last_err!r}; see {log_path}"
             )
-        yield
+        try:
+            yield generation
+        finally:
+            start_serving.clear_serving()
 
 
 @pytest.fixture
@@ -574,7 +584,7 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
 
 
 @pytest.fixture
-def restarter_proc(gateway_proc: None) -> Iterator[None]:
+def restarter_proc(gateway_proc: str) -> Iterator[None]:
     """services/restarter/daemon.py — separate restart dispatch process.
 
     Gateway no longer embeds restart watcher (extracted as services/restarter).
@@ -629,11 +639,15 @@ def restarter_proc(gateway_proc: None) -> Iterator[None]:
             raise RuntimeError(
                 f"{e}; restarter daemon {state}; log tail:\n{proc_log_tail(str(log_path))}"
             ) from e
+        from shared import start_serving
+
+        if not start_serving.mark_serving(gateway_proc):
+            raise RuntimeError("e2e restarter lost the gateway start generation")
         yield
 
 
 @pytest.fixture
-def agent_host_proc(gateway_proc: None) -> Iterator[None]:
+def agent_host_proc(gateway_proc: str) -> Iterator[None]:
     """services/agent_host/daemon.py — the hosted runner that hosts every local
     agent's turns as asyncio tasks.
 
@@ -677,11 +691,15 @@ def agent_host_proc(gateway_proc: None) -> Iterator[None]:
             raise RuntimeError(
                 f"{e}; agent-host daemon {state}; log tail:\n{proc_log_tail(str(log_path))}"
             ) from e
+        from shared import start_serving
+
+        if not start_serving.mark_serving(gateway_proc):
+            raise RuntimeError("e2e agent-host lost the gateway start generation")
         yield
 
 
 @pytest.fixture
-def ops_proc(gateway_proc: None) -> Iterator[None]:
+def ops_proc(gateway_proc: str) -> Iterator[None]:
     """services/agent_ops/daemon.py — the agent-runner ops server.
 
     Spawn is HTTP-uniform: `POST /api/agents` creates the row on the gateway and

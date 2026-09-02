@@ -59,6 +59,7 @@ from cli.commands._setup import _print_missing_setup_error
 from cli.commands._update_uv_sync import run_uv_sync
 from cli.commands.migrations import cmd_migrations_apply
 from cli.commands.status import _update_in_flight, cmd_status
+from shared import start_serving
 from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.machine import MachineRoles
@@ -605,6 +606,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if rc != 0:
         return rc
 
+    # Failed start attempts must leave recovery actions gated.
+    serving_generation = start_serving.begin_start()
     _record_running_sha(repo)
     launch = _launch_sessions(roles, launch_skip, repo)
     started = launch.started
@@ -704,18 +707,10 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
                 "(with AVA_CLUSTER_SECRET set from a non-echoing prompt)"
             )
 
-    # 8) readiness verdict, last: everything above has printed, so the caller reading
-    # the exit code and the operator reading the screen learn the same thing from the
-    # same run. The gate only converts an ALREADY-VISIBLE cross into a code.
+    # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
     #
-    # A session that could not be launched joins the unready ones here. It is the
-    # harder failure of the two — nothing was spawned, so no probe was ever going
-    # to pass — but it lands in the same verdict because the operator's move is the
-    # same (`ava start` again; the watchdog keepalive is already reviving it), and
-    # because the two callers that waive this verdict each have a better channel
-    # for it: the rollout reads the names out of `shared.launch_failures`, and the
-    # boot loop would otherwise retry an unbounded number of times over one service
-    # (`shared/boot_policy.py`).
+    # Launch failures share the verdict: rollout reads `shared.launch_failures`, while the
+    # boot loop retries without an unbounded wait on one service (`shared/boot_policy.py`).
     if launch.failed:
         print(
             f"\n✗ {len(launch.failed)} session(s) could not be launched "
@@ -746,7 +741,11 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         if waiver is None:
             return SERVICES_NOT_READY_EXIT_CODE
         print(f"  · {waiver}: exiting 0 anyway", file=sys.stderr)
+        return 0
 
+    if not start_serving.mark_serving(serving_generation):
+        print("  ✗ this start lost its serving generation", file=sys.stderr)
+        return 1
     return 0
 
 
