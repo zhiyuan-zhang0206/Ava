@@ -50,7 +50,9 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
             build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP)),
             host="127.0.0.1",
             port=port,
-            log_level="critical",
+            log_level=None,
+            access_log=False,
+            log_config=None,
         )
     )
     thread = threading.Thread(target=server.run, daemon=True)

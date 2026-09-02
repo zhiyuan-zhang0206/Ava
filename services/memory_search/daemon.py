@@ -54,6 +54,7 @@ async def run() -> None:
             port=_PORT,
             log_level="warning",
             access_log=False,
+            log_config=None,
         )
     )
     await server.serve()
