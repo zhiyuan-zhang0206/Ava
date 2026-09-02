@@ -110,6 +110,7 @@ class _PreparedResurrect:
     config_overlay: dict[str, object] | None
     birth_config: dict[str, object] | None
     event_target: int | None
+    attempt_session: str | None = None
 
 
 class _ResurrectSessionStartError(RuntimeError):
@@ -312,7 +313,7 @@ def _prepare_resurrect_attempt(
                 event_target=_resurrect_event_target(resurrected_by),
             )
         try:
-            agent_launch._launch_agent_process(
+            attempt_session = agent_launch._launch_agent_process(
                 agent_id,
                 config_overlay=config_overlay,
                 birth_config=birth_config,
@@ -327,10 +328,11 @@ def _prepare_resurrect_attempt(
         config_overlay=config_overlay,
         birth_config=birth_config,
         event_target=_resurrect_event_target(resurrected_by),
+        attempt_session=attempt_session,
     )
 
 
-def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> bool:
+def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> str | None:
     """Create another session only while the same active allocation still owns the row."""
     with write_transaction() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
@@ -345,14 +347,13 @@ def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> boo
             or row[1] != prepared.allocation_epoch
             or row[2] is not None
         ):
-            return False
-        agent_launch._launch_agent_process(
+            return None
+        return agent_launch._launch_agent_process(
             agent_id,
             config_overlay=prepared.config_overlay,
             birth_config=prepared.birth_config,
             confirm=False,
         )
-    return True
 
 
 def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -> None:
@@ -388,9 +389,13 @@ def _confirm_resurrect_with_retries(
 ) -> bool:
     """Confirm one incarnation, retrying sessions without reopening an old death."""
     attempt = first_attempt
+    attempt_session = prepared.attempt_session
     while True:
         try:
-            agent_launch._wait_for_agent_claim(agent_id)
+            if attempt_session is None:
+                agent_launch._wait_for_agent_claim(agent_id)
+            else:
+                agent_launch._wait_for_agent_claim(agent_id, attempt_session)
             return True
         except RuntimeError as exc:
             if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
@@ -409,7 +414,8 @@ def _confirm_resurrect_with_retries(
             time.sleep(backoff)
             attempt += 1
             try:
-                if not _retry_resurrect_session(agent_id, prepared):
+                attempt_session = _retry_resurrect_session(agent_id, prepared)
+                if attempt_session is None:
                     return False
             except RuntimeError:
                 if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
