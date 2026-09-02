@@ -30,7 +30,7 @@ jobs:
       - name: Generate authoritative schema types
         run: bash scripts/codegen-types.sh
       - name: Verify existing database observations and failure distinction
-        run: uv run pytest tests/shared/test_agent_observation.py tests/shared/test_live_announce.py tests/services/test_heartbeat_liveness.py tests/gateway/test_agent_inspect.py -q
+        run: uv run pytest tests/shared/test_agent_observation.py tests/shared/test_live_announce.py tests/services/test_heartbeat_liveness.py tests/gateway/test_agent_inspect.py tests/gateway/test_agents_endpoints.py tests/shared/test_agent_snapshot_scope.py -q
       - name: Verify rendered observation states
         if: success() || failure()
         working-directory: ui/web
