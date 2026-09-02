@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import psutil
@@ -141,16 +142,20 @@ def test_explicit_resurrection_after_observed_process_exit(e2e_env: E2EEnv) -> N
             break
         assert time.monotonic() < deadline, "the original process did not actually exit"
         time.sleep(0.05)
-    response = asyncio.run(
-        dispatch_to_machine(
-            target_machine=row[1],
-            kind="lifecycle",
-            payload={
-                "path": f"/api/agents/{agent_id}/resurrect-explicit-v2",
-                "body": {"resurrected_by": "user", "prompt": "explicit wake"},
-            },
-        )
-    )
+    # Playwright's sync bridge keeps an event loop on this thread. The real
+    # lifecycle RPC therefore runs on a separate, bounded test-owned thread.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        response = executor.submit(
+            asyncio.run,
+            dispatch_to_machine(
+                target_machine=row[1],
+                kind="lifecycle",
+                payload={
+                    "path": f"/api/agents/{agent_id}/resurrect-explicit-v2",
+                    "body": {"resurrected_by": "user", "prompt": "explicit wake"},
+                },
+            ),
+        ).result(timeout=120)
     assert response["status"] == "spawned"
     wait_for_status(agent_id, AgentStatus.IDLING.value)
     with psycopg.connect(settings.data_plane.db_url) as conn:
