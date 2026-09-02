@@ -1,6 +1,6 @@
-"""Diagnostic contract: a fresh fake model repeats restart after markerless fallback.
+"""Scenario selection must not repeat restart after a consumed request.
 
-This proves the existing defect, not a corrected production restart protocol.
+This fixes the fake discriminator, not the production completion protocol.
 No actual child or atexit handler is installed; the real DB CAS and scenario
 factory run against the isolated CI database.
 """
@@ -22,8 +22,9 @@ from shared.machine import machine_name
 from tests.e2e.fakes.scenarios import lifecycle_restart
 
 
-def test_fallback_fresh_model_reissues_restart_without_completion_marker(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("status", ["claimed", "done"])
+def test_fallback_fresh_model_does_not_reissue_consumed_restart(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, status: str
 ) -> None:
     agent_id, _birth = create_agent_row(spawner="test", machine=machine_name())
     monkeypatch.setattr(ava.self, "AGENT_ID", agent_id)
@@ -31,8 +32,8 @@ def test_fallback_fresh_model_reissues_restart_without_completion_marker(
     assert initial.script == lifecycle_restart.RESTART_SCRIPT
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,status) "
-        "VALUES(%s,'','restart','self','claimed') RETURNING id",
-        (agent_id,),
+        "VALUES(%s,'','restart','self',%s) RETURNING id",
+        (agent_id, status),
     ).fetchone()
     assert row is not None
     original_request = row[0]
@@ -61,13 +62,34 @@ def test_fallback_fresh_model_reissues_restart_without_completion_marker(
         "SELECT id,kind,source,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (agent_id,),
     ).fetchall()
-    assert rows == [(original_request, "restart", "self", "claimed")]
+    assert rows == [(original_request, "restart", "self", status)]
     # Same persisted request, no additional chat or command. A newly built fake
-    # still chooses restart because its sole discriminator is the missing marker.
+    # must not issue another command merely because completion evidence is absent.
     successor = lifecycle_restart.build("diagnostic")
     assert successor.cursor == 0
-    assert successor.script == lifecycle_restart.RESTART_SCRIPT
-    assert successor.script[0].tool_calls[0]["id"] == "call_restart"
+    assert successor.script == lifecycle_restart.IDLE_SCRIPT
+    assert not successor.script[0].tool_calls
     print(  # noqa: T201 — explicit CI-only diagnostic receipt, no production content.
-        json.dumps({"agent": agent_id, "inbounds": rows, "freshModelReissuesRestart": True})
+        json.dumps(
+            {
+                "agent": agent_id,
+                "inbounds": rows,
+                "completionMarkerAbsent": True,
+                "freshModelReissuesRestart": False,
+            }
+        )
     )
+
+
+def test_pending_request_does_not_select_post_request_script(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_id, _birth = create_agent_row(spawner="test", machine=machine_name())
+    monkeypatch.setattr(ava.self, "AGENT_ID", agent_id)
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source,status) "
+        "VALUES(%s,'','restart','self','pending')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    assert lifecycle_restart.build("diagnostic").script == lifecycle_restart.RESTART_SCRIPT
