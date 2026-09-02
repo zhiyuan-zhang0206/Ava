@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from shared.native_job_observation import (
     NativeReadUnavailableError,
+    launchd_loaded,
     native_read,
     read_crontab,
     read_launchd_labels,
@@ -38,10 +39,18 @@ def main() -> None:
         if result.returncode != 0 or not result.stdout:
             raise RuntimeError("native launchctl system domain is unreadable")
         try:
-            read_launchd_labels(until)
+            labels = read_launchd_labels(until)
             gui_enumeration = True
         except NativeReadUnavailableError:
             gui_enumeration = False
+            labels = frozenset()
+        exact_gui_lookup = False
+        for label in sorted(labels):
+            if label.startswith("com.apple.") and launchd_loaded(label, until) is True:
+                exact_gui_lookup = True
+                break
+        if gui_enumeration and labels and not exact_gui_lookup:
+            raise RuntimeError("enumerated GUI services had no positive exact lookup")
         print(
             json.dumps(
                 {
@@ -49,6 +58,7 @@ def main() -> None:
                     "realLaunchctlRead": True,
                     "effectiveEnabledProof": False,
                     "guiEnumerationAvailable": gui_enumeration,
+                    "exactGuiLookup": exact_gui_lookup,
                     "writes": False,
                     "closure": "unknown",
                 }

@@ -84,7 +84,17 @@ def read_launchd_definition(label: str) -> bytes:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
         raise NativeReadUnavailableError("launchd definition is not a bounded regular file")
-    return path.read_bytes()
+    with path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+            info.st_dev,
+            info.st_ino,
+        ):
+            raise NativeReadUnavailableError("launchd definition changed while opening")
+        body = stream.read(1024 * 1024 + 1)
+    if len(body) > 1024 * 1024:
+        raise NativeReadUnavailableError("launchd definition grew beyond budget")
+    return body
 
 
 def launchd_loaded(label: str, valid_until: datetime) -> bool | None:
