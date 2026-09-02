@@ -125,6 +125,33 @@ async def test_owner_locked_queue_mutation_rolls_back(
         assert [r.id for r in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
 
 
+async def test_lock_wait_past_unchanged_lease_expiry_refuses_claim(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    inbound = _insert(db_conn, agent_id)
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at=clock_timestamp()+interval '1 second' WHERE id=%s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    with bind_turn_identity(agent_id, incarnation=owner):
+        async with async_write_transaction(aops_pool) as conn:
+            await conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
+            waiter = asyncio.create_task(claim_inbound_batch(aops_pool, agent_id))
+            # Hold the unchanged tuple past expiry; statement-time predicates
+            # can be true before blocking and must not authorize after waking.
+            await asyncio.sleep(1.1)
+            assert not waiter.done()
+        with pytest.raises(RuntimeOwnershipLostError):
+            await asyncio.wait_for(waiter, 3)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
+    ).fetchone() == ("pending",)
+
+
 async def test_missing_redis_publish_recovers_from_durable_pg(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
