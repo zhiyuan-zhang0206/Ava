@@ -131,6 +131,7 @@ def test_summary_projection_omits_detail_only_columns_in_sql() -> None:
     assert "a.fork_source_agent_id" in query  # frontend fork-tree lineage
     assert "fork_source_checkpoint_id" not in query
     assert "mp.last_probe_at" in query
+    assert "a.last_probe_at" not in query  # agent activity is not machine reachability
     assert "a.lease_expires_at" in query
     assert "a.config_overlay," not in query
     assert "a.config_overlay ->> 'llm_model' AS effective_model" in query

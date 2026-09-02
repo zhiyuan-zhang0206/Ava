@@ -1083,6 +1083,7 @@ class TestList:
             "heartbeat_paused_until",
             "observation",
         }
+        assert rows[0]["observation"]["runtime_owner"] == "unknown"
         by_id = {r["agent_id"]: r for r in rows}
         assert by_id[a_id]["status"] == "idling"
         assert by_id[a_id]["spawner"] == "user"
@@ -1148,6 +1149,9 @@ class TestList:
             "heartbeat_paused_until",
             "observation",
         }
+        assert row["observation"]["runtime_owner"] == "unknown"
+        assert row["observation"]["machine_probe_at"] is None
+        assert row["observation"]["machine_probe_valid_until"] is None
         assert detail.status_code == 200
         assert "fork_source_checkpoint_id" in detail.json()
         assert "last_probe_at" in detail.json()
