@@ -22,6 +22,8 @@ jobs:
       RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
       RUN_EVENT: ${{ github.event.workflow_run.event }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
       PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
     steps:
       - name: Rerun failed CI jobs once
@@ -44,6 +46,33 @@ jobs:
           if [ "$RUN_ATTEMPT" -gt 1 ]; then
             echo "CI run attempt $RUN_ATTEMPT has already been rerun"
             exit 0
+          fi
+          # Check current authority, not merely the newest run of an obsolete SHA.
+          # This GET cannot fence a later synchronize event; ci.yml therefore
+          # isolates concurrency by immutable SHA as the race-safety boundary.
+          if [ "$RUN_EVENT" = pull_request ]; then
+            if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Cannot confirm a unique PR for this run; refusing automatic retry"
+              exit 0
+            fi
+            observed="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --jq '[.state, .head.sha, .base.repo.full_name, .head.repo.full_name] | @tsv')"
+            IFS=$'\t' read -r state current_sha base_repo head_repo <<< "$observed"
+            if [ "$state" != open ] || [ "$current_sha" != "$HEAD_SHA" ] || \
+               [ "$base_repo" != "$GITHUB_REPOSITORY" ] || [ "$head_repo" != "$HEAD_REPO" ]; then
+              echo "PR is closed, superseded, or repository identity differs; refusing retry"
+              exit 0
+            fi
+          else
+            if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ] || [ -z "$HEAD_BRANCH" ]; then
+              echo "Push repository/branch identity is unavailable; refusing retry"
+              exit 0
+            fi
+            current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_BRANCH}" --jq .sha)"
+            if [ "$current_sha" != "$HEAD_SHA" ]; then
+              echo "Push has been superseded; refusing retry"
+              exit 0
+            fi
           fi
           # On pushes, this workflow shares HEAD_SHA with CI and would otherwise be newest.
           # Filter to CI only; PR rerun heads are on default branch, not the PR.
