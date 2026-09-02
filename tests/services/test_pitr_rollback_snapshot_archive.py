@@ -11,6 +11,7 @@ from services.pitr.checksums import CRC32C, ObjectChecksum, digest_bytes
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.rollback_snapshot_archive import (
+    SnapshotArchiveNotArchivedError,
     SnapshotArchiveNotVerifiedError,
     archive_rollback_snapshot,
     retire_rollback_snapshot,
@@ -175,6 +176,17 @@ def test_verify_downloads_the_exact_generation_decrypts_it_and_marks_the_evidenc
     assert verified.verified_at is not None
 
 
+def test_verify_identifies_a_missing_archive_record_without_retire_context(tmp_path: Path) -> None:
+    with pytest.raises(SnapshotArchiveNotArchivedError, match="has no archive record to verify"):
+        verify_rollback_snapshot(
+            "agent_state_backfill_snapshot",
+            ava_home=tmp_path / "home",
+            key=b"k" * 32,
+            reader=_Reader(_Store()),
+            restore_drill=lambda _table, _dump: None,
+        )
+
+
 def test_retire_refuses_until_the_exact_archived_artifact_has_passed_a_restore_drill(
     tmp_path: Path,
 ) -> None:
@@ -203,6 +215,15 @@ def test_retire_refuses_until_the_exact_archived_artifact_has_passed_a_restore_d
 
     retire_rollback_snapshot(archived.table, ava_home=home, drop_table=retired.append)
     assert retired == [archived.table]
+
+
+def test_retire_keeps_its_not_verified_message_for_a_missing_archive_record(tmp_path: Path) -> None:
+    with pytest.raises(SnapshotArchiveNotVerifiedError, match="cannot retire before archive"):
+        retire_rollback_snapshot(
+            "agent_state_backfill_snapshot",
+            ava_home=tmp_path / "home",
+            drop_table=lambda _table: None,
+        )
 
 
 def test_archive_accepts_only_the_snapshot_name_convention_shared_with_migration_lint(

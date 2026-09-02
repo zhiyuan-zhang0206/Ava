@@ -43,6 +43,10 @@ class SnapshotArchiveNotVerifiedError(SnapshotArchiveError):
     """Retirement was requested before an archived snapshot passed its drill."""
 
 
+class SnapshotArchiveNotArchivedError(SnapshotArchiveError):
+    """Verification was requested before a snapshot archive was recorded."""
+
+
 @dataclass(frozen=True)
 class RollbackSnapshotArchive:
     """Durable evidence for one immutable archived rollback snapshot."""
@@ -205,7 +209,12 @@ def retire_rollback_snapshot(
 ) -> RollbackSnapshotArchive:
     """Drop one rollback snapshot only after local archive proof is complete."""
     _require_snapshot_table(table)
-    record = _read_record(_record_path(ava_home, table))
+    try:
+        record = _read_record(_record_path(ava_home, table))
+    except SnapshotArchiveNotArchivedError as exc:
+        raise SnapshotArchiveNotVerifiedError(
+            f"rollback snapshot {table!r} cannot retire before archive verification succeeds"
+        ) from exc
     if record.verified_at is None:
         raise SnapshotArchiveNotVerifiedError(
             f"rollback snapshot {table!r} cannot retire before archive verification succeeds"
@@ -292,8 +301,8 @@ def _read_record(path: Path) -> RollbackSnapshotArchive:
     try:
         return RollbackSnapshotArchive.from_json(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise SnapshotArchiveNotVerifiedError(
-            f"rollback snapshot {path.stem!r} cannot retire before archive verification succeeds"
+        raise SnapshotArchiveNotArchivedError(
+            f"rollback snapshot {path.stem!r} has no archive record to verify"
         ) from exc
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise SnapshotArchiveError("rollback snapshot archive evidence is invalid") from exc
