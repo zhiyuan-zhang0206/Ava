@@ -162,6 +162,37 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                 "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
             }
             schema = json.loads((release.root / "manifest.json").read_text())["schema_digest"]
+            # Prove the independent resolver before the inherited updater hop.
+            # Restore exact fixture paths so native hop preparation sees no
+            # synthetic sessions/jobs. A later hop failure still fails this run.
+            fixture_paths = [
+                root / "unit/run/sessions/ava-restarter.json",
+                root / "unit/run/sessions/ava-obsolete-plugin-service.json",
+                root / "Library/LaunchAgents/com.ava.runtime-proof.legacy-relauncher.plist",
+            ]
+            prior = {path: path.read_bytes() if path.exists() else None for path in fixture_paths}
+            try:
+                subprocess.run(  # noqa: S603 — real retained image, native CI database, private home.
+                    [
+                        str(release.interpreter),
+                        "-I",
+                        "-B",
+                        str(inventory_proof),
+                        release.digest,
+                        release.manifest_digest,
+                        schema,
+                    ],
+                    cwd=root,
+                    env=migration_env,
+                    check=True,
+                    timeout=300,
+                )
+            finally:
+                for path, body in prior.items():
+                    if body is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        path.write_bytes(body)
             subprocess.run(  # noqa: S603 — real retained ops entry, isolated old-schema CI database.
                 [
                     str(release.interpreter),
@@ -220,21 +251,6 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                 # runner's ambient environment. Retain the actual admission error.
                 raise AssertionError(f"wheel/PG admission failed:\n{result.stderr[-8000:]}")
             (root / "migration-proof.json").write_text(result.stdout)
-            subprocess.run(  # noqa: S603 — actual retained wheel, native CI PG, private unit.
-                [
-                    str(release.interpreter),
-                    "-I",
-                    "-B",
-                    str(inventory_proof),
-                    release.digest,
-                    release.manifest_digest,
-                    schema,
-                ],
-                cwd=root,
-                env=migration_env,
-                check=True,
-                timeout=180,
-            )
     finally:
         retired_checkout.rename(checkout)
 

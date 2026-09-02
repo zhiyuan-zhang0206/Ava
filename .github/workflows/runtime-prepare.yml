@@ -139,6 +139,13 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: uv run --locked pytest tests/shared/test_updater_handoff.py tests/shared/test_posixproc_expected_signal.py -q
+      - name: Retain independent resolver proof even when inherited hop fails
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-publication-input-${{ github.sha }}
+          path: ${{ runner.temp }}/prepare/runtime-publication-input-proof.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: inactive-prepare-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}

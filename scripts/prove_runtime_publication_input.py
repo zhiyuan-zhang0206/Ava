@@ -3,14 +3,19 @@
 import hashlib
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from shared.managed_writer_observation import ExpectedUnitWriters
-from shared.runtime_publication_input import resolve_runtime_publication_input
+from shared.runtime_publication_input import (
+    resolve_runtime_publication_input,
+    revalidate_runtime_publication_input,
+)
 from shared.runtime_release import ReleaseRejectedError
 
 
-def prove_publication_input(home: Path, receipt: Path) -> None:
+def prove_publication_input(home: Path, receipt: Path) -> None:  # noqa: PLR0915 — isolated selector/receipt lifetime, always restored.
     """Called inside the existing source-absent installed inventory proof."""
     original_receipt = receipt.read_bytes()
     expected = json.loads(original_receipt)["expected"]
@@ -32,6 +37,18 @@ def prove_publication_input(home: Path, receipt: Path) -> None:
             or actual.actual.inventory_digest != chosen["inventory_receipt_digest"]
         ):
             raise AssertionError("installed resolver did not return actual complete receipt")
+        with patch(
+            "shared.runtime_publication_input.verify_release", side_effect=AssertionError("rehash")
+        ):
+            revalidate_runtime_publication_input(actual)
+            try:
+                revalidate_runtime_publication_input(
+                    replace(actual, process_pid=actual.process_pid + 1)
+                )
+            except ReleaseRejectedError:
+                pass
+            else:
+                raise AssertionError("runtime input reused across processes")
         for mutation in ("selector", "receipt", "home"):
             other: Path | None = None
             if mutation == "selector":
@@ -52,6 +69,12 @@ def prove_publication_input(home: Path, receipt: Path) -> None:
                 other.write_bytes(changed)
                 selector.write_text(json.dumps(chosen | {"inventory_receipt_digest": digest}))
             try:
+                try:
+                    revalidate_runtime_publication_input(actual)
+                except ReleaseRejectedError:
+                    pass
+                else:
+                    raise AssertionError("cheap runtime binding accepted changed input")
                 resolve_runtime_publication_input()
             except (ReleaseRejectedError, ValueError):
                 pass
@@ -78,6 +101,8 @@ def prove_publication_input(home: Path, receipt: Path) -> None:
                     "legacyGrantsNoNewInput": True,
                     "liveSchemaCompatibilityProved": False,
                     "publicationActivated": False,
+                    "cheapBindingAvoidsImageRehash": True,
+                    "crossProcessReuseRejected": True,
                 }
             )
         )
