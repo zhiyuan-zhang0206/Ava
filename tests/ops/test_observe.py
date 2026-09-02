@@ -22,8 +22,12 @@ def test_probe_set_gateway_classifies_signal_types() -> None:
     assert views["gateway-watchdog"].healthcheck_module is None  # the monitor itself
 
 
-def test_probe_set_agent_runner_membership() -> None:
+def test_probe_set_agent_runner_membership(monkeypatch: pytest.MonkeyPatch) -> None:
     """The agent-runner probe set is exactly the agent-runner-capability services."""
+    # This test models the code-DEFAULT shape (hosted since 2026-09). The CI
+    # backend shards export AVA_RUNNER_MODE=process for the process-shaped
+    # lifecycle suites, so pin the mode here instead of inheriting the job env.
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "hosted")
     sessions = {v.session for v in observe.probe_set(frozenset({"agent-runner"}))}
     assert {
         "ops",
