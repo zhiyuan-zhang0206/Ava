@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   prove-operation-evidence:
-    if: github.head_ref == 'ava-5344-managed-writer-barrier'
+    if: github.head_ref == 'ava-5344-managed-writer-barrier' || github.head_ref == 'ava-5344-writer-publication'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -23,3 +23,7 @@ jobs:
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --frozen
       - run: uv run pytest tests/shared/test_managed_writer_barrier.py -q
+      - if: github.head_ref == 'ava-5344-writer-publication'
+        run: uv run pytest tests/shared/test_managed_writer_publication.py -q
+      - if: github.head_ref == 'ava-5344-writer-publication'
+        run: uv run pyright shared/managed_writer_publication.py tests/shared/test_managed_writer_publication.py
