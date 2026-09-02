@@ -30,9 +30,10 @@ jobs:
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
           timeout 240 uv run pytest tests/agent/test_lifecycle_finalizers.py tests/ops/test_cold_lifecycle.py -q --junitxml=proof/head.xml
-          git show ee1dc850f:agent/_starting.py > agent/_starting.py
-          git show ee1dc850f:services/delivery_watchdog/daemon.py > services/delivery_watchdog/daemon.py
-          git show ee1dc850f:ops/agent_launch.py > ops/agent_launch.py
+          git fetch origin ee1dc850fbb13cff8fa925c5956e8611921b3c3a
+          git show ee1dc850fbb13cff8fa925c5956e8611921b3c3a:agent/_starting.py > agent/_starting.py
+          git show ee1dc850fbb13cff8fa925c5956e8611921b3c3a:services/delivery_watchdog/daemon.py > services/delivery_watchdog/daemon.py
+          git show ee1dc850fbb13cff8fa925c5956e8611921b3c3a:ops/agent_launch.py > ops/agent_launch.py
           set +e
           timeout 120 uv run pytest tests/agent/test_lifecycle_finalizers.py -q --junitxml=proof/baseline.xml
           result=$?
