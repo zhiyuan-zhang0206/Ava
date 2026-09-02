@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from shared.caller_identity import CallerIdentity
+from shared.caller_identity import CallerIdentity, caller_payload
 from shared.envelope import validate_source, wrap_inbound
 
 
@@ -53,3 +53,33 @@ def test_caller_cannot_carry_authentication_or_capabilities() -> None:
 def test_external_model_cannot_impersonate_other_identity_kinds(kind: str) -> None:
     with pytest.raises(ValidationError):
         CallerIdentity.model_validate({"kind": kind, "subject": "codex"})
+
+
+def test_structured_payload_preserves_other_fields_and_does_not_mutate_input() -> None:
+    original: dict[str, object] = {"content_blocks": [{"type": "text", "text": "hello"}]}
+    result = caller_payload("external_agent:codex:run-42", original)
+    assert result == original | {
+        "caller_identity": {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
+    }
+    assert "caller_identity" not in original
+    assert caller_payload("external_agent:codex:run-42", result) == result
+
+
+@pytest.mark.parametrize("source", ["user", "agent:405", "system:update", "shell:123"])
+def test_legacy_payload_has_no_invented_identity(source: str) -> None:
+    assert caller_payload(source, None) is None
+    assert caller_payload(source, {"inbound_id": 42}) == {"inbound_id": 42}
+
+
+@pytest.mark.parametrize("source", ["user", "external_agent:claude_code", "unknown:cli"])
+def test_reserved_metadata_cannot_contradict_source(source: str) -> None:
+    with pytest.raises(ValueError, match="conflicts with source"):
+        caller_payload(source, {"caller_identity": {"kind": "external_agent", "subject": "codex"}})
+
+
+def test_reserved_metadata_cannot_claim_verified_identity() -> None:
+    with pytest.raises(ValidationError):
+        caller_payload(
+            "external_agent:codex",
+            {"caller_identity": {"kind": "external_agent", "subject": "codex", "verified": True}},
+        )

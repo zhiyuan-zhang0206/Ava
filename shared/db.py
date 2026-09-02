@@ -579,6 +579,9 @@ def insert_inbound_message(
         publish an `inbound_arrived` event for the web UI to show in
         real time (spec §5).
     """
+    from shared.caller_identity import caller_payload
+
+    payload = caller_payload(source, payload)
     # Map inbound kind → lifecycle event_type. Only chat messages between
     # agents produce a 'send_message' event; user→agent chat is not an
     # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /
