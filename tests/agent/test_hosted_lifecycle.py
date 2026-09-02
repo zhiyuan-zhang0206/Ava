@@ -29,9 +29,10 @@ async def test_hosted_restart_marker_does_not_claim_completion() -> None:
     )
     assert state.restart_requested
     assert isinstance(state.new_msgs[0], SystemMessage)
-    assert isinstance(state.new_msgs[0].content, str)
-    assert "Restart was accepted" in state.new_msgs[0].content
-    assert "have been restarted" not in state.new_msgs[0].content
+    content = state.new_msgs[0].model_dump()["content"]
+    assert isinstance(content, str)
+    assert "Restart was accepted" in content
+    assert "have been restarted" not in content
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
