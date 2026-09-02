@@ -25,13 +25,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import shared.db
+from shared.db_transaction import write_transaction
 
 
 def set_cluster_target_sha(target_sha: str, *, set_by: str | None = None) -> None:
     """Record `target_sha` as the cluster's pinned commit, overwriting the prior
     pin. Called by the gateway after a rollout's local update reaches the
     target. `set_by` is free-form provenance (e.g. `machine:pid`)."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_pin SET target_sha = %s, updated_at = now(), updated_by = %s "
             "WHERE id = 1",
@@ -46,7 +47,7 @@ def set_cluster_target_sha(target_sha: str, *, set_by: str | None = None) -> Non
 
 def set_target_with_pending_known_good(new_target_sha: str, *, set_by: str | None = None) -> None:
     """Pin a successful rollout while deferring its LKG promotion to health probes."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_pin SET target_sha = %s, pending_known_good_sha = %s, "
             "pending_known_good_at = now(), updated_at = now(), updated_by = %s "
@@ -101,7 +102,7 @@ def get_pending_known_good() -> tuple[str, datetime] | None:
 
 def clear_pending_known_good() -> None:
     """Discard the rollout candidate whose observation window no longer applies."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_pin SET pending_known_good_sha = NULL, pending_known_good_at = NULL "
             "WHERE id = 1"
@@ -120,7 +121,7 @@ def promote_pending_known_good_if_ready(*, min_age_s: float) -> bool:
     preserves the record instead; it never blocks advancement of the rollback
     anchor.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT target_sha, pending_known_good_sha, pending_known_good_at "
             "FROM cluster_pin WHERE id = 1 FOR UPDATE"
@@ -157,7 +158,7 @@ def set_last_known_good_sha(sha: str, *, set_by: str | None = None) -> None:
     (`ava cluster rollback --set-known-good`). Most callers should use
     `advance_pin` instead, which moves `target_sha` → `last_known_good_sha`
     atomically with a rollout."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_pin SET last_known_good_sha = %s, last_known_good_at = now(), "
             "updated_by = %s "  # last writer wins — the append form grew unbounded (audit 2026-08-08 P2)
@@ -179,7 +180,7 @@ def seed_last_known_good_sha_if_null(sha: str, *, set_by: str | None = None) -> 
     fires. Seeding on the first successful start floors the rollback at the commit
     the cluster came up healthy on. The caller passes the HEAD sha in (this module
     stays free of the CLI git helpers)."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute("SELECT last_known_good_sha FROM cluster_pin WHERE id = 1")
         row = cur.fetchone()
         if row is None:
@@ -206,7 +207,7 @@ def advance_pin(new_target_sha: str, *, set_by: str | None = None) -> str | None
     This is the immediate-advance form. Ordinary backend rollouts use
     `set_target_with_pending_known_good` so the health probe must first observe
     the new commit before it replaces the rollback anchor."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute("SELECT target_sha FROM cluster_pin WHERE id = 1")
         row = cur.fetchone()
         if row is None:

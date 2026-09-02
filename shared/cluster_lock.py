@@ -274,7 +274,7 @@ def acquire_update_lock(
     would silently make live rollouts eligible for convergence-release. If a run
     lease ever needs to say something, it needs a different column, not this one.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state "
             "SET holder = %s, acquired_at = now(), expires_at = now() + make_interval(secs => %s), "
@@ -324,7 +324,7 @@ def renew_update_lock(holder: str, *, ttl_s: float = LOCK_TTL_S) -> bool:
     rollout unprotected is worse — but says so at WARNING, because a lapse means the
     invariant was already broken and re-arming it silently would hide that.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         # MATERIALIZED + FOR UPDATE for the same reason as force_release_update_lock:
         # the pre-UPDATE `expires_at` has to be read under a row lock, or an inlined
         # CTE would re-read it after the UPDATE and never report a lapse.
@@ -402,7 +402,7 @@ def force_release_update_lock() -> str | None:
     # MATERIALIZED is load-bearing: a plain CTE inlines (PG12+) and the RETURNING
     # subquery would then re-read the row *after* the UPDATE (NULL); materializing
     # pins the pre-UPDATE holder.
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "WITH prev AS MATERIALIZED "
             "(SELECT holder FROM deployment_state WHERE id = 1 FOR UPDATE), "
@@ -510,7 +510,7 @@ def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_T
     """
     note = settle_note(hosts)
     sorted_hosts = sorted(hosts)  # one order in all three renderings
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         # The settle fact lands three ways: the structured `settle_hosts` array
         # (the new truth), `settle_note` (human-readable), and the legacy `note`
         # column every current reader parses. All three are written together and
@@ -557,7 +557,7 @@ def release_settle_hold(holder: str) -> bool:
     and suppress auto-rollback — for the rest of `SETTLE_TTL_S`. The caller
     (`ops.deploy_window`) establishes convergence; this is only the write.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, "
             "    expires_at = NULL, note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
