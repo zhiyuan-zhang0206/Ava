@@ -155,7 +155,18 @@ async def test_successor_admission_observes_restart_before_next_claim(
     ).fetchone()
     assert observed is not None and observed[0] == "done"
     assert observed[1] is not None and observed[2] is not None
-    assert [item.id for item in await claim_inbound_batch(aops_pool, agent_id)] == [second]
+    successor_batch = await claim_inbound_batch(aops_pool, agent_id)
+    if following_kind == "restart":
+        assert [item.id for item in successor_batch] == [second]
+    else:
+        # Actual admission emits its own completion marker alongside retained work.
+        assert len(successor_batch) == 2
+        assert (successor_batch[0].id, successor_batch[0].kind) == (second, following_kind)
+        assert successor_batch[1].kind == "restart_completed"
+        assert successor_batch[1].id > second
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (second,)
+        ).fetchone() == (("claimed",) if following_kind == "chat" else ("done",))
     with bind_turn_identity(agent_id, incarnation=old):
         async with async_write_transaction(aops_pool) as conn:
             assert not await apply_process_lifecycle(conn, agent_id, first)
