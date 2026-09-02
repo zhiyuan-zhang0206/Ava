@@ -21,6 +21,7 @@ from shared.runtime_config import read_env_aliases
 
 _USER_AGENT = "Ava model-update tracker"
 _TIMEOUT_SECONDS, _QWEN_PAGE_SIZE = 30, 100
+_DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{4}(?:-\d{2}(?:-\d{2})?)?$|-\d{8}$")
 
 
 @dataclass(frozen=True)
@@ -301,6 +302,10 @@ def compare_models(
         series, version = identity
         same_series = registry_series.get(series, [])
         series_models[model_id] = [known_id for known_id, _ in same_series]
+        snapshot_suffix = _DATED_SNAPSHOT_SUFFIX.search(model_id)
+        if snapshot_suffix is not None and model_id[: snapshot_suffix.start()] in registry:
+            suppressed.append(model_id)
+            continue
         if any(known_version > version for _, known_version in same_series):
             suppressed.append(model_id)
         else:

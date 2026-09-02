@@ -120,6 +120,47 @@ def test_qwen_major_only_variant_is_suppressed_but_same_version_variant_is_actio
     assert comparison.suppressed == ["qwen3-max-2025-09-23"]
 
 
+def test_qwen_dated_snapshots_of_registered_aliases_are_suppressed() -> None:
+    tracker = _load_script()
+    registry = {
+        "qwen3.8-max": type("Spec", (), {"provider": "qwen"})(),
+    }
+
+    comparison = tracker.compare_models(
+        tracker.SOURCES["qwen"],
+        [
+            "qwen3.8-max-0902",
+            "qwen3.8-max-2026-09-02",
+            "qwen3.8-max-20260902",
+            "qwen3.8-2.4t-a95b",
+        ],
+        registry,
+    )
+
+    assert comparison.candidates == ["qwen3.8-2.4t-a95b"]
+    assert comparison.suppressed == [
+        "qwen3.8-max-0902",
+        "qwen3.8-max-2026-09-02",
+        "qwen3.8-max-20260902",
+    ]
+
+
+def test_qwen_date_suffixes_with_unregistered_remainders_fall_through() -> None:
+    tracker = _load_script()
+    registry = {
+        "qwen3.8-max": type("Spec", (), {"provider": "qwen"})(),
+    }
+
+    comparison = tracker.compare_models(
+        tracker.SOURCES["qwen"],
+        ["qwen3-max-2025-09-23", "qwen3.8-other-0902"],
+        registry,
+    )
+
+    assert comparison.candidates == ["qwen3.8-other-0902"]
+    assert comparison.suppressed == ["qwen3-max-2025-09-23"]
+
+
 def test_openai_response_shape_drift_raises_instead_of_reading_no_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

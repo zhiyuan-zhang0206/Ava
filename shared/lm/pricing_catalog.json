@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-02.1",
+  "catalog_version": "2026-09-02.2",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -678,9 +678,9 @@
     },
     "qwen3.8-flash": {
       "vendor": "alibaba",
-      "source_url": "https://www.qwencloud.com/models/qwen3.8-flash",
-      "source_checked_at": "2026-08-27",
-      "effective_time_note": "Model Studio (dashscope.aliyuncs.com) EN pricing page not yet published (checked 2026-08-27; model launched 2026-08-25/26) - these are the official QwenCloud USD figures (Alibaba's own Qwen cloud, announced on the official Qwen X account). The DashScope models API publishes the Beijing CNY column (1 / 0.1 / 3 per 1M) and range_name=Default (single flat tier). The Beijing USD column must be re-checked when the alibabacloud.com model page lands: QwenCloud's USD for qwen3.8-max equals Model Studio's Singapore column, not Beijing's.",
+      "source_url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-flash",
+      "source_checked_at": "2026-09-02",
+      "effective_time_note": "The Model Studio EN page landed (checked 2026-09-02); this entry uses its published Beijing USD column. Earlier QwenCloud figures tracked the Singapore column, overstated Beijing cost, and are retired.",
       "periods": [
         {
           "effective_from": null,
@@ -690,9 +690,9 @@
               "input_tokens_min": 0,
               "input_tokens_max": null,
               "rates": {
-                "input": "0.16",
-                "cache_read": "0.016",
-                "output": "0.47"
+                "input": "0.113",
+                "cache_read": "0.014",
+                "output": "0.382"
               },
               "utc_daily_overrides": []
             }
