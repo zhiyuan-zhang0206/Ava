@@ -10,6 +10,8 @@ from typing import Any
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from shared.db_transaction import write_transaction
+
 _CACHE_TTL = timedelta(seconds=30)
 _SESSION_CACHE_MAX_ENTRIES = 4096
 
@@ -29,7 +31,7 @@ def create_session(
     ip: str,
 ) -> None:
     """Insert one session and evict any stale positive cache entry."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO web_sessions (id, expires_at, user_agent, ip)
@@ -81,7 +83,7 @@ def session_is_valid(
 
 def revoke_session(pool: ConnectionPool[Any], session_id: str) -> bool:
     """Revoke one active session and evict its positive cache entry."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             """
             UPDATE web_sessions
@@ -123,7 +125,7 @@ def list_sessions(
 
 def touch_session(pool: ConnectionPool[Any], session_id: str) -> None:
     """Record recent use of a session."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE web_sessions SET last_seen_at = now() WHERE id = %s",
             (session_id,),
