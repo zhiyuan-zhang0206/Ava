@@ -35,20 +35,22 @@ from shared.runtime_release import (
 )
 
 
+def _copy_proof(root: Path, checkout: Path, name: str) -> Path:
+    target = root / name
+    shutil.copy2(checkout / "scripts" / name, target)
+    return target
+
+
 def prove_checkout_absent(
     root: Path, checkout: Path, application_name: str, release: VerifiedRelease
 ) -> None:
     """Run the existing CLI with no source checkout at its original path."""
-    verifier = root / "verify_runtime_wheel.py"
-    shutil.copy2(checkout / "scripts/verify_runtime_wheel.py", verifier)
-    consumer = root / "prove_runtime_consumer.py"
-    shutil.copy2(checkout / "scripts/prove_runtime_consumer.py", consumer)
-    migration = root / "prove_runtime_migration.py"
-    shutil.copy2(checkout / "scripts/prove_runtime_migration.py", migration)
-    collector = root / "prove_runtime_otel.py"
-    shutil.copy2(checkout / "scripts/prove_runtime_otel.py", collector)
-    plugin_proof = root / "prove_runtime_plugins.py"
-    shutil.copy2(checkout / "scripts/prove_runtime_plugins.py", plugin_proof)
+    verifier = _copy_proof(root, checkout, "verify_runtime_wheel.py")
+    consumer = _copy_proof(root, checkout, "prove_runtime_consumer.py")
+    migration = _copy_proof(root, checkout, "prove_runtime_migration.py")
+    collector = _copy_proof(root, checkout, "prove_runtime_otel.py")
+    plugin_proof = _copy_proof(root, checkout, "prove_runtime_plugins.py")
+    inventory_proof = _copy_proof(root, checkout, "prove_release_inventory.py")
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -174,6 +176,21 @@ def prove_checkout_absent(
                 # runner's ambient environment. Retain the actual admission error.
                 raise AssertionError(f"wheel/PG admission failed:\n{result.stderr[-8000:]}")
             (root / "migration-proof.json").write_text(result.stdout)
+            subprocess.run(  # noqa: S603 — actual retained wheel, native CI PG, private unit.
+                [
+                    str(release.interpreter),
+                    "-I",
+                    "-B",
+                    str(inventory_proof),
+                    release.digest,
+                    release.manifest_digest,
+                    schema,
+                ],
+                cwd=root,
+                env=migration_env,
+                check=True,
+                timeout=180,
+            )
     finally:
         retired_checkout.rename(checkout)
 
