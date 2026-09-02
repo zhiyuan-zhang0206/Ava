@@ -441,7 +441,7 @@ async def reconcile_open_pages(
         tuple[str, int, str, str | None, str | None]
     ] = []  # name, port, host, title, serve_dir
     try:
-        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 "SELECT name, port, host, title, serve_dir FROM agent_pages "
                 "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL",
@@ -666,7 +666,7 @@ async def _close_dead_show_pages(
     names = [name for name, _port in dead]
     notified = False
     try:
-        async with pool.connection() as conn, conn.cursor() as cur:
+        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             for name in names:
                 # CAS open->closed (the same UPDATE close_page uses).
                 await cur.execute(

@@ -51,6 +51,12 @@ class _FakeConn:
     def cursor(self) -> _FakeCursor:
         return self._cursor
 
+    def transaction(self) -> _FakeConn:
+        return self
+
+    async def execute(self, sql: str, params: tuple | None = None) -> None:
+        await self._cursor.execute(sql, params)
+
     async def __aenter__(self) -> _FakeConn:
         return self
 
@@ -62,7 +68,7 @@ class _FakePool:
     def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
         self._conn = _FakeConn(rows, fetchone_row)
 
-    def connection(self) -> _FakeConn:
+    def connection(self, *, timeout: float | None = None) -> _FakeConn:
         # Mirrors AsyncConnectionPool.connection(): returns a (sync) context
         # object whose __aenter__ is awaited by `async with`.
         return self._conn
