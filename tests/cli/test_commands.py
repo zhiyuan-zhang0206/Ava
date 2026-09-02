@@ -600,6 +600,9 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
         "agent-host",
         "pitr-uploader",
         "pitr-base-candidate",
+        # milvus is gated out under the numpy memory-search backend (the
+        # default) — see ops.spec._gate_reason.
+        "milvus",
     }
     assert "ops" not in sessions
     assert "browser" not in sessions
@@ -662,6 +665,9 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
         "restarter",
         "pitr-uploader",
         "pitr-base-candidate",
+        # milvus is gated out under the numpy memory-search backend (the
+        # default) — see ops.spec._gate_reason.
+        "milvus",
     }
     assert "ops" in sessions  # the load-bearing addition vs gateway-only
     assert "gateway" in sessions

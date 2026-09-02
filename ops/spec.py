@@ -327,6 +327,8 @@ def build_services() -> tuple[ServiceSpec, ...]:
             healthcheck_module="services.healthchecks.events_maintenance",
         ),
         # milvus before memory-indexer: memory-indexer cold-start connects to milvus.
+        # Gated by _gate_reason to the milvus memory-search backend — numpy
+        # (default) / pgvector hosts do not launch the ~1GB milvus-lite server.
         ServiceSpec(
             session="milvus",
             cmd=".venv/bin/python -m services.milvus.daemon",
@@ -759,6 +761,16 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         # probes, lease rows, session relaunches); hosted rows have none of
         # those, so a process reaper would harvest every healthy agent.
         return "disabled (AVA_RUNNER_MODE is hosted — per-agent process supervision retired)"
+    if session == "milvus" and settings.services.memory_search_backend != "milvus":
+        # The milvus-lite server only serves the memory indexer's milvus
+        # backend; numpy (default) and pgvector never dial it. Without the
+        # gate every `ava start` launched an idle ~1GB milvus-lite process the
+        # memory search never uses (2026-09-02 numpy-default ruling; daemon
+        # was disabled by hand 2026-09-03, this gate makes it durable).
+        return (
+            "memory-search backend is "
+            f"{settings.services.memory_search_backend!r} (AVA_MEMORY_SEARCH_BACKEND) — milvus not needed"
+        )
     return None
 
 

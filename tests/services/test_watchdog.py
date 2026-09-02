@@ -381,7 +381,16 @@ def test_pidfile_for_role_picks_per_capability_file(
 # ─── per-capability healthcheck selection (build_services-derived roster) ─────
 
 
-def test_checks_for_capability_gateway_returns_gateway_set() -> None:
+def test_checks_for_capability_gateway_returns_gateway_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # This test locks the gateway capability's healthcheck membership and
+    # ordering, so milvus must be on the set: pin the milvus memory-search
+    # backend (numpy, the default, gates the milvus service out — see
+    # ops.spec._gate_reason / test_milvus_gated_out_unless_milvus_backend).
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "memory_search_backend", "milvus")
     names = [c.name for c in wd._checks_for_capability("gateway")]
     assert "gateway" in names
     assert "labeler" in names
