@@ -71,8 +71,8 @@ BEGIN
     END IF;
 END $$;
 
--- A live child folds to its terminated parent's live parent. This exercises
--- the PL/pgSQL body instead of only checking that CREATE FUNCTION succeeds.
+-- Lifecycle status transitions preserve spawn lineage, even when the parent is
+-- terminated. This protects against a trigger reintroducing a spawner rewrite.
 INSERT INTO agents (id, label) VALUES
     (991001, 'spawner-smoke-grandparent'),
     (991002, 'spawner-smoke-parent'),
@@ -91,13 +91,13 @@ DECLARE child_spawner TEXT;
 DECLARE resurrected_spawner TEXT;
 BEGIN
     SELECT spawner INTO child_spawner FROM agents_meta WHERE id = 991003;
-    IF child_spawner <> 'agent:991001' THEN
-        RAISE EXCEPTION 'fold_live_child_spawners_on_terminate wrong result — child_spawner=%',
+    IF child_spawner <> 'agent:991002' THEN
+        RAISE EXCEPTION 'terminating parent rewrote child spawner — child_spawner=%',
             child_spawner;
     END IF;
     SELECT spawner INTO resurrected_spawner FROM agents_meta WHERE id = 991004;
-    IF resurrected_spawner <> 'agent:991001' THEN
-        RAISE EXCEPTION 'fold_resurrected_agent_spawner wrong result — resurrected_spawner=%',
+    IF resurrected_spawner <> 'agent:991002' THEN
+        RAISE EXCEPTION 'resurrecting agent rewrote spawner — resurrected_spawner=%',
             resurrected_spawner;
     END IF;
 END $$;
