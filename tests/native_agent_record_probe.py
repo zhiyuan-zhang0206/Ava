@@ -229,13 +229,35 @@ class NativeAgentRecordOrdering(unittest.TestCase):
             "original_lookup=helper.psutil.Process;"
             f"exec({delayed_lookup!r});helper.psutil.Process=delayed_lookup;"
             f"helper.send_private_console_break(Path({str(path)!r}),{record.pid},"
-            f"{record.create_time!r},{time.monotonic() + 2!r})"
+            f"{record.create_time!r},time.monotonic()+2)"
         )
         with self.assertRaises(subprocess.TimeoutExpired):
             run_job_process([sys.executable, "-I", "-c", script], timeout=1)
         self.assertTrue(ready.exists(), "real signal module never loaded before timeout")
         time.sleep(3.2)
         self.assertFalse(marker.exists(), "timed-out or expired helper sent late SIGBREAK")
+        self.assertFalse(psutil.pid_exists(int(ready.read_text())))
+        ready.unlink()
+        owner = (
+            "import os,sys,threading,time;from pathlib import Path;"
+            "from shared.winjob_spawn import run_job_process;"
+            f"ready=Path({str(ready)!r});"
+            "threading.Thread(target=lambda: "
+            "([time.sleep(.02) for _ in iter(lambda:ready.exists(),True)],os._exit(0)),"
+            "daemon=True).start();"
+            f"run_job_process([sys.executable,'-I','-c',{script!r}],timeout=5)"
+        )
+        completed = subprocess.run(  # noqa: S603 - fixed disposable CI owner
+            [sys.executable, "-I", "-c", owner],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(ready.exists(), "signal helper did not enter its identity check")
+        time.sleep(3.2)
+        self.assertFalse(marker.exists(), "owner-dead helper sent late SIGBREAK")
         self.assertFalse(psutil.pid_exists(int(ready.read_text())))
 
     def assert_redirector_parent(self, child: psutil.Process, record: SessionRecord) -> None:
