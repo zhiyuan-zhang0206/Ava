@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from psycopg import Connection
 from psycopg.rows import dict_row
@@ -102,9 +102,10 @@ def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
             or command["observed_at"] is not None
         ):
             return False
-        payload = command["payload"] or {}
-        if not isinstance(payload, dict):
+        raw_payload: object = command["payload"] or {}
+        if not isinstance(raw_payload, dict):
             raise TypeError("lifecycle command payload must be an object")
+        payload = cast(dict[str, object], raw_payload)
         count = _attempt_count(payload)
         pid = owner["pid"]
         if pid is not None:
