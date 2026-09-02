@@ -133,13 +133,15 @@ def fault_worker(mode: str, request: Path) -> int:
 
 def wait_endpoint(context: PreparedObservation, projection: ObserverProjection) -> None:
     deadline = time.monotonic() + 20
+    last_error = "no observation attempted"
     while time.monotonic() < deadline:
         try:
             hop.probe_bootstrap(context, projection)
             return
-        except (OSError, ValueError, RuntimeError):
+        except (OSError, ValueError, RuntimeError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
             time.sleep(0.05)
-    raise AssertionError("actual restricted endpoint did not become available")
+    raise AssertionError("actual restricted endpoint did not become available: " + last_error)
 
 
 def verify_probe_reuse(
