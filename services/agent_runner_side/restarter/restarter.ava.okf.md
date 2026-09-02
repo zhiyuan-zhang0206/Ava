@@ -15,6 +15,13 @@ Polls local `agents_meta` rows with `status='restarting'` every second and calls
 ## Core Responsibilities
 Each tick runs three machine-scoped, non-blocking (`blocks` always `BlockScope.NONE`) controllers: `RespawnController` (restart+reap), `CrashResurrectController` (auto-resurrect on crash), and `WedgedAgentController` (kill + resurrect live agents that stop consuming pending work).
 
+**Runtime boundary**: all three controllers are process-mode only. In hosted
+mode each controller returns without database access; the daemon refuses before
+startup I/O and exits its dispatch loop without running a controller. The roster
+gate is therefore not the only boundary against a stale direct daemon launch.
+This containment does not fence a process with stale configuration: runtime-owner
+generations remain a separate requirement.
+
 **Serving boundary**: every automatic process launch holds the local
 `shared.start_serving` generation lock and proceeds only after `ava start` has
 completed fully ready. Corpse and terminated-zombie cleanup still runs while it
