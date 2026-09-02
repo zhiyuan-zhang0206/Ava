@@ -513,6 +513,29 @@ def make_list_item(
     )
 
 
+def make_list_item_listapi(
+    *,
+    message_id: str,
+    content: str = '{"text": "hello poll"}',
+    sender_id: str = "ou_user_1",
+    id_type: str = "open_id",
+    sender_type: str = "user",
+    msg_type: str = "text",
+) -> SimpleNamespace:
+    """A ListMessage-API-shaped item: no chat_type, id on sender.id."""
+    return SimpleNamespace(
+        message_id=message_id,
+        msg_type=msg_type,
+        body=SimpleNamespace(content=content),
+        sender=SimpleNamespace(
+            sender_type=sender_type,
+            id=sender_id,
+            id_type=id_type,
+        ),
+        create_time="1788000000000",
+    )
+
+
 def make_list_response(items: list[SimpleNamespace]) -> SimpleNamespace:
     # The API returns newest-first; tests pass items in desc order explicitly.
     return SimpleNamespace(code=0, msg="ok", data=SimpleNamespace(items=items))
@@ -670,6 +693,55 @@ def test_start_poller_honors_zero_interval(monkeypatch: pytest.MonkeyPatch) -> N
     adapter = FeishuAdapter(FakeCore())
     adapter._start_poller()
     assert adapter._poll_task is None
+
+
+async def test_poll_normalizes_list_message_api_shape(adapter: FeishuAdapter) -> None:
+    """Regression: ListMessage items carry no chat_type and put the open id
+    on sender.id (id_type=open_id) — the poller must deliver them, not
+    reject them as non-p2p / id-less (post-deploy bug: every polled message
+    was dropped since 2026-09-02 04:08)."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        make_list_response([make_list_item_listapi(message_id="om_0")]),
+        make_list_response(
+            [
+                make_list_item_listapi(message_id="om_9", content='{"text": "via list api"}'),
+                make_list_item_listapi(message_id="om_0"),
+            ]
+        ),
+    ]
+    await adapter._poll_once("oc_p2p_1")
+    await adapter._poll_once("oc_p2p_1")
+    assert [m.text for m in adapter.core.received] == ["via list api"]
+    assert [m.chat_id for m in adapter.core.received] == ["ou_user_1"]
+    assert adapter._last_open_id == "ou_user_1"
+
+
+async def test_poll_list_api_item_with_union_id_rejected(adapter: FeishuAdapter) -> None:
+    """A ListMessage sender whose id is not an open_id is not deliverable."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        make_list_response([make_list_item_listapi(message_id="om_0")]),
+        make_list_response(
+            [
+                make_list_item_listapi(
+                    message_id="om_8",
+                    content='{"text": "union id"}',
+                    sender_id="on_union_1",
+                    id_type="union_id",
+                ),
+                make_list_item_listapi(message_id="om_0"),
+            ]
+        ),
+    ]
+    await adapter._poll_once("oc_p2p_1")
+    await adapter._poll_once("oc_p2p_1")
+    assert adapter.core.received == []
+    assert adapter._last_open_id == ""
 
 
 def test_poll_round_delay_partial_failure_keeps_cadence(adapter: FeishuAdapter) -> None:
