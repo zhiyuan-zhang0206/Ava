@@ -57,7 +57,7 @@ def challenge_budget(until: datetime) -> float:
     return remaining
 
 
-def fault_worker(mode: str, request: Path) -> int:
+def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped real-updater fault interposition and evidence.
     """Test-only interposition around the actual existing updater entry."""
     from cli.commands._update_agent_runner import main as updater_main
 
@@ -127,12 +127,25 @@ def fault_worker(mode: str, request: Path) -> int:
                 time.sleep(0.05)
             raise AssertionError("candidate did not encounter the actual occupied endpoint")
 
-    with patch.object(hop, "_start_observer", side_effect=blocked_candidate):
+    def recorded_candidate(
+        plan: hop.PreparedBootstrapHop, image: hop.VerifiedRelease, context_path: str
+    ) -> None:
+        try:
+            blocked_candidate(plan, image, context_path)
+        except Exception as exc:
+            # The updater may legitimately catch this failure for compensation.
+            # Preserve fixture versus native-launch attribution without secret text.
+            (request.parent / "occupied-candidate-error.json").write_text(
+                json.dumps({"exception": type(exc).__name__, "errno": getattr(exc, "errno", None)})
+            )
+            raise
+
+    with patch.object(hop, "_start_observer", side_effect=recorded_candidate):
         return updater_main(["--bootstrap-hop", str(request)])
 
 
 def wait_endpoint(context: PreparedObservation, projection: ObserverProjection) -> None:
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + challenge_budget(context.challenge.valid_until) / 2
     last_error = "no observation attempted"
     while time.monotonic() < deadline:
         try:
@@ -500,7 +513,18 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     )
                     require(resumed.returncode == 1, "dead-owner resume did not restore A")
                 if mode == "candidate-bind-failure":
-                    failure = json.loads((home / "run/occupied-candidate-exit.json").read_text())
+                    evidence = home / "run/occupied-candidate-exit.json"
+                    if not evidence.exists():
+                        diagnostic = home / "run/occupied-candidate-error.json"
+                        detail = (
+                            diagnostic.read_text()
+                            if diagnostic.exists()
+                            else "no fixture error recorded"
+                        )
+                        raise AssertionError(
+                            "actual candidate bind failure was not proved: " + detail
+                        )
+                    failure = json.loads(evidence.read_text())
                     require(
                         failure["exited_while_occupied"] is True,
                         "compensation swallowed a failed native bind fault fixture",
