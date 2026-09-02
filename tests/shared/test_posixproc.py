@@ -22,7 +22,7 @@ import pytest
 from shared import posixproc
 from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.session_record import SessionRecord, pid_starttime_ticks
-from tests.shared.process_evidence import detach_evidence
+from tests.shared.process_evidence import detach_evidence, detached_to_known_reaper
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 
@@ -136,12 +136,14 @@ def test_new_session_reparents_to_init_no_zombie(
     unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     record_property: Callable[[str, object], None],
 ) -> None:
-    """The launched child double-forks: it reparents to init (PPID==1) immediately,
+    """The launched child double-forks to init or an ancestor subreaper,
     so the spawner (this test process) accretes no zombie, and the record tracks
     the real child pid."""
     name = "ava-test-agent-1"
     spawner = psutil.Process()
     before_children = set(spawner.children())
+    ancestor_births = {(parent.pid, parent.create_time()) for parent in spawner.parents()}
+    caller_sid = os.getsid(0)
 
     assert _new(name, list(_SLEEP), unit_home) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
@@ -158,14 +160,16 @@ def test_new_session_reparents_to_init_no_zombie(
         assert _wait(lambda: child.name() == "sleep"), (
             f"child never became sleep (name={child.name()})"
         )
-        # Reparented to init — the double-fork's payoff (init reaps it on death).
+        # Init or a pre-existing ancestor subreaper adopts the detached child.
+        # PID + birth guards reject an unknown/recycled adopter; the caller and
+        # its session remain forbidden. Unreadable observations fail the test.
         # The reparent lands when the helper (the child's parent) exits, which
         # new_session's subprocess.run has already awaited; poll rather than
         # one-shot so a beat of ppid-update lag on a loaded runner can't flake it
         # (same treatment as the exec-name wait above).
-        assert _wait(lambda: child.ppid() == 1), (
-            f"child never reparented to init: {detach_evidence(child.pid)}"
-        )
+        assert _wait(
+            lambda: detached_to_known_reaper(child.pid, spawner.pid, caller_sid, ancestor_births)
+        ), f"child never detached to a known reaper: {detach_evidence(child.pid)}"
         # Each of these is a state the OS lands asynchronously (record write vs
         # /proc visibility), so read it with a bounded poll instead of sampling
         # once — a one-shot read races the update on a loaded runner.
