@@ -15,6 +15,7 @@ import os
 import re
 import stat
 import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -64,6 +65,28 @@ def _plain_file(root: Path, relative: str) -> Path:
 def file_sha256(path: Path) -> str:
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def _recorded_setuptools_helper(root: Path, path: Path) -> bool:
+    """Accept the locked dependency's helper, not arbitrary executable .pth code.
+
+    The wheel input and full installed inventory are separately hash-verified.
+    Compare against a private copy of the original locked wheel, not mutable
+    installed RECORD claims. Real isolated launch must still verify origins.
+    """
+    if path.name != "distutils-precedence.pth":
+        return False
+    wheel = root / "wheel-evidence/setuptools.whl"
+    if not wheel.is_file():
+        return False
+    with zipfile.ZipFile(wheel) as archive:
+        for relative in (path.name, "_distutils_hack/__init__.py"):
+            member = path.parent / relative
+            if archive.namelist().count(relative) != 1 or not member.is_file():
+                return False
+            if member.read_bytes() != archive.read(relative):
+                return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -142,8 +165,14 @@ def verify_release(
         path = _plain_file(root, relative)
         if file_sha256(path) != expected_hash:
             raise ReleaseRejectedError(f"release member hash mismatch: {relative}")
-        if path.suffix == ".pth":
-            raise ReleaseRejectedError("release contains path injection metadata")
+        if (
+            path.suffix == ".pth"
+            and path.parent.name in {"site-packages", "dist-packages"}
+            and not _recorded_setuptools_helper(root, path)
+        ):
+            raise ReleaseRejectedError(
+                f"release contains untrusted active path injection: {relative}"
+            )
         if path.name == "direct_url.json":
             metadata = json.loads(path.read_text(encoding="utf-8"))
             if metadata.get("dir_info", {}).get("editable"):

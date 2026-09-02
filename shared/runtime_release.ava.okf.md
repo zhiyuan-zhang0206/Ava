@@ -1,5 +1,12 @@
 # Runtime release store
 
+Active `.pth` files are rejected except the standard setuptools helper whose
+bytes and `_distutils_hack` module match a retained copy of the original locked
+wheel. The builder must copy that wheel from its verified input set; the full
+image manifest protects the evidence wheel too. Installed RECORD alone is not
+authority. Inert `.pth` fixtures outside site directories are not startup hooks.
+Actual source-absent launch must also verify helper import origin and sys.path.
+
 `runtime_release.py` is a dormant, config-free verification and pointer primitive.
 No production service consumes it. Existing checkout activation is unchanged.
 

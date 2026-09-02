@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -167,12 +168,52 @@ class ReleaseStoreTests(unittest.TestCase):
         root = self.store / release[0]
         path = root / "manifest.json"
         manifest = json.loads(path.read_text())
-        injection = root / "runtime" / "editable.pth"
+        injection = root / "runtime" / "site-packages" / "editable.pth"
+        injection.parent.mkdir()
         injection.write_text("/mutable/source\n")
-        manifest["files"]["runtime/editable.pth"] = file_sha256(injection)
+        manifest["files"]["runtime/site-packages/editable.pth"] = file_sha256(injection)
         path.write_text(json.dumps(manifest))
         with self.assertRaisesRegex(ReleaseRejectedError, "path injection"):
             self.activate((release[0], file_sha256(path)))
+
+    def test_inert_pth_fixture_is_not_a_startup_hook(self) -> None:
+        release = self.make_release(b"first")
+        root = self.store / release[0]
+        fixture = root / "runtime" / "test-fixture.pth"
+        fixture.write_text("/not-an-active-site-path\n")
+        self.activate(self.refresh_manifest(release))
+
+    def refresh_manifest(self, release: tuple[str, str]) -> tuple[str, str]:
+        root = self.store / release[0]
+        path = root / "manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["files"] = {
+            item.relative_to(root).as_posix(): file_sha256(item)
+            for item in root.rglob("*")
+            if item.is_file() and item != path
+        }
+        path.write_text(json.dumps(manifest))
+        return release[0], file_sha256(path)
+
+    def test_setuptools_hook_requires_original_wheel_bytes(self) -> None:
+        release = self.make_release(b"first")
+        root = self.store / release[0]
+        site = root / "runtime/site-packages"
+        (site / "_distutils_hack").mkdir(parents=True)
+        helper = site / "distutils-precedence.pth"
+        helper.write_bytes(b"import _distutils_hack\n")
+        module = site / "_distutils_hack/__init__.py"
+        module.write_bytes(b"# wheel-owned helper\n")
+        (root / "wheel-evidence").mkdir()
+        with zipfile.ZipFile(root / "wheel-evidence/setuptools.whl", "w") as archive:
+            archive.writestr(helper.name, helper.read_bytes())
+            archive.writestr("_distutils_hack/__init__.py", module.read_bytes())
+        self.activate(self.refresh_manifest(release))
+        helper.write_bytes(b"/mutable/source\n")
+        # Even a new self-reported installed inventory cannot authorize bytes
+        # that differ from the retained original wheel.
+        with self.assertRaisesRegex(ReleaseRejectedError, "path injection"):
+            self.activate(self.refresh_manifest(release))
 
 
 if __name__ == "__main__":
