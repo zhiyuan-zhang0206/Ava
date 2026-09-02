@@ -53,18 +53,14 @@ same models differently (qwen3.8-max $2.00/$0.25/$6.00 against Beijing's
 $1.65/$0.206/$4.951). Repointing the base URL at another region means
 re-checking this catalog, not just the URL.
 
-## qwen3.8-flash is priced from QwenCloud USD pending the Model Studio page
+## qwen3.8-flash uses published Beijing USD
 
-The Model Studio EN model page for qwen3.8-flash was not yet published when it
-was onboarded (checked 2026-08-27, the day after launch) — the Beijing USD
-column it will eventually carry does not exist yet, and deriving Beijing USD
-from the published Beijing CNY would violate the no-conversion rule above. The
-catalog therefore uses the official QwenCloud USD figures ($0.16 / $0.016 /
-$0.47), Alibaba's own Qwen cloud, with the caveat that QwenCloud's USD for
-qwen3.8-max equals Model Studio's SINGAPORE column ($2.00/$0.25/$6.00), not
-Beijing's. If the Beijing USD column lands lower, update this entry — until
-then the Singapore-rate figures err toward overstating cost, the same
-conservative direction as the UTC+14 boundary convention.
+The Model Studio EN model page for qwen3.8-flash landed (checked 2026-09-02)
+and publishes the Beijing USD column: $0.113 / $0.014 / $0.382. The catalog
+now uses those figures rather than QwenCloud's $0.16 / $0.016 / $0.47, which
+tracked the Singapore column and overstated Beijing cost. This is a published
+USD column, not a CNY conversion, so the no-conversion rule above remains
+intact.
 """
 
 from __future__ import annotations
