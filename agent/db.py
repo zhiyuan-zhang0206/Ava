@@ -426,46 +426,6 @@ async def mark_agent_status(
     await publish_agent_updated(pool, agent_id)
 
 
-async def flip_hosted_status(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    to: str,
-    *,
-    expected_from: str,
-) -> bool:
-    """Soft-CAS one hosted turn status transition.
-
-    Hosted turns race ordinary lifecycle operations at their admission and
-    settlement boundaries. A lost compare-and-swap therefore means another
-    owner took the row, not that the host must crash; return False so the host
-    can skip the turn or leave that owner's status intact.
-    """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(
-            "UPDATE agents_meta SET status = %s WHERE id = %s AND status = %s",
-            (to, agent_id, expected_from),
-        )
-        if cur.rowcount != 1:
-            return False
-        logger.info(
-            "[{label}] {body}",
-            label="status-change",
-            body=f"{expected_from} -> {to}",
-            event="status_change",
-            **{"from": expected_from, "to": to},
-        )
-        from shared.audit_events import insert_event_log_async
-
-        await insert_event_log_async(
-            event_type="status_change",
-            agent_id=agent_id,
-            source="system",
-            payload={"from": expected_from, "to": to},
-        )
-    await publish_agent_updated(pool, agent_id)
-    return True
-
-
 async def enter_idling_state(pool: AsyncConnectionPool, agent_id: int) -> None:
     """Transition to idling; no-op if already idling.
 

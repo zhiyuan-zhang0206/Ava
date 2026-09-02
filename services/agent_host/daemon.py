@@ -269,7 +269,7 @@ async def _watch_plugins_for_restart() -> None:
         return
 
 
-async def _beat_forever(liveness: Liveness) -> None:
+async def _beat_forever(liveness: Liveness, host: AgentHost) -> None:
     """Keep /healthz fresh while the host waits for wakes.
 
     The host's main loop is the dispatcher's subscription, which blocks for as
@@ -277,8 +277,17 @@ async def _beat_forever(liveness: Liveness) -> None:
     idle host as a wedged one.
     """
     while True:
+        await host.renew_ownership()
         liveness.beat()
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
+
+
+async def _stop_ownership_beat(beat: asyncio.Task[None] | None) -> None:
+    """Stop renewal before releasing any hosted owner leases."""
+    if beat is not None:
+        beat.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await beat
 
 
 class _PageEventPublisher:
@@ -410,7 +419,7 @@ async def run() -> None:
     pool = build_shared_pool(settings.data_plane.db_url)
     await pool.open()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    beat = asyncio.create_task(_beat_forever(liveness))
+    beat: asyncio.Task[None] | None = None
     health = None
     try:
         checkpointer = await _build_checkpointer(pool)
@@ -419,6 +428,7 @@ async def run() -> None:
         # than one per agent (services/agent_host/host.py explains the cost).
         graph = build_graph(checkpointer)
         host = AgentHost(pool=pool, checkpointer=checkpointer, graph=graph)
+        beat = asyncio.create_task(_beat_forever(liveness, host))
         settled = await settle_stale_running_rows(pool, machine_name())
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
         # The clock reader is injected, not imported by the scheduler: it owns no
@@ -463,11 +473,11 @@ async def run() -> None:
             # in-flight step — the same recovery path a runner restart already
             # exercises, and the reason a rolling restart is cheap here.
             await scheduler.aclose()
+            await _stop_ownership_beat(beat)
+            beat = None
             await host.aclose()
     finally:
-        beat.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await beat
+        await _stop_ownership_beat(beat)
         if health is not None:
             await stop_health_server(health)
         await pool.close()

@@ -27,8 +27,9 @@ now share one process:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, cast
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
@@ -253,6 +254,34 @@ class _FakeGraph:
 _Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
 
 
+def _stub_host_transitions(
+    monkeypatch: pytest.MonkeyPatch,
+    flip: Callable[..., Awaitable[bool]],
+) -> None:
+    import services.agent_host.host as host_mod
+    from shared.runtime_incarnation import RuntimeIncarnation
+
+    async def admit(
+        pool: object,
+        agent_id: int,
+        _machine: str,
+        owner: UUID,
+        *,
+        expected_from: str,
+    ) -> RuntimeIncarnation | None:
+        if not await flip(pool, agent_id, "running", expected_from=expected_from):
+            return None
+        return RuntimeIncarnation(agent_id, uuid4(), owner)
+
+    async def settle(
+        pool: object, incarnation: RuntimeIncarnation, *, release: bool = False
+    ) -> bool:
+        return await flip(pool, incarnation.agent_id, "idling", expected_from="running")
+
+    monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
+    monkeypatch.setattr(host_mod, "settle_hosted_runtime", settle)
+
+
 @pytest.fixture
 def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     """An `AgentHost` over fakes, with the per-agent build stubbed.
@@ -286,7 +315,9 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     async def _flip_hosted_status(*_args: object, **_kwargs: object) -> bool:
         return True
 
-    monkeypatch.setattr(host_mod, "flip_hosted_status", _flip_hosted_status)
+    _stub_host_transitions(monkeypatch, _flip_hosted_status)
+
+    monkeypatch.setattr(host_mod, "release_hosted_owner", _noop_reconcile)
 
     def _swallow_notify(_agent_id: int) -> None:
         """Overridden per-test where the notify itself is the contract."""
@@ -467,7 +498,6 @@ class TestTurnLoop:
     async def test_a_turn_flips_status_running_then_idling(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import services.agent_host.host as host_mod
 
         flips: list[tuple[int, str, str]] = []
 
@@ -475,7 +505,7 @@ class TestTurnLoop:
             flips.append((agent_id, to, expected_from))
             return True
 
-        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        _stub_host_transitions(monkeypatch, _flip)
         host, _, _ = wired({1: _Row(status="idling")})
 
         await asyncio.wait_for(host.run_turn(1), 2)
@@ -485,7 +515,6 @@ class TestTurnLoop:
     async def test_a_crashing_turn_restores_idling(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import services.agent_host.host as host_mod
 
         flips: list[tuple[int, str, str]] = []
 
@@ -496,7 +525,7 @@ class TestTurnLoop:
         async def _boom(*_args: object, **_kwargs: object) -> dict[str, Any]:
             raise RuntimeError("turn exploded")
 
-        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        _stub_host_transitions(monkeypatch, _flip)
         host, graph, _ = wired({1: _Row(status="idling")})
         graph.ainvoke = _boom  # pyright: ignore[reportAttributeAccessIssue]
 
@@ -508,7 +537,6 @@ class TestTurnLoop:
     async def test_exit_requested_does_not_restore_idling(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import services.agent_host.host as host_mod
 
         flips: list[tuple[int, str, str]] = []
 
@@ -516,7 +544,7 @@ class TestTurnLoop:
             flips.append((agent_id, to, expected_from))
             return True
 
-        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        _stub_host_transitions(monkeypatch, _flip)
         host, _, _ = wired(
             {1: _Row(status="idling")},
             {1: [{"exit_requested": True, "turn_idle": False, "restart_requested": False}]},
@@ -529,7 +557,6 @@ class TestTurnLoop:
     async def test_a_losing_start_flip_skips_the_turn(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import services.agent_host.host as host_mod
 
         flips: list[tuple[int, str, str]] = []
 
@@ -537,7 +564,7 @@ class TestTurnLoop:
             flips.append((agent_id, to, expected_from))
             return False
 
-        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        _stub_host_transitions(monkeypatch, _flip)
         host, graph, _ = wired({1: _Row(status="idling")})
 
         await asyncio.wait_for(host.run_turn(1), 2)
@@ -550,7 +577,6 @@ class TestTurnLoop:
     async def test_restart_requested_restores_idling(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import services.agent_host.host as host_mod
 
         flips: list[tuple[int, str, str]] = []
 
@@ -558,7 +584,7 @@ class TestTurnLoop:
             flips.append((agent_id, to, expected_from))
             return True
 
-        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        _stub_host_transitions(monkeypatch, _flip)
         host, _, _ = wired(
             {1: _Row(status="idling")},
             {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},

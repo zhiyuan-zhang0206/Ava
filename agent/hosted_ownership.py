@@ -1,0 +1,121 @@
+"""Hosted incarnation admission and settlement, replacing status-only writes."""
+
+from uuid import UUID, uuid4
+
+from psycopg_pool import AsyncConnectionPool
+
+from shared.audit_events import insert_event_log_async
+from shared.db_transaction import async_write_transaction
+from shared.deploy_timing import AGENT_LEASE_TTL_S
+from shared.live_announce import publish_agent_updated
+from shared.log import logger
+from shared.runtime_incarnation import RuntimeIncarnation
+
+
+async def admit_hosted_runtime(
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    machine: str,
+    owner: UUID,
+    *,
+    expected_from: str,
+) -> RuntimeIncarnation | None:
+    """Keep this owner's logical incarnation across turns; reject live others."""
+    async with async_write_transaction(pool) as conn:
+        row = await (
+            await conn.execute(
+                "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', "
+                "runtime_generation = CASE WHEN runtime_owner = %s AND runtime_kind = 'hosted' "
+                "AND runtime_generation IS NOT NULL "
+                "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
+                "runtime_protocol_version = 0, "
+                "lease_expires_at = now() + make_interval(secs => %s) "
+                "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
+                "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
+                "AND (runtime_owner IS NULL OR runtime_owner = %s "
+                "OR lease_expires_at IS NULL OR lease_expires_at <= now()) "
+                "RETURNING runtime_generation",
+                (owner, uuid4(), owner, AGENT_LEASE_TTL_S, agent_id, machine, expected_from, owner),
+            )
+        ).fetchone()
+        if row is not None:
+            await insert_event_log_async(
+                event_type="status_change",
+                agent_id=agent_id,
+                source="system",
+                payload={"from": expected_from, "to": "running"},
+            )
+    if row is None:
+        return None
+    await publish_agent_updated(pool, agent_id)
+    logger.info(
+        "hosted runtime admitted", agent_id=agent_id, generation=str(row[0]), owner=str(owner)
+    )
+    return RuntimeIncarnation(agent_id, row[0], owner)
+
+
+async def settle_hosted_runtime(
+    pool: AsyncConnectionPool,
+    incarnation: RuntimeIncarnation,
+    *,
+    release: bool = False,
+) -> bool:
+    """Settle before scheduler releases single-flight; restart releases ownership."""
+    async with async_write_transaction(pool) as conn:
+        cur = await conn.execute(
+            "UPDATE agents_meta SET status = 'idling', "
+            "runtime_generation = CASE WHEN %s THEN NULL ELSE runtime_generation END, "
+            "runtime_owner = CASE WHEN %s THEN NULL ELSE runtime_owner END, "
+            "runtime_kind = CASE WHEN %s THEN NULL ELSE runtime_kind END, "
+            "lease_expires_at = CASE WHEN %s THEN NULL ELSE lease_expires_at END, "
+            "runtime_protocol_version = 0 "
+            "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
+            "AND runtime_generation = %s AND runtime_owner = %s",
+            (
+                release,
+                release,
+                release,
+                release,
+                incarnation.agent_id,
+                incarnation.generation,
+                incarnation.owner,
+            ),
+        )
+        changed = cur.rowcount == 1
+        if changed:
+            await insert_event_log_async(
+                event_type="status_change",
+                agent_id=incarnation.agent_id,
+                source="system",
+                payload={"from": "running", "to": "idling"},
+            )
+    if changed:
+        await publish_agent_updated(pool, incarnation.agent_id)
+    return changed
+
+
+async def release_hosted_owner(
+    pool: AsyncConnectionPool,
+    machine: str,
+    owner: UUID,
+    in_flight: set[int],
+) -> None:
+    """Only settled tasks can release responsibility before host process exit."""
+    async with async_write_transaction(pool) as conn:
+        await conn.execute(
+            "UPDATE agents_meta SET lease_expires_at = NULL "
+            "WHERE machine = %s AND runtime_kind = 'hosted' AND runtime_owner = %s "
+            "AND NOT (id = ANY(%s))",
+            (machine, owner, list(in_flight)),
+        )
+
+
+async def renew_hosted_owner(pool: AsyncConnectionPool, machine: str, owner: UUID) -> None:
+    """Renew idle and busy responsibility from the existing host liveness beat."""
+    async with async_write_transaction(pool) as conn:
+        await conn.execute(
+            "UPDATE agents_meta SET lease_expires_at = now() + make_interval(secs => %s) "
+            "WHERE machine = %s AND runtime_kind = 'hosted' AND runtime_owner = %s "
+            "AND runtime_generation IS NOT NULL AND status IN ('running', 'idling')",
+            (AGENT_LEASE_TTL_S, machine, owner),
+        )
