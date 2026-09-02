@@ -84,7 +84,12 @@ from shared.lifecycle_termination_observe import observe_applied_termination
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
 from shared.machine import machine_name
-from shared.resurrection_launch import authorize_launch, prepare_launch
+from shared.resurrection_launch import (
+    authorize_launch,
+    pending_allocation,
+    prepare_launch,
+    require_launch,
+)
 
 
 class ResurrectTriggerStaleError(ResurrectError):
@@ -122,6 +127,28 @@ class _PreparedResurrect:
 
 class _ResurrectSessionStartError(RuntimeError):
     """Detached session creation failed before the resurrect commit."""
+
+
+def _resume_pending_allocation(agent_id: int, trigger_id: int) -> _PreparedResurrect | None:
+    """The original wake may resume its committed allocation, never replace it."""
+    with write_transaction() as conn:
+        conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
+        if not pending_allocation(conn, agent_id, trigger_id):
+            return None
+        row = conn.execute(
+            "SELECT i.id,m.status_changed_at,m.config_overlay,m.birth_config "
+            "FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id "
+            "WHERE m.id=%s AND i.kind='resurrect' AND i.status='pending' "
+            "AND (i.payload->'resurrection_launch'->>'trigger_id')::bigint=%s "
+            "AND (i.payload->'resurrection_launch'->>'allocation_epoch')::timestamptz"
+            "=m.status_changed_at",
+            (agent_id, trigger_id),
+        ).fetchall()
+        if len(row) != 1:
+            raise ResurrectError("pending wake has ambiguous allocation evidence")
+        command_id, epoch, overlay, birth = row[0]
+        require_launch(conn, agent_id, command_id)
+        return _PreparedResurrect(epoch, overlay, birth, None, command_id=command_id)
 
 
 def _hosted_agent_host_healthy() -> bool:
@@ -526,8 +553,12 @@ def resurrect_agent(
             f"auto-resurrect claim belongs to agent {auto_claim.agent_id}, not {agent_id}"
         )
     prepared: _PreparedResurrect | None = None
+    if trigger_inbound_id is not None:
+        prepared = _resume_pending_allocation(agent_id, trigger_inbound_id)
     first_attempt = 0
     for first_attempt in range(agent_launch._LAUNCH_MAX_RETRIES + 1):
+        if prepared is not None:
+            break
         if trigger_inbound_id is not None:
             if trigger_inbound_kind is None:
                 raise ValueError("pending resurrection trigger kind is required")

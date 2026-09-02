@@ -2,11 +2,15 @@
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
 from agent._starting import claim_agent_row
+from ops import agent_launch, agent_wake
+from ops.ops_lifecycle import _pending_allocation_can_resume
 from shared.agents import ResurrectError
-from shared.db import insert_inbound_message
-from shared.resurrection_launch import authorize_launch, prepare_launch
+from shared.config import settings
+from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
+from shared.resurrection_launch import authorize_launch, pending_allocation, prepare_launch
 from tests.agent.test_runtime_incarnation import _row
 
 
@@ -46,6 +50,58 @@ def test_launch_crash_and_redispatch_cannot_reset_wake_budget(db_conn: psycopg.C
         "SELECT status,payload->'resurrection_launch_attempts' FROM inbound_messages WHERE id=%s",
         (wake,),
     ).fetchone() == ("pending", 2)
+    db_conn.commit()
+
+
+def test_prepared_crash_resumes_same_allocation_before_os_launch(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_id = _row(db_conn)
+    wake = insert_inbound_message(db_conn, agent_id, "wake", "user")
+    db_conn.commit()
+    command = _prepare(db_conn, agent_id, wake)
+    before = db_conn.execute(
+        "SELECT status_changed_at FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    assert _pending_allocation_can_resume(agent_id, wake)
+    assert not _pending_allocation_can_resume(agent_id, None)
+    from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+    with ConnectionPool(
+        settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
+    ) as pool:
+        assert (agent_id, wake) in select_terminated_owners_with_pending(pool)
+    prepared = agent_wake._resume_pending_allocation(agent_id, wake)
+    assert prepared is not None and prepared.command_id == command
+    calls: list[object] = []
+
+    def failed_launch(*args: object, **kwargs: object) -> str:
+        # Separate connection sees authorization before a real launcher could
+        # fork: no uncommitted row lock or rolled-back "spent" counter.
+        db_conn.rollback()
+        count = db_conn.execute(
+            "SELECT payload->'resurrection_launch_attempts' FROM inbound_messages WHERE id=%s",
+            (wake,),
+        ).fetchone()
+        assert count == (1,)
+        attempt = kwargs["resurrect_attempt"]
+        assert isinstance(attempt, tuple)
+        calls.append(attempt)
+        raise RuntimeError("injected failure after committed authorization")
+
+    monkeypatch.setattr(agent_launch, "_launch_agent_process", failed_launch)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        agent_wake._retry_resurrect_session(agent_id, prepared)
+    assert len(calls) == 1
+    assert (
+        db_conn.execute(
+            "SELECT status_changed_at FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
+        == before
+    )
+    assert pending_allocation(db_conn, agent_id, wake)
+    db_conn.execute("UPDATE agents_meta SET pid=12345 WHERE id=%s", (agent_id,))
+    assert not pending_allocation(db_conn, agent_id, wake)
     db_conn.commit()
 
 
