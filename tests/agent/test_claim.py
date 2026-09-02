@@ -1516,10 +1516,8 @@ async def test_claim_restart_kind_hosted_self_arms_no_process_respawn(
     """A hosted self-restart must not arm the atexit self-respawn fallback —
     that fallback forks a replacement PROCESS, which hosted mode has no use
     for and which would double-claim with the dispatcher's turn task."""
-    from agent import db as agent_db
-
     scheduled: list[int] = []
-    monkeypatch.setattr(agent_db, "schedule_self_respawn", scheduled.append)
+    monkeypatch.setattr("atexit.register", scheduled.append)
     tid = spawn_agent()
     _set_agent_status(db_conn, tid, "running")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="self")
