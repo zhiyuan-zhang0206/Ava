@@ -23,7 +23,7 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
 ### Stage 1: Schema Gate (`agent/_starting.py:claim_agent_row_or_die_on_stale_schema()`)
 Validate schema before claiming running. Rejected owned attempts cannot settle
 another runtime or durable command. Exact rejection and launch-record contracts:
-[[startup/admission.ava.okf.md]].
+[[admission.ava.okf.md]].
 
 ### Stage 0: Arm the boot watchdog (`agent/__main__.py` → `_boot_deadline.arm()`)
 - Runs before the `_starting` import, so it covers the import chain itself — which is why the window arrives on argv (`--boot-stall-seconds`, from `settings.gateway.agent_boot_stall_seconds` via `ops/agent_launch.py`) and not from `shared.config`: importing that module is part of what needs watching
@@ -35,10 +35,10 @@ another runtime or durable command. Exact rejection and launch-record contracts:
 ### Stage 2: Claim (`agent/_starting.py:claim_agent_row()`)
 - Flip an unclaimed agents_meta row from 'idling' to 'running'
 - Record pid, publish `agent_updated` event
-- **Write the liveness lease** (`lease_expires_at = now() + TTL`) in the same UPDATE — the claim is the lease's birth; the run loop renews it ([[lease.ava.okf.md|Agent Liveness Lease]])
+- **Write the liveness lease** (`lease_expires_at = now() + TTL`) in the same UPDATE — the claim is the lease's birth; the run loop renews it ([[../lease.ava.okf.md|Agent Liveness Lease]])
 - **Do not import any langgraph/langchain** — minimize delay to claim the row
 - Durable command identity, fixed deadline/attempt budget, canonical publication
-  and explicit cold acceptance: [[startup/admission.ava.okf.md]].
+  and explicit cold acceptance: [[admission.ava.okf.md]].
 
 ### Stage 3: Boot Stage
 - This stage is between '_starting' and run loop
@@ -51,16 +51,16 @@ another runtime or durable command. Exact rejection and launch-record contracts:
   - `_apply_per_agent_framework_config()` — apply this agent's two stored config maps onto the settings singleton, birth stamp first and explicit overlay on top, so the effective order is `config_overlay > birth_config > current config`. Runs before `build_chat_model` so a per-agent model reaches the LLM client this process actually builds. Both maps arrive via child-process env (`$AVA_AGENT_CONFIG_OVERLAY` / `$AVA_AGENT_BIRTH_CONFIG`), **never argv** — argv is world-readable via `ps` and can carry a provider api_key (issue #974); launcher reads them off `agents_meta`; `birth_config` is the frozen-lifecycle set stamped at spawn (see the `shared/config` module docstring for the axis and `shared/birth_config.py` for the mechanics)
   - `_write_effective_config_to_restart_completed()` — record the post-apply config snapshot
   - `_notify_screen_capture_at_startup()` — renders whichever OS-level screen-capture fault the converge preflight recorded (permissions helper holds no Screen Recording grant / never answered, so the grant is unknown); each state carries its own headline and fix
-  - [[page-restore.ava.okf.md]] — page restore
+  - [[../page-restore.ava.okf.md]] — page restore
 
 ### Stage 4: Run Loop
 - Enter `agent/loop.py` main loop; no second status transition is needed
 
 ## Key Dependencies
 
-- [[env-vars.ava.okf.md]] — read environment variables at startup
-- [[loop.ava.okf.md]] — run loop entry point
-- [[db.ava.okf.md]] — agents_meta table, schema version table
+- [[../env-vars.ava.okf.md]] — read environment variables at startup
+- [[../loop.ava.okf.md]] — run loop entry point
+- [[../db.ava.okf.md]] — agents_meta table, schema version table
 
 ## Entry Points
 

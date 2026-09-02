@@ -34,7 +34,11 @@ def test_confirm_tracks_returned_attempt_before_canonical_publication(
 ) -> None:
     backend = Mock()
     backend.new_session.return_value = True
-    backend.has_session.side_effect = lambda name: name.startswith("ava-boot-")
+
+    def live_attempt(name: str) -> bool:
+        return name.startswith("ava-boot-")
+
+    backend.has_session.side_effect = live_attempt
     monkeypatch.setattr(agent_launch, "native_proc", Mock(return_value=backend))
     monkeypatch.setattr(agent_launch, "agent_spawn_env_dict", Mock(return_value={}))
     confirm = Mock()
