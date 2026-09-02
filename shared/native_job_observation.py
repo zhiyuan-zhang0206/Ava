@@ -211,7 +211,9 @@ def observe_launchd(
         {
             "definition": "match",
             "loaded": loaded,
-            **declaration_binding(home, artifact_digest, environment.get("AVA_HOME"), argv),
+            **declaration_binding(
+                home, artifact_digest, environment.get("AVA_HOME"), cast(object, argv)
+            ),
         }
     )
 
