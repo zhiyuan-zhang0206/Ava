@@ -341,7 +341,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
             {agent.status !== "terminated" ? (
               <span className="text-[9px] text-amber-600" title={observationText(agent.observation)}>
                 {agent.observation?.machine_probe_valid_until &&
-                Date.parse(agent.observation.machine_probe_valid_until) <= Date.now() ? "stale" : "unknown"}
+                Date.parse(agent.observation.machine_probe_valid_until) <= Date.now() ? "probe stale" : "owner unknown"}
               </span>
             ) : null}
             {/* notices-awaiting-response badge — count colored by highest
