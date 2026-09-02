@@ -1765,6 +1765,9 @@ class TestLaunchConfirm:
                 return False
 
         monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
+        # These tests exercise launch confirmation, not credential projection;
+        # the fake supervisor never starts a child that could consume this env.
+        monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
 
     @staticmethod
     def _shrink_confirm_timeout(monkeypatch: pytest.MonkeyPatch, timeout_sec: float = 0.1) -> None:
