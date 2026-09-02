@@ -163,6 +163,11 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.NO_PROGRESS_TIMEOUT_S,
         "the one definition of 'this host stopped making progress'",
     ),
+    "PHASE_B_ABSOLUTE_TIMEOUT_S": Clock(
+        "deploy",
+        lambda: deploy.PHASE_B_ABSOLUTE_TIMEOUT_S,
+        "the Phase-B poll's alias for the whole-run no-progress deadline",
+    ),
     "STAGE_NO_PROGRESS_TIMEOUT_S": Clock(
         "deploy",
         lambda: deploy.STAGE_NO_PROGRESS_TIMEOUT_S,
@@ -379,6 +384,13 @@ CONSTRAINTS: list[Constraint] = [
         "deadline: a host that is alive and making progress is handed to the settle "
         "hold once this elapses, and a value at or beyond the whole-run bound would "
         "make that early exit unreachable",
+    ),
+    Constraint(
+        "==",
+        "PHASE_B_ABSOLUTE_TIMEOUT_S",
+        "NO_PROGRESS_TIMEOUT_S",
+        "the advertised Phase-B absolute deadline is an alias for the whole-run "
+        "no-progress definition, not an independent calibration",
     ),
     Constraint(
         "<",
