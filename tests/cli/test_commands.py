@@ -3031,6 +3031,20 @@ def test_continuous_progress_past_the_converging_bound_hands_the_host_to_settle(
     assert probes["n"] < 50
 
 
+def test_phase_b_deadline_contract_matches_the_timing_invariants() -> None:
+    """The public 900-second absolute deadline and C3's 300-second handoff are
+    different clocks with one authoritative definition each."""
+    from shared.deploy_timing import (
+        CONVERGING_POLL_TIMEOUT_S,
+        NO_PROGRESS_TIMEOUT_S,
+        PHASE_B_ABSOLUTE_TIMEOUT_S,
+    )
+
+    assert _cli._POLL_TIMEOUT_S == PHASE_B_ABSOLUTE_TIMEOUT_S == NO_PROGRESS_TIMEOUT_S == 900.0
+    assert _cli._CONVERGING_TIMEOUT_S == CONVERGING_POLL_TIMEOUT_S == 300.0
+    assert CONVERGING_POLL_TIMEOUT_S < PHASE_B_ABSOLUTE_TIMEOUT_S
+
+
 def test_a_restart_resets_the_converging_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     """C3's patience is the CONTINUOUS progress streak, not total poll time: an
     unreachable reading (the expected mid-restart silence) must reset the clock,
