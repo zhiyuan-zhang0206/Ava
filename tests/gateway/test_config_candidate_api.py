@@ -89,6 +89,39 @@ def test_put_rejects_invalid_oss_candidate_without_writing(
     assert env_path.read_bytes() == before
 
 
+def test_put_full_oss_atomic_patch_succeeds(gcs_restore_proof_home: Path) -> None:
+    """The complete OSS transition lands in one atomic PUT — backend, endpoint,
+    bucket, uploader credentials, and a distinct viewer — with restore proof
+    validating. This is the exact patch shape the prod OSS switch executes."""
+    oss_viewer = _write_private_file(
+        gcs_restore_proof_home / "oss-viewer.json",
+        json.dumps({"access_key_id": "view", "access_key_secret": "test-view-secret"}),
+    )
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={
+                "pitr_store_backend": "oss",
+                "pitr_oss_endpoint": "https://oss-cn-shanghai.aliyuncs.com",
+                "pitr_oss_bucket": "test-bucket",
+                "pitr_oss_credentials_file": str(gcs_restore_proof_home / "oss-uploader.json"),
+                "pitr_oss_viewer_credentials_file": str(oss_viewer),
+            },
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["applied"] is True
+    assert "gateway" in body["restart_required"]
+    aliases = runtime_config.read_env_aliases()
+    assert aliases["AVA_PITR_STORE_BACKEND"] == "oss"
+    assert aliases["AVA_PITR_OSS_ENDPOINT"] == "https://oss-cn-shanghai.aliyuncs.com"
+    assert aliases["AVA_PITR_OSS_BUCKET"] == "test-bucket"
+    assert aliases["AVA_PITR_OSS_CREDENTIALS_FILE"] == str(
+        gcs_restore_proof_home / "oss-uploader.json"
+    )
+    assert aliases["AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE"] == str(oss_viewer)
+
+
 def test_host_only_put_skips_cluster_candidate_validation(
     gcs_restore_proof_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from shared.config import get_config_metadata
 from shared.config.physical_backup import PhysicalBackupSettings
 
 
@@ -400,3 +401,19 @@ def test_cos_backend_rejects_overexposed_credentials(tmp_path: Path) -> None:
             AVA_PITR_BACKUP_KEY_ID="prod-v1",
             AVA_PITR_REPLICATION_DB_URL="postgresql://backup:secret@localhost:5433/postgres",
         )
+
+
+def test_oss_store_keys_are_writable_on_the_own_host() -> None:
+    """The four OSS store keys are panel/API editable so the atomic backend switch
+    can land through the official config path; the credential paths stay
+    host-local (remote_writable=False), so a remote edit must keep failing."""
+    metas = {m.name: m for m in get_config_metadata()}
+    for name in (
+        "pitr_oss_endpoint",
+        "pitr_oss_bucket",
+        "pitr_oss_credentials_file",
+        "pitr_oss_viewer_credentials_file",
+    ):
+        assert metas[name].writable is True
+    assert metas["pitr_oss_credentials_file"].remote_writable is False
+    assert metas["pitr_oss_viewer_credentials_file"].remote_writable is False

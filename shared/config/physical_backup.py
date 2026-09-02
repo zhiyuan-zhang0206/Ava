@@ -277,7 +277,7 @@ class PhysicalBackupSettings(EnvSettings):
         ),
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
             "bootstrap": False,
@@ -291,7 +291,7 @@ class PhysicalBackupSettings(EnvSettings):
         ),
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
             "bootstrap": False,
@@ -307,7 +307,7 @@ class PhysicalBackupSettings(EnvSettings):
         ),
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": True,
             "scope": "host",
             "remote_writable": False,
@@ -325,7 +325,7 @@ class PhysicalBackupSettings(EnvSettings):
         ),
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": True,
             "scope": "host",
             "remote_writable": False,
