@@ -15,7 +15,7 @@ development keeps its existing checkout venv. An explicitly targeted checkout
 remains separate for the updater's preparation path. Nothing reads or changes
 the active-generation pointer, installs packages, or grants release admission.
 
-The first consumers are service Python commands, process-agent interpreters,
+The consumers include retained frontend and collector executable paths, service Python commands, process-agent interpreters,
 platform console-script paths, and shell/session activation. Their lifecycle,
 enabled-state, credentials, and supervision owners do not change. Wheel bootstrap
 requires explicit absolute `AVA_HOME` before loading configuration; it cannot
