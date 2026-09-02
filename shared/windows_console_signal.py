@@ -32,7 +32,7 @@ def send_private_console_break(record_path: Path, pid: int, birth: float) -> Non
     kernel.FreeConsole()
     if not kernel.AttachConsole(pid):
         raise ctypes.WinError(ctypes.get_last_error())
-    handler_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_ulong)
+    handler_type = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_ulong)
     handler = handler_type(lambda _event: True)
     if not kernel.SetConsoleCtrlHandler(handler, 1):
         raise ctypes.WinError(ctypes.get_last_error())
