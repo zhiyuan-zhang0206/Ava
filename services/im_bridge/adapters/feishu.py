@@ -526,10 +526,18 @@ class FeishuAdapter(IMAdapter):
 
     def _normalize_poll_item(self, item: Any) -> InboundMessage | None:
         """Map one listed message to an InboundMessage (same contract as the
-        WS event path: p2p text from a user, never our own sends)."""
+        WS event path: p2p text from a user, never our own sends).
+
+        Accepts both response shapes: the WS event shape (``chat_type`` +
+        ``sender.sender_id.open_id``) and the ListMessage API shape (no
+        ``chat_type`` — the polled chat is a resolved p2p chat by
+        construction — and the open id on ``sender.id`` with
+        ``id_type=open_id``).
+        """
         if not getattr(item, "message_id", ""):
             return None
-        if getattr(item, "chat_type", "") != "p2p":
+        # ListMessage responses carry no chat_type; absence means p2p.
+        if getattr(item, "chat_type", "") not in ("", "p2p"):
             return None
         if getattr(item, "msg_type", "") != "text":
             return None
@@ -549,6 +557,10 @@ class FeishuAdapter(IMAdapter):
             return None
         sender_id = getattr(sender, "sender_id", None)
         open_id = getattr(sender_id, "open_id", "") if sender_id is not None else ""
+        if not open_id and getattr(sender, "id_type", "") == "open_id":
+            # ListMessage's Sender has no sender_id sub-object; the open id
+            # rides directly on sender.id.
+            open_id = getattr(sender, "id", "")
         if not open_id:
             return None
         self._last_open_id = open_id
