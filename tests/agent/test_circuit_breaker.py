@@ -35,7 +35,6 @@ from agent.hooks.compact import (
     emergency_compact_summary,
 )
 from agent.state import AgentState, CircuitState
-from shared.db import create_agent
 from shared.redis_listener import RedisInboundListener
 from tests.agent.test_claim import (
     _compact_tail,
@@ -171,7 +170,7 @@ async def test_heartbeat_while_breaker_open_forces_compact(
     """Breaker open with context_overflow + heartbeat wake → the check-in note
     is NOT appended (no doomed call), and the wake routes into a compaction
     whose tail is the generated summary — the overflow self-rescue."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
@@ -201,7 +200,7 @@ async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
     """The 3962 shape: the compaction request itself is rejected (context over
     the effective input ceiling) — the wake must still be rescued by the
     no-LLM minimal compact instead of looping forever."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
@@ -234,7 +233,7 @@ async def test_heartbeat_while_breaker_open_non_overflow_parks(
     """Breaker open with a non-overflow reason (billing): the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
     doomed re-fire."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="billing")
@@ -342,7 +341,7 @@ async def test_heartbeat_normal_when_breaker_closed(
     """Breaker closed: the heartbeat check-in note is appended and the wake
     routes to the LLM as before — the gate only exists while the breaker is
     open."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state()  # breaker closed
