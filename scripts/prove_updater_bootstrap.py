@@ -147,6 +147,29 @@ def verify_probe_reuse(
             raise AssertionError("actual endpoint accepted a mismatched verified image")
 
 
+def failure_snapshot(home: Path, old: hop.ExpectedProcess) -> str:
+    """Bounded identity-only evidence before the CI fixture cleans up processes."""
+    evidence: dict[str, object] = {
+        "old_identity": old.model_dump(),
+        "old_state": observe_process(old),
+    }
+    try:
+        state = json.loads(updater_handoff.state_path().read_bytes())
+        evidence["journal_stage"] = state.get("bootstrap_hop", {}).get("stage", "not-created")
+    except FileNotFoundError:
+        evidence["journal_stage"] = "absent"
+    try:
+        record = json.loads((home / "run/sessions/ava-ops.json").read_bytes())
+        current = hop.ExpectedProcess.model_validate(
+            {key: record[key] for key in ("pid", "create_time", "starttime")}
+        )
+        evidence["record_identity"] = current.model_dump()
+        evidence["record_state"] = observe_process(current)
+    except FileNotFoundError:
+        evidence["record_identity"] = "absent"
+    return json.dumps(evidence, sort_keys=True)
+
+
 def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always restored in finally.
     if len(sys.argv) > 1 and sys.argv[1] == "--fault-worker":
         raise SystemExit(fault_worker(sys.argv[2], Path(sys.argv[3])))
@@ -376,13 +399,18 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     stage = raw.get("bootstrap_hop", {}).get("stage", "before-bootstrap-journal")
                     stderr = exc.stderr or b""
                     raise AssertionError(
-                        f"{mode} timed out at {stage}: " + stderr.decode(errors="replace")[-12000:]
+                        f"{mode} timed out at {stage}; "
+                        + failure_snapshot(home, expected.sessions[0].process)
+                        + ": "
+                        + stderr.decode(errors="replace")[-12000:]
                     ) from exc
                 if result.returncode not in {
                     3 if mode == "success" else 77 if mode == "crash-after-stop" else 1
                 }:
                     raise AssertionError(
-                        f"{mode} updater returned {result.returncode}: "
+                        f"{mode} updater returned {result.returncode}; "
+                        + failure_snapshot(home, expected.sessions[0].process)
+                        + ": "
                         + result.stderr.decode(errors="replace")[-4000:]
                     )
                 if mode == "crash-after-stop":
