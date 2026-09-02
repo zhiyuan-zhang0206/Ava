@@ -53,6 +53,21 @@ def fault_worker(mode: str, request: Path) -> int:
     """Test-only interposition around the actual existing updater entry."""
     from cli.commands._update_agent_runner import main as updater_main
 
+    if mode in {"expire-after-stop", "holder-change-after-stop"}:
+        real_wait = hop._wait_exited
+
+        def turnover(plan: hop.PreparedBootstrapHop, process: hop.ExpectedProcess) -> None:
+            real_wait(plan, process)
+            with psycopg.connect(os.environ["AVA_DB_URL"], autocommit=True) as conn:
+                if mode == "expire-after-stop":
+                    conn.execute(
+                        "UPDATE deployment_state SET expires_at=clock_timestamp()-interval '1 second'"
+                    )
+                else:
+                    conn.execute("UPDATE deployment_state SET holder='another-operation'")
+
+        with patch.object(hop, "_wait_exited", side_effect=turnover):
+            return updater_main(["--bootstrap-hop", str(request)])
     if mode == "crash-after-stop":
         real_journal = hop._journal
 
@@ -202,7 +217,13 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                 require(stopped, "CI exact native cleanup failed: " + detail)
 
         try:
-            for mode in ("success", "candidate-bind-failure", "crash-after-stop"):
+            for mode in (
+                "success",
+                "candidate-bind-failure",
+                "crash-after-stop",
+                "expire-after-stop",
+                "holder-change-after-stop",
+            ):
                 install_cron(cron)
                 require(
                     get_backend().new_session(
@@ -327,6 +348,28 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         normal, cwd=home, env=env, capture_output=True, timeout=60, check=False
                     )
                     require(resumed.returncode == 1, "dead-owner resume did not restore A")
+                if mode in {"expire-after-stop", "holder-change-after-stop"}:
+                    recorded = json.loads((sessions / "ava-ops.json").read_bytes())
+                    require(
+                        recorded["pid"] == expected.sessions[0].process.pid,
+                        "stale operation spawned another process",
+                    )
+                    require(
+                        observe_process(expected.sessions[0].process) == "exited",
+                        "authority turnover was not injected after real stop",
+                    )
+                    require(read_crontab(until) == b"", "stale operation restored launcher")
+                    require(
+                        updater_handoff.state_path().exists(), "failure discarded recovery record"
+                    )
+                    # Reset only this isolated fixture for the next independent case;
+                    # production cannot revive an expired operation this way.
+                    conn.execute(
+                        "UPDATE deployment_state SET holder='hop',expires_at=clock_timestamp()+interval '10 minutes'"
+                    )
+                    updater_handoff.state_path().unlink()
+                    (sessions / "ava-ops.json").unlink()
+                    continue
                 wait_endpoint(candidate if mode == "success" else old_context, projection)
                 require(
                     read_crontab(until) == (b"" if mode == "success" else cron),
@@ -346,6 +389,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         "livePredecessorRefusedBeforeStop": True,
                         "candidateFailureRestoresRestrictedA": True,
                         "deadOwnerCrashResumeRestoresRestrictedA": True,
+                        "leaseTurnoverDuringStopPreventsSpawnAndCron": True,
                         "normalSourceLkgProved": False,
                         "normalReady": False,
                     },

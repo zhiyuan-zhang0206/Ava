@@ -46,6 +46,7 @@ from shared.native_job_observation import read_crontab
 from shared.platform import file_lock
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.session_backend import get_backend
+from shared.session_record import SessionRecord
 
 
 class BootstrapHopRequest(EvidenceModel):
@@ -367,6 +368,7 @@ def _replace_cron(before: bytes, after: bytes, plan: PreparedBootstrapHop) -> No
     remaining = (until - datetime.now(UTC)).total_seconds()
     if remaining <= 0:
         raise ReleaseRejectedError("bootstrap hop expired before native action")
+    validate_operation(plan.candidate, plan.projection)
     result = subprocess.run(
         ["/usr/bin/crontab", "-"],
         input=after,
@@ -377,6 +379,7 @@ def _replace_cron(before: bytes, after: bytes, plan: PreparedBootstrapHop) -> No
     )
     if result.returncode or read_crontab(until) != after:
         raise ReleaseRejectedError("native cron action has no matching independent readback")
+    validate_operation(plan.candidate, plan.projection)
 
 
 def _child_environment(plan: PreparedBootstrapHop) -> dict[str, str]:
@@ -391,6 +394,8 @@ def _child_environment(plan: PreparedBootstrapHop) -> dict[str, str]:
 
 
 def _start_observer(plan: PreparedBootstrapHop, image: VerifiedRelease, context_path: str) -> None:
+    context = plan.candidate if image.digest == plan.image.digest else plan.recovery
+    validate_operation(context, plan.projection)
     if not get_backend().new_session(
         plan.old_session.name,
         "exec " + shlex.join(bootstrap_command(image, Path(context_path))),
@@ -406,7 +411,7 @@ def _stop_old_observer(plan: PreparedBootstrapHop) -> None:
         raise ReleaseRejectedError("native session no longer identifies restricted A")
     if observe_process(plan.old_session.process) != "alive":
         raise ReleaseRejectedError("restricted predecessor changed before stop")
-    if not get_backend().graceful_signal(plan.old_session.name):
+    if not _signal_expected(plan, plan.old_session.process):
         raise ReleaseRejectedError("official exact session stop was refused")
     _wait_exited(plan, plan.old_session.process)
 
@@ -459,6 +464,19 @@ def _recorded_observer(plan: PreparedBootstrapHop) -> tuple[ExpectedProcess, str
     return process, kind
 
 
+def _signal_expected(plan: PreparedBootstrapHop, process: ExpectedProcess) -> bool:
+    path = Path(plan.candidate.expected.home) / "run/sessions/ava-ops.json"
+    record = SessionRecord(**json.loads(_regular_bytes(path)))
+    if (record.pid, record.create_time, record.starttime) != (
+        process.pid,
+        process.create_time,
+        process.starttime,
+    ):
+        raise ReleaseRejectedError("session record changed before exact native signal")
+    validate_operation(plan.candidate, plan.projection)
+    return get_backend().graceful_signal(plan.old_session.name, expected=record)
+
+
 def _await_observer(plan: PreparedBootstrapHop, kind: Literal["A", "B"]) -> None:
     context = plan.recovery if kind == "A" else plan.candidate
     remaining = (context.challenge.valid_until - datetime.now(UTC)).total_seconds()
@@ -484,7 +502,7 @@ def _restore_a(
         # Never signal a name after the identity was substituted by another writer.
         if _recorded_observer(plan) != (process, kind):
             raise ReleaseRejectedError("candidate session changed before compensation")
-        if not get_backend().graceful_signal(plan.old_session.name):
+        if not _signal_expected(plan, process):
             raise ReleaseRejectedError("candidate compensation stop was refused")
         _wait_exited(plan, process)
     _journal(plan, generation, "recovering", original)
