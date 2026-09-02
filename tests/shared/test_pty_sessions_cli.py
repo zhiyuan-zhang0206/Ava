@@ -246,8 +246,15 @@ def test_zombie_is_not_a_live_pty_session(
     proc.is_running.return_value = True
     proc.status.return_value = psutil.STATUS_ZOMBIE
     proc.create_time.return_value = 0.0
-    monkeypatch.setattr(psutil, "Process", lambda _pid: proc)
-    monkeypatch.setattr(SessionRecord, "identifies", lambda _rec, _pid: True)
+
+    def process(_pid: int) -> Mock:
+        return proc
+
+    def identifies(_record: SessionRecord, _pid: int) -> bool:
+        return True
+
+    monkeypatch.setattr(psutil, "Process", process)
+    monkeypatch.setattr(SessionRecord, "identifies", identifies)
     try:
         observed = (
             pty_cli._record_alive(session.record) if observer == "cli" else session.pid_matches()
