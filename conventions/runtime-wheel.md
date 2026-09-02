@@ -15,7 +15,12 @@ missing member.
 
 This is not a fleet readiness test. It does not start services, migrate data,
 validate native dependencies on every platform, or prove the runtime resource
-closure of frontend/migration/plugin state. Side-by-side activation must add
+closure of frontend/external-plugin state. The wheel carries the baseline and
+paired SQL migrations, commands, schedule definitions and native observability
+configuration at the relative paths existing consumers use. Isolated imports
+also exercise the hosted-agent daemon and gateway without entering their service
+lifespans. Shipping configuration does not enable a service or change storage
+provider selection. Side-by-side activation must add
 those gates before changing production launch paths. A merge does not establish
 runtime health; only an explicitly authorized deployment and observed service
 and agent verification can do that.
