@@ -413,7 +413,7 @@ async def _handle_restart(
     if ctx.hosted:
         st.new_msgs.append(
             system_note_message(
-                content=_render_restart_completed_marker(item.source, item.payload),
+                content=f"{_ts_prefix()}Restart was accepted from {_by_who(item.source)}",
                 tag=NoteTag.LIFECYCLE_RESTART,
                 created_at=datetime.now(UTC),
             )
