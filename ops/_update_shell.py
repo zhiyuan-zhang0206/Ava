@@ -72,12 +72,23 @@ def _restart_recovery_cmd(
         flags += f" --quiesce --mode {mode}"
     if force_reap:
         flags += " --force-reap"
+    # The recovery `ava start` arms run as an INTERNAL child start
+    # (`--persist-services`), never as an operator start: a Phase-B updater
+    # runs under the cluster-wide executing deploy lease, and an operator start
+    # is refused by the rollout boundary (start._rollout_child_window) — the
+    # exact shape that stranded win on 2026-09-02 (a restart refused by a
+    # co-located unit's health port fell into the recovery arm, the arm's
+    # operator-mode start was refused by the lease, and the updater exited rc=1
+    # before its services ever started). The POSIX in-process updater already
+    # starts internally under that same lease; the hidden flag is the cmd.exe
+    # ladder's way to say the same thing, and it also preserves the operator's
+    # durable --disable-service marker across the restart.
     return (
         f"ava restart{flags}"
-        f" & if errorlevel {RESTART_DECLINED_EXIT_CODE + 1} (ava start & {native_exit_line(1)})"
+        f" & if errorlevel {RESTART_DECLINED_EXIT_CODE + 1} (ava start --persist-services & {native_exit_line(1)})"
         f" else if errorlevel {RESTART_DECLINED_EXIT_CODE} ("
         f"echo [updater] restart DECLINED by its own preflight -- host still serving, not starting over it"
         f" & {native_exit_line(RESTART_DECLINED_EXIT_CODE)})"
-        f" else if errorlevel 1 (ava start & {native_exit_line(1)})"
+        f" else if errorlevel 1 (ava start --persist-services & {native_exit_line(1)})"
         f" else ({native_exit_line(0)})"
     )

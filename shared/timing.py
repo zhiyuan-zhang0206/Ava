@@ -174,6 +174,12 @@ CLOCKS: dict[str, Clock] = {
         "how long one updater stage may be in flight before host reaper and Phase-B "
         "poll call it no-progress",
     ),
+    "LEASE_ARM_GRACE_S": Clock(
+        "deploy",
+        lambda: deploy.LEASE_ARM_GRACE_S,
+        "how long a Phase-B poll reads paused-with-no-lease as 'the updater has "
+        "not armed yet' before treating it as a provable stop",
+    ),
     "CONVERGING_POLL_TIMEOUT_S": Clock(
         "deploy",
         lambda: deploy.CONVERGING_POLL_TIMEOUT_S,

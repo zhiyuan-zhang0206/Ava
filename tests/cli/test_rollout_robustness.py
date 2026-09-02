@@ -211,6 +211,26 @@ def test_native_updater_ladder_recovers_a_failed_restart_but_not_a_declined_one(
     assert cmd.index(f"errorlevel {RESTART_DECLINED_EXIT_CODE}") < (cmd.index("errorlevel 1"))
 
 
+def test_native_ladder_recovery_starts_run_as_internal_child() -> None:
+    """The recovery `ava start` arms run as INTERNAL child starts: a Phase-B
+    updater runs under the cluster-wide executing deploy lease, and an
+    operator-mode start is refused by the rollout boundary — the 2026-09-02 win
+    shape (a restart refused by a co-located unit's health port fell into the
+    recovery arm; the arm's operator-mode start was refused by the lease; the
+    updater exited rc=1 before its services started). `--persist-services` is
+    the cmd.exe ladder's internal-child marker, the same posture the POSIX
+    in-process updater's internal start already has."""
+    from ops.cluster import _restart_recovery_cmd
+
+    cmd = _restart_recovery_cmd()
+    # Both recovery arms (errorlevel >3 and 1..2) start internally; the plain
+    # `ava restart` keeps its operator rc semantics (it declines, never refuses).
+    assert cmd.count("ava start --persist-services") == 2
+    assert "ava restart --persist-services" not in cmd
+    # No operator-mode `ava start` remains anywhere in the ladder.
+    assert "(ava start &" not in cmd
+
+
 @pytest.mark.skipif(IS_WINDOWS, reason="runs the POSIX wrapper fragment through /bin/sh")
 @pytest.mark.parametrize("entry_rc", [0, 1, RESTART_DECLINED_EXIT_CODE, 7])
 def test_posix_updater_wrapper_preserves_the_entry_rc(entry_rc: int, tmp_path: Path) -> None:

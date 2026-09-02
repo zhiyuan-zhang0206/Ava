@@ -381,6 +381,24 @@ def test_local_set_applies_valid_patch(
     assert "restart to apply" in capsys.readouterr().out
 
 
+def test_local_set_can_pin_the_hosted_runner_health_port(
+    local_env_home: Path,
+) -> None:
+    """2026-09-02 (win and wsl both fell back to the shared 8114): the
+    agent-host health port was read-only with no official repair surface, so the
+    emergency fix was a direct `.env` hand-edit. The field is now host-writable:
+    `config set` IS the repair surface. remote_writable stays False, so a remote
+    `--machine` set is still refused gateway-side."""
+    (local_env_home / ".env").write_text("OTHER=kept\n")
+
+    rc = cfg.cmd_config_set(["AVA_AGENT_HOST_HEALTH_PORT=18133"], machine=None, local=True)
+
+    assert rc == 0
+    aliases = runtime_config.read_env_aliases()
+    assert aliases["AVA_AGENT_HOST_HEALTH_PORT"] == "18133"
+    assert "OTHER" in aliases  # unrelated lines survive the patch
+
+
 def test_local_unset_removes_key(local_env_home: Path) -> None:
     (local_env_home / ".env").write_text("AVA_OPS_CONCURRENCY=7\n")
 

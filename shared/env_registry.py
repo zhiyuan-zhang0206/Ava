@@ -239,6 +239,68 @@ def health_port_env(base: int) -> dict[str, str]:
     return {var: str(port) for var, port in ports.items()}
 
 
+# The lowest base a real unit port block can sit on. The legacy shared segment
+# (LEGACY_AVA_PORTS, 8000-8120) ALSO satisfies offset-consistency by accident —
+# prod's fixed pins (restarter 8102 / labeler 8103 / memory_indexer 8105 / ops
+# 8106) line up with PORT_OFFSETS 3/4/6/7 onto one fake "base" (8099) — so
+# consistency alone cannot tell a legacy unit from a block unit. Every real
+# block base is operator-chosen or allocated at >= BLOCK_START (18000),
+# hand-pinned enroll bases included (win: 18114, WSL2 default: 20027), so a
+# solved base below this floor is a legacy pin sequence, never a block.
+_HEALTH_PORT_BLOCK_FLOOR = 15000
+
+
+def backfill_missing_health_ports(existing: dict[str, str]) -> dict[str, str]:
+    """The `AVA_*_HEALTH_PORT` keys a block-style unit is missing, derived from
+    the block its present keys already prove.
+
+    A unit enrolled before a service joined `_HEALTH_PORT_SERVICES` carries an
+    older key set in its `.env` (agent_host joined 2026-08-20, the capability
+    watchdogs later), so that service's daemon falls back to the LEGACY shared
+    port (`daemon_health.health_port`) — and on a mirrored localhost namespace
+    (a Windows unit + its WSL2 sibling) two co-located units then collide on
+    the same shared default (2026-09-02: win and wsl both fell back to 8114).
+    The unit's own block base is recoverable from the keys it DOES have: each
+    value equals `base + PORT_OFFSETS[svc]`.
+
+    Returns {} unless every present key solves to ONE base at or above
+    `_HEALTH_PORT_BLOCK_FLOOR`. A legacy unit's fixed 8102-8111 pins solve to
+    different bases (their slot order predates PORT_OFFSETS) or to a base
+    below the floor, so it is never misread as a block. Fewer than two keys
+    cannot prove a block (one legacy pin is trivially "consistent"). Keys
+    already present are never rewritten — this heals ABSENCE, never drift (a
+    hand-set emergency port, even one on the wrong slot, is the operator's to
+    move through the config surface).
+    """
+    if len(existing) < 2:
+        return {}
+    aliases = health_port_env_aliases()
+    svc_by_var = {var: svc for svc, var in aliases.items()}
+    solved: int | None = None
+    for var, value in existing.items():
+        svc = svc_by_var.get(var)
+        if svc is None:
+            continue
+        try:
+            base = int(value) - PORT_OFFSETS[svc]
+        except (TypeError, ValueError):
+            return {}
+        if base < _HEALTH_PORT_BLOCK_FLOOR:
+            return {}
+        if solved is None:
+            solved = base
+        elif base != solved:
+            return {}
+    if solved is None:
+        return {}
+    highest = solved + max(PORT_OFFSETS.values())
+    if highest > 65535:
+        return {}
+    return {
+        var: str(solved + PORT_OFFSETS[svc]) for svc, var in aliases.items() if var not in existing
+    }
+
+
 # The base `ava enroll` applies to a WSL2 host when --health-port-base is
 # omitted (issue #1152). WSL2 shares its physical machine's localhost namespace
 # with any co-located native Windows unit, and both otherwise fall back to the
