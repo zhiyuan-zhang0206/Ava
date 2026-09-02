@@ -35,6 +35,7 @@ from services.agent_ops.bootstrap import (
     validate_operation,
 )
 from shared import updater_handoff
+from shared.log import logger
 from shared.managed_writer_barrier import EvidenceModel
 from shared.managed_writer_observation import (
     ExpectedProcess,
@@ -63,6 +64,16 @@ class BootstrapHopRequest(EvidenceModel):
     predecessor: ExpectedProcess
 
 
+class BootstrapPhase(EvidenceModel):
+    """Observed timings only; never lease or readiness authority."""
+
+    stage: str
+    observed_at: datetime
+    monotonic_s: float
+    pid: int
+    elapsed_s: float | None
+
+
 class BootstrapJournal(EvidenceModel):
     request: str
     request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -80,6 +91,7 @@ class BootstrapJournal(EvidenceModel):
         "recovered",
     ]
     cron: str = Field(max_length=65536)
+    phases: tuple[BootstrapPhase, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,6 +106,7 @@ class PreparedBootstrapHop:
     old_session: ExpectedSession
     resume_generation: str | None = None
     journal: BootstrapJournal | None = None
+    validation_seconds: float = 0.0
 
 
 def _private_reference(text: str, home: Path) -> Path:
@@ -200,6 +213,7 @@ def probe_bootstrap(
 
 def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: PLR0915 — ordered read-only admission before any updater effect.
     """Validate image, unit, full receipt and live A before updater/service writes."""
+    validation_started = time.monotonic()
     if sys.platform != "linux":
         raise ReleaseRejectedError("restricted updater hop has no native proof on this platform")
     request = BootstrapHopRequest.model_validate_json(_regular_bytes(request_path))
@@ -294,6 +308,7 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
         session,
         resume_generation,
         journal,
+        time.monotonic() - validation_started,
     )
 
 
@@ -363,6 +378,22 @@ def _journal(plan: PreparedBootstrapHop, generation: str, stage: str, cron: byte
             raise ReleaseRejectedError("bootstrap updater lost exact handoff ownership")
         path = updater_handoff.state_path()
         payload = json.loads(_regular_bytes(path))
+        previous = (
+            BootstrapJournal.model_validate(payload["bootstrap_hop"]).phases
+            if "bootstrap_hop" in payload
+            else ()
+        )
+        now = time.monotonic()
+        elapsed = (
+            now - previous[-1].monotonic_s if previous and previous[-1].pid == os.getpid() else None
+        )
+        phase = BootstrapPhase(
+            stage=stage,
+            observed_at=datetime.now(UTC),
+            monotonic_s=now,
+            pid=os.getpid(),
+            elapsed_s=elapsed,
+        )
         journal = BootstrapJournal.model_validate_json(
             json.dumps(
                 {
@@ -380,11 +411,18 @@ def _journal(plan: PreparedBootstrapHop, generation: str, stage: str, cron: byte
                     "stage": stage,
                     # Only the validated secret-free restricted-A command shape reaches here.
                     "cron": cron.decode("utf-8"),
+                    "phases": [entry.model_dump(mode="json") for entry in (*previous, phase)],
                 }
             )
         )
         payload["bootstrap_hop"] = journal.model_dump(mode="json")
         updater_handoff._write_atomic(path, payload)
+        logger.info(
+            "bootstrap_hop_phase {stage} elapsed_s={elapsed} validation_s={validation}",
+            stage=stage,
+            elapsed=elapsed,
+            validation=plan.validation_seconds,
+        )
 
 
 def _replace_cron(before: bytes, after: bytes, plan: PreparedBootstrapHop) -> None:
@@ -581,6 +619,9 @@ def execute_bootstrap_hop(plan: PreparedBootstrapHop, generation: str) -> int:
     original_cron, quiesced_cron = _cron_tables(plan)
     if plan.journal is not None:
         return _resume_hop(plan, generation, original_cron, quiesced_cron)
+    remaining = (plan.candidate.challenge.valid_until - datetime.now(UTC)).total_seconds()
+    if remaining <= plan.validation_seconds:
+        raise ReleaseRejectedError("remaining challenge cannot cover observed cold validation cost")
     _journal(plan, generation, "prepared", original_cron)
     try:
         _replace_cron(original_cron, quiesced_cron, plan)

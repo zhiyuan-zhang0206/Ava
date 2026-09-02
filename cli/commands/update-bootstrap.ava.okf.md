@@ -37,6 +37,11 @@ predecessor is rejected before image traversal and checked again afterward.
 Each startup wait uses at most half the outstanding challenge, reserving the
 remaining authority window for compensation. Transient unproven exec identity
 is only retried as not-ready; it never authorizes a signal or successful closure.
+Pre-quiesce rejects a remaining challenge shorter than this invocation's measured
+validation cost. This is a lower-bound refusal, not a claimed cold-boot upper
+bound or proof that recovery will fit. The existing journal records phase times;
+they are observation only, never authority, and a new updater PID resets the
+comparable elapsed interval instead of inventing a cross-process duration.
 
 Candidate startup failure compensates to the verified restricted A and restores
 only the unchanged original cron definition. Dead updater recovery reclaims the

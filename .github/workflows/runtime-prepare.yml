@@ -145,6 +145,12 @@ jobs:
             ${{ runner.temp }}/prepare/ops-bootstrap-proof.json
             ${{ runner.temp }}/prepare/updater-bootstrap-proof.json
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && runner.os == 'Linux'
+        with:
+          name: updater-hop-observations-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/prepare/hop-observation-*.json
+          if-no-files-found: ignore
       - name: Stop isolated native PG
         if: always() && runner.os == 'Linux'
         shell: bash

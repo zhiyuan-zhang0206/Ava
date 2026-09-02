@@ -181,7 +181,34 @@ def failure_snapshot(home: Path, old: hop.ExpectedProcess) -> str:
             ]
     except FileNotFoundError:
         evidence["record_identity"] = "absent"
+    except psutil.Error as exc:
+        evidence["record_observation_error"] = type(exc).__name__
     return json.dumps(evidence, sort_keys=True)
+
+
+def record_hop_observation(
+    home: Path,
+    mode: str,
+    old: hop.ExpectedProcess,
+    started: float,
+    outcome: int | str,
+    stderr: bytes,
+) -> None:
+    (home.parent / f"hop-observation-{mode}.json").write_text(
+        json.dumps(
+            {
+                "outcome": outcome,
+                "elapsed_s": time.monotonic() - started,
+                "native": json.loads(failure_snapshot(home, old)),
+                "phases": [
+                    line
+                    for line in stderr.decode(errors="replace").splitlines()
+                    if "bootstrap_hop_phase " in line
+                ],
+            },
+            indent=2,
+        )
+    )
 
 
 def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always restored in finally.
@@ -399,6 +426,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         str(request_path),
                     ]
                 )
+                invocation_started = time.monotonic()
                 try:
                     result = subprocess.run(  # noqa: S603 — verified updater or copied CI-only fault worker.
                         argv,
@@ -412,12 +440,28 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     raw = json.loads(updater_handoff.state_path().read_bytes())
                     stage = raw.get("bootstrap_hop", {}).get("stage", "before-bootstrap-journal")
                     stderr = exc.stderr or b""
+                    record_hop_observation(
+                        home,
+                        mode,
+                        expected.sessions[0].process,
+                        invocation_started,
+                        "timeout",
+                        stderr,
+                    )
                     raise AssertionError(
                         f"{mode} timed out at {stage}; "
                         + failure_snapshot(home, expected.sessions[0].process)
                         + ": "
                         + stderr.decode(errors="replace")[-12000:]
                     ) from exc
+                record_hop_observation(
+                    home,
+                    mode,
+                    expected.sessions[0].process,
+                    invocation_started,
+                    result.returncode,
+                    result.stderr,
+                )
                 if result.returncode not in {
                     3 if mode == "success" else 77 if mode == "crash-after-stop" else 1
                 }:
