@@ -18,6 +18,11 @@ on:
       - 'scripts/prove_runtime_otel.py'
       - 'cli/commands/_otel_collector.py'
       - 'shared/paths.py'
+      - 'shared/runtime_plugins.py'
+      - 'shared/plugins_config.py'
+      - 'ava/_extend.py'
+      - 'scripts/prove_runtime_plugins.py'
+      - 'scripts/prepare_plugin_fixture.py'
       - 'scripts/prove_runtime_migration.py'
       - 'shared/runtime_migration.py'
       - 'cli/commands/_release_candidate.py'
@@ -98,12 +103,13 @@ jobs:
         run: uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py cli/commands/_otel_collector.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py cli/commands/_otel_collector.py
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
         run: |
           set -euo pipefail
           uv python install 3.12
+          python3 scripts/prepare_plugin_fixture.py "$RUNNER_TEMP/prepare/plugin-input"
           python3 scripts/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$(uv python find --managed-python 3.12)" --uv "$(command -v uv)"
           test -s "$RUNNER_TEMP/prepare/proof.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -113,6 +119,7 @@ jobs:
             ${{ runner.temp }}/prepare/proof.json
             ${{ runner.temp }}/prepare/migration-proof.json
             ${{ runner.temp }}/prepare/otel-proof.json
+            ${{ runner.temp }}/prepare/plugin-proof.json
             ${{ runner.temp }}/frontend-proof.json
           if-no-files-found: error
       - name: Stop isolated native PG

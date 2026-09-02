@@ -336,8 +336,9 @@ def scan_and_load(
     if plugin_dir is None:
         # lazy import to avoid top-level cycle (shared.paths indirectly imports shared.config)
         from shared import paths
+        from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_plugins_dir
 
-        root = paths.plugins_dir()
+        root = runtime_plugins_dir() if WHEEL_RUNTIME else paths.plugins_dir()
     else:
         root = Path(plugin_dir).expanduser()
     if not root.exists():

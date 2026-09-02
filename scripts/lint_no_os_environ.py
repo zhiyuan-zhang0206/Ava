@@ -88,6 +88,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/prove_runtime_consumer.py",  # CI-only isolated child environment and missing-home negative control, not runtime configuration.
         "scripts/prove_runtime_migration.py",  # CI-only runner scratch guard must not become an application setting.
         "scripts/prove_runtime_otel.py",  # CI-only scratch/home guard; never production collector configuration.
+        "scripts/prove_runtime_plugins.py",  # CI-only private home and CI guard, not runtime plugin settings.
         "scripts/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
         "scripts/lint_fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
         "shared/session_env.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded
