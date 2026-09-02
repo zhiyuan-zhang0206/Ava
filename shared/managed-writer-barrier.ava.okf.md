@@ -63,6 +63,16 @@ remains, avoiding silent removal of permission on rollback.
 
 ## Integration boundary
 
+Publication admission has identical synchronous/asynchronous SQL and a shared
+decision function. SQL NULL evidence is the explicit never-enabled legacy state:
+stable permits only existing protocol-zero behavior. A nonstable phase or valid
+pending publication defers new runtime admission, preserving agent state and all
+inbounds even after the operation lease expires. Valid stable current evidence
+requires the exact loaded image, selector, full receipt and complete registry.
+Unknown versions, malformed evidence and an empty version-two record are errors,
+never legacy fallbacks. These results do not authorize caller-supplied DTOs or
+terminate an agent; the actual process/hosted entrypoints still require wiring.
+
 The models, transaction fence and nullable schema are not activation. Actual
 rollout collection and image-bound runtime admission must consume the same
 operation, and ordinary same-owner idle must retain only previously granted
