@@ -26,6 +26,7 @@ from typing import Any
 from psycopg.rows import dict_row
 
 from shared.db import connect
+from shared.db_transaction import write_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,7 @@ def register_cron_atomic(
     # check, never `or -1` (QA nit, #794 delta2).
     exclude = -1 if exclude_session is None else exclude_session
     with connect() as conn, conn.cursor() as cur:
+        cur.execute("SET TRANSACTION READ WRITE")
         cur.execute(
             "SELECT pg_advisory_xact_lock(%s)",
             (cron_advisory_key(agent_id, cron_expr, cron_timezone, cron_end_at),),
@@ -208,7 +210,7 @@ def register_watcher(
     """
     if kind not in _KIND_PAYLOAD:
         raise ValueError(f"unknown watcher kind {kind!r}")
-    with connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             _REGISTER_SQL,
             (
@@ -240,7 +242,7 @@ def delete_watcher(agent_id: int, session_id: int) -> None:
     row is keyed by (agent_id, session_id) — deleting on session_id alone
     could drop another agent's same-numbered row (task #1155).
     """
-    with connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "DELETE FROM agent_watchers WHERE agent_id = %s AND session_id = %s",
             (agent_id, session_id),
@@ -251,7 +253,7 @@ def mark_status(agent_id: int, session_id: int, status: str) -> None:
     """Transition a row's status (`running` → terminal history)."""
     if status not in _WATCHER_STATUSES:
         raise ValueError(f"unknown watcher status {status!r}")
-    with connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_watchers SET status = %s, updated_at = now() "
             "WHERE agent_id = %s AND session_id = %s",

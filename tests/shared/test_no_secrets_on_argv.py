@@ -364,6 +364,18 @@ def test_self_respawn_fallback(secret_env: None, monkeypatch: pytest.MonkeyPatch
         def cursor(self) -> _FakeCursor:
             return _FakeCursor()
 
+        def transaction(self) -> _FakeConn:
+            return self
+
+        def execute(self, *_a: Any, **_kw: Any) -> None:
+            return None
+
+        def __enter__(self) -> _FakeConn:
+            return self
+
+        def __exit__(self, *_a: Any) -> None:
+            return None
+
         def close(self) -> None:
             pass
 

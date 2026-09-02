@@ -47,6 +47,7 @@ from ops.controllers.base import BlockScope, ReconcileResult
 from ops.pages import list_open_page_names
 from shared.boot_timing import BOOT_REAP_GRACE_SEC
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.http_dial import get as dial_get
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.machine import MachineRole, machine_name
@@ -158,7 +159,7 @@ def _reap_local_unclaimed_idling(
         ids = [r[0] for r in cur.fetchall()]
     reaped: list[int] = []
     for agent_id in ids:
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             # Capture cascade-closable show() page names before the status
             # flip. Daemon-supervised serve() pages stay open.
             page_names = list_open_page_names(conn, agent_id)
@@ -198,7 +199,7 @@ def _reap_local_dead_boot_phase_agents(pool: ConnectionPool, local_machine: str)
     for agent_id, pid in rows:
         if pid is None or _process_still_resident(agent_id, pid):
             continue
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             page_names = list_open_page_names(conn, agent_id)
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', termination_source = 'reaper' "

@@ -14,10 +14,10 @@ from __future__ import annotations
 import os
 import sys
 
-import shared.db
 from agent import _boot_timing
 from shared.agents import AgentStatus
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.machine import machine_name
 from shared.migrations import (
@@ -50,7 +50,7 @@ def claim_agent_row_or_die_on_stale_schema(agent_id: int) -> None:
 
 def _mark_preclaim_terminated(agent_id: int) -> None:
     """Mark an unclaimed row terminated and close its show() pages after boot rejection."""
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         # Capture only agent-owned pages before the terminal transition closes them.
         cur.execute(
             "SELECT name FROM agent_pages "
@@ -81,7 +81,7 @@ def claim_agent_row(agent_id: int) -> None:
     identity with the process that already owns it.
     """
     local_machine = machine_name()
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         # A guarded auto-resurrect transaction may still be committing the row
         # when its child starts. Lock first so this process validates that final
         # committed state rather than a stale pre-resurrection snapshot.

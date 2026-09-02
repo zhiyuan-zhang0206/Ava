@@ -42,6 +42,7 @@ from typing import NamedTuple
 
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
+from shared.db_transaction import async_write_transaction, write_transaction
 from shared.log import logger
 
 
@@ -135,7 +136,7 @@ async def mark_compact_boundary(
     callers, since a missed stamp only loses segment traceability, never
     recoverability (the summary survives regardless).
     """
-    async with pool.connection() as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
             " WHERE thread_id = %s AND checkpoint_ns = %s"
@@ -154,7 +155,7 @@ def mark_compact_boundary_sync(
     checkpoint_ns: str = "",
 ) -> None:
     """Synchronous twin of `mark_compact_boundary` (gateway-side maintenance)."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
             " WHERE thread_id = %s AND checkpoint_ns = %s"
@@ -222,7 +223,7 @@ async def trim_checkpoints(
     assert keep >= 1, f"keep must be >= 1 to preserve the latest checkpoint, got {keep}"  # noqa: S101
     total = [0, 0, 0]
     for _ in range(_TRIM_MAX_ROUNDS):
-        async with pool.connection() as conn, conn.cursor() as cur:
+        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             await cur.execute(
                 _TRIM_SQL,
                 {"thread_id": thread_id, "ns": checkpoint_ns, "keep": keep, "batch": batch},
@@ -267,7 +268,7 @@ def trim_checkpoints_sync(
     assert keep >= 1, f"keep must be >= 1 to preserve the latest checkpoint, got {keep}"  # noqa: S101
     total = [0, 0, 0]
     for _ in range(_TRIM_MAX_ROUNDS):
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 _TRIM_SQL,
                 {"thread_id": thread_id, "ns": checkpoint_ns, "keep": keep, "batch": batch},

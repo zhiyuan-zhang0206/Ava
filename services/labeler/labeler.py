@@ -9,7 +9,7 @@ import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
-import shared.db
+from shared.db_transaction import write_transaction
 from shared.labels import publish_label_updated
 from shared.lm.content import content_blocks
 from shared.lm.factory import build_chat_model
@@ -218,7 +218,7 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
     # label_user_set false; the LLM write matches that. Legacy
     # 'agent-user' / 'thread-N' placeholder rows are non-NULL and also
     # do not match (no special migration needed for old rows).
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents SET label=%s WHERE id=%s AND label IS NULL AND NOT label_user_set",
             (label, agent_id),

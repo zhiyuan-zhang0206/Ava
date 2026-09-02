@@ -199,10 +199,11 @@ def _notify_agents_of_rollback(from_sha: str, to_sha: str) -> None:
     import json
 
     import shared.db
+    from shared.db_transaction import write_transaction
 
     payload = json.dumps({"from_sha": from_sha, "to_sha": to_sha, "reason": "rollback"})
     try:
-        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with write_transaction() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, source, kind, content) "
                 "SELECT id, 'system:rollback', 'chat', %s FROM agents_meta "

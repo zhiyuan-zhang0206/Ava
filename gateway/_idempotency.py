@@ -44,6 +44,7 @@ from psycopg_pool import ConnectionPool
 from gateway.error_envelope import error_response
 from shared import contracts
 from shared.contracts import Idempotency
+from shared.db_transaction import write_transaction
 
 _MAX_WAIT_SECONDS = 15.0
 _POLL_INITIAL_S = 0.1
@@ -80,7 +81,7 @@ def _claim(pool: ConnectionPool, key: str, method: str, path: str) -> bool:
     (status NULL, fresh) or a completed same-route row is left alone —
     those mean "someone is executing" / "replay this", respectively.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "DELETE FROM api_idempotency "
             "WHERE completed_at < now() - make_interval(days => %s) "
@@ -128,7 +129,7 @@ def _fetch(
 def _store(
     pool: ConnectionPool, key: str, status: int, body: object, headers: dict[str, str]
 ) -> None:
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE api_idempotency SET status = %s, response_body = %s, "
             "response_headers = %s, completed_at = now() WHERE key = %s",
@@ -139,7 +140,7 @@ def _store(
 def _release(pool: ConnectionPool, key: str) -> None:
     """Drop the row for `key` — the owner failed without a replayable
     outcome, so a retry must be able to execute afresh."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM api_idempotency WHERE key = %s", (key,))
 
 

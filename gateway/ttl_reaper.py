@@ -48,6 +48,7 @@ from ops import cluster_rpc
 from shared import telemetry
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
+from shared.db_transaction import write_transaction
 from shared.live_events import PageClosed
 from shared.redis_client import publish_best_effort_sync
 
@@ -110,7 +111,7 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
     blocks on psycopg). Each row is a CAS so an explicit close() or a parallel
     reaper pass wins the race instead of double-terminalizing.
     """
-    with pool.connection() as conn:
+    with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, agent_id, name, serve_dir FROM agent_pages "
@@ -170,7 +171,7 @@ def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, i
 
 def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
     """Delete browser sessions whose authoritative expiry has elapsed."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "WITH expired AS ("
             "SELECT id FROM web_sessions WHERE expires_at < now() "
@@ -236,7 +237,7 @@ def _delete_shell_row_blocking(
     the reclamation interrupted a running job (an empty shell's reaping is
     silent — user ruling 2026-08-27). The notice states when the TTL expired
     and how long it was (``expires_at`` / ``created_at`` from the row)."""
-    with pool.connection() as conn:
+    with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
