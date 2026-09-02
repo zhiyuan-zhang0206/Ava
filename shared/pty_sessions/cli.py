@@ -310,6 +310,8 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
         proc = psutil.Process(rec.pid)
         if not proc.is_running():
             return True, "shell pid is no longer running"
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return True, "shell exited and awaits parent reap"
     except psutil.NoSuchProcess:
         return True, "shell pid is gone"
     except (psutil.AccessDenied, OSError):
