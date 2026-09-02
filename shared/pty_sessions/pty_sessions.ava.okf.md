@@ -12,6 +12,11 @@ tags:
 
 ## What it is
 
+A matching PID/start-time is not sufficient for liveness: both the record
+reader and host reject `STATUS_ZOMBIE`. A zombie cannot execute, even when its
+parent or init has not reaped its PID yet. Crash tests require the shell/child
+to be gone or zombie; running and unreadable survivors still fail.
+
 `shared/pty_sessions/` hosts every agent interactive shell — **one detached
 host process per session**, no supervisor daemon. The SDK keeps its
 named-session surface (`ava.shell.sessions`, watchers, schedules) unchanged.
