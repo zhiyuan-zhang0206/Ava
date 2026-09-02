@@ -324,10 +324,10 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     str(image.interpreter),
                     "-I",
                     "-B",
-                    "-c",
-                    "import faulthandler,runpy; "
-                    "faulthandler.dump_traceback_later(20,repeat=True); "
-                    "runpy.run_module('cli.commands._update_agent_runner',run_name='__main__')",
+                    "-X",
+                    "faulthandler",
+                    "-m",
+                    "cli.commands._update_agent_runner",
                     "--bootstrap-hop",
                     str(request_path),
                 ]
