@@ -62,6 +62,7 @@ import sys
 import time
 
 import psycopg
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 import shared.db
@@ -194,7 +195,7 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            psycopg.sql.SQL(
+            sql.SQL(
                 "SELECT m.agent_id, MIN(m.id) "
                 "FROM inbound_messages m "
                 "JOIN agents_meta ON agents_meta.id = m.agent_id "
@@ -204,7 +205,7 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
                 "  AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0) "
                 "GROUP BY m.agent_id "
                 "ORDER BY m.agent_id"
-            ).format(psycopg.sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET))
+            ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET))
         )
         return [(r[0], r[1]) for r in cur.fetchall()]
 
