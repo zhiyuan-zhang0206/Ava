@@ -19,6 +19,8 @@ PRIVATE_CONSOLE = "private-console-v1"
 
 def send_private_console_break(record_path: Path, pid: int, birth: float) -> None:
     """Reject stale identity, legacy records and any foreign console member."""
+    if sys.platform != "win32":
+        raise RuntimeError("private console signaling is Windows-only")
     record = json.loads(record_path.read_text())
     if (record["pid"], record["create_time"], record.get("control_mode")) != (
         pid,
