@@ -236,7 +236,7 @@ def dead_letter_stale_claimed(pool: ConnectionPool, threshold_s: float) -> int:
             "FROM agents_meta am "
             "WHERE m.agent_id = am.id "
             "  AND am.status = 'terminated' "
-            "  AND m.status = 'claimed' "
+            "  AND m.status = 'claimed' AND m.kind = 'chat' "
             "  AND COALESCE(m.claimed_at, m.created_at) "
             "      < now() - make_interval(secs => %s)",
             (threshold_s,),

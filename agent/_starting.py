@@ -65,7 +65,9 @@ def _mark_preclaim_terminated(agent_id: int) -> None:
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', "
             "termination_source = 'launch-confirm' "
-            "WHERE id = %s AND status = 'idling' AND pid IS NULL",
+            "WHERE id = %s AND status = 'idling' AND pid IS NULL "
+            "AND runtime_generation IS NULL AND runtime_owner IS NULL AND runtime_kind IS NULL "
+            "AND lifecycle_command_id IS NULL",
             (agent_id,),
         )
         transitioned = cur.rowcount == 1
