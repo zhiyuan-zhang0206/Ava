@@ -30,11 +30,14 @@ It fetches rendered static resources, checks the copied inventory after serving,
 and proves a failed subsequent preparation leaves that server available. The
 negative input tests reject changed bytes before writing and dotenv inclusion.
 
-This artifact is not yet integrated into the complete Python generation or
-production frontend ServiceSpec/watchdog. Their source build commands are still
-legacy behavior, not acceptable release behavior. Release admission remains
-closed until this prepared asset is bound to the candidate image and the existing
-start/watchdog consumer uses only its retained executable/server. Native OTel,
+The Python preparer optionally consumes this trusted input inventory, verifies
+its private copy before execution and includes all frontend bytes in the same
+generation manifest/seal. The existing frontend command and watchdog bind wheel
+mode to that loaded generation's retained Node/server, never npm or a moving
+selector; source mode keeps its existing behavior. Combined CI invokes the real
+wheel command with source absent and fetches HTTP from that command's process.
+This does not bypass service-respawn ownership or release admission, which stays
+closed until every enabled asset is verified. Native OTel,
 enabled plugins, bootable LKG and all-managed-writer closure are separate hard
 gates; HTTP alone does not prove full service readiness.
 

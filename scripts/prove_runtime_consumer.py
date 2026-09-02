@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ops.agent_launch import _agent_interpreter
 from ops.spec import build_services
+from shared.cluster import frontend_service_cmd
 from shared.migrations import required_migration_set
 from shared.platform_backend import get_backend
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
@@ -32,6 +33,15 @@ def main() -> None:
         "interpreter canonicalized the entry alias; this is not a moving-prefix proof",
     )
     require(WHEEL_RUNTIME, "proof did not load the installed wheel")
+    frontend_command = frontend_service_cmd(43871)
+    require(
+        "npm" not in frontend_command and "build" not in frontend_command,
+        "release frontend rebuilds",
+    )
+    require(
+        str(prefix.parent / "frontend/node") in frontend_command,
+        "frontend escaped loaded generation",
+    )
     require(bool(required_migration_set()), "installed read-only schema inventory is unavailable")
     require(runtime_venv().resolve() == prefix, "venv escaped current prefix")
     python = runtime_python()

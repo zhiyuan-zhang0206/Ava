@@ -16,11 +16,13 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from shared.runtime_prepare import (
+    FrontendInput,
     PrepareInputs,
     _copy_python,
     _python_input_inventory,
     inventory_digest,
     prepare_release,
+    tree_inventory,
     verify_loaded_images,
 )
 from shared.runtime_release import (
@@ -206,6 +208,24 @@ def prove_copy_race(
         raise AssertionError("copy-race rejection changed serving pointer")
 
 
+def prove_prepared_frontend(
+    inputs: PrepareInputs, release: VerifiedRelease, checkout: Path, root: Path
+) -> None:
+    if inputs.frontend is None:
+        return
+    subprocess.run(  # noqa: S603 — verified retained Node, CI-only source-absence proof.
+        [
+            str(release.root / "frontend/node"),
+            str(checkout / "scripts/prove_frontend_release.mjs"),
+            str(release.root / "frontend"),
+            str(release.interpreter),
+            str(root / "unit"),
+        ],
+        check=True,
+        timeout=120,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
@@ -247,6 +267,13 @@ def main() -> None:
         application.name,
         file_sha256(checkout / "db/schema.sql"),
         args.uv.resolve(),
+        frontend=(
+            FrontendInput(
+                root / "frontend-input", inventory_digest(tree_inventory(root / "frontend-input"))
+            )
+            if (root / "frontend-input").is_dir()
+            else None
+        ),
     )
     release = prepare_with_diagnostics(store, inputs)
     if serving.read_bytes() != original:
@@ -256,6 +283,7 @@ def main() -> None:
     private_python.rename(root / "retired-python-input")
     wheels.rename(root / "retired-wheels")
     prove_checkout_absent(root, checkout, application.name, release)
+    prove_prepared_frontend(inputs, release, checkout, root)
     verify_loaded_images(release)
     import platform
 
