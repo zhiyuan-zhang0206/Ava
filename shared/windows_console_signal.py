@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 import psutil
@@ -17,10 +18,12 @@ import psutil
 PRIVATE_CONSOLE = "private-console-v1"
 
 
-def send_private_console_break(record_path: Path, pid: int, birth: float) -> None:
+def send_private_console_break(record_path: Path, pid: int, birth: float, deadline: float) -> None:
     """Reject stale identity, legacy records and any foreign console member."""
     if sys.platform != "win32":
         raise RuntimeError("private console signaling is Windows-only")
+    if time.monotonic() >= deadline:
+        raise RuntimeError("private console delivery deadline expired")
     record = json.loads(record_path.read_text())
     if (record["pid"], record["create_time"], record.get("control_mode")) != (
         pid,
@@ -65,6 +68,8 @@ def send_private_console_break(record_path: Path, pid: int, birth: float) -> Non
             raise RuntimeError("private console target exited before delivery")
         if json.loads(record_path.read_text()) != record:
             raise RuntimeError("private console record changed before delivery")
+        if time.monotonic() >= deadline:
+            raise RuntimeError("private console delivery deadline expired")
         # NEW_CONSOLE ignores NEW_PROCESS_GROUP. Broadcast is confined to this
         # explicitly private, enumerated console; never infer a group from PID.
         if not kernel.GenerateConsoleCtrlEvent(1, 0):
@@ -79,7 +84,9 @@ def send_private_console_break(record_path: Path, pid: int, birth: float) -> Non
 
 if __name__ == "__main__":
     try:
-        send_private_console_break(Path(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]))
+        send_private_console_break(
+            Path(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
+        )
     except Exception as error:
         sys.stderr.write(f"private console delivery refused: {error}\n")
         raise SystemExit(1) from error
