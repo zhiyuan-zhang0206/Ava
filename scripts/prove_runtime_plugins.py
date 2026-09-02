@@ -37,7 +37,14 @@ def main() -> None:
     (mutable / "plugin.py").write_text("raise RuntimeError('mutable poison must not execute')\n")
     _load_extensions()
     require(_plugins_fingerprint() == fingerprint, "mutable input triggered host restart")
-    require(module.VALUE == "retained-resource", "mutable install changed loaded image")
+    reloaded = sys.modules["plugins.runtime_fixture.plugin"]
+    require(reloaded.VALUE == "retained-resource", "mutable install changed loaded image")
+    if reloaded.__file__ is None:
+        raise AssertionError("reloaded extension has no file origin")
+    require(
+        Path(reloaded.__file__).resolve() == retained / "plugin.py",
+        "reloaded extension origin escaped retained generation",
+    )
     # Machine services depend on presence, not agent-facing enable-state.
     config["plugins"]["runtime_fixture"]["enabled"] = False
     plugins_config.local_config_path().write_text(json.dumps(config))
