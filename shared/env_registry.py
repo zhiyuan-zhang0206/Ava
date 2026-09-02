@@ -263,20 +263,27 @@ def backfill_missing_health_ports(existing: dict[str, str]) -> dict[str, str]:
     The unit's own block base is recoverable from the keys it DOES have: each
     value equals `base + PORT_OFFSETS[svc]`.
 
-    Returns {} unless every present key solves to ONE base at or above
-    `_HEALTH_PORT_BLOCK_FLOOR`. A legacy unit's fixed 8102-8111 pins solve to
-    different bases (their slot order predates PORT_OFFSETS) or to a base
-    below the floor, so it is never misread as a block. Fewer than two keys
-    cannot prove a block (one legacy pin is trivially "consistent"). Keys
-    already present are never rewritten — this heals ABSENCE, never drift (a
-    hand-set emergency port, even one on the wrong slot, is the operator's to
-    move through the config surface).
+    Returns {} unless at least two present keys solve to ONE common base at or
+    above `_HEALTH_PORT_BLOCK_FLOOR` — the majority base. Keys that solve to a
+    different base, or to none at all (unparseable value, or a base below the
+    floor), are outliers and ignored: a single drifted key must not block the
+    backfill for a block the remaining keys prove (2026-09-02: wsl carried one
+    hand-set outlier, AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT=20024, that aborted
+    the whole table). A legacy unit's fixed 8102-8111 pins solve to different
+    bases (their slot order predates PORT_OFFSETS) or to a base below the
+    floor, and no two of them agree above it, so it is never misread as a
+    block. Fewer than two agreeing keys cannot prove a block (one legacy pin
+    is trivially "consistent"). A tie between two candidate bases is ambiguous
+    and yields {} — guessing would bind ports nobody asked for. Keys already
+    present are never rewritten — this heals ABSENCE, never drift (a hand-set
+    emergency port, even one on the wrong slot, is the operator's to move
+    through the config surface).
     """
     if len(existing) < 2:
         return {}
     aliases = health_port_env_aliases()
     svc_by_var = {var: svc for svc, var in aliases.items()}
-    solved: int | None = None
+    counts: dict[int, int] = {}
     for var, value in existing.items():
         svc = svc_by_var.get(var)
         if svc is None:
@@ -284,14 +291,14 @@ def backfill_missing_health_ports(existing: dict[str, str]) -> dict[str, str]:
         try:
             base = int(value) - PORT_OFFSETS[svc]
         except (TypeError, ValueError):
-            return {}
+            continue  # outlier: unparseable value
         if base < _HEALTH_PORT_BLOCK_FLOOR:
-            return {}
-        if solved is None:
-            solved = base
-        elif base != solved:
-            return {}
-    if solved is None:
+            continue  # outlier: legacy pin sequence, not a block
+        counts[base] = counts.get(base, 0) + 1
+    if not counts:
+        return {}
+    solved, n = max(counts.items(), key=lambda kv: (kv[1], kv[0]))
+    if n < 2 or any(cnt == n and base != solved for base, cnt in counts.items()):
         return {}
     highest = solved + max(PORT_OFFSETS.values())
     if highest > 65535:

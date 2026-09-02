@@ -301,3 +301,32 @@ def test_standin_dispatch_never_raises_on_a_failing_reconcile(
     hc._standin_dispatch()  # no exception
 
     assert fake_pool.closed == 1
+
+
+def test_hosted_runner_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted mode gates the whole round: the roster disables the restarter
+    there, so the healthcheck must neither probe, nor respawn, nor stand in —
+    a stand-in reconcile would reap healthy hosted-agent rows (2026-09-02,
+    agent 2986 harvested mid-turn)."""
+    monkeypatch.setattr(hc, "runner_mode", lambda: "hosted")
+    monkeypatch.setattr(hc, "_probe", lambda: pytest.fail("must not probe on hosted"))
+    monkeypatch.setattr(hc, "_restart_daemon", lambda: pytest.fail("must not respawn on hosted"))
+    monkeypatch.setattr(hc, "_standin_dispatch", lambda: pytest.fail("must not stand in on hosted"))
+
+    hc.main()  # returns after the guard, no keepalive round
+
+
+def test_process_runner_still_runs_the_round(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard is mode-specific: on a process runner the round must run
+    exactly as before."""
+    monkeypatch.setattr(hc, "runner_mode", lambda: "process")
+    rounds: list[int] = []
+
+    def _record_round(*a: object, **k: object) -> None:
+        rounds.append(1)
+
+    monkeypatch.setattr(hc, "run_keepalive", _record_round)
+
+    hc.main()
+
+    assert rounds == [1]

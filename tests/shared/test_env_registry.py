@@ -390,3 +390,51 @@ def test_backfill_ignores_a_present_but_misplaced_key() -> None:
         "AVA_AGENT_HOST_HEALTH_PORT": str(base),  # wrong slot: base, not base+19
     }
     assert _backfill(keys) == {}
+
+
+def test_backfill_majority_base_ignores_a_single_outlier() -> None:
+    """wsl-shaped .env (2026-09-02): all keys prove one block base except one
+    drifted hand-set key — the agreeing majority must still prove the block,
+    and the outlier must not abort the whole backfill."""
+    from shared.port_block import PORT_OFFSETS
+
+    base = 20027
+    full = _block_env(base)
+    present = set(full) - {"AVA_AGENT_HOST_HEALTH_PORT", "AVA_GATEWAY_WATCHDOG_HEALTH_PORT"}
+    keys = {alias: full[alias] for alias in present}
+    keys["AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT"] = "20024"  # the drifted outlier
+    missing = _backfill(keys)
+    assert missing["AVA_AGENT_HOST_HEALTH_PORT"] == str(base + PORT_OFFSETS["agent_host"])
+    assert missing["AVA_GATEWAY_WATCHDOG_HEALTH_PORT"] == str(
+        base + PORT_OFFSETS["gateway_watchdog"]
+    )
+
+
+def test_backfill_refuses_an_ambiguous_tie_between_two_bases() -> None:
+    """Two keys on base A and two on base B prove neither — guessing would bind
+    ports nobody asked for."""
+    from shared.port_block import PORT_OFFSETS
+
+    base, other = 18114, 20027
+    keys = {
+        "AVA_OPS_HEALTH_PORT": str(base + PORT_OFFSETS["ops"]),
+        "AVA_LABELER_HEALTH_PORT": str(base + PORT_OFFSETS["labeler"]),
+        "AVA_HEARTBEAT_HEALTH_PORT": str(other + PORT_OFFSETS["heartbeat"]),
+        "AVA_RESTARTER_HEALTH_PORT": str(other + PORT_OFFSETS["restarter"]),
+    }
+    assert _backfill(keys) == {}
+
+
+def test_backfill_unparseable_values_are_outliers_not_fatal() -> None:
+    """A corrupt value must not abort the backfill when the rest of the block
+    still agrees (previously any TypeError returned {})."""
+    from shared.port_block import PORT_OFFSETS
+
+    base = 18114
+    full = _block_env(base)
+    present = set(full) - {"AVA_MEMORY_INDEXER_HEALTH_PORT"}
+    keys = {alias: full[alias] for alias in present}
+    keys["AVA_OPS_HEALTH_PORT"] = "not-a-port"
+    missing = _backfill(keys)
+    assert missing["AVA_MEMORY_INDEXER_HEALTH_PORT"] == str(base + PORT_OFFSETS["memory_indexer"])
+    assert "AVA_OPS_HEALTH_PORT" not in missing

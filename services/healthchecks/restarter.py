@@ -6,6 +6,9 @@ Checks whether the restarter daemon is alive:
   restarts in its place (`_standin_dispatch`)
 - port held by another unit's daemon -> no respawn at all (nothing this unit can
   do frees that port), report at ERROR, and dispatch in its place
+- hosted runner -> no-op: the roster disables the restarter there (per-agent
+  process supervision is retired), so there is nothing to keep alive — and a
+  stand-in would reap every healthy hosted agent (2026-09-02, agent 2986)
 
 "Alive" means an identity-verified `/healthz` (`shared.daemon_health.probe_daemon`),
 not merely a 200: this healthcheck was the one a leaked test daemon on prod's
@@ -41,6 +44,7 @@ from pathlib import Path
 
 import shared.db
 from ops.controllers.respawn import RespawnController
+from ops.runner_mode import runner_mode
 from shared.config import settings
 from shared.daemon_health import DaemonProbe, health_port, probe_daemon
 from shared.log import init_gateway_process
@@ -126,6 +130,17 @@ def _restart_daemon() -> DaemonProbe:
 
 def main() -> None:
     init_gateway_process(name="restarter-healthcheck")
+    if runner_mode() == "hosted":
+        # The roster disables the restarter on hosted runners (per-agent
+        # process supervision is retired there — ops/spec.py:_gate_reason), so
+        # there is nothing to keep alive and nothing to stand in for. Standing
+        # in would reap every healthy hosted agent: RespawnController reads
+        # process lease rows that hosted agents do not hold (2026-09-02, agent
+        # 2986 harvested mid-turn). The watchdog still wires this check on
+        # single-box hosts because the service spec is present on the roster,
+        # so gate the whole round here.
+        _log.info("restarter roster-disabled on hosted runner — healthcheck no-op")
+        return
     # The respawn runs before any DB work, and the stand-in only after it — see the
     # module docstring. `run_keepalive` owns that ordering for every healthcheck: the
     # `on_unrevivable` hook is never called ahead of a respawn attempt.

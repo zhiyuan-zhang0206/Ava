@@ -170,6 +170,12 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_CONSUME_ABANDON_GRACE",
     ): "independent: pubsub consume-abandon window, no lattice neighbour",
     (
+        "services/agent_host/daemon.py",
+        "_STRAY_STOP_GRACE_S",
+    ): "independent: SIGTERM drain window for a roster-gated stray at hosted bring-up; "
+    "the watchdog round is the backstop but no ordering safety depends on this value "
+    "(it only bounds how long bring-up waits before handing over), no lattice neighbour",
+    (
         "shared/events/contract.py",
         "DELIVERY_STALLED_KEYS",
     ): "SQL key set for the delivery_stalled view, not a clock",
