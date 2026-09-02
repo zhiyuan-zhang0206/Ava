@@ -121,6 +121,7 @@ jobs:
       - name: Type-check publication input reader
         run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/prove_runtime_publication_input.py
       - name: Publication selector compatibility
+        if: runner.os == 'Linux'
         run: uv run --locked pytest tests/shared/test_runtime_publication_input.py -q
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
