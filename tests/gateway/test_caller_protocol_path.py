@@ -8,11 +8,11 @@ by a mocked lookup. Production admission still advertises protocol zero.
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, LiteralString
 from unittest.mock import Mock
 from uuid import uuid4
 
-import httpx
+import httpx2
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -86,7 +86,7 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     )
     with TestClient(app) as client:
 
-        def post(url: str, **kwargs: Any) -> httpx.Response:
+        def post(url: str, **kwargs: Any) -> httpx2.Response:
             return client.post(url, **kwargs)
 
         monkeypatch.setattr("shared.http_dial.post", post)
@@ -106,10 +106,11 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
         assert item.source == _SOURCE
         assert item.payload == {"caller_identity": _CALLER}
         message = build_chat_inbound(item)
-    assert isinstance(message.content, str)
-    assert "External agent" in message.content and "codex" in message.content
-    assert "asserted" in message.content
-    assert "User [" not in message.content and "[system]" not in message.content
+    content = message.model_dump()["content"]
+    assert isinstance(content, str)
+    assert "External agent" in content and "codex" in content
+    assert "asserted" in content
+    assert "User [" not in content and "[system]" not in content
 
 
 @pytest.mark.parametrize(
@@ -123,7 +124,7 @@ async def test_unready_target_rejects_before_insert(
     incarnation = await _admit(db_conn, aops_pool)
     if invalid != "legacy":
         _after_proven_old_writer_barrier(db_conn, incarnation)
-    mutations = {
+    mutations: dict[str, LiteralString] = {
         "legacy": "runtime_protocol_version = 0",
         "missing_owner": "runtime_owner = NULL",
         "missing_generation": "runtime_generation = NULL",
