@@ -71,6 +71,18 @@ async def test_stale_or_missing_owner_cannot_claim(
     ).fetchone() == ("pending",)
 
 
+async def test_missing_runtime_metadata_cannot_claim(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = create_agent(db_conn)
+    inbound = _insert(db_conn, agent_id)
+    with bind_turn_identity(agent_id, incarnation=None), pytest.raises(RuntimeOwnershipLostError):
+        await claim_inbound_batch(aops_pool, agent_id)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
+    ).fetchone() == ("pending",)
+
+
 async def test_two_owners_compete_only_current_owner_claims(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
