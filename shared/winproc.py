@@ -24,6 +24,7 @@ from shared.paths import logs_dir, run_dir
 from shared.platform import IS_WINDOWS
 from shared.session_record import SessionRecord
 from shared.winjob import in_attached_exec_job
+from shared.winjob_spawn import run_job_process
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # benign during a teardown race.
@@ -311,7 +312,7 @@ def graceful_signal(name: str) -> bool:
     if rec.control_mode != "private-console-v1":
         raise RuntimeError("graceful delivery requires a verified private-console session")
     helper = Path(__file__).resolve().with_name("windows_console_signal.py")
-    result = subprocess.run(  # noqa: S603 — fixed loaded-image helper, no shell
+    result = run_job_process(
         [
             sys.executable,
             "-I",
@@ -319,13 +320,9 @@ def graceful_signal(name: str) -> bool:
             str(_record_path(name)),
             str(rec.pid),
             str(rec.create_time),
+            str(time.monotonic() + 5),
         ],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
         timeout=5,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-        check=False,
     )
     if result.returncode:
         raise RuntimeError(
