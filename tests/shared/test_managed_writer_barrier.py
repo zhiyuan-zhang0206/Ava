@@ -213,6 +213,7 @@ def test_down_waits_for_adoption_before_checking_evidence(db_conn: psycopg.Conne
         with psycopg.connect(db_conn.info.dsn) as worker:
             worker.execute("SELECT set_config('search_path',%s,false)", (schema + ",public",))
             worker.commit()
+            db_conn.execute("BEGIN")
             _record(db_conn, collection)
             with ThreadPoolExecutor(max_workers=1) as executor:
 
