@@ -320,15 +320,19 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
         raise BaseCandidateError("backup process leader was not reaped") from exc
 
 
-def _stderr_suffix(stderr: bytes | None) -> str:
-    """The bounded, decoded tail of a failed child's stderr — the part of the
-    failure a bare exit code hides (2026-08-30: "pg_basebackup exited 1" was
-    the whole record; the actual FATAL "no pg_hba.conf entry for replication
-    connection" sat in a DEVNULL'd pipe)."""
-    if not stderr:
-        return ""
-    tail = stderr.decode("utf-8", errors="replace").strip()[-1600:]
-    return f": {tail}" if tail else ""
+def _output_suffix(stdout: bytes | None, stderr: bytes | None) -> str:
+    """The bounded, decoded tails of a failed child's stdout and stderr — the
+    part of the failure a bare exit code hides (2026-08-30: "pg_basebackup
+    exited 1" was the whole record; the actual FATAL "no pg_hba.conf entry for
+    replication connection" sat in a DEVNULL'd pipe and stdout was discarded
+    with it)."""
+    tails = [
+        stream.decode("utf-8", errors="replace").strip()[-1600:]
+        for stream in (stdout, stderr)
+        if stream
+    ]
+    tails = [tail for tail in tails if tail]
+    return f": {' | '.join(tails)}" if tails else ""
 
 
 def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: StopSignal) -> None:
@@ -346,7 +350,7 @@ def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: 
     ]
     process = subprocess.Popen(  # noqa: S603
         wrapped,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
         start_new_session=False,
@@ -360,10 +364,10 @@ def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: 
             _stop_process(process)
             process.communicate()
             raise BaseCandidateError("pg_basebackup exceeded its six-hour bound")
-    stderr = process.communicate()[1]
+    stdout, stderr = process.communicate()
     if process.returncode != 0:
         raise BaseCandidateError(
-            f"pg_basebackup exited {process.returncode}{_stderr_suffix(stderr)}"
+            f"pg_basebackup exited {process.returncode}{_output_suffix(stdout, stderr)}"
         )
 
 
@@ -453,7 +457,7 @@ def _birth_candidate(
 def _verify_candidate(path: Path, stop: StopSignal) -> None:
     verify = subprocess.Popen(  # noqa: S603
         [str(pg_tool("pg_verifybackup")), "--no-parse-wal", str(path)],
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=False,
     )
@@ -467,10 +471,10 @@ def _verify_candidate(path: Path, stop: StopSignal) -> None:
             _stop_process(verify)
             verify.communicate()
             raise BaseCandidateError("pg_verifybackup exceeded its six-hour bound")
-    stderr = verify.communicate()[1]
+    stdout, stderr = verify.communicate()
     if verify.returncode != 0:
         raise BaseCandidateError(
-            f"pg_verifybackup exited {verify.returncode}{_stderr_suffix(stderr)}"
+            f"pg_verifybackup exited {verify.returncode}{_output_suffix(stdout, stderr)}"
         )
 
 

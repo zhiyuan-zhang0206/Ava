@@ -3,8 +3,8 @@
 The 2026-08-30 activation died at `base_pending`: pg_basebackup exited 1 with
 "no pg_hba.conf entry for replication connection" while every normal-connection
 probe passed, and the only durable record was the bare type name. These tests
-lock the two fixes: the pg_hba replication-rule preflight and the stderr-carrying
-failure messages.
+lock the two fixes: the pg_hba replication-rule preflight and the
+stdout-and-stderr-carrying failure messages.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ import pytest
 from services.pitr import base_candidate
 from services.pitr.base_candidate import (
     BaseCandidateError,
+    _output_suffix,
     _rule_name_set,
-    _stderr_suffix,
     _validate_replication_contract,
     _validate_replication_hba,
 )
@@ -144,23 +144,24 @@ def test_reconcile_rejects_crc32c_ack_differing_from_the_plan(
     assert ready.exists()
 
 
-def test_stderr_suffix_bounds_decodes_and_preserves_the_tail() -> None:
-    assert _stderr_suffix(None) == ""
-    assert _stderr_suffix(b"") == ""
-    assert _stderr_suffix(b"boom\n") == ": boom"
-    assert _stderr_suffix("ü".encode()) == ": ü"
-    assert _stderr_suffix("ü".encode("latin-1")) == ": \ufffd"
+def test_output_suffix_bounds_decodes_and_preserves_both_streams() -> None:
+    assert _output_suffix(None, None) == ""
+    assert _output_suffix(b"", b"") == ""
+    assert _output_suffix(None, b"boom\n") == ": boom"
+    assert _output_suffix(b"out\n", b"err\n") == ": out | err"
+    assert _output_suffix("ü".encode(), None) == ": ü"
+    assert _output_suffix("ü".encode("latin-1"), None) == ": \ufffd"
     payload = "x" * 5000
-    assert _stderr_suffix(payload.encode()) == f": {payload[-1600:]}"
+    assert _output_suffix(payload.encode(), b"") == f": {payload[-1600:]}"
 
 
-def test_run_capture_failure_carries_the_child_stderr(tmp_path: Path) -> None:
-    """A failing capture must name the exit code AND the child's stderr tail —
-    the 2026-08-30 record held neither."""
+def test_run_capture_failure_carries_the_child_output(tmp_path: Path) -> None:
+    """A failing capture must name the exit code AND the child's stdout and
+    stderr tails — the 2026-08-30 record held none of them."""
     command = [
         sys.executable,
         "-c",
-        "import sys; print('boom-detail', file=sys.stderr); sys.exit(3)",
+        "import sys; print('stdout-detail'); print('boom-detail', file=sys.stderr); sys.exit(3)",
     ]
     with pytest.raises(BaseCandidateError) as caught:
         base_candidate._run_capture(
@@ -171,6 +172,7 @@ def test_run_capture_failure_carries_the_child_stderr(tmp_path: Path) -> None:
         )
     message = str(caught.value)
     assert "exited 3" in message
+    assert "stdout-detail" in message
     assert "boom-detail" in message
 
 
