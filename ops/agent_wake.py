@@ -254,8 +254,10 @@ def _prepare_resurrect_attempt(
     auto_claim: AutoResurrectClaim | None,
 ) -> _PreparedResurrect:
     """Commit the allocation and its launch identity; never wait for OS work here."""
+    from shared.envelope import reject_unnegotiated_caller
     from shared.exec_owner_recovery import recover_local_resources
 
+    reject_unnegotiated_caller(resurrected_by)
     recover_local_resources(agent_id, machine_name())
     with write_transaction() as conn, conn.cursor() as cur:
         latched_machine = _lock_active_home_machine(cur, agent_id)
