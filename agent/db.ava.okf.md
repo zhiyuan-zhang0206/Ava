@@ -43,6 +43,8 @@ Ava's Postgres persistence layer—responsible for agent message history storage
 
 ## Notes
 
+- Accepted process lifecycle commands dispatch alone, with an internal receipt minted from the locked same-agent active pointer and matching current generation/owner. Later pending messages cannot invoke the legacy veto and strand the command. Other rows remain pending; actual effect application still checks the pointer and target, and accepted/applied never means the process has exited. Hosted runtime integration and external controller recovery remain downstream slices.
+
 - Claim, startup reconcile, compaction finalization and co-batch deferral use the same owner lock. Reconcile/finalization/deferral only mutate chat rows, never acknowledge lifecycle work using missing checkpoint anchors. The caller must retain existing single-flight ordering around checkpoint reads and compaction.
 - This ownership fence is not lifecycle effect acknowledgement: non-chat rows still become done at claim, so crash-before-effect recovery remains unresolved. Old binaries issuing unconditional SQL need a verified shutdown/upgrade barrier; new columns alone cannot fence them.
 - Connection budget: **2 PG connections per agent in steady state** (pool 2; the inbound listener uses Redis, not PG). Boot adds short-lived sync connections (schema gate, `assert_schema_current`, restart-completed write, atexit self-respawn) — PgBouncer absorbs these bursts, so the 2-conn budget describes steady state only

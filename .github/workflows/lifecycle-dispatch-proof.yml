@@ -30,7 +30,24 @@ jobs:
           set -euo pipefail
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
+          uv run pyright agent/db.py agent/graph/_claim_routing.py tests/agent/test_claim.py tests/agent/test_lifecycle_apply.py
+          timeout 360 uv run pytest tests/agent/test_claim.py -q --junitxml=proof/claim-compatibility.xml
           timeout 240 uv run pytest tests/agent/test_lifecycle_apply.py -q --junitxml=proof/head.xml
+          git show 0027bb9528b39d2ca08a66a35768589dc29d5456:agent/graph/_claim_routing.py > agent/graph/_claim_routing.py
+          set +e
+          timeout 120 uv run pytest tests/agent/test_lifecycle_apply.py::test_accepted_termination_ignores_pending_veto_but_retains_apply_fence -q --junitxml=proof/baseline-routing.xml
+          route_result=$?
+          set -e
+          git restore agent/graph/_claim_routing.py
+          test "$route_result" -eq 1
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('proof/baseline-routing.xml')
+          assert len(root.findall('.//testcase')) == 3 and not root.findall('.//error')
+          failures = root.findall('.//failure')
+          assert len(failures) == 3
+          assert all('routing.exit_kind' in f.text and 'None' in f.text for f in failures)
+          PY
           git show 40ad47ca3:agent/db.py > agent/db.py
           set +e
           timeout 180 uv run pytest tests/agent/test_lifecycle_apply.py -k actual_process_dispatch -q --junitxml=proof/baseline.xml

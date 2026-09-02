@@ -7,17 +7,69 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent._starting import claim_agent_row
-from agent.db import claim_inbound_batch
+from agent.db import ClaimedInbound, claim_inbound_batch
 from agent.graph._claim_dispatch import _BatchState, _handle_restart, _handle_terminate
+from agent.graph._claim_routing import resolve_routing
 from agent.graph._nodes import END
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.lifecycle_apply import apply_process_lifecycle
 from shared.context import AvaContext
+from shared.db import insert_inbound_message
 from shared.db_transaction import async_write_transaction
+from shared.inbound import InboundKind
 from shared.runtime_incarnation import current_incarnation
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_lifecycle_intent import _command
 from tests.agent.test_runtime_incarnation import _row
+
+
+def test_payload_cannot_mint_accepted_dispatch_receipt() -> None:
+    item = ClaimedInbound.from_row(
+        (1, 2, "", "terminate", "user", {"durable_lifecycle": True}, None, None)
+    )
+    assert not item.durable_lifecycle
+
+
+@pytest.mark.parametrize("replacement", ["none", "owner", "pointer"])
+async def test_accepted_termination_ignores_pending_veto_but_retains_apply_fence(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, replacement: str
+) -> None:
+    agent_id = _row(db_conn)
+    claim_agent_row(agent_id)
+    first = _command(db_conn, agent_id, "terminate")
+    batch = await claim_inbound_batch(aops_pool, agent_id)
+    second = _command(db_conn, agent_id, "restart")
+    insert_inbound_message(db_conn, agent_id, "later chat", source="user")
+    db_conn.commit()
+    assert batch[0].durable_lifecycle
+    if replacement == "owner":
+        db_conn.execute("UPDATE agents_meta SET runtime_owner=%s WHERE id=%s", (uuid4(), agent_id))
+    elif replacement == "pointer":
+        db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    ctx = AvaContext(ops_pool=aops_pool)
+    routing = await resolve_routing(ctx, agent_id, batch)
+    assert routing.exit_kind == InboundKind.TERMINATE
+    assert not routing.terminate_vetoed_by_pending
+    state = _BatchState()
+    await _handle_terminate(ctx, batch[0], state)
+    assert state.next_goto == END
+    command = db_conn.execute(
+        "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
+        (first,),
+    ).fetchone()
+    assert command == ("claimed", replacement == "none", None)
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (("terminated",) if replacement == "none" else ("running",))
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (second,)
+    ).fetchone() == ("pending",)
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (agent_id,)
+    ).fetchone() == ("pending", "later chat")
+    if replacement != "none":
+        assert state.new_msgs == []
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
