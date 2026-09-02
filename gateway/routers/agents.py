@@ -26,6 +26,7 @@ from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from shared import agent_snapshot
 from shared.agents import AgentNotFound, InvalidModelConfig, SpawnTargetNotAgentRunner
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.labels import publish_label_updated
 from shared.machine import machine_name
 
@@ -142,7 +143,7 @@ def get_agents(
 
 def _patch_label_blocking(pool: ConnectionPool, agent_id: int, new_label: str | None) -> None:
     """Sync label UPDATE + 404 guard — via to_thread."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
             (new_label, agent_id),

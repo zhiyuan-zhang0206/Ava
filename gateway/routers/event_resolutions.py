@@ -20,6 +20,7 @@ from gateway.schemas.event_resolutions import (
     EventResolutionStatus,
 )
 from shared import telemetry
+from shared.db_transaction import write_transaction
 
 router = APIRouter()
 
@@ -58,7 +59,10 @@ def create_event_resolution(body: EventResolutionCreate, request: Request) -> Ev
     sentinel. The ops agent uses the same authenticated API surface.
     """
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with (
+        write_transaction(request.app.state.db_pool) as conn,
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
         cur.execute(
             """
             INSERT INTO event_dismissals
@@ -131,7 +135,10 @@ def list_event_resolutions(
 def reopen_event_resolution(dismissal_id: int, request: Request) -> EventResolutionRow:
     """Manually reopen one active dismissal and emit its transition marker."""
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with (
+        write_transaction(request.app.state.db_pool) as conn,
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
         cur.execute(
             """
             UPDATE event_dismissals
