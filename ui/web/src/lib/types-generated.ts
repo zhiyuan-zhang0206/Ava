@@ -3073,7 +3073,7 @@ export interface paths {
          *     reconstruct the absolute path. fs-neutral so gateway fs (e.g.
          *     /Users/x) and agent-runner fs (/home/y) being different still works.
          *
-         *     Only the gateway hosts the search backend (milvus by default), so
+         *     Only the gateway hosts the search backend (numpy by default), so
          *     this endpoint always runs on the gateway; agent-runner SDK calls reach this
          *     handler via the gateway URL they were configured with (CF Tunnel /
          *     private network) and never enter via a local agent-runner gateway
