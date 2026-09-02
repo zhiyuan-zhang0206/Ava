@@ -48,6 +48,7 @@ from shared.paths import repo_root
 from shared.platform import IS_WINDOWS
 from shared.platform_backend import get_backend
 
+# Keep this in sync with the provisioned Node locations in scripts/provision/node.sh.
 _FRONTEND_TOOLCHAIN_DIRS = (
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -174,7 +175,7 @@ def venv_activation_prefix() -> str:
     toolchain_suffix = f"{os.pathsep}{toolchain_path}" if toolchain_path else ""
     return (
         f"export VIRTUAL_ENV={shlex.quote(str(venv))} && "
-        f'export PATH={shlex.quote(str(bindir))}{toolchain_suffix}:"$PATH" && '
+        f"export PATH={shlex.quote(str(bindir))}{toolchain_suffix}${{PATH:+:$PATH}} && "
     )
 
 

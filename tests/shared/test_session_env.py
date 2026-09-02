@@ -28,6 +28,11 @@ def test_frontend_toolchain_path_is_independent_of_shell_profile(shell_path: str
     ]
 
 
+def test_venv_activation_prefix_omits_an_empty_path_entry() -> None:
+    """An empty login-shell PATH does not add the working directory to lookup."""
+    assert "${PATH:+:$PATH}" in session_env.venv_activation_prefix()
+
+
 def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     """`forward_env_dict` (the `ava start` daemon child env, POSIX and Windows)
     drops the cluster-scope keys too — same policy as the env-file prefix it

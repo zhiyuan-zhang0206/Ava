@@ -1175,11 +1175,15 @@ class TestSpawnSessionsResolveAvaFromVenv:
         cmd = self._cmd(monkeypatch, spawn_backend, spawn)
 
         venv_bin = repo_root() / ".venv" / "bin"
-        export = f'export PATH={venv_bin}:"$PATH"'
-        assert export in cmd, f"{label} session does not put the venv on PATH: {cmd}"
+        cmd_export = next(
+            (part for part in cmd.split(" && ") if part.startswith("export PATH=")), ""
+        )
+        assert cmd_export.startswith(f"export PATH={venv_bin}:"), (
+            f"{label} session does not put the venv first on PATH: {cmd}"
+        )
         # `ava start` in spawn_update's else-branch is reached only after the
         # export, so checking the FIRST call is enough to cover both branches.
-        assert cmd.index(export) < cmd.index(first_ava_call), (
+        assert cmd.index(cmd_export) < cmd.index(first_ava_call), (
             f"{label} session invokes `{first_ava_call}` before exporting the venv PATH"
         )
 
