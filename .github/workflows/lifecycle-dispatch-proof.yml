@@ -48,7 +48,8 @@ jobs:
           assert len(failures) == 3
           assert all('routing.exit_kind' in f.text and 'None' in f.text for f in failures)
           PY
-          git show 40ad47ca3:agent/db.py > agent/db.py
+          git fetch origin 40ad47ca3dc2023a2992666686aab5581e992686
+          git show 40ad47ca3dc2023a2992666686aab5581e992686:agent/db.py > agent/db.py
           set +e
           timeout 180 uv run pytest tests/agent/test_lifecycle_apply.py -k actual_process_dispatch -q --junitxml=proof/baseline.xml
           result=$?
