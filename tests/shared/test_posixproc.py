@@ -20,6 +20,7 @@ import pytest
 from shared import posixproc
 from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.session_record import SessionRecord, pid_starttime_ticks
+from tests.shared.process_evidence import detach_evidence
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 
@@ -153,7 +154,7 @@ def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright:
         # one-shot so a beat of ppid-update lag on a loaded runner can't flake it
         # (same treatment as the exec-name wait above).
         assert _wait(lambda: child.ppid() == 1), (
-            f"child never reparented to init (ppid={child.ppid()})"
+            f"child never reparented to init: {detach_evidence(child.pid)}"
         )
         # Each of these is a state the OS lands asynchronously (record write vs
         # /proc visibility), so read it with a bounded poll instead of sampling
@@ -514,8 +515,7 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
                 return True
 
         assert _wait(child_exited), (
-            f"late-spawned child must exit with the group: pid={late_pid}, "
-            f"status={psutil.Process(late_pid).status()}"
+            f"late-spawned child must exit with the group: {detach_evidence(late_pid)}"
         )
     finally:
         posixproc.kill_session(name, graceful=False)
