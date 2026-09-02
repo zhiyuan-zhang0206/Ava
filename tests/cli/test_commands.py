@@ -538,6 +538,8 @@ def test_start_agent_runner_starts_only_minimal_services(
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)  # env-independent
     # Pin computer-mcp's platform gate "available" (env-independent roster).
     monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
+    # The process-mode startup shape (hosted is the default since 2026-09).
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
 
     def _secondary_collect(_args: dict[str, str | None]) -> tuple[dict[str, str], list]:
         return {
@@ -593,8 +595,8 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
         "computer-mcp",
         "restarter",
         "agent-runner-watchdog",
-        # agent-host: agent-runner-only, and gated off by AVA_RUNNER_MODE on top
-        # — dropped both ways, like browser.
+        # agent-host: agent-runner-only — never on a gateway-only host, in
+        # either runner mode.
         "agent-host",
         "pitr-uploader",
         "pitr-base-candidate",
@@ -618,6 +620,9 @@ def test_services_for_role_agent_runner_subset(monkeypatch: pytest.MonkeyPatch) 
     # This synthetic runner roster includes its relay collector; pin the gate
     # open so the actual host's gateway marker cannot perturb the assertion.
     monkeypatch.setattr("ops.spec._otel_collector_gate_reason", lambda: None)
+    # Pin the process partition: hosted (the default since 2026-09) swaps
+    # restarter for agent-host on this roster.
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
     sessions = {s.session for s in _cli._services_for_roles(frozenset({"agent-runner"}))}
     assert sessions == {
         "ops",
@@ -634,7 +639,7 @@ def test_services_for_role_agent_runner_subset(monkeypatch: pytest.MonkeyPatch) 
 def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPatch) -> None:
     """A single-box gateway,agent-runner host runs the UNION — every gateway
     daemon PLUS ops (so its own gateway can dial it over localhost for spawn),
-    BOTH capability watchdogs, and exactly one restarter."""
+    both capability watchdogs, and exactly one host-or-restarter."""
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)
     # computer-mcp's gate is the platform's permissions-helper capability, not a
     # setting — pin it "available" so the union is env-independent.
@@ -642,23 +647,26 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
     # The exact union includes the designated gateway's collector; pin its
     # marker gate open so this capability-partition assertion is host-independent.
     monkeypatch.setattr("ops.spec._otel_collector_gate_reason", lambda: None)
+    # Pin the runner mode BEFORE computing the roster: hosted is the default
+    # since 2026-09, so this asserts the default shape — agent-host in,
+    # restarter out.
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "hosted")
     sessions = {s.session for s in _cli._services_for_roles(frozenset({"gateway", "agent-runner"}))}
     all_sessions = {s.session for s in _cli.build_services()}
     # union = everything that is not gated out; browser + browser-mcp are off
     # above (build_services still lists them, services_for_capabilities drops
-    # them), computer-mcp is pinned available; ops IS present. agent-host is
-    # gated out by AVA_RUNNER_MODE, which defaults to `process` — so a single
-    # box does NOT run the hosted runner unless the cluster opts in.
+    # them), computer-mcp is pinned available; ops IS present.
     assert sessions == all_sessions - {
         "browser",
         "browser-mcp",
-        "agent-host",
+        "restarter",
         "pitr-uploader",
         "pitr-base-candidate",
     }
     assert "ops" in sessions  # the load-bearing addition vs gateway-only
     assert "gateway" in sessions
-    assert "restarter" in sessions  # exactly one restarter, here
+    assert "agent-host" in sessions  # the hosted runner, by default
+    assert "restarter" not in sessions  # process supervision retired in hosted
     assert "gateway-watchdog" in sessions
     assert "agent-runner-watchdog" in sessions
 
@@ -2486,6 +2494,10 @@ def test_phase_b_pure_runner_restores_idle_posture_and_restarter(
     transition instead of inheriting the gateway parent's resume boundary."""
     from cli.commands import start as start_mod
     from shared.cluster_lock import DeployLease
+
+    # The restarter-restoring path this exercises is the process shape (hosted
+    # is the default since 2026-09).
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
 
     service, _shell = _fake_session_backends
     postures: list[str] = []

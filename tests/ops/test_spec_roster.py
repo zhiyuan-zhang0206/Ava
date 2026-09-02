@@ -524,8 +524,8 @@ def test_restarter_gated_out_in_hosted_mode(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_restarter_runs_in_process_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The regression guard: default process mode keeps the restarter on the
-    start roster (and the agent-host off)."""
+    """The regression guard: an explicit process mode (rollback) keeps the
+    restarter on the start roster (and the agent-host off)."""
     monkeypatch.setattr(spec, "runner_mode", lambda: "process")
     annotated = {
         s.session: r
