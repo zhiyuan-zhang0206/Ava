@@ -42,19 +42,35 @@ location (already stable).
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from cli.commands._repo import _repo_root
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
-from shared.editable_install import editable_pth_write_window
+from shared.editable_install import (
+    editable_ava_pth_paths,
+    editable_direct_url_paths,
+    editable_pth_write_window,
+    editable_site_packages_dirs,
+)
 from shared.paths import ava_home
 from shared.platform import IS_WINDOWS
 from shared.proc import run_bounded
 
 _PROD_SYNC_ARGS = ["uv", "sync", "--locked", "--no-dev", "--inexact", "--verbose"]
+
+
+@dataclass(frozen=True)
+class _EditableRecordSnapshot:
+    """One editable-install record's state before a production ``uv sync``."""
+
+    path: Path
+    exists: bool
+    content: bytes | None
 
 
 def _uv_cache_dir() -> str | None:
@@ -75,6 +91,110 @@ def _uv_cache_dir() -> str | None:
     return str(ava_home() / "uv-cache")
 
 
+def _failed_uv_sync(returncode: int) -> subprocess.CompletedProcess[bytes]:
+    """Create the terminal result used by sync preflight and launch failures."""
+
+    return subprocess.CompletedProcess(
+        _PROD_SYNC_ARGS, returncode=returncode, stdout=None, stderr=None
+    )
+
+
+def _preflight_editable_site_packages(repo: Path) -> subprocess.CompletedProcess[bytes] | None:
+    """Probe uv's write, rename, and unlink boundary before it changes the venv."""
+
+    for directory in editable_site_packages_dirs(repo):
+        probe = directory / f".ava-write-probe-{os.getpid()}"
+        replacement = directory / f".{probe.name}.tmp"
+        failure: tuple[str, OSError] | None = None
+        operation = "write"
+        try:
+            probe.write_text("")
+            operation = "rename"
+            probe.rename(replacement)
+            operation = "unlink"
+            replacement.unlink()
+        except OSError as exc:
+            failure = (operation, exc)
+        finally:
+            for leftover in (probe, replacement):
+                try:
+                    leftover.unlink()
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    if failure is None:
+                        failure = ("cleanup unlink", exc)
+                    else:
+                        print(
+                            f"  ! uv sync preflight could not clean up {leftover}: {exc}",
+                            file=sys.stderr,
+                        )
+        if failure is not None:
+            operation, exc = failure
+            print(
+                f"  ✗ uv sync preflight failed in {directory}: {operation} "
+                f"operation on the editable pointer would fail: {exc}",
+                file=sys.stderr,
+            )
+            return _failed_uv_sync(126)
+    return None
+
+
+def _snapshot_editable_records(repo: Path) -> tuple[_EditableRecordSnapshot, ...]:
+    """Capture every current Ava pointer and direct-URL record before uv mutates it."""
+
+    snapshots: list[_EditableRecordSnapshot] = []
+    records = editable_ava_pth_paths(repo) + editable_direct_url_paths(repo)
+    for path in records:
+        try:
+            content = path.read_bytes()
+        except FileNotFoundError:
+            snapshots.append(_EditableRecordSnapshot(path, exists=False, content=None))
+        else:
+            snapshots.append(_EditableRecordSnapshot(path, exists=True, content=content))
+    return tuple(snapshots)
+
+
+def _restore_record(path: Path, content: bytes) -> None:
+    """Restore one record through uv's same-directory atomic replacement shape."""
+
+    temporary = path.with_name(f".{path.name}.ava-restore-{os.getpid()}.tmp")
+    try:
+        temporary.write_bytes(content)
+        temporary.replace(path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            temporary.unlink()
+
+
+def _restore_editable_records(snapshots: tuple[_EditableRecordSnapshot, ...]) -> None:
+    """Return altered pre-sync editable records to their exact byte content."""
+
+    for snapshot in snapshots:
+        if not snapshot.exists or snapshot.content is None:
+            continue
+        try:
+            unchanged = snapshot.path.read_bytes() == snapshot.content
+        except OSError:
+            unchanged = False
+        if unchanged:
+            continue
+        try:
+            snapshot.path.parent.mkdir(parents=True, exist_ok=True)
+            _restore_record(snapshot.path, snapshot.content)
+        except OSError as exc:
+            print(
+                f"  ! failed to restore editable install record {snapshot.path} "
+                f"after uv sync failure: {exc}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"  ! restored editable install record {snapshot.path} after uv sync failure",
+                file=sys.stderr,
+            )
+
+
 def run_uv_sync(
     repo: Path, *, timeout_s: float = UV_SYNC_TIMEOUT_S
 ) -> subprocess.CompletedProcess[bytes]:
@@ -87,14 +207,29 @@ def run_uv_sync(
     caller keeps its existing ``returncode != 0`` handling and the updater chain
     ends in a terminal, diagnosable outcome instead of silently stalling the
     rollout. The same applies to a sync that cannot start at all (uv missing) —
-    both print the reason to stderr, which lands in the updater log.
+    both print the reason to stderr, which lands in the updater log. Before uv
+    starts, its site-packages write boundary is probed with the same write,
+    rename, and unlink sequence it uses for the editable pointer. A failed
+    sync restores any changed or missing editable records to their exact
+    pre-sync bytes before the write window closes.
     """
     cache_dir = _uv_cache_dir()
     if cache_dir is not None:
         os.environ.setdefault("UV_CACHE_DIR", cache_dir)
     with editable_pth_write_window(repo):
+        preflight_failure = _preflight_editable_site_packages(repo)
+        if preflight_failure is not None:
+            return preflight_failure
         try:
-            return run_bounded(
+            snapshots = _snapshot_editable_records(repo)
+        except OSError as exc:
+            print(
+                f"  ✗ uv sync could not snapshot editable install records: {exc}",
+                file=sys.stderr,
+            )
+            return _failed_uv_sync(126)
+        try:
+            result = run_bounded(
                 _PROD_SYNC_ARGS,
                 cwd=repo,
                 capture_output=False,
@@ -108,17 +243,16 @@ def run_uv_sync(
                 "downloading.",
                 file=sys.stderr,
             )
-            return subprocess.CompletedProcess(
-                _PROD_SYNC_ARGS, returncode=124, stdout=None, stderr=None
-            )
+            result = _failed_uv_sync(124)
         except OSError as exc:
             print(
                 f"  ✗ uv sync could not start: {exc} — is uv installed and on PATH?",
                 file=sys.stderr,
             )
-            return subprocess.CompletedProcess(
-                _PROD_SYNC_ARGS, returncode=127, stdout=None, stderr=None
-            )
+            result = _failed_uv_sync(127)
+        if result.returncode != 0:
+            _restore_editable_records(snapshots)
+        return result
 
 
 def _main() -> int:

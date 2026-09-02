@@ -54,9 +54,10 @@ callers.
 
 - Allowlisting is exact-root based. An allowlisted dev clone does not permit
   any `.worktrees/*` descendant.
-- Missing `.pth` or `direct_url.json` files need no repair; an existing
-  site-packages directory is still discovered structurally so a later write
-  window can open it.
+- Both missing editable records need no repair; an existing site-packages
+  directory is still discovered structurally so a later write window can open
+  it. A `direct_url.json` record without its `.pth` pointer is a half-uninstall
+  violation, and the guard recreates the pointer at the checkout root.
 - Repair changes pointer content only. The write window restores every record
   and directory mode that existed before lifecycle code entered it.
 

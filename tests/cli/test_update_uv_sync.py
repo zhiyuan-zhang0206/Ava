@@ -39,6 +39,23 @@ def _read_only_pth(repo: Path) -> Path:
     return pth
 
 
+def _editable_direct_url(repo: Path) -> Path:
+    """Create the companion record uv writes for Ava's editable install."""
+
+    record = (
+        repo
+        / ".venv"
+        / "lib"
+        / "python3.12"
+        / "site-packages"
+        / "ava-0.1.5.dist-info"
+        / "direct_url.json"
+    )
+    record.parent.mkdir(parents=True)
+    record.write_text('{"url":"file:///source","dir_info":{"editable":true}}')
+    return record
+
+
 def _read_mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
@@ -156,6 +173,93 @@ def test_nonzero_exit_passes_through_untouched(
     monkeypatch.setattr(_native_sync, "run_bounded", _fail)
 
     assert _native_sync.run_uv_sync(repo).returncode == 3
+
+
+def test_preflight_success_starts_uv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A successful write, rename, and unlink probe permits the real uv path."""
+    repo = tmp_path / "source"
+    site_packages = repo / ".venv" / "lib" / "python3.12" / "site-packages"
+    site_packages.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def run_uv(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(argv)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(_native_sync, "run_bounded", run_uv)
+
+    assert _native_sync.run_uv_sync(repo).returncode == 0
+    assert calls == [_EXPECTED_ARGS]
+    assert list(site_packages.iterdir()) == []
+
+
+def test_preflight_write_failure_stops_before_uv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A protected pointer boundary fails before uv can partially uninstall it."""
+    repo = tmp_path / "source"
+    site_packages = repo / ".venv" / "lib" / "python3.12" / "site-packages"
+    site_packages.mkdir(parents=True)
+    original_write_text = Path.write_text
+    calls: list[list[str]] = []
+
+    def deny_probe_write(
+        path: Path,
+        text: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if path.parent == site_packages and path.name.startswith(".ava-write-probe-"):
+            raise PermissionError(13, "Permission denied", str(path))
+        return original_write_text(
+            path,
+            text,
+            encoding=encoding,
+            errors=errors,
+            newline=newline,
+        )
+
+    def should_not_run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(argv)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(Path, "write_text", deny_probe_write)
+    monkeypatch.setattr(_native_sync, "run_bounded", should_not_run)
+
+    result = _native_sync.run_uv_sync(repo)
+
+    assert result.returncode == 126
+    assert calls == []
+    assert list(site_packages.iterdir()) == []
+    err = capsys.readouterr().err
+    assert str(site_packages) in err
+    assert "write operation" in err
+    assert "Permission denied" in err
+
+
+def test_failed_sync_restores_removed_editable_records(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-zero sync cannot leave either editable record half-uninstalled."""
+    repo = tmp_path / "source"
+    pth = _read_only_pth(repo)
+    direct_url = _editable_direct_url(repo)
+    before = {pth: pth.read_bytes(), direct_url: direct_url.read_bytes()}
+
+    def remove_records(_argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        pth.unlink()
+        direct_url.unlink()
+        return SimpleNamespace(returncode=3)
+
+    monkeypatch.setattr(_native_sync, "run_bounded", remove_records)
+
+    assert _native_sync.run_uv_sync(repo).returncode == 3
+    assert {path: path.read_bytes() for path in before} == before
+    assert _read_mode(pth) == 0o444
+    err = capsys.readouterr().err
+    assert f"restored editable install record {pth}" in err
+    assert f"restored editable install record {direct_url}" in err
 
 
 # ─── Windows uv cache pinning ────────────────────────────────────────────────
