@@ -587,6 +587,10 @@ def insert_inbound_message(
         raise ValueError("target_process_identity is reserved for admitted lifecycle application")
     if payload is not None and "resurrection_retry" in payload:
         raise ValueError("resurrection_retry is reserved for the pending resurrection owner")
+    if payload is not None and (
+        {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys()
+    ):
+        raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
     # Map inbound kind → lifecycle event_type. Only chat messages between
     # agents produce a 'send_message' event; user→agent chat is not an
     # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /
