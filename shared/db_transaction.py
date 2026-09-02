@@ -2,9 +2,12 @@
 
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
+from typing import Any, TypeVar
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
+
+_CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
 
 
 @contextmanager
@@ -30,9 +33,9 @@ def write_transaction(
 
 
 @asynccontextmanager
-async def async_write_transaction(
-    pool: AsyncConnectionPool, *, timeout: float | None = None
-) -> AsyncGenerator[psycopg.AsyncConnection, None]:
+async def async_write_transaction(  # noqa: UP047 - preserve the pool connection subtype.
+    pool: AsyncConnectionPool[_CT], *, timeout: float | None = None
+) -> AsyncGenerator[_CT, None]:
     """Borrow one async connection for an explicitly writable transaction.
 
     PgBouncer can reuse a backend whose prior client left its default transaction
