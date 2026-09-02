@@ -370,6 +370,11 @@ class RespawnController:
         reconcile — a restart signal must be acted on promptly. Returns True if it
         attempted any respawn."""
         ids = _select_local_restarting_ids(self._pool, local_machine)
+        from shared import start_serving
+
+        if ids and not start_serving.is_serving():
+            _log.debug("[ops.respawn] respawn deferred until this host is serving")
+            return False
         if ids and not _gateway_healthy():
             _log.debug(
                 "[ops.respawn] gateway not healthy, deferring respawn of %d agent(s)", len(ids)
@@ -436,6 +441,11 @@ class RespawnController:
                     "expired (or missing) lease; process killed, revive pass relaunches it",
                     tid,
                 )
+        from shared import start_serving
+
+        if not start_serving.is_serving():
+            _log.debug("[ops.respawn] revive pass deferred until this host is serving")
+            return acted
         for tid in _revive_local_dead_running_idling(
             self._pool, local_machine, settings.daemon.revive_max_per_pass
         ):

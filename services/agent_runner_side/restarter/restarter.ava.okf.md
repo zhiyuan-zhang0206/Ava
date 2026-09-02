@@ -15,9 +15,17 @@ Polls local `agents_meta` rows with `status='restarting'` every second and calls
 ## Core Responsibilities
 Each tick runs three machine-scoped, non-blocking (`blocks` always `BlockScope.NONE`) controllers: `RespawnController` (restart+reap), `CrashResurrectController` (auto-resurrect on crash), and `WedgedAgentController` (kill + resurrect live agents that stop consuming pending work).
 
+**Serving boundary**: automatic process launches wait for the local
+`shared.start_serving` generation to become serving after `ava start` passes its
+readiness verdict. Corpse and terminated-zombie cleanup still runs while it is
+closed; a failed start therefore cannot revive an agent, while the next successful
+start preserves normal crash and reboot recovery.
+
 ### RespawnController (`ops/controllers/respawn.py`)
 - **Poll restart requests**: every second SELECT local `status='restarting'` agents.
-- **Gateway health gate** (#517): `_gateway_healthy()` false → skip the round; the row stays restarting, retries next round.
+- **Serving + gateway health gates** (#517): before serving, leave a restart row
+  unchanged; once serving, `_gateway_healthy()` false also skips the round. Either
+  deferral keeps the row restarting for the next round.
 - **Process rebirth**: `ops.agents.respawn_agent` starts a new session (`ava-agent-<id>`, via `session_name` in `ops/agent_launch.py:188`) bound to the same agent_id; internally CAS race-safe.
 - **Four orphan reapers** (machine-scoped, local rows only, pin pid/age to close the ABA window, 30s cadence, all set `termination_source='reaper'`).
   The pid predicate is process **identity**, not liveness (`ops/agent_identity.py:probe_agent_process` matches the row's pid

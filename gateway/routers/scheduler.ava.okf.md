@@ -12,7 +12,7 @@ A **schedule** is a **resident process** supervised by the gateway (supervised r
 ## Two Components
 
 ### ScheduleManager (`gateway/schedule_manager.py`)
-- **Background reconcile loop**: every 5 seconds, compares the database `schedules` table (desired: enabled rows) against actual sessions (actual: live sessions)
+- **Background reconcile loop**: every 5 seconds, compares the database `schedules` table (desired: enabled rows) against actual sessions (actual: live sessions). It launches a missing enabled session only after the local `shared.start_serving` generation is serving; cleanup (disabled/deleted session reaping and orphan run closure) remains active before that boundary.
 - **Starts missing** sessions, **kills excess** sessions (when a schedule is disabled/deleted). Every explicit stop and enabled-state value change synchronously invokes the identity-checked PTY backend; `stopped` is written only after that backend confirms the session is gone, while a failed reap remains queued for an identity-checked retry.
 - **Generation boundary**: exact old-session records support cleanup only; they never decide desired state. A missing PTY is rebuilt after gateway restart when, and only when, the current schedule row remains enabled.
 - **Liveness identity**: the session name `ava-schedule-<id>` is the schedule's stable identity—it encodes no cluster/machine name (path-only cluster identity, #629/#633); the PTY session namespace itself is host-local + per-home (`$AVA_HOME/run/pty/`), and home already isolates sessions adequately

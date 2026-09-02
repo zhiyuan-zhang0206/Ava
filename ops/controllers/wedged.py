@@ -394,6 +394,10 @@ class WedgedAgentController:
         if not settings.daemon.wedged_agent_enabled:
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
 
+        from shared import start_serving
+
+        serving = start_serving.is_serving()
+
         # Throttle: only scan every CONTROLLER_SCAN_INTERVAL_S.
         now = time.monotonic()
         if now - self._last_scan < CONTROLLER_SCAN_INTERVAL_S:
@@ -408,7 +412,7 @@ class WedgedAgentController:
         # reachable gateway. A user-terminated zombie only needs reaping and
         # runs below without that dependency.
         candidates = []
-        if _gateway_healthy():
+        if serving and _gateway_healthy():
             candidates = _claim_wedged_candidates(
                 self._pool, local_machine, running_age_s, idling_age_s, _BACKOFF_S
             )

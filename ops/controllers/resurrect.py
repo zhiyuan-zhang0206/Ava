@@ -289,6 +289,11 @@ class CrashResurrectController:
     def reconcile(self, role: MachineRole) -> ReconcileResult:  # noqa: ARG002 — agent-runner-only, uniform Controller signature
         if not settings.daemon.auto_resurrect_enabled:
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=False)
+        from shared import start_serving
+
+        if not start_serving.is_serving():
+            _log.debug("[ops.crash_resurrect] pass deferred until this host is serving")
+            return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=False)
         # One-shot boot revive: on the daemon's FIRST reconcile (i.e. once per
         # restarter start, which `ava start` / `ava cluster update` both run),
         # resurrect this host's involuntary corpses with no pending-inbound

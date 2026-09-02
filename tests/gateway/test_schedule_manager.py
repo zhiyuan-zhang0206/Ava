@@ -65,6 +65,7 @@ def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
 
 @pytest.fixture
 def fake_session(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBackend, list[int]]:
+    from shared import start_serving
     from shared.pty_sessions import allocation_freeze
 
     backend = _FakeBackend()
@@ -84,6 +85,7 @@ def fake_session(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBackend, list[in
     monkeypatch.setattr(sm, "get_shell_backend", lambda: backend)
     monkeypatch.setattr(_FakeBackend, "new_session", _fake_new_session)
     monkeypatch.setattr(allocation_freeze, "current_generation", lambda: None)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     return backend, launched
 
 
@@ -214,6 +216,37 @@ def test_launches_enabled_missing_session(
     sid = _insert(db_conn, "job-a")
 
     sm.ScheduleManager(pool)._reconcile()
+
+    assert launched == [sid]
+    assert _status(db_conn, sid) == "running"
+
+
+def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed gateway start leaves an enabled schedule stopped until retry.
+
+    Removing the serving check would launch on the first reconcile; applying it
+    to the whole reconcile would break disabled-schedule cleanup tests.
+    """
+    from shared import start_serving
+
+    _backend, launched = fake_session
+    serving = False
+    monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
+    sid = _insert(db_conn, "await-serving")
+    manager = sm.ScheduleManager(pool)
+
+    manager._reconcile()
+
+    assert launched == []
+    assert _status(db_conn, sid) == "stopped"
+
+    serving = True
+    manager._reconcile()
 
     assert launched == [sid]
     assert _status(db_conn, sid) == "running"
