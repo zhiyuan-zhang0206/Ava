@@ -251,6 +251,16 @@ def _terminate_graceful_blocking(
     return "enqueued", iid, []
 
 
+def _pending_allocation_can_resume(agent_id: int, trigger_inbound_id: int | None) -> bool:
+    from shared.db import connect
+    from shared.resurrection_launch import pending_allocation
+
+    if trigger_inbound_id is None:
+        return False
+    with connect() as conn:
+        return pending_allocation(conn, agent_id, trigger_inbound_id)
+
+
 async def resurrect_agent_op(
     agent_id: int,
     body: ResurrectAgentRequest,
@@ -264,7 +274,10 @@ async def resurrect_agent_op(
     runner; manual resurrects omit it and retain their unconditional contract.
     """
     s = await asyncio.to_thread(get_agent_status, agent_id)
-    if s is not AgentStatus.TERMINATED:
+    if s is not AgentStatus.TERMINATED and (
+        s is not AgentStatus.IDLING
+        or not await asyncio.to_thread(_pending_allocation_can_resume, agent_id, trigger_inbound_id)
+    ):
         return ResurrectAgentResponse(status="already_alive")
     try:
         # resurrect_agent synchronously launches the agent and polls up to
@@ -330,7 +343,10 @@ async def resurrect_if_terminated(
     TERMINATED instead.
     """
     status = await asyncio.to_thread(get_agent_status, agent_id)
-    if status is not AgentStatus.TERMINATED:
+    if status is not AgentStatus.TERMINATED and (
+        status is not AgentStatus.IDLING
+        or not await asyncio.to_thread(_pending_allocation_can_resume, agent_id, trigger_inbound_id)
+    ):
         return status
     body = ResurrectAgentRequest(resurrected_by="system")
     try:

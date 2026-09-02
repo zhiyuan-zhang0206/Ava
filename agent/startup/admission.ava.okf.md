@@ -40,8 +40,11 @@ deadline and trigger identity. Each OS attempt is authorized in a short committe
 transaction before launch outside locks. A pending user's persisted OS counter
 survives redispatch and is distinct from exit-wait preparation attempts. Missing
 or stale launch identity cannot claim that allocation. This establishes bounded
-authorization, not OS exactly-once; recovery after controller death between
-allocation commit and its first launch remains an explicit integration gate.
+authorization, not OS exactly-once. The existing delivery watchdog also retries
+an exact pending chat with a server-prepared, unexpired allocation and no admitted
+PID. The home runner resumes that same notification and allocation epoch without
+minting another budget; ordinary idle agents and historical task owners do not
+qualify. Actual crash/interleaving and full-CI evidence remain required gates.
 
 `agent/session_admission.py` publishes the winning process's canonical record
 before admission commits. The record is repairable observation, not a second
