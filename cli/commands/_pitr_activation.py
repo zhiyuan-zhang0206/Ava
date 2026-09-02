@@ -23,8 +23,10 @@ from cli.commands._pitr_activation_config import apply_wal_config, restore_archi
 from services.pitr.activation_credentials import (
     credential_app_key,
     credential_identity,
+    oss_credential_identity,
     probe_baidu_read_access,
     probe_bucket_read_access,
+    probe_oss_read_access,
     require_store_config,
 )
 from services.pitr.activation_lease import run_while_renewing
@@ -141,6 +143,28 @@ def _validate_secrets() -> dict[str, str]:
             **_cos_credential_evidence(
                 credentials_file, region=config.pitr_cos_region, bucket=config.pitr_cos_bucket
             ),
+            **common,
+        }
+    if config.pitr_store_backend == "oss":
+        uploader = config.pitr_oss_credentials_file
+        viewer = config.pitr_oss_viewer_credentials_file
+        if uploader is None or viewer is None:
+            raise RuntimeError("uploader and viewer credentials are required")
+        for secret in (uploader, viewer):
+            if not secret.is_file() or secret.is_symlink() or _mode(secret) != 0o600:
+                raise RuntimeError(f"PITR secret is unsafe: {secret}")
+        uploader_id = oss_credential_identity(uploader)
+        viewer_id = oss_credential_identity(viewer)
+        if uploader_id == viewer_id:
+            raise RuntimeError("uploader and viewer OSS identities must differ")
+        # Data-plane uploader is bucket-scoped read-write; no synthetic
+        # write/delete probe. One list page proves the viewer read scope.
+        bucket_name = probe_oss_read_access(viewer)
+        return {
+            "backend": "oss",
+            "uploader_identity": uploader_id,
+            "viewer_identity": viewer_id,
+            "store_target": bucket_name,
             **common,
         }
     if config.pitr_store_backend != "baidu":

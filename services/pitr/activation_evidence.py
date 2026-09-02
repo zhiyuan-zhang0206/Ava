@@ -65,7 +65,7 @@ def validate_wal_remote_evidence(
         raise ValueError("PITR ACK and viewer immutable evidence differ")
     frozen = credential_evidence or {}
     backend = frozen.get("backend", "gcs")
-    if backend not in {"gcs", "baidu"}:
+    if backend not in {"gcs", "baidu", "oss"}:
         raise ValueError("PITR credential evidence has an unknown backend")
     if exact is None or any(
         (
@@ -92,6 +92,12 @@ def validate_wal_remote_evidence(
         # from the downloaded bytes at restore time).
         if not re.fullmatch(r"[0-9]+:[0-9a-z]{32}", ack["generation"]):
             raise ValueError("PITR remote evidence has an invalid Baidu pin token")
+    elif backend == "oss":
+        # OSS pins an object with its server ETag: a single-put content MD5
+        # or the multipart composite "<md5-of-parts>-<count>". Never an
+        # integer generation, so it cannot share the GCS numeric branch.
+        if not re.fullmatch(r"[0-9a-fA-F]{32}(-[0-9]+)?", ack["generation"]):
+            raise ValueError("PITR remote evidence has an invalid OSS pin token")
     elif int(ack["generation"]) <= 0:
         raise ValueError("PITR remote identity must have positive generation and size")
     if int(ack["ciphertext_size"]) <= 0:
@@ -101,6 +107,12 @@ def validate_wal_remote_evidence(
     if backend == "baidu":
         # The backend-verified checksum is the content MD5 in lowercase hex,
         # not a CRC32C base64 digest.
+        if not re.fullmatch(r"[0-9a-f]{32}", ack["ciphertext_crc32c"]):
+            raise ValueError("PITR remote evidence has an invalid ciphertext MD5")
+    elif backend == "oss":
+        # OSS WAL objects publish with Content-MD5 (single PUT); the
+        # backend-verified checksum is the lowercase hex content MD5, so the
+        # evidence digest clears the same gate as the Baidu branch.
         if not re.fullmatch(r"[0-9a-f]{32}", ack["ciphertext_crc32c"]):
             raise ValueError("PITR remote evidence has an invalid ciphertext MD5")
     elif not re.fullmatch(r"[A-Za-z0-9+/]{6}==", ack["ciphertext_crc32c"]):

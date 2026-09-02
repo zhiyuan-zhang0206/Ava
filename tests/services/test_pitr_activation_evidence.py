@@ -9,13 +9,15 @@ same gates instead of wedging the activation.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from services.pitr.activation_evidence import validate_wal_remote_evidence
 from services.pitr.activation_runtime import wal_evidence_common, wal_metadata
 from services.pitr.uploader import AckManifest
 from shared.config import settings
-from tests._pitr_fixtures import baidu_credential_evidence
+from tests._pitr_fixtures import baidu_credential_evidence, oss_credential_evidence
 
 _SEGMENT = "00000001000000A20000008B"
 _MD5_HEX = "b" * 32
@@ -88,6 +90,37 @@ def _pair(**overrides: str) -> tuple[dict[str, str], dict[str, str]]:
     sides, so the mutation reaches the gate under test instead of the
     ack/viewer immutable cross-check."""
     return {**_baidu_ack(), **overrides}, {**_baidu_viewer(), **overrides}
+
+
+def _oss_ack() -> dict[str, str]:
+    """A single-put OSS WAL object: the ETag pin token equals the content
+    MD5, and the backend-verified checksum is the same MD5 hex digest."""
+    return {
+        **_baidu_ack(),
+        "bucket_name": "ava-pitr-prod",
+        "generation": _MD5_HEX,
+    }
+
+
+def _oss_pair(**overrides: str) -> tuple[dict[str, str], dict[str, str]]:
+    """An OSS ACK/viewer pair with the same tampering applied to both sides."""
+    ack = _oss_ack()
+    viewer = {k: v for k, v in ack.items() if k != "acknowledged_at"}
+    viewer.update({"viewer_id": "ak-id-viewer", "observed_at": "2026-08-30T03:31:00+00:00"})
+    if overrides:
+        ack.update(overrides)
+        viewer.update(overrides)
+    return ack, viewer
+
+
+def _validate_oss(*, ack: dict[str, str], viewer: dict[str, str]) -> None:
+    validate_wal_remote_evidence(
+        ack=ack,
+        viewer=viewer,
+        exact=_exact(),
+        verification_deadline="2026-08-30T04:00:00+00:00",
+        credential_evidence=oss_credential_evidence(),
+    )
 
 
 def test_baidu_wal_proof_validates_through_all_three_gates() -> None:
@@ -235,3 +268,82 @@ def test_require_store_config_refuses_each_missing_target(
     monkeypatch.setattr(config, "pitr_gcs_prefix", "")
     with pytest.raises(RuntimeError, match="prefix"):
         require_store_config(config)
+
+
+def test_oss_wal_proof_validates_through_all_three_gates() -> None:
+    """OSS vocabulary: single-put ETag pin token + MD5-hex checksum clear
+    the same gates the GCS and Baidu vocabularies clear."""
+    ack, viewer = _oss_pair()
+    _validate_oss(ack=ack, viewer=viewer)
+
+
+def test_oss_wal_proof_accepts_a_multipart_etag_pin_token() -> None:
+    """A stat-observed multipart object pins with '<md5-of-parts>-<count>';
+    the gate accepts it while still refusing anything non-etag-shaped."""
+    ack, viewer = _oss_pair(generation=f"{'c' * 32}-3")
+    _validate_oss(ack=ack, viewer=viewer)
+
+
+def test_oss_wal_proof_rejects_a_gcs_shaped_numeric_pin_token() -> None:
+    """An integer generation is GCS vocabulary, never an OSS ETag."""
+    ack, viewer = _oss_pair(generation="12345678901234567890")
+    with pytest.raises(ValueError, match="invalid OSS pin token"):
+        _validate_oss(ack=ack, viewer=viewer)
+
+
+def test_oss_wal_proof_rejects_crc32c_shaped_checksum() -> None:
+    """The OSS backend-verified WAL checksum is MD5 hex, not CRC32C base64."""
+    ack, viewer = _oss_pair(ciphertext_crc32c=_CRC32C)
+    with pytest.raises(ValueError, match="invalid ciphertext MD5"):
+        _validate_oss(ack=ack, viewer=viewer)
+
+
+def test_oss_wal_proof_rejects_an_uploader_viewer_identity_collision() -> None:
+    """The frozen evidence pins distinct AK identities; a viewer carrying the
+    uploader's AK id must fail the WAL-intent gate."""
+    ack = _oss_ack()
+    viewer = {k: v for k, v in ack.items() if k != "acknowledged_at"}
+    viewer.update({"viewer_id": "ak-id-uploader", "observed_at": "2026-08-30T03:31:00+00:00"})
+    with pytest.raises(ValueError, match="differs from WAL intent"):
+        validate_wal_remote_evidence(
+            ack=ack,
+            viewer=viewer,
+            exact=_exact(),
+            verification_deadline="2026-08-30T04:00:00+00:00",
+            credential_evidence=oss_credential_evidence(),
+        )
+
+
+def test_wal_evidence_common_uses_the_oss_bucket_as_store_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "oss")
+    monkeypatch.setattr(settings.physical_backup, "pitr_oss_bucket", "ava-pitr-prod")
+    common = wal_evidence_common(
+        ack=_ack_manifest(), exact=_exact(), config=settings.physical_backup
+    )
+    assert common["bucket_name"] == "ava-pitr-prod"
+
+
+def test_require_store_config_refuses_a_missing_oss_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from services.pitr.activation_credentials import require_store_config
+
+    config = settings.physical_backup
+    monkeypatch.setattr(config, "pitr_gcs_prefix", "pitr")
+    monkeypatch.setattr(config, "pitr_store_backend", "oss")
+    monkeypatch.setattr(config, "pitr_oss_bucket", "")
+    with pytest.raises(RuntimeError, match="OSS bucket"):
+        require_store_config(config)
+    monkeypatch.setattr(config, "pitr_oss_bucket", "ava-pitr-prod")
+    require_store_config(config)
+
+
+def test_oss_credential_identity_reads_the_access_key_id(tmp_path: Path) -> None:
+    """OSS evidence identity = the AK id (opaque, like the COS SecretId)."""
+    from services.pitr.activation_credentials import oss_credential_identity
+
+    creds = tmp_path / "oss-uploader.json"
+    creds.write_text('{"access_key_id": "ak-upload", "access_key_secret": "secret"}')
+    assert oss_credential_identity(creds) == "ak-upload"
