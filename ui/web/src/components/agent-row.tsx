@@ -174,9 +174,9 @@ export function AgentRow({
   const [resurrectOpen, setResurrectOpen] = useState(false);
   const inspectPrefetch = useInspectorPrefetch(agent.agent_id);
   // Re-render every minute so the relative-time string refreshes
-  const [, setTick] = useState(0);
+  const [observationNow, setObservationNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 60_000);
+    const id = setInterval(() => setObservationNow(Date.now()), 60_000);
     return () => clearInterval(id);
   }, []);
 
@@ -339,9 +339,9 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
               />
             ) : null}
             {agent.status !== "terminated" ? (
-              <span className="text-[9px] text-amber-600" title={observationText(agent.observation)}>
+              <span className="text-[9px] text-amber-600" title={observationText(agent.observation, observationNow)}>
                 {agent.observation?.machine_probe_valid_until &&
-                Date.parse(agent.observation.machine_probe_valid_until) <= Date.now() ? "probe stale" : "owner unknown"}
+                Date.parse(agent.observation.machine_probe_valid_until) <= observationNow ? "probe stale" : "owner unknown"}
               </span>
             ) : null}
             {/* notices-awaiting-response badge — count colored by highest
