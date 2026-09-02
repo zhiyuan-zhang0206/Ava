@@ -19,6 +19,7 @@ does not prove ownership: this compatibility slice reports runtime owner as
 unknown until a generation-bound ownership contract is available. Execution
 progress and `last_active_at` are not heartbeats. UI renders observation age
 and absolute deadlines using its existing clock, without extra network probes.
+The existing per-row minute timers remain; no additional list timer is added.
 
 Inspector `shells_available=false` means the runner observation failed;
 `true` with an empty list means a successful empty result. Missing availability
