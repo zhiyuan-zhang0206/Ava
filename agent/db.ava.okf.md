@@ -44,6 +44,8 @@ Ava's Postgres persistence layer—responsible for agent message history storage
 
 ## Notes
 
+- Process lifecycle application fixes server-reserved `target_process_identity` in the command under the admitted owner/target lock. Its PID is the actual Python runtime, with OS birth evidence, not a DB timestamp or Windows redirector. Controller and explicit resurrection share termination observation: exact process disappearance/reuse permits completion and pointer clearing; live, unreadable or missing historical evidence defers. Swept session records do not erase this evidence. Hosted termination remains tied to real continuation settlement.
+
 - An owned lifecycle command dispatches alone with an internal receipt derived from its locked same-agent pointer and current generation/owner. Legacy latest-wins and pending-message vetoes cannot override this accepted command. Other rows remain pending; a real successor admission observes the restart before its next claim can consume them. The receipt is not effect authority: application still checks the fixed pointer and target incarnation, and acceptance never implies process exit.
 
 - Claim, startup reconcile, compaction finalization and co-batch deferral use the same owner lock. Reconcile/finalization/deferral only mutate chat rows, never acknowledge lifecycle work using missing checkpoint anchors. The caller must retain existing single-flight ordering around checkpoint reads and compaction.

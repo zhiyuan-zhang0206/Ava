@@ -19,6 +19,7 @@ from ops.cold_lifecycle import (
 from shared.boot_timing import BOOT_BUDGET_SEC
 from shared.cluster import session_name
 from shared.db_transaction import write_transaction
+from shared.lifecycle_termination_observe import observe_applied_termination
 from shared.machine import machine_name
 from shared.session_backend import native_proc
 
@@ -102,6 +103,9 @@ def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
             or command["observed_at"] is not None
         ):
             return False
+        if command["kind"] == "terminate":
+            observe_applied_termination(conn, agent_id, machine_name())
+            return False
         raw_payload: object = command["payload"] or {}
         if not isinstance(raw_payload, dict):
             raise TypeError("lifecycle command payload must be an object")
@@ -115,19 +119,6 @@ def _authorize_attempt(agent_id: int) -> RestartAttempt | bool | None:
         elif count == 0 and not prepared_target_was_released(conn, owner):
             # NULL is not exit evidence. Only our previous durable authorization
             # explains the prepared state after the original PID was observed gone.
-            return False
-        if command["kind"] == "terminate":
-            if owner["status"] != "terminated":
-                return False
-            cur.execute(
-                "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' WHERE id=%s",
-                (pointer,),
-            )
-            cur.execute(
-                "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s "
-                "AND lifecycle_command_id=%s",
-                (agent_id, pointer),
-            )
             return False
         if command["kind"] != "restart" or owner["status"] not in {"restarting", "idling"}:
             return False
