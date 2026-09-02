@@ -236,16 +236,19 @@ def _register_in_cluster(
     local = origin.startswith("local:")
     # A git ref pins a remote source; it says nothing about a local directory.
     ref = None if local else ref
-    pool = db.pool()
-    for pkg in packages:
-        extension_registry.register_tree(
-            pool,
-            root=pkg.root,
-            name=pkg.name,
-            kind="skill",
-            source=origin,
-            source_ref=ref,
-        )
+    # The pool opens eagerly and owns worker threads; close it here rather
+    # than letting ConnectionPool.__del__ run at interpreter exit (it then
+    # joins its own worker and prints "cannot join current thread" noise).
+    with db.pool() as pool:
+        for pkg in packages:
+            extension_registry.register_tree(
+                pool,
+                root=pkg.root,
+                name=pkg.name,
+                kind="skill",
+                source=origin,
+                source_ref=ref,
+            )
 
 
 def install(

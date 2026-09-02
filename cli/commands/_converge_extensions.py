@@ -45,7 +45,10 @@ def materialize_cluster_extensions() -> None:
     from shared import db, extension_materialize, paths
 
     try:
-        with db.pool().connection() as conn:
+        # The pool opens eagerly and owns worker threads; close it here rather
+        # than letting ConnectionPool.__del__ run at interpreter exit (it then
+        # joins its own worker and prints "cannot join current thread" noise).
+        with db.pool() as pool, pool.connection() as conn:
             result = extension_materialize.materialize_skills(conn, dest_root=paths.skills_dir())
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: cluster registry unreachable ({exc}); skipping", file=sys.stderr)
@@ -79,7 +82,8 @@ def adopt_local_extensions() -> None:
     from shared import db, extension_adopt, paths
 
     try:
-        result = extension_adopt.adopt_local_installs(db.pool(), skills_root=paths.skills_dir())
+        with db.pool() as pool:
+            result = extension_adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)
         return
