@@ -609,6 +609,8 @@ class TestTurnLoop:
     async def test_restart_requested_restores_idling(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        import services.agent_host.host as host_mod
+        from shared.runtime_incarnation import RuntimeIncarnation
 
         flips: list[tuple[int, str, str]] = []
 
@@ -621,6 +623,12 @@ class TestTurnLoop:
             {1: _Row(status="idling")},
             {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
         )
+
+        async def apply(pool: object, incarnation: RuntimeIncarnation) -> str:
+            await _flip(pool, incarnation.agent_id, "idling", expected_from="running")
+            return "restart"
+
+        monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
 
         await asyncio.wait_for(host.run_turn(1), 2)
 
