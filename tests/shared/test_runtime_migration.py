@@ -20,6 +20,20 @@ from shared.runtime_migration import ReleaseMigrationContext, installed_migratio
 from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
 
 
+def test_wheel_start_without_receipt_cannot_enter_legacy_source_path() -> None:
+    from cli.commands.start import cmd_start
+
+    with (
+        patch("shared.runtime_interpreter.WHEEL_RUNTIME", True),
+        patch("shared.db.connect") as connection,
+        patch("cli.commands.start._repo_root") as resolve_repo,
+        pytest.raises(ReleaseRejectedError, match="verified release admission"),
+    ):
+        cmd_start()
+    connection.assert_not_called()
+    resolve_repo.assert_not_called()
+
+
 def test_real_start_rejects_receipt_before_any_start_side_effect(tmp_path: Path) -> None:
     from cli.commands.start import cmd_start
 

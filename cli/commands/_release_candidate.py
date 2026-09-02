@@ -125,9 +125,15 @@ def load_candidate(conn: psycopg.Connection, path: Path) -> ReleaseMigrationCont
     return context
 
 
-def admit_start_candidate(path: Path) -> ReleaseMigrationContext:
+def admit_start_candidate(path: Path | None) -> ReleaseMigrationContext | None:
     """Validate before start writes; a migration receipt is not a cutover permit."""
     from shared.db import connect
+    from shared.runtime_interpreter import WHEEL_RUNTIME
+
+    if path is None:
+        if WHEEL_RUNTIME:
+            raise ReleaseRejectedError("wheel start requires verified release admission")
+        return None
 
     with connect(direct=True) as connection:
         load_candidate(connection, path)

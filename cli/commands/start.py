@@ -341,11 +341,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     import cli.commands as _ns
 
     # Receipt admission precedes every setup/converge/source-repair write.
-    release = None
-    if release_receipt is not None:
-        from cli.commands._release_candidate import admit_start_candidate
+    from cli.commands._release_candidate import admit_start_candidate
 
-        release = admit_start_candidate(release_receipt)
+    release = admit_start_candidate(release_receipt)
 
     repo = _repo_root()
     print(f"[ava start] cwd = {repo}")
