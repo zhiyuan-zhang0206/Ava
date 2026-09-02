@@ -329,6 +329,18 @@ def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPat
         def cursor(self) -> _FakeCursor:
             return _FakeCursor()
 
+        def transaction(self) -> _FakeConn:
+            return self
+
+        def execute(self, *_a: Any, **_kw: Any) -> None:
+            return None
+
+        def __enter__(self) -> _FakeConn:
+            return self
+
+        def __exit__(self, *_a: Any) -> None:
+            return None
+
         def close(self) -> None:
             pass
 
