@@ -28,7 +28,14 @@ import pytest
 from cli.commands import _update_uv_sync as _native_sync
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
-_EXPECTED_ARGS = ["uv", "sync", "--locked", "--no-dev", "--inexact", "--verbose"]
+
+def _expected_args(repo: Path) -> list[str]:
+    python_name = "python.exe" if _native_sync.IS_WINDOWS else "python"
+    return [
+        *_native_sync._PROD_SYNC_ARGS,
+        "--python",
+        str(repo / ".venv" / _native_sync.get_backend().venv_bin_dir_name() / python_name),
+    ]
 
 
 def _read_only_pth(repo: Path) -> Path:
@@ -73,6 +80,7 @@ def test_prod_sync_argv_excludes_dev_group_and_carries_the_bound(
     (uv's default) and would not catch a drift."""
     repo = tmp_path / "source"
     seen: dict[str, object] = {}
+    monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "foreign-venv"))
 
     def _run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
         seen["argv"] = argv
@@ -84,12 +92,13 @@ def test_prod_sync_argv_excludes_dev_group_and_carries_the_bound(
     result = _native_sync.run_uv_sync(repo)
 
     assert result.returncode == 0
-    assert seen["argv"] == _EXPECTED_ARGS
+    assert seen["argv"] == _expected_args(repo)
     kwargs = seen["kwargs"]
     assert isinstance(kwargs, dict)
     assert kwargs["cwd"] == repo
     assert kwargs["timeout"] == UV_SYNC_TIMEOUT_S
     assert kwargs["capture_output"] is False
+    assert "VIRTUAL_ENV" not in kwargs["env"]
     # Lockfile semantics are asserted, never silently re-resolved or ignored:
     # `--locked` in, `--frozen` out (a lock change lands through the deliberate
     # `uv lock` + rollout flow).
@@ -175,6 +184,47 @@ def test_nonzero_exit_passes_through_untouched(
     assert _native_sync.run_uv_sync(repo).returncode == 3
 
 
+def test_verified_sync_rejects_a_fake_successful_half_uninstall(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A zero uv exit is not accepted until the venv import gate passes."""
+
+    repo = tmp_path / "source"
+    pth = _read_only_pth(repo)
+    original = subprocess.CompletedProcess(["uv", "sync"], returncode=0, stdout=b"ok", stderr=None)
+
+    def fake_sync(
+        _repo: Path, *, timeout_s: float = UV_SYNC_TIMEOUT_S
+    ) -> subprocess.CompletedProcess[bytes]:
+        pth.unlink()
+        return original
+
+    monkeypatch.setattr(_native_sync, "run_uv_sync", fake_sync)
+    monkeypatch.setattr(
+        _native_sync,
+        "editable_import_gate",
+        lambda _repo: ("editable import gate failed (pointer missing)",),
+    )
+
+    result = _native_sync.run_uv_sync_verified(repo)
+
+    assert result.returncode == 126
+    assert result.stderr is not None
+    assert b"pointer missing" in result.stderr
+
+
+def test_verified_sync_preserves_a_healthy_sync_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A passing import proof preserves the successful sync result unchanged."""
+
+    original = subprocess.CompletedProcess(["uv", "sync"], returncode=0, stdout=b"ok", stderr=None)
+    monkeypatch.setattr(_native_sync, "run_uv_sync", lambda _repo, **_kwargs: original)
+    monkeypatch.setattr(_native_sync, "editable_import_gate", lambda _repo: ())
+
+    assert _native_sync.run_uv_sync_verified(tmp_path) is original
+
+
 def test_preflight_success_starts_uv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A successful write, rename, and unlink probe permits the real uv path."""
     repo = tmp_path / "source"
@@ -189,7 +239,7 @@ def test_preflight_success_starts_uv(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setattr(_native_sync, "run_bounded", run_uv)
 
     assert _native_sync.run_uv_sync(repo).returncode == 0
-    assert calls == [_EXPECTED_ARGS]
+    assert calls == [_expected_args(repo)]
     assert list(site_packages.iterdir()) == []
 
 

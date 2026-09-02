@@ -128,7 +128,9 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
     stopped: list[bool] = []
 
     monkeypatch.setattr(_runner, "git_checkout_sha", lambda _sha: "oldsha0000")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_runner, "run_uv_sync", lambda _repo: SimpleNamespace(returncode=0))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        _runner, "run_uv_sync_verified", lambda _repo: SimpleNamespace(returncode=0)
+    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr("shared.source_integrity.set_installed", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(
         _runner,

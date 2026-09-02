@@ -162,6 +162,54 @@ def _ensure_prod_editable_dir_protection(ctx: ConvergeCtx) -> None:  # noqa: ARG
         directory.chmod(0o555)
 
 
+def _ensure_prod_editable_exec_gate(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Fail converge unless the prod venv's console command can import agent code.
+
+    The earlier repair step can restore known pointer and direct-URL records.
+    This final gate covers the remaining half-uninstalls, including a missing
+    dist-info directory or console script that only a verified ``uv sync`` can
+    restore. An import proof is the final discriminator because a read-only
+    site-packages directory can make uv report success after a partial change.
+    """
+
+    import shared.cluster_drift
+    import shared.editable_install
+    from cli.commands._update_uv_sync import run_uv_sync
+
+    source_root = shared.cluster_drift.prod_source_dir()
+    if source_root is None:
+        return
+    allowed_roots = (Path.home() / "Ava",)
+    violations = list(
+        shared.editable_install.editable_install_violations(
+            source_root,
+            allowed_roots=allowed_roots,
+        )
+    )
+    violations.extend(shared.editable_install.editable_console_script_violations(source_root))
+    if violations:
+        print(
+            "  ! prod editable install incomplete; attempting one uv sync recovery",
+            file=sys.stderr,
+        )
+        sync_result = run_uv_sync(source_root)
+        violations = list(
+            shared.editable_install.editable_install_violations(
+                source_root,
+                allowed_roots=allowed_roots,
+            )
+        )
+        violations.extend(shared.editable_install.editable_console_script_violations(source_root))
+        if sync_result.returncode != 0:
+            violations.append(f"uv sync recovery failed (rc={sync_result.returncode})")
+    violations.extend(shared.editable_install.editable_import_gate(source_root))
+    if not violations:
+        return
+    detail = "\n".join(f"- {violation}" for violation in violations)
+    print(f"  ✗ prod editable exec gate failed:\n{detail}", file=sys.stderr)
+    raise RuntimeError(f"prod editable exec gate failed:\n{detail}")
+
+
 def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Fetch the vendored relocatable Postgres + inject the pinned pgvector
     extension files (both idempotent — no-ops once the host-level
@@ -541,6 +589,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         _ensure_prod_editable_dir_protection,
         host_global=True,
     ),
+    ConvergeStep("prod editable exec gate", _ensure_prod_editable_exec_gate, host_global=True),
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),

@@ -109,7 +109,7 @@ def _session_forward_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return forward
 
 
-def forward_env_dict() -> dict[str, str]:
+def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     """The full child env dict for a daemon/service session (the Windows analog
     of `forward_env_prefix`; POSIX callers also use it where the backend takes a
     dict).
@@ -132,6 +132,11 @@ def forward_env_dict() -> dict[str, str]:
     remote shell starts with only system PATH entries. Symmetric with the agent
     activation in `ops.agent_launch._launch_agent_process`.
 
+    ``VIRTUAL_ENV`` selects uv's sync target. A session whose cwd is outside
+    this checkout must not receive it: its PATH remains venv-prefixed for
+    tooling, but an accidental bare uv command cannot mutate this checkout's
+    editable install. ``activate_venv=False`` applies that projection.
+
     The dict is handed to the session backend as the child's real environment
     (`new_session(..., env=...)`) on both platforms — the out-of-band env handoff
     that replaced the old env-file handoff (issue #974), so the activation
@@ -148,7 +153,8 @@ def forward_env_dict() -> dict[str, str]:
     # vars and the Windows system keys ride in `child_env` already.)
     venv = repo_root() / ".venv"
     venv_bin = venv / get_backend().venv_bin_dir_name()
-    env["VIRTUAL_ENV"] = str(venv)
+    if activate_venv:
+        env["VIRTUAL_ENV"] = str(venv)
     env["PATH"] = str(venv_bin) + os.pathsep + frontend_toolchain_path(os.environ.get("PATH", ""))
     return env
 

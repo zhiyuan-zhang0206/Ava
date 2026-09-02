@@ -507,10 +507,13 @@ def _editable_install_failure() -> str | None:
     source_root = shared.cluster_drift.prod_source_dir()
     if source_root is None:
         return None
-    violations = ei.editable_install_violations(source_root, allowed_roots=(Path.home() / "Ava",))
+    violations = list(
+        ei.editable_install_violations(source_root, allowed_roots=(Path.home() / "Ava",))
+    )
+    violations.extend(ei.editable_console_script_violations(source_root))
     if not violations:
         return None
-    return "prod venv editable install names non-allowlisted source: " + "; ".join(violations)
+    return "prod venv editable install violation: " + "; ".join(violations)
 
 
 def _source_tree_failure() -> str | None:
