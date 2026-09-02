@@ -21,9 +21,11 @@ from shared.managed_writer_barrier import (
     EvidenceModel,
     ManagedUnit,
     ManagedWriterBarrierError,
+    ManagedWriterCollection,
     RolloutIdentity,
     lock_registered_units,
     lock_rollout,
+    validate_collection_for_write,
 )
 
 
@@ -47,6 +49,7 @@ class PendingPublication(EvidenceModel):
     candidate_digest: Digest
     challenge: UUID
     units: tuple[PublishedUnit, ...] = Field(min_length=1)
+    collection: ManagedWriterCollection | None = None
 
 
 class WriterPublication(EvidenceModel):
@@ -66,6 +69,13 @@ class WriterPublication(EvidenceModel):
             predecessor = self.current.publication_id if self.current is not None else None
             if self.pending.predecessor != predecessor:
                 raise ValueError("pending publication has a different predecessor")
+            collection = self.pending.collection
+            if collection is not None and (
+                collection.operation != self.pending.operation
+                or collection.challenge != self.pending.challenge
+                or collection.candidate_digest != self.pending.candidate_digest
+            ):
+                raise ValueError("pending collection belongs to a different operation")
         return self
 
 
@@ -102,6 +112,8 @@ def begin_pending_publication(
     A crash leaves pending in place even after lease expiry; only explicit
     verified completion/recovery may clear it. A new holder cannot overwrite it.
     """
+    if pending.collection is not None:
+        raise ManagedWriterBarrierError("prepare cannot import a cached collection")
     lock_rollout(conn, pending.operation)
     state = _locked_publication(conn)
     registered = lock_registered_units(conn)
@@ -112,6 +124,82 @@ def begin_pending_publication(
     if state.pending is not None and state.pending != pending:
         raise ManagedWriterBarrierError("another pending publication requires explicit recovery")
     _store(conn, proposed)
+
+
+def adopt_pending_collection(conn: psycopg.Connection, collection: ManagedWriterCollection) -> None:
+    """Store fresh post-stop facts without promoting them to a current release.
+
+    The expected challenge and full receipt digests come from locked pending
+    state, not from a replayed collection's own assertions. Actual collector
+    provenance is the existing updater's responsibility; this is not an API.
+    """
+    lock_rollout(conn, collection.operation)
+    state = _locked_publication(conn)
+    pending = state.pending
+    if pending is None:
+        raise ManagedWriterBarrierError("no prepared pending operation exists")
+    prepared = tuple(
+        ManagedUnit(machine=unit.machine, home=unit.home, inventory_digest=unit.inventory_digest)
+        for unit in pending.units
+    )
+    validate_collection_for_write(
+        conn,
+        collection,
+        operation=pending.operation,
+        candidate_digest=pending.candidate_digest,
+        expected_challenge=pending.challenge,
+        prepared_units=prepared,
+    )
+    if pending.collection is not None and pending.collection != collection:
+        raise ManagedWriterBarrierError("pending collection cannot be silently replaced")
+    _store(
+        conn,
+        WriterPublication(
+            current=state.current, pending=pending.model_copy(update={"collection": collection})
+        ),
+    )
+
+
+def recover_pending_publication(
+    conn: psycopg.Connection,
+    abandoned: RolloutIdentity,
+    replacement: PendingPublication,
+    fresh_collection: ManagedWriterCollection,
+) -> None:
+    """Explicit recovery CAS requires fresh complete closure under the NEW lease.
+
+    TTL expiry alone is not old-holder exit evidence and cannot clear pending.
+    The existing takeover producer must include that holder among managed writers
+    and positively establish its exit before acquiring its replacement lease.
+    Recovery preserves current and keeps births frozen; it does not publish.
+    """
+    if replacement.collection is not None or replacement.operation == abandoned:
+        raise ManagedWriterBarrierError("recovery requires a new operation and fresh collection")
+    lock_rollout(conn, replacement.operation)
+    state = _locked_publication(conn)
+    if state.pending is None or state.pending.operation != abandoned:
+        raise ManagedWriterBarrierError("abandoned pending operation no longer matches")
+    if replacement.challenge == state.pending.challenge:
+        raise ManagedWriterBarrierError("recovery must issue a new observation challenge")
+    prepared = tuple(
+        ManagedUnit(machine=unit.machine, home=unit.home, inventory_digest=unit.inventory_digest)
+        for unit in replacement.units
+    )
+    validate_collection_for_write(
+        conn,
+        fresh_collection,
+        operation=replacement.operation,
+        candidate_digest=replacement.candidate_digest,
+        expected_challenge=replacement.challenge,
+        prepared_units=prepared,
+    )
+    _store(
+        conn,
+        WriterPublication(
+            current=state.current,
+            pending=replacement.model_copy(update={"collection": fresh_collection}),
+        ),
+    )
 
 
 def require_current_publication(
