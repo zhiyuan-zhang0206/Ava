@@ -12,7 +12,9 @@ from services.delivery_watchdog.daemon import dead_letter_stale_claimed
 from shared.db import insert_inbound_message
 from tests.agent.test_restart_admission import _prepared
 from tests.agent.test_runtime_incarnation import _row
-from tests.ops.test_cold_lifecycle import sync_pool as cold_pool  # noqa: F401
+from tests.ops.test_cold_lifecycle import (
+    sync_pool as cold_pool,  # noqa: F401  # pyright: ignore[reportUnusedImport]
+)
 
 
 @pytest.mark.parametrize("wrong_host", [False, True])

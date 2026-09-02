@@ -35,6 +35,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+from agent._starting import claim_agent_row
 from agent.graph import claim_node
 from agent.graph._context import AvaContext
 from agent.hooks.compact import compose_summary_message
@@ -251,7 +252,7 @@ def _config(tid: int) -> RunnableConfig:
 
 @pytest.fixture
 def running_agent(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch):
-    """factory: spawn agent row + directly UPDATE to 'running'.
+    """Factory: actual admission binds the token before lifecycle dispatch.
 
     Simulates production: the bootstrap CAS has already created a running row
     before the process enters claim_node. Dispatch tests need that row for the
@@ -260,7 +261,7 @@ def running_agent(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch):
 
     def _make() -> int:
         tid = spawn_agent()
-        _set_agent_status(db_conn, tid, "running")
+        claim_agent_row(tid)
         return tid
 
     return _make
@@ -1339,6 +1340,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_restart_kind_marks_restarting_and_no_message(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1347,7 +1349,7 @@ async def test_claim_restart_kind_marks_restarting_and_no_message(
     """restart inbound → mark agents.status running→restarting + goto END,
     does **not** append message (old process writing 'has been restarted' is writing for the future,
     left to the new process's 'restart_completed' kind dispatch)."""
-    tid = spawn_agent()
+    tid = running_agent()
     # simulate process already up: unclaimed idling → running (mark_agent_status 'restarting' expects from='running')
     _set_agent_status(db_conn, tid, "running")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
@@ -1372,6 +1374,7 @@ async def test_claim_restart_kind_marks_restarting_and_no_message(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_multiple_restart_in_one_batch_flips_status_once(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1382,7 +1385,7 @@ async def test_claim_multiple_restart_in_one_batch_flips_status_once(
     restarting status -> raises RuntimeError, claim_node crashes, old process does not exit cleanly,
     agent gets stuck and eventually the reaper flips it to terminated. After fix: the second restart
     skips CAS, claim_node returns normally with goto END, status is restarting."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     r2 = _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
@@ -1820,6 +1823,7 @@ async def test_claim_terminate_before_restart_completed_still_exits(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_cancel_batched_with_restart_idle_respawn_silent(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1827,7 +1831,7 @@ async def test_claim_cancel_batched_with_restart_idle_respawn_silent(
     """cancel + restart in the same batch (user clicks Stop then Restart) → restart wins over cancel:
     exits normally via respawn; the Cancelled event for cancel is still emitted (frontend clears
     turn-active), the pause intent is absorbed into 'silent idle after respawn' (halted=True preserved)."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
@@ -1853,6 +1857,7 @@ async def test_claim_cancel_batched_with_restart_idle_respawn_silent(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_second_restart_batched_with_restart_completed_exits_again(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1860,7 +1865,7 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
     """boot batch [restart_completed, restart] (user clicked restart again within the respawn window) →
     the second restart wins over wake: after committing marker, exits again via respawn, idle preserved
     (external + halted=True) → second respawn remains silent."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
@@ -1881,6 +1886,7 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_compact_request_batched_with_restart_is_dropped(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1888,7 +1894,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
     """compact_request + restart in same batch → compact_request is the discarded loser:
     does **not** run the backend Compaction LLM (if it raised, the already consumed restart row
     would be lost before the RESTARTING marker), restart exits normally. Re-trigger /compact afterwards."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
@@ -1913,6 +1919,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1920,12 +1927,12 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
     """compact_summary + restart in same batch → summary is data the agent already wrote itself,
     applied as usual (discarding = silently swallowing the agent's work), while the restart's idle
     preservation is not overwritten by the compact return path's halted — remains silent after respawn."""
-    tid = spawn_agent()
+    tid = running_agent()
     # Confirm the spawn is visible on the async pool before we start writing
     # through it.  Every subsequent write goes through `aops_pool` too, so there
     # is no sync→async visibility window — the same pool is used for writes and
     # for the claim_node read.
-    await _await_status(aops_pool, tid, "idling")
+    await _await_status(aops_pool, tid, "running")
     await _set_agent_status_async(aops_pool, tid, "running")
     # Confirm the status update is visible before inserting inbounds — a second
     # read-after-write barrier on the same pool eliminates any residual
@@ -2125,19 +2132,20 @@ async def test_claim_resurrect_then_terminate_still_dies(
 
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
-async def test_claim_terminate_then_restart_respawns(
+async def test_claim_terminate_then_restart_preserves_serial_order(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """Reverse of test_claim_restart_batched_with_terminate_terminate_wins:
-    terminate older, restart newer → restart wins (the user's latest intent is to
-    recycle). status flips to 'restarting' (the restarter respawns); the stale
-    terminate is the consumed loser (no marker). Recency resolves both directions
-    of the terminate/restart conflict, not a fixed terminate > restart."""
-    tid = spawn_agent()
+    """An owned runtime accepts the first lifecycle command, not latest-wins.
+
+    A following explicit restart remains pending for cold acceptance after exit;
+    it must not silently discard the accepted termination.
+    """
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    # restart inserted last -> newer id -> wins over the older terminate
+    # A later restart cannot replace the active command pointer.
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
@@ -2149,11 +2157,10 @@ async def test_claim_terminate_then_restart_respawns(
     )
 
     assert cmd.goto == END
-    # terminate lost -> no terminate marker; restart writes no marker either
-    assert cmd.update["messages"] == []  # type: ignore[index]
-    # Read status on the pool claim_node wrote through; _await_status dumps full
-    # state on timeout (the CI-only `idling != restarting` flake).
-    await _await_status(aops_pool, tid, "restarting")
+    await _await_status(aops_pool, tid, "terminated")
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (restart_id,)
+    ).fetchone() == ("pending",)
 
 
 async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
@@ -3507,6 +3514,7 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
 
 
 async def test_claim_restart_cas_lost_retries_from_idling(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -3516,7 +3524,7 @@ async def test_claim_restart_cas_lost_retries_from_idling(
     and killed the process; a crash during a network outage cannot be resurrected).
     _flip_to_restarting re-reads the row, retries the flip from 'idling', and the
     claim completes normally with goto END."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "idling")  # race: row no longer 'running'
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
@@ -3532,42 +3540,26 @@ async def test_claim_restart_cas_lost_retries_from_idling(
     await _await_status(aops_pool, tid, "restarting")
 
 
-async def test_flip_to_restarting_cas_lost_foreign_status_ends_normally(
+@pytest.mark.parametrize("status,expected", [("terminated", False), ("idling", True)])
+async def test_durable_restart_apply_rechecks_current_status(
+    running_agent,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    status: str,
+    expected: bool,
 ):
-    """_flip_to_restarting loses the running→restarting CAS to a foreign status
-    (e.g. a terminate parked the row 'terminated' between the claim's
-    running-mark and the CAS) — it logs and returns without raising, leaving
-    the row untouched. Pre-fix code raised RuntimeError out of the graph and
-    killed the process; a crash during a network outage cannot be resurrected
-    (audit #689 G2, agent 2147 2026-08-03: 4h dead)."""
-    tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "terminated")  # race: terminate won
+    """The replacement for the removed status-only writer preserves both races."""
+    from agent.db import claim_inbound_batch
+    from agent.lifecycle_apply import apply_process_lifecycle
+    from shared.db_transaction import async_write_transaction
 
-    from agent.graph._claim import _flip_to_restarting
-
-    await _flip_to_restarting(aops_pool, tid)  # must not raise
-
-    await _await_status(aops_pool, tid, "terminated")  # untouched
-
-
-async def test_flip_to_restarting_cas_lost_retries_from_idling(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-):
-    """_flip_to_restarting loses the running→restarting CAS to a re-entered claim
-    that left the row 'idling' — it re-reads and retries from the actual live
-    state, landing 'restarting' for the restarter (the claim-level variant of
-    this is covered by test_claim_restart_cas_lost_retries_from_idling)."""
-    tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "idling")
-
-    from agent.graph._claim import _flip_to_restarting
-
-    await _flip_to_restarting(aops_pool, tid)
-
-    await _await_status(aops_pool, tid, "restarting")
+    tid = running_agent()
+    command_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    assert [item.id for item in await claim_inbound_batch(aops_pool, tid)] == [command_id]
+    _set_agent_status(db_conn, tid, status)
+    async with async_write_transaction(aops_pool) as conn:
+        assert await apply_process_lifecycle(conn, tid, command_id) is expected
+    await _await_status(aops_pool, tid, "restarting" if expected else status)
 
 
 def test_claim_agent_row_grants_the_liveness_lease(db_conn: psycopg.Connection) -> None:

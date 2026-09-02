@@ -52,6 +52,7 @@ from datetime import datetime
 from typing import Literal
 
 import psycopg
+from psycopg import sql
 
 from ops import agent_launch, runner_mode
 
@@ -159,7 +160,7 @@ def _transition_terminated_to_unclaimed_idling(
 
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
-            psycopg.sql.SQL(
+            sql.SQL(
                 "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
                 "termination_source = NULL, lease_expires_at = NULL "
                 "WHERE id = %s AND status = %s "
@@ -170,7 +171,7 @@ def _transition_terminated_to_unclaimed_idling(
                 "    AND m.created_at > agents_meta.status_changed_at "
                 "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
                 ") RETURNING status_changed_at"
-            ).format(psycopg.sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)),
+            ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)),
             (*base_params, trigger_inbound_id, trigger_inbound_kind),
         )
     elif auto_claim is not None and auto_claim.claim_kind == "crash":
