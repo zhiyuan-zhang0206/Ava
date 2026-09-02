@@ -52,7 +52,7 @@ jobs:
           # isolates concurrency by immutable SHA as the race-safety boundary.
           if [ "$RUN_EVENT" = pull_request ]; then
             if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-              echo "Cannot confirm a unique PR for this run; refusing automatic retry"
+              echo "Cannot confirm a PR for this run; refusing automatic retry"
               exit 0
             fi
             observed="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \

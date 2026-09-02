@@ -81,6 +81,13 @@ def test_current_head_retries_once(tmp_path: Path, event: str) -> None:
     ]
 
 
+def test_verified_fork_head_is_not_confused_with_base_repository(tmp_path: Path) -> None:
+    fork = "contributor/repository"
+    result, calls = run_retry(tmp_path, HEAD_REPO=fork, PR_RESPONSE=f"open\t{SHA}\t{REPO}\t{fork}")
+    assert result.returncode == 0, result.stderr
+    assert sum("POST" in call for call in calls) == 1
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
