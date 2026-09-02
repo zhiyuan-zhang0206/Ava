@@ -157,6 +157,26 @@ def test_transaction_pooling_never_prepare() -> None:
             assert row is not None and row[0] == i
 
 
+def test_finalize_writes_override_a_poisoned_pooled_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finalizer posture and lock writes must override a poisoned backend.
+
+    This reproduces the rollout-finalizer failure: a prior client sets the
+    backend's default transaction posture read-only, then the tail's two
+    compensating writes must start explicit read-write transactions before DML.
+    """
+    from shared import config, host_deploy_state
+    from shared.cluster_lock import release_update_lock
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as reader:
+            reader.execute("SET default_transaction_read_only = on")
+        host_deploy_state.set_posture("idle")
+        release_update_lock("pgbouncer-finalizer-test")
+
+
 def _statement_timeout(conn: psycopg.Connection) -> str:
     """The backend's statement_timeout as a string, with a row-asserted fetchone."""
     row = conn.execute("SHOW statement_timeout").fetchone()
