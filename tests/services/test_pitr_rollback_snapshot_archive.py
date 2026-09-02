@@ -18,26 +18,31 @@ from services.pitr.rollback_snapshot_archive import (
 )
 
 _FAKE_PIN_TOKEN = str(42)
+_REOBSERVED_PIN_TOKEN = str(43)
 
 
 class _Store:
-    def __init__(self) -> None:
+    def __init__(self, *, created: bool = True, pin_token: str = _FAKE_PIN_TOKEN) -> None:
         self.objects: dict[str, bytes] = {}
         self.acks: dict[str, RemoteObjectAck] = {}
+        self.puts: list[str] = []
+        self._created = created
+        self._pin_token = pin_token
 
     def put_wal_ciphertext_if_absent(
         self, path: Path, object_name: str, metadata: Mapping[str, str]
     ) -> RemoteObjectAck:
+        self.puts.append(object_name)
         payload = path.read_bytes()
         if object_name not in self.objects:
             self.objects[object_name] = payload
             self.acks[object_name] = RemoteObjectAck(
                 object_name=object_name,
-                pin_token=_FAKE_PIN_TOKEN,
+                pin_token=self._pin_token,
                 size=len(payload),
                 checksum=ObjectChecksum(CRC32C, digest_bytes(CRC32C, payload)),
                 metadata=dict(metadata),
-                created=True,
+                created=self._created,
             )
         return self.acks[object_name]
 
@@ -82,6 +87,61 @@ def test_archive_publishes_aes_gcm_ciphertext_and_persists_pinned_evidence(tmp_p
         "ava-key-id": "archive-key-v1",
         "ava-rollback-snapshot-table": record.table,
     }
+
+
+def test_archive_short_circuits_after_persisting_evidence_without_another_export_or_put(
+    tmp_path: Path,
+) -> None:
+    store = _Store()
+    export_count = 0
+
+    def export_once(table: str, destination: Path) -> None:
+        nonlocal export_count
+        export_count += 1
+        _export(table, destination)
+
+    archived = archive_rollback_snapshot(
+        "agent_state_backfill_snapshot",
+        ava_home=tmp_path / "home",
+        key=b"k" * 32,
+        key_id="archive-key-v1",
+        export_table=export_once,
+        store=store,
+    )
+
+    resumed = archive_rollback_snapshot(
+        archived.table,
+        ava_home=tmp_path / "home",
+        key=b"k" * 32,
+        key_id="archive-key-v1",
+        export_table=export_once,
+        store=store,
+    )
+
+    assert resumed == archived
+    assert export_count == 1
+    assert store.puts == [archived.object_name]
+
+
+def test_archive_records_the_reobserved_identity_after_a_crash_before_evidence_persists(
+    tmp_path: Path,
+) -> None:
+    store = _Store(created=False, pin_token=_REOBSERVED_PIN_TOKEN)
+
+    record = archive_rollback_snapshot(
+        "agent_state_backfill_snapshot",
+        ava_home=tmp_path / "home",
+        key=b"k" * 32,
+        key_id="archive-key-v1",
+        export_table=_export,
+        store=store,
+    )
+
+    ack = store.acks[record.object_name]
+    assert ack.created is False
+    assert record.pin_token == _REOBSERVED_PIN_TOKEN
+    assert record.size == ack.size
+    assert record.metadata == tuple(sorted(ack.metadata.items()))
 
 
 def test_verify_downloads_the_exact_generation_decrypts_it_and_marks_the_evidence(
