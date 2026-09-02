@@ -39,6 +39,8 @@ def prove_checkout_absent(
     shutil.copy2(checkout / "scripts/verify_runtime_wheel.py", verifier)
     consumer = root / "prove_runtime_consumer.py"
     shutil.copy2(checkout / "scripts/prove_runtime_consumer.py", consumer)
+    migration = root / "prove_runtime_migration.py"
+    shutil.copy2(checkout / "scripts/prove_runtime_migration.py", migration)
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -56,7 +58,7 @@ def prove_checkout_absent(
         "HOME": str(root),
         "AVA_CONFIG_FETCH": "skip",
         "AVA_TIMEZONE": "UTC",
-        "AVA_HOME": str(root / "probe-home"),
+        "AVA_HOME": str(root / "unit"),
         "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
         "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
     }
@@ -95,6 +97,34 @@ def prove_checkout_absent(
         )
         if "usage:" not in launched.stdout.lower():
             raise AssertionError("existing CLI did not execute from prepared generation")
+        if "AVA_RUNTIME_PROOF_PG" in os.environ:
+            migration_env = child_env | {
+                "AVA_DB_URL": os.environ["AVA_RUNTIME_PROOF_PG"],
+                "AVA_MACHINE_NAME": "runtime-proof",
+                "AVA_MACHINE_SERVE_GATEWAY": "true",
+                "AVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+                "GITHUB_ACTIONS": "true",
+                "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
+            }
+            schema = json.loads((release.root / "manifest.json").read_text())["schema_digest"]
+            result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
+                [
+                    str(release.interpreter),
+                    "-I",
+                    "-B",
+                    str(migration),
+                    release.digest,
+                    release.manifest_digest,
+                    schema,
+                ],
+                cwd=root,
+                env=migration_env,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=180,
+            )
+            (root / "migration-proof.json").write_text(result.stdout)
     finally:
         retired_checkout.rename(checkout)
 
@@ -168,8 +198,8 @@ def main() -> None:
     wheels = root / "wheels"
     (application,) = wheels.glob("ava-*.whl")
     requirements = root / "requirements.txt"
-    store = root / "store"
-    store.mkdir(mode=0o700)
+    store = root / "unit/releases"
+    store.mkdir(mode=0o700, parents=True)
     # Sentinel is intentionally not a real active image: preparation must never
     # read/replace it, even when it cannot understand the serving generation.
     serving = store / "current-release"

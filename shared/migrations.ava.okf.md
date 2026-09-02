@@ -70,6 +70,14 @@ loaded module, must not be editable, and changed or undeclared SQL is rejected.
 This RECORD check is package integrity for read-only comparison, not deployment
 authority: an ordinary unanchored wheel still cannot migrate the database.
 
+The existing CLI transition helper records one secret-free candidate receipt per
+lease acquisition under the unit's `run/` directory. It validates operation,
+gateway ownership and the complete image before atomically writing a 0600
+receipt. Re-recording identical evidence is idempotent; a different candidate
+for that acquisition is refused. Loading revalidates the current lease, target,
+platform, image and gateway tuple. This journal neither selects an image nor
+authorizes service activation independently of the deployment operation.
+
 Rationale and the rejected alternatives:
 [2026-07-31-migrations-are-gateway-only](../decisions/2026-07-31-migrations-are-gateway-only.md).
 
