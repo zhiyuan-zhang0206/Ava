@@ -96,6 +96,9 @@ jobs:
       - name: Download the existing pinned collector outside maintenance
         shell: bash
         run: uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
+      - name: Type-check retained collector integration
+        shell: bash
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py cli/commands/_otel_collector.py
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
         run: |
