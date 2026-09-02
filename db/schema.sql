@@ -344,8 +344,24 @@ CREATE TABLE inbound_messages (
     -- pending -> done for lifecycle kinds); NULL = never claimed. Lets the
     -- gateway compute creation -> pickup latency (claimed_at - created_at),
     -- e.g. for the delivery watchdog / degraded-wake alerts.
-    claimed_at TIMESTAMPTZ
+    claimed_at TIMESTAMPTZ,
+    target_generation UUID,
+    target_owner UUID,
+    applied_at TIMESTAMPTZ,
+    observed_at TIMESTAMPTZ,
+    CONSTRAINT inbound_agent_command_unique UNIQUE(agent_id,id),
+    CONSTRAINT inbound_lifecycle_target_check CHECK (
+        (target_generation IS NULL AND target_owner IS NULL AND applied_at IS NULL AND observed_at IS NULL)
+        OR (target_generation IS NOT NULL AND target_owner IS NOT NULL
+            AND kind IN ('restart','terminate') AND claimed_at IS NOT NULL
+            AND status IN ('claimed','done') AND (observed_at IS NULL OR applied_at IS NOT NULL))
+    )
 );
+
+-- Same-agent reference also prevents retention from deleting unfinished intent.
+ALTER TABLE agents_meta ADD COLUMN lifecycle_command_id BIGINT;
+ALTER TABLE agents_meta ADD CONSTRAINT agents_meta_lifecycle_command_fk
+    FOREIGN KEY(id,lifecycle_command_id) REFERENCES inbound_messages(agent_id,id);
 
 COMMENT ON COLUMN inbound_messages.claimed_at IS
     'When the claim node grabbed this row (pending -> claimed for chat, pending -> done for lifecycle kinds). NULL = never claimed. Pickup latency = claimed_at - created_at.';
