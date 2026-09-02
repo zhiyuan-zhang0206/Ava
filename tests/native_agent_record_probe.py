@@ -11,7 +11,9 @@ import sys
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import psutil
 
@@ -23,6 +25,54 @@ from shared.session_record import SessionRecord
 
 
 class NativeAgentRecordOrdering(unittest.TestCase):
+    def test_helper_failure_and_timeout_are_not_delivery_success(self) -> None:
+        import subprocess
+
+        from shared import winproc
+
+        record = SessionRecord(123, 1.0, "test", "/", 1.0, control_mode="private-console-v1")
+        with (
+            patch.object(winproc, "_read_record", return_value=record),
+            patch.object(winproc, "_process_for_record", return_value=object()),
+            patch.object(winproc, "_record_path", return_value=Path("/unused/test.json")),
+        ):
+            with (
+                patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("helper", 5)),
+                self.assertRaises(subprocess.TimeoutExpired),
+            ):
+                winproc.graceful_signal("test")
+            result = subprocess.CompletedProcess([], 1, "", "identity changed")
+            with (
+                patch.object(subprocess, "run", return_value=result),
+                self.assertRaisesRegex(RuntimeError, "identity changed"),
+            ):
+                winproc.graceful_signal("test")
+
+    def assert_control_refusals(self, home: Path, child_pid: int) -> None:
+        from shared import winproc
+
+        name = session_name("agent-124")
+        path = home / "run" / "sessions" / f"{name}.json"
+        record = SessionRecord.read(path)
+        if record is None:
+            self.fail("missing admitted record")
+        replace(record, control_mode=None).write(path)
+        with self.assertRaisesRegex(RuntimeError, "private-console"):
+            winproc.graceful_signal(name)
+        replace(record, create_time=record.create_time + 100).write(path)
+        self.assertFalse(winproc.graceful_signal(name))
+        record.write(path)
+        if child_pid != record.pid:
+            foreign = path.with_name("other-recorded-session.json")
+            replace(
+                record, pid=child_pid, create_time=psutil.Process(child_pid).create_time()
+            ).write(foreign)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "another recorded session"):
+                    winproc.graceful_signal(name)
+            finally:
+                foreign.unlink()
+
     def assert_redirector_parent(self, child: psutil.Process, record: SessionRecord) -> None:
         self.assertEqual(os.name, "nt")
         parent = child.parent()
@@ -87,6 +137,7 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                 while not ready.exists() and time.monotonic() < deadline:
                     time.sleep(0.05)
                 self.assertTrue(ready.exists(), "signal handler readiness was never observed")
+                self.assert_control_refusals(home, int(ready.read_text()))
                 reported = backend.graceful_signal(session_name("agent-124"))
                 deadline = time.monotonic() + 5
                 while not received.exists() and time.monotonic() < deadline:
