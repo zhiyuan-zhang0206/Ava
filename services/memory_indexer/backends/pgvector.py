@@ -45,6 +45,7 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services.memory_indexer.backends.base import KIND_BODY, pk_of
+from shared.db_transaction import write_transaction
 
 _log = logging.getLogger("services.memory_indexer.backends.pgvector")
 
@@ -240,6 +241,18 @@ class PGVectorBackend:
                 yield conn
                 conn.commit()
 
+    @contextmanager
+    def _write_conn(
+        self, *, timeout: float | None = None
+    ) -> Generator[psycopg.Connection, None, None]:
+        """A connection whose transaction declares write intent before DML."""
+        if self._pool is None:
+            with write_transaction() as conn:
+                yield conn
+        else:
+            with write_transaction(self._pool, timeout=timeout) as conn:
+                yield conn
+
     def connect(self) -> None:
         """Open the connection pool + ensure extension/table/dim.
 
@@ -283,7 +296,7 @@ class PGVectorBackend:
         Re-upserting the same triple overwrites in place via the folded pk —
         identical semantics to the milvus backend."""
         self._require_writable()
-        with self._conn() as conn:
+        with self._write_conn() as conn:
             conn.execute(
                 _UPSERT_SQL,
                 (
@@ -304,7 +317,7 @@ class PGVectorBackend:
         Plain equality — no filter-expression escaping worries the way milvus
         boolean filters have them."""
         self._require_writable()
-        with self._conn() as conn:
+        with self._write_conn() as conn:
             conn.execute(_DELETE_SQL, (path,))
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
