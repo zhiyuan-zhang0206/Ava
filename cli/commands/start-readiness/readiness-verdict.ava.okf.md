@@ -74,6 +74,12 @@ tags:
   agent-runners still need Phase B, so the failure changes the verdict, not the plan.
   The frontend-only fast path returns before that machinery exists, so it prints its
   own block and returns 1 in `cli/commands/update.py:_run_frontend_only_update`.
+- `shared.start_serving` adds the recovery boundary: immediately before service
+  sessions launch, `start.py` replaces any prior success with a fresh `starting`
+  generation. Only that generation becomes `serving` after a fully ready start;
+  an unready or waived start leaves it closed, and `ava stop` removes it before
+  teardown. Each automatic respawn/resurrection or missing-schedule launch holds
+  the marker lock through its action, while reaping and other cleanup keep running.
 
 
 Parent: [[cli/commands/start-readiness/start-readiness.ava.okf.md|start readiness]].

@@ -205,6 +205,42 @@ def test_unready_service_exits_nonzero_after_printing_the_snapshot(
     assert "never became ready" in combined
 
 
+def test_unready_start_revokes_a_previous_serving_generation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failed start cannot leave an earlier boot's recovery authority live.
+
+    Omitting the attempt reset before service launch would leave the old marker
+    serving after the non-zero result and permit the boot-time reconcilers.
+    """
+    from shared import start_serving
+
+    path = tmp_path / "start-serving.json"
+    monkeypatch.setattr(start_serving, "state_path", lambda: path)
+    previous = start_serving.begin_start()
+    assert start_serving.mark_serving(previous) is True
+    _roster(monkeypatch, (("gateway", None),))
+    _probes(monkeypatch, ready=set())
+
+    assert _cli.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
+    assert start_serving.is_serving() is False
+
+
+def test_ready_start_marks_its_serving_generation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A healthy start admits recovery for the sessions it just brought up."""
+    from shared import start_serving
+
+    path = tmp_path / "start-serving.json"
+    monkeypatch.setattr(start_serving, "state_path", lambda: path)
+    _roster(monkeypatch, (("gateway", None),))
+    _probes(monkeypatch, ready={"gateway"})
+
+    assert _cli.cmd_start() == 0
+    assert start_serving.is_serving() is True
+
+
 def test_unready_service_code_is_not_the_declined_code(monkeypatch: pytest.MonkeyPatch) -> None:
     """The readiness code must not collide with `RESTART_DECLINED_EXIT_CODE`.
 
@@ -428,6 +464,21 @@ def test_no_readiness_gate_still_prints_but_exits_zero(
     combined = "".join(capsys.readouterr())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert _sess("gateway") in combined
     assert "never became ready" in combined
+
+
+def test_waived_unready_start_keeps_recovery_gated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An exit-code waiver never substitutes for the readiness boundary."""
+    from shared import start_serving
+
+    path = tmp_path / "start-serving.json"
+    monkeypatch.setattr(start_serving, "state_path", lambda: path)
+    _roster(monkeypatch, (("gateway", None),))
+    _probes(monkeypatch, ready=set())
+
+    assert _cli.cmd_start(readiness_gate=False) == 0
+    assert start_serving.is_serving() is False
 
 
 def test_live_update_lease_waives_the_gate_on_a_gateway(

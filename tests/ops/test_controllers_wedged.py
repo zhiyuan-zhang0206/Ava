@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -154,6 +155,16 @@ def _fresh_controller(pool: ConnectionPool | MagicMock) -> wedged_mod.WedgedAgen
     return controller
 
 
+@pytest.fixture(autouse=True)
+def _host_is_serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Existing controller cases model a host that passed its start gate."""
+    from shared import start_serving
+
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
+
+
 class TestGuards:
     def test_role_gate_skips_non_agent_runner(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -199,6 +210,44 @@ class TestGuards:
         controller = _fresh_controller(MagicMock())
         result = controller.reconcile("agent-runner")
         assert not result.acted
+
+    def test_not_serving_defers_recovery_but_keeps_zombie_cleanup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed start may reap terminated zombies but cannot relaunch work."""
+        from shared import start_serving
+
+        monkeypatch.setattr(settings.daemon, "wedged_agent_enabled", True)
+        start_serving.clear_serving()
+        reaped: list[int] = []
+
+        def _must_not_claim(
+            _pool: ConnectionPool,
+            _local_machine: str,
+            _running_age_s: float,
+            _idling_age_s: float,
+            _backoff_s: float,
+        ) -> list[tuple[int, int, datetime]]:
+            pytest.fail("must not claim a recovery before serving")
+
+        def _terminated_zombies(
+            _pool: ConnectionPool, _local_machine: str, _backoff_s: float
+        ) -> list[tuple[int, int]]:
+            return [(7, 1234)]
+
+        def _reap_terminated_zombie(_pool: ConnectionPool, agent_id: int, _pid: int) -> bool:
+            reaped.append(agent_id)
+            return True
+
+        monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
+        monkeypatch.setattr(wedged_mod, "_claim_wedged_candidates", _must_not_claim)
+        monkeypatch.setattr(wedged_mod, "_claim_terminated_lease_zombies", _terminated_zombies)
+        monkeypatch.setattr(wedged_mod, "_reap_terminated_lease_zombie", _reap_terminated_zombie)
+
+        result = _fresh_controller(MagicMock()).reconcile("agent-runner")
+
+        assert result.acted is True
+        assert reaped == [7]
 
 
 class TestRecovery:

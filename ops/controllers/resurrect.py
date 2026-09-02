@@ -146,7 +146,7 @@ _WORK_INBOUND_KINDS = ("chat", "compact_request")
 
 
 def _claim_crash_resurrect_candidates(
-    pool: ConnectionPool, local_machine: str, backoff_s: float
+    pool: ConnectionPool, local_machine: str, backoff_s: float, max_candidates: int | None = None
 ) -> list[AutoResurrectClaim]:
     """Atomically claim crash-resurrect candidates and return their CAS tokens.
 
@@ -160,7 +160,8 @@ def _claim_crash_resurrect_candidates(
     concurrent pass cannot double-claim the same corpse (the second UPDATE matches 0
     rows for it). Machine-scoped — a resurrect launches a local process, so a foreign
     row is never touched. A corpse at ``auto_resurrect_max_attempts`` unconsumed
-    ``kind='resurrect'`` lifecycle inbounds is outside the claim budget."""
+    ``kind='resurrect'`` lifecycle inbounds is outside the claim budget. A caller
+    can cap the atomic claim to serialize one recovery action at a time."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_resurrect_at = now() "
@@ -178,6 +179,26 @@ def _claim_crash_resurrect_candidates(
             "    AND im.status IN ('pending', 'claimed') "
             "    AND im.kind = ANY(%s)"
             ") "
+            "AND id IN ("
+            "  SELECT candidate.id FROM agents_meta candidate "
+            "  WHERE candidate.status = 'terminated' "
+            "    AND candidate.termination_source = ANY(%s) "
+            "    AND candidate.machine = %s "
+            "    AND (candidate.last_resurrect_at IS NULL "
+            "         OR now() - candidate.last_resurrect_at >= make_interval(secs => %s)) "
+            "    AND (SELECT count(*) FROM inbound_messages candidate_lc "
+            "         WHERE candidate_lc.agent_id = candidate.id "
+            "           AND candidate_lc.kind = 'resurrect' "
+            "           AND candidate_lc.status = 'pending') < %s "
+            "    AND EXISTS ("
+            "      SELECT 1 FROM inbound_messages candidate_im "
+            "      WHERE candidate_im.agent_id = candidate.id "
+            "        AND candidate_im.status IN ('pending', 'claimed') "
+            "        AND candidate_im.kind = ANY(%s)"
+            "    ) "
+            "  ORDER BY candidate.id "
+            "  LIMIT %s"
+            ") "
             "RETURNING id, termination_source, status_changed_at, last_resurrect_at",
             (
                 list(_RESURRECTABLE_SOURCES),
@@ -185,6 +206,12 @@ def _claim_crash_resurrect_candidates(
                 backoff_s,
                 settings.daemon.auto_resurrect_max_attempts,
                 list(_WORK_INBOUND_KINDS),
+                list(_RESURRECTABLE_SOURCES),
+                local_machine,
+                backoff_s,
+                settings.daemon.auto_resurrect_max_attempts,
+                list(_WORK_INBOUND_KINDS),
+                max_candidates,
             ),
         )
         claims = [
@@ -289,6 +316,8 @@ class CrashResurrectController:
     def reconcile(self, role: MachineRole) -> ReconcileResult:  # noqa: ARG002 — agent-runner-only, uniform Controller signature
         if not settings.daemon.auto_resurrect_enabled:
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=False)
+        from shared import start_serving
+
         # One-shot boot revive: on the daemon's FIRST reconcile (i.e. once per
         # restarter start, which `ava start` / `ava cluster update` both run),
         # resurrect this host's involuntary corpses with no pending-inbound
@@ -303,97 +332,113 @@ class CrashResurrectController:
             # down the pass is skipped WITHOUT setting the flag, so the next
             # tick retries the boot revive (nothing is stamped, no backoff
             # burned) instead of giving up on it.
+            if not _gateway_healthy():
+                return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=False)
             acted = False
-            if _gateway_healthy():
-                acted = self._resurrect_boot_corpses(machine_name())
-                self._boot_pass_done = True
+            for _ in range(settings.daemon.revive_max_per_pass):
+                with start_serving.recovery_permitted() as permitted:
+                    if not permitted:
+                        _log.debug("[ops.crash_resurrect] pass deferred until this host is serving")
+                        return ReconcileResult(
+                            dimension=self.name, blocks=BlockScope.NONE, acted=acted
+                        )
+                    revived = self._resurrect_one_boot_corpse(machine_name())
+                if revived is None:
+                    self._boot_pass_done = True
+                    return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=acted)
+                acted = revived or acted
+            self._boot_pass_done = True
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=acted)
         now = time.monotonic()
         if now - self._last_scan < CONTROLLER_SCAN_INTERVAL_S:
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=False)
-        self._last_scan = now
-        acted = self._resurrect_crashed(machine_name())
+        acted, scanned = self._resurrect_crashed(machine_name())
+        if scanned:
+            self._last_scan = now
         return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=acted)
 
-    def _resurrect_boot_corpses(self, local_machine: str) -> bool:
-        """One-shot boot revive: claim + resurrect this host's involuntary
-        corpses WITHOUT a pending-inbound requirement, capped per pass. Returns
-        True if any resurrect was attempted.
+    def _resurrect_one_boot_corpse(self, local_machine: str) -> bool | None:
+        """Claim + resurrect one boot corpse, or ``None`` once the pass is drained.
 
         Gateway-health gated exactly like the crash scan (deferred, not
         stamped, while the gateway is down). The cap is the same anti-storm
         guard the running/idling revive pass uses (`revive_max_per_pass`): a
         mass-death event drains over successive daemon starts, never as a
         burst."""
-        if not _gateway_healthy():
-            return False
         claims = _claim_boot_revive_candidates(
             self._pool,
             local_machine,
             settings.daemon.auto_resurrect_backoff_seconds,
-            settings.daemon.revive_max_per_pass,
+            1,
         )
         if not claims:
-            return False
-        for claim in claims:
-            _log.warning(
-                "[ops.crash_resurrect] boot-reviving involuntary-death agent %s "
-                "(no pending inbound; machine-reboot fleet restore)",
-                claim.agent_id,
-            )
-        return self._resurrect_claims(claims)
+            return None
+        claim = claims[0]
+        _log.warning(
+            "[ops.crash_resurrect] boot-reviving involuntary-death agent %s "
+            "(no pending inbound; machine-reboot fleet restore)",
+            claim.agent_id,
+        )
+        return self._resurrect_claim(claim)
 
-    def _resurrect_crashed(self, local_machine: str) -> bool:
+    def _resurrect_crashed(self, local_machine: str) -> tuple[bool, bool]:
         """Claim + resurrect this host's involuntary-death corpses that have pending
-        work past their backoff. Returns True if any resurrect was attempted.
+        work past their backoff. Returns ``(acted, scanned)``.
 
         Gateway health is checked BEFORE the claim: a resurrect boots against the
         gateway, so with it down we defer the whole pass without stamping
         last_resurrect_at (the corpses stay eligible, retried once the gateway is
         back) rather than burning a backoff window on a resurrect that would just
         crash-loop the agent."""
-        if not _gateway_healthy():
-            # Cheap pre-check so we don't advance the backoff clock during an outage.
-            # A rare false-negative just delays one scan; the corpses are unchanged.
-            return False
-        claims = _claim_crash_resurrect_candidates(
-            self._pool, local_machine, settings.daemon.auto_resurrect_backoff_seconds
-        )
-        return self._resurrect_claims(claims)
+        gateway_healthy = _gateway_healthy()
+        from shared import start_serving
 
-    def _resurrect_claims(self, claims: list[AutoResurrectClaim]) -> bool:
-        """Resurrect claimed agents one at a time; a single agent's failure is
-        caught and logged so one bad row never drops the pass. The backoff clock
-        is already stamped by the claim, so a failed resurrect is spaced by the
-        window, not retried next tick."""
-        if not claims:
-            return False
-        for claim in claims:
-            tid = claim.agent_id
-            try:
-                resurrect_agent(
-                    tid,
-                    resurrected_by=_RESURRECT_SOURCE,
-                    auto_claim=claim,
-                )
-                _log.warning(
-                    "[ops.crash_resurrect] auto-resurrected involuntary-death agent %s "
-                    "(will not retry for %.0fs)",
-                    tid,
+        acted = False
+        while True:
+            with start_serving.recovery_permitted() as permitted:
+                if not permitted:
+                    _log.debug("[ops.crash_resurrect] pass deferred until this host is serving")
+                    return acted, False
+                if not gateway_healthy:
+                    # The serving lock proves this was a real scan attempt. A
+                    # false-negative only delays one pass; the corpses are unchanged.
+                    return acted, True
+                claims = _claim_crash_resurrect_candidates(
+                    self._pool,
+                    local_machine,
                     settings.daemon.auto_resurrect_backoff_seconds,
+                    max_candidates=1,
                 )
-            except (ResurrectAlreadyAlive, ResurrectClaimStaleError):
-                # Raced with another resurrect after the claim — harmless (the agent
-                # is already coming back); the stamped backoff just spaces a future one.
-                _log.info(
-                    "[ops.crash_resurrect] agent %s already alive — another path "
-                    "resurrected it first",
-                    tid,
-                )
-            except Exception as exc:
-                # resurrect_agent forces the row back to 'terminated' + re-raises on a
-                # launch failure; termination_source is re-stamped 'launch-confirm', so
-                # the corpse stays eligible but the backoff window (already stamped)
-                # spaces the retry — no tight loop.
-                _log.error("[ops.crash_resurrect] resurrect agent %s failed: %r", tid, exc)
+                if not claims:
+                    return acted, True
+                acted = self._resurrect_claim(claims[0]) or acted
+
+    def _resurrect_claim(self, claim: AutoResurrectClaim) -> bool:
+        """Resurrect one claimed corpse while its serving authority is held."""
+        tid = claim.agent_id
+        try:
+            resurrect_agent(
+                tid,
+                resurrected_by=_RESURRECT_SOURCE,
+                auto_claim=claim,
+            )
+            _log.warning(
+                "[ops.crash_resurrect] auto-resurrected involuntary-death agent %s "
+                "(will not retry for %.0fs)",
+                tid,
+                settings.daemon.auto_resurrect_backoff_seconds,
+            )
+        except (ResurrectAlreadyAlive, ResurrectClaimStaleError):
+            # Raced with another resurrect after the claim — harmless (the agent
+            # is already coming back); the stamped backoff just spaces a future one.
+            _log.info(
+                "[ops.crash_resurrect] agent %s already alive — another path resurrected it first",
+                tid,
+            )
+        except Exception as exc:
+            # resurrect_agent forces the row back to 'terminated' + re-raises on a
+            # launch failure; termination_source is re-stamped 'launch-confirm', so
+            # the corpse stays eligible but the backoff window (already stamped)
+            # spaces the retry — no tight loop.
+            _log.error("[ops.crash_resurrect] resurrect agent %s failed: %r", tid, exc)
         return True
