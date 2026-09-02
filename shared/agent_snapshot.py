@@ -106,6 +106,27 @@ _GROUP = ""
 AgentListScope = Literal["all", "live", "terminated"]
 AgentListFields = Literal["full", "summary", "compact"]
 
+_MAX_SPAWNER_ANCESTOR_DEPTH = 32
+_LIVE_SPAWNER_ANCESTORS_SQL = cast(
+    LiteralString,
+    "WITH RECURSIVE spawner_walk(seed_id, agent_id, spawner, status, depth) AS ("
+    "SELECT seeded.seed_id, a.id, a.spawner, a.status, 0 "
+    "FROM unnest(%s::bigint[]) AS seeded(seed_id) "
+    "JOIN agents_meta a ON a.id = seeded.seed_id "
+    "UNION ALL "
+    "SELECT walk.seed_id, a.id, a.spawner, a.status, walk.depth + 1 "
+    "FROM spawner_walk walk "
+    "JOIN agents_meta a "
+    "ON a.id = substring(walk.spawner FROM '^agent:([0-9]+)$')::bigint "
+    "WHERE walk.status = 'terminated' "
+    "AND walk.depth < %s "
+    ") "
+    "SELECT DISTINCT ON (seed_id) seed_id, agent_id "
+    "FROM spawner_walk "
+    "WHERE status <> 'terminated' "
+    "ORDER BY seed_id, depth",
+)
+
 
 # Scope is part of the query text, not a post-fetch Python filter.  The three
 # statements are fixed literals selected from the validated vocabulary, so a
@@ -326,6 +347,51 @@ def _row_to_compact(row: tuple[Any, ...]) -> AgentListCompact:
     )
 
 
+def _agent_id_from_spawner(spawner: str) -> int | None:
+    """Return the valid agent id encoded by a direct agent spawner."""
+    target = spawner.removeprefix("agent:")
+    if target == spawner or not target.isascii() or not target.isdecimal():
+        return None
+    if len(target.lstrip("0") or "0") > 19:
+        return None
+    agent_id = int(target)
+    return agent_id if 0 < agent_id <= 9_223_372_036_854_775_807 else None
+
+
+def _project_live_spawners(
+    conn: psycopg.Connection,
+    rows: list[tuple[Any, ...]],
+) -> list[tuple[Any, ...]]:
+    """Replace dead direct parents with the nearest live ancestor for a roster."""
+    target_ids = {
+        agent_id for row in rows if (agent_id := _agent_id_from_spawner(row[1])) is not None
+    }
+    if not target_ids:
+        return rows
+
+    with conn.cursor() as cur:
+        cur.execute(
+            _LIVE_SPAWNER_ANCESTORS_SQL,
+            (list(target_ids), _MAX_SPAWNER_ANCESTOR_DEPTH),
+        )
+        nearest_live_ancestors = {
+            cast(int, seed_id): cast(int, ancestor_id) for seed_id, ancestor_id in cur.fetchall()
+        }
+
+    projected_rows: list[tuple[Any, ...]] = []
+    for row in rows:
+        target_id = _agent_id_from_spawner(row[1])
+        if target_id is None:
+            projected_rows.append(row)
+            continue
+        nearest_live_ancestor = nearest_live_ancestors.get(target_id)
+        if nearest_live_ancestor in (None, target_id):
+            projected_rows.append(row)
+            continue
+        projected_rows.append((*row[:1], f"agent:{nearest_live_ancestor}", *row[2:]))
+    return projected_rows
+
+
 def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     with conn.cursor() as cur:
@@ -367,6 +433,8 @@ def select_all(
     with conn.cursor() as cur:
         cur.execute(_SELECT_ALL_SQL[fields][scope])
         rows = cur.fetchall()
+    if scope == "live" and fields != "compact" and rows:
+        rows = _project_live_spawners(conn, rows)
     if fields == "summary":
         return [_row_to_summary(r) for r in rows]
     if fields == "compact":
