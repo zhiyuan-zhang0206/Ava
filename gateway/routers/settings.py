@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from psycopg.types.json import Jsonb
 
 from gateway.schemas import UserSettingListResponse, UserSettingRow, UserSettingUpdateRequest
+from shared.db_transaction import write_transaction
 
 router = APIRouter()
 
@@ -33,7 +34,7 @@ def get_settings(request: Request) -> UserSettingListResponse:
 @router.put("/api/settings/{key}")
 def put_setting(key: str, body: UserSettingUpdateRequest, request: Request) -> UserSettingRow:
     """Upsert a single setting by key."""
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(request.app.state.db_pool) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO user_settings (key, value, updated_at) "
             "VALUES (%s, %s, now()) "
@@ -42,6 +43,7 @@ def put_setting(key: str, body: UserSettingUpdateRequest, request: Request) -> U
             (key, Jsonb(body.value)),
         )
         row = cur.fetchone()
+        assert row is not None  # noqa: S101 — upsert RETURNING always yields a row
     return UserSettingRow(
         key=row[0],
         value=row[1],

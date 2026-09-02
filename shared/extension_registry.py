@@ -406,6 +406,7 @@ def register_tree(
     # at", and the one converge already records per package.
     digest = tree_hash(root)
     with pool.connection() as conn, conn.transaction():
+        conn.execute("SET TRANSACTION READ WRITE")
         put_blob(conn, archive, name=name, content_hash=digest)
         upsert(
             conn,

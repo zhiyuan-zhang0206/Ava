@@ -43,6 +43,7 @@ from ops.rpc_schemas import ClusterSpawnSession, ClusterTransitionPayload
 from shared import machines
 from shared.cluster_drift import prod_source_head_sha
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.live_events import ClusterUpdateStarted
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.redis_client import publish_best_effort_sync
@@ -614,7 +615,7 @@ def delete_cluster_machine(name: str, request: Request) -> MachineDeleteResponse
             detail=f"refusing to delete this host's own machines row ({name!r}); "
             "stop the gateway first if you really want to retire it.",
         )
-    with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(request.app.state.control_db_pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM machines WHERE name = %s", (name,))
         deleted = cur.rowcount > 0
     return MachineDeleteResponse(deleted=deleted)

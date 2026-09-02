@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from gateway.routers.agents import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
 from shared.cluster import session_name
+from shared.db_transaction import write_transaction
 from shared.machine import machine_name
 from shared.paths import ava_home
 
@@ -139,6 +140,7 @@ def _update_blocking(
 
     try:
         with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ WRITE")
             previous_enabled: bool | None = None
             if "enabled" in fields:
                 cur.execute(
@@ -188,6 +190,7 @@ def _create_blocking(pool: ConnectionPool[Any], body: ScheduleCreate) -> tuple[A
     _validate_script(body.script)
     try:
         with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ WRITE")
             cur.execute(
                 f"INSERT INTO schedules (name, description, script, command, enabled) "  # noqa: S608
                 f"VALUES (%s, %s, %s, %s, %s) RETURNING {_FULL_COLS}",
@@ -249,7 +252,7 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
 
 def _delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
     """Sync delete (DELETE + 404 guard) — via to_thread."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM schedules WHERE id = %s RETURNING id", (schedule_id,))
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
@@ -420,7 +423,7 @@ def _fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[A
 
 def _set_enabled_blocking(pool: ConnectionPool[Any], schedule_id: int, *, enabled: bool) -> None:
     """Sync enabled-flag UPDATE + 404 guard — via to_thread."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE schedules SET enabled = %s, updated_at = now() WHERE id = %s RETURNING id",
             (enabled, schedule_id),

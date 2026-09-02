@@ -56,6 +56,7 @@ def _next_session_index_from_db() -> int:
     # black-holing database would otherwise hang `ava.shell.new()` on the OS
     # TCP-retransmit timeout instead of raising. Same constant as shared.db.
     with psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn, conn.cursor() as cur:
+        cur.execute("SET TRANSACTION READ WRITE")
         cur.execute(
             "UPDATE agents_meta SET session_index = session_index + 1 "
             "WHERE id = %s RETURNING session_index",
@@ -235,6 +236,7 @@ def _create_session(
                 psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
                 conn.cursor() as cur,
             ):
+                cur.execute("SET TRANSACTION READ WRITE")
                 cur.execute(
                     "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
                     "VALUES (%s, %s, now() + make_interval(secs => %s))",

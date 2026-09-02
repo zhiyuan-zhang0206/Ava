@@ -51,6 +51,7 @@ from psycopg.rows import DictRow, dict_row
 
 from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.db import pool
+from shared.db_transaction import async_write_transaction
 
 _log = logging.getLogger(__name__)
 
@@ -388,7 +389,7 @@ async def attach_trace_to_checkpoint(
     Failure-tolerant: a missed stamp only loses one turn's content link.
     """
     try:
-        async with pool.connection() as conn, conn.cursor() as cur:
+        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             await cur.execute(
                 "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('trace_id', %s::text)"
                 " WHERE thread_id = %s AND checkpoint_id = %s",
