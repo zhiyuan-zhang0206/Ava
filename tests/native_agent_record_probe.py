@@ -5,6 +5,7 @@ authority. The separate PostgreSQL suite proves that only admission calls the
 publisher. All children and paths belong to this disposable CI test.
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -57,7 +58,28 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                         self.fail("native child did not publish both record identities")
                     self.assertEqual(admitted.pid, launched.pid)
                     self.assertEqual(admitted.create_time, launched.create_time)
+                    self.assertEqual(launched.cwd, str(Path.cwd()))
+                    self.assertIn("publish_admitted_session", launched.cmd)
                     self.assertEqual(admitted.generation, "00000000-0000-0000-0000-000000000001")
+                    process_group = None
+                    if os.name == "posix":
+                        process_group = os.getpgid(admitted.pid)
+                        self.assertNotEqual(process_group, os.getpgrp())
+                    sys.stdout.write(
+                        json.dumps(
+                            {
+                                "platform": sys.platform,
+                                "pid": admitted.pid,
+                                "birth": admitted.create_time,
+                                "pgid": process_group,
+                                "starttime": admitted.starttime,
+                                "attempt": attempt,
+                                "generation": admitted.generation,
+                                "child_delay": child_delay,
+                            }
+                        )
+                        + "\n"
+                    )
                     before = canonical.read_bytes()
                     with self.assertRaisesRegex(RuntimeError, "still live"):
                         _require_released_agent_session(123)
