@@ -28,6 +28,7 @@ from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.log import logger
 from shared.url_secret import url_with_port
 
+
 class UnanchoredHomeError(RuntimeError):
     """A DB connection was attempted from a dev checkout that resolved no home.
 
@@ -37,6 +38,7 @@ class UnanchoredHomeError(RuntimeError):
     database (see shared/dotenv_boot.py). Raised instead of letting the
     connection silently reach the prod database the host .env points at.
     """
+
 
 # TCP keepalive + connect timeout applied to every cluster Postgres connection —
 # the psycopg/libpq mirror of shared/redis_client.py's `_RESILIENCE_KWARGS`. A
@@ -125,6 +127,7 @@ PG_STATEMENT_TIMEOUT_KWARGS: dict[str, Any] = {
 # ceiling for the next borrower.
 PG_POOLED_BASELINE_RESTORE_SQL = ("RESET ALL", PG_STATEMENT_TIMEOUT_SET_SQL)
 
+
 def _restore_pooled_session(conn: psycopg.Connection) -> None:
     """Scrub a pooled connection back to its baseline session state.
 
@@ -152,6 +155,7 @@ def _restore_pooled_session(conn: psycopg.Connection) -> None:
     conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1])
     conn.commit()
 
+
 async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
     """Async twin of `_restore_pooled_session` for the agent-process pools.
 
@@ -164,11 +168,13 @@ async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
     await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1])
     await conn.commit()
 
+
 # psycopg_pool's own `ConnectionPool(timeout=...)` default, restated as a name so
 # `pool()` can pass it explicitly (a `float | None` sentinel forwarded via `**kwargs`
 # is untypeable against ConnectionPool's overloads). Callers that must not block for
 # this long pass their own — see `pool`'s docstring.
 DEFAULT_POOL_TIMEOUT_S = 30.0
+
 
 def _guard_db_url(url: str) -> str:
     """Refuse the unanchored sentinel; return the url otherwise. The single point
@@ -189,6 +195,7 @@ def _guard_db_url(url: str) -> str:
             "this operation needs the cluster config a fetch would have provided."
         )
     return url
+
 
 def direct_db_url() -> str:
     """The admin-plane Postgres URL: this cluster's `AVA_DB_URL` never routed
@@ -262,6 +269,7 @@ def direct_db_url() -> str:
         )
     return url
 
+
 def connect(
     *,
     autocommit: bool = False,
@@ -331,6 +339,7 @@ def connect(
         # own their backend exclusively, so no scrub is needed there).
         _restore_pooled_session(conn)
     return conn
+
 
 def pool(
     *,
@@ -420,6 +429,7 @@ def pool(
         ),
     )
 
+
 class InboundRow(NamedTuple):
     """One row of inbound_messages (for timeline reads)."""
 
@@ -430,6 +440,7 @@ class InboundRow(NamedTuple):
     status: str
     created_at: datetime
     claimed_at: datetime | None = None
+
 
 def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]:
     """After `fetchone()`, assert there was a row — for
@@ -446,6 +457,7 @@ def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]:
     if row is None:
         raise RuntimeError(f"expected exactly one row: {context}")
     return row
+
 
 def create_agent(db: psycopg.Connection) -> int:
     """Create a new agent (agents + agents_meta row). label left NULL
@@ -467,11 +479,13 @@ def create_agent(db: psycopg.Connection) -> int:
     db.commit()
     return new_id
 
+
 def agent_exists(db: psycopg.Connection, agent_id: int) -> bool:
     """Check whether an agent exists. Web endpoints use this as a 404 precondition."""
     with db.cursor() as cur:
         cur.execute("SELECT 1 FROM agents WHERE id = %s", (agent_id,))
         return cur.fetchone() is not None
+
 
 def list_agents(db: psycopg.Connection) -> list[tuple[int, str | None]]:
     """Return all agents: (id, label). label None means "not set" —
@@ -479,6 +493,7 @@ def list_agents(db: psycopg.Connection) -> list[tuple[int, str | None]]:
     with db.cursor() as cur:
         cur.execute("SELECT id, label FROM agents ORDER BY id ASC")
         return cur.fetchall()
+
 
 def publish_inbound_wake(agent_id: int, payload: str) -> None:
     """Best-effort Redis publish to wake an idle agent — the fast path paired
@@ -532,6 +547,7 @@ def publish_inbound_wake(agent_id: int, payload: str) -> None:
             exc=exc,
         )
 
+
 def insert_inbound_message(
     db: psycopg.Connection,
     agent_id: int,
@@ -572,19 +588,15 @@ def insert_inbound_message(
         raise ValueError("target_process_identity is reserved for admitted lifecycle application")
     if payload is not None and "resurrection_retry" in payload:
         raise ValueError("resurrection_retry is reserved for the pending resurrection owner")
-<<<<<<< HEAD
+    if payload is not None and (
+        {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys()
+    ):
+        raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
     from shared.caller_identity import caller_payload
     from shared.envelope import reject_unnegotiated_caller
 
     reject_unnegotiated_caller(source)
     payload = caller_payload(source, payload)
-084097681 (fix: retain bounded pending wake retries through old process exit)
-=======
-    if payload is not None and (
-        {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys()
-    ):
-        raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
->>>>>>> 7f4039be5 (fix(lifecycle): commit resurrection launch budget before OS effects)
     # Map inbound kind → lifecycle event_type. Only chat messages between
     # agents produce a 'send_message' event; user→agent chat is not an
     # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /
@@ -644,6 +656,7 @@ def insert_inbound_message(
     publish_inbound_wake(agent_id, str(new_id))
     return new_id
 
+
 def insert_restart_completed_inbound(
     cur: psycopg.Cursor,
     agent_id: int,
@@ -690,6 +703,7 @@ def insert_restart_completed_inbound(
     )
     return source, content, payload
 
+
 # A "live" agent is one currently holding a process (status running/idling) —
 # the set a cluster-wide stop-the-world (quiesce before a schema migration) must
 # drain. The three helpers below all key off this same predicate; the statuses
@@ -716,6 +730,7 @@ ALIVE_STATUSES: tuple[str, ...] = (
 # "alive" stays one definition across queries of every shape.
 ALIVE_SQL = "status = ANY(%s) AND lease_expires_at > now()"
 
+
 def agent_is_alive(status: str | None, lease_expires_at: datetime | None) -> bool:
     """The Python half of the single alive predicate, for row-based checks.
 
@@ -730,6 +745,7 @@ def agent_is_alive(status: str | None, lease_expires_at: datetime | None) -> boo
         return False
     return lease_expires_at > datetime.now(UTC)
 
+
 # FYI notice (require_response=false) lifetime in the open queue: after this many
 # days an unread FYI is auto-resolved ('read') — the open feed, the unread badge
 # and the IM bridge stop carrying it (audit 05-gateway-lifecycle C1: open FYIs
@@ -739,6 +755,7 @@ def agent_is_alive(status: str | None, lease_expires_at: datetime | None) -> boo
 # the gateway's open-feed query, so no background sweeper is needed. One knob:
 # change it here (and re-run the notice tests) to configure the TTL.
 NOTICE_FYI_TTL_DAYS = 30
+
 
 def signal_live_agents_restart(
     source: str, *, exclude_agent_ids: Collection[int] = (), machine: str | None = None
@@ -787,6 +804,7 @@ def signal_live_agents_restart(
         publish_inbound_wake(aid, "0")
     return ids
 
+
 def list_live_agent_ids(machine: str | None = None) -> list[int]:
     """IDs of agents currently holding a process (status running/idling).
 
@@ -800,6 +818,7 @@ def list_live_agent_ids(machine: str | None = None) -> list[int]:
             (list(ALIVE_STATUSES), machine, machine),
         )
         return [row[0] for row in cur.fetchall()]
+
 
 def mark_agents_restarting(agent_ids: Collection[int]) -> list[int]:
     """CAS-mark live agents 'restarting' so the restarter respawns them on new
@@ -824,6 +843,7 @@ def mark_agents_restarting(agent_ids: Collection[int]) -> list[int]:
         conn.commit()
     return ids
 
+
 def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[InboundRow]:
     """List chat inbounds still queued for an agent, oldest first.
 
@@ -843,6 +863,7 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
             (agent_id,),
         )
         return [InboundRow(*row) for row in cur.fetchall()]
+
 
 def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int:
     """UI / admin call: insert one kind='compact_request' inbound —
@@ -878,6 +899,7 @@ def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int
     # publish_inbound_wake docstring).
     publish_inbound_wake(agent_id, str(inbound_id))
     return inbound_id
+
 
 def list_inbound_messages(
     db: psycopg.Connection,
