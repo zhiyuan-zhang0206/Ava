@@ -177,6 +177,23 @@ def test_finalize_writes_override_a_poisoned_pooled_backend(
         release_update_lock("pgbouncer-finalizer-test")
 
 
+def test_recovery_claim_overrides_a_poisoned_pooled_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovery can lock a lease on a backend a previous client made read-only."""
+    from shared import config
+    from shared.cluster_lock import claim_recovery_lock
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as reader:
+            reader.execute("SET default_transaction_read_only = on")
+
+        claim = claim_recovery_lock("pgbouncer-recovery-test", observed=None)
+
+    assert claim.acquired is True
+
+
 def _statement_timeout(conn: psycopg.Connection) -> str:
     """The backend's statement_timeout as a string, with a row-asserted fetchone."""
     row = conn.execute("SHOW statement_timeout").fetchone()
