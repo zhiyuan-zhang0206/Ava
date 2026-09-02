@@ -80,10 +80,22 @@ def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
 
 
 def editable_site_packages_dirs(source_root: Path) -> tuple[Path, ...]:
-    """Existing site-packages directories holding an Ava editable-install record."""
+    """Existing site-packages directories under ``source_root/.venv``.
 
-    records = editable_ava_pth_paths(source_root) + editable_direct_url_paths(source_root)
-    return tuple(sorted({path.parent for path in records}, key=str))
+    Discover layouts structurally rather than through Ava's editable-install
+    records. A partially failed sync can remove those records while leaving a
+    read-only directory that a later sync must still be able to open.
+    """
+
+    venv = source_root / ".venv"
+    matches: set[Path] = set()
+    for pattern in (
+        "Lib/site-packages",
+        "lib/python*/site-packages",
+        "lib64/python*/site-packages",
+    ):
+        matches.update(path for path in venv.glob(pattern) if path.is_dir())
+    return tuple(sorted(matches, key=str))
 
 
 def _normalized_exact_path(path: Path) -> str:
@@ -128,16 +140,20 @@ def _write_window(paths: Iterable[Path]) -> Generator[None, None, None]:
 
     The exact original mode is restored in ``finally`` on both successful and
     failed writes. If a writer atomically replaces the file, the replacement
-    receives the original protection too.
+    receives the original protection too. Paths that disappear before entry
+    are skipped because a recreated virtualenv has no prior mode to restore.
     """
 
     original_modes: dict[Path, int] = {}
     for path in paths:
-        mode = stat.S_IMODE(path.stat().st_mode)
-        if mode & stat.S_IWUSR:
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+            if mode & stat.S_IWUSR:
+                continue
+            original_modes[path] = mode
+            path.chmod(mode | stat.S_IWUSR)
+        except FileNotFoundError:
             continue
-        original_modes[path] = mode
-        path.chmod(mode | stat.S_IWUSR)
     try:
         yield
     finally:
