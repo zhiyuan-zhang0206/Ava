@@ -108,6 +108,16 @@ build-backend = "hatchling.build"
 # This packaging step does not activate wheel-based production deployments.
 packages = ["ava", "cli", "agent", "shared", "ops", "gateway", "services", "ava_builtins"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# Existing consumers resolve these siblings of shared/. Keep their relative
+# layout in the installed application; no Git checkout is needed to read them.
+"db/schema.sql" = "db/schema.sql"
+"migrations" = "migrations"
+"commands" = "commands"
+"schedules" = "schedules"
+"deploy/otel-collector/otel-collector.yaml" = "deploy/otel-collector/otel-collector.yaml"
+"deploy/lgtm/config" = "deploy/lgtm/config"
+
 [tool.uv]
 package = true
 
