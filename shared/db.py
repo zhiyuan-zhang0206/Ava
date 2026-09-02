@@ -579,6 +579,8 @@ def insert_inbound_message(
         publish an `inbound_arrived` event for the web UI to show in
         real time (spec §5).
     """
+    if payload is not None and "lifecycle_result" in payload:
+        raise ValueError("lifecycle_result is reserved for verified command settlement")
     # Map inbound kind → lifecycle event_type. Only chat messages between
     # agents produce a 'send_message' event; user→agent chat is not an
     # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /
