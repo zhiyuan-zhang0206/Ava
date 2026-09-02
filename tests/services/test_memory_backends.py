@@ -39,12 +39,13 @@ def test_factory_and_probe_registries_stay_in_sync() -> None:
     assert set(factory._BACKENDS) == set(probe._PROBES)
 
 
-def test_factory_default_is_milvus() -> None:
-    """The unset switch yields the milvus backend — behavior unchanged."""
+def test_factory_default_is_numpy() -> None:
+    """The unset switch yields the numpy backend (default since 2026-09-02)."""
+    from services.memory_indexer.backends.numpy import NumPyBackend
     from shared.config import settings
 
-    assert settings.services.memory_search_backend == "milvus"
-    assert isinstance(factory.get_backend(dim=_DIM, fingerprint=_FP), MilvusBackend)
+    assert settings.services.memory_search_backend == "numpy"
+    assert isinstance(factory.get_backend(dim=_DIM, fingerprint=_FP), NumPyBackend)
 
 
 def test_factory_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:

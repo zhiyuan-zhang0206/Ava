@@ -196,11 +196,11 @@ class ServiceSettings(EnvSettings):
     )
 
     memory_search_backend: str = Field(
-        default="milvus",
+        default="numpy",
         alias="AVA_MEMORY_SEARCH_BACKEND",
         description=(
-            "Storage backend for the memory embedding index — 'milvus' (default) | "
-            "'numpy' (the local exact-search service) | 'pgvector' (the cluster "
+            "Storage backend for the memory embedding index — 'milvus' | "
+            "'numpy' (default; the local exact-search service) | 'pgvector' (the cluster "
             "Postgres as vector store — the vendored runtime injects the pinned "
             "pgvector files and `ava start` pre-creates the extension, so it works "
             "on the zero-manual-install path; a Postgres without the binaries "
