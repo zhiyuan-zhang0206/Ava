@@ -348,6 +348,12 @@ def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: 
         "--",
         *command,
     ]
+    # Both pipes are drained only at exit (communicate below), not during the
+    # poll loop: without --progress, pg_basebackup emits far less than the
+    # 64 KiB pipe buffer, so the child cannot block on a full pipe in
+    # practice. Output beyond the buffer would only surface as the six-hour
+    # bound firing with the drained tail in the message — accepted over a
+    # reader thread, which this diagnostic path does not need.
     process = subprocess.Popen(  # noqa: S603
         wrapped,
         stdout=subprocess.PIPE,
@@ -358,12 +364,16 @@ def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: 
     while process.poll() is None:
         if stop.wait(0.25):
             _stop_process(process)
-            process.communicate()
-            raise BaseCandidateError("base candidate capture was stopped")
+            stdout, stderr = process.communicate()
+            raise BaseCandidateError(
+                f"base candidate capture was stopped{_output_suffix(stdout, stderr)}"
+            )
         if time.time() >= deadline:
             _stop_process(process)
-            process.communicate()
-            raise BaseCandidateError("pg_basebackup exceeded its six-hour bound")
+            stdout, stderr = process.communicate()
+            raise BaseCandidateError(
+                f"pg_basebackup exceeded its six-hour bound{_output_suffix(stdout, stderr)}"
+            )
     stdout, stderr = process.communicate()
     if process.returncode != 0:
         raise BaseCandidateError(
@@ -455,6 +465,8 @@ def _birth_candidate(
 
 
 def _verify_candidate(path: Path, stop: StopSignal) -> None:
+    # Same pipe-bound acceptance as _run_capture: pg_verifybackup's report is
+    # a few lines, far below the pipe buffer, drained at exit.
     verify = subprocess.Popen(  # noqa: S603
         [str(pg_tool("pg_verifybackup")), "--no-parse-wal", str(path)],
         stdout=subprocess.PIPE,
@@ -465,12 +477,16 @@ def _verify_candidate(path: Path, stop: StopSignal) -> None:
     while verify.poll() is None:
         if stop.wait(0.25):
             _stop_process(verify)
-            verify.communicate()
-            raise BaseCandidateError("base candidate verification was stopped")
+            stdout, stderr = verify.communicate()
+            raise BaseCandidateError(
+                f"base candidate verification was stopped{_output_suffix(stdout, stderr)}"
+            )
         if time.monotonic() >= deadline:
             _stop_process(verify)
-            verify.communicate()
-            raise BaseCandidateError("pg_verifybackup exceeded its six-hour bound")
+            stdout, stderr = verify.communicate()
+            raise BaseCandidateError(
+                f"pg_verifybackup exceeded its six-hour bound{_output_suffix(stdout, stderr)}"
+            )
     stdout, stderr = verify.communicate()
     if verify.returncode != 0:
         raise BaseCandidateError(
