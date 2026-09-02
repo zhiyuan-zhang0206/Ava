@@ -55,7 +55,9 @@ async def test_token_derived_mcp_source_reaches_real_claim(
             "instance": str(credential["id"]),
         }
     }
-    assert "External agent" in str(build_chat_inbound(claimed[0]).content)
+    content = build_chat_inbound(claimed[0]).model_dump()["content"]
+    assert isinstance(content, str)
+    assert "External agent" in content
 
 
 @pytest.mark.parametrize("denial", ["revoked", "read", "source", "instance", "protocol0", "stale"])
