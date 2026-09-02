@@ -41,7 +41,7 @@ from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CompactState
 from shared.config import settings
-from shared.db import create_agent, insert_inbound_message
+from shared.db import insert_inbound_message
 from shared.redis_listener import RedisInboundListener
 from tests.conftest import spawn_agent
 
@@ -325,7 +325,7 @@ async def test_claim_inbound_batch_stamps_claimed_at(
     nobody claimed keeps claimed_at NULL."""
     from agent.db import claim_inbound_batch
 
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     chat_id = insert_inbound_message(db_conn, tid, "hello", source="user")
     with db_conn.cursor() as cur:
         cur.execute(
@@ -403,7 +403,7 @@ async def test_claim_chat_expands_slash_command(
 ):
     """A `/<name> ...` chat inbound is expanded by the claim node into the
     command's template + the user's note before being wrapped for the model."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     insert_inbound_message(db_conn, tid, "/recap just the PRs", source="user")
 
     cmd = await claim_node(
@@ -427,7 +427,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     """compact_summary inbound (written by agent ava.compact) → claim returns
     Command containing RemoveMessage(REMOVE_ALL_MESSAGES) sentinel + summary.
     The entire history is replaced, leaving no raw tail. Does **not** call LLM."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     summary_text = "agent-written summary text"
     _insert_inbound_kind(db_conn, tid, summary_text, "compact_summary")
 
@@ -463,7 +463,7 @@ async def test_claim_compact_summary_bumps_compact_version(
     same, so Layer 3 subscribers (ava_code's context-file re-injection, the
     reminder re-arm) must see it. Without the bump a self-compact is invisible to
     them."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "agent summary", "compact_summary")
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="old")],
@@ -490,7 +490,7 @@ async def test_claim_compact_request_calls_backend_llm(
 ):
     """compact_request inbound (user "/compact") → claim calls generate_summary,
     running backend LLM to generate a summary, then replaces messages."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -521,7 +521,7 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
     not a fault — consumed as a no-op: does not issue LLM request, does not replace messages,
     does not raise an error (raising would crash the process after the batch is already claimed,
     losing the consumed inbound row)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -547,7 +547,7 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
     COMPACT_MAX_ATTEMPTS times, then raises CompactionFailedError (the runloop
     turns that into a turn-abort; the agent stays alive) instead of letting a
     raw provider exception kill the process after the row is consumed."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -584,7 +584,7 @@ async def test_claim_compact_request_retries_then_succeeds(
     """compact_request whose first Compaction LLM call fails → retried; a later
     attempt's summary is applied (same retry semantics as the auto-compact
     hook's COMPACT_MAX_ATTEMPTS)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -741,7 +741,7 @@ async def test_claim_compact_summary_finalizes_claimed_history(
     missing from the checkpoint, resets them to 'pending', and re-delivers
     already-answered messages — a run of consecutive user messages with the
     compacted replies gone (Task #823)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "agent summary", "compact_summary")
     # Two chats claimed earlier (their HumanMessages are in state.messages,
     # status still 'claimed' — the two-phase path finalizes only at startup).
@@ -793,7 +793,7 @@ async def test_claim_unknown_kind_raises(
     """
     from agent.db import ClaimedInbound
 
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
 
     async def fake_claim(_db, _tid):
         return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
@@ -817,7 +817,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     'You are terminated by {source}' text + ava_msg_type='lifecycle' metadata)
     + goto END with exit_requested=True, so the per-turn runloop returns
     (instead of re-invoking) and the process exits naturally."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
@@ -856,7 +856,7 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
     instead of blocking in _wait_for_batch — that is what closes the per-turn
     root span at the turn boundary. Would hang here if it blocked, so a plain
     return IS the lock."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=True),
@@ -885,7 +885,7 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
     `exit_requested` stays False: an idle agent is not a terminated one — the
     host drops the task and re-creates it on the next wake.
     """
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
@@ -959,7 +959,7 @@ async def test_claim_fresh_invocation_waits_then_runs_turn(
     before_llm with turn_active=True so the NEXT idle pass ends the turn."""
     from agent.db import ClaimedInbound
 
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     waited: list[int] = []
 
     async def fake_wait(_ctx: object, agent_id: int) -> list[ClaimedInbound]:
@@ -987,7 +987,7 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
     """cancel inbound → pause: halted=True + re-enter CLAIM (-> idle), NOT END
     (process stays alive). No lifecycle marker (a pause leaves no trace); a
     Cancelled SSE is emitted so the live UI clears turn-active state."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     pub = MagicMock()
 
@@ -1023,7 +1023,7 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     co-batched chat in state.messages (surfaced to the UI via InboundCommitted)
     until some later inbound happened to arrive — "message picked up but the
     agent never continued"."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     # chat first (older id), then cancel — the real sequence: message queued,
     # then Stop pressed mid-execution.
     insert_inbound_message(db_conn, tid, "please also do X", source="user")
@@ -1062,7 +1062,7 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
     sends a new message while both are still pending). The wake decision is
     order-independent — a chat anywhere in the cancel batch means new intent to
     process, so goto=before_llm + halted=False regardless of insertion order."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     # cancel first (older id), then chat
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     chat_id = insert_inbound_message(db_conn, tid, "new instruction", source="user")
@@ -1092,7 +1092,7 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
     the cancel idle. Both rows are claimed/done in one pass; the pause must not
     swallow the stronger kill. Regression for the cancel-over-terminate
     precedence inversion."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     # insertion order shouldn't matter; put cancel first to make the override tempting
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
@@ -1122,7 +1122,7 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
     """settings.general.message_timestamps=False → the lifecycle marker has no leading
     timestamp; it starts straight at `[system]` with no stray space."""
     monkeypatch.setattr(settings.general, "message_timestamps", False)
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
@@ -1141,7 +1141,7 @@ async def test_claim_terminate_self_renders_by_yourself(
 ):
     """source='self' (ava.self.terminate() suicide) → marker text spells 'by yourself'
     instead of 'by self', more accurately expressing 'agent shuts itself down' semantics."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
 
     cmd = await claim_node(
@@ -1167,7 +1167,7 @@ async def test_claim_self_terminate_with_chat_cobatch_abandons_terminate(
     start), so the death decision must be abandoned: the chat is committed and
     drives a wake (goto before_llm), the terminate is a consumed no-op (no
     marker, no END), the agent stays alive to process the message."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     insert_inbound_message(db_conn, tid, "peer message during suicide", source="agent:1")
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
     await _await_inbound_visible(aops_pool, terminate_id)
@@ -1199,7 +1199,7 @@ async def test_claim_self_terminate_with_older_chat_cobatch_abandons_terminate(
     terminating turn). It is still unseen by the agent, so it vetoes the death
     just the same — a co-batched chat is by construction not in the LLM context
     (only chats claimed in an earlier batch are)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     chat_id = insert_inbound_message(db_conn, tid, "queued before the suicide", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
@@ -1225,7 +1225,7 @@ async def test_claim_external_terminate_with_newer_chat_abandons_terminate(
     the chat is the most recent genuine intent — same recency rule as the
     resurrect veto — so the terminate is abandoned (consumed no-op, no marker)
     and the agent wakes to process the chat."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     chat_id = insert_inbound_message(db_conn, tid, "message after the kill", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
@@ -1253,7 +1253,7 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     terminate is the latest intent and the agent dies (END + marker). The
     pre-death chat is committed to history as before; it is visible after a
     resurrect."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     chat_id = insert_inbound_message(db_conn, tid, "old message before the kill", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
@@ -1286,7 +1286,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     stays pending in the table."""
     from agent.db import ClaimedInbound
 
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
     chat_id = insert_inbound_message(db_conn, tid, "message after the claim", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
@@ -1545,7 +1545,7 @@ async def test_claim_restart_completed_kind_appends_marker_and_continues(
     """restart_completed inbound (delivered to the new process by respawn_agent) → claim appends
     lifecycle marker 'You have been restarted by {source}' + goto BEFORE_LLM.
     halted=False (mid-task before restart) → wakes up to resume interrupted work."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
 
     cmd = await claim_node(
@@ -1571,7 +1571,7 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
 ):
     """system_note inbound (task assign/update/reminder delivery) → claim appends
     a system note (NoteTag 'task') + goto BEFORE_LLM — never a chat peer message."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -1616,7 +1616,7 @@ async def test_claim_co_batched_task_notes_leave_usage_untagged(
     aredis_inbound_listener: RedisInboundListener,
 ):
     """One LLM turn cannot be attributed to two distinct task notes."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -1645,7 +1645,7 @@ async def test_claim_system_note_unknown_tag_fails_loud(
 ):
     """A system_note inbound carrying a non-NoteTag payload fails loud — a
     writer bug must not silently render as the wrong timeline chip."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -1966,7 +1966,7 @@ async def test_claim_restart_completed_while_idle_stays_silent(
     """halted=True (idle before restart, preserved from RESTART case) + batch has only
     restart_completed → after committing lifecycle marker, goto CLAIM returns to waiting,
     does **not** enter before_llm — idle agent does not burn an LLM call for 'knowing I was restarted'."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
 
     cmd = await claim_node(
@@ -1992,7 +1992,7 @@ async def test_claim_restart_completed_with_chat_cobatch_wakes(
 ):
     """halted=True but batch has chat in addition to restart_completed (user message that arrived
     during agent downtime window) → wakes normally to before_llm, must not silently swallow the chat."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
     insert_inbound_message(db_conn, tid, "are you back?", source="user")
 
@@ -2017,7 +2017,7 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
 ):
     """resurrect inbound (delivered to the new process by resurrect_agent) → claim appends
     lifecycle marker 'You have been resurrected by {source}' + goto BEFORE_LLM."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
     cmd = await claim_node(
@@ -2054,7 +2054,7 @@ async def test_claim_stale_terminate_loses_to_newer_resurrect(
     latest intent → the agent wakes (goto before_llm), the stale prior-life
     terminate is the consumed loser (no terminate marker, no END). Without recency
     the terminate would kill the freshly-resurrected process on its first claim."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     # id == insertion order: terminate older than the resurrect that follows it
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
@@ -2084,7 +2084,7 @@ async def test_claim_resurrect_then_terminate_still_dies(
     dies (goto END + terminate marker); the resurrect is the consumed loser (no
     'resurrected' marker). Fixed `resurrect > terminate` priority would wrongly
     keep alive an agent the user just killed; recency resolves it correctly."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
@@ -2142,7 +2142,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     [terminate, chat, resurrect]. The resurrect (newest) wins → the agent wakes and
     the chat survives to be answered; the stale terminate is vetoed. Without recency
     the auto-resurrected agent would die before reading the message."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     insert_inbound_message(db_conn, tid, "are you there?", source="user")
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
@@ -2172,7 +2172,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     (exit_kind is None), so it still runs — the history is compacted and the
     resurrect marker is appended after the summary. Without auto-resurrect the
     compact_request would sit pending with no live process to claim it."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
@@ -2211,7 +2211,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     (inherited history from source agent), so no SystemMessage injection; marker appended at
     the end, then the `on_fork` notes (fork_notes stubbed here — its membership is pinned in
     test_fork_notes.py, issue #1320)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
@@ -2261,7 +2261,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     cluster-wide: the inherited copy is kept and NOT re-grafted."""
     from langchain_core.messages import RemoveMessage
 
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
 
     def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:  # pyright: ignore[reportShadowedBuiltins]
@@ -2320,7 +2320,7 @@ async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
     aredis_inbound_listener: RedisInboundListener,
 ):
     """multiple chat inbounds in same batch → all appended in FIFO order by created_at (none lost)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     insert_inbound_message(db_conn, tid, "first", source="user")
     insert_inbound_message(db_conn, tid, "second", source="agent:5")
     insert_inbound_message(db_conn, tid, "third", source="user")
@@ -2353,7 +2353,7 @@ async def test_claim_chat_marks_inbound_claimed_immediately(
     """chat inbound uses two-phase commit (since 2026-05-27): claim UPDATE pending → claimed;
     a subsequent startup reconcile will move claimed → done; if the process dies midway,
     claimed rows will be reset back to pending by the new process for re-delivery."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     iid = insert_inbound_message(db_conn, tid, "msg", source="user")
 
     await claim_node(
@@ -2381,7 +2381,7 @@ async def test_claim_lifecycle_marks_inbound_done_immediately(
     startup's reconcile would see no `ava_inbound_id` in state.messages for it
     and reset it to `pending` — that loops resurrect→terminate→resurrect, and
     re-delivers compact summaries on every boot. See codex review of PR #539."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     iid = _insert_inbound_kind(db_conn, tid, "terminate me", "terminate", source="user")
 
     await claim_node(
@@ -2505,7 +2505,7 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     """
     import json
 
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     id1 = insert_inbound_message(db_conn, tid, "first", source="user")
     id2 = insert_inbound_message(db_conn, tid, "second", source="user")
 
@@ -2541,7 +2541,7 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
     part of the inbound_chat anchor sequence).
 
     The restart test below (claim does not append message nor publish)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", kind, source="user")
 
     pub = MagicMock()
@@ -2585,7 +2585,7 @@ async def test_claim_compact_summary_alone_does_not_publish_committed(
 ) -> None:
     """compact_summary alone → does not publish InboundCommitted (it goes through state replace
     not inbound append; frontend reload should be triggered by llm_done)."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "summary", "compact_summary")
 
     pub = MagicMock()
@@ -2607,7 +2607,7 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
 ) -> None:
     """same batch chat + compact_summary → publish only for the chat's inbound_id,
     summary does not emit publish."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     chat_id = insert_inbound_message(db_conn, tid, "user msg", source="user")
     _insert_inbound_kind(db_conn, tid, "summary", "compact_summary")
 
@@ -3060,7 +3060,7 @@ async def test_claim_terminate_external_source_renders_source_verbatim(
 ):
     """source='agent:42' (another agent triggering terminate) → marker uses 'by agent:42'
     as-is, does not go through _by_who's self special case."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="agent:42")
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -3089,7 +3089,7 @@ async def test_claim_compact_summary_with_no_existing_system_message(
     SystemMessage. Claim now never emits one — the head is `init_context`'s — so
     the invariant is stronger and simpler: a compaction emits the clearing
     sentinel and nothing else."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     summary_text = "first turn summary"
     _insert_inbound_kind(db_conn, tid, summary_text, "compact_summary")
 
@@ -3116,7 +3116,7 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     Lock down `committed_chat_ids.append(item.id)` appearing only in CHAT branch —
     mutation moving it to dispatch top / resurrect branch would cause publish for extra
     lifecycle id, frontend fetching timeline would not find reload anchor."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     chat_id = insert_inbound_message(db_conn, tid, "user msg", source="user")
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
@@ -3171,7 +3171,7 @@ async def test_claim_chat_message_carries_source_metadata(
 
     Lock down mutant_76: `source=item.source` → `source=None`. Verify message's
     additional_kwargs.ava_source equals original item.source ('user'), preventing None leak."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     insert_inbound_message(db_conn, tid, "hello", source="user")
 
     cmd = await claim_node(
@@ -3196,7 +3196,7 @@ async def test_claim_restart_completed_with_payload_overlay_preserves_args(
 
     Lock down mutation that replaces source / payload args with None or skips them: losing source
     misses the 'restarted by' wording, losing payload misses overlay diff segment."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -3230,7 +3230,7 @@ async def test_claim_node_wrapper_returns_underlying_command(
     """`claim_node` is a thin wrapper around `node_lifecycle` enter/exit, **must** return the
     inner `_claim_node_impl`'s Command (cannot drop / change goto / wrap into something else).
     Lock down mutation that removes `await` / `return` from `return await _claim_node_impl(...)`."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     insert_inbound_message(db_conn, tid, "wrapper test", source="user")
 
     cmd = await claim_node(
@@ -3452,7 +3452,7 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     from agent.graph import _claim
     from agent.graph._claim import claim_node
 
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
 
     # stub the body: we only exercise the wrapper + node_lifecycle enter path
     async def _stub_impl(_state, _runtime, _config):

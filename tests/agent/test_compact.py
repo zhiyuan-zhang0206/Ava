@@ -46,7 +46,6 @@ from agent.hooks.compact import (
 from agent.llm import execute_code
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
-from shared.db import create_agent as _create_agent
 from shared.lm.context_budget import ContextBudget
 from tests.conftest import spawn_agent
 
@@ -795,7 +794,7 @@ async def test_compact_summary_preserves_agent_continuity(
     the agent continues its conversation rather than being terminated. The goto
     itself is the init_context detour that rebuilds the standing head; where the
     batch was actually headed rides in `context_reset.resume`."""
-    tid = _create_agent(db_conn)
+    tid = spawn_agent()
     _insert_compact_summary(db_conn, tid, "summary after compact")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -819,7 +818,7 @@ async def test_compact_summary_replaces_whole_history_no_tail(
     """compact_summary → the whole history is cleared and the parked tail is the
     summary alone; not a single original message survives (the summary is the
     complete memory, no raw tail)."""
-    tid = _create_agent(db_conn)
+    tid = spawn_agent()
     sys_msg = SystemMessage(content="<test sys prompt>")
     initial_msgs: list[AnyMessage] = [
         sys_msg,
@@ -843,7 +842,7 @@ async def test_compact_summary_emits_compact_done(
     """When claim processes compact_summary (agent-written summary), emit CompactDone
     at the same place where history is replaced — so UI refreshes, aligning with auto path (agent/hooks/compact.py).
     User-triggered compact_request goes through the same compact_payload block, emit is path-agnostic."""
-    tid = _create_agent(db_conn)
+    tid = spawn_agent()
     _insert_compact_summary(db_conn, tid, "summary after compact")
     state = AgentState(
         messages=[
@@ -918,7 +917,7 @@ async def test_compact_with_empty_state_injects_system_message_and_summary(
     to clear. Claim used to lay down a cold-start head here and then pop it back
     off — the head is `init_context`'s now, so there is nothing to undo and the
     two cases stopped differing."""
-    tid = _create_agent(db_conn)
+    tid = spawn_agent()
     _insert_compact_summary(db_conn, tid, "compact before any chat")
 
     state = AgentState()  # empty messages
@@ -935,7 +934,7 @@ async def test_compact_with_super_long_summary_in_claim(
 ):
     """claim_node processes compact_summary with super-long summary (50K chars) —
     no truncation, no error thrown."""
-    tid = _create_agent(db_conn)
+    tid = spawn_agent()
     long_summary = "LONG_" * 10_000  # 50K chars
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -961,7 +960,7 @@ async def test_compact_summary_with_chat_and_terminate_in_same_batch_ignores_ter
     """Same batch contains compact_summary + terminate → compact_summary takes effect first,
     but next_goto is overwritten to END by the later-appearing terminate.
     This is the current claim_node's sequential dispatch behavior — documented, not a bug."""
-    tid = _create_agent(db_conn)
+    tid = spawn_agent()
     summary_text = "summary before terminate"
     _insert_compact_summary(db_conn, tid, summary_text)
     with db_conn.cursor() as cur:
@@ -1002,7 +1001,7 @@ async def test_compact_in_same_batch_as_restart(
 
     This is the currently expected sequential dispatch behavior — restart causes agent to enter restart process after compact (gateway respawn)."""
     # restart path calls mark_agent_status('restarting') — needs agents row to exist
-    tid = _create_agent(db_conn)
+    tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
