@@ -57,7 +57,7 @@ Environment variables propagate along two paths:
 ## Key Dependencies
 
 - [[sessions.ava.okf.md]] — sessions receive env through the forward allowlists (`shared/session_env.py`), not inherited from the launcher
-- [[startup.ava.okf.md]] — At startup, environment variables are read and used for initialization
+- [[startup/startup.ava.okf.md]] — At startup, environment variables are read and used for initialization
 
 ## Notes
 

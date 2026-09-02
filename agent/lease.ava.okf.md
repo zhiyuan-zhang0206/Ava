@@ -52,7 +52,7 @@ The **lease half of the registry × lease frame** ([[okf/design/r1-state-livenes
 
 ## Key Dependencies
 
-- [[startup.ava.okf.md]] — the claim is Stage 2 of the startup sequence
+- [[startup/startup.ava.okf.md]] — the claim is Stage 2 of the startup sequence
 - [[loop.ava.okf.md]] — the renewal task runs for the whole graph lifetime
 - [[db.ava.okf.md]] — `renew_agent_lease` on the kernel DB layer
 - [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the registry × lease frame
