@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from shared.caller_identity import PREFIXES as _CALLER_PREFIXES
+from shared.caller_identity import CallerIdentity
 from shared.config import format_timestamp, now_timestamp, settings
 
 _AGENT_PREFIX = "agent:"
@@ -61,6 +63,9 @@ def validate_source(source: str) -> None:
     `inbound_messages` and causing the agent claim node to hit ValueError and
     kill the whole agent process.
     """
+    if source.startswith(_CALLER_PREFIXES):
+        CallerIdentity.from_source(source)
+        return
     if source == "system" or source.startswith(_SYSTEM_PREFIX):
         return
     if source == "user":
@@ -93,6 +98,11 @@ def wrap_inbound(content: str, source: str, *, created_at: datetime | None = Non
     even when several messages are claimed in one batch. When None (legacy
     callers / system messages), the current time is used as before.
     """
+    if source.startswith(_CALLER_PREFIXES):
+        caller = CallerIdentity.from_source(source)
+        instance = f" / {caller.instance}" if caller.instance is not None else ""
+        label = "External agent" if caller.kind == "external_agent" else "Unknown caller"
+        return f"{label} ({caller.subject}{instance}; asserted provenance):\n\n{content}"
     if source == "system" or source.startswith(_SYSTEM_PREFIX):
         return f"[system] {content}"
     # `ts` carries its own leading space so the off-state leaves no stray
