@@ -106,12 +106,13 @@ def test_openai_api_key_field_exists_and_is_per_secret():
     assert field_domain("openai_api_key") == "lm"
 
 
-def test_runner_mode_defaults_to_process_and_is_not_per_agent() -> None:
+def test_runner_mode_defaults_to_hosted_and_is_not_per_agent() -> None:
     """`AVA_RUNNER_MODE` gates the hosted agent-runner
     (`future/infra/agent-runner-as-server.md`). Three properties are load-bearing:
 
-    - **default `process`** — the whole Phase 1 rollout is inert until an operator
-      flips this, so a drifted default would silently migrate every cluster;
+    - **default `hosted`** — the end-state model since 2026-09 (user ruling:
+      run agent-host by default); `process` is the explicit rollback opt-out,
+      never a silent drift target;
     - **not `per_agent`** — the overlay an agent can write through
       `ava.self.restart(config_overlay)` must not reach it, or an agent could flip
       the hosting model of the runner it lives in;
@@ -122,7 +123,7 @@ def test_runner_mode_defaults_to_process_and_is_not_per_agent() -> None:
     from shared.config import FIELD_INFOS, get_config_metadata
 
     meta = next(m for m in get_config_metadata() if m.name == "runner_mode")
-    assert meta.default_value == "process"
+    assert meta.default_value == "hosted"
     assert meta.per_agent is False
     assert meta.scope == "cluster-pinned"
     assert meta.capability == "agent-runner"

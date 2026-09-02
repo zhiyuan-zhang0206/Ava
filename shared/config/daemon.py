@@ -15,9 +15,9 @@ from shared.config._base import EnvSettings
 
 class DaemonSettings(EnvSettings):
     runner_mode: Literal["process", "hosted"] = Field(
-        default="process",
+        default="hosted",
         alias="AVA_RUNNER_MODE",
-        description="How the agent-runner hosts agents. `process` = one OS process per agent, alive from spawn to terminate (today's model). `hosted` = the runner daemon hosts every local agent's turns as asyncio tasks in its own process, and an idle agent is no task at all; it is what puts the `agent-host` service on this host's start roster. Cluster-pinned because the model must be uniform: a cluster running both would need double bookkeeping for agent leases, since a hosted agent's liveness is an in-process fact while a process agent's is a lease row. Rollback is a restart with this flipped back — no schema shape changes with it.",
+        description="How the agent-runner hosts agents. `hosted` (the default since 2026-09, user ruling) = the runner daemon hosts every local agent's turns as asyncio tasks in its own process, and an idle agent is no task at all; it is what puts the `agent-host` service on this host's start roster. `process` = one OS process per agent, alive from spawn to terminate — the legacy model, kept as an explicit opt-out for rollback. Cluster-pinned because the model must be uniform: a cluster running both would need double bookkeeping for agent leases, since a hosted agent's liveness is an in-process fact while a process agent's is a lease row. Rollback is a restart with this flipped back — no schema shape changes with it.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
