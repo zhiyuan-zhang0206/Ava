@@ -54,7 +54,6 @@ from typing import Literal
 
 import psycopg
 
-import shared.db
 from ops import agent_launch, runner_mode
 
 # Re-exported so the existing importers (`ops.agents`, the restarter
@@ -72,6 +71,7 @@ from shared.agents import (
 )
 from shared.audit_events import insert_event_log
 from shared.db import fetch_one, publish_inbound_wake
+from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
 
@@ -241,7 +241,7 @@ def _prepare_resurrect_attempt(
     auto_claim: AutoResurrectClaim | None,
 ) -> _PreparedResurrect:
     """Transition, persist lifecycle rows, and create the session under one row lock."""
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
@@ -312,7 +312,7 @@ def _prepare_resurrect_attempt(
 
 def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> bool:
     """Create another session only while the same active allocation still owns the row."""
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
         cur.execute(
             "SELECT status, status_changed_at, pid FROM agents_meta WHERE id = %s FOR UPDATE",
@@ -339,7 +339,7 @@ def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -
     """Terminate only the still-unclaimed allocation owned by this resurrect."""
     page_names: list[str] = []
     changed = False
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT status, status_changed_at, pid FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
@@ -557,7 +557,7 @@ def respawn_agent(agent_id: int) -> bool:
         False: another dispatcher won / status changed, noop (does not raise —
             dispatcher should keep polling).
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         # Phase 1: race-safe gate — UPDATE + commit. Commit makes the
         # restarter see status no longer 'restarting' so it no longer polls
         # this agent. Also clears pid + started_at (restart comes from

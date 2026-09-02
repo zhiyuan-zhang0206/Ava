@@ -231,7 +231,7 @@ def _upsert(
     `converging` — updater entry / lease renewal) preserves it, because the
     pause window's anchor must survive the transitions inside the window."""
     machine = machine_name()
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO host_deploy_state "  # noqa: S608 — _LEASE_EXPIRY_SQL is a module constant
             "    (machine, posture, updater_lease_expires_at, paused_at, updated_at) "
@@ -307,7 +307,7 @@ def clear_updater_lease() -> None:
     until the controller reaps it).
     """
     machine = machine_name()
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE host_deploy_state SET updater_lease_expires_at = NULL WHERE machine = %s",
             (machine,),

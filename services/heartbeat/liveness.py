@@ -61,6 +61,7 @@ from psycopg_pool import ConnectionPool
 from ops import cluster_rpc
 from shared import cluster_lock, host_deploy_state
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync
 from shared.machines import list_agent_runners
 from shared.transition import transition_severity
@@ -223,7 +224,7 @@ async def _record_probe(
     """UPSERT one probe outcome into machine_probe, bumping the consecutive
     failure count on failure and resetting it on success — and record the
     offline/online edge as an alerts row (see ``_machine_alert_edges``)."""
-    with pool.connection() as conn:
+    with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT online, consecutive_failures FROM machine_probe WHERE machine_name = %s",
@@ -285,7 +286,7 @@ def _merge_liveness(pool: ConnectionPool) -> list[int]:
     behaviour: rows start 'unknown' and only ever flip to offline on real
     probe failures / lease expiry.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "WITH probe AS ("
             "  SELECT m.name AS machine_name,"

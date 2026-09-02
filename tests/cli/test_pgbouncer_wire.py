@@ -16,6 +16,7 @@ a dev box gets it from `brew install pgbouncer`).
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import shutil
@@ -29,6 +30,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict
+from psycopg_pool import AsyncConnectionPool
 
 from cli.commands._pgbouncer import pgbouncer_bin
 from tests._containers import _free_port, _wait_port, postgres
@@ -209,6 +211,121 @@ def test_recovery_claim_overrides_a_poisoned_pooled_backend(
         claim = claim_recovery_lock("pgbouncer-recovery-test", observed=None)
 
     assert claim.acquired is True
+
+
+def _poison_pooled_backends(pooled: str) -> None:
+    """Set read-only defaults on both backends in the two-slot test pool.
+
+    The first explicit transaction keeps one backend occupied while the second
+    autocommit client sets the other backend's session default. Committing the
+    first then releases two poisoned backends for deterministic follow-up writes.
+    """
+    with (
+        psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as first,
+        psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as second,
+    ):
+        first.execute("BEGIN")
+        first.execute("SET default_transaction_read_only = on")
+        second.execute("SET default_transaction_read_only = on")
+        first.execute("COMMIT")
+
+
+def _insert_agent(pg_url: str) -> int:
+    """Insert one agent for foreign-keyed PgBouncer wire-test rows."""
+    with psycopg.connect(pg_url) as conn:
+        row = conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
+        assert row is not None
+        return int(row[0])
+
+
+def test_write_transaction_repairs_connect_and_watcher_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rule A writes, including watcher cleanup DELETE, survive poisoned backends."""
+    from shared import config
+    from shared.cluster_lock import acquire_update_lock, release_update_lock
+    from shared.watcher_registry import delete_watcher, mark_status, register_watcher
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        agent_id = _insert_agent(pg_url)
+        _poison_pooled_backends(pooled)
+
+        assert acquire_update_lock("pgbouncer-wire-test") is True
+        release_update_lock("pgbouncer-wire-test")
+        register_watcher(agent_id, 7, kind="at", name="poisoned", message="wake")
+        mark_status(agent_id, 7, "missed")
+        delete_watcher(agent_id, 7)
+
+
+def test_write_transaction_repairs_pooled_borrow_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rule B's pool-borrow DELETE declares its transaction writable first."""
+    from gateway.ttl_reaper import _delete_shell_row_blocking
+    from shared import config
+    from shared.db import pool
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        agent_id = _insert_agent(pg_url)
+        with psycopg.connect(pg_url) as setup:
+            setup.execute(
+                "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+                "VALUES (%s, %s, now())",
+                (agent_id, 7),
+            )
+        _poison_pooled_backends(pooled)
+        db_pool = pool(min_size=1, max_size=2)
+        try:
+            _delete_shell_row_blocking(db_pool, agent_id, 7, interrupted=False)
+        finally:
+            db_pool.close()
+
+        with psycopg.connect(pg_url) as verify:
+            row = verify.execute(
+                "SELECT 1 FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
+                (agent_id, 7),
+            ).fetchone()
+        assert row is None
+
+
+def test_async_write_transaction_repairs_async_pool_write() -> None:
+    """Rule C opens an explicit read-write transaction on an autocommit pool."""
+    from shared.db_transaction import async_write_transaction
+
+    async def write_once(pooled: str) -> None:
+        db_pool = AsyncConnectionPool(
+            pooled,
+            min_size=1,
+            max_size=2,
+            open=False,
+            kwargs={"autocommit": True, "prepare_threshold": None},
+        )
+        await db_pool.open()
+        try:
+            async with async_write_transaction(db_pool) as conn:
+                await conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+        finally:
+            await db_pool.close()
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        _poison_pooled_backends(pooled)
+        asyncio.run(write_once(pooled))
+
+
+def test_plain_autocommit_write_still_fails_on_poisoned_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regression test is meaningful: unpostured pooled DML stays rejected."""
+    from shared import config
+    from shared.db import connect
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        _poison_pooled_backends(pooled)
+        with connect(autocommit=True) as conn, pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+            conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
 
 
 def _statement_timeout(conn: psycopg.Connection) -> str:

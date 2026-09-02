@@ -38,6 +38,7 @@ from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.paths import legacy_pid_path
 
@@ -225,7 +226,7 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
     node wraps it via system_note_message(tag=NoteTag.HEARTBEAT). `idle_minutes`
     rides the telemetry event only; the inbound content is the plain check-in."""
     content = "Heartbeat. Find something to do, or pause your heartbeat for some time."
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, %s, 'heartbeat', 'system')",

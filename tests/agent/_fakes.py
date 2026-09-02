@@ -27,6 +27,10 @@ def make_fake_ops_pool() -> AsyncMock:
     cur_cm.__aexit__.return_value = None
     conn = AsyncMock()
     conn.cursor = MagicMock(return_value=cur_cm)
+    transaction_cm = AsyncMock()
+    transaction_cm.__aenter__.return_value = conn
+    transaction_cm.__aexit__.return_value = None
+    conn.transaction = MagicMock(return_value=transaction_cm)
     conn_cm = AsyncMock()
     conn_cm.__aenter__.return_value = conn
     conn_cm.__aexit__.return_value = None

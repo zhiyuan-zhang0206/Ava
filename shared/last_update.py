@@ -36,6 +36,7 @@ import psycopg
 from pydantic import BaseModel, ConfigDict
 
 import shared.db
+from shared.db_transaction import write_transaction
 from shared.log import logger
 
 
@@ -183,7 +184,7 @@ def begin_update(
     `failed` while the new rollout is already moving the cluster: from this write
     until the `finally`, an open row under a live lease reads `running`.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_last_update SET target_sha = %s, origin = %s, holder = %s, "
             "log_path = %s, started_at = now(), ended_at = NULL, outcome = NULL, "
@@ -227,7 +228,7 @@ def finish_update(
     """
     if outcome in (UpdateOutcome.RUNNING, UpdateOutcome.ORPHANED):
         raise ValueError(f"{outcome} is a reading of an unfinished row, not a recorded outcome")
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_last_update SET ended_at = now(), outcome = %s, "
             "failing_step = %s, pin_advanced = %s WHERE id = 1",
@@ -265,7 +266,7 @@ def note_observed_recovery(reason: str) -> None:
     Touches only `observed_by`, so it can neither move a terminal outcome nor
     disturb the `log_path` this run's `begin_update` recorded.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_last_update SET observed_by = %s "
             "WHERE id = 1 AND started_at IS NOT NULL AND outcome IS DISTINCT FROM %s",

@@ -274,7 +274,7 @@ def acquire_update_lock(
     would silently make live rollouts eligible for convergence-release. If a run
     lease ever needs to say something, it needs a different column, not this one.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state "
             "SET holder = %s, acquired_at = now(), expires_at = now() + make_interval(secs => %s), "
@@ -324,10 +324,9 @@ def renew_update_lock(holder: str, *, ttl_s: float = LOCK_TTL_S) -> bool:
     rollout unprotected is worse — but says so at WARNING, because a lapse means the
     invariant was already broken and re-arming it silently would hide that.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
-        # MATERIALIZED + FOR UPDATE for the same reason as force_release_update_lock:
-        # the pre-UPDATE `expires_at` has to be read under a row lock, or an inlined
-        # CTE would re-read it after the UPDATE and never report a lapse.
+    with write_transaction() as conn, conn.cursor() as cur:
+        # MATERIALIZED pins the pre-UPDATE expiry under the row lock. An inlined CTE
+        # would re-read it after the UPDATE and never report a lapse.
         cur.execute(
             "WITH prev AS MATERIALIZED "
             "(SELECT expires_at < now() AS lapsed FROM deployment_state "
@@ -383,38 +382,6 @@ def release_update_lock(holder: str) -> None:
                 "a rollout outran LOCK_TTL_S, or two ran concurrently)",
                 holder=holder,
             )
-
-
-def force_release_update_lock() -> str | None:
-    """Clear the lock unconditionally, whatever holder/TTL it carries. Returns the
-    holder that was cleared (None if it was already free).
-
-    For operator-driven stranded-cluster recovery only: a hard-killed rollout can
-    leave the lock held until its TTL expires (up to LOCK_TTL_S), blocking the next
-    rollout's acquire. Unlike `release_update_lock`, this ignores the holder — the
-    caller (`cluster_recover_op`) has already established that no orchestration is
-    actually live (no rollout/restart/updater session), so the held row is stale.
-    """
-    # Single statement so capture-and-clear is atomic: the `prev` CTE takes a
-    # row lock (FOR UPDATE) before the UPDATE, so a concurrent acquire_update_lock
-    # serializes behind it instead of slipping a new holder in between a separate
-    # SELECT and UPDATE (which would be silently cleared, returning a stale None).
-    # MATERIALIZED is load-bearing: a plain CTE inlines (PG12+) and the RETURNING
-    # subquery would then re-read the row *after* the UPDATE (NULL); materializing
-    # pins the pre-UPDATE holder.
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            "WITH prev AS MATERIALIZED "
-            "(SELECT holder FROM deployment_state WHERE id = 1 FOR UPDATE), "
-            "cleared AS "
-            "(UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "
-            "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
-            "    phase = 'stable', kind = NULL "
-            "WHERE id = 1) "
-            "SELECT holder FROM prev"
-        )
-        row = cur.fetchone()
-        return row[0] if row is not None else None
 
 
 @dataclass(frozen=True)
@@ -510,7 +477,7 @@ def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_T
     """
     note = settle_note(hosts)
     sorted_hosts = sorted(hosts)  # one order in all three renderings
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         # The settle fact lands three ways: the structured `settle_hosts` array
         # (the new truth), `settle_note` (human-readable), and the legacy `note`
         # column every current reader parses. All three are written together and
@@ -557,7 +524,7 @@ def release_settle_hold(holder: str) -> bool:
     and suppress auto-rollback — for the rest of `SETTLE_TTL_S`. The caller
     (`ops.deploy_window`) establishes convergence; this is only the write.
     """
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, "
             "    expires_at = NULL, note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "

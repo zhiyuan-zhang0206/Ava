@@ -22,10 +22,10 @@ launching on any other host trips the boot placement gate and crash-loops
 
 from __future__ import annotations
 
-import shared.db
 from ops import agent_launch, runner_mode
 from shared.agents import AgentStatus
 from shared.db import fetch_one, publish_inbound_wake
+from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 
@@ -58,7 +58,7 @@ def revive_agent(agent_id: int, dead_pid: int) -> bool:
         False: lost the race / the row is not 'running'/'idling' with that pid --
             noop, does not raise.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         # Race-safe gate, pid-reasserted (ABA-closed like the reaper): flip +
         # commit so a concurrent revive/reap/launch sees unclaimed 'idling' and loses.
         # Clears pid/started_at -- the probed pid is a corpse (or recycled), it

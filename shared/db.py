@@ -23,6 +23,7 @@ from psycopg_pool import ConnectionPool
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.config.data_plane import gateway_url_host, resolved_pool_size, sslmode_for_url
+from shared.db_transaction import write_transaction
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.log import logger
 from shared.url_secret import url_with_port
@@ -694,8 +695,7 @@ NOTICE_FYI_TTL_DAYS = 30
 def signal_live_agents_restart(
     source: str, *, exclude_agent_ids: Collection[int] = (), machine: str | None = None
 ) -> list[int]:
-    """Bulk-INSERT one kind='restart' inbound per live agent, wake each over
-    Redis; return the ids signalled.
+    """Bulk-INSERT one kind='restart' inbound per live agent, wake each over Redis; return ids.
 
     The set-based form of the per-agent restart path (gateway
     restart_agent_op -> insert_inbound_message(kind='restart')): same
@@ -720,7 +720,7 @@ def signal_live_agents_restart(
             mid-quiesce, or one whose spawn completed mid-quiesce.
         machine: restrict to agents running on this machine (None = all).
     """
-    with connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "  # noqa: S608 — ALIVE_SQL is a module constant
             "SELECT id, '', 'restart', %s FROM agents_meta "
@@ -767,7 +767,7 @@ def mark_agents_restarting(agent_ids: Collection[int]) -> list[int]:
     """
     if not agent_ids:
         return []
-    with connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'restarting' "  # noqa: S608 — ALIVE_SQL is a module constant
             f"WHERE id = ANY(%s) AND {ALIVE_SQL} "

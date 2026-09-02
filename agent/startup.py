@@ -42,6 +42,7 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
 from agent.hooks.repair import dangling_tool_pairing_repairs
+from shared.db_transaction import async_write_transaction
 from shared.log import logger
 
 
@@ -286,6 +287,7 @@ def _write_effective_config_to_restart_completed(agent_id: int) -> None:
     from shared.config import settings as _cfg
 
     with _pg.connect(_cfg.data_plane.db_url) as conn, conn.cursor() as cur:
+        conn.execute("SET TRANSACTION READ WRITE")
         # Directly UPDATE the most recent restart_completed (even if
         # status='done', let claim see the latest snapshot). jsonb_set uses
         # path to replace/append the key.
@@ -664,7 +666,7 @@ async def _close_dead_show_pages(
     names = [name for name, _port in dead]
     notified = False
     try:
-        async with pool.connection() as conn, conn.cursor() as cur:
+        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             for name in names:
                 # CAS open->closed (the same UPDATE close_page uses).
                 await cur.execute(

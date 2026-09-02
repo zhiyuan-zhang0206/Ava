@@ -25,9 +25,9 @@ class _FakeCursor:
     def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
         self._rows = rows  # pyright: ignore[reportUnknownMemberType]
         self._fetchone_row = fetchone_row
-        self.executed: list[tuple[str, tuple | None]] = []
+        self.executed: list[tuple[str, tuple[object, ...] | None]] = []
 
-    async def execute(self, sql: str, params: tuple | None = None) -> None:
+    async def execute(self, sql: str, params: tuple[object, ...] | None = None) -> None:
         self.executed.append((sql, params))  # pyright: ignore[reportUnknownMemberType]
 
     async def fetchall(self) -> list[tuple]:
@@ -51,6 +51,12 @@ class _FakeConn:
     def cursor(self) -> _FakeCursor:
         return self._cursor
 
+    def transaction(self) -> _FakeConn:
+        return self
+
+    async def execute(self, sql: str, params: tuple[object, ...] | None = None) -> None:
+        await self._cursor.execute(sql, params)
+
     async def __aenter__(self) -> _FakeConn:
         return self
 
@@ -62,23 +68,21 @@ class _FakePool:
     def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
         self._conn = _FakeConn(rows, fetchone_row)
 
-    def connection(self) -> _FakeConn:
+    def connection(self, *, timeout: float | None = None) -> _FakeConn:
         # Mirrors AsyncConnectionPool.connection(): returns a (sync) context
         # object whose __aenter__ is awaited by `async with`.
         return self._conn
 
     @property
-    def executed(self) -> list[tuple[str, tuple | None]]:
+    def executed(self) -> list[tuple[str, tuple[object, ...] | None]]:
         return self._conn._cursor.executed  # pyright: ignore[reportUnknownMemberType]
 
 
 def _notice_inserts(pool: _FakePool) -> list[tuple[object, ...]]:
     """(agent_id, content) params of the re-serve-notice INSERTs recorded by
     the fake pool — typed so the assertions below stay pyright-clean."""
-    from typing import cast
-
     rows = [p for sql, p in pool.executed if "INSERT INTO inbound_messages" in sql]  # pyright: ignore[reportUnknownMemberType]
-    return [cast(tuple[object, ...], r) for r in rows if r is not None]
+    return [r for r in rows if r is not None]
 
 
 def _row(
