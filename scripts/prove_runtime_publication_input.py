@@ -33,6 +33,7 @@ def prove_publication_input(home: Path, receipt: Path) -> None:
         ):
             raise AssertionError("installed resolver did not return actual complete receipt")
         for mutation in ("selector", "receipt", "home"):
+            other: Path | None = None
             if mutation == "selector":
                 selector.write_text(json.dumps(chosen | {"artifact_digest": "0" * 64}))
             elif mutation == "receipt":
@@ -59,7 +60,7 @@ def prove_publication_input(home: Path, receipt: Path) -> None:
             finally:
                 receipt.write_bytes(original_receipt)
                 selector.write_text(json.dumps(chosen))
-                if mutation == "home":
+                if other is not None:
                     other.unlink()
         selector.write_text(
             json.dumps({key: chosen[key] for key in ("artifact_digest", "manifest_digest")})
