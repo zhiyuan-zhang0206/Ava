@@ -130,13 +130,22 @@ def native_dependencies(root: Path) -> list[str]:
         output = _run(
             ["/usr/bin/otool", "-L", str(path)] if darwin else ["/usr/bin/ldd", str(path)], root
         )
+        own_ids = (
+            set(_run(["/usr/bin/otool", "-D", str(path)], root).splitlines()[1:])
+            if darwin
+            else set()
+        )
         for line in output.splitlines()[1:] if darwin else output.splitlines():
             fields = line.strip().split()
-            if not fields or fields[0].startswith("linux-vdso"):
+            if not fields or fields[0].startswith("linux-vdso") or line.endswith(":"):
                 continue
             if "not found" in line:
                 raise ReleaseRejectedError("unresolved native library")
             name = fields[2] if not darwin and len(fields) > 2 and fields[1] == "=>" else fields[0]
+            if darwin:
+                name = line.strip().split(" (compatibility version", 1)[0]
+                if name in own_ids:
+                    continue  # LC_ID_DYLIB names this image, not a dependency.
             if darwin and name.startswith(("/usr/lib/", "/System/Library/")):
                 external.add(name)  # dyld shared-cache entries may have no disk file.
                 continue
@@ -151,7 +160,9 @@ def native_dependencies(root: Path) -> list[str]:
                 )
             dependency = Path(name)
             if not dependency.is_absolute() or not dependency.is_file():
-                raise ReleaseRejectedError("unrecognized native loader dependency")
+                raise ReleaseRejectedError(
+                    f"unrecognized native dependency {name!r} in {path.relative_to(root)}"
+                )
             dependency = dependency.resolve(strict=True)
             if not dependency.is_relative_to(root):
                 if not darwin and any(
