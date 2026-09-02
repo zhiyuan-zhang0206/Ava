@@ -16,7 +16,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -139,9 +139,13 @@ def declaration_binding(
 ) -> dict[str, str]:
     if declared_home != str(home):
         return {"declared_home": "mismatch"}
-    if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) for arg in argv):
+    if not isinstance(argv, list) or not argv:
         return {"declared_home": "match"}
-    executable = Path(argv[0])
+    arguments = cast(list[object], argv)
+    executable_text = arguments[0]
+    if not isinstance(executable_text, str) or not all(isinstance(arg, str) for arg in arguments):
+        return {"declared_home": "match"}
+    executable = Path(executable_text)
     if not executable.is_absolute():
         return {"declared_home": "match"}
     prepared = home / "releases" / artifact_digest / "venv"
@@ -175,16 +179,22 @@ def observe_launchd(
         raise NativeReadUnavailableError("launchd state changed during observation")
     if hashlib.sha256(first).hexdigest() != digest:
         return LauncherObservation(definition="mismatch")
-    definition = plistlib.loads(first)
-    if not isinstance(definition, dict) or definition.get("Label") != label:
+    parsed = plistlib.loads(first)
+    if not isinstance(parsed, dict):
+        raise NativeReadUnavailableError("launchd definition is not a dictionary")
+    definition = cast(dict[str, object], parsed)
+    if definition.get("Label") != label:
         raise NativeReadUnavailableError("launchd definition label is inconsistent")
-    environment = definition.get("EnvironmentVariables")
-    if not isinstance(environment, dict):
+    raw_environment = definition.get("EnvironmentVariables")
+    if not isinstance(raw_environment, dict):
         raise NativeReadUnavailableError("launchd definition has no explicit environment")
+    environment = cast(dict[str, object], raw_environment)
     # Program can override argv[0]; refuse contradictory declarations.
     argv = definition.get("ProgramArguments")
     if "Program" in definition and (
-        not isinstance(argv, list) or not argv or definition["Program"] != argv[0]
+        not isinstance(argv, list)
+        or not argv
+        or definition["Program"] != cast(list[object], argv)[0]
     ):
         raise NativeReadUnavailableError("launchd executable declarations disagree")
     return LauncherObservation.model_validate(
@@ -199,6 +209,8 @@ def observe_launchd(
 def observe_crontab(
     name: str, digest: str, home: Path, artifact_digest: str, valid_until: datetime
 ) -> LauncherObservation:
+    if name != digest or not re.fullmatch(r"[0-9a-f]{64}", name):
+        raise NativeReadUnavailableError("crontab identity must be its exact definition digest")
     first = read_crontab(valid_until)
     second = read_crontab(valid_until)
     if first != second:

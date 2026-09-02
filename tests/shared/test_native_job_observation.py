@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import plistlib
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,6 +18,22 @@ def deadline() -> datetime:
     return datetime.now(UTC) + timedelta(seconds=10)
 
 
+def constant[T](value: T) -> Callable[..., T]:
+    def read(*_args: object) -> T:
+        return value
+
+    return read
+
+
+def sequence[T](*values: T) -> Callable[..., T]:
+    entries = iter(values)
+
+    def read(*_args: object) -> T:
+        return next(entries)
+
+    return read
+
+
 def test_crontab_definition_bound_to_home_and_image(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -26,7 +43,7 @@ def test_crontab_definition_bound_to_home_and_image(
     binary.touch()
     line = f"@reboot AVA_HOME={home} {binary} start # ava-autostart.test"
     digest = hashlib.sha256(line.encode()).hexdigest()
-    monkeypatch.setattr(jobs, "read_crontab", lambda _until: (line + "\n").encode())
+    monkeypatch.setattr(jobs, "read_crontab", constant((line + "\n").encode()))
     result = jobs.observe_crontab(digest, digest, home, "a" * 64, deadline())
     assert result.definition == "match"
     assert result.enabled is True
@@ -43,11 +60,10 @@ def test_crontab_definition_bound_to_home_and_image(
 def test_crontab_drift_and_missing_are_different(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    reads = iter((b"", b"new job\n"))
-    monkeypatch.setattr(jobs, "read_crontab", lambda _until: next(reads))
+    monkeypatch.setattr(jobs, "read_crontab", sequence(b"", b"new job\n"))
     with pytest.raises(jobs.NativeReadUnavailableError, match="changed"):
         jobs.observe_crontab("a" * 64, "a" * 64, tmp_path, "b" * 64, deadline())
-    monkeypatch.setattr(jobs, "read_crontab", lambda _until: b"")
+    monkeypatch.setattr(jobs, "read_crontab", constant(b""))
     result = jobs.observe_crontab("a" * 64, "a" * 64, tmp_path, "b" * 64, deadline())
     assert result.definition == "absent"
     assert result.enabled is False
@@ -65,8 +81,8 @@ def test_launchd_disk_binding_does_not_claim_loaded_image_or_enabled(
             "Disabled": True,
         }
     )
-    monkeypatch.setattr(jobs, "read_launchd_definition", lambda _label: raw)
-    monkeypatch.setattr(jobs, "launchd_loaded", lambda _label, _until: True)
+    monkeypatch.setattr(jobs, "read_launchd_definition", constant(raw))
+    monkeypatch.setattr(jobs, "launchd_loaded", constant(True))
     result = jobs.observe_launchd(
         "com.ava.test", hashlib.sha256(raw).hexdigest(), tmp_path, "a" * 64, deadline()
     )
@@ -81,9 +97,8 @@ def test_launchd_disk_binding_does_not_claim_loaded_image_or_enabled(
 def test_launchd_loaded_state_drift_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(jobs, "read_launchd_definition", lambda _label: b"same")
-    reads = iter((True, None))
-    monkeypatch.setattr(jobs, "launchd_loaded", lambda _label, _until: next(reads))
+    monkeypatch.setattr(jobs, "read_launchd_definition", constant(b"same"))
+    monkeypatch.setattr(jobs, "launchd_loaded", sequence(True, None))
     with pytest.raises(jobs.NativeReadUnavailableError, match="changed"):
         jobs.observe_launchd("com.ava.test", "a" * 64, tmp_path, "b" * 64, deadline())
 
@@ -122,6 +137,11 @@ def test_failed_crontab_read_is_not_absence(monkeypatch: pytest.MonkeyPatch) -> 
     failed = subprocess.CompletedProcess(
         ("/usr/bin/crontab", "-l"), 1, b"", b"permission denied; no crontab for user\n"
     )
-    monkeypatch.setattr(jobs, "native_read", lambda _argv, _until: failed)
+    monkeypatch.setattr(jobs, "native_read", constant(failed))
     with pytest.raises(jobs.NativeReadUnavailableError):
         jobs.read_crontab(deadline())
+
+
+def test_inconsistent_crontab_identity_cannot_claim_absence(tmp_path: Path) -> None:
+    with pytest.raises(jobs.NativeReadUnavailableError, match="identity"):
+        jobs.observe_crontab("a" * 64, "b" * 64, tmp_path, "c" * 64, deadline())
