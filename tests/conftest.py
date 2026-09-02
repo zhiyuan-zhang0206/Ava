@@ -1402,8 +1402,8 @@ def _guard_agent_launch(request: pytest.FixtureRequest, monkeypatch: pytest.Monk
     # confirms only after commit. The launch spy never advances the row, so its
     # matching confirm must be a no-op too. Tests of the real wait opt out with
     # `real_agent_launch`.
-    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id: None)
-    monkeypatch.setattr("ops.agent_launch.schedule_launch_confirm", lambda _id: None)
+    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id, _attempt=None: None)
+    monkeypatch.setattr("ops.agent_launch.schedule_launch_confirm", lambda _id, _attempt=None: None)
     request.node.stash[_LAUNCH_RECORDER] = calls
 
 

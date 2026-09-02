@@ -103,6 +103,48 @@ def test_exact_process_observation_does_not_need_session_record(
     assert not target_process_ended(payload, "different-machine")
 
 
+@pytest.mark.parametrize("changed", ["owner", "pointer", "machine"])
+async def test_termination_observation_rejects_changed_locked_target(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    changed: str,
+) -> None:
+    agent_id = _row(db_conn)
+    claim_agent_row(agent_id)
+    command_id = _command(db_conn, agent_id, "terminate")
+    await claim_inbound_batch(aops_pool, agent_id)
+    async with async_write_transaction(aops_pool) as conn:
+        assert await apply_process_lifecycle(conn, agent_id, command_id)
+    if changed == "owner":
+        db_conn.execute("UPDATE agents_meta SET runtime_owner=%s WHERE id=%s", (uuid4(), agent_id))
+    elif changed == "pointer":
+        other = _command(db_conn, agent_id, "terminate")
+        db_conn.execute(
+            "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (other, agent_id)
+        )
+    else:
+        monkeypatch.setattr(
+            "shared.lifecycle_termination_observe.target_process_ended", lambda *_: True
+        )
+    before = db_conn.execute(
+        "SELECT runtime_owner,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    assert not observe_applied_termination(
+        db_conn, agent_id, "another-machine" if changed == "machine" else machine_name()
+    )
+    assert (
+        db_conn.execute(
+            "SELECT runtime_owner,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
+        == before
+    )
+    assert db_conn.execute(
+        "SELECT status,observed_at FROM inbound_messages WHERE id=%s", (command_id,)
+    ).fetchone() == ("claimed", None)
+    db_conn.commit()
+
+
 @pytest.mark.parametrize("replacement", ["none", "owner", "pointer"])
 async def test_accepted_termination_ignores_pending_veto_but_retains_apply_fence(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, replacement: str

@@ -44,6 +44,7 @@ Ava's Postgres persistence layer—responsible for agent message history storage
 ## Notes
 
 - Process lifecycle application fixes server-reserved `target_process_identity` in the command under the admitted owner/target lock. Its PID is the actual Python runtime, with OS birth evidence, not a DB timestamp or Windows redirector. Controller and explicit resurrection share termination observation: exact process disappearance/reuse permits completion and pointer clearing; live, unreadable or missing historical evidence defers. Swept session records do not erase this evidence. Hosted termination remains tied to real continuation settlement.
+- Launch confirmation follows the exact boot-attempt record returned by the launcher, including the off-path spawn confirmation. It does not require canonical publication before admission; missing attempt evidence retains the hard boot deadline rather than guessing a dead process from a missing canonical name.
 
 - An owned lifecycle command dispatches alone with an internal receipt derived from its locked same-agent pointer and current generation/owner. Legacy latest-wins and pending-message vetoes cannot override this accepted command. Other rows remain pending; a real successor admission observes the restart before its next claim can consume them. The receipt is not effect authority: application still checks the fixed pointer and target incarnation, and acceptance never implies process exit.
 

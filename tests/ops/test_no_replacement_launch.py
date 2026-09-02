@@ -27,6 +27,26 @@ def test_normal_launch_allocates_unique_attempt_records(monkeypatch: pytest.Monk
     backend.kill_session.assert_not_called()
 
 
+@pytest.mark.real_agent_launch
+def test_confirm_tracks_returned_attempt_before_canonical_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = Mock()
+    backend.new_session.return_value = True
+    backend.has_session.side_effect = lambda name: name.startswith("ava-boot-")
+    monkeypatch.setattr(agent_launch, "native_proc", Mock(return_value=backend))
+    monkeypatch.setattr(agent_launch, "agent_spawn_env_dict", Mock(return_value={}))
+    confirm = Mock()
+    monkeypatch.setattr(agent_launch, "_wait_for_agent_claim", confirm)
+    attempt = agent_launch._launch_agent_process(123)
+    confirm.assert_called_once_with(123, attempt)
+    assert agent_launch._launched_process_alive(123, attempt)
+    backend.has_session.assert_called_once_with(attempt)
+    backend.has_session.return_value = False
+    backend.has_session.side_effect = None
+    assert not agent_launch._launched_process_alive(123, attempt)
+
+
 def test_ordinary_admission_alone_publishes_canonical(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
