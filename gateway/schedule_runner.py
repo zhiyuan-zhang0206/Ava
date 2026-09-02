@@ -46,6 +46,7 @@ from loguru import logger
 
 import shared.db
 from shared.config import settings
+from shared.db_transaction import write_transaction
 from shared.paths import ava_home, prod_service_checkout_error
 
 # A .py schedule script is run in-process, so a single call that hangs (a
@@ -102,7 +103,7 @@ def _load(schedule_id: int) -> tuple[str, str] | None:
 
 
 def _record_error(schedule_id: int, message: str) -> None:
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE schedules SET last_error = %s, updated_at = now() WHERE id = %s",
             (message, schedule_id),
@@ -116,7 +117,7 @@ def _mark_completed(schedule_id: int) -> None:
     schedule alone instead of relaunching / counting it toward the crash breaker.
     The manager reads liveness before status, so a session that is gone is
     guaranteed to have this write already committed (see schedule_manager)."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE schedules SET status = 'completed', updated_at = now() WHERE id = %s",
             (schedule_id,),
@@ -146,7 +147,7 @@ def _record_run_start(schedule_id: int) -> int | None:
     observability, so a DB hiccup must never break the schedule itself (the
     caller then skips the closing write)."""
     try:
-        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with write_transaction() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO schedule_runs (schedule_id) VALUES (%s) RETURNING id",
                 (schedule_id,),
@@ -164,7 +165,7 @@ def _record_run_end(run_id: int | None, *, ok: bool, note: str | None) -> None:
     if run_id is None:
         return
     try:
-        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with write_transaction() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE schedule_runs SET ok = %s, note = %s WHERE id = %s",
                 (ok, note, run_id),

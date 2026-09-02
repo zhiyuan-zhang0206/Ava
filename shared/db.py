@@ -23,6 +23,7 @@ from psycopg_pool import ConnectionPool
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.config.data_plane import gateway_url_host, resolved_pool_size, sslmode_for_url
+from shared.db_transaction import write_transaction
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.log import logger
 from shared.url_secret import url_with_port
@@ -705,9 +706,7 @@ def signal_live_agents_restart(
     this is `ava cluster update`'s quiesce step, whose convergence loop keeps signalling
     until every live agent has drained — a 30s recheck lag per idle agent would
     drag the whole quiesce out. `source` tags the signal's origin
-    (e.g. 'system:update').
-
-    `machine` scopes the signal to one host's agents — the per-host quiesce the
+    (e.g. 'system:update'). `machine` scopes the signal to one host's agents — the per-host quiesce the
     agent-runner self-update runs before it stops services (watchdog self-heal /
     a direct `ava cluster update` on a runner); None means the whole cluster
     (the rollout's stop-the-world).
@@ -720,7 +719,7 @@ def signal_live_agents_restart(
             mid-quiesce, or one whose spawn completed mid-quiesce.
         machine: restrict to agents running on this machine (None = all).
     """
-    with connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "  # noqa: S608 — ALIVE_SQL is a module constant
             "SELECT id, '', 'restart', %s FROM agents_meta "
@@ -767,7 +766,7 @@ def mark_agents_restarting(agent_ids: Collection[int]) -> list[int]:
     """
     if not agent_ids:
         return []
-    with connect() as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'restarting' "  # noqa: S608 — ALIVE_SQL is a module constant
             f"WHERE id = ANY(%s) AND {ALIVE_SQL} "
