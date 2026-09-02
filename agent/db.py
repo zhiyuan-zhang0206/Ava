@@ -189,9 +189,8 @@ async def claim_inbound_batch(
       the original design accepted as worth the simplicity).
 
     All kinds claimed together (no kind filter on the SELECT) — dispatch
-    happens inside the claim Node, not at the SQL layer. Pool conns are
-    configured `autocommit=True`, so the UPDATE commits as soon as
-    RETURNING fetches; no explicit `commit()` needed.
+    happens inside the claim Node, not at the SQL layer. The explicit
+    read-write transaction commits the batch when its context exits.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat

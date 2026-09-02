@@ -695,8 +695,7 @@ NOTICE_FYI_TTL_DAYS = 30
 def signal_live_agents_restart(
     source: str, *, exclude_agent_ids: Collection[int] = (), machine: str | None = None
 ) -> list[int]:
-    """Bulk-INSERT one kind='restart' inbound per live agent, wake each over
-    Redis; return the ids signalled.
+    """Bulk-INSERT one kind='restart' inbound per live agent, wake each over Redis; return ids.
 
     The set-based form of the per-agent restart path (gateway
     restart_agent_op -> insert_inbound_message(kind='restart')): same
@@ -706,7 +705,9 @@ def signal_live_agents_restart(
     this is `ava cluster update`'s quiesce step, whose convergence loop keeps signalling
     until every live agent has drained — a 30s recheck lag per idle agent would
     drag the whole quiesce out. `source` tags the signal's origin
-    (e.g. 'system:update'). `machine` scopes the signal to one host's agents — the per-host quiesce the
+    (e.g. 'system:update').
+
+    `machine` scopes the signal to one host's agents — the per-host quiesce the
     agent-runner self-update runs before it stops services (watchdog self-heal /
     a direct `ava cluster update` on a runner); None means the whole cluster
     (the rollout's stop-the-world).
