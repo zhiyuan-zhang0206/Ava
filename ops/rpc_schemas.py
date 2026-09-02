@@ -19,7 +19,7 @@ from pydantic import (
     model_validator,
 )
 
-from shared.envelope import validate_writable_source
+from shared.envelope import reject_unnegotiated_caller, validate_writable_source
 
 _MAX_CONTENT_CHARS = 1_000_000
 """Prompt/reply content needs a memory-abuse guardrail, not a 64 KiB wire contract.
@@ -300,7 +300,9 @@ class TerminateAgentRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_source(cls, value: str) -> str:
-        validate_writable_source(value)
+        # Lifecycle audit reasons include opaque legacy values such as
+        # machine-pause; they are not chat envelope source identifiers.
+        reject_unnegotiated_caller(value)
         return value
 
 
@@ -340,7 +342,7 @@ class RestartAgentRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_source(cls, value: str) -> str:
-        validate_writable_source(value)
+        reject_unnegotiated_caller(value)
         return value
 
     @model_validator(mode="after")

@@ -52,3 +52,11 @@ def test_direct_resurrection_rejects_before_transaction(monkeypatch: pytest.Monk
             auto_claim=None,
         )
     transaction.assert_not_called()
+
+
+@pytest.mark.parametrize("schema", [TerminateAgentRequest, RestartAgentRequest])
+@pytest.mark.parametrize("reason", ["machine-pause", "incident-operator", "self"])
+def test_legacy_lifecycle_audit_reason_is_not_chat_envelope_grammar(
+    schema: type[BaseModel], reason: str
+) -> None:
+    assert schema.model_validate({"source": reason}).model_dump()["source"] == reason
