@@ -24,6 +24,7 @@ Usage (watchdog / crontab):
 import logging
 from pathlib import Path
 
+from shared.cluster.derive import runner_db_url_projection
 from shared.config import settings
 from shared.daemon_health import DaemonProbe, health_port, probe_daemon
 from shared.log import init_gateway_process
@@ -46,6 +47,14 @@ def _probe() -> DaemonProbe:
     return probe_daemon("agent_host", _HEALTH_URL, pidfile=settings.services.agent_host_pidfile)
 
 
+def _agent_host_env() -> dict[str, str]:
+    """The agent-profile environment for every hosted-agent-host launch."""
+    return {
+        "AVA_PROCESS_PROFILE": _HOST_PROCESS_PROFILE,
+        "AVA_DB_URL": runner_db_url_projection(settings.data_plane.db_url),
+    }
+
+
 def _restart_daemon() -> DaemonProbe:
     """Start the host in the ava-agent-host pane, then confirm it came up."""
     project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
@@ -53,7 +62,7 @@ def _restart_daemon() -> DaemonProbe:
         "agent-host",
         ".venv/bin/python -m services.agent_host.daemon",
         project_root,
-        extra_env={"AVA_PROCESS_PROFILE": _HOST_PROCESS_PROFILE},
+        extra_env=_agent_host_env(),
         verify=_probe,
     )
 
