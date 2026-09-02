@@ -16,6 +16,10 @@ fail on a foreign-owned path. On POSIX it compares `Path.stat().st_uid` to the
 current user for the home directory, `.env`, `logs/`, `configs/`, `secrets/`,
 and the source tree when it exists.
 
+This is a heuristic rather than an exhaustive ownership audit: it checks only
+these top-level paths, while each printed `chown -R` repair command covers the
+relevant subtree.
+
 Findings are warning-only: converge and start continue, while the console and
 `$AVA_HOME/logs/ownership_preflight.log` name each foreign-owned path and its
 exact `sudo chown -R <user>:<group> <path>` repair command. It intentionally

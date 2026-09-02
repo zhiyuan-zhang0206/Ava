@@ -138,3 +138,5 @@ same local evidence record. `retire` refuses until that verification exists;
 once it does, it performs the idempotent `DROP TABLE IF EXISTS` on the live
 snapshot table. Do not delete or edit the evidence record between these steps:
 the record is the guard that binds retirement to the archived, drilled object.
+Verification requires the record key ID to match the currently configured PITR key.
+Before reusing a rollback-snapshot table name, delete its old evidence record.
