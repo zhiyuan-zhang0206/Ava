@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import LiteralString
 
 import psycopg
 import pytest
@@ -718,7 +719,7 @@ def test_lease_reaper_rechecks_candidate_under_row_lock(
         nonlocal changed
         if not changed:
             changed = True
-            updates = {
+            updates: dict[str, LiteralString] = {
                 "renewed": "UPDATE agents_meta SET lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
                 "replacement": "UPDATE agents_meta SET started_at = now() WHERE id = %s",
                 "terminated": "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' WHERE id = %s",
