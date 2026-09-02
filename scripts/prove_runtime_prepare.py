@@ -86,6 +86,15 @@ def prove_checkout_absent(
         retired_checkout.rename(checkout)
 
 
+def prepare_with_diagnostics(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
+    try:
+        return prepare_release(store, inputs)
+    except ReleaseRejectedError as exc:
+        candidates = [str(path.relative_to(store)) for path in store.rglob("*.pth")]
+        exc.add_note(f"retained .pth inventory: {candidates}")
+        raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
@@ -128,7 +137,7 @@ def main() -> None:
         file_sha256(checkout / "db/schema.sql"),
         args.uv.resolve(),
     )
-    release = prepare_release(store, inputs)
+    release = prepare_with_diagnostics(store, inputs)
     if serving.read_bytes() != original:
         raise AssertionError("successful preparation changed serving pointer")
     # Remove the input locations from their original names, proving that a
