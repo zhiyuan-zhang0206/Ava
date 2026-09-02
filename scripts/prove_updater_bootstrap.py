@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -34,7 +35,7 @@ from shared.managed_writer_observation import (
     observe_process,
 )
 from shared.native_job_observation import read_crontab
-from shared.runtime_release import verify_release
+from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.session_backend import get_backend
 
 
@@ -123,6 +124,27 @@ def wait_endpoint(context: PreparedObservation, projection: ObserverProjection) 
         except (OSError, ValueError, RuntimeError):
             time.sleep(0.05)
     raise AssertionError("actual restricted endpoint did not become available")
+
+
+def verify_probe_reuse(
+    context: PreparedObservation,
+    projection: ObserverProjection,
+    image: VerifiedRelease,
+    other_image: VerifiedRelease,
+) -> None:
+    """Actual HTTP identity still rejects a mismatched invocation-local image."""
+    with patch.object(hop, "_verify_image", side_effect=AssertionError("rehashed image")):
+        hop.probe_bootstrap(context, projection, verified_image=image)
+        for invalid in (
+            other_image,
+            replace(image, root=image.root.parent.parent / "wrong-home" / image.digest),
+            replace(image, manifest_digest="0" * 64),
+        ):
+            try:
+                hop.probe_bootstrap(context, projection, verified_image=invalid)
+            except ReleaseRejectedError:
+                continue
+            raise AssertionError("actual endpoint accepted a mismatched verified image")
 
 
 def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always restored in finally.
@@ -245,6 +267,8 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     "A native session launch refused",
                 )
                 wait_endpoint(old_context, projection)
+                if mode == "success":
+                    verify_probe_reuse(old_context, projection, old_image, image)
                 with psycopg.connect(env["AVA_DB_URL"]) as inventory_conn:
                     receipt = prepare_unit_inventory(
                         inventory_conn, image, home, "runtime-proof", schema_digest=schema_digest
