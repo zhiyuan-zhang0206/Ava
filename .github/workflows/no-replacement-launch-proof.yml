@@ -115,6 +115,7 @@ jobs:
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
           uv run pyright shared/windows_console_signal.py shared/winproc.py agent/session_admission.py tests/native_agent_record_probe.py
+          uv run pyright --pythonplatform Windows shared/windows_console_signal.py shared/winproc.py agent/session_admission.py tests/native_agent_record_probe.py
           timeout 360 uv run pytest tests/ops/test_no_replacement_launch.py tests/ops/test_lifecycle_recovery.py tests/agent/test_restart_process_crash.py tests/agent/test_lifecycle_finalizers.py tests/ava/test_shell.py tests/shared/test_winproc_launch.py tests/shared/test_winproc_kill_boundaries.py -q --junitxml=proof/head.xml
       - name: Require exact old canonical-launch regression
         shell: bash

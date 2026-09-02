@@ -247,7 +247,7 @@ def new_session(
         creationflags |= _BREAKAWAY
     out = session_log_path(name).open("ab")
     startup = None
-    if IS_WINDOWS:
+    if sys.platform == "win32":  # narrows Windows-only stdlib types for static checking
         startup = subprocess.STARTUPINFO()
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = subprocess.SW_HIDE
