@@ -22,6 +22,8 @@ def test_agent_spawn_forwards_display(monkeypatch: pytest.MonkeyPatch) -> None:
     detached-child env dict carries $DISPLAY / $WAYLAND_DISPLAY through; $HOME
     rides too (2026-08-06: agents lost HOME in the allowlist refactor and gh
     flipped to "not logged in" — macOS bash 3.2 never restores it)."""
+    # This is an enrolled runner projection; do not inspect the synthetic HOME.
+    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
     monkeypatch.setattr(
         os,
         "environ",

@@ -1315,7 +1315,7 @@ def test_current_field_values_warns_on_undecodable_env_value(
     assert val is True  # boot-time fallback (the field default)
     assert len(rec.warnings) == 1
     assert "AVA_TRACE_ENABLED" in rec.warnings[0]
-    assert "banana" in rec.warnings[0]
+    assert "banana" not in rec.warnings[0]
 
 
 def test_current_field_values_warns_on_bad_nodecode_list_value(
@@ -1335,7 +1335,7 @@ def test_current_field_values_warns_on_bad_nodecode_list_value(
     assert values["im_send_retry_delays"] == [2.0, 4.0, 8.0, 16.0, 32.0]
     assert len(rec.warnings) == 1
     assert "AVA_IM_SEND_RETRY_DELAYS" in rec.warnings[0]
-    assert "banana,apple" in rec.warnings[0]
+    assert "banana,apple" not in rec.warnings[0]
 
 
 def test_current_field_values_isolates_bad_env_from_good_file_value(
