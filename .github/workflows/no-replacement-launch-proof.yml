@@ -5,6 +5,42 @@ on:
 permissions:
   contents: read
 jobs:
+  actual-restart-e2e:
+    if: github.head_ref == 'ava-stability-no-replacement-launch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      AVA_RUNNER_MODE: process
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: 0.10.2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+      - uses: ./.github/actions/install-pg-redis
+      - run: uv sync --frozen
+      - run: npm ci
+        working-directory: ui/web
+      - run: uv run playwright install --with-deps chromium
+        timeout-minutes: 10
+      - name: Prove actual successor completion and next message
+        run: |
+          mkdir -p proof
+          timeout 600 uv run pytest tests/e2e/test_self_restart.py -v --junitxml=proof/actual-restart.xml
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: actual-restart-${{ github.event.pull_request.head.sha }}
+          path: |
+            proof/
+            tmp/e2e-logs/
+          if-no-files-found: error
   native-records:
     if: github.head_ref == 'ava-stability-no-replacement-launch'
     strategy:
