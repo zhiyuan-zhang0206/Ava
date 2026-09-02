@@ -89,6 +89,11 @@ def _pgbouncer_in_front(pg_url: str, listen_addr: str = "127.0.0.1") -> Generato
                 "auth_type = scram-sha-256",
                 f"auth_file = {userlist}",
                 "pool_mode = transaction",
+                # Mirrors _render_ini's load-bearing reset contract: scrub the
+                # backend to connect_query-fresh state on EVERY return to the
+                # pool (always=1), not only on client disconnect.
+                "server_reset_query = 'DISCARD ALL; SET statement_timeout = 60000'",
+                "server_reset_query_always = 1",
                 "max_client_conn = 100",
                 "default_pool_size = 2",  # tiny, so transactions genuinely reuse backends
                 "ignore_startup_parameters = extra_float_digits,options",
