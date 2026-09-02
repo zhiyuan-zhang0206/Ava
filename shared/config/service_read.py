@@ -304,6 +304,11 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
         )
     aliases = runtime_config.read_env_aliases()
     out: dict[str, str] = {}
+    if not aliases.get("AVA_DB_URL"):
+        raise ValueError(
+            "AVA_DB_URL is missing from the gateway config snapshot; "
+            "cannot serve runner credentials from mixed config snapshots"
+        )
     for name in BOOTSTRAP_FIELDS:
         alias = field_alias(name)
         if alias in aliases:

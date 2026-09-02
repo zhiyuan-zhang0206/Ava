@@ -203,7 +203,13 @@ def test_bootstrap_serves_comma_list_not_repr(monkeypatch: pytest.MonkeyPatch, t
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
-    upsert_env(tmp_path / ".env", {"AVA_RUNNER_DB_PASSWORD": "runner-password"})
+    upsert_env(
+        tmp_path / ".env",
+        {
+            "AVA_DB_URL": str(config.settings.data_plane.db_url),
+            "AVA_RUNNER_DB_PASSWORD": "runner-password",
+        },
+    )
 
     vals = config.bootstrap_config_values()
     assert vals["AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == "alpha,beta"
@@ -468,7 +474,10 @@ def test_bootstrap_distributes_a_behavior_knob(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         runtime_config,
         "read_env_aliases",
-        lambda: {"AVA_RUNNER_DB_PASSWORD": "runner-password"},
+        lambda: {
+            "AVA_DB_URL": str(cfg.settings.data_plane.db_url),
+            "AVA_RUNNER_DB_PASSWORD": "runner-password",
+        },
     )
     monkeypatch.setattr(cfg.settings.sandbox, "exec_timeout_seconds", 123.0)
     values = cfg.bootstrap_config_values()

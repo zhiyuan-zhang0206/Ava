@@ -124,6 +124,12 @@ Enrolled remote runners are different: their authenticated bootstrap URL is
 authoritative and passes through unchanged; they never consult a local gateway
 runner password or synthesize a runner identity from an owner URL. The bootstrap
 response and local launcher share the same pure credential projection function.
+Bootstrap likewise requires its database URL from that same file snapshot;
+it cannot substitute a cached Settings URL when the file omits it. Noncredential
+defaults retain the existing Settings resolution. Connection pools bind the
+complete configuration captured at process startup and are closed at shutdown;
+configuration changes take effect through the existing restart boundary, not
+a hot pool swap or a new credential-generation protocol.
 This is per-call consistency, not a credential rotation protocol or proof that
 the database's live verifier has already been changed. Connection credentials
 must not be included in logs or manifests.

@@ -2315,6 +2315,7 @@ class TestStderrLogsDir:
             lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         _fake_launch_supervisor(monkeypatch)  # don't actually start a process
+        monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
 
         _launch_agent_process(99999)  # agent_id arbitrary, doesn't read DB
         assert fresh_logs_dir.exists(), (
@@ -2948,6 +2949,7 @@ class TestLaunchAgentProcessConfigOverlay:
     @staticmethod
     def _capture_launch(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], dict[str, str]]]:
         captured: list[tuple[list[str], dict[str, str]]] = []
+        monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
 
         class _FakeSupervisor:
             @staticmethod

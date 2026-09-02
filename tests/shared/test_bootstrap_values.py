@@ -10,7 +10,13 @@ from shared.envfile import upsert_env
 
 
 def _write_runner_password(home: Path) -> None:
-    upsert_env(home / ".env", {"AVA_RUNNER_DB_PASSWORD": "runner-password"})
+    upsert_env(
+        home / ".env",
+        {
+            "AVA_DB_URL": str(config.settings.data_plane.db_url),
+            "AVA_RUNNER_DB_PASSWORD": "runner-password",
+        },
+    )
 
 
 def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
