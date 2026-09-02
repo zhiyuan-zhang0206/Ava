@@ -12,8 +12,9 @@ from typing import Any
 QA_ACCOUNT_ID = 87293881
 TRUNK_ACCOUNT_ID = 85644782
 REPOSITORY = "zhiyuan-zhang0206/Ava"
-_RECEIPT = re.compile(r"\A```ava-qa\n(.*?)\n```\s*\Z", re.DOTALL)
+_RECEIPT = re.compile(r"\A```(?:ava-qa|json)\n(.*?)\n```\s*\Z", re.DOTALL)
 _FIELDS = {"ava_qa_version", "pr_number", "head_sha", "verdict", "asserted_ava_reviewer"}
+_METADATA = {"time", "note"}
 
 
 def trusted_queue_pr(pr: dict[str, Any]) -> bool:
@@ -37,7 +38,9 @@ def _receipt(body: str, pr: dict[str, Any]) -> str | None:
         value = json.loads(match[1])
     except json.JSONDecodeError:
         return None
-    if not isinstance(value, dict) or set(value) != _FIELDS:
+    if not isinstance(value, dict) or not set(value) >= _FIELDS or set(value) - _FIELDS - _METADATA:
+        return None
+    if any(not isinstance(value[key], str) for key in _METADATA & set(value)):
         return None
     if (
         type(value["ava_qa_version"]) is not int

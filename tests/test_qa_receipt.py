@@ -47,6 +47,26 @@ def test_current_receipt_requires_label_and_authentication() -> None:
     assert not approved(pr, [receipt], [])
 
 
+def test_adopted_json_receipt_allows_only_string_time_and_note_metadata() -> None:
+    pr = _pr()
+    receipt = _comment(pr)
+    value = {
+        "ava_qa_version": 1,
+        "pr_number": 42,
+        "head_sha": "a" * 40,
+        "verdict": "approved",
+        "asserted_ava_reviewer": "3242",
+        "time": "2026-09-02T18:34:16Z",
+        "note": "current-SHA receipt",
+    }
+    receipt["body"] = "```json\n" + json.dumps(value) + "\n```"
+    assert approved(pr, [receipt], [])
+    receipt["body"] = "```json\n" + json.dumps(value | {"bypass": True}) + "\n```"
+    assert not approved(pr, [receipt], [])
+    receipt["body"] = "```json\n" + json.dumps(value | {"time": 1}) + "\n```"
+    assert not approved(pr, [receipt], [])
+
+
 def test_synchronize_does_not_carry_old_approval() -> None:
     pr = _pr()
     receipt = _comment(pr)

@@ -13,6 +13,9 @@ substituting the actual PR number, full current SHA and asserted reviewer ID:
 ```
 
 `revoked` withdraws approval. Comments for another SHA never carry forward.
+The fence may be `json` or `ava-qa`. Optional `time` and `note` strings are
+accepted for the existing reviewer workflow; they never influence trust or
+ordering (GitHub record timestamps are authoritative). Unknown keys fail closed.
 Edits/deletions and label changes re-evaluate records. Current-head dismissed or
 changes-requested GitHub reviews veto receipts until a new actual review; their
 `submitted_at` is not a dismissal timestamp and must not be used to hide a veto.
