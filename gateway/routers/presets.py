@@ -33,6 +33,8 @@ from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
+from shared.db_transaction import write_transaction
+
 router = APIRouter()
 
 _COLS = "id, name, label, description, config, created_at, updated_at"
@@ -115,7 +117,7 @@ async def list_presets(request: Request) -> list[PresetView]:
 def _create_blocking(pool: ConnectionPool, body: PresetCreate) -> tuple[Any, ...]:
     """Sync create INSERT — via to_thread (409 on name clash)."""
     try:
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 f"INSERT INTO agent_presets (name, label, description, config) "  # noqa: S608 — _COLS is a fixed literal
                 f"VALUES (%s, %s, %s, %s) RETURNING {_COLS}",
@@ -158,7 +160,7 @@ def _update_blocking(
     set_parts.append("updated_at = now()")
 
     try:
-        with pool.connection() as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 cast(
                     LiteralString,
@@ -194,7 +196,7 @@ async def update_preset(request: Request, preset_id: int, body: PresetUpdate) ->
 
 def _delete_blocking(pool: ConnectionPool, preset_id: int) -> None:
     """Sync delete + 404 guard — via to_thread."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM agent_presets WHERE id = %s RETURNING id", (preset_id,))
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"preset {preset_id} not found")
