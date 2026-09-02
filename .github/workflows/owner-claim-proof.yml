@@ -25,6 +25,10 @@ jobs:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --frozen
+      - name: Verify existing kernel dispatch and reconciliation contracts
+        run: |
+          mkdir -p proof
+          timeout 360 uv run pytest tests/agent/test_claim.py tests/agent/test_compact.py tests/agent/test_circuit_breaker.py tests/agent/test_db.py -q --junitxml=proof/kernel-contracts.xml
       - name: Prove owner-bound durable claim
         shell: bash
         run: |
