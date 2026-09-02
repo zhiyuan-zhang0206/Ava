@@ -75,12 +75,11 @@ at most once per window (each a loud WARN) instead of a tight loop. The continuo
 crash-resurrect scan and one-shot boot revive stop after
 ``auto_resurrect_max_attempts`` unconsumed ``kind='resurrect'`` lifecycle inbounds;
 a successful boot consumes those rows, so the count represents consecutive failed
-recovery attempts. New post-death work still wakes the agent through the delivery path
-or delivery watchdog, so a permanently boot-failing corpse stops storming while a
-genuinely wanted agent is woken by a fresh delivery. A one-off crash is recovered on
-the next scan (its ``last_resurrect_at`` is NULL or long-stale). The claim + backoff
-stamp is a single atomic UPDATE, so under any race only one pass resurrects a given
-corpse.
+recovery attempts. The shared wake gate gives delivery-path and watchdog retries the
+same system-initiated limit while manual resurrection remains the escape hatch. A
+one-off crash is recovered on the next scan (its ``last_resurrect_at`` is NULL or
+long-stale). The claim + backoff stamp is a single atomic UPDATE, so under any race
+only one pass resurrects a given corpse.
 
 **Gateway-health gated**, like RespawnController: a resurrected agent self-fetches
 its config from the gateway at boot, so resurrecting while the gateway is down would

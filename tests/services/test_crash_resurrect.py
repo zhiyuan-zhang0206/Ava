@@ -44,6 +44,7 @@ from ops.controllers import respawn as rd
 from ops.controllers import resurrect as cr
 from ops.controllers import wedged as wd
 from ops.ops_lifecycle import _force_mark_terminated, mark_agent_exited_op
+from shared.agents import ResurrectBudgetExhausted
 from shared.config import settings
 from shared.machine import machine_name
 from shared.migrations import CodeBehindSchema
@@ -721,6 +722,59 @@ class TestResurrectClearsSource:
         monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         aid = _corpse(db_conn, source="reaper")
         resurrect_agent(aid, resurrected_by="system")
+        assert _row(db_conn, aid) == ("idling", None)
+
+
+class TestSystemResurrectBudget:
+    def test_reads_cluster_file_budget_when_gateway_has_only_the_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The gateway pop must not turn an operator-set budget into the default."""
+        from shared import runtime_config
+
+        def _gateway_default(_name: str) -> int:
+            return 3
+
+        monkeypatch.setattr(agent_wake, "get_field", _gateway_default)
+        monkeypatch.setattr(
+            runtime_config,
+            "read_env_aliases",
+            lambda: {"AVA_AUTO_RESURRECT_MAX_ATTEMPTS": "5"},
+        )
+
+        assert agent_wake._auto_resurrect_max_attempts() == 5
+
+    def test_system_resurrect_stops_at_pending_budget(self, db_conn: psycopg.Connection) -> None:
+        """A failed system recovery leaves the corpse unchanged at its budget."""
+        aid = _corpse(db_conn, source="reaper")
+        for _ in range(settings.daemon.auto_resurrect_max_attempts):
+            _add_pending_resurrect_inbound(db_conn, aid)
+
+        with pytest.raises(ResurrectBudgetExhausted, match="exhausted"):
+            resurrect_agent(aid, resurrected_by="system")
+
+        assert _row(db_conn, aid) == ("terminated", "reaper")
+
+    def test_system_resurrect_allows_pending_rows_below_budget(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """A system recovery below the limit still wakes the terminated agent."""
+        aid = _corpse(db_conn, source="reaper")
+        for _ in range(settings.daemon.auto_resurrect_max_attempts - 1):
+            _add_pending_resurrect_inbound(db_conn, aid)
+
+        resurrect_agent(aid, resurrected_by="system")
+
+        assert _row(db_conn, aid) == ("idling", None)
+
+    def test_manual_resurrect_bypasses_pending_budget(self, db_conn: psycopg.Connection) -> None:
+        """Manual recovery remains available after automatic retries are exhausted."""
+        aid = _corpse(db_conn, source="reaper")
+        for _ in range(settings.daemon.auto_resurrect_max_attempts):
+            _add_pending_resurrect_inbound(db_conn, aid)
+
+        resurrect_agent(aid, resurrected_by="user")
+
         assert _row(db_conn, aid) == ("idling", None)
 
 

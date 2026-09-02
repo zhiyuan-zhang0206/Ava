@@ -470,83 +470,38 @@ def _insert_pending_resurrect_row(
     return inbound_id  # pyright: ignore[reportUnknownVariableType]
 
 
-class TestDeadLetterStaleUnconsumedResurrects:
-    def test_only_old_exhausted_pending_resurrects_are_dead_lettered(
+class TestDeadLetterStalePendingResurrects:
+    def test_only_old_pending_resurrects_are_dead_lettered(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
     ) -> None:
-        from services.delivery_watchdog.daemon import dead_letter_stale_unconsumed_resurrects
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_resurrects
 
-        max_attempts = settings.daemon.auto_resurrect_max_attempts
-        exhausted = _make_terminated_agent(db_conn)
-        old_exhausted = _insert_pending_resurrect_row(db_conn, exhausted, age_s=2 * 86400)
-        fresh_exhausted = _insert_pending_resurrect_row(db_conn, exhausted, age_s=60)
-        for _ in range(max_attempts - 2):
-            _insert_pending_resurrect_row(db_conn, exhausted, age_s=60)
+        aid = _make_idling_agent(db_conn)
+        old = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400)
+        fresh = _insert_pending_resurrect_row(db_conn, aid, age_s=60)
+        claimed = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, status="claimed")
+        done = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, status="done")
         old_non_resurrect = _insert_pending_resurrect_row(
-            db_conn, exhausted, age_s=2 * 86400, kind="chat"
+            db_conn, aid, age_s=2 * 86400, kind="chat"
         )
 
-        below_budget = _make_terminated_agent(db_conn)
-        old_below_budget = _insert_pending_resurrect_row(db_conn, below_budget, age_s=2 * 86400)
-        for _ in range(max_attempts - 2):
-            _insert_pending_resurrect_row(db_conn, below_budget, age_s=60)
-
-        idling_exhausted = _make_idling_agent(db_conn)
-        old_idling = _insert_pending_resurrect_row(db_conn, idling_exhausted, age_s=2 * 86400)
-        for _ in range(max_attempts - 1):
-            _insert_pending_resurrect_row(db_conn, idling_exhausted, age_s=60)
-
-        claimed = _insert_pending_resurrect_row(
-            db_conn, exhausted, age_s=2 * 86400, status="claimed"
-        )
-        done = _insert_pending_resurrect_row(db_conn, exhausted, age_s=2 * 86400, status="done")
-
-        assert dead_letter_stale_unconsumed_resurrects(pool, 86400.0, max_attempts) == 2
+        assert dead_letter_stale_pending_resurrects(pool, 86400.0) == 1
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT id, status, claimed_at IS NOT NULL FROM inbound_messages "
                 "WHERE id = ANY(%s)",
-                (
-                    [
-                        old_exhausted,
-                        fresh_exhausted,
-                        old_non_resurrect,
-                        old_below_budget,
-                        old_idling,
-                        claimed,
-                        done,
-                    ],
-                ),
+                ([old, fresh, claimed, done, old_non_resurrect],),
             )
             rows = {row[0]: row[1:] for row in cur.fetchall()}
 
-        assert rows[old_exhausted] == ("done", True)
-        assert rows[fresh_exhausted] == ("pending", False)
+        assert rows[old] == ("done", True)
+        assert rows[fresh] == ("pending", False)
         assert rows[old_non_resurrect] == ("pending", False)
-        assert rows[old_below_budget] == ("pending", False)
-        assert rows[old_idling] == ("done", True)
         assert rows[claimed] == ("claimed", False)
         assert rows[done] == ("done", False)
 
 
 class TestSelectTerminatedOwnersWithPending:
-    @pytest.mark.parametrize("pending_resurrects, expected", [(2, True), (3, False)])
-    def test_attempt_budget_bounds_resurrect_retries(
-        self,
-        db_conn: psycopg.Connection,
-        pool: ConnectionPool,
-        pending_resurrects: int,
-        expected: bool,
-    ) -> None:
-        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
-
-        aid = _make_terminated_agent(db_conn)
-        chat_id = insert_inbound_message(db_conn, aid, "hello?", source="user")
-        for _ in range(pending_resurrects):
-            _insert_pending_resurrect_row(db_conn, aid, age_s=60)
-
-        assert select_terminated_owners_with_pending(pool) == ([(aid, chat_id)] if expected else [])
-
     def test_force_fence_excludes_older_chat_but_accepts_newer_chat(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
     ) -> None:
