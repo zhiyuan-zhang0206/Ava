@@ -121,9 +121,13 @@ def prove_checkout_absent(
                 env=migration_env,
                 capture_output=True,
                 text=True,
-                check=True,
+                check=False,
                 timeout=180,
             )
+            if result.returncode:
+                # This child has only explicit CI scratch credentials, not the
+                # runner's ambient environment. Retain the actual admission error.
+                raise AssertionError(f"wheel/PG admission failed:\n{result.stderr[-8000:]}")
             (root / "migration-proof.json").write_text(result.stdout)
     finally:
         retired_checkout.rename(checkout)
