@@ -11,6 +11,8 @@ annotated service roster (including presence-discovered plugin services), every
 home session record, and user launchd/crontab definitions. Disabled and obsolete
 session names remain in the inventory. Missing, malformed, unsupported and
 changing facts refuse before writing a receipt.
+Session/definition reads are bounded and verify the opened inode against the
+path observation; replacement or growth during a read refuses the inventory.
 
 The existing `ExpectedUnitWriters` model carries exact process/session/job
 identities. The full secret-free prepare receipt also carries the complete
