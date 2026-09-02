@@ -166,8 +166,13 @@ def test_observe_liveness_only_failure_says_which_endpoint(monkeypatch: pytest.M
     """The weaker signals report their own words too, so `_run_probe` stays faithful
     to `cli.commands._probe._probe_service` in what it reports, not just in its
     precedence — the two drifting is the bug this module's roster exists to prevent."""
+    from shared.config import settings
     from shared.daemon_health import DaemonProbe
 
+    # This test exercises the probe-failure message per signal kind, so milvus
+    # must be on the probe set: pin the milvus memory-search backend (numpy,
+    # the default, gates the milvus service out with its own gated status).
+    monkeypatch.setattr(settings.services, "memory_search_backend", "milvus")
     monkeypatch.setattr(observe, "_curl_ok", lambda _url: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(observe, "_tcp_ok", lambda _port: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
