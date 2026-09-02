@@ -81,9 +81,9 @@ from real incidents; the concrete sizes and dates are illustrative.
   N — cross-thread batch deletes are the anomaly, not the norm).
 - Causes: unbounded checkpoint accumulation (same as disk), a hot loop
   holding state, a leak in a long-lived daemon.
-- Response: heap forensics on PG (varlena compression, tuple layout — see
-  pg-heap notes), kill-and-respawn the offender, pin the regression with a
-  test before calling it fixed.
+- Response: attribute the exact consumer and use the smallest authorized
+  official lifecycle operation. Never raw-kill a process or bulk-resurrect a
+  fleet from a symptom. Pin the regression in CI and verify actual progress.
 
 ### Connectivity / port conflicts
 
@@ -178,8 +178,9 @@ code version. After every rollout, verify:
    Healthcheck probe: `.venv/bin/python -m services.healthchecks.mcp_daemon`
    must log "alive, no-op".
 3. **watchdog processes** (agent-runner/gateway) restarted with the new code:
-   start time must be ≈ deploy time; a stale watchdog runs old code forever on
-   wsl (probe only checks existence). Fix: kill old → probe respawns in ≤1min.
+   start time must match the intended generation; a stale watchdog can keep
+   running old code. Use the exact official service lifecycle after proving
+   its unit/process identity, then verify the replacement generation.
 4. **win browser daemon**: restarter does not keep it alive; an empty pidfile
    means only `ava start` relaunches it.
 5. **schedules**: `ava schedules ls` — a stale `ava-schedule-*` session from
@@ -189,11 +190,13 @@ code version. After every rollout, verify:
 
 ## Response discipline
 
-1. **Stop the bleed before the root cause.** An incident gets an immediate
-   mitigation that restores service (kill the loop, pin the port, mark the
-   row terminal, restart the service) even before the fix is understood.
-   Then root-cause and PR the fix. The mitigation is temporary and labeled
-   as such in the task.
+1. **Stop the bleed within authority.** First attribute the machine, unit,
+   exact service/session, and actor. Report the smallest supported official
+   lifecycle mitigation and its blast radius. Do not use raw signals, direct
+   database state writes, production source edits, or broad restart/update as
+   shortcuts. A temporary recovery is not a persistent fix; label it and send
+   the defect through PR, review and CI. Explicit user constraints override
+   generic incident playbooks.
 2. **User approval boundaries.** Rollouts/cluster updates need user approval
    (a standing ruling; offline-tolerance carve-outs are granted separately).
    Irreversible actions (deleting data, force-pushing, killing production

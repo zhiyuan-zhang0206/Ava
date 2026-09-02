@@ -189,7 +189,7 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 
 ## Workflow (mandatory)
 
-- **Worktree + PR** — every change in `git worktree add -b ava-<id>-<task>`, merged via PR through the Trunk merge queue; direct push forbidden. [Workflow →](.agents/skills/ship-a-change/SKILL.md)
+- **Worktree + PR** — every change in `git worktree add -b ava-<id>-<task>`, merged via PR through the Trunk merge queue; direct push forbidden. Merge is not deployment; runtime rollout requires separate operator authorization and verification. [Workflow →](.agents/skills/ship-a-change/SKILL.md)
 - **PR description** — must have file-tree diff with ★ critical paths + prose data flow. [Spec →](.agents/skills/write-a-pr-description/SKILL.md)
 - **Tech-debt sweeps** — follow `.agents/skills/ava-sweeper/` (debt classes + tracker; boundary vs. lint in [`conventions/lint-vs-sweeper.md`](conventions/lint-vs-sweeper.md)).
 - **Complexity analysis** — McCabe cyclomatic complexity + maintainability index via radon, ranked for refactoring. [Skill →](.agents/skills/measure-complexity/SKILL.md)
