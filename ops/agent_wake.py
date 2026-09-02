@@ -75,8 +75,10 @@ from shared.config import settings
 from shared.daemon_health import health_port, probe_daemon
 from shared.db import fetch_one, publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.lifecycle_termination_observe import observe_applied_termination
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
+from shared.machine import machine_name
 
 
 class ResurrectTriggerStaleError(ResurrectError):
@@ -268,6 +270,8 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
+        if not observe_applied_termination(conn, agent_id, machine_name()):
+            raise ResurrectError("outstanding lifecycle target has not been observed ended")
         allocation_epoch = _transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,

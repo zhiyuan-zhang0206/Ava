@@ -32,7 +32,7 @@ jobs:
       - name: Prove actual successor completion and next message
         run: |
           mkdir -p proof
-          timeout 600 uv run pytest tests/e2e/test_self_restart.py -v --junitxml=proof/actual-restart.xml
+          timeout 600 uv run pytest tests/e2e/test_self_restart.py tests/e2e/test_self_resurrect.py -v --junitxml=proof/actual-restart.xml
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
