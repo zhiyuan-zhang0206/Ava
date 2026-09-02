@@ -84,6 +84,17 @@ def _classify_rollout(repo: Path, *, restart_only: bool, origin: str) -> tuple[i
         # affect the UI process).
         print("\n→ cluster restart (no pull): bounce every service on current code")
         return None, True
+    from shared.running_sha import get as get_running_sha
+    from shared.source_integrity import get as get_installed_sha
+
+    installed_sha = get_installed_sha()
+    running_sha = get_running_sha()
+    if installed_sha is not None and running_sha is not None and installed_sha != running_sha:
+        print(
+            "\n→ half-deployed state: installed and running commits disagree; "
+            "replaying the full rollout"
+        )
+        return None, True
     # Classify before touching anything. On a git error, fall back to a full
     # restart (restart_frontend=True) — never under-restart on a fetch hiccup.
     try:

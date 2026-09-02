@@ -256,10 +256,13 @@ async def post_cluster_rollout(
     Body is fully optional; `origin` (default "user") names the trigger and
     heads the rollout log + the cluster pin's `updated_by`.
 
-    Returns the orchestration session name + tee'd log path, plus `backend_changed` —
-    whether this rollout restarts agent processes (the frontend "Update"
-    button uses it to say agents will be restarted; the SDK initiator that
-    once waited on it, `ava.self.update()`, was removed 2026-08).
+    Returns the orchestration session name + tee'd log path, plus
+    `backend_changed` (whether this rollout restarts agent processes) and
+    `needs_replay` (whether it reconciles disagreeing installed/running
+    bookmarks). The frontend uses the first to describe agent restarts; the
+    CLI uses the second to identify a half-deployed state. The SDK initiator
+    that once waited on the restart signal, `ava.self.update()`, was removed
+    2026-08.
 
     Errors:
     - 400 if called on an agent-runner (rollout is a gateway operation).
@@ -337,11 +340,12 @@ async def post_cluster_restart(
 @router.get("/api/cluster/update-check")
 async def get_cluster_update_check() -> UpdateCheck:
     """Read-only preflight for the Update button — how far behind origin/main and
-    what a rollout would restart.
+    what a rollout would restart, or whether an interrupted rollout needs replay.
 
     Gateway only (it inspects the gateway checkout). Does a
     `git fetch` but never pulls or mutates the tree, so the UI can poll it.
-    `behind == 0` → the UI shows "no updates" and does not launch a rollout.
+    A clean `behind == 0` → the UI shows "no updates" and does not launch a
+    rollout. A bookmark disagreement is instead returned as `needs_replay`.
     """
     if not is_gateway():
         raise HTTPException(

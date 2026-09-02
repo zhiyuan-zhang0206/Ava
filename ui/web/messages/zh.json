@@ -618,6 +618,8 @@
       "upToDate": "已是最新",
       "update": "更新",
       "updateWithCount": "更新（{count}）",
+      "replayUpdate": "重放更新",
+      "replayRequired": "⚠ 半部署状态 — 需要重放",
       "thisHost": "此主机：{host}（{capabilities}）",
       "gateway": "网关",
       "agentRunner": "Agent 运行器",
