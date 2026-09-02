@@ -13,13 +13,17 @@ _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
 
 
+def _admit_future_protocol(_source: str) -> None:
+    """Test-only seam: exercise storage beyond the independently tested fence."""
+
+
 def test_chat_insert_and_reconcile_persist_same_structured_identity(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Exercise future admitted-write storage separately from today's closed
     # rollout fence; the tests below assert the real fence rejects every write.
-    monkeypatch.setattr("shared.chat_delivery.reject_unnegotiated_caller", lambda _source: None)
+    monkeypatch.setattr("shared.chat_delivery.reject_unnegotiated_caller", _admit_future_protocol)
     agent_id = create_agent(db_conn)
     key = str(uuid4())
     receipt = insert_chat_inbound_once(
@@ -50,7 +54,7 @@ def test_lifecycle_insert_persists_structured_identity(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("shared.envelope.reject_unnegotiated_caller", lambda _source: None)
+    monkeypatch.setattr("shared.envelope.reject_unnegotiated_caller", _admit_future_protocol)
     agent_id = create_agent(db_conn)
     inbound_id = insert_inbound_message(db_conn, agent_id, "", _SOURCE, kind="restart")
     with db_conn.cursor() as cur:
