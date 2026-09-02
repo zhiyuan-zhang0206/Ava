@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psutil
@@ -15,6 +17,7 @@ from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_postgres import (
     _append_recovery_config,
     _live_identity,
+    _run,
     _write_sandbox_config,
 )
 from services.pitr.restore_proof import (
@@ -331,3 +334,60 @@ def test_live_identity_probe_needs_no_settings_privilege() -> None:
     assert identity.data_directory == data_directory
     assert identity.system_identifier
     assert identity.pid == int(pid_line)
+
+
+def test_restore_run_token_fits_the_socket_path_budget() -> None:
+    """The run-directory token must keep the sandboxed PostgreSQL's unix socket
+    path under the macOS 103-byte sun_path cap for the real restore root: the
+    fixed prefix (~/.ava/physical-backup/restore/, 47 chars) plus
+    "/socket/.s.PGSQL.<port>" leaves 33 chars for the ".{token}.partial" name.
+    The 2026-09-03 activation #7 failed exactly here (full run_id in the
+    directory name); tests never caught it because tmp_path roots are short."""
+    now = datetime(2026, 9, 3, 2, 12, 42, tzinfo=UTC)
+    chain_ids = (
+        # Activation chain: timestamp + 36-char operation uuid.
+        "activation-20260902T161958Z-24e5f23a-5de2-45be-b6a8-fcd51f3642e5",
+        # Scheduled-proof chain: dash-less timestamp id.
+        "20260901T040728Z",
+    )
+    for chain_id in chain_ids:
+        token = restore_proof._restore_run_token(chain_id, now)
+        assert len(token) <= restore_proof._MAX_RUN_DIR_NAME_LEN - len(".partial") - 1
+        assert len(f".{token}.partial") <= restore_proof._MAX_RUN_DIR_NAME_LEN
+        # Deterministic and chain-distinguishable.
+        assert restore_proof._restore_run_token(chain_id, now) == token
+        assert now.strftime("%Y%m%dT%H%M%SZ") in token
+        assert token.split("-")[-1] == chain_id.rsplit("-", 1)[-1][:6]
+
+
+def test_run_error_carries_the_child_output_tail() -> None:
+    """_run must not swallow the child's stderr: the 2026-09-03 activation #7
+    sandbox postmaster failure was invisible because pg_ctl's stderr went to
+    DEVNULL. A failing child now names its output (bounded tail)."""
+    marker = "restore-command-failure-marker"
+    with pytest.raises(RestoreProofError) as excinfo:
+        _run(
+            [
+                sys.executable,
+                "-c",
+                f"import sys; print('{marker}', file=sys.stderr); sys.exit(3)",
+            ],
+            timeout=30,
+        )
+    assert marker in str(excinfo.value)
+
+
+def test_run_error_tail_is_bounded() -> None:
+    """A verbose child failure stays bounded in the error message."""
+    with pytest.raises(RestoreProofError) as excinfo:
+        _run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; print('x' * 20000, file=sys.stderr); sys.exit(3)",
+            ],
+            timeout=30,
+        )
+    message = str(excinfo.value)
+    assert len(message) < 4500
+    assert message.endswith("x" * 500)

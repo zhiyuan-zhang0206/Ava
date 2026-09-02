@@ -54,3 +54,20 @@ def save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None
             error_message=message,
         ),
     )
+
+
+def refusal_message(exc: BaseException) -> str:
+    """`Type: message` bounded for a CLI refusal line — a refusal must say WHY
+    (2026-08-30: `PITR activation refused: BaseCandidateError` carried nothing;
+    the actual cause lived in the exception message the old print dropped).
+
+    A long detail keeps its TAIL: a wrapped worker traceback puts the actual
+    exception in its last lines, and the head is framing — the 2026-09-03
+    activation #7 root cause (sandbox postmaster socket-path failure) hid
+    behind exactly this truncation."""
+    detail = str(exc).strip()
+    if not detail:
+        return type(exc).__name__
+    if len(detail) > 300:
+        detail = f"…{detail[-300:]}"
+    return f"{type(exc).__name__}: {detail}"

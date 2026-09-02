@@ -13,7 +13,7 @@ from cli.commands import _pitr_activation as activation
 from cli.commands import _pitr_activation_config as activation_config
 from ops.pitr_restart import PitrRestartContinuation
 from services.pitr import activation_runtime
-from services.pitr.activation_observability import save_error
+from services.pitr.activation_observability import refusal_message, save_error
 from services.pitr.activation_runtime import (
     _restore_exact_file,
     archiver_reached_target,
@@ -1734,3 +1734,21 @@ def test_remote_wal_proof_refuses_after_the_deadline_passed(
     _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw)
     with pytest.raises(RuntimeError, match="deadline expired"):
         activation_runtime.remote_wal_proof(record)
+
+
+def test_refusal_message_shows_the_tail_of_a_long_detail() -> None:
+    """A refusal must expose the CAUSE, and wrapped tracebacks put it in the
+    last lines — the 2026-09-03 activation #7 root cause (sandbox postmaster
+    socket-path failure) was invisible behind the old head-only truncation."""
+    # Short details pass through whole.
+    assert refusal_message(RuntimeError("short cause")) == ("RuntimeError: short cause")
+    # Long details keep their tail, bounded, with an ellipsis marker.
+    head = "Traceback (most recent call last):\n" + ("  File ... prove_candidate\n" * 12)
+    cause = "RestoreProofError: restore command exited 1: pg_ctl: FATAL: socket path too long"
+    detail = head + cause
+    message = refusal_message(RuntimeError(detail))
+    assert message.startswith("RuntimeError: …")
+    assert message.endswith(cause)
+    assert len(message) <= len("RuntimeError: ") + 300 + 1
+    # An empty detail stays type-only.
+    assert refusal_message(RuntimeError("  \n")) == "RuntimeError"
