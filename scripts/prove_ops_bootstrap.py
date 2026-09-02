@@ -47,7 +47,7 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
         conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(namespace)))
         conn.execute("SELECT set_config('search_path',%s,false)", (namespace,))
         conn.execute("CREATE TABLE machine_units(machine_name text,home text)")
-        conn.execute("INSERT INTO machine_units VALUES ('proof',%s)", (str(home),))
+        conn.execute("INSERT INTO machine_units VALUES ('runtime-proof',%s)", (str(home),))
         conn.execute(
             "CREATE TABLE deployment_state(id int,phase text,kind text,note text,holder text,"
             "acquired_at timestamptz,expires_at timestamptz,target_sha text)"
@@ -61,7 +61,7 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
             raise AssertionError("fixture operation missing")
         context = PreparedObservation(
             expected=ExpectedUnitWriters(
-                machine="proof",
+                machine="runtime-proof",
                 home=str(home),
                 artifact_digest=artifact,
                 manifest_digest=manifest,
