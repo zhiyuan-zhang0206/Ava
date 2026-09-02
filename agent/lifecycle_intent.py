@@ -7,6 +7,7 @@ by adding nullable columns. Acceptance never asserts that a process exited.
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal, TypedDict
 from uuid import UUID
 
 import psycopg
@@ -25,6 +26,11 @@ class LifecycleIntent:
     generation: UUID
     owner: UUID
     accepted_at: datetime
+
+
+class LifecycleNoopResult(TypedDict):
+    outcome: Literal["superseded"]
+    reason: Literal["target_replaced"]
 
 
 async def accept_lifecycle_intent(
@@ -104,12 +110,13 @@ async def settle_superseded_intent(conn: psycopg.AsyncConnection, command: Lifec
     # Unknown ownership is not evidence of replacement.
     if current[1] is None or current[2] is None:
         return False
+    result: LifecycleNoopResult = {"outcome": "superseded", "reason": "target_replaced"}
     cursor = await conn.execute(
         "UPDATE inbound_messages SET status='done',payload=COALESCE(payload,'{}'::jsonb) || %s "
         "WHERE id=%s AND agent_id=%s AND status='claimed' AND target_generation=%s "
         "AND target_owner=%s AND applied_at IS NULL RETURNING id",
         (
-            Jsonb({"lifecycle_result": {"outcome": "superseded", "reason": "target_replaced"}}),
+            Jsonb({"lifecycle_result": result}),
             command.id,
             command.agent_id,
             command.generation,
