@@ -21,6 +21,13 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
 ```
 
 ### Stage 1: Schema Gate (`agent/_starting.py:claim_agent_row_or_die_on_stale_schema()`)
+Parent launch records use unique boot-attempt names on POSIX and Windows. Only
+the actual PostgreSQL admission winner publishes the canonical agent record,
+including ordinary legacy births and explicit resurrection. A resident or
+unreadable old canonical process refuses replacement; no revive/retry path kills
+it by name. This preflight is not a reservation: the admission CAS and bounded
+canonical publication lock protect a winner that appears after the preflight.
+
 - **Before claiming 'running'**, validates that DB schema matches the local code.
 - **Two mismatch types have the same runtime behavior**: both reject boot; only genuinely unowned legacy rows are marked terminated. A rejected attempt cannot settle an owned lifecycle command.
 - `CodeBehindSchema` (local code behind) — host layer can self-heal afterwards: update checkout to match cluster then resurrect

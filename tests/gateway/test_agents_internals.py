@@ -1526,7 +1526,7 @@ class TestResurrectAgent:
             raise RuntimeError("launch \u6545\u610f\u6302")
 
         # disable retries: this test only verifies the "permanent failure -> force-terminate + re-raise" contract,
-        # the retry path is covered separately by TestLaunchRetry (otherwise it would sleep + repeatedly _kill_stale_session).
+        # the retry path is covered separately by TestLaunchRetry (otherwise it would sleep + repeatedly _require_released_agent_session).
         monkeypatch.setattr("ops.agent_launch._LAUNCH_MAX_RETRIES", 0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", boom)
 
@@ -1745,7 +1745,7 @@ class TestLaunchConfirm:
     def _fake_launch_success(monkeypatch: pytest.MonkeyPatch) -> None:
         """Make the native supervisor's `new_session` return True without starting any real process —
         simulating "process spawn succeeded but child python immediately crashed". `kill_session`
-        (kill-stale) is also stubbed as noop (resurrect/respawn first call _kill_stale_session).
+        (kill-stale) is also stubbed as noop (resurrect/respawn first call _require_released_agent_session).
 
         `has_session` answers False, which is what the simulated failure means: the
         launched child is gone, so the confirm gets no deadline extension and fails
@@ -1784,7 +1784,7 @@ class TestLaunchConfirm:
         Also disables launch retries (`_LAUNCH_MAX_RETRIES=0`): the confirm-timeout
         tests assert the single-attempt force-terminate outcome; retrying a
         permanently-non-claiming child would only multiply the confirm wait and
-        shell out to `_kill_stale_session`. The retry path is covered by
+        shell out to `_require_released_agent_session`. The retry path is covered by
         TestLaunchRetry."""
         monkeypatch.setattr("ops.agent_launch.LAUNCH_CONFIRM_TIMEOUT_SEC", timeout_sec)
         monkeypatch.setattr("ops.agent_launch._LAUNCH_CONFIRM_POLL_INTERVAL_SEC", 0.02)
@@ -2144,7 +2144,7 @@ class TestLaunchRetry:
     """`_launch_or_force_terminated` retries transient launch failures, only force-terminating when exhausted.
     Covers the root-cause fix after ava.self.update() where an agent would become terminated:
     a single launch jitter no longer kills the agent outright.
-    `_launch_agent_process` / `_kill_stale_session` are monkeypatched in this class (no real process),
+    `_launch_agent_process` / `_require_released_agent_session` are monkeypatched in this class (no real process),
     and the backoff base is patched to 0 for speed."""
 
     def test_retry_then_succeed_does_not_terminate(
@@ -2164,7 +2164,7 @@ class TestLaunchRetry:
         monkeypatch.setattr("ops.agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", flaky)
         monkeypatch.setattr(
-            "ops.agent_launch._kill_stale_session",
+            "ops.agent_launch._require_released_agent_session",
             lambda _id: kills.__setitem__("n", kills["n"] + 1),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
 
@@ -2189,7 +2189,7 @@ class TestLaunchRetry:
         monkeypatch.setattr("ops.agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.agent_launch._LAUNCH_MAX_RETRIES", 3)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", always_boom)
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         with pytest.raises(RuntimeError, match="permanent launch fail"):
             _launch_or_force_terminated(agent_id)
@@ -2232,7 +2232,7 @@ class TestLaunchRetry:
                 )
             db_conn.commit()
 
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", _claim_then_note)
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", _claim_then_note)
 
         with pytest.raises(RuntimeError, match="confirm timed out"):
             _launch_or_force_terminated(agent_id)
@@ -2257,7 +2257,7 @@ class TestLaunchRetry:
 
         monkeypatch.setattr("ops.agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", boom_value)
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         with pytest.raises(ValueError, match="unexpected bug"):
             _launch_or_force_terminated(agent_id)
@@ -2898,7 +2898,7 @@ class TestRespawnResurrectColumnOverlay:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
         monkeypatch.setattr("ops.agent_launch._launch_or_force_terminated", fake_launch)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         result = respawn_agent(agent_id)
 
@@ -2934,7 +2934,7 @@ class TestRespawnResurrectColumnOverlay:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", fake_launch)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         resurrect_agent(agent_id, resurrected_by="user", prompt="test")
 

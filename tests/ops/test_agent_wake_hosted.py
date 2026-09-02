@@ -52,7 +52,7 @@ def _guard_process_launch(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(agent_wake.agent_launch, "_launch_agent_process", _boom)
     monkeypatch.setattr(agent_wake.agent_launch, "_launch_or_force_terminated", _boom)
-    monkeypatch.setattr(agent_wake.agent_launch, "_kill_stale_session", _boom)
+    monkeypatch.setattr(agent_wake.agent_launch, "_require_released_agent_session", _boom)
     monkeypatch.setattr(agent_wake.agent_launch, "_wait_for_agent_claim", _boom)
 
 

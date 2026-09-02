@@ -1,0 +1,72 @@
+"""Native OS record ordering probe, run with unittest outside PG/Redis fixtures.
+
+This exercises actual POSIX/Windows launch and record consumers, not admission
+authority. The separate PostgreSQL suite proves that only admission calls the
+publisher. All children and paths belong to this disposable CI test.
+"""
+
+import os
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+from ops.agent_launch import _require_released_agent_session
+from shared.cluster import session_name
+from shared.config import settings
+from shared.session_backend import native_proc
+from shared.session_record import SessionRecord
+
+
+class NativeAgentRecordOrdering(unittest.TestCase):
+    def test_parent_record_cannot_overwrite_child_canonical(self) -> None:
+        for child_delay in (0.0, 0.3):
+            with self.subTest(child_delay=child_delay), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                original_home = settings.general.ava_home
+                settings.general.ava_home = home
+                backend = native_proc()
+                attempt = session_name("boot-123-" + "a" * 32)
+                canonical = home / "run" / "sessions" / f"{session_name('agent-123')}.json"
+                attempt_path = canonical.with_name(f"{attempt}.json")
+                child = (
+                    "import time;from pathlib import Path;from uuid import UUID;"
+                    "from shared.config import settings;"
+                    f"settings.general.ava_home=Path({str(home)!r});"
+                    "from agent.session_admission import publish_admitted_session;"
+                    "from shared.runtime_incarnation import RuntimeIncarnation;"
+                    f"time.sleep({child_delay});"
+                    "publish_admitted_session(RuntimeIncarnation(123,UUID(int=1),UUID(int=2)));"
+                    "time.sleep(30)"
+                )
+                try:
+                    self.assertTrue(
+                        backend.new_session(
+                            attempt, [sys.executable, "-c", child], Path.cwd(), env=dict(os.environ)
+                        )
+                    )
+                    deadline = time.monotonic() + 15
+                    while not canonical.exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    admitted = SessionRecord.read(canonical)
+                    launched = SessionRecord.read(attempt_path)
+                    self.assertIsNotNone(admitted)
+                    self.assertIsNotNone(launched)
+                    if admitted is None or launched is None:
+                        self.fail("native child did not publish both record identities")
+                    self.assertEqual(admitted.pid, launched.pid)
+                    self.assertEqual(admitted.create_time, launched.create_time)
+                    self.assertEqual(admitted.generation, "00000000-0000-0000-0000-000000000001")
+                    before = canonical.read_bytes()
+                    with self.assertRaisesRegex(RuntimeError, "still live"):
+                        _require_released_agent_session(123)
+                    self.assertTrue(backend.has_session(attempt))
+                    self.assertEqual(canonical.read_bytes(), before)
+                finally:
+                    backend.kill_session(attempt, graceful=False)
+                    settings.general.ava_home = original_home
+
+
+if __name__ == "__main__":
+    unittest.main()
