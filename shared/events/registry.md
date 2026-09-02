@@ -147,7 +147,6 @@ consumers: see the comments at each emit point.
 | `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events |
 | `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events |
-| `restart_cas_lost` | restart CAS race lost | anomaly | — | — | events |
 | `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | anomaly | — | — | events |
 | `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | anomaly | — | — | events |
 | `idle_cas_lost` | idle-flip CAS race lost — degraded, not fatal | anomaly | — | — | events |
