@@ -28,7 +28,7 @@ jobs:
       - name: Verify existing kernel dispatch and reconciliation contracts
         run: |
           mkdir -p proof
-          timeout 360 uv run pytest tests/agent/test_claim.py tests/agent/test_compact.py tests/agent/test_circuit_breaker.py tests/agent/test_db.py -q --junitxml=proof/kernel-contracts.xml
+          timeout 360 uv run pytest tests/agent/test_claim.py tests/agent/test_compact.py tests/agent/test_circuit_breaker.py tests/agent/test_db.py tests/agent/test_fork_notes.py tests/agent/test_history_dump.py tests/services/test_turn_dispatcher.py -q --junitxml=proof/kernel-contracts.xml
       - name: Prove owner-bound durable claim
         shell: bash
         run: |
