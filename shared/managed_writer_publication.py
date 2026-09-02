@@ -8,6 +8,7 @@ unregistered credential holders, or activate caller protocol support by themselv
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Literal, Self
 from uuid import UUID
 
@@ -27,6 +28,28 @@ from shared.managed_writer_barrier import (
     lock_rollout,
     validate_collection_for_write,
 )
+
+
+@dataclass(frozen=True)
+class LegacyProtocolZero:
+    """Known never-enabled publication; preserve existing protocol-zero behavior."""
+
+
+@dataclass(frozen=True)
+class DeferredAdmission:
+    """Do not admit a new runtime; retain agent state and queued inbound work."""
+
+
+@dataclass(frozen=True)
+class CurrentAdmission:
+    publication_id: UUID
+
+
+AdmissionDecision = LegacyProtocolZero | DeferredAdmission | CurrentAdmission
+_ADMISSION_ROW = "SELECT managed_writer_evidence, phase FROM deployment_state WHERE id=1 FOR UPDATE"
+_UNIT_LOCK = "LOCK TABLE machine_units, machines IN SHARE MODE"
+_UNITS = "SELECT machine_name, home FROM machine_units ORDER BY machine_name, home"
+_MACHINES = "SELECT name FROM machines"
 
 
 class PublishedUnit(ManagedUnit):
@@ -241,3 +264,92 @@ def require_current_publication(
     if row is None or row[0] != "stable":
         raise ManagedWriterBarrierError("deployment is not settled for ordinary admission")
     return state.current.publication_id
+
+
+def _admission_state(row: tuple[object, ...] | None) -> WriterPublication | AdmissionDecision:
+    if row is None:
+        raise ManagedWriterBarrierError("deployment state is missing")
+    evidence, phase = row
+    if evidence is None:
+        # SQL NULL is the migration's explicit never-enabled value, not a parse fallback.
+        return LegacyProtocolZero() if phase == "stable" else DeferredAdmission()
+    state = WriterPublication.model_validate_json(json.dumps(evidence))
+    if state.pending is not None:
+        return DeferredAdmission()
+    if state.current is None:
+        raise ManagedWriterBarrierError("publication evidence has no current or pending record")
+    if phase != "stable":
+        return DeferredAdmission()
+    return state
+
+
+def _current_admission(
+    state: WriterPublication,
+    units: set[tuple[str, str]],
+    machines: set[str],
+    actual: PublishedUnit | None,
+    selector_artifact_digest: str | None,
+    selector_manifest_digest: str | None,
+) -> CurrentAdmission:
+    current = state.current
+    if current is None:
+        raise ManagedWriterBarrierError("current publication is absent")
+    if not units or machines != {machine for machine, _home in units}:
+        raise ManagedWriterBarrierError("registered unit inventory is incomplete")
+    if {(unit.machine, unit.home) for unit in current.units} != units:
+        raise ManagedWriterBarrierError("registered units changed after publication")
+    if actual is None or actual not in current.units:
+        raise ManagedWriterBarrierError("trusted loaded unit facts are missing or mismatched")
+    if (selector_artifact_digest, selector_manifest_digest) != (
+        actual.artifact_digest,
+        actual.manifest_digest,
+    ):
+        raise ManagedWriterBarrierError("loaded image and canonical selector differ")
+    return CurrentAdmission(current.publication_id)
+
+
+def publication_admission(
+    conn: psycopg.Connection,
+    actual: PublishedUnit | None = None,
+    *,
+    selector_artifact_digest: str | None = None,
+    selector_manifest_digest: str | None = None,
+) -> AdmissionDecision:
+    """Classify under the caller's transaction before locking any agent row.
+
+    Deferred and invalid evidence must never terminate/deadletter an agent.
+    Runtime facts come from the verified consumer, not user input. This helper
+    neither enables the new mode nor authenticates caller-created DTOs.
+    """
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise ManagedWriterBarrierError("admission requires a caller-owned transaction")
+    state = _admission_state(conn.execute(_ADMISSION_ROW).fetchone())
+    if not isinstance(state, WriterPublication):
+        return state
+    conn.execute(_UNIT_LOCK)
+    units = set(conn.execute(_UNITS).fetchall())
+    machines = {row[0] for row in conn.execute(_MACHINES).fetchall()}
+    return _current_admission(
+        state, units, machines, actual, selector_artifact_digest, selector_manifest_digest
+    )
+
+
+async def publication_admission_async(
+    conn: psycopg.AsyncConnection,
+    actual: PublishedUnit | None = None,
+    *,
+    selector_artifact_digest: str | None = None,
+    selector_manifest_digest: str | None = None,
+) -> AdmissionDecision:
+    """Async transport for the identical SQL, lock order and decision function."""
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise ManagedWriterBarrierError("admission requires a caller-owned transaction")
+    state = _admission_state(await (await conn.execute(_ADMISSION_ROW)).fetchone())
+    if not isinstance(state, WriterPublication):
+        return state
+    await conn.execute(_UNIT_LOCK)
+    units = set(await (await conn.execute(_UNITS)).fetchall())
+    machines = {row[0] for row in await (await conn.execute(_MACHINES)).fetchall()}
+    return _current_admission(
+        state, units, machines, actual, selector_artifact_digest, selector_manifest_digest
+    )
