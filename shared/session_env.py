@@ -48,6 +48,46 @@ from shared.paths import repo_root
 from shared.platform import IS_WINDOWS
 from shared.platform_backend import get_backend
 
+_FRONTEND_TOOLCHAIN_DIRS = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+)
+
+
+def frontend_toolchain_path(inherited_path: str) -> str:
+    """Return a POSIX PATH that can resolve the provisioned Node toolchain.
+
+    `scripts/provision/node.sh` installs Node through Homebrew on macOS and
+    through apt on Linux. Non-login remote shells do not reliably inherit the
+    Homebrew directories, so the frontend cannot rely on a shell profile to
+    find `npm`. Keep the provisioned locations ahead of the inherited path,
+    while preserving every caller-specific directory after them. Windows keeps
+    its inherited PATH because its `npm.cmd` lookup uses the native shell.
+    """
+    if IS_WINDOWS:
+        return inherited_path
+    seen: set[str] = set()
+    dirs = (*_FRONTEND_TOOLCHAIN_DIRS, *inherited_path.split(os.pathsep))
+    return os.pathsep.join(
+        directory
+        for directory in dirs
+        if directory and not (directory in seen or seen.add(directory))
+    )
+
+
+def frontend_toolchain_env() -> dict[str, str]:
+    """The inherited environment for a direct frontend-toolchain subprocess.
+
+    `npm ci` already inherited this process's complete environment; copying it
+    preserves npm's user cache and credential behavior while replacing only its
+    PATH with the deterministic Node search path.
+    """
+    env = dict(os.environ)
+    env["PATH"] = frontend_toolchain_path(env.get("PATH", ""))
+    return env
+
 
 def _session_forward_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """The caller-built env dict a daemon/session child receives: the
@@ -86,7 +126,9 @@ def forward_env_dict() -> dict[str, str]:
     venv interpreter directly (`.venv/bin/python -m …`, no resident `uv run`
     parent per daemon), so this reproduces what `uv run` injected — VIRTUAL_ENV +
     the venv bin dir prepended to PATH — so a daemon that shells out to bare
-    `python` / `ava` still resolves into the venv. Symmetric with the agent
+    `python` / `ava` still resolves into the venv. The provisioned Node
+    locations follow it, so the frontend's bare `npm` is found even when a
+    remote shell starts with only system PATH entries. Symmetric with the agent
     activation in `ops.agent_launch._launch_agent_process`.
 
     The dict is handed to the session backend as the child's real environment
@@ -106,7 +148,7 @@ def forward_env_dict() -> dict[str, str]:
     venv = repo_root() / ".venv"
     venv_bin = venv / get_backend().venv_bin_dir_name()
     env["VIRTUAL_ENV"] = str(venv)
-    env["PATH"] = str(venv_bin) + os.pathsep + os.environ.get("PATH", "")
+    env["PATH"] = str(venv_bin) + os.pathsep + frontend_toolchain_path(os.environ.get("PATH", ""))
     return env
 
 
@@ -121,14 +163,18 @@ def venv_activation_prefix() -> str:
     venv prefix the forwarded env carried (VIRTUAL_ENV survives, PATH does not). Re-exporting here, after the
     profile has run, is what makes a daemon that execs a bare binary off PATH
     work — `services.milvus.daemon` execvp's `milvus-lite`, and a daemon that
-    shells out to bare `ava` / `python` resolves them into the venv. Mirrors the
-    child-env activation `ops.agent_launch` does for agents.
+    shells out to bare `ava` / `python` resolves them into the venv. It also
+    injects the provisioned Node locations after the venv, because the frontend
+    session runs bare `npm` after that profile has had a chance to discard PATH.
+    Mirrors the child-env activation `ops.agent_launch` does for agents.
     """
     venv = repo_root() / ".venv"
     bindir = venv / get_backend().venv_bin_dir_name()
+    toolchain_path = frontend_toolchain_path("")
+    toolchain_suffix = f"{os.pathsep}{toolchain_path}" if toolchain_path else ""
     return (
         f"export VIRTUAL_ENV={shlex.quote(str(venv))} && "
-        f'export PATH={shlex.quote(str(bindir))}:"$PATH" && '
+        f'export PATH={shlex.quote(str(bindir))}{toolchain_suffix}:"$PATH" && '
     )
 
 
