@@ -103,4 +103,4 @@ jobs:
           fi
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
             -f body="$marker
-          Failed CI jobs were re-run once. If this run is still red, this PR was removed from the merge queue (if it was queued); a maintainer must run @mergifyio queue once CI is green."
+          Failed CI jobs were re-run once. Inspect the current PR head and remaining failures before requesting another action. This workflow does not change merge-queue membership."
