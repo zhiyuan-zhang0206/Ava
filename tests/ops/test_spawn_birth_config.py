@@ -180,7 +180,7 @@ class TestSelfRespawnFallback:
         assert json.loads(env[AGENT_CONFIG_OVERLAY_ENV]) == {"llm_model": "claude-sonnet-5"}
         assert json.loads(env[AGENT_BIRTH_CONFIG_ENV]) == stamp
 
-    def test_env_vars_are_omitted_when_the_row_carries_nothing(
+    def test_restarter_never_claims_and_fallback_launches_when_the_row_carries_nothing(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import atexit
@@ -218,6 +218,10 @@ class TestSelfRespawnFallback:
         assert "--birth-config" not in argv
         assert AGENT_CONFIG_OVERLAY_ENV not in env
         assert AGENT_BIRTH_CONFIG_ENV not in env
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+            row = cur.fetchone()
+        assert row is not None and row[0] == "idling"
 
 
 class TestForkInheritance:

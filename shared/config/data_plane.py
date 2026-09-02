@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
 
-from shared.config._base import EnvSettings
+from shared.config._base import EnvSettings, _unit_home
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.netutil import is_ipv4_literal, is_loopback_host
 from shared.url_secret import url_host, url_with_host, url_with_password, url_with_query_param
@@ -443,12 +443,32 @@ class DataPlaneSettings(EnvSettings):
         Runs after `_dial_self_host_via_loopback` (declared above it), so the
         local/foreign decision sees the dial host the cluster will actually use.
         """
-        if (
-            self.cluster_secret
-            and self.db_url != UNANCHORED_DB_SENTINEL
+        local_owner_url = (
+            self.db_url != UNANCHORED_DB_SENTINEL
             and not _is_runner_db_url(self.db_url)
             and is_loopback_host(urlsplit(self.db_url).hostname or "")
-        ):
+        )
+        home = _unit_home().expanduser().resolve()
+        on_default_home = home == (Path.home() / ".ava").resolve()
+        # AVA_PROCESS_PROFILE is a launcher-only process marker, not a Settings
+        # field. It must remain an environment read so agent startup can preserve
+        # its injected database projection.
+        agent_profile_on_default_home = (
+            os.environ.get("AVA_PROCESS_PROFILE") == "agent" and on_default_home
+        )
+        if agent_profile_on_default_home and self.cluster_secret and local_owner_url:
+            # Agent-profile startup protects launcher-injected AVA_DB_URL from
+            # dotenv replacement. Without this check, a missing projection would
+            # combine the owner username with the cluster secret after agent
+            # hygiene removes the owner password, granting the wrong identity.
+            # Non-default homes are test/e2e clusters that deliberately retain
+            # the owner URL topology to exercise password derivation.
+            raise ValueError(
+                "agent-profile processes must receive an ava_runner AVA_DB_URL; "
+                "refusing a local owner URL derived from AVA_CLUSTER_SECRET "
+                "at the default home"
+            )
+        if self.cluster_secret and local_owner_url:
             self.db_url = url_with_password(
                 self.db_url, self.db_admin_password or self.cluster_secret
             )

@@ -19,7 +19,7 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from shared.config import DataPlaneSettings, settings
+from shared.config import DataPlaneSettings, data_plane, settings
 from shared.config.data_plane import _self_machine_host
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.machine import reachable_host, reset_identity
@@ -169,6 +169,60 @@ class TestSettingsAppliesDataPlanePasswords:
         )
         assert s.db_url == _pg(runner_pw, host="gw.host:5432", user="ava_runner", db="ava")
         assert s.redis_url == _redis("STALE", host="gw.host:6379", user="ava")
+
+    def test_agent_profile_rejects_local_owner_url_with_cluster_secret(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+        monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
+
+        with pytest.raises(ValueError, match="must receive an ava_runner AVA_DB_URL"):
+            _settings_with(
+                db_url=_pg("STALE", host="127.0.0.1:5432", user="ava"),
+                redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
+                secret=_SECRET,
+            )
+
+    def test_agent_profile_keeps_local_owner_url_at_a_nondefault_home(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+        monkeypatch.setattr(data_plane, "_unit_home", lambda: tmp_path / "test-home")
+
+        s = _settings_with(
+            db_url=_pg("STALE", host="127.0.0.1:5432", user="ava"),
+            redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
+            secret=_SECRET,
+        )
+
+        assert s.db_url.startswith(f"postgresql://ava:{_SECRET}@127.0.0.1:5432/ava")
+
+    def test_gateway_profile_keeps_local_owner_url_password_refresh(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AVA_PROCESS_PROFILE", "gateway")
+
+        s = _settings_with(
+            db_url=_pg("STALE", host="127.0.0.1:5432", user="ava"),
+            redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
+            secret=_SECRET,
+        )
+
+        assert s.db_url.startswith(f"postgresql://ava:{_SECRET}@127.0.0.1:5432/ava")
+
+    def test_agent_profile_keeps_projected_runner_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+        runner_pw = "runner-pw-v1"
+
+        s = _settings_with(
+            db_url=_pg(runner_pw, host="127.0.0.1:5432", user="ava_runner"),
+            redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
+            secret=_SECRET,
+        )
+
+        assert s.db_url.startswith("postgresql://ava_runner:runner-pw-v1@127.0.0.1:5432/ava")
 
     def test_empty_secret_leaves_urls_verbatim(self) -> None:
         # An unprovisioned checkout / the no-secret test path must not rewrite URLs.

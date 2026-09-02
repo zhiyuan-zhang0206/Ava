@@ -70,6 +70,9 @@ posture: Postgres and its pooler bind loopback + this host's reachable address
 only when set; Redis is always loopback-only with off-box inbound carried by the
 host-level relay bridge. An EMPTY secret (single-box default — off is fully off)
 keeps every credential empty and serves everything unauthenticated, loopback-only.
+Every `AVA_PROCESS_PROFILE=agent` process, including the single-box hosted
+agent-host, is launched with an explicit `ava_runner` DB URL projection; it must
+never combine an owner username with the cluster bearer.
 
 | Path | Role |
 |---|---|

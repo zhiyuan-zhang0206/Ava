@@ -1062,6 +1062,12 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "halt": _telemetry("halt", "turn stopped (idle/compact/system)", payload=Halt, tier="noise"),
     "agent_restarted": _telemetry("agent_restarted", "agent restarted (phase2 done)"),
+    "restart_handoff_host_unhealthy": _telemetry(
+        "restart_handoff_host_unhealthy",
+        "hosted restart ownership could not transfer: agent-host is unhealthy; row left restarting "
+        "for retry",
+        tier="anomaly",
+    ),
     "heartbeat_nudged": _telemetry(
         "heartbeat_nudged", "heartbeat reminder", payload=HeartbeatNudged, tier="noise"
     ),

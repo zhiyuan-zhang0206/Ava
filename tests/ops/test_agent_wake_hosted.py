@@ -17,12 +17,15 @@ forever.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any, cast
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
 from ops import agent_revive, agent_wake
 from ops.agent_spawn import create_agent_row
+from ops.controllers import respawn as respawn_controller
 from shared.machine import machine_name
 
 _DEAD_PID = 424243
@@ -31,6 +34,11 @@ _DEAD_PID = 424243
 @pytest.fixture(autouse=True)
 def _hosted_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_wake.runner_mode, "is_hosted", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _healthy_hosted_consumer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_wake, "_hosted_agent_host_healthy", lambda: True)
 
 
 @pytest.fixture(autouse=True)
@@ -154,6 +162,41 @@ def test_respawn_agent_hosted_flips_and_wakes(
     assert _row(db_conn, aid) == ("idling", None)
     assert _kind_rows(db_conn, aid, "restart_completed") == 1
     assert wakes == [(aid, "0")]
+
+
+def test_respawn_agent_hosted_unhealthy_leaves_restart_unclaimed(
+    db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A dead agent-host cannot accept ownership, so the row remains retryable."""
+    aid = _park(db_conn, status="restarting")
+    monkeypatch.setattr(agent_wake, "_hosted_agent_host_healthy", lambda: False)
+
+    assert agent_wake.respawn_agent(aid) is False
+
+    assert _row(db_conn, aid) == ("restarting", None)
+    assert _kind_rows(db_conn, aid, "restart_completed") == 0
+    assert wakes == []
+    assert any(
+        record["extra"].get("event") == "restart_handoff_host_unhealthy"
+        for record in loguru_records
+    )
+
+
+def test_hosted_respawn_controller_does_not_reap_mid_turn_row(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A hosted idling row has no pid by design and must not reach a reaper."""
+    aid = _park(db_conn, status="idling")
+
+    result = respawn_controller.RespawnController(cast(ConnectionPool, object())).reconcile(
+        "agent-runner"
+    )
+
+    assert result.acted is False
+    assert _row(db_conn, aid) == ("idling", None)
 
 
 # ── swap-in ──────────────────────────────────────────────────────────────────
