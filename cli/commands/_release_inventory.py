@@ -130,7 +130,7 @@ def _service_roster() -> list[dict[str, object]]:
 
     if not WHEEL_RUNTIME:
         raise ReleaseRejectedError("inventory must load the verified candidate service code")
-    roster = [
+    roster: list[dict[str, object]] = [
         {"session": spec.session, "requires_db": spec.requires_db, "gate": reason}
         for spec, reason in services_for_capabilities_annotated(machine_role())
     ]
