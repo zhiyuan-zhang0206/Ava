@@ -192,7 +192,10 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                     cwd=root,
                     env=migration_env,
                     check=True,
-                    timeout=300,
+                    # The proof owns one absolute ten-minute operation deadline.
+                    # Allow initial full image verification and final CI cleanup;
+                    # this outer guard must not truncate that inner authority budget.
+                    timeout=900,
                 )
             result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
                 [
