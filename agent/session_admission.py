@@ -98,18 +98,28 @@ def _admitted_control_mode(directory: Path, agent_id: int, current: psutil.Proce
     """
     if not IS_WINDOWS:
         return None
+    for path in directory.glob(f"{session_name(f'boot-{agent_id}-')}*.json"):
+        record = SessionRecord.read(path)
+        if record is not None and (record.pid, record.create_time, record.control_mode) == (
+            current.pid,
+            current.create_time(),
+            "private-console-v1",
+        ):
+            return record.control_mode
+    raise RuntimeError("admitted Windows runtime has no verified private-console launch record")
+
+
+def wait_for_launch_record(agent_id: int) -> None:
+    """Parent-write handoff before opening the admission DB transaction."""
+    if not IS_WINDOWS:
+        return
+    current = _session_control_process(psutil.Process(os.getpid()))
     deadline = time.monotonic() + 2
     while True:
-        for path in directory.glob(f"{session_name(f'boot-{agent_id}-')}*.json"):
-            record = SessionRecord.read(path)
-            if record is not None and (record.pid, record.create_time, record.control_mode) == (
-                current.pid,
-                current.create_time(),
-                "private-console-v1",
-            ):
-                return record.control_mode
-        if time.monotonic() >= deadline:
-            raise RuntimeError(
-                "admitted Windows runtime has no verified private-console launch record"
-            )
+        try:
+            _admitted_control_mode(run_dir() / "sessions", agent_id, current)
+            return
+        except RuntimeError:
+            if time.monotonic() >= deadline:
+                raise
         time.sleep(0.01)

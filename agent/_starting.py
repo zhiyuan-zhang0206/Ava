@@ -87,6 +87,9 @@ def claim_agent_row(agent_id: int, *, restart_command_id: int | None = None) -> 
     """
     local_machine = machine_name()
     incarnation = new_process_incarnation(agent_id)
+    from agent.session_admission import wait_for_launch_record
+
+    wait_for_launch_record(agent_id)
     with write_transaction() as conn, conn.cursor() as cur:
         # A guarded auto-resurrect transaction may still be committing the row
         # when its child starts. Lock first so this process validates that final
