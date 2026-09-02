@@ -36,6 +36,7 @@ import psycopg
 from pydantic import BaseModel, ConfigDict
 
 import shared.db
+from shared.log import logger
 
 
 class UpdateOutcome(StrEnum):
@@ -286,7 +287,10 @@ def finalize_incomplete_update_after_lkg_advance(
     Phase B has since self-healed: it happens only after the target is still pinned
     and has passed the health observation window. This function runs in the same
     transaction as that promotion, so a crash cannot leave the new anchor behind
-    while the last-update record remains permanently `INCOMPLETE`.
+    while the last-update record remains permanently `INCOMPLETE`. A stale
+    `deployment_state` mirror is the one exception: it rolls back only this
+    optional finalization, logs the mismatch, and lets the authoritative LKG
+    promotion commit.
 
     It is deliberately narrower than `note_observed_recovery`: only the current
     record, its exact target, and its recorded `INCOMPLETE` outcome qualify. A
@@ -295,6 +299,7 @@ def finalize_incomplete_update_after_lkg_advance(
     """
     reason = f"cluster self-healed; last-known-good advanced to {target_sha}"
     with conn.cursor() as cur:
+        cur.execute("SAVEPOINT finalize_incomplete_update")
         cur.execute(
             "UPDATE cluster_last_update SET outcome = %s, observed_by = %s "
             "WHERE id = 1 AND target_sha = %s AND outcome = %s",
@@ -318,9 +323,15 @@ def finalize_incomplete_update_after_lkg_advance(
         )
         expected_count = 1 if finalized else 0
         if cur.rowcount != expected_count:
-            raise RuntimeError(
-                "deployment_state last-update mirror disagrees with cluster_last_update"
+            cur.execute("ROLLBACK TO SAVEPOINT finalize_incomplete_update")
+            cur.execute("RELEASE SAVEPOINT finalize_incomplete_update")
+            logger.warning(
+                "last-update mirror disagreed during LKG promotion; preserving the incomplete "
+                "record while advancing the LKG anchor (target={target_sha})",
+                target_sha=target_sha,
             )
+            return False
+        cur.execute("RELEASE SAVEPOINT finalize_incomplete_update")
     return finalized
 
 
