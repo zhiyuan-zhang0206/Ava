@@ -1081,6 +1081,7 @@ class TestList:
             "notices_awaiting_response",
             "unread_notice_count",
             "heartbeat_paused_until",
+            "observation",
         }
         by_id = {r["agent_id"]: r for r in rows}
         assert by_id[a_id]["status"] == "idling"
@@ -1145,6 +1146,7 @@ class TestList:
             "notices_awaiting_response",
             "unread_notice_count",
             "heartbeat_paused_until",
+            "observation",
         }
         assert detail.status_code == 200
         assert "fork_source_checkpoint_id" in detail.json()

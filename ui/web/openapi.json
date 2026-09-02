@@ -1430,7 +1430,7 @@
     "/api/agents/{agent_id}/inspect/live": {
       "get": {
         "summary": "Get Agent Inspect Live",
-        "description": "Cheap current-state half of the inspector panel.\n\nReads the agent projection and open notice from Postgres, probes shells on\nthe owning runner, and performs only one bounded best-effort Loki lookup for\nthe heartbeat's recent-pause hint. Unknown agents return 404. Shell probe\nfailures degrade to an empty list and Loki failures degrade\n`heartbeat.last_pause` to None, keeping this endpoint useful as the panel's\nfast skeleton source. No part of this response is cached.",
+        "description": "Cheap current-state half of the inspector panel.\n\nReads the agent projection and open notice from Postgres, probes shells on\nthe owning runner, and performs only one bounded best-effort Loki lookup for\nthe heartbeat's recent-pause hint. Unknown agents return 404. Shell probe\nfailures set shells_available=False and Loki failures degrade\n`heartbeat.last_pause` to None, keeping this endpoint useful as the panel's\nfast skeleton source. No part of this response is cached.",
         "operationId": "get_agent_inspect_live_api_agents__agent_id__inspect_live_get",
         "parameters": [
           {
@@ -1470,7 +1470,7 @@
     "/api/agents/{agent_id}/inspect": {
       "get": {
         "summary": "Get Agent Inspect",
-        "description": "Per-agent inspector panel data in one shot — the agent's live persistent\nshells, its frozen config overlay, its LLM cost, turn/exec stats, idle\nheartbeat state. The\nsingle-agent counterpart to `/api/stats/dashboard` (fleet-wide).\n\n`?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;\n1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since\nspawn.\n`?since_compact=true` windows them to events since the agent's latest\ncompact halt instead — it takes precedence, `hours` is ignored and the\nechoed `window_hours` is None.\n`shells` + `config_overlay` + `heartbeat` are always\ncurrent, independent of the window. 404 if the agent is unknown (no\nagents_meta row). `config_overlay` is the spawn-time override map — `{}` when\nthe agent runs on cluster defaults (the column is NULL).\n\nLatency discipline: event-history sections use a shared bounded executor,\nand only their aggregates ride a 75s TTL cache keyed by (agent_id, hours,\nsince_compact). Concurrent misses share one single-flight Future; no more\nthan `_INSPECT_MAX_CONCURRENT_LOADS` distinct leaders run at once, and a\nsaturated request gets the queue-full 503. Each leader's 15-second response\nbudget is also its load deadline, so expired work stops and releases its\nadmission slot rather than continuing under transport timeouts. The\nagents_meta projection (machine, config, heartbeat inputs, liveness and\ntimestamps), `notice`, and `shells` are fetched fresh on every call and\nnever ride the cache. `shells` is probed on the agent's own machine via the\n`shell_probe` cluster op (the gateway never runs sessions itself; every\nmachine — its own included — is dialed at its registered ops URL), so a\nsplit deployment reflects each agent's runner and an unreachable machine\ndegrades to an empty list rather than failing the panel. `heartbeat` is the agent's idle check-in state: the\nprojected next check-in due time when idle (or the active pause / running\nsuppression) plus its most recent pause from history.\n\nThe retained live lifecycle leg begins at the index-label cutover and never\nscans the legacy slice. It has an 8-second Loki timeout and a per-agent\nthirty-minute single-flight cache, so changing `hours` or `since_compact`\ndoes not repeat that indexed read. Agents whose lifecycle history is wholly\npre-cutover use the `spawned_at` fallback described by `_alive_seconds`.",
+        "description": "Per-agent inspector panel data in one shot — the agent's live persistent\nshells, its frozen config overlay, its LLM cost, turn/exec stats, idle\nheartbeat state. The\nsingle-agent counterpart to `/api/stats/dashboard` (fleet-wide).\n\n`?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;\n1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since\nspawn.\n`?since_compact=true` windows them to events since the agent's latest\ncompact halt instead — it takes precedence, `hours` is ignored and the\nechoed `window_hours` is None.\n`shells` + `config_overlay` + `heartbeat` are always\ncurrent, independent of the window. 404 if the agent is unknown (no\nagents_meta row). `config_overlay` is the spawn-time override map — `{}` when\nthe agent runs on cluster defaults (the column is NULL).\n\nLatency discipline: event-history sections use a shared bounded executor,\nand only their aggregates ride a 75s TTL cache keyed by (agent_id, hours,\nsince_compact). Concurrent misses share one single-flight Future; no more\nthan `_INSPECT_MAX_CONCURRENT_LOADS` distinct leaders run at once, and a\nsaturated request gets the queue-full 503. Each leader's 15-second response\nbudget is also its load deadline, so expired work stops and releases its\nadmission slot rather than continuing under transport timeouts. The\nagents_meta projection (machine, config, heartbeat inputs, liveness and\ntimestamps), `notice`, and `shells` are fetched fresh on every call and\nnever ride the cache. `shells` is probed on the agent's own machine via the\n`shell_probe` cluster op (the gateway never runs sessions itself; every\nmachine — its own included — is dialed at its registered ops URL), so a\nsplit deployment reflects each agent's runner and an unreachable machine\nsets shells_available=False rather than claiming no shells exist.\n`heartbeat` is the agent's idle check-in state: the\nprojected next check-in due time when idle (or the active pause / running\nsuppression) plus its most recent pause from history.\n\nThe retained live lifecycle leg begins at the index-label cutover and never\nscans the legacy slice. It has an 8-second Loki timeout and a per-agent\nthirty-minute single-flight cache, so changing `hours` or `since_compact`\ndoes not repeat that indexed read. Agents whose lifecycle history is wholly\npre-cutover use the `spawned_at` fallback described by `_alive_seconds`.",
         "operationId": "get_agent_inspect_api_agents__agent_id__inspect_get",
         "parameters": [
           {
@@ -6573,6 +6573,27 @@
             ],
             "title": "Last Probe At"
           },
+          "observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shells_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shells Available"
+          },
           "spawned_at": {
             "type": "string",
             "format": "date-time",
@@ -6690,6 +6711,27 @@
               }
             ],
             "title": "Last Probe At"
+          },
+          "observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shells_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shells Available"
           },
           "spawned_at": {
             "type": "string",
@@ -7000,6 +7042,55 @@
         "title": "AgentMetricsReport",
         "description": "GET /api/metrics/agents response — the per-agent breakdown behind the\nmetrics page's Agents panel, sorted by cost descending (ties by agent_id).\nSame window semantics as `/api/metrics`; `meta.since_compact` echoes the\noptional since-last-compact filter."
       },
+      "AgentObservation": {
+        "properties": {
+          "machine_probe_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Probe At"
+          },
+          "machine_probe_valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Probe Valid Until"
+          },
+          "runtime_lease_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Lease Expires At"
+          },
+          "runtime_owner": {
+            "type": "string",
+            "const": "unknown",
+            "title": "Runtime Owner",
+            "default": "unknown"
+          }
+        },
+        "type": "object",
+        "title": "AgentObservation",
+        "description": "Machine reachability is not proof of runtime ownership.\n\nThis compatibility slice has no generation/owner binding. A fresh lease\nalone, or a PID, must not invent one. UI uses absolute deadlines."
+      },
       "AgentRestartRow": {
         "properties": {
           "agent_id": {
@@ -7144,6 +7235,16 @@
               }
             ],
             "title": "Last Probe At"
+          },
+          "observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "notices_awaiting_response": {
             "items": {
@@ -7349,6 +7450,16 @@
               "unknown"
             ],
             "title": "Liveness State"
+          },
+          "observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "notices_awaiting_response": {
             "items": {

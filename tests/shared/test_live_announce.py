@@ -31,6 +31,7 @@ _FULL_SNAPSHOT_FIELDS = {
     "supports_vision",
     "liveness_state",
     "last_probe_at",
+    "observation",
     "notices_awaiting_response",
     "unread_notice_count",
     "heartbeat_paused_until",

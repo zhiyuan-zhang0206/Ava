@@ -941,7 +941,7 @@ export interface paths {
          *     Reads the agent projection and open notice from Postgres, probes shells on
          *     the owning runner, and performs only one bounded best-effort Loki lookup for
          *     the heartbeat's recent-pause hint. Unknown agents return 404. Shell probe
-         *     failures degrade to an empty list and Loki failures degrade
+         *     failures set shells_available=False and Loki failures degrade
          *     `heartbeat.last_pause` to None, keeping this endpoint useful as the panel's
          *     fast skeleton source. No part of this response is cached.
          */
@@ -992,7 +992,8 @@ export interface paths {
          *     `shell_probe` cluster op (the gateway never runs sessions itself; every
          *     machine — its own included — is dialed at its registered ops URL), so a
          *     split deployment reflects each agent's runner and an unreachable machine
-         *     degrades to an empty list rather than failing the panel. `heartbeat` is the agent's idle check-in state: the
+         *     sets shells_available=False rather than claiming no shells exist.
+         *     `heartbeat` is the agent's idle check-in state: the
          *     projected next check-in due time when idle (or the active pause / running
          *     suppression) plus its most recent pause from history.
          *
@@ -3761,6 +3762,9 @@ export interface components {
             liveness_state: "online" | "offline" | "unknown";
             /** Last Probe At */
             last_probe_at?: string | null;
+            observation?: components["schemas"]["AgentObservation"] | null;
+            /** Shells Available */
+            shells_available?: boolean | null;
             /**
              * Spawned At
              * Format: date-time
@@ -3810,6 +3814,9 @@ export interface components {
             liveness_state: "online" | "offline" | "unknown";
             /** Last Probe At */
             last_probe_at?: string | null;
+            observation?: components["schemas"]["AgentObservation"] | null;
+            /** Shells Available */
+            shells_available?: boolean | null;
             /**
              * Spawned At
              * Format: date-time
@@ -3964,6 +3971,27 @@ export interface components {
             agents: components["schemas"]["AgentMetricsItem"][];
         };
         /**
+         * AgentObservation
+         * @description Machine reachability is not proof of runtime ownership.
+         *
+         *     This compatibility slice has no generation/owner binding. A fresh lease
+         *     alone, or a PID, must not invent one. UI uses absolute deadlines.
+         */
+        AgentObservation: {
+            /** Machine Probe At */
+            machine_probe_at?: string | null;
+            /** Machine Probe Valid Until */
+            machine_probe_valid_until?: string | null;
+            /** Runtime Lease Expires At */
+            runtime_lease_expires_at?: string | null;
+            /**
+             * Runtime Owner
+             * @default unknown
+             * @constant
+             */
+            runtime_owner: "unknown";
+        };
+        /**
          * AgentRestartRow
          * @description One agent's restart count within the window.
          */
@@ -4026,6 +4054,7 @@ export interface components {
             liveness_state: "online" | "offline" | "unknown";
             /** Last Probe At */
             last_probe_at: string | null;
+            observation?: components["schemas"]["AgentObservation"] | null;
             /** Notices Awaiting Response */
             notices_awaiting_response: components["schemas"]["OpenNotice"][];
             /** Unread Notice Count */
@@ -4108,6 +4137,7 @@ export interface components {
              * @enum {string}
              */
             liveness_state: "online" | "offline" | "unknown";
+            observation?: components["schemas"]["AgentObservation"] | null;
             /** Notices Awaiting Response */
             notices_awaiting_response: components["schemas"]["OpenNotice"][];
             /** Unread Notice Count */

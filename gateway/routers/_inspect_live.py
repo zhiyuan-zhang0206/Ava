@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 
 from gateway.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
+from shared.agent_observation import AgentObservation, observation
 from shared.agent_snapshot import OpenNotice
 from shared.agents import AgentStatus
 from shared.config import settings
@@ -33,6 +34,7 @@ class InspectDbRows(NamedTuple):
     config_overlay: dict[str, Any]
     liveness_state: Literal["online", "offline", "unknown"]
     last_probe_at: Any
+    observation: AgentObservation
 
 
 def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
@@ -42,7 +44,9 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             "SELECT config_overlay, machine, status, last_active_at, "
             "       spawned_at, started_at, "
             "       CASE WHEN heartbeat_paused_until > now() THEN heartbeat_paused_until END, "
-            "       liveness_state, last_probe_at "
+            "       liveness_state, last_probe_at, lease_expires_at, "
+            "       (SELECT mp.last_probe_at FROM machine_probe mp "
+            "        WHERE mp.machine_name = agents_meta.machine) "
             "FROM agents_meta WHERE id = %s",
             (agent_id,),
         )
@@ -71,6 +75,7 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
                 row[7] if row[7] is not None else "unknown",
             ),
             last_probe_at=row[8],
+            observation=observation(row[10], row[9]),
         )
 
 
