@@ -113,7 +113,7 @@ def loaded_native_images(root: Path) -> list[str]:
     dlopen path. The real loader receives the retained interpreter's context.
     """
     probe = """
-import ctypes, importlib, json, os, pathlib, platform
+import ctypes, importlib, json, os, pathlib, platform, sys
 from unittest.mock import patch
 with patch('socket.socket.connect', side_effect=RuntimeError('network forbidden')), \\
      patch('socket.socket.connect_ex', side_effect=RuntimeError('network forbidden')), \\
@@ -133,6 +133,10 @@ with patch('socket.socket.connect', side_effect=RuntimeError('network forbidden'
         writer.write_table(table)
     assert pa.ipc.open_stream(sink.getvalue()).read_all().equals(table)
     assert psycopg.pq.version() > 0
+    import _distutils_hack
+    assert pathlib.Path(_distutils_hack.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve())
+    image = pathlib.Path(sys.prefix).resolve().parent
+    assert all(pathlib.Path(item).resolve().is_relative_to(image) for item in sys.path if item)
 if platform.system() == 'Darwin':
     dyld = ctypes.CDLL(None)
     dyld._dyld_image_count.restype = ctypes.c_uint32
@@ -204,6 +208,20 @@ else:
         raise ReleaseRejectedError("retained Python changed optional tkinter availability")
 
 
+def _retain_startup_wheel(wheels: Path, root: Path) -> None:
+    """Keep original locked dependency bytes for the active startup-hook gate."""
+    candidates = list(wheels.glob("setuptools-*.whl"))
+    if len(candidates) != 1:
+        raise ReleaseRejectedError("expected exactly one locked setuptools wheel")
+    source = candidates[0]
+    destination = root / "wheel-evidence/setuptools.whl"
+    destination.parent.mkdir(mode=0o700)
+    expected = file_sha256(source)
+    shutil.copy2(source, destination)
+    if file_sha256(destination) != expected or file_sha256(source) != expected:
+        raise ReleaseRejectedError("setuptools evidence changed during private copy")
+
+
 def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     """Create one final inactive generation or fail without touching serving state.
 
@@ -263,6 +281,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     )
     root = store / identity
     root.mkdir(mode=0o700)  # Never reuse a partial or previously sealed generation.
+    _retain_startup_wheel(wheels, root)
     _copy_python(source, root / "python")
     python = root / "python/bin/python3"
     _run(
