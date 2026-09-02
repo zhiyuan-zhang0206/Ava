@@ -324,6 +324,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     persist_services: bool = True,
     readiness_gate: bool = True,
     updater_telemetry: bool = False,
+    release_receipt: Path | None = None,
 ) -> int:
     """Core start logic, shared by cmd_start and cmd_restart.
 
@@ -336,34 +337,27 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     `readiness_gate` decides whether an unready service is an exit code or only a
     printed cross; the module docstring holds which callers turn it off and why.
     """
-    # Dynamic lookup so tests can monkeypatch
-    # `cli.commands._collect_setup_values` / `converge_host` /
-    # `_register_machine_or_die` / `_probe_gateway_or_die` /
-    # `_assert_schema_current_or_die` and the patches actually take effect
-    # here (the cmd_start callsite). Sub-module-local imports would be
-    # frozen at import time and bypass the rebind.
+    # Dynamic namespace lookup preserves existing setup/converge/probe test seams.
     import cli.commands as _ns
+
+    # Receipt admission precedes every setup/converge/source-repair write.
+    release = None
+    if release_receipt is not None:
+        from cli.commands._release_candidate import admit_start_candidate
+
+        release = admit_start_candidate(release_receipt)
 
     repo = _repo_root()
     print(f"[ava start] cwd = {repo}")
     parent_handoff = _consume_rollout_parent_handoff()
 
-    # 0) checkout guard — the prod home may only be launched from its own
-    #    anchored checkout (~/.ava/source). A dev clone or worktree with no
-    #    .ava_home pointer resolves to the prod home as an unanchored checkout,
-    #    and binding prod daemons to it leaves the fleet on disposable code
-    #    (01:13 worktree accident, Task #966).
+    # The prod home must not launch from a disposable development checkout.
     err = prod_service_checkout_error(repo)
     if err:
         print(f"\u2717 {err}", file=sys.stderr)
         return 1
 
-    # 0a) reset the prod tree to the installed commit BEFORE the source-integrity
-    #     guard: drift must be reverted, not adopted by the guard's auto-heal
-    #     (Task #1905 — the periodic reset must bite on the regular start
-    #     path). Skipped while a cluster update is in flight (deploy verbs own
-    #     the tree; the guard's auto-heal then syncs it) and for dev worktree
-    #     starts (their tree is a development context).
+    # Legacy checkout repair remains below admission, never a release fallback.
     from cli.commands._converge_source_tree import reset_prod_source_tree
 
     reset_prod_source_tree(repo)
@@ -462,7 +456,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     print("\n→ apply pending migrations")
     try:
         with updater_stage("migration") if updater_telemetry else nullcontext():
-            applied = cmd_migrations_apply()
+            applied = (
+                cmd_migrations_apply() if release is None else cmd_migrations_apply(release=release)
+            )
     except Exception as e:
         print(f"  ✗ migrations apply failed: {e}", file=sys.stderr)
         return 1
@@ -744,6 +740,7 @@ def cmd_start(
     persist_services: bool = True,
     readiness_gate: bool = True,
     updater_telemetry: bool = False,
+    release_receipt: Path | None = None,
 ) -> int:
     """Start the cluster.
 
@@ -764,10 +761,7 @@ def cmd_start(
       must point at the gateway's reachable endpoint; the gateway
       reaches this host by dialing its registered ops URL)
     """
-    # No tty gate: `ava start` runs headless (the agent-runner self-update spawns it
-    # from a detached, tty-less session — see _update_agent_runner). PATH reaches the
-    # child via process-chain inheritance, not a tty capture. (PR #180's
-    # cherry-pick reintroduced a pre-#113 tty gate that broke `ava cluster update`; removed.)
+    # Headless runner updates inherit PATH; no tty capture or gate is required.
     return _cmd_start_body(
         machine_name=machine_name,
         serve_gateway=serve_gateway,
@@ -780,4 +774,5 @@ def cmd_start(
         persist_services=persist_services,
         readiness_gate=readiness_gate,
         updater_telemetry=updater_telemetry,
+        release_receipt=release_receipt,
     )

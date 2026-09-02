@@ -5,6 +5,8 @@ on:
       - 'shared/runtime_migration.py'
       - 'shared/migrations.py'
       - 'cli/commands/_release_candidate.py'
+      - 'cli/commands/start.py'
+      - 'cli/commands/migrations.py'
       - 'scripts/prove_runtime_migration.py'
       - 'tests/shared/test_runtime_migration.py'
       - '.github/workflows/runtime-migration.yml'
@@ -26,7 +28,7 @@ jobs:
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --locked
       - name: Type-check the candidate admission boundary
-        run: uv run pyright shared/runtime_migration.py cli/commands/_release_candidate.py scripts/prove_runtime_migration.py tests/shared/test_runtime_migration.py
+        run: uv run pyright shared/runtime_migration.py cli/commands/_release_candidate.py cli/commands/migrations.py scripts/prove_runtime_migration.py tests/shared/test_runtime_migration.py
       - name: Real native PG authority and checkout regression cases
         run: uv run pytest -q tests/shared/test_runtime_migration.py tests/shared/test_migration_authority.py --junitxml=runtime-migration.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -20,6 +20,39 @@ from shared.runtime_migration import ReleaseMigrationContext, installed_migratio
 from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
 
 
+def test_real_start_rejects_receipt_before_any_start_side_effect(tmp_path: Path) -> None:
+    from cli.commands.start import cmd_start
+
+    with (
+        patch("shared.db.connect") as connection,
+        patch(
+            "cli.commands._release_candidate.load_candidate",
+            side_effect=ReleaseRejectedError("stale operation"),
+        ) as admission,
+        patch("cli.commands.start._repo_root") as resolve_repo,
+        patch("cli.commands.start._consume_rollout_parent_handoff") as handoff,
+        pytest.raises(ReleaseRejectedError, match="stale operation"),
+    ):
+        cmd_start(release_receipt=tmp_path / "receipt.json")
+    connection.assert_called_once_with(direct=True)
+    admission.assert_called_once()
+    resolve_repo.assert_not_called()
+    handoff.assert_not_called()
+
+
+def test_receipt_alone_does_not_authorize_service_cutover(tmp_path: Path) -> None:
+    from cli.commands.start import cmd_start
+
+    with (
+        patch("shared.db.connect"),
+        patch("cli.commands._release_candidate.load_candidate", return_value=MagicMock()),
+        patch("cli.commands.start._repo_root") as resolve_repo,
+        pytest.raises(ReleaseRejectedError, match="service closure"),
+    ):
+        cmd_start(release_receipt=tmp_path / "receipt.json")
+    resolve_repo.assert_not_called()
+
+
 def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path: Path) -> None:
     from shared import runtime_migration
 

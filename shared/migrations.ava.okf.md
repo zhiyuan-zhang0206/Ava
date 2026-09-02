@@ -10,6 +10,13 @@ tags:
 
 # Schema Migrations (baseline + deltas)
 
+The internal verified-release argument on the real `cmd_start` entry validates
+the operation receipt before setup, source repair, or converge. A migration
+receipt alone cannot authorize service cutover: start currently refuses until
+prepared service closure, bootable LKG and the all-writer barrier are implemented.
+The existing start migration helper accepts the same typed context and preserves
+checkpoint dependency/schema checks. No public CLI activation option is exposed.
+
 ## Two places, one schema
 
 - **`db/schema.sql`** — the squashed **baseline**: the full current schema a

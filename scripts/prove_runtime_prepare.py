@@ -111,6 +111,14 @@ def prove_checkout_absent(
                     f"AVA_DB_URL={os.environ['AVA_RUNTIME_PROOF_PG']}\n"
                     "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
                 )
+            for field, value in (
+                ("machine_name", "runtime-proof"),
+                ("machine_serve_gateway", "true"),
+                ("machine_serve_agent_runner", "true"),
+            ):
+                fd = os.open(root / "unit" / field, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    stream.write(value + "\n")
             migration_env = child_env | {
                 "AVA_DB_URL": os.environ["AVA_RUNTIME_PROOF_PG"],
                 "AVA_MACHINE_NAME": "runtime-proof",
