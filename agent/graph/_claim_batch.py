@@ -32,6 +32,7 @@ from agent.db import (
     wait_for_inbound,
 )
 from agent.graph._context import AvaContext
+from agent.inbound_ownership import RuntimeOwnershipLostError
 from shared.agents import AgentStatus
 from shared.db_transaction import async_write_transaction
 from shared.log import logger
@@ -84,6 +85,8 @@ async def _wait_for_batch(
             while not batch:
                 await wait_for_inbound(pool, listener, agent_id=agent_id)
                 batch = await claim_inbound_batch(pool, agent_id)
+    except RuntimeOwnershipLostError as exc:
+        raise LifecycleCasLostError(str(exc)) from exc
     except BaseException:
         with suppress(Exception):
             await mark_agent_status(
