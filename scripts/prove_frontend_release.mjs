@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { frontendInputs, prepareFrontend, verifyFrontend } from "./prepare_frontend_release.mjs";
+import { frontendInputs, prepareFrontend, recordFrontendBuildConfig, verifyFrontend } from "./prepare_frontend_release.mjs";
 
 const checkout = fs.realpathSync(process.env.GITHUB_WORKSPACE);
 const temporary = fs.realpathSync(process.env.RUNNER_TEMP);
@@ -22,6 +22,8 @@ fs.mkdirSync(path.join(fixture, "public"));
 fs.writeFileSync(path.join(fixture, ".next", "standalone", "server.js"), "// fixture\n");
 fs.writeFileSync(path.join(fixture, ".next", "static", "chunk.js"), "// asset\n");
 fs.writeFileSync(path.join(fixture, "public", "asset.txt"), "fixture asset\n");
+recordFrontendBuildConfig(fixture, "8000");
+assert.throws(() => recordFrontendBuildConfig(fixture, "8000", "https://private.invalid/token"), /public gateway port/);
 const fixtureInputs = frontendInputs(fixture, node);
 fs.writeFileSync(path.join(fixture, ".next", "static", "chunk.js"), "// changed\n");
 const rejected = path.join(temporary, "frontend-rejected");

@@ -24,6 +24,14 @@ may enter NEXT_PUBLIC variables. Unit secrets/configuration/data never belong in
 the image. The current application has no public directory; the proof reports
 that absence rather than inventing a production asset.
 
+The release-only Node version is pinned in `scripts/runtime-node-version`; normal
+development CI is unchanged. The build records only the public gateway port and
+default API base, using the same explicit environment as the build. The image
+command refuses a mismatch against the unit's configured gateway port, rather
+than silently serving a bundle built for another unit. Non-default API base is
+currently unsupported and fails before preparation; no secrets or full environment
+snapshot are serialized.
+
 Dedicated Linux/macOS CI builds with the existing npm lock, retains Node, moves
 the source checkout away and serves actual HTTP with the standalone server.
 It fetches rendered static resources, checks the copied inventory after serving,
