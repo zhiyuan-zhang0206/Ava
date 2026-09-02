@@ -45,9 +45,9 @@ class PlatformBackend(abc.ABC):
 
     def venv_python(self) -> str:
         """Absolute path to the Python interpreter inside the repo's virtualenv."""
-        from shared.paths import repo_root
+        from shared.runtime_interpreter import runtime_venv
 
-        return str(repo_root() / ".venv" / self.venv_bin_dir_name() / "python3")
+        return str(runtime_venv() / self.venv_bin_dir_name() / "python3")
 
     def venv_launcher(self, name: str, *, root: Path | None = None) -> Path:
         """Absolute path to a console script the virtualenv installs (``"ava"``,
@@ -60,10 +60,9 @@ class PlatformBackend(abc.ABC):
         path to ``subprocess`` is relying on CreateProcess's PATHEXT search, which
         does not apply to an absolute path with a directory component.
         """
-        from shared.paths import repo_root
+        from shared.runtime_interpreter import runtime_venv
 
-        base = repo_root() if root is None else root
-        return base / ".venv" / self.venv_bin_dir_name() / name
+        return runtime_venv(checkout=root) / self.venv_bin_dir_name() / name
 
     # -- autostart ----------------------------------------------------------
 
@@ -394,15 +393,14 @@ class WindowsPlatformBackend(PlatformBackend):
         return "Scripts"
 
     def venv_python(self) -> str:
-        from shared.paths import repo_root
+        from shared.runtime_interpreter import runtime_python
 
-        return str(repo_root() / ".venv" / "Scripts" / "python.exe")
+        return str(runtime_python())
 
     def venv_launcher(self, name: str, *, root: Path | None = None) -> Path:
-        from shared.paths import repo_root
+        from shared.runtime_interpreter import runtime_venv
 
-        base = repo_root() if root is None else root
-        return base / ".venv" / "Scripts" / f"{name}.exe"
+        return runtime_venv(checkout=root) / "Scripts" / f"{name}.exe"
 
     # -- autostart --
 

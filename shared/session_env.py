@@ -44,7 +44,6 @@ import os
 import re
 import shlex
 
-from shared.paths import repo_root
 from shared.platform import IS_WINDOWS
 from shared.platform_backend import get_backend
 
@@ -151,7 +150,9 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     # allowlist never carried PATH/VIRTUAL_ENV, and on Windows the env block is
     # a wholesale replacement, so the child must get them here. (The temp-dir
     # vars and the Windows system keys ride in `child_env` already.)
-    venv = repo_root() / ".venv"
+    from shared.runtime_interpreter import runtime_venv
+
+    venv = runtime_venv()
     venv_bin = venv / get_backend().venv_bin_dir_name()
     if activate_venv:
         env["VIRTUAL_ENV"] = str(venv)
@@ -175,7 +176,9 @@ def venv_activation_prefix() -> str:
     session runs bare `npm` after that profile has had a chance to discard PATH.
     Mirrors the child-env activation `ops.agent_launch` does for agents.
     """
-    venv = repo_root() / ".venv"
+    from shared.runtime_interpreter import runtime_venv
+
+    venv = runtime_venv()
     bindir = venv / get_backend().venv_bin_dir_name()
     toolchain_path = frontend_toolchain_path("")
     toolchain_suffix = f"{os.pathsep}{toolchain_path}" if toolchain_path else ""

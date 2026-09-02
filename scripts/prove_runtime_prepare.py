@@ -35,6 +35,8 @@ def prove_checkout_absent(
     """Run the existing CLI with no source checkout at its original path."""
     verifier = root / "verify_runtime_wheel.py"
     shutil.copy2(checkout / "scripts/verify_runtime_wheel.py", verifier)
+    consumer = root / "prove_runtime_consumer.py"
+    shutil.copy2(checkout / "scripts/prove_runtime_consumer.py", consumer)
     if (
         os.environ.get("GITHUB_ACTIONS") != "true"
         or Path(os.environ["GITHUB_WORKSPACE"]).resolve() != checkout
@@ -56,6 +58,13 @@ def prove_checkout_absent(
     }
     checkout.rename(retired_checkout)
     try:
+        subprocess.run(  # noqa: S603 — copied proof with the installed generation only.
+            [str(release.interpreter), "-I", "-B", str(consumer), str(root)],
+            cwd=root,
+            env=child_env,
+            check=True,
+            timeout=120,
+        )
         subprocess.run(  # noqa: S603 — verified generation interpreter, no shell.
             [
                 str(release.interpreter),

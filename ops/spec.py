@@ -37,8 +37,9 @@ definitions live only here.
 from __future__ import annotations
 
 import importlib.util
+import shlex
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 
@@ -577,7 +578,17 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # unique for the watchdog/status derivations keyed on `session`.
     plugin = _plugin_services()
     _assert_unique_sessions(core, plugin)
-    return core + plugin
+    return tuple(_bind_runtime_command(spec) for spec in core + plugin)
+
+
+def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
+    """Bind Python services to the loaded runtime without changing their gates."""
+    from shared.runtime_interpreter import INSTALLED_RUNTIME, runtime_python
+
+    prefix = ".venv/bin/python "
+    if not INSTALLED_RUNTIME or not spec.cmd.startswith(prefix):
+        return spec
+    return replace(spec, cmd=f"{shlex.quote(str(runtime_python()))} {spec.cmd[len(prefix) :]}")
 
 
 def _plugin_services() -> tuple[ServiceSpec, ...]:
