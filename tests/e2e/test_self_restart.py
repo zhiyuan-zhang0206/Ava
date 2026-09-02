@@ -82,12 +82,6 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
 
 def _assert_successor_consumes_next_message(env: E2EEnv, successor_pid: int) -> None:
     """Real UI -> queue -> admitted successor, with no second self restart."""
-    with psycopg.connect(settings.data_plane.db_url) as conn:
-        before = conn.execute(
-            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='chat'",
-            (env.agent_id,),
-        ).fetchone()
-    assert before is not None
     env.page.fill('[data-testid="composer-input"]', "continue after verified restart")
     env.page.click('[data-testid="composer-send"]')
     deadline = time.monotonic() + 90
@@ -98,10 +92,11 @@ def _assert_successor_consumes_next_message(env: E2EEnv, successor_pid: int) -> 
                 (env.agent_id,),
             ).fetchone()
             chats = conn.execute(
-                "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='chat' "
-                "AND status='done'",
+                "SELECT status,claimed_at IS NOT NULL FROM inbound_messages "
+                "WHERE agent_id=%s AND kind='chat' "
+                "AND content='continue after verified restart'",
                 (env.agent_id,),
-            ).fetchone()
+            ).fetchall()
             commands = conn.execute(
                 "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
                 "FROM inbound_messages WHERE agent_id=%s AND kind='restart' AND source='self'",
@@ -113,7 +108,13 @@ def _assert_successor_consumes_next_message(env: E2EEnv, successor_pid: int) -> 
             ).fetchone()
         assert commands == [("done", True, True)], commands
         assert completions == (1,), completions
-        if row == ("idling", successor_pid, None) and chats == (before[0] + 1,):
+        # Ordinary chat is checkpoint-backed: done is reconciled on restart or
+        # compaction, not at each idle transition. Claim alone is insufficient;
+        # require the persisted answer below while the same successor is idle.
+        if row == ("idling", successor_pid, None) and chats in (
+            [("claimed", True)],
+            [("done", True)],
+        ):
             items = httpx.get(
                 f"{env.gateway_url}/api/agents/{env.agent_id}/timeline?limit=1000", timeout=30
             ).json()["items"]
