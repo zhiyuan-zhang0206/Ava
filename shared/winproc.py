@@ -327,7 +327,9 @@ def graceful_signal(name: str) -> bool:
         check=False,
     )
     if result.returncode:
-        raise RuntimeError(f"private console delivery failed: {result.stderr.strip()}")
+        raise RuntimeError(
+            f"private console delivery failed (exit {result.returncode}): {result.stderr.strip()}"
+        )
     return True
 
 
