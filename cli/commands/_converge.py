@@ -39,6 +39,9 @@ from cli.commands._health_preflight import ensure_health_preflight as _ensure_he
 from cli.commands._lgtm import ensure_lgtm_stack_step
 from cli.commands._lgtm_native import ensure_lgtm_native_step
 from cli.commands._otel_collector import ensure_otel_collector_step
+from cli.commands._ownership_preflight import (
+    ensure_ownership_preflight as _ensure_ownership_preflight,
+)
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
 from shared.browser_deps import browser_deps_notice, browser_deps_warning
@@ -525,6 +528,9 @@ def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
+    # Warning-only ownership preflight must run before every write-capable step:
+    # root-owned paths otherwise fail before converge can print the exact repair.
+    ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
     # Reset the prod checkout before any other step reads the tree: a tampered
     # tree would make every later step misbehave, and resetting first means the
     # rest of converge runs against the installed commit.
