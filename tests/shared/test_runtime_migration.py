@@ -1,5 +1,6 @@
 """Verified release authority failures must precede migration writes."""
 
+import base64
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,8 +16,38 @@ from shared.migrations import (
     _assert_migration_authority,
     _ensure_cutover,
 )
-from shared.runtime_migration import ReleaseMigrationContext
+from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
+
+
+def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path: Path) -> None:
+    from shared import runtime_migration
+
+    path = tmp_path / "29991231T235959_inventory.sql"
+    path.write_text("SELECT 1")
+    record = MagicMock()
+    record.hash.mode = "sha256"
+    record.hash.value = (
+        base64.urlsafe_b64encode(bytes.fromhex(file_sha256(path))).decode().rstrip("=")
+    )
+    distribution = MagicMock()
+    distribution.files = [record]
+    distribution.read_text.return_value = None
+    distribution.locate_file.side_effect = lambda name: (
+        Path(runtime_migration.__file__) if isinstance(name, str) else path
+    )
+    with patch(
+        "shared.runtime_migration.importlib.metadata.distribution", return_value=distribution
+    ):
+        assert installed_migration_paths(tmp_path) == {path}
+        extra = tmp_path / "29991231T235958_unlisted.sql"
+        extra.write_text("SELECT 2")
+        with pytest.raises(ReleaseRejectedError, match="undeclared"):
+            installed_migration_paths(tmp_path)
+        extra.unlink()
+        path.write_text("SELECT 3")
+        with pytest.raises(ReleaseRejectedError, match="differs"):
+            installed_migration_paths(tmp_path)
 
 
 def test_release_receipt_rejects_another_acquisition() -> None:
@@ -112,20 +143,20 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
                 "VALUES (%s,%s,true,true)",
                 ("runtime-proof", str(home)),
             )
-            acquired = connection.execute(
+            acquired_row = connection.execute(
                 "UPDATE deployment_state SET holder='runtime-proof:pid1',acquired_at=now(), "
                 "expires_at=now()+interval '5 minutes',kind='rollout',phase='updating', "
                 "note=NULL,target_sha=%s WHERE id=1 RETURNING acquired_at",
                 ("c" * 40,),
-            ).fetchone()[0]
+            ).fetchone()
+            assert acquired_row is not None
             context = ReleaseMigrationContext(
-                release, home, "runtime-proof:pid1", acquired, "c" * 40
+                release, home, "runtime-proof:pid1", acquired_row[0], "c" * 40
             )
             assert apply_pending_migrations(connection, release=context) == [migration.stem]
-            assert connection.execute("SELECT to_regclass('runtime_migration_probe')").fetchone()[0]
+            created = connection.execute("SELECT to_regclass('runtime_migration_probe')").fetchone()
+            assert created is not None and created[0] is not None
         finally:
             connection.rollback()
-        assert (
-            connection.execute("SELECT to_regclass('runtime_migration_probe')").fetchone()[0]
-            is None
-        )
+        removed = connection.execute("SELECT to_regclass('runtime_migration_probe')").fetchone()
+        assert removed is not None and removed[0] is None

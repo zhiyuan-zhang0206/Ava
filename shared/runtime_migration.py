@@ -7,6 +7,8 @@ Ordinary development migrations keep their checkout/Git ownership checks.
 
 from __future__ import annotations
 
+import base64
+import importlib.metadata
 import json
 import re
 from dataclasses import dataclass
@@ -17,6 +19,40 @@ import psycopg
 
 from shared.cluster_lock import read_update_lease
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
+
+
+def installed_migration_paths(directory: Path) -> set[Path]:
+    """Read-only schema inventory from the distribution that loaded this module.
+
+    Package RECORD is an installed-package integrity check, not deployment or
+    migration authority. Writes still require the independently verified release
+    context and gateway/operation checks. Unknown files are never silently adopted.
+    """
+    distribution = importlib.metadata.distribution("ava")
+    module = Path(__file__).resolve()
+    if Path(str(distribution.locate_file("shared/runtime_migration.py"))).resolve() != module:
+        raise ReleaseRejectedError("migration metadata belongs to a different Ava installation")
+    direct = distribution.read_text("direct_url.json")
+    if direct and json.loads(direct).get("dir_info", {}).get("editable"):
+        raise ReleaseRejectedError("installed migration inventory cannot use editable metadata")
+    records = distribution.files
+    if records is None:
+        raise ReleaseRejectedError("installed Ava has no declared file inventory")
+    expected: set[Path] = set()
+    for record in records:
+        located = Path(str(distribution.locate_file(record)))
+        path = located.resolve()
+        if path.parent != directory or path.suffix != ".sql":
+            continue
+        if located.is_symlink() or record.hash is None or record.hash.mode != "sha256":
+            raise ReleaseRejectedError("installed SQL requires a regular hash-declared member")
+        actual = base64.urlsafe_b64encode(bytes.fromhex(file_sha256(path))).decode().rstrip("=")
+        if actual != record.hash.value:
+            raise ReleaseRejectedError("installed SQL differs from its package inventory")
+        expected.add(path)
+    if set(directory.glob("*.sql")) != expected:
+        raise ReleaseRejectedError("installed migrations contain undeclared SQL")
+    return expected
 
 
 @dataclass(frozen=True)
