@@ -29,7 +29,7 @@ Schema: single collection `memory_embeddings`, one row per **chunk**:
 - `embedder` VARCHAR(64) — the embedding provider `fingerprint` the row
   was produced with (semantic-space id; a change re-embeds the row)
 - `vector` FLOAT_VECTOR({dim}) COSINE AUTOINDEX — width = the provider's dim
-  (injected by the factory; mismatched collections are dropped + recreated)
+  (injected by the factory; the indexer daemon rebuilds mismatched collections)
 
 One file maps to 0-or-1 desc row + N body-chunk rows; embedding the
 frontmatter description on its own keeps short entity-bearing lines
@@ -38,9 +38,10 @@ pulls raw chunk hits, aggregates them per path (best cosine wins) and
 returns top-k **paths** — the caller-facing contract (list of paths) is
 unchanged.
 
-The pre-chunking collection (path as PK, no kind/chunk_idx) is detected
-at connect and dropped + recreated, so the cold-start scan rebuilds the
-whole index chunked.
+The indexer daemon's writable cold-start reconcile detects the pre-chunking
+collection (path as PK, no kind/chunk_idx) and rebuilds it so the cold-start
+scan can repopulate the whole index chunked. Read-only connections refuse a
+missing or mismatched collection instead of changing persistent storage.
 
 Milvus COSINE returns "distance" = 1 - cosine_similarity, ascending (0
 = identical); aggregation keeps the minimum distance per path.
@@ -86,7 +87,7 @@ def _create_collection(client: MilvusClient, dim: int) -> None:
 
     `dim` is the provider's embedding width — the vector field's declared
     width; a collection built for another width is a mismatched cache and is
-    dropped + recreated by `_schema_current`."""
+    rebuilt by a writable indexer-daemon connection."""
     schema = client.create_schema(auto_id=False, enable_dynamic_field=False)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("pk", DataType.VARCHAR, is_primary=True, max_length=_PK_MAX_LENGTH)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("path", DataType.VARCHAR, max_length=1024)  # pyright: ignore[reportUnknownMemberType]
@@ -101,17 +102,13 @@ def _create_collection(client: MilvusClient, dim: int) -> None:
     client.create_collection(collection_name=_COLLECTION, schema=schema, index_params=idx)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _schema_current(client: MilvusClient, dim: int) -> bool:
-    """True when the existing collection already has the chunked schema at
-    `dim`.
+def _schema_problem(client: MilvusClient, dim: int) -> str | None:
+    """Describe why the collection cannot serve vectors at `dim`, if anything.
 
     The legacy collection had `path` as its primary key and no `kind` /
     `chunk_idx` fields; the chunked schema adds those and folds the triple
-    into a `pk` key. Any mismatch — legacy layout, missing `embedder`
-    column (a pre-provider-era collection), or a vector width other than the
-    configured provider's dim — makes `connect` drop + recreate, because the
-    index is a derived cache and a cold-start rebuild is the cheapest
-    correct fix.
+    into a `pk` key. This detail makes read-only errors actionable without
+    loosening their no-mutation guarantee.
     """
     try:
         # pymilvus's stubs type every client method as an async Unknown; the
@@ -121,7 +118,7 @@ def _schema_current(client: MilvusClient, dim: int) -> bool:
             client.describe_collection(collection_name=_COLLECTION),  # pyright: ignore[reportUnknownMemberType]
         )
     except Exception:
-        return False
+        return "could not be inspected"
     # pymilvus 3.x returns a plain dict here; older versions return an object
     # with a `.fields` attribute — accept both.
     # isinstance-narrowing an Any yields dict[Unknown, ...], so the fields
@@ -138,23 +135,48 @@ def _schema_current(client: MilvusClient, dim: int) -> bool:
             params: dict[str, Any] = cast(dict[str, Any], f.get("params") or {})  # pyright: ignore[reportUnknownVariableType]
             if isinstance(params.get("dim"), int):
                 vec_dim = params.get("dim")
-    return set(_EXPECTED_FIELDS) == names and primaries == {"pk"} and vec_dim == dim
+    details: list[str] = []
+    missing = sorted(_EXPECTED_FIELDS - names)
+    extra = sorted(names - _EXPECTED_FIELDS)
+    if missing:
+        details.append(f"missing fields {missing}")
+    if extra:
+        details.append(f"unexpected fields {extra}")
+    if primaries != {"pk"}:
+        details.append(f"primary key fields are {sorted(primaries)} instead of ['pk']")
+    if vec_dim != dim:
+        details.append(f"vector dimension is {vec_dim}, expected {dim}")
+    return "; ".join(details) if details else None
 
 
-def _connect(dim: int) -> MilvusClient:
+def _schema_current(client: MilvusClient, dim: int) -> bool:
+    """True when the existing collection has the chunked schema at `dim`."""
+    return _schema_problem(client, dim) is None
+
+
+def _readonly_schema_error(problem: str) -> RuntimeError:
+    """The safe failure for a read-only backend that cannot search."""
+    return RuntimeError(
+        f"Milvus collection {_COLLECTION!r} {problem}; a read-only connection will not "
+        "create or rebuild it. The indexer daemon's cold-start reconcile on startup is "
+        "the legitimate writer."
+    )
+
+
+def _connect(dim: int, *, readonly: bool = False) -> MilvusClient:
     """Connect to milvus server + ensure collection exists + load into
     memory (at the provider's `dim`). Caller is responsible for `client.close()`.
 
-    Collection schema is idempotent: first connect creates it (or, when the
-    existing collection carries the legacy / a mismatched schema, drops and
-    recreates it — the cold-start reconcile then rebuilds the index chunked);
-    subsequent calls return directly. The first `create_collection`
-    auto-loads, but after a milvus server restart the collection switches to
-    "released" state (memory cleared, persistent data remains), and subsequent
-    query/search hit `MilvusException(code=101) Collection ... is in state
-    'released'`. This function unconditionally `load_collection` as a
-    defensive guard (already-loaded is idempotent) so callers do not need to
-    worry about the load lifecycle.
+    A writable connection creates a missing collection or replaces a stale
+    derived cache; that path belongs to the indexer daemon's cold-start
+    reconcile. A read-only connection rejects either state before issuing a
+    persistent mutation. The first `create_collection` auto-loads, but after
+    a milvus server restart the collection switches to "released" state
+    (memory cleared, persistent data remains), and subsequent query/search
+    hit `MilvusException(code=101) Collection ... is in state 'released'`.
+    This function unconditionally `load_collection` as a defensive guard
+    (already-loaded is idempotent) so callers do not need to worry about the
+    load lifecycle.
     """
     client = MilvusClient(uri=server_uri())
     # pymilvus's sync MilvusClient.has_collection returns bool, but its untyped
@@ -162,15 +184,24 @@ def _connect(dim: int) -> MilvusClient:
     # is real, not always-true. Every pymilvus client/schema method below also types
     # its **kwargs as Unknown (reportUnknownMemberType); the call args are fully typed.
     if not client.has_collection(collection_name=_COLLECTION):  # pyright: ignore[reportUnnecessaryComparison, reportUnknownMemberType]
+        if readonly:
+            client.close()
+            raise _readonly_schema_error("is missing")
         _create_collection(client, dim)
-    elif not _schema_current(client, dim):
-        _log.warning(
-            "[index] collection %s schema mismatch — dropping + recreating; "
-            "cold-start will rebuild the index chunked",
-            _COLLECTION,
-        )
-        client.drop_collection(collection_name=_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
-        _create_collection(client, dim)
+    else:
+        problem = _schema_problem(client, dim)
+        if problem is not None:
+            if readonly:
+                client.close()
+                raise _readonly_schema_error(f"has a schema mismatch: {problem}")
+            _log.warning(
+                "[index] collection %s schema mismatch (%s) — dropping + recreating; "
+                "the indexer daemon cold-start reconcile will rebuild the index chunked",
+                _COLLECTION,
+                problem,
+            )
+            client.drop_collection(collection_name=_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
+            _create_collection(client, dim)
     client.load_collection(collection_name=_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
     return client
 
@@ -362,10 +393,18 @@ class MilvusBackend:
 
     name = "milvus"
 
-    def __init__(self, dim: int, fingerprint: str, client: MilvusClient | None = None) -> None:
+    def __init__(
+        self,
+        dim: int,
+        fingerprint: str,
+        client: MilvusClient | None = None,
+        *,
+        readonly: bool = False,
+    ) -> None:
         self._dim = dim
         self._fingerprint = fingerprint
         self._client = client
+        self._readonly = readonly
 
     def _require_client(self) -> MilvusClient:
         """The connected client, or fail fast — using an unconnected
@@ -376,7 +415,15 @@ class MilvusBackend:
 
     def connect(self) -> None:
         """Connect + ensure collection + load (see `_connect`)."""
-        self._client = _connect(self._dim)
+        self._client = _connect(self._dim, readonly=self._readonly)
+
+    def _require_writable(self) -> None:
+        """Reject mutations through a backend created for read-only work."""
+        if self._readonly:
+            raise RuntimeError(
+                "milvus backend is read-only; only the indexer daemon's cold-start "
+                "reconcile on startup may write this collection"
+            )
 
     def close(self) -> None:
         """Close the held client; idempotent, safe to call twice."""
@@ -395,6 +442,7 @@ class MilvusBackend:
         chunk_idx: int = 0,
     ) -> None:
         """Write / update one chunk row — see `_upsert`."""
+        self._require_writable()
         _upsert(
             self._require_client(),
             path,
@@ -408,6 +456,7 @@ class MilvusBackend:
 
     def delete(self, path: str) -> None:
         """Delete every chunk row of `path` — see `_delete`."""
+        self._require_writable()
         _delete(self._require_client(), path)
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:

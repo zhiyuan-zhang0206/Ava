@@ -16,6 +16,8 @@ import pytest
 from services.memory_indexer.backends import factory
 from services.memory_indexer.backends.base import KIND_DESC, pk_of
 from services.memory_indexer.backends.milvus import MilvusBackend
+from services.memory_indexer.backends.numpy import NumPyBackend
+from services.memory_indexer.backends.pgvector import PGVectorBackend
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -120,6 +122,56 @@ def test_backend_write_read_delegation(milvus_client) -> None:  # pyright: ignor
     assert backend.all_meta() == {"/b.md": (2.0, "hb", _FP)}
 
 
+def test_readonly_backends_refuse_mutations() -> None:
+    """Factory-provided read-only backends reject writes before connect."""
+    for name in (MilvusBackend.name, PGVectorBackend.name, NumPyBackend.name):
+        backend = factory.get_backend_named(name, dim=_DIM, fingerprint=_FP, readonly=True)
+        with pytest.raises(RuntimeError, match="read-only"):
+            backend.upsert("/a.md", 1.0, "hash", _vec(0), kind="body", chunk_idx=0)
+        with pytest.raises(RuntimeError, match="read-only"):
+            backend.delete("/a.md")
+
+
+def test_readonly_connect_refuses_dim_mismatch_without_dropping_rows(
+    milvus_client,
+) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """D3 regression: a comparison connection cannot rebuild a live collection."""
+    writer = MilvusBackend(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
+    writer.upsert("/survives.md", 1.0, "hash", _vec(0))
+
+    readonly = MilvusBackend(dim=_DIM + 1, fingerprint=_FP, readonly=True)
+    with pytest.raises(RuntimeError, match="schema mismatch"):
+        readonly.connect()
+
+    assert writer.all_meta() == {"/survives.md": (1.0, "hash", _FP)}
+
+
+def test_readonly_connect_refuses_missing_collection(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """A comparison connection does not create an absent collection."""
+    from services.memory_indexer.backends.milvus import _COLLECTION
+
+    milvus_client.drop_collection(_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
+    readonly = MilvusBackend(dim=_DIM, fingerprint=_FP, readonly=True)
+    with pytest.raises(RuntimeError, match="is missing"):
+        readonly.connect()
+    assert not milvus_client.has_collection(_COLLECTION)  # pyright: ignore[reportUnnecessaryComparison, reportUnknownMemberType]
+
+
+def test_readonly_connect_searches_matching_collection(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """A matching collection still loads and serves the comparison reads."""
+    writer = MilvusBackend(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
+    target = _vec(0)
+    writer.upsert("/searchable.md", 1.0, "hash", target)
+
+    readonly = MilvusBackend(dim=_DIM, fingerprint=_FP, readonly=True)
+    readonly.connect()
+    try:
+        assert readonly.all_meta() == {"/searchable.md": (1.0, "hash", _FP)}
+        assert readonly.search_topk(target, k=1) == ["/searchable.md"]
+    finally:
+        readonly.close()
+
+
 def test_backend_search_topk_async_passes_timeout_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -191,7 +243,8 @@ def test_backend_connect_sets_client_and_close_releases(monkeypatch: pytest.Monk
         def close(self) -> None:
             closed.append("x")
 
-    def _fake_connect(_dim: int) -> _FakeClient:
+    def _fake_connect(_dim: int, *, readonly: bool = False) -> _FakeClient:
+        assert not readonly
         return _FakeClient()
 
     monkeypatch.setattr(milvus, "_connect", _fake_connect)
