@@ -1,3 +1,12 @@
+---
+type: doc
+title: Inactive runtime preparation
+description: Offline private Python generation preparation and declared native capability proof, without activation.
+tags:
+- shared
+- runtime
+---
+
 # Inactive runtime preparation
 
 `runtime_prepare.py` prepares a Linux/macOS generation at its final, private,
