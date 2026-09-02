@@ -9,6 +9,7 @@ import ctypes
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 import psutil
@@ -33,7 +34,13 @@ def send_private_console_break(record_path: Path, pid: int, birth: float) -> Non
     if not kernel.AttachConsole(pid):
         raise ctypes.WinError(ctypes.get_last_error())
     handler_type = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_ulong)
-    handler = handler_type(lambda _event: True)
+    handled = threading.Event()
+
+    def ignore_own_event(_event: int) -> int:
+        handled.set()
+        return 1
+
+    handler = handler_type(ignore_own_event)
     if not kernel.SetConsoleCtrlHandler(handler, 1):
         raise ctypes.WinError(ctypes.get_last_error())
     try:
@@ -60,6 +67,10 @@ def send_private_console_break(record_path: Path, pid: int, birth: float) -> Non
         # explicitly private, enumerated console; never infer a group from PID.
         if not kernel.GenerateConsoleCtrlEvent(1, 0):
             raise ctypes.WinError(ctypes.get_last_error())
+        # FreeConsole resets the process handler table. Do not detach before
+        # our own queued broadcast has reached the protective handler.
+        if not handled.wait(1):
+            raise RuntimeError("private console helper did not observe its own control event")
     finally:
         kernel.FreeConsole()
 
