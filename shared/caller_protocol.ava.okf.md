@@ -16,6 +16,13 @@ Unknown, expired, terminated and legacy targets fail before INSERT with an
 actionable error; there is no source downgrade or installed-commit shortcut.
 The check applies to direct chat persistence as well as HTTP delivery.
 
+MCP `send_message` accepts opt-in `caller_protocol='v1'`. The format declaration
+grants no permissions: a verified, non-revoked write-scope client is still
+required. The server derives external MCP provenance from its client row ID;
+body source/instance assertions are rejected, and delivery uses this same gate.
+Omitted protocol retains legacy attribution, an explicitly unresolved default
+until coordinated producer activation. The opt-in is not that activation.
+
 CLI opt-in profiles pass through authentication and this gate unchanged. The
 persisted `caller_identity` sidecar is asserted provenance, never authority.
 The actual hosted claim/envelope path reads it without representing an external

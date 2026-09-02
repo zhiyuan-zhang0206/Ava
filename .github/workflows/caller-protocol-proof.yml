@@ -26,7 +26,7 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          timeout 180 uv run pytest tests/gateway/test_caller_protocol_path.py tests/gateway/test_caller_write_fence.py tests/shared/test_caller_persistence.py tests/agent/test_hosted_ownership.py -q --junitxml=proof/caller-path.xml
+          timeout 180 uv run pytest tests/gateway/test_caller_protocol_path.py tests/gateway/test_mcp_caller_protocol.py tests/gateway/test_caller_write_fence.py tests/shared/test_caller_persistence.py tests/agent/test_hosted_ownership.py -q --junitxml=proof/caller-path.xml
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
