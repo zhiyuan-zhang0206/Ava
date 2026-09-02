@@ -1,5 +1,6 @@
 """Real process admission -> durable queue -> graph dispatch, no OS effect."""
 
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg
@@ -64,8 +65,12 @@ async def test_actual_process_dispatch_installs_decision_not_observation(
 
 
 async def test_successor_admission_observes_restart_before_next_claim(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("agent.session_admission.run_dir", lambda: tmp_path)
     agent_id = _row(db_conn)
     claim_agent_row(agent_id)
     old = current_incarnation(agent_id)
@@ -79,7 +84,7 @@ async def test_successor_admission_observes_restart_before_next_claim(
     # This database test proves admission, not an actual OS process exit.
     db_conn.execute("UPDATE agents_meta SET status='idling',pid=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
-    claim_agent_row(agent_id)
+    claim_agent_row(agent_id, restart_command_id=first)
     successor = current_incarnation(agent_id)
     assert successor is not None and successor != old
     assert db_conn.execute(
