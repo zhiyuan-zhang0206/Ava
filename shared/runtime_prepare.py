@@ -16,6 +16,7 @@ import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from shared.runtime_release import (
     ReleaseRejectedError,
@@ -181,7 +182,7 @@ print(json.dumps(sorted(set(images))))
         else (Path("/usr/lib"), Path("/lib"), Path("/lib64"))
     )
     result: list[str] = []
-    for name in images:
+    for name in cast(list[object], images):
         if not isinstance(name, str) or not Path(name).is_absolute():
             raise ReleaseRejectedError("invalid loaded native image path")
         path = Path(name).resolve()
