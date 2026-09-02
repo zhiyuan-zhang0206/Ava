@@ -5,8 +5,8 @@ export interface TimelineWindowOverride {
   to: string;
 }
 
-/** Keep server-selected sessions and long explicit windows bounded before rendering. */
+/** Aggregate only long explicit windows before the turn count is known. */
 export function usesTimelineBuckets(window: TimelineWindowOverride | null): boolean {
-  if (window === null) return true;
+  if (window === null) return false;
   return Date.parse(window.to) - Date.parse(window.from) >= SIX_HOURS_MS;
 }
