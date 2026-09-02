@@ -25,6 +25,50 @@ from shared.session_record import SessionRecord
 
 
 class NativeAgentRecordOrdering(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows owner death closes helper Job")
+    def test_job_owner_death_removes_helper_family(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            evidence, late = home / "family.json", home / "late"
+            helper = (
+                "import json,time;import psutil;from pathlib import Path;"
+                "p=psutil.Process();"
+                f"Path({str(evidence)!r}).write_text(json.dumps("
+                "[(p.pid,p.create_time()),(p.ppid(),p.parent().create_time())]));"
+                f"time.sleep(3);Path({str(late)!r}).write_text('late action')"
+            )
+            owner = (
+                "import os,sys,threading,time;from pathlib import Path;"
+                "from shared.winjob_spawn import run_job_process;"
+                f"evidence=Path({str(evidence)!r});"
+                "threading.Thread(target=lambda: "
+                "([time.sleep(.02) for _ in iter(lambda:evidence.exists(),True)],os._exit(0)),"
+                "daemon=True).start();"
+                f"run_job_process([sys.executable,'-I','-c',{helper!r}],timeout=10)"
+            )
+            completed = subprocess.run(  # noqa: S603 - fixed disposable CI owner
+                [sys.executable, "-I", "-c", owner],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue(evidence.exists())
+            identities = json.loads(evidence.read_text())
+            for pid, birth in identities:
+                try:
+                    process = psutil.Process(pid)
+                except psutil.NoSuchProcess:
+                    continue
+                if process.create_time() == birth:
+                    self.assert_process_exited(process)
+            time.sleep(3.2)
+            self.assertFalse(late.exists(), "family survived its Job owner")
+            sys.stdout.write(json.dumps({"job_owner_death_family": identities}) + "\n")
+
     @unittest.skipUnless(os.name == "nt", "Windows atomic helper family containment")
     def test_atomic_job_timeout_removes_redirector_and_actual_helper(self) -> None:
         import subprocess
