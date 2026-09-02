@@ -447,7 +447,7 @@ def claim_recovery_lock(
             "[cluster-lock] recovery claim refused: observed lease lacks acquired_at identity"
         )
         return RecoveryClaim(acquired=False)
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "WITH prev AS MATERIALIZED ("
             "  SELECT holder FROM deployment_state WHERE id = 1 AND ("
