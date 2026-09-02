@@ -92,9 +92,9 @@ def _discover_plugins() -> dict[str, Path]:
                 discovered[p.name] = p
 
     # External plugin: ~/.ava/plugins/<name>/plugin.py
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_plugins_dir
+    from shared.runtime_interpreter import external_plugin_read_root
 
-    user_dir = runtime_plugins_dir() if WHEEL_RUNTIME else paths.plugins_dir()
+    user_dir = external_plugin_read_root()
     if user_dir.exists():
         for p in sorted(user_dir.iterdir()):
             if p.name.startswith("."):

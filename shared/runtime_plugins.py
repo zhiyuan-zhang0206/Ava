@@ -27,6 +27,8 @@ def declared_plugins(root: Path) -> dict[str, str]:
         manifest = load_manifest(directory)
         if manifest is None or not (directory / "plugin.py").is_file():
             raise ReleaseRejectedError("retained plugin requires a complete declared package")
+        if (directory / ".mcp.json").exists():
+            raise ReleaseRejectedError("plugin MCP executable closure is not yet supported")
         if skill_names.match_key(manifest.name) != skill_names.match_key(directory.name):
             raise ReleaseRejectedError("plugin manifest identity differs from directory")
         for path in directory.rglob("*"):
