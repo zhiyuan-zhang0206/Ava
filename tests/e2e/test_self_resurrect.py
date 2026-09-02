@@ -16,13 +16,16 @@ Verifies:
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import httpx
+import psutil
 import psycopg
 import pytest
 from playwright.sync_api import Page
 
+from ops.cluster_rpc import dispatch_to_machine
 from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._db import wait_for_status
@@ -30,7 +33,7 @@ from tests.e2e._env import E2EEnv
 from tests.e2e.conftest import _HOSTED
 
 
-@pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_resurrect:build")
+@pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_resurrect:build_waiting_for_chat")
 def test_resurrect_brings_back_terminated_agent(e2e_env: E2EEnv) -> None:
     page = e2e_env.page
     agent_id = e2e_env.agent_id
@@ -87,6 +90,22 @@ def test_resurrect_brings_back_terminated_agent(e2e_env: E2EEnv) -> None:
             and last_pid is not None
             and last_pid != first_pid
         ):
+            with psycopg.connect(settings.data_plane.db_url) as conn:
+                wake = conn.execute(
+                    "SELECT status,payload->'resurrection_retry'->>'attempts' "
+                    "FROM inbound_messages WHERE agent_id=%s AND kind='chat' AND content='wake up'",
+                    (agent_id,),
+                ).fetchone()
+            assert wake is not None and wake[0] in ("claimed", "done")
+            assert int(wake[1]) >= 2, "the old process must have remained alive through a retry"
+            items = httpx.get(
+                f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=30
+            ).json()["items"]
+            assert any(
+                item["kind"] == "agent_chat"
+                and "I processed the wake after resurrection." in item["payload"]
+                for item in items
+            )
             return
         time.sleep(0.5)
     raise RuntimeError(
@@ -94,6 +113,59 @@ def test_resurrect_brings_back_terminated_agent(e2e_env: E2EEnv) -> None:
         f"first_pid={first_pid} resurrect={last_resurrect} "
         f"status={last_status!r} pid={last_pid}"
     )
+
+
+@pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_resurrect:build")
+def test_explicit_resurrection_after_observed_process_exit(e2e_env: E2EEnv) -> None:
+    """Separate supported lifecycle RPC, not the chat auto-resurrection path."""
+    if _HOSTED:
+        pytest.skip("process exit identity belongs to the process-mode contract")
+    agent_id = e2e_env.agent_id
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        row = conn.execute(
+            "SELECT pid,machine FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
+    assert row is not None and row[0] is not None
+    original = psutil.Process(row[0])
+    e2e_env.page.goto(e2e_env.agent_url)
+    e2e_env.page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
+    e2e_env.page.fill('[data-testid="composer-input"]', "terminate before explicit resurrection")
+    e2e_env.page.click('[data-testid="composer-send"]')
+    wait_for_status(agent_id, AgentStatus.TERMINATED.value)
+    deadline = time.monotonic() + 90
+    while True:
+        try:
+            if not original.is_running() or original.status() == psutil.STATUS_ZOMBIE:
+                break
+        except psutil.NoSuchProcess:
+            break
+        assert time.monotonic() < deadline, "the original process did not actually exit"
+        time.sleep(0.05)
+    response = asyncio.run(
+        dispatch_to_machine(
+            target_machine=row[1],
+            kind="lifecycle",
+            payload={
+                "path": f"/api/agents/{agent_id}/resurrect-explicit-v2",
+                "body": {"resurrected_by": "user", "prompt": "explicit wake"},
+            },
+        )
+    )
+    assert response["status"] == "spawned"
+    wait_for_status(agent_id, AgentStatus.IDLING.value)
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        after = conn.execute(
+            "SELECT pid,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
+        commands = conn.execute(
+            "SELECT status,observed_at IS NOT NULL FROM inbound_messages "
+            "WHERE agent_id=%s AND kind='terminate'",
+            (agent_id,),
+        ).fetchall()
+    assert (
+        after is not None and after[0] is not None and after[0] != original.pid and after[1] is None
+    )
+    assert commands == [("done", True)]
 
 
 def _assert_hosted_resurrect(e2e_env: E2EEnv, page: Page, agent_id: int) -> None:

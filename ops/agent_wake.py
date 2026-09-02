@@ -61,6 +61,11 @@ from ops import agent_launch, runner_mode
 # split: `revive_agent` now lives in `ops/agent_revive.py`.
 from ops.agent_revive import revive_agent as revive_agent
 from ops.pages import list_open_page_names
+from ops.resurrection_retry import (
+    ResurrectExitDeferredError,
+    authorize_pending_retry,
+    validate_pending_retry,
+)
 from shared.agents import (
     AgentNotFound,
     AgentStatus,
@@ -80,7 +85,6 @@ from shared.live_announce import publish_agent_updated_sync, publish_page_closed
 from shared.log import logger
 from shared.machine import machine_name
 
-
 class ResurrectTriggerStaleError(ResurrectError):
     """An auto-resurrect trigger no longer qualifies for the current death.
 
@@ -88,10 +92,8 @@ class ResurrectTriggerStaleError(ResurrectError):
     Unlike `ResurrectAlreadyAlive`, the agent can still be terminated.
     """
 
-
 class ResurrectClaimStaleError(ResurrectError):
     """A controller's auto-resurrect claim no longer owns this death."""
-
 
 @dataclass(frozen=True)
 class AutoResurrectClaim:
@@ -103,7 +105,6 @@ class AutoResurrectClaim:
     claim_kind: Literal["crash", "wedged"]
     claimed_at: datetime
 
-
 @dataclass(frozen=True)
 class _PreparedResurrect:
     allocation_epoch: datetime
@@ -112,10 +113,8 @@ class _PreparedResurrect:
     event_target: int | None
     attempt_session: str | None = None
 
-
 class _ResurrectSessionStartError(RuntimeError):
     """Detached session creation failed before the resurrect commit."""
-
 
 def _hosted_agent_host_healthy() -> bool:
     """Whether this hosted cluster's sole restart consumer is live and ours."""
@@ -124,7 +123,6 @@ def _hosted_agent_host_healthy() -> bool:
         f"http://localhost:{health_port('agent_host')}/healthz",
         pidfile=settings.services.agent_host_pidfile,
     ).alive
-
 
 def _lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
     """Lock the home-machine admission row before locking the agent row.
@@ -146,7 +144,6 @@ def _lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
             f"agent {agent_id} home machine {home_machine!r} is paused; "
             "resume it before resurrecting"
         )
-
 
 def _transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
@@ -240,7 +237,6 @@ def _transition_terminated_to_unclaimed_idling(
         f"agent {agent_id} was concurrently modified after SELECT; UPDATE affected 0 rows"
     )
 
-
 def _resurrect_event_target(resurrected_by: str) -> int | None:
     if not resurrected_by.startswith("agent:"):
         return None
@@ -248,7 +244,6 @@ def _resurrect_event_target(resurrected_by: str) -> int | None:
         return int(resurrected_by.removeprefix("agent:"))
     except ValueError:
         return None
-
 
 def _auto_resurrect_max_attempts() -> int:
     """Read the recovery budget after the gateway's runner-alias projection.
@@ -269,7 +264,6 @@ def _auto_resurrect_max_attempts() -> int:
         return settings.daemon.auto_resurrect_max_attempts
     raise RuntimeError("auto-resurrect budget has no configured daemon domain")
 
-
 def _prepare_resurrect_attempt(
     agent_id: int,
     *,
@@ -285,7 +279,7 @@ def _prepare_resurrect_attempt(
     reject_unnegotiated_caller(resurrected_by)
     with write_transaction() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
@@ -305,8 +299,12 @@ def _prepare_resurrect_attempt(
                 raise ResurrectBudgetExhausted(
                     f"agent {agent_id} has exhausted its auto-resurrect budget"
                 )
+        if trigger_inbound_id is not None:
+            validate_pending_retry(conn, agent_id, trigger_inbound_id)
         if not observe_applied_termination(conn, agent_id, machine_name()):
-            raise ResurrectError("outstanding lifecycle target has not been observed ended")
+            raise ResurrectExitDeferredError(
+                "outstanding lifecycle target has not been observed ended"
+            )
         allocation_epoch = _transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,
@@ -365,7 +363,6 @@ def _prepare_resurrect_attempt(
         attempt_session=attempt_session,
     )
 
-
 def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> str | None:
     """Create another session only while the same active allocation still owns the row."""
     with write_transaction() as conn, conn.cursor() as cur:
@@ -388,7 +385,6 @@ def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> str
             birth_config=prepared.birth_config,
             confirm=False,
         )
-
 
 def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -> None:
     """Terminate only the still-unclaimed allocation owned by this resurrect."""
@@ -416,7 +412,6 @@ def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -
     if changed:
         for page_name in page_names:
             publish_page_closed_sync(agent_id, page_name)
-
 
 def _confirm_resurrect_with_retries(
     agent_id: int, prepared: _PreparedResurrect, *, first_attempt: int
@@ -456,7 +451,6 @@ def _confirm_resurrect_with_retries(
                     _mark_resurrect_launch_failed(agent_id, prepared)
                     raise
                 continue
-
 
 def resurrect_agent(
     agent_id: int,
@@ -552,6 +546,15 @@ def resurrect_agent(
     prepared: _PreparedResurrect | None = None
     first_attempt = 0
     for first_attempt in range(agent_launch._LAUNCH_MAX_RETRIES + 1):
+        if trigger_inbound_id is not None:
+            if trigger_inbound_kind is None:
+                raise ValueError("pending resurrection trigger kind is required")
+            authorize_pending_retry(
+                agent_id,
+                trigger_inbound_id,
+                trigger_inbound_kind,
+                agent_launch._LAUNCH_MAX_RETRIES + 1,
+            )
         try:
             prepared = _prepare_resurrect_attempt(
                 agent_id,
@@ -562,7 +565,7 @@ def resurrect_agent(
                 auto_claim=auto_claim,
             )
             break
-        except _ResurrectSessionStartError:
+        except (_ResurrectSessionStartError, ResurrectExitDeferredError):
             if first_attempt >= agent_launch._LAUNCH_MAX_RETRIES:
                 raise
             backoff = agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC * 2**first_attempt
@@ -594,7 +597,6 @@ def resurrect_agent(
         confirmed=confirmed,
     )
     return agent_id
-
 
 def respawn_agent(agent_id: int) -> bool:
     """Called by the restarter daemon: UPDATE 'restarting' -> unclaimed 'idling' +

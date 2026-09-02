@@ -33,6 +33,26 @@ jobs:
         run: |
           mkdir -p proof
           timeout 600 uv run pytest tests/e2e/test_self_restart.py tests/e2e/test_self_resurrect.py -v --junitxml=proof/actual-restart.xml
+      - name: Old wake owner must strand the deterministic delayed-exit request
+        run: |
+          git fetch --no-tags origin 22122ae8aa183382bae82bc8b07c74be12d98dba
+          cp ops/agent_wake.py /tmp/current-agent-wake.py
+          trap 'cp /tmp/current-agent-wake.py ops/agent_wake.py' EXIT
+          git show 22122ae8aa183382bae82bc8b07c74be12d98dba:ops/agent_wake.py > ops/agent_wake.py
+          set +e
+          timeout 240 uv run pytest tests/e2e/test_self_resurrect.py::test_resurrect_brings_back_terminated_agent -v --junitxml=proof/old-wake-owner.xml
+          result=$?
+          set -e
+          test "$result" = 1
+          uv run python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('proof/old-wake-owner.xml').getroot()
+          cases = list(root.iter('testcase'))
+          assert len(cases) == 1 and cases[0].find('error') is None
+          failure = cases[0].find('failure')
+          assert failure is not None
+          assert 'did not complete resurrect cycle' in failure.get('message', '')
+          PY
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
