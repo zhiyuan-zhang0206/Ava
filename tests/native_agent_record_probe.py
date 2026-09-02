@@ -204,14 +204,17 @@ class NativeAgentRecordOrdering(unittest.TestCase):
 
     def assert_process_exited(self, process: psutil.Process) -> None:
         deadline = time.monotonic() + 5
-        while process.is_running() and time.monotonic() < deadline:
-            if process.status() == psutil.STATUS_ZOMBIE:
-                return
-            time.sleep(0.05)
-        self.assertTrue(
-            not process.is_running() or process.status() == psutil.STATUS_ZOMBIE,
-            "canonical alias must not spare the attempt's actual Python child",
-        )
+        try:
+            while process.is_running() and time.monotonic() < deadline:
+                if process.status() == psutil.STATUS_ZOMBIE:
+                    return
+                time.sleep(0.05)
+            self.assertTrue(
+                not process.is_running() or process.status() == psutil.STATUS_ZOMBIE,
+                "canonical alias must not spare the attempt's actual Python child",
+            )
+        except psutil.NoSuchProcess:
+            return  # Exit between is_running() and status() is positive exit evidence.
 
     @unittest.skipUnless(os.name == "nt", "Windows console control contract")
     def test_ctrl_break_reaches_child_without_stopping_other_session(self) -> None:
