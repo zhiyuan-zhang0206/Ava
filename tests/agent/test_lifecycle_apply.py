@@ -83,6 +83,10 @@ async def test_successor_admission_observes_restart_before_next_claim(
     # The launcher owns this transition after exit/session confirmation.
     # This database test proves admission, not an actual OS process exit.
     db_conn.execute("UPDATE agents_meta SET status='idling',pid=NULL WHERE id=%s", (agent_id,))
+    db_conn.execute(
+        "UPDATE inbound_messages SET payload=jsonb_build_object('launch_attempts',1) WHERE id=%s",
+        (first,),
+    )
     db_conn.commit()
     claim_agent_row(agent_id, restart_command_id=first)
     successor = current_incarnation(agent_id)

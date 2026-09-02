@@ -29,7 +29,8 @@ def _prepared(conn: psycopg.Connection) -> tuple[int, int]:
     generation, owner = uuid4(), uuid4()
     conn.execute(
         "UPDATE inbound_messages SET status='claimed',claimed_at=clock_timestamp(), "
-        "applied_at=clock_timestamp(),target_generation=%s,target_owner=%s WHERE id=%s",
+        "applied_at=clock_timestamp(),target_generation=%s,target_owner=%s, "
+        "payload=jsonb_build_object('launch_attempts',1) WHERE id=%s",
         (generation, owner, command_id),
     )
     conn.execute(
@@ -47,6 +48,17 @@ def test_owned_restart_does_not_fall_back_to_legacy_admission(
     agent_id, _ = _prepared(db_conn)
     with pytest.raises(RuntimeError, match="restart admission command"):
         claim_agent_row(agent_id)
+    assert not session_directory.exists()
+
+
+def test_boot_before_controller_authorization_cannot_admit(
+    db_conn: psycopg.Connection, session_directory: Path
+) -> None:
+    agent_id, command_id = _prepared(db_conn)
+    db_conn.execute("UPDATE inbound_messages SET payload=NULL WHERE id=%s", (command_id,))
+    db_conn.commit()
+    with pytest.raises(RuntimeError, match="no committed launch authorization"):
+        claim_agent_row(agent_id, restart_command_id=command_id)
     assert not session_directory.exists()
 
 
